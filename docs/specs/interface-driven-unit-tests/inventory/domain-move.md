@@ -10,35 +10,42 @@ component: CI Pipelines
 
 # Inventory of Domain's data and logic, and the callers of its logic
 
-Produced 2026-11-17 for task 2.1 of the [interface-driven unit tests specification](../README.md),
-on branch `opencode/idt/domain-plan` at `0409d910`, by a script run over every `.cs` file under `src/KyberWeave.Domain`,
-followed by a read of 20 classifications. Evidence for the specification, not living guidance: it goes
-stale as the move tasks land.
+Produced 2026-11-17 for task 2.1 of the [interface-driven unit tests specification](../README.md) on
+branch `opencode/idt/domain-plan`, by a script run over every `.cs` file under `src/KyberWeave.Domain`, followed by a
+read of 20 classifications. The tree scanned is the one this file was produced from; the last commit
+that changed `src/KyberWeave.Domain` is `cead1588`. Evidence for the specification, not living
+guidance: it goes stale as the move tasks land.
 
 Owner decision D7 sets the end state: `KyberWeave.Domain` holds data only (records, DTOs, property
 bags, value objects, enums, options, constants) and all logic moves to `KyberWeave.Application`.
+
+**445 files, not 440.** The design and requirements say 440. The tree holds 445 at
+`a5af901f` — the commit the other inventories were written at — and 445 today, so 440 is a
+counting slip in the design, not a change since. This inventory counts 445 and classifies
+every one of them.
 
 ## Bottom line
 
 - **445 `.cs` files**: **155** stay (data), **285** hold logic and move,
   **5** hold nothing but interface declarations and move to `Contracts`.
-  322 logic types are declared in those 285 files. 7 of the 155 data files also declare
-  an interface: the records stay and only the interface is lifted to `Contracts`, so those files are
-  never moved whole.
+  322 logic types are declared in those 285 files. 7 of the
+  155 data files also declare an interface: the records stay and only the interface is
+  lifted to `Contracts`, so those files are never moved whole.
 - **Namespaces do not change.** Domain declares its types under `KyberWeave.Core` (350 files),
   `KyberWeave.Domain` (48), `KyberWeave.Arbiter` (29), `KyberWeave.Cli` (17) and `KyberWeave.Mcp` (1),
   and `Application` already carries files in those namespaces (25 in `KyberWeave.Application.Review`,
   14 in `KyberWeave.Core.Docs.Validation`, 9 in `KyberWeave.Mcp`), so a moved class keeps its namespace.
   A project that already references `Application` needs no source change at its call sites.
-- **Only four projects cannot reach the moved code**: `Data` (because `Application` references it),
-  `Contracts` (a reference back would be a cycle), and `Core` and `Core.Docs` (task 2.2 removes their
-  `Application` reference). 66 files in `Data`,
-  14 in `Core` and 36 in `Contracts` name a Domain logic type.
+- **Only three projects cannot reach the moved code**: `Data` (because `Application` references it),
+  `Contracts` (a reference back would be a cycle), and `Core` (task 2.2 removes its `Application`
+  reference). 65 files in `Data`, 14 in `Core` and
+  36 in `Contracts` name a Domain logic type and take a route below.
+  `Core.Docs` has no caller of Domain logic; it has four files of its own to delete, listed in part 2.
   `Cli` (76 files), `Mcp` (4),
-  `Arbiter` (2) and `Hooks` (1) already
-  reference `Application` and are unaffected.
-- **22 Domain logic types are named by 36 files in `Contracts`.** That is the
-  finding the task asks for; part 2 lists it type by type.
+  `Arbiter` (2) and `Hooks` (1) reference
+  `Application` and are unaffected.
+- **22 Domain logic types are named by 36 files in `Contracts`**: the finding the
+  task asks for, with a decision per type in part 2.
 - **24 move tasks**, one per Domain folder or group of subfolders, none over 30 logic classes.
 
 ## How a file was classified
@@ -54,12 +61,12 @@ The rule the scan implements:
   service, or a helper computing over other values. A factory that does more than construct, a
   `With*` helper that is not a copy, and every method named `Parse`, `Load`, `Render`, `Resolve`,
   `Validate`, `Find` or `Is*` is logic.
-- **interface-only (the whole file moves to `Contracts`)** — every type it declares is an
-  `interface`. It declares no logic, but D7's list of what Domain keeps does not include interfaces,
-  and `Contracts` already references `Domain` for the records those interfaces name.
+- **interface-only (the whole file moves to `Contracts`)** — every type it declares is an `interface`.
+  It declares no logic, but D7's list of what Domain keeps does not include interfaces, and `Contracts`
+  already references `Domain` for the records those interfaces name.
 - The scan is a C#-shaped parser, not Roslyn: it strips comments and string literals, finds every type
   declaration with its body, then classifies each top-level member by its declaration header. It was
-  compared against the compiler's own view by counting declarations: 968 types across 445 files.
+  checked against the compiler's own view by counting declarations: 968 types across 445 files.
 
 ### The 20 classifications read by hand
 
@@ -74,13 +81,13 @@ use.
 | Arbiter/Sections/DocumentSection.cs | data | data | agrees: a positional record |
 | Docs/Analysis/DocumentationAnalysisRuleIds.cs | data | data | agrees: constants only |
 | Docs/Validation/PlanPacketContext.cs | logic | logic | agrees: records plus a plan parser |
-| Arbiter/Credentials/KeychainUnavailableException.cs | data | data | disagreed before the fix: read `method base` from a constructor’s `: base(...)`; a constructor is data |
-| Arbiter/Facts/CommentSyntax.cs | logic | logic | disagreed before the fix: read a field initializer’s `new(...)` as a method |
-| Squad/Rendering/SquadCollectionExtensions.cs | logic | logic | disagreed before the fix: an extension method was read as data |
-| Docs/Validation/TodoInventoryValidator.cs | logic | logic | disagreed before the fix: `Validate(DocumentSet)` was read as own-value validation |
-| Squad/Model/CopilotToolCatalog.cs | logic | logic | disagreed before the fix: `Normalize` was in the trivial list |
-| Configuration/ConfigRegConfig.cs | logic | logic | disagreed before the fix: read `method readonly` from a tuple-typed field |
-| Squad/Briefs/BriefFacts.cs | logic | logic | disagreed before the fix: read `method static` from a tuple return type |
+| Arbiter/Credentials/KeychainUnavailableException.cs | data | data | disagreed: read `method base` from a constructor’s `: base(...)`; a constructor is data |
+| Arbiter/Facts/CommentSyntax.cs | logic | logic | disagreed: read a field initializer’s `new(...)` as a method |
+| Squad/Rendering/SquadCollectionExtensions.cs | logic | logic | disagreed: an extension method was read as data |
+| Docs/Validation/TodoInventoryValidator.cs | logic | logic | disagreed: `Validate(DocumentSet)` was read as own-value validation |
+| Squad/Model/CopilotToolCatalog.cs | logic | logic | disagreed: `Normalize` was in the trivial list |
+| Configuration/ConfigRegConfig.cs | logic | logic | disagreed: read `method readonly` from a tuple-typed field |
+| Squad/Briefs/BriefFacts.cs | logic | logic | disagreed: read `method static` from a tuple return type |
 | Docs/Graph/DocGraphNode.cs | data | data | agrees: constructor validation, equality, properties |
 | Review/Commands/ReviewOutcomeCodes.cs | data | data | agrees: rule-id constants |
 | Hooks/HooksDefaults.cs | data | data | agrees: a shipped configuration bag |
@@ -98,6 +105,7 @@ data; a tuple return type or tuple-typed field must not be read as a method; `No
 ## Part 1: every file, by folder
 
 Counts are files, then the logic types declared in them. "Interface-only" files hold declarations only.
+
 
 | folder | files | data | logic | interface-only | logic types |
 |---|---|---|---|---|---|
@@ -232,57 +240,37 @@ Counts are files, then the logic types declared in them. "Interface-only" files 
 
 **Logic: 1 file, 1 type.** `DocsRootPath`
 
+
 ## Part 2: every caller of Domain logic outside Application
 
-A caller is a file outside `Domain` and `Application` that names a logic type the scan found, in code
-(not in a `using` line or a comment). Counts are files. The route is what the caller does when that
-type moves.
+A caller is a file outside `Domain` and `Application` that names a logic type the scan found, in code:
+comments and string literals are stripped first, so a name that appears only in prose is not a caller.
+A file that **declares** a type of the same name is not a caller either; those are listed separately
+below. Counts are files.
 
 | Project | Files | Route |
 |---|---|---|
 | `Data` | 65 | take a `Contracts` interface, or the caller itself moves to `Application` (the deployment services do) |
-| `Contracts` | 36 | narrow the signature to a Domain record, or move the interface to `Application` (finding, below) |
+| `Contracts` | 36 | one of the three decisions below, per type |
 | `Core` | 14 | take a `Contracts` interface, or delete the static locator (task 2.2) |
 | `Core.Docs` | 0 | no caller; its own four files are deleted under task 2.2 (below) |
 | `Cli` | 76 | none: `Cli` references `Application` |
 | `Mcp` | 4 | none: `Mcp` references `Application` |
 | `Arbiter` | 2 | none: `Arbiter` references `Application` |
 | `Hooks` | 1 | none: `Hooks` references `Application` |
-| `tests/KyberWeave.Tests` | 326 | none: the test projects reference `Application` |
+| `tests/KyberWeave.Tests` | 318 | none: the test projects reference `Application` |
 | `tests/KyberWeave.Integration.Tests` | 80 | none: they reference `Application` |
-| `tests/KyberWeave.Testing` | 18 | none: they reference `Application` |
+| `tests/KyberWeave.Testing` | 16 | none: they reference `Application` |
 | `tests/KyberWeave.Domain.Tests` | 5 | the test moves to `KyberWeave.Application.Tests` with its class |
 | `tests/KyberWeave.Application.Tests` | 3 | already an `Application` test |
 | `tests/KyberWeave.RepoPolicy.Tests` | 2 | none |
 
-
-
-### `src/KyberWeave.Core.Docs` — no Domain caller, four files to delete
-
-The project has four `.cs` files and none names a Domain logic type: `PlanPathResolver.cs`,
-`LegacyPorts.cs`, `PacketTestCommand.cs`, `PlanTaskTarget.cs`. Two of them are exactly what task 2.2
-must delete, and this inventory is the place that says so:
-
-- `LegacyPorts.cs` holds `static readonly IRepositoryFileStore Files = new PhysicalRepositoryFileStore()`
-  — a `Data` adapter in a static field, which is also the proof that `Core.Docs` references `Data`
-  today. Task 2.2 removes that reference and the class.
-- `PlanTaskTarget.cs` and `PacketTestCommand.cs` each build
-  `new PlanTaskTargetService(new PlanTaskService(LegacyPorts.Files), …)` in a static field. Task 2.2
-  deletes those statics, and their callers take the services by injection (requirement 1.5).
-- `PlanPathResolver.cs` has the same shape with `new PhysicalRepositoryFileStore()` and goes with them.
-
-So `Core.Docs` reaches the moved Domain logic only after task 2.2 rewires it, not before. The table row
-above counts callers of Domain logic, which is why it is zero; the four files are still work, and task
-2.2 owns them.
-
 ### The one same-name definition the scan found
 
-A file that **declares** a type of the same name is not a caller of Domain's type, so it takes no
-route here:
 
 | file | name it declares | what to do |
 |---|---|---|
-| `src/KyberWeave.Data/FileSystem/DocsRootPath.cs` | `DocsRootPath` | It declares its own `internal static class DocsRootPath`, as `src/KyberWeave.Domain/FileSystem/DocsRootPath.cs` does. Reconcile the two definitions under the folder task that moves `DocsRootPath` (2.5.6); do not add an injection point to this file. |
+| `src/KyberWeave.Data/FileSystem/DocsRootPath.cs` | `DocsRootPath` | declares its own `DocsRootPath`, as `src/KyberWeave.Domain/FileSystem/DocsRootPath.cs` does; it is not a caller. Reconcile the two definitions under the folder task that moves `DocsRootPath` (2.5.6), and do not add an injection point here. |
 
 ### src/KyberWeave.Data (65 files)
 
@@ -476,68 +464,83 @@ route here:
 |---|---|---|
 | `HooksCli.cs` | `ClaudeHookEventParser`, `HookParseResult` | none: stays |
 
-### Tests (326 files in `KyberWeave.Tests`, 80 in `KyberWeave.Integration.Tests`, 18 in `KyberWeave.Testing`, 5 in `KyberWeave.Domain.Tests`, 3 in `KyberWeave.Application.Tests`)
+### `src/KyberWeave.Core.Docs` — no Domain caller, four files to delete
+
+The project has these four files and none names a Domain logic type: `PlanPathResolver.cs`,
+`LegacyPorts.cs`, `PacketTestCommand.cs`, `PlanTaskTarget.cs`. Two of them are exactly what task 2.2
+must delete, and this inventory is the place that says so:
+
+- `LegacyPorts.cs` holds `static readonly IRepositoryFileStore Files = new PhysicalRepositoryFileStore()`
+  — a `Data` adapter in a static field, which is also the proof that `Core.Docs` references `Data`
+  today. Task 2.2 removes that reference and the class.
+- `PlanTaskTarget.cs` and `PacketTestCommand.cs` each build
+  `new PlanTaskTargetService(new PlanTaskService(LegacyPorts.Files), …)` in a static field. Task 2.2
+  deletes those statics and their callers take the services by injection, which is what requirement
+  1.5 asks for.
+
+`PlanPathResolver.cs` has the same shape with `new PhysicalRepositoryFileStore()` and goes with them.
+So `Core.Docs` reaches the moved Domain logic only after task 2.2 rewires it, not before.
+
+### Tests (318 files in `KyberWeave.Tests`, 80 in `KyberWeave.Integration.Tests`, 16 in `KyberWeave.Testing`, 5 in `KyberWeave.Domain.Tests`, 3 in `KyberWeave.Application.Tests`)
 
 Every test project references `Application` (directly or through the product project it tests), so a
 test that names a moved class keeps compiling. Two groups still move: `KyberWeave.Domain.Tests` holds
 five hook tests, which belong in `KyberWeave.Application.Tests` beside the class they test, and a test
-of a moved class moves to that class's project under task 5.2. The list is not repeated here; it is the
-same 406 files the scan found, and task 5.2 groups them by seam.
-
+of a moved class moves to that class's project under task 5.2. The list is not repeated here; it is
+the same 398 files the scan found, and task 5.2 groups them by seam.
 
 ### Finding: `Contracts` names Domain logic, with a decision per type
 
 `Contracts` references `Domain` for the records in its service interfaces, so a logic type that moves
 to `Application` would make `Contracts` reference `Application`, which is a cycle. Each type below has
-one decision, taken now so a move task does not have to guess:
+one decision, taken now so the move task does not have to guess:
 
 - **split** — the record stays in `Domain` and the named helper methods move to an `Application`
   service. The `Contracts` signature does not change, because it already names the record.
-- **move the interface** — the type is a service, not a record, and the interface exists only for it,
-  so the interface moves to `Application` with the implementation and is registered in its composition
-  root.
+- **move the interface** — the type is a service, not a record, and the `Contracts` interface exists
+  only for it. The interface moves to `Application` with the implementation.
 - **narrow** — the interface returns a `Domain` record instead of a type that carries factory methods;
   the factories move to an `Application` factory.
 
+
 | logic type | files | Contracts files | decision | what moves |
 |---|---|---|---|---|
-| `ArbiterFactSet` | 3 | `IArbiterFactSources.cs`, `IGateReportFacts.cs`, `IPlanFacts.cs` | split | the record stays; `Contains`, `IsPresent`, `TryGet` and the `With` lookups move to an Application service |
-| `ArbiterModelTargets` | 1 | `IArbiterModelTargetsReader.cs` | split | the record stays; `IsCompleteFor` moves |
-| `ArbiterRule` | 3 | `IArbiterEvaluator.cs`, `IReviewDecisionModel.cs`, `IReviewDecisionModelFactory.cs` | split | the record stays; `ShouldAsk` moves |
-| `ArbiterRunScope` | 2 | `IArbiterFactSources.cs`, `IArbiterLedger.cs` | split | the record stays; `Includes` and `Normalize` move |
+| `ArbiterFactSet` | 3 | `IArbiterFactSources.cs`, `IGateReportFacts.cs`, `IPlanFacts.cs` | split | record stays; `Contains`, `IsPresent`, `TryGet` and the lookups move to an Application service |
+| `ArbiterModelTargets` | 1 | `IArbiterModelTargetsReader.cs` | split | record stays; `IsCompleteFor` moves |
+| `ArbiterRule` | 3 | `IArbiterEvaluator.cs`, `IReviewDecisionModel.cs`, `IReviewDecisionModelFactory.cs` | split | record stays; `ShouldAsk` moves |
+| `ArbiterRunScope` | 2 | `IArbiterFactSources.cs`, `IArbiterLedger.cs` | split | record stays; `Includes` and `Normalize` move |
 | `BriefFacts` | 1 | `ISquadBriefService.cs` | move the interface | a resolver over prompt text, not a record; `ISquadBriefService` moves to Application |
 | `BriefMap` | 1 | `ISquadBriefService.cs` | move the interface | loads and indexes files; `ISquadBriefService` moves with it |
 | `ConfigRegConfig` | 1 | `ISeverityOverrideSource.cs` | split | the declared map stays; `Resolve` and `ModeWord` move |
-| `DocGraphProjection` | 1 | `CandidateContracts.cs` | move the interface | computes document relationships; `CandidateContracts.cs` moves to Application |
-| `DocumentModel` | 1 | `IDocumentSource.cs` | split | the record stays; `AppendSectionKeywords` and `AppendSectionCodeRefs` move |
-| `DocumentSet` | 4 | `IDocGraphContributor.cs`, `IDocsGateRunner.cs`, `IDocumentSource.cs`, `IDocsSchemaGate.cs` | split | the record stays; `ByComponent` moves |
-| `DuplicateReport` | 1 | `IDuplicateDetectionService.cs` | split | the record stays; `Merge` and `ClusterId` move |
-| `HarnessProfileConfig` | 1 | `IAgentGovernanceService.cs` | split | the record stays; `CloneWithProfiles` and `CreateProductDefaultProfiles` move |
-| `KyberWeaveConfigLoadResult` | 2 | `IKyberWeaveConfigRepository.cs`, `IArbiterConfigResolver.cs` | narrow | the record stays in Domain; `Ok` and `Fail` move to an Application factory and the interface returns the record |
-| `OntologyConfig` | 2 | `IDocumentSourceFactory.cs`, `IConfigLoadService.cs` | split | the record stays; `IsRequired*` and the `With*` helpers that do work move |
-| `PlanDocument` | 1 | `IArbiterPlanService.cs` | split | the record stays; `RedEvidenceRequirement` moves |
+| `DocGraphProjection` | 1 | `CandidateContracts.cs` | move the interface | computes relationships; `CandidateContracts.cs` moves to Application |
+| `DocumentModel` | 1 | `IDocumentSource.cs` | split | record stays; `AppendSectionKeywords` and `AppendSectionCodeRefs` move |
+| `DocumentSet` | 4 | `IDocGraphContributor.cs`, `IDocsGateRunner.cs`, `IDocumentSource.cs`, `IDocsSchemaGate.cs` | split | record stays; `ByComponent` moves |
+| `DuplicateReport` | 1 | `IDuplicateDetectionService.cs` | split | record stays; `Merge` and `ClusterId` move |
+| `HarnessProfileConfig` | 1 | `IAgentGovernanceService.cs` | split | record stays; `CloneWithProfiles` and `CreateProductDefaultProfiles` move |
+| `KyberWeaveConfigLoadResult` | 2 | `IKyberWeaveConfigRepository.cs`, `IArbiterConfigResolver.cs` | narrow | the record stays in Domain; `Ok` and `Fail` move to an Application factory, and the interface returns the record |
+| `OntologyConfig` | 2 | `IDocumentSourceFactory.cs`, `IConfigLoadService.cs` | split | record stays; `IsRequired*` and `With*` (except the copy helper) move |
+| `PlanDocument` | 1 | `IArbiterPlanService.cs` | split | record stays; `RedEvidenceRequirement` moves |
 | `ReviewCommandResult` | 6 | `IReviewCatalogueService.cs`, `IReviewCycleService.cs`, `IReviewDuplicatesService.cs`, `IReviewGatesService.cs`, `IReviewSeatsService.cs`, `IReviewSuppressionsService.cs` | narrow | the record stays in Domain; `Refused` and `Reported` move to an Application factory |
-| `ReviewPolicy` | 1 | `IReviewCycleSelector.cs` | split | the record stays; `FixRoundTakes` moves |
-| `SeverityOverrides` | 2 | `ISeverityOverrideSource.cs`, `IReviewDecisionSteps.cs` | split | the record stays; `Find`, `Apply` and `RowsFor` move |
+| `ReviewPolicy` | 1 | `IReviewCycleSelector.cs` | split | record stays; `FixRoundTakes` moves |
+| `SeverityOverrides` | 2 | `ISeverityOverrideSource.cs`, `IReviewDecisionSteps.cs` | split | record stays; `Find`, `Apply` and `RowsFor` move |
 | `SquadDeploymentPlan` | 2 | `ISquadDeploymentPlanner.cs`, `ISquadTransaction.cs` | move the interface | `ISquadDeploymentPlanner` and `ISquadTransaction` move to Application with the plan |
-| `SquadModelPreset` | 2 | `ISquadModelPresetStore.cs`, `ISquadModelPresetValidator.cs` | split | the record stays; `ApplyTo` moves |
-| `SquadRenderRequest` | 1 | `ISquadRenderInputReader.cs` | split | the record stays; the `Require*` guards and `Unprepared` move |
-| `StatusLineTargetRoots` | 1 | `IStatusLineDeploymentService.cs` | split | the record stays; the `Resolve*` helpers move |
+| `SquadModelPreset` | 2 | `ISquadModelPresetStore.cs`, `ISquadModelPresetValidator.cs` | split | record stays; `ApplyTo` moves |
+| `SquadRenderRequest` | 1 | `ISquadRenderInputReader.cs` | split | record stays; the `Require*` guards and `Unprepared` move |
+| `StatusLineTargetRoots` | 1 | `IStatusLineDeploymentService.cs` | split | record stays; the `Resolve*` helpers move |
 
-
-Twenty of the twenty-two types are a record with a handful of helper methods, which is why split is the
-common decision: the record is what `Contracts` needs and it stays exactly where it is.
-`SquadDeploymentPlan` is the only type whose interface moves whole, because `ISquadDeploymentPlanner`
-and `ISquadTransaction` exist for the deployment logic that phase 3 moves anyway. `ReviewCommandResult`
-and `KyberWeaveConfigLoadResult` are the two where neither fits: their factory methods are the logic,
-and they belong to six and two `Contracts` files, so the record stays and the factories go.
+Two of them (`ReviewCommandResult`, `KyberWeaveConfigLoadResult`) are the only ones where neither of
+the first two fits cleanly: their factory methods are the logic and they belong to six and two
+`Contracts` files respectively, so the record stays and the factories go to an `Application` factory.
+`SquadDeploymentPlan` is the only type whose whole interface moves, because `ISquadDeploymentPlanner`
+and `ISquadTransaction` exist for the deployment logic that phase 3 moves anyway.
 
 ## Part 3: the move, in dependency order
 
-One task per group, each a Domain folder or a slice of one, none over 30 logic classes, ordered so a
-task's dependencies move before it where the graph allows. `depends on` names the folders whose logic
-this group's code names; a cycle is harmless here because the whole move lands in one project and keeps
-every namespace, so those tasks can run in either order.
+One task per group, each a Domain folder or a slice of one, none over 30 logic classes, ordered by how
+many other groups name a group's types, most-named first: the shared records and helpers move before
+the code that uses them. `depends on` names the groups whose logic this group's code names; a cycle is
+harmless here because the whole move lands in one project and keeps every namespace, so the groups in a
+cycle can run in either order without a compile break.
 
 
 | task | Domain group | logic classes | files | depends on | callers outside Application |
@@ -571,23 +574,18 @@ every namespace, so those tasks can run in either order.
 each moved class gains or keeps a unit test through fakes, and behaviour does not change
 (requirement 10.1). Task 2.6 then confirms the end state.
 
-The order is by how many other groups name a group's types, most-named first: the shared records and
-helpers move before the code that uses them. The graph is cyclic at folder granularity (Arbiter's facts
-name Squad models, and Squad's renderers name Arbiter rule types), so no order is a strict dependency
-order; because every group lands in the same project and keeps its namespace, a cyclic pair can run in
-either order without a compile break.
-
 ## Limits
 
-- The scan matches type names, not resolved symbols. A name declared both in `Domain` and in another
-  project would be counted as a caller, so a count may include one such collision; the file lists for
-  the projects that need a route were reviewed and the route is a property of the folder, not of the
-  single file.
+- The scan matches type names, not resolved symbols. Comments and string literals are stripped, and a
+  same-name definition is excluded (the one found is listed in part 2), but a name declared in another
+  project under a different meaning would still count. The file list for each project that needs a
+  route was reviewed; the route is a property of the folder, not of the single file.
 - The scan classifies by declaration shape. A record whose only method is a real algorithm under a
   name in the trivial list (`Equals`, `ToString`) would be counted as data; none of the 20 read by hand
   was.
 - A file with one data type and one logic type counts as one logic file, and the logic type count is
   per type, so the two totals do not add up to the file count.
-- A dependency edge is a type name used in the group's code, so an edge can come from a doc comment
-  that the scan kept; the edges were not read line by line.
+- A dependency edge is a type name used in the group's code with comments and string literals stripped,
+  so it can still come from a name in a generic constraint or an attribute; the edges were not read
+  line by line.
 
