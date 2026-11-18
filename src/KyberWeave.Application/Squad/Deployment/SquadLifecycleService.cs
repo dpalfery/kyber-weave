@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Host;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
@@ -133,6 +134,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
 
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentities.Resolve(request.TargetRoot, _pathSemantics);
         string targetRoot = identity.PhysicalPath;
+        IReadOnlyList<string> recovery = RecoverUnfinishedTransaction(targetRoot, request.Scope, request.DryRun);
 
         SquadReceipt? existingReceipt = _stateStore.ReadReceipt(targetRoot, request.Scope);
 
@@ -240,7 +242,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 throw new SquadRenderValidationException(error);
             }
 
-            List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings)];
+            List<string> warnings = [.. recovery, .. RenderWarningMessages(renderResult.Warnings)];
             string effectiveGuidance = _guidance.ReadEffective(
                 _stateStore.ResolveHomeOwnedFilesRoot(),
                 warnings);
@@ -376,6 +378,38 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         return MergeAddedTargets(request, _stateStore.ReadReceipt(root, request.Scope));
     }
 
+    /// <summary>
+    ///     Finishes or rolls back a transaction a killed run left for the root, before anything is read or planned, so the
+    ///     plan is built from the recovered tree rather than a half-applied one. A dry run changes nothing and plans from
+    ///     the tree as it stands.
+    /// </summary>
+    /// <returns>The notices recovery raised; empty when nothing was left.</returns>
+    private IReadOnlyList<string> RecoverUnfinishedTransaction(
+        string targetRoot,
+        SquadDeploymentScope scope,
+        bool dryRun)
+    {
+        if (dryRun)
+            return [];
+
+        ISquadTransaction transaction = _transactions.Create(null);
+        try
+        {
+            transaction.Recover(targetRoot, scope);
+        }
+        catch (Exception cause) when (cause is not OperationCanceledException && cause.InnerException is not LeaseTimeoutException)
+        {
+            string message =
+                $"An unfinished Squad transaction exists at '{_stateStore.ResolveTransactionDirectory(targetRoot, scope)}' " +
+                $"and could not be recovered: {cause.Message} Nothing new was deployed. Fix the cause and run the command again.";
+            throw cause is SquadDeploymentConflictException
+                ? new SquadDeploymentConflictException(message, cause)
+                : new InvalidOperationException(message, cause);
+        }
+
+        return [.. transaction.Warnings];
+    }
+
     private static IReadOnlyList<SquadTarget> MergeAddedTargets(SquadInstallRequest request, SquadReceipt? existing)
     {
         if (existing is null || request.Scope != SquadDeploymentScope.Global)
@@ -422,6 +456,8 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
 
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentities.Resolve(request.TargetRoot, _pathSemantics);
         string targetRoot = identity.PhysicalPath;
+
+        IReadOnlyList<string> recovery = RecoverUnfinishedTransaction(targetRoot, request.Scope, request.DryRun);
 
         SquadReceipt previousReceipt = _stateStore.ReadReceipt(targetRoot, request.Scope)
                                        ?? throw new SquadDeploymentConflictException(
@@ -518,7 +554,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 throw new SquadRenderValidationException(error);
             }
 
-            List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings)];
+            List<string> warnings = [.. recovery, .. RenderWarningMessages(renderResult.Warnings)];
             string effectiveGuidance = _guidance.ReadEffective(
                 _stateStore.ResolveHomeOwnedFilesRoot(),
                 warnings);
@@ -665,6 +701,8 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentities.Resolve(request.TargetRoot, _pathSemantics);
         string targetRoot = identity.PhysicalPath;
 
+        IReadOnlyList<string> recovery = RecoverUnfinishedTransaction(targetRoot, request.Scope, request.DryRun);
+
         SquadReceipt? receipt = _stateStore.ReadReceipt(targetRoot, request.Scope);
         if (receipt is null)
             return Task.FromResult(new SquadLifecycleResult(
@@ -673,7 +711,8 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 null,
                 null,
                 Array.Empty<SquadDegradation>(),
-                DryRun: request.DryRun));
+                DryRun: request.DryRun,
+                Warnings: recovery));
 
         ISquadGlobalRootResolver? planGlobalRoots = _globalRoots;
         if (planGlobalRoots is null && request.Scope == SquadDeploymentScope.Instance)
@@ -713,7 +752,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             plan.LockMutation == SquadStateMutation.Write ? plan.Lock : null,
             plan.Receipt.Degradations,
             DryRun: false,
-            Warnings: transaction.Warnings));
+            Warnings: [.. recovery, .. transaction.Warnings]));
     }
 
     /// <summary>
