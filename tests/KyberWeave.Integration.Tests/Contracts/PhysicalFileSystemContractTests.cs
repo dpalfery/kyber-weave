@@ -9,4 +9,7 @@ public sealed class PhysicalFileSystemContractTests : FileSystemContractTests
 {
     /// <inheritdoc />
     protected override IWritableFileSystem CreateFileSystem() => new PhysicalFileSystem();
+
+    /// <inheritdoc />
+    protected override bool CaseSensitive => OperatingSystem.IsLinux();
 }

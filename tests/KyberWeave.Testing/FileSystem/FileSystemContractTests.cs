@@ -20,6 +20,13 @@ public abstract class FileSystemContractTests : IDisposable
     /// <returns>A writable file system. The suite may create more than one instance.</returns>
     protected abstract IWritableFileSystem CreateFileSystem();
 
+    /// <summary>Gets whether the implementation compares file names case-sensitively.</summary>
+    /// <remarks>
+    /// The suite runs the case rules the instance actually has rather than skipping them: an APFS or NTFS volume and
+    /// a case-insensitive fake must behave alike, and so must ext4 and a case-sensitive fake.
+    /// </remarks>
+    protected abstract bool CaseSensitive { get; }
+
     /// <summary>Creates the implementation under test and one empty scratch directory.</summary>
     /// <param name="root">The scratch directory the test writes under.</param>
     /// <returns>The implementation.</returns>
@@ -92,6 +99,19 @@ public abstract class FileSystemContractTests : IDisposable
         Assert.False(files.FileExists(directory));
         Assert.False(files.FileExists(At(root, "absent.txt")));
         Assert.False(files.DirectoryExists(At(root, "absent")));
+    }
+
+    [Fact]
+    public void ExistenceProbesOfANullPathAreFalse()
+    {
+        IWritableFileSystem files = CreateFileSystem();
+
+        Assert.False(files.FileExists(null!));
+        Assert.False(files.DirectoryExists(null!));
+        Assert.False(files.PathExists(null!));
+        Assert.False(files.FileExists(string.Empty));
+        Assert.False(files.DirectoryExists(string.Empty));
+        Assert.False(files.PathExists(string.Empty));
     }
 
     [Fact]
@@ -542,5 +562,143 @@ public abstract class FileSystemContractTests : IDisposable
         Assert.True(files.DirectoryExists(second));
         Assert.Empty(files.EnumerateEntries(first));
         Assert.Empty(files.EnumerateEntries(second));
+    }
+
+    [Fact]
+    public void GetLinkTargetReportsOneHopRatherThanTheFinalTarget()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string target = WriteFile(files, root, "target.txt", "x");
+        string first = At(root, "first.txt");
+        string second = At(root, "second.txt");
+        files.CreateFileLink(first, target);
+        files.CreateFileLink(second, first);
+
+        string? written = files.GetLinkTarget(second);
+
+        Assert.NotNull(written);
+        Assert.Equal(first, Path.GetFullPath(written, root));
+        Assert.Equal(target, files.GetFinalLinkTarget(second));
+    }
+
+    [Fact]
+    public void NamesFollowTheInstancesCaseRule()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string path = WriteFile(files, root, "Note.txt", "kept");
+        string differentlyCased = At(root, "note.txt");
+
+        if (CaseSensitive)
+        {
+            Assert.False(files.FileExists(differentlyCased));
+            _ = Assert.Throws<FileNotFoundException>(() => files.ReadAllText(differentlyCased));
+            return;
+        }
+
+        Assert.True(files.FileExists(differentlyCased));
+        Assert.Equal("kept", files.ReadAllText(differentlyCased));
+
+        files.WriteAllText(differentlyCased, "changed");
+
+        Assert.Equal("changed", files.ReadAllText(path));
+        Assert.Equal([path], files.EnumerateEntries(root).Select(entry => entry.Path));
+    }
+
+    [Fact]
+    public void ExclusiveCreateFollowsTheInstancesCaseRule()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string path = WriteFile(files, root, "Claim.txt", "first");
+        string differentlyCased = At(root, "claim.txt");
+
+        bool created = files.TryCreateNewFile(differentlyCased);
+
+        if (CaseSensitive)
+        {
+            Assert.True(created);
+            Assert.True(files.FileExists(differentlyCased));
+            Assert.Equal("first", files.ReadAllText(path));
+            return;
+        }
+
+        Assert.False(created);
+        Assert.Equal("first", files.ReadAllText(path));
+    }
+
+    [Fact]
+    public void ARewriteDoesNotMoveTheLastWriteTimeBackwards()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string path = WriteFile(files, root, "stamped.txt", "first");
+        DateTime before = files.GetLastWriteTimeUtc(path);
+
+        files.WriteAllText(path, "second");
+
+        Assert.True(files.GetLastWriteTimeUtc(path) >= before);
+    }
+
+    [Fact]
+    public void GetLastWriteTimeOfAMissingPathIsTheFileTimeEpoch()
+    {
+        IWritableFileSystem files = Starting(out string root);
+
+        Assert.Equal(DateTime.FromFileTimeUtc(0), files.GetLastWriteTimeUtc(At(root, "absent.txt")));
+    }
+
+    [Fact]
+    public void WritesIntoAMissingDirectoryFailAsDocumented()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string missing = At(root, "missing/note.txt");
+
+        _ = Assert.Throws<DirectoryNotFoundException>(() => files.WriteAllText(missing, "x"));
+        _ = Assert.Throws<DirectoryNotFoundException>(() => files.WriteAllBytes(missing, [1]));
+        _ = Assert.Throws<DirectoryNotFoundException>(() => files.CreateNewFile(missing));
+        _ = Assert.Throws<FileNotFoundException>(() => files.MoveFile(missing, At(root, "destination.txt")));
+    }
+
+    [Fact]
+    public void CreateDirectoryRefusesAFileInTheWay()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string file = WriteFile(files, root, "blocker", "x");
+
+        _ = Assert.Throws<IOException>(() => files.CreateDirectory(file));
+
+        Assert.True(files.FileExists(file));
+    }
+
+    [Fact]
+    public void DeleteFileRefusesADirectory()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string directory = At(root, "folder");
+        files.CreateDirectory(directory);
+
+        _ = Assert.Throws<UnauthorizedAccessException>(() => files.DeleteFile(directory));
+
+        Assert.True(files.DirectoryExists(directory));
+    }
+
+    [Fact]
+    public void EnumerationOfAMissingDirectoryIsEmpty()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string missing = At(root, "absent");
+
+        Assert.Empty(files.EnumerateFiles(missing, "*", recursive: true));
+        Assert.Empty(files.EnumerateDirectories(missing));
+        Assert.Empty(files.EnumerateEntries(missing));
+    }
+
+    [Fact]
+    public void AtomicByteWriteCreatesTheDirectoryItNeeds()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string path = At(root, "missing/nested/atomic.bin");
+
+        files.WriteAllBytesAtomic(path, [1, 2, 3]);
+
+        Assert.Equal([1, 2, 3], files.ReadAllBytes(path));
     }
 }
