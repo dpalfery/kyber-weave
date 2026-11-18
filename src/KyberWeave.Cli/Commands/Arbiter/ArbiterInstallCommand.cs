@@ -26,7 +26,9 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// </remarks>
 internal sealed class ArbiterInstallCommand(
     IArbiterInstallService installer,
-    SquadConsoleOptions console) : Command<ArbiterInstallSettings>
+    SquadConsoleOptions console,
+    SquadConsole output,
+    SquadTargetRootConfirmation confirmation) : Command<ArbiterInstallSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, ArbiterInstallSettings settings,
@@ -85,13 +87,13 @@ internal sealed class ArbiterInstallCommand(
         if (prepared.Plan is not { } plan)
             return prepared.ExitCode;
 
-        if (!plan.DryRun && !SquadTargetRootConfirmation.Confirm(
+        if (!plan.DryRun && !confirmation.Confirm(
                 plan.Root,
                 plan.Scope,
                 "install",
-                console.IsInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
+                console.IsInteractive ?? output.IsInteractive,
                 settings.Yes,
-                console.ReadAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer))
+                console.ReadAnswer))
         {
             AnsiConsole.MarkupLine("[yellow]Declined. No changes were made.[/]");
             return 2;
@@ -108,7 +110,7 @@ internal sealed class ArbiterInstallCommand(
         return Execute(context, settings, CancellationToken.None);
     }
 
-    private static void Print(IReadOnlyList<ArbiterInstallEvent> events, SquadTarget? plan)
+    private void Print(IReadOnlyList<ArbiterInstallEvent> events, SquadTarget? plan)
     {
         foreach (ArbiterInstallEvent item in events)
         {
@@ -146,10 +148,10 @@ internal sealed class ArbiterInstallCommand(
                           $"in '[bold]{Markup.Escape(done.Root)}[/]'.[/]"));
                     break;
                 case ArbiterInstallTrustSteps trust:
-                    SquadInstallCommand.WriteArbiterTrustSteps(plan is { } target ? [target] : [], trust.Wiring);
+                    SquadInstallCommand.WriteArbiterTrustSteps(output, plan is { } target ? [target] : [], trust.Wiring);
                     break;
                 case ArbiterInstallWarnings warnings:
-                    SquadCommandComposition.WriteTransactionWarnings(warnings.Warnings);
+                    output.WriteTransactionWarnings(warnings.Warnings);
                     break;
                 case ArbiterInstallScopeTable table:
                     PrintScopeTable(table);

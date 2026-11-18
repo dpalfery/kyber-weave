@@ -36,8 +36,10 @@ internal static class SquadTestCommands
         ISquadGlobalRootResolver? globalRoots = null,
         KyberDashCapturePluginStep? capturePluginStep = null,
         Func<string, string?>? environmentReader = null,
-        IKyberWeaveConfigRepository? configs = null)
+        IKyberWeaveConfigRepository? configs = null,
+        SquadConsole? output = null)
     {
+        SquadConsole console = output ?? CapturedSquadConsole();
         SquadStateStore store = stateStore ?? SquadHostDefaults.ResolveStateStore(userPaths, environmentReader);
         ISquadGlobalRootResolver roots = globalRoots ?? SquadHostDefaults.ResolveGlobalRoots(environmentReader);
         return new SquadInstallCommand(
@@ -47,6 +49,10 @@ internal static class SquadTestCommands
             new FileSquadTargetResolver(),
             roots,
             new SquadConsoleOptions(isInteractive, readAnswer),
+            console,
+            new SquadTargetRootConfirmation(console),
+            new ProcessEnvironment(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
             configs ?? RealFileKyberWeaveConfigRepository.Create(),
             capturePluginStep);
     }
@@ -63,8 +69,10 @@ internal static class SquadTestCommands
         ISquadInstanceService? instanceService = null,
         KyberDashCapturePluginStep? capturePluginStep = null,
         Func<string, string?>? environmentReader = null,
-        IKyberWeaveConfigRepository? configs = null)
+        IKyberWeaveConfigRepository? configs = null,
+        SquadConsole? output = null)
     {
+        SquadConsole console = output ?? CapturedSquadConsole();
         SquadStateStore store = stateStore ?? SquadHostDefaults.ResolveStateStore(userPaths, environmentReader);
         ISquadGlobalRootResolver roots = globalRoots ?? SquadHostDefaults.ResolveGlobalRoots(environmentReader);
         return new SquadUpdateCommand(
@@ -76,6 +84,10 @@ internal static class SquadTestCommands
             roots,
             new PhysicalSquadFileAccess(),
             new SquadConsoleOptions(isInteractive, readAnswer),
+            console,
+            new SquadTargetRootConfirmation(console),
+            new ProcessEnvironment(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
             configs ?? RealFileKyberWeaveConfigRepository.Create(),
             picker,
             capturePluginStep);
@@ -88,8 +100,10 @@ internal static class SquadTestCommands
         bool? isInteractive = null,
         Func<string, bool>? readAnswer = null,
         ISquadGlobalRootResolver? globalRoots = null,
-        Func<string, string?>? environmentReader = null)
+        Func<string, string?>? environmentReader = null,
+        SquadConsole? output = null)
     {
+        SquadConsole console = output ?? CapturedSquadConsole();
         SquadStateStore store = stateStore ?? SquadHostDefaults.ResolveStateStore(userPaths, environmentReader);
         ISquadGlobalRootResolver roots = globalRoots ?? SquadHostDefaults.ResolveGlobalRoots(environmentReader);
         return new SquadUninstallCommand(
@@ -97,7 +111,11 @@ internal static class SquadTestCommands
             store,
             new SquadStateMigration(store, store.UserPaths),
             roots,
-            new SquadConsoleOptions(isInteractive, readAnswer));
+            new SquadConsoleOptions(isInteractive, readAnswer),
+            console,
+            new SquadTargetRootConfirmation(console),
+            new ProcessEnvironment(),
+            new PhysicalPathResolver(new PhysicalFileSystem()));
     }
 
     public static SquadInstanceRemoveCommand InstanceRemove(
