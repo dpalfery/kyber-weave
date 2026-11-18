@@ -20,6 +20,7 @@ public sealed class DocsScaffolderSeamTests
     private readonly InMemoryRepositoryFileStore _store;
     private readonly FakePathResolver _paths;
     private readonly FakeProcessEnvironment _environment = new(currentDirectory: WorkingDirectory);
+    private readonly FakeEmbeddedResources _resources = new();
 
     public DocsScaffolderSeamTests()
     {
@@ -34,7 +35,8 @@ public sealed class DocsScaffolderSeamTests
         new NoProbe(),
         _paths,
         _environment,
-        TimeProvider.System);
+        TimeProvider.System,
+        new KyberStandardsTemplateReader(_resources));
 
     [Fact]
     public void ItScaffoldsARelativeRootUnderTheInjectedWorkingDirectory()

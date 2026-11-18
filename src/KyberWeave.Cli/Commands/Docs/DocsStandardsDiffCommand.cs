@@ -26,6 +26,7 @@ public sealed class DocsStandardsDiffCommand(
     IFileSystem files,
     IPathResolver paths,
     IProcessEnvironment environment,
+    IKyberStandardsTemplates templates,
     IAnsiConsole console) : Command<DocsStandardsDiffSettings>
 {
     /// <inheritdoc />
@@ -44,7 +45,8 @@ public sealed class DocsStandardsDiffCommand(
         StandardsDiffResult result;
         try
         {
-            result = new StandardsTemplateDiff(files, settings.Path, ontology, paths, environment).Run(settings.Name);
+            result = new StandardsTemplateDiff(files, settings.Path, ontology, paths, environment, templates)
+                .Run(settings.Name);
         }
         catch (ArgumentException ex)
         {

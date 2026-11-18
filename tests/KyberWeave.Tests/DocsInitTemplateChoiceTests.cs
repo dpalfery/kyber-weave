@@ -15,6 +15,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public class DocsInitTemplateChoiceTests : IDisposable
 {
+    private static readonly IKyberStandardsTemplates Templates = ShippedKyberStandards.Templates;
+
     private readonly TempDirectory _temp = new();
 
     public void Dispose()
@@ -135,7 +137,7 @@ public class DocsInitTemplateChoiceTests : IDisposable
         Scaffolding.Scaffold(_temp.Path, standards: ["csharp"]);
 
         Assert.Equal(
-            KyberStandardsTemplates.RenderPart(
+            Templates.RenderPart(
                 "csharp", KyberStandardsTemplates.Part.Standard, "unassigned", today),
             File.ReadAllText(PathOf("docs/standards/csharp/csharp.standards.md")));
     }
@@ -161,7 +163,7 @@ public class DocsInitTemplateChoiceTests : IDisposable
 
         string today = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
         Assert.Equal(
-            KyberStandardsTemplates.RenderPart(
+            Templates.RenderPart(
                 "github", KyberStandardsTemplates.Part.Standard, "unassigned", today),
             File.ReadAllText(PathOf("docs/standards/github/github.standards.md")));
     }
@@ -193,7 +195,7 @@ public class DocsInitTemplateChoiceTests : IDisposable
         string today = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
         string rules = File.ReadAllText(PathOf("docs/standards/csharp/csharp.rules.md"));
         Assert.NotEqual(
-            KyberStandardsTemplates.RenderPart("csharp", KyberStandardsTemplates.Part.Rules, "unassigned", today),
+            Templates.RenderPart("csharp", KyberStandardsTemplates.Part.Rules, "unassigned", today),
             rules);
         Assert.Contains("technology: csharp", rules, StringComparison.Ordinal);
         Assert.Contains("doc-type: rule", rules, StringComparison.Ordinal);

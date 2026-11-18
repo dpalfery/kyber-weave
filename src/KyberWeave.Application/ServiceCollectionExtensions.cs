@@ -3,6 +3,7 @@ using KyberWeave.Application.Doctor;
 using KyberWeave.Application.Arbiter;
 using KyberWeave.Application.Hooks;
 using KyberWeave.Contracts.Docs;
+using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Mcp;
@@ -172,6 +173,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IRepositoryFileLister>(),
             sp.GetRequiredService<IRepositoryTreeProbe>()));
         services.TryAddSingleton<IReviewGateCatalogue>(sp => sp.GetRequiredService<ReviewBlockWriter>());
+        services.TryAddSingleton<IKyberStandardsTemplates>(sp =>
+            new KyberStandardsTemplateReader(sp.GetRequiredService<IEmbeddedResources>()));
         services.TryAddSingleton<IDocsScaffoldingService>(sp => new DocsScaffolder(
             sp.GetRequiredService<IRepositoryFileStore>(),
             sp.GetRequiredService<IKyberWeaveConfigRepository>(),
@@ -179,7 +182,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IRepositoryTreeProbe>(),
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>(),
-            sp.GetRequiredService<TimeProvider>()));
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<IKyberStandardsTemplates>()));
         services.TryAddSingleton<ISquadBriefService>(sp => new SquadBriefService(sp.GetRequiredService<IFileSystem>()));
         _ = services.AddWeaveSquadApplication();
         services.TryAddSingleton<IRepositoryTreeProbe>(sp => new FileRepositoryTreeProbe(
@@ -229,7 +233,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IRepositoryFileLister>(),
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
-            sp.GetRequiredService<IProcessEnvironment>()));
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IKyberStandardsTemplates>()));
         services.TryAddSingleton<IReviewDuplicatesService>(sp => new ReviewDuplicatesService(
             sp.GetRequiredService<IDuplicateDetectionService>(),
             sp.GetRequiredService<ICodeGraphPortsFactory>(),

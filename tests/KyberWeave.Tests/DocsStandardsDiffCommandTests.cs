@@ -19,6 +19,8 @@ public class DocsStandardsDiffCommandTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
+    private static readonly IKyberStandardsTemplates Templates = ShippedKyberStandards.Templates;
+
     private static readonly OntologyConfig Declared = new() { Technologies = ["csharp"] };
 
     private string PathOf(string relative) =>
@@ -34,7 +36,7 @@ public class DocsStandardsDiffCommandTests : IDisposable
     [Fact]
     public void ItReportsMissingChangedAndHostOnlyFiles()
     {
-        KyberStandardsTemplates.TryGetPart(
+        Templates.TryGetPart(
             "csharp", KyberStandardsTemplates.Part.Standard, out string? standard);
         string changed = standard!.Replace("# C# coding standard", "# Our C# coding standard", StringComparison.Ordinal);
         Write("6-Docs/standards/csharp/csharp.standards.md", changed);
@@ -52,7 +54,7 @@ public class DocsStandardsDiffCommandTests : IDisposable
     [Fact]
     public void AnOwnerStatusOrDateDifferenceIsNotAChange()
     {
-        KyberStandardsTemplates.TryGetPart(
+        Templates.TryGetPart(
             "csharp", KyberStandardsTemplates.Part.Standard, out string? standard);
         string host = standard!
             .Replace("\nowner: unassigned\n", "\nowner: dpalfery\n", StringComparison.Ordinal)
@@ -70,7 +72,7 @@ public class DocsStandardsDiffCommandTests : IDisposable
     {
         foreach (KyberStandardsTemplates.Part part in Enum.GetValues<KyberStandardsTemplates.Part>())
         {
-            KyberStandardsTemplates.TryGetPart("csharp", part, out string? template);
+            Templates.TryGetPart("csharp", part, out string? template);
             Write(
                 $"6-Docs/standards/csharp/{KyberStandardsTemplates.FileName("csharp", part)}",
                 template!);
@@ -90,7 +92,7 @@ public class DocsStandardsDiffCommandTests : IDisposable
     [Fact]
     public void ABodyLineThatStartsWithAHostOwnedKeyIsStillCompared()
     {
-        KyberStandardsTemplates.TryGetPart(
+        Templates.TryGetPart(
             "csharp", KyberStandardsTemplates.Part.Standard, out string? standard);
         string host = standard! + "\nstatus: review needed\n";
         Write("6-Docs/standards/csharp/csharp.standards.md", host);

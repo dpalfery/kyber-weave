@@ -11,6 +11,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public class KyberStandardsTemplateShapeTests
 {
+    private static readonly IKyberStandardsTemplates Templates = ShippedKyberStandards.Templates;
+
     private static readonly string[] SixHeadings =
     [
         "## Naming and layout",
@@ -29,7 +31,7 @@ public class KyberStandardsTemplateShapeTests
             foreach (KyberStandardsTemplates.Part part in Enum.GetValues<KyberStandardsTemplates.Part>())
             {
                 Assert.True(
-                    KyberStandardsTemplates.TryGetPart(folder, part, out string? template),
+                    Templates.TryGetPart(folder, part, out string? template),
                     $"{folder} has no template for {part}.");
                 Assert.False(string.IsNullOrWhiteSpace(template));
             }
@@ -41,7 +43,7 @@ public class KyberStandardsTemplateShapeTests
     {
         foreach (string folder in KyberStandardsTemplates.AllFolders)
         {
-            KyberStandardsTemplates.TryGetPart(
+            Templates.TryGetPart(
                 folder, KyberStandardsTemplates.Part.Standard, out string? standard);
             string[] headings = standard!
                 .Split('\n')
@@ -58,7 +60,7 @@ public class KyberStandardsTemplateShapeTests
     {
         foreach (string folder in KyberStandardsTemplates.AllFolders)
         {
-            KyberStandardsTemplates.TryGetPart(
+            Templates.TryGetPart(
                 folder, KyberStandardsTemplates.Part.Standard, out string? standard);
 
             Assert.Contains("## Testing", standard, StringComparison.Ordinal);
@@ -70,9 +72,9 @@ public class KyberStandardsTemplateShapeTests
     {
         foreach (string technology in KyberStandardsTemplates.All)
         {
-            KyberStandardsTemplates.TryGetPart(
+            Templates.TryGetPart(
                 technology, KyberStandardsTemplates.Part.Rules, out string? rules);
-            KyberStandardsTemplates.TryGetPart(
+            Templates.TryGetPart(
                 technology, KyberStandardsTemplates.Part.Skills, out string? skills);
 
             Assert.Contains($"technology: {technology}", rules, StringComparison.Ordinal);
@@ -92,7 +94,7 @@ public class KyberStandardsTemplateShapeTests
                          KyberStandardsTemplates.Part.Skills
                      })
             {
-                KyberStandardsTemplates.TryGetPart(role, part, out string? template);
+                Templates.TryGetPart(role, part, out string? template);
 
                 Assert.Contains($"role: {role}", template, StringComparison.Ordinal);
                 Assert.DoesNotContain($"technology: {role}", template, StringComparison.Ordinal);
@@ -111,7 +113,7 @@ public class KyberStandardsTemplateShapeTests
                          KyberStandardsTemplates.Part.Skills
                      })
             {
-                KyberStandardsTemplates.TryGetPart(platform, part, out string? template);
+                Templates.TryGetPart(platform, part, out string? template);
 
                 Assert.Contains($"technology: {platform}", template, StringComparison.Ordinal);
             }
@@ -127,9 +129,9 @@ public class KyberStandardsTemplateShapeTests
     [Fact]
     public void TheGithubTemplateStatesWhatTheGithubWorkStandardStates()
     {
-        KyberStandardsTemplates.TryGetPart(
+        Templates.TryGetPart(
             "github", KyberStandardsTemplates.Part.Standard, out string? standard);
-        KyberStandardsTemplates.TryGetPart(
+        Templates.TryGetPart(
             "github", KyberStandardsTemplates.Part.Skills, out string? skills);
 
         Assert.Contains("permissions", standard, StringComparison.OrdinalIgnoreCase);
@@ -143,7 +145,7 @@ public class KyberStandardsTemplateShapeTests
         foreach (string folder in KyberStandardsTemplates.AllFolders)
         {
             Assert.True(
-                KyberStandardsTemplates.TryGetPart(
+                Templates.TryGetPart(
                     folder, KyberStandardsTemplates.Part.ArbiterRules, out string? rules),
                 $"{folder} has no arbiter-rules template.");
 
