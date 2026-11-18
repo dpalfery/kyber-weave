@@ -280,6 +280,28 @@ public sealed class UtilitiesStatusLineCommandSeamTests
         Assert.Contains("Apply this snippet yourself.", _console.Output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A deploy records the digest of the bytes it staged, and status reads that digest back. The artifact source, the
+    /// deployment service and the host are all fakes, so this pins the round trip the two commands share.
+    /// </summary>
+    [Fact]
+    public void ADeployedArtifactReadsBackHealthyOnStatus()
+    {
+        byte[] content = "#!/bin/sh\necho synthetic\n"u8.ToArray();
+        _host.Artifacts.With(StatusLineTarget.Claude, new StatusLineDeploymentFile("statusline/statusline.sh", content));
+
+        Assert.Equal(0, Deploy().Execute(null!, new UtilitiesStatusLineDeploySettings { Target = "claude" }));
+
+        StatusLineReceipt receipt = Assert.Single(_plans.Applied).Receipt;
+        _plans.WithReceipt(StatusLineTarget.Claude, [.. receipt.Files]);
+        _host.Contents[Path.Combine(ClaudeStagingRoot, "statusline", "statusline.sh")] = content;
+
+        int result = Status().Execute(null!, new UtilitiesStatusLineSettings());
+
+        Assert.Equal(0, result);
+        Assert.Contains("ok statusline/statusline.sh", _console.Output, StringComparison.Ordinal);
+    }
+
     /// <summary>An unknown target is client input, refused with exit 2 on the command's own console.</summary>
     [Fact]
     public void DeployRefusesAnUnknownTargetWithExitTwo()

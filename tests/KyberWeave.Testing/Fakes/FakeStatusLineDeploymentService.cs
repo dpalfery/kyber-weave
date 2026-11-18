@@ -1,5 +1,6 @@
 using KyberWeave.Contracts.Services;
 using KyberWeave.Domain.StatusLine;
+using System.Security.Cryptography;
 
 namespace KyberWeave.Tests.Fakes;
 
@@ -78,8 +79,9 @@ public sealed class FakeStatusLineDeploymentService : IStatusLineDeploymentServi
         return Plan(
             target,
             roots.ResolveStagingRoot(target),
-            new StatusLineReceipt([.. files.Select(file => new StatusLineOwnedFile(file.RelativePath, string.Empty, target))]),
-            [.. files.Select(file => (file.RelativePath, StatusLineFileChangeKind.Write))]);
+            new StatusLineReceipt(
+                [.. files.Select(file => new StatusLineOwnedFile(file.RelativePath, Digest(file.Content.Span), target))]),
+            [.. files.Select(file => (file.RelativePath, StatusLineFileChangeKind.Write, file.Content))]);
     }
 
     /// <inheritdoc />
@@ -93,7 +95,7 @@ public sealed class FakeStatusLineDeploymentService : IStatusLineDeploymentServi
             target,
             roots.ResolveStagingRoot(target),
             retained,
-            [.. deleted.Select(relativePath => (relativePath, StatusLineFileChangeKind.Delete))]);
+            [.. deleted.Select(relativePath => (relativePath, StatusLineFileChangeKind.Delete, ReadOnlyMemory<byte>.Empty))]);
     }
 
     /// <inheritdoc />
@@ -115,7 +117,7 @@ public sealed class FakeStatusLineDeploymentService : IStatusLineDeploymentServi
         StatusLineTarget target,
         string stagingRoot,
         StatusLineReceipt receipt,
-        IReadOnlyList<(string RelativePath, StatusLineFileChangeKind Kind)> changes)
+        IReadOnlyList<(string RelativePath, StatusLineFileChangeKind Kind, ReadOnlyMemory<byte> Content)> changes)
     {
         return new StatusLineDeploymentPlan(
             target,
@@ -126,6 +128,9 @@ public sealed class FakeStatusLineDeploymentService : IStatusLineDeploymentServi
                 change.RelativePath,
                 stagingRoot + "/" + change.RelativePath,
                 change.Kind,
-                ReadOnlyMemory<byte>.Empty))]);
+                change.Content))]);
     }
+
+    /// <summary>The digest the real deployment service records: lower-case hex SHA-256 of the staged bytes.</summary>
+    private static string Digest(ReadOnlySpan<byte> content) => Convert.ToHexStringLower(SHA256.HashData(content));
 }
