@@ -72,6 +72,86 @@ public sealed class SquadStateMigrationInMemoryTests
     }
 
     [Fact]
+    public void ASecondGlobalRunRecordsTheLedgerEntryAStopBeforeItLeftOut()
+    {
+        string root = SeedLegacyGlobal();
+        _state.Migration.MigrateGlobal(invokingCwd: null);
+        _state.Files.DeleteFile(Layout.LedgerPath());
+
+        _state.Migration.MigrateGlobal(invokingCwd: null);
+
+        JsonObject ledger = JsonNode.Parse(_state.Files.ReadAllText(Layout.LedgerPath()))!.AsObject();
+        Assert.Equal([Layout.KeyOf(root)], ledger["globalMigratedFrom"]!.AsArray().Select(node => node!.GetValue<string>()));
+    }
+
+    [Fact]
+    public void AGlobalDryRunNeverRecordsAMissingLedgerEntry()
+    {
+        SeedLegacyGlobal();
+        _state.Migration.MigrateGlobal(invokingCwd: null);
+        _state.Files.DeleteFile(Layout.LedgerPath());
+
+        _state.Migration.MigrateGlobal(invokingCwd: null, dryRun: true);
+
+        Assert.False(_state.Files.FileExists(Layout.LedgerPath()));
+    }
+
+    [Fact]
+    public void AGlobalLedgerEntryIsNotRecordedWhileAnotherWriterHoldsTheHomeLease()
+    {
+        SeedLegacyGlobal();
+        _state.Migration.MigrateGlobal(invokingCwd: null);
+        _state.Files.DeleteFile(Layout.LedgerPath());
+        using IDisposable holder = new InProcessLease(_state.LeaseHost).Hold(LeaseNameOfGlobal());
+
+        _state.Migration.MigrateGlobal(invokingCwd: null);
+
+        Assert.False(_state.Files.FileExists(Layout.LedgerPath()));
+    }
+
+    [Fact]
+    public void ASecondProjectRunRecordsTheLedgerEntryAStopBeforeItLeftOut()
+    {
+        string repo = SeedInRepo();
+        _state.Migration.ImportProject(repo);
+        _state.Files.DeleteFile(Layout.LedgerPath());
+
+        _state.Migration.ImportProject(repo);
+
+        Assert.Contains(
+            Layout.KeyOf(repo),
+            JsonNode.Parse(_state.Files.ReadAllText(Layout.LedgerPath()))!["projectsImported"]!.AsArray().Select(node => node!.GetValue<string>()));
+    }
+
+    [Fact]
+    public void ASecondProjectRunRegistersTheProjectAStopBeforeRegistrationLeftOut()
+    {
+        string repo = SeedInRepo();
+        _state.Time.Advance(TimeSpan.FromHours(3));
+        _state.Migration.ImportProject(repo);
+        _state.Files.DeleteFile(Layout.RegistryPath());
+
+        _state.Migration.ImportProject(repo);
+
+        Assert.Equal(_state.Time.GetUtcNow(), _state.Store.FindProject(repo)!.LastUpdatedUtc);
+        Assert.True(_state.Files.FileExists(Layout.RegistryPath()));
+    }
+
+    [Fact]
+    public void AProjectDryRunNeverRecordsOrRegistersWhatAStopLeftOut()
+    {
+        string repo = SeedInRepo();
+        _state.Migration.ImportProject(repo);
+        _state.Files.DeleteFile(Layout.LedgerPath());
+        _state.Files.DeleteFile(Layout.RegistryPath());
+
+        _state.Migration.ImportProject(repo, dryRun: true);
+
+        Assert.False(_state.Files.FileExists(Layout.LedgerPath()));
+        Assert.False(_state.Files.FileExists(Layout.RegistryPath()));
+    }
+
+    [Fact]
     public void ASecondRunChangesNothingAndAMigratedThenUninstalledGlobalIsNotCopiedBack()
     {
         SeedLegacyGlobal();

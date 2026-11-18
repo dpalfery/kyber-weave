@@ -183,12 +183,18 @@ public sealed class SquadStateMigration : ISquadStateMigration
         {
             // The home receipt is the authority, so nothing is copied. Each legacy root that remains is still
             // reported: doctor must be able to say it is on disk and is no longer read.
-            foreach (string legacyDirectory in FindNonEmptyLegacyRootDirectories())
+            List<string> remaining = FindNonEmptyLegacyRootDirectories();
+            foreach (string legacyDirectory in remaining)
             {
                 unmigrated.Add(new SquadUnmigratedLegacyRoot(
                     legacyDirectory,
                     HomeAuthorityReason,
                     HomeAuthorityGuidance));
+            }
+
+            if (!dryRun)
+            {
+                ReconcileGlobalLedger(remaining, warnings);
             }
         }
 
@@ -246,8 +252,92 @@ public sealed class SquadStateMigration : ISquadStateMigration
             }
         }
 
+        else if (homeReceiptExists && !dryRun && _files.FileExists(inRepoReceiptPath))
+        {
+            ReconcileProjectImport(identity, projectDirectory);
+        }
+
         return new SquadMigrationReport([], [], imported, warnings);
     }
+
+    /// <summary>
+    /// Finishes what a run stopped after the home receipt left undone. The receipt is the completion marker of a
+    /// copy, so a later run no longer copies, and the ledger entry and the registry entry that follow it in a copy
+    /// would otherwise stay missing for good. The ledger is written only here, after the receipt is known to exist.
+    /// </summary>
+    private void ReconcileProjectImport(SquadPhysicalRootIdentity identity, string projectDirectory)
+    {
+        string leaseIdentity = _stateStore.ResolveLeaseIdentity(identity.PhysicalPath, SquadDeploymentScope.Project);
+        RunUnderLease(
+            leaseIdentity,
+            () =>
+            {
+                if (!SquadMigrationLedger.Read(_files, LedgerPath(), out _).HasProjectImport(identity.Key))
+                {
+                    RecordInLedger(ledger => ledger.WithProjectImport(identity.Key));
+                }
+
+                if (_stateStore.IsRegistered(identity.PhysicalPath))
+                {
+                    return;
+                }
+
+                SquadReceipt receipt;
+                try
+                {
+                    receipt = _stateStore.DeserializeReceipt(_files.ReadAllText(Path.Combine(projectDirectory, ReceiptFileName)));
+                }
+                catch (InvalidDataException)
+                {
+                    // A home receipt that cannot be read describes no targets, so there is nothing to register.
+                    return;
+                }
+
+                _stateStore.RegisterProject(identity.PhysicalPath, TargetsOf(receipt), _time.GetUtcNow());
+            });
+    }
+
+    /// <summary>
+    /// Records the ledger entry of each legacy root a stop after the home receipt left out. The home receipt exists,
+    /// so the entry is never written before the receipt it follows.
+    /// </summary>
+    private void ReconcileGlobalLedger(List<string> legacyDirectories, List<string> warnings)
+    {
+        if (legacyDirectories.Count == 0)
+        {
+            return;
+        }
+
+        SquadMigrationLedger recorded = ReadLedger(warnings);
+        List<string> missing = legacyDirectories
+            .Select(Path.GetFileName)
+            .OfType<string>()
+            .Where(key => !recorded.HasGlobalMigration(key))
+            .ToList();
+        if (missing.Count == 0)
+        {
+            return;
+        }
+
+        string leaseIdentity = _stateStore.ResolveLeaseIdentity(_stateStore.ResolveHomeRoot(), SquadDeploymentScope.Global);
+        RunUnderLease(
+            leaseIdentity,
+            () =>
+            {
+                SquadMigrationLedger current = SquadMigrationLedger.Read(_files, LedgerPath(), out _);
+                foreach (string key in missing.Where(key => !current.HasGlobalMigration(key)))
+                {
+                    RecordInLedger(ledger => ledger.WithGlobalMigration(key));
+                }
+            });
+    }
+
+    private static IReadOnlyList<string> TargetsOf(SquadReceipt receipt) =>
+        receipt.Files
+            .Select(file => file.Target)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
 
     private void ImportInRepoState(
         SquadPhysicalRootIdentity identity,
@@ -315,12 +405,7 @@ public sealed class SquadStateMigration : ISquadStateMigration
 
         // The target roots a project deploys to come from the receipt itself, so the registry entry
         // describes the same files the receipt owns.
-        IReadOnlyList<string> targets = receipt.Files
-            .Select(file => file.Target)
-            .Distinct(StringComparer.Ordinal)
-            .Order(StringComparer.Ordinal)
-            .ToArray();
-        _stateStore.RegisterProject(identity.PhysicalPath, targets, _time.GetUtcNow());
+        _stateStore.RegisterProject(identity.PhysicalPath, TargetsOf(receipt), _time.GetUtcNow());
         imported.Add(identity.PhysicalPath);
     }
 
@@ -464,11 +549,39 @@ public sealed class SquadStateMigration : ISquadStateMigration
     /// transaction. The home receipt is checked again once the lease is held: a receipt that appeared since the
     /// plan was made is authoritative, and the write is skipped rather than overwriting it.
     /// </summary>
+    private CopyOutcome WriteUnderLease(string leaseIdentity, string homeReceiptPath, Action write)
+    {
+        bool present = false;
+        bool ran = RunUnderLease(
+            leaseIdentity,
+            () =>
+            {
+                if (_files.FileExists(homeReceiptPath))
+                {
+                    present = true;
+                    return;
+                }
+
+                write();
+            });
+        if (!ran)
+        {
+            return CopyOutcome.LeaseBusy;
+        }
+
+        return present ? CopyOutcome.AlreadyPresent : CopyOutcome.Copied;
+    }
+
+    /// <summary>
+    /// Runs an action while holding the lease an install takes for the root. A busy lease is not an error: the
+    /// action does not run, and a later run finds the same work waiting.
+    /// </summary>
+    /// <returns>True when the action ran; false when another transaction held the lease.</returns>
     [SuppressMessage(
         "Reliability",
         "CA2000:Dispose objects before losing scope",
         Justification = "The lease is acquired inside the try and disposed by the using statement that follows; a busy root returns before any lease exists.")]
-    private CopyOutcome WriteUnderLease(string leaseIdentity, string homeReceiptPath, Action write)
+    private bool RunUnderLease(string leaseIdentity, Action action)
     {
         IDisposable lease;
         try
@@ -478,18 +591,13 @@ public sealed class SquadStateMigration : ISquadStateMigration
         catch (LeaseTimeoutException)
         {
             // The lease is refused only when a transaction holds it for the root, in this process or another.
-            return CopyOutcome.LeaseBusy;
+            return false;
         }
 
         using (lease)
         {
-            if (_files.FileExists(homeReceiptPath))
-            {
-                return CopyOutcome.AlreadyPresent;
-            }
-
-            write();
-            return CopyOutcome.Copied;
+            action();
+            return true;
         }
     }
 

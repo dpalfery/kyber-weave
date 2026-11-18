@@ -46,21 +46,7 @@ public abstract class SquadStateMigrationCrashSafetyContractTests
     protected abstract SquadStateCrashWorkspace CreateWorkspace();
 
     /// <summary>The symptoms that fail today, each an existing crash-safety weakness.</summary>
-    protected virtual IReadOnlyList<SquadStateMigrationKnownWeakness> KnownWeaknesses =>
-    [
-        new(
-            SquadStateMigrationFlow.Global,
-            "migration-ledger.json' is missing",
-            "A stop after the copy began, between the receipt write and the ledger write, leaves a ledger that running the migration again does not rewrite."),
-        new(
-            SquadStateMigrationFlow.Project,
-            "migration-ledger.json' is missing",
-            "A stop after the copy began, between the receipt write and the ledger write, leaves a ledger that running the migration again does not rewrite."),
-        new(
-            SquadStateMigrationFlow.Project,
-            "registry.json' is missing",
-            "A stop before the project is registered leaves a registry that running the import again does not rewrite."),
-    ];
+    protected virtual IReadOnlyList<SquadStateMigrationKnownWeakness> KnownWeaknesses => [];
 
     /// <summary>The global migration stopped at every operation recovers by running again.</summary>
     [Fact]

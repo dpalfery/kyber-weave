@@ -195,6 +195,15 @@ public sealed class SquadStateStore : ISquadStateStore
             .FirstOrDefault(entry => string.Equals(entry.RootKey, key, StringComparison.Ordinal));
     }
 
+    /// <inheritdoc />
+    public bool IsRegistered(string root)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+
+        string key = SquadPhysicalRootIdentity.KeyOf(SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(root, _semantics));
+        return ReadRegistry().ContainsKey(key);
+    }
+
     /// <summary>
     ///     Lists the registry exactly as <see cref="ListProjects()" /> does, but never writes the rebuilt registry
     ///     back. A read-only caller, such as a migration dry run, must not change the home to answer a question.
