@@ -209,7 +209,7 @@ public sealed class ArbiterRunStoreTests : IDisposable
     {
         (string path, long[] starts, long length) = await WriteFindingLinesAsync("RUN-TAIL", "first", "second", "third");
 
-        IReadOnlyList<string> read = ArbiterRunStore.ReadItems(path, length - starts[1]);
+        IReadOnlyList<string> read = ArbiterRunStore.ReadItems(path, length - starts[1], new ArbiterLogFiles());
 
         Assert.Equal(["second", "third"], read);
     }
@@ -219,7 +219,7 @@ public sealed class ArbiterRunStoreTests : IDisposable
     {
         (string path, long[] starts, long length) = await WriteFindingLinesAsync("RUN-TAIL", "first", "second", "third");
 
-        IReadOnlyList<string> read = ArbiterRunStore.ReadItems(path, length - starts[1] - 3);
+        IReadOnlyList<string> read = ArbiterRunStore.ReadItems(path, length - starts[1] - 3, new ArbiterLogFiles());
 
         Assert.Equal(["third"], read);
     }
@@ -230,7 +230,7 @@ public sealed class ArbiterRunStoreTests : IDisposable
         (string path, long[] starts, long length) = await WriteFindingLinesAsync("RUN-TAIL", "first", "second", "third");
 
         // The window opens on the newline that ends "first": only that empty remainder is dropped.
-        IReadOnlyList<string> read = ArbiterRunStore.ReadItems(path, length - starts[1] + 1);
+        IReadOnlyList<string> read = ArbiterRunStore.ReadItems(path, length - starts[1] + 1, new ArbiterLogFiles());
 
         Assert.Equal(["second", "third"], read);
     }
@@ -240,16 +240,16 @@ public sealed class ArbiterRunStoreTests : IDisposable
     {
         (string path, _, long length) = await WriteFindingLinesAsync("RUN-TAIL", "first", "second");
 
-        Assert.Equal(["first", "second"], ArbiterRunStore.ReadItems(path, length));
-        Assert.Equal(["first", "second"], ArbiterRunStore.ReadItems(path, length + 1));
-        Assert.Equal(["second"], ArbiterRunStore.ReadItems(path, length - 1));
+        Assert.Equal(["first", "second"], ArbiterRunStore.ReadItems(path, length, new ArbiterLogFiles()));
+        Assert.Equal(["first", "second"], ArbiterRunStore.ReadItems(path, length + 1, new ArbiterLogFiles()));
+        Assert.Equal(["second"], ArbiterRunStore.ReadItems(path, length - 1, new ArbiterLogFiles()));
     }
 
     [Fact]
     public void AMissingFileAndANonPositiveWindowAreHandledExplicitly()
     {
-        Assert.Empty(ArbiterRunStore.ReadItems(Path.Combine(_root, "no", "such.jsonl"), 10));
-        Assert.Throws<ArgumentOutOfRangeException>(() => ArbiterRunStore.ReadItems(Path.Combine(_root, "x.jsonl"), 0));
+        Assert.Empty(ArbiterRunStore.ReadItems(Path.Combine(_root, "no", "such.jsonl"), 10, new ArbiterLogFiles()));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ArbiterRunStore.ReadItems(Path.Combine(_root, "x.jsonl"), 0, new ArbiterLogFiles()));
     }
 
     [Fact]

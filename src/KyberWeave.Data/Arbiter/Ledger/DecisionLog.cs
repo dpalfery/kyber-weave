@@ -22,6 +22,7 @@ public sealed class DecisionLog : IArbiterDecisionLog
     public const string FileName = "decisions.jsonl";
 
     private readonly string _directory;
+    private readonly IArbiterLogStore _log = new ArbiterLogFiles();
 
     /// <summary>Creates a decision log over <paramref name="arbiterDirectory"/>.</summary>
     public DecisionLog(string arbiterDirectory)
@@ -44,7 +45,7 @@ public sealed class DecisionLog : IArbiterDecisionLog
     public async Task AppendAsync(ArbiterDecisionRecord record, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);
-        await ArbiterLogFiles.AppendLineAsync(_directory, FileName, ArbiterJson.Serialize(record), cancellationToken);
+        await _log.AppendLineAsync(_directory, FileName, ArbiterJson.Serialize(record), cancellationToken);
     }
 
     /// <summary>Reads every complete decision in the newest <see cref="ArbiterLogFiles.MaxReadBytes"/> bytes, in append order. Takes no lock.</summary>
@@ -60,7 +61,7 @@ public sealed class DecisionLog : IArbiterDecisionLog
     {
         List<ArbiterDecisionRecord> records = [];
         int malformed = 0;
-        LogTail tail = ArbiterLogFiles.ReadComplete(FilePath);
+        LogTail tail = _log.ReadComplete(FilePath);
         foreach (string line in tail.Lines)
         {
             ArbiterDecisionRecord? record = TryDeserialize(line);

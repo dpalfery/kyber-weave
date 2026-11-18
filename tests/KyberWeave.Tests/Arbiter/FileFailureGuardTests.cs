@@ -6,6 +6,7 @@ using System.Security;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Stores;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.FileSystem;
 using Xunit;
 
@@ -18,6 +19,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class FileFailureGuardTests : IDisposable
 {
+    private static readonly ArbiterLogFiles Logs = new();
     private readonly TempDirectory _temp = new();
 
     public void Dispose() => _temp.Dispose();
@@ -100,7 +102,7 @@ public sealed class FileFailureGuardTests : IDisposable
     [Fact]
     public void ALogPathTheFileSystemCannotTakeReadsAsUnreadableNotAsACrash()
     {
-        LogTail tail = ArbiterLogFiles.ReadTail(Path.Combine(_temp.Path, "bad\0name.jsonl"), 1024, keepUnterminatedFinalLine: true);
+        LogTail tail = Logs.ReadTail(Path.Combine(_temp.Path, "bad\0name.jsonl"), 1024, keepUnterminatedFinalLine: true);
 
         Assert.Empty(tail.Lines);
         Assert.NotNull(tail.Unreadable);
@@ -109,7 +111,7 @@ public sealed class FileFailureGuardTests : IDisposable
     [Fact]
     public void AStoreWhoseDirectoryHoldsAnUnusablePathReadsAsEmpty()
     {
-        Assert.Empty(ArbiterRunStore.ReadItems(Path.Combine(_temp.Path, "bad\0name.jsonl"), 1024));
+        Assert.Empty(ArbiterRunStore.ReadItems(Path.Combine(_temp.Path, "bad\0name.jsonl"), 1024, new ArbiterLogFiles()));
     }
 
     [Theory]

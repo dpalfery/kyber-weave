@@ -11,6 +11,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ArbiterLogFilesReadTests : IDisposable
 {
+    private static readonly ArbiterLogFiles Logs = new();
     private readonly TempDirectory _temp = new();
 
     public void Dispose() => _temp.Dispose();
@@ -20,13 +21,13 @@ public sealed class ArbiterLogFilesReadTests : IDisposable
     {
         Directory.CreateDirectory(_temp.Path);
 
-        Assert.Empty(ArbiterLogFiles.ReadCompleteLines(Path.Combine(_temp.Path, "ledger.jsonl")));
+        Assert.Empty(Logs.ReadCompleteLines(Path.Combine(_temp.Path, "ledger.jsonl")));
     }
 
     [Fact]
     public void AFolderThatIsNotThereReadsAsNoLines()
     {
-        Assert.Empty(ArbiterLogFiles.ReadCompleteLines(Path.Combine(_temp.Path, "no-such-folder", "ledger.jsonl")));
+        Assert.Empty(Logs.ReadCompleteLines(Path.Combine(_temp.Path, "no-such-folder", "ledger.jsonl")));
     }
 
     [Fact]
@@ -35,7 +36,7 @@ public sealed class ArbiterLogFilesReadTests : IDisposable
         string path = Path.Combine(_temp.Path, "ledger.jsonl");
         File.WriteAllText(path, string.Empty);
 
-        Assert.Empty(ArbiterLogFiles.ReadCompleteLines(path));
+        Assert.Empty(Logs.ReadCompleteLines(path));
     }
 
     [Fact]
@@ -44,7 +45,7 @@ public sealed class ArbiterLogFilesReadTests : IDisposable
         string path = Path.Combine(_temp.Path, "ledger.jsonl");
         File.WriteAllText(path, "{\"a\":1}\n{\"b\":2}\n{\"c\":");
 
-        Assert.Equal(["{\"a\":1}", "{\"b\":2}"], ArbiterLogFiles.ReadCompleteLines(path));
+        Assert.Equal(["{\"a\":1}", "{\"b\":2}"], Logs.ReadCompleteLines(path));
     }
 
     [Fact]
@@ -65,7 +66,7 @@ public sealed class ArbiterLogFilesReadTests : IDisposable
         long length = new FileInfo(path).Length;
         long firstKept = (long)Math.Ceiling((length - ArbiterLogFiles.MaxReadBytes) / (double)(lineBytes + 1));
 
-        IReadOnlyList<string> read = ArbiterLogFiles.ReadCompleteLines(path);
+        IReadOnlyList<string> read = Logs.ReadCompleteLines(path);
 
         Assert.Equal(lines - firstKept, read.Count);
         Assert.StartsWith(firstKept.ToString("D8", CultureInfo.InvariantCulture), read[0], StringComparison.Ordinal);
@@ -81,7 +82,7 @@ public sealed class ArbiterLogFilesReadTests : IDisposable
         long length = new FileInfo(path).Length;
 
         // The window opens one byte into the second line's first two-byte character.
-        IReadOnlyList<string> read = ArbiterLogFiles.ReadTailLines(path, length - "first\n".Length - 1, keepUnterminatedFinalLine: false);
+        IReadOnlyList<string> read = Logs.ReadTailLines(path, length - "first\n".Length - 1, keepUnterminatedFinalLine: false);
 
         Assert.Equal(["second", "third"], read);
     }
@@ -94,7 +95,7 @@ public sealed class ArbiterLogFilesReadTests : IDisposable
         Directory.CreateDirectory(path);
         Directory.CreateDirectory(Path.Combine(_temp.Path, DecisionLog.FileName));
 
-        Assert.Empty(ArbiterLogFiles.ReadCompleteLines(path));
+        Assert.Empty(Logs.ReadCompleteLines(path));
         Assert.Empty(new InFlightLedger(_temp.Path).ReadAll());
         Assert.Empty(new DecisionLog(_temp.Path).ReadAll());
     }
@@ -105,7 +106,7 @@ public sealed class ArbiterLogFilesReadTests : IDisposable
         byte[] bytes = Encoding.UTF8.GetBytes("one\ntwo\nthree\nfour\n");
         using ShrinkingLengthStream stream = new(bytes);
 
-        IReadOnlyList<string> read = ArbiterLogFiles.ReadTailLines(stream, 11, keepUnterminatedFinalLine: false);
+        IReadOnlyList<string> read = Logs.ReadTailLines(stream, 11, keepUnterminatedFinalLine: false);
 
         Assert.Equal(["three", "four"], read);
         Assert.Equal(1, stream.LengthReads);
@@ -119,7 +120,7 @@ public sealed class ArbiterLogFilesReadTests : IDisposable
         byte[] bytes = Encoding.UTF8.GetBytes(string.Join('\n', expected) + "\n");
         using RecordingStream stream = new(bytes);
 
-        IReadOnlyList<string> read = ArbiterLogFiles.ReadTailLines(stream, bytes.Length, keepUnterminatedFinalLine: false);
+        IReadOnlyList<string> read = Logs.ReadTailLines(stream, bytes.Length, keepUnterminatedFinalLine: false);
 
         Assert.Equal(expected, read);
         Assert.InRange(stream.LargestRequest, 1, 64 * 1024);
@@ -130,8 +131,8 @@ public sealed class ArbiterLogFilesReadTests : IDisposable
     {
         byte[] bytes = Encoding.UTF8.GetBytes("one\ntwo\nthr");
 
-        Assert.Equal(["one", "two"], ArbiterLogFiles.ReadTailLines(new MemoryStream(bytes), 100, keepUnterminatedFinalLine: false));
-        Assert.Equal(["one", "two", "thr"], ArbiterLogFiles.ReadTailLines(new MemoryStream(bytes), 100, keepUnterminatedFinalLine: true));
+        Assert.Equal(["one", "two"], Logs.ReadTailLines(new MemoryStream(bytes), 100, keepUnterminatedFinalLine: false));
+        Assert.Equal(["one", "two", "thr"], Logs.ReadTailLines(new MemoryStream(bytes), 100, keepUnterminatedFinalLine: true));
     }
 
     [Fact]
@@ -139,7 +140,7 @@ public sealed class ArbiterLogFilesReadTests : IDisposable
     {
         byte[] bytes = Encoding.UTF8.GetBytes("abcdefghij\n");
 
-        Assert.Empty(ArbiterLogFiles.ReadTailLines(new MemoryStream(bytes), 5, keepUnterminatedFinalLine: true));
+        Assert.Empty(Logs.ReadTailLines(new MemoryStream(bytes), 5, keepUnterminatedFinalLine: true));
     }
 
     /// <summary>A stream that records the largest buffer any read was offered.</summary>

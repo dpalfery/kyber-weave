@@ -66,6 +66,7 @@ public sealed class ArbiterRunStore : IArbiterRunStore
     private readonly ArbiterStoreOptions _options;
     private readonly Func<DateTimeOffset> _clock;
     private readonly Func<DirectoryInfo, DateTime> _newestItemTime;
+    private readonly IArbiterLogStore _log = new ArbiterLogFiles();
 
     /// <summary>Creates a store rooted at <c>&lt;arbiter-dir&gt;/stores</c>.</summary>
     /// <param name="arbiterDirectory">The Arbiter directory the stores sit under.</param>
@@ -162,7 +163,7 @@ public sealed class ArbiterRunStore : IArbiterRunStore
     public IReadOnlyList<string> ReadFailures(string? planFile, string? planDigest, string? session)
     {
         string path = Path.Combine(FailureDirectory(planFile, planDigest, session), FailuresFileName);
-        return ReadItems(path, MaxFailuresReadBytes);
+        return ReadItems(path, MaxFailuresReadBytes, _log);
     }
 
     /// <summary>
@@ -186,7 +187,7 @@ public sealed class ArbiterRunStore : IArbiterRunStore
     public IReadOnlyList<string> ReadReturns(string planFile)
     {
         ArgumentNullException.ThrowIfNull(planFile);
-        return ReadItems(Path.Combine(ReturnsDirectory(planFile), ReturnsFileName), MaxReturnsReadBytes);
+        return ReadItems(Path.Combine(ReturnsDirectory(planFile), ReturnsFileName), MaxReturnsReadBytes, _log);
     }
 
     /// <summary>Keyed by the plan file alone, so an amended plan still sees the returns made before the amendment.</summary>
@@ -222,7 +223,7 @@ public sealed class ArbiterRunStore : IArbiterRunStore
     {
         ArgumentNullException.ThrowIfNull(reviewRun);
         string path = Path.Combine(ReviewDirectory(reviewRun), FindingsFileName);
-        return ReadItems(path, MaxFindingsReadBytes);
+        return ReadItems(path, MaxFindingsReadBytes, _log);
     }
 
     private async Task<ArbiterStoreStatus> AppendAsync(string directory, string fileName, string text, CancellationToken ct)
@@ -237,7 +238,7 @@ public sealed class ArbiterRunStore : IArbiterRunStore
         {
             SweepExpired(directory, now);
             string line = ArbiterJson.Serialize(new StoredItem(now, text));
-            await ArbiterLogFiles.AppendLineAsync(directory, fileName, line, ct);
+            await _log.AppendLineAsync(directory, fileName, line, ct);
             return ArbiterStoreStatus.Stored;
         }
         catch (Exception exception) when (FileFailure.Is(exception))
@@ -336,10 +337,10 @@ public sealed class ArbiterRunStore : IArbiterRunStore
     /// first line is the end of an item cut by the seek and is dropped, so a whole item is never lost.
     /// A missing file reads as empty.
     /// </remarks>
-    internal static IReadOnlyList<string> ReadItems(string path, long tailBytes)
+    internal static IReadOnlyList<string> ReadItems(string path, long tailBytes, IArbiterLogStore log)
     {
         List<string> items = [];
-        foreach (string line in ArbiterLogFiles.ReadTailLines(path, tailBytes, keepUnterminatedFinalLine: true))
+        foreach (string line in log.ReadTailLines(path, tailBytes, keepUnterminatedFinalLine: true))
         {
             StoredItem? item = TryDeserialize(line);
             if (item is not null)
