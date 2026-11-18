@@ -103,6 +103,35 @@ public abstract class LeaseContractTests
     }
 
     [Fact]
+    public void ReleasesTheLeaseFromAThreadOtherThanTheOneThatTookIt()
+    {
+        ILease lease = CreateLease();
+        string name = NewName();
+        IDisposable held = lease.Acquire(name, GenerousTimeout);
+
+        Exception? failure = null;
+        Thread thread = new(() =>
+        {
+            try
+            {
+                held.Dispose();
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+        });
+
+        thread.Start();
+        _ = thread.Join(TimeSpan.FromSeconds(30));
+
+        Assert.Null(failure);
+        using (lease.Acquire(name, ShortTimeout))
+        {
+        }
+    }
+
+    [Fact]
     public void TakesAFreeLeaseWithNoWait()
     {
         ILease lease = CreateLease();
