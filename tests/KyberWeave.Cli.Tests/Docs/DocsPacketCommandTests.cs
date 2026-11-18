@@ -2,10 +2,12 @@ using KyberWeave.Application.Review;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
+using Spectre.Console.Testing;
 using Xunit;
 
-using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -14,16 +16,30 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class DocsPacketCommandTests
 {
-    private static DocFixture Ready()
+    /// <summary>The host's services over the fixture's in-memory checkout; git answers as it does outside a repository.</summary>
+    private static IServiceProvider Services(DocFixture fixture, Action<IServiceCollection>? configure = null) =>
+        DocsMemoryServicesD.Services(fixture, services =>
+        {
+            services.AddSingleton<IGitRepositoryFacts>(new FakeGitRepositoryFacts());
+            configure?.Invoke(services);
+        });
+
+    private static DocFixture Ready() => Written(PlanTaskFileProbe.CorpusInMemory());
+
+    private static DocFixture Written(DocFixture fixture)
     {
-        DocFixture fixture = PlanTaskFileProbe.Corpus();
-        Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
-        DocsTestCommands.Tasks().Execute(
+        _ = fixture.EnsureDirectory(".git");
+        TestConsole console = new() { EmitAnsiSequences = false };
+        _ = DocsTestCommands.Tasks(Services(fixture), console).Execute(
             null!,
-            new DocsTasksSettings { Path = Path.Combine(fixture.Root, PlanTaskFileProbe.PlanPath), Format = "json", Write = true },
+            new DocsTasksSettings { Path = fixture.FullPath(PlanTaskFileProbe.PlanPath), Format = "json", Write = true },
             CancellationToken.None);
         return fixture;
     }
+
+    /// <summary>A checkout beside <paramref name="sibling"/> on the same in-memory file system.</summary>
+    private static DocFixture ReadyBeside(DocFixture sibling, string folder) =>
+        Written(PlanTaskFileProbe.CorpusIn(DocFixture.CreateInMemoryBeside(sibling, folder)));
 
     private static (int Exit, string Output) Packet(
         DocFixture fixture, string task, string? plan = null, string? prior = null, IServiceProvider? services = null, params string[] worktrees)
@@ -36,9 +52,9 @@ public sealed class DocsPacketCommandTests
             WorkingDirectory = fixture.Root,
             ListWorktrees = _ => [fixture.Root, .. worktrees],
         };
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => DocsTestCommands.Packet(services).Execute(null!, settings, CancellationToken.None));
-        return (execution.Result, execution.Output);
+        TestConsole console = new() { EmitAnsiSequences = false };
+        int exit = DocsTestCommands.Packet(services ?? Services(fixture), console).Execute(null!, settings, CancellationToken.None);
+        return (exit, console.Output);
     }
 
     /// <summary>The CodeGraph ports are the injected factory's, so a checkout outside this one is read the same way.</summary>
@@ -47,8 +63,7 @@ public sealed class DocsPacketCommandTests
     {
         using DocFixture fixture = Ready();
         FakeCodeGraphPortsFactory codeGraph = new(FakeCodeGraphResolver.WithNodes());
-        IServiceProvider services = DocsTestCommands.Services(
-            collection => collection.AddSingleton<ICodeGraphPortsFactory>(codeGraph));
+        IServiceProvider services = Services(fixture, collection => collection.AddSingleton<ICodeGraphPortsFactory>(codeGraph));
 
         (int exit, string output) = Packet(fixture, "T1", services: services);
 
@@ -94,10 +109,8 @@ public sealed class DocsPacketCommandTests
     public void PriorResultsFromAFileInTheScratchAreaFillTheirSection()
     {
         using DocFixture fixture = Ready();
-        string scratch = Path.Combine(fixture.Root, TaskPromptService.ScratchFolder);
-        Directory.CreateDirectory(scratch);
-        string results = Path.Combine(scratch, "results.txt");
-        File.WriteAllText(results, "T1 reported: built, 4 tests green.");
+        string results = fixture.FullPath(TaskPromptService.ScratchFolder + "/results.txt");
+        _ = fixture.Write(TaskPromptService.ScratchFolder + "/results.txt", "T1 reported: built, 4 tests green.");
 
         (int exit, string output) = Packet(fixture, "T2", prior: results);
 
@@ -114,8 +127,8 @@ public sealed class DocsPacketCommandTests
     public void APriorResultsFileOutsideTheScratchAreaIsRefusedUnderItsOwnCode()
     {
         using DocFixture fixture = Ready();
-        string results = Path.Combine(fixture.Root, "results.txt");
-        File.WriteAllText(results, "a file outside the scratch area");
+        string results = fixture.FullPath("results.txt");
+        _ = fixture.Write("results.txt", "a file outside the scratch area");
 
         (int exit, string output) = Packet(fixture, "T2", prior: results);
 
@@ -157,8 +170,9 @@ public sealed class DocsPacketCommandTests
     public void SeveralActivePlansAreListedAndNoneIsGuessed()
     {
         using DocFixture fixture = Ready();
-        string folder = Path.GetDirectoryName(Path.Combine(fixture.Root, PlanTaskFileProbe.PlanPath.Replace('/', Path.DirectorySeparatorChar)))!;
-        File.WriteAllText(Path.Combine(folder, "2026-11-08-other-plan.md"), "# Other\n\n**Status: In progress.**\n");
+        _ = fixture.Write(
+            Path.GetDirectoryName(PlanTaskFileProbe.PlanPath)!.Replace('\\', '/') + "/2026-11-08-other-plan.md",
+            "# Other\n\n**Status: In progress.**\n");
 
         (int exit, string output) = Packet(fixture, "T1");
 
@@ -175,8 +189,9 @@ public sealed class DocsPacketCommandTests
     public void NoActivePlanSaysSoAndTellsTheWorkerNotToHuntForOne()
     {
         using DocFixture fixture = Ready();
-        string plan = Path.Combine(fixture.Root, PlanTaskFileProbe.PlanPath.Replace('/', Path.DirectorySeparatorChar));
-        File.WriteAllText(plan, File.ReadAllText(plan).Replace("**Status: Ready.**", "**Status: Draft.**", StringComparison.Ordinal));
+        _ = fixture.Write(
+            PlanTaskFileProbe.PlanPath,
+            fixture.ReadText(PlanTaskFileProbe.PlanPath).Replace("**Status: Ready.**", "**Status: Draft.**", StringComparison.Ordinal));
 
         (int exit, string output) = Packet(fixture, "T1");
 
@@ -187,8 +202,9 @@ public sealed class DocsPacketCommandTests
     private static DocFixture CanonicalWithoutPlan()
     {
         DocFixture fixture = Ready();
-        string plan = Path.Combine(fixture.Root, PlanTaskFileProbe.PlanPath.Replace('/', Path.DirectorySeparatorChar));
-        File.WriteAllText(plan, File.ReadAllText(plan).Replace("**Status: Ready.**", "**Status: Draft.**", StringComparison.Ordinal));
+        _ = fixture.Write(
+            PlanTaskFileProbe.PlanPath,
+            fixture.ReadText(PlanTaskFileProbe.PlanPath).Replace("**Status: Ready.**", "**Status: Draft.**", StringComparison.Ordinal));
         return fixture;
     }
 
@@ -196,7 +212,7 @@ public sealed class DocsPacketCommandTests
     public void ARunFromTheCanonicalCheckoutPrintsThePacketOfTheOneWorktreeThatHasTheTask()
     {
         using DocFixture canonical = CanonicalWithoutPlan();
-        using DocFixture worktree = Ready();
+        using DocFixture worktree = ReadyBeside(canonical, "worktree");
 
         (int exit, string output) = Packet(canonical, "T1", worktrees: worktree.Root);
 
@@ -208,8 +224,8 @@ public sealed class DocsPacketCommandTests
     public void SeveralWorktreesWithTheTaskAreListedWithTheCommandToRunFromEach()
     {
         using DocFixture canonical = CanonicalWithoutPlan();
-        using DocFixture first = Ready();
-        using DocFixture second = Ready();
+        using DocFixture first = ReadyBeside(canonical, "first");
+        using DocFixture second = ReadyBeside(canonical, "second");
 
         (int exit, string output) = Packet(canonical, "T1", worktrees: [first.Root, second.Root]);
 
@@ -224,7 +240,7 @@ public sealed class DocsPacketCommandTests
     public void AWorktreeWithoutTheTaskIsNotAMatchAndTheFindingNamesTheDirectorySearched()
     {
         using DocFixture canonical = CanonicalWithoutPlan();
-        using DocFixture worktree = Ready();
+        using DocFixture worktree = ReadyBeside(canonical, "worktree");
 
         (int exit, string output) = Packet(canonical, "T9", worktrees: worktree.Root);
 
@@ -237,13 +253,13 @@ public sealed class DocsPacketCommandTests
     public void ListPrintsOneLinePerTaskAndNothingElse()
     {
         using DocFixture fixture = Ready();
-        DocsTasksSettings settings = new() { Path = Path.Combine(fixture.Root, PlanTaskFileProbe.PlanPath), List = true };
+        DocsTasksSettings settings = new() { Path = fixture.FullPath(PlanTaskFileProbe.PlanPath), List = true };
+        TestConsole console = new() { EmitAnsiSequences = false };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => DocsTestCommands.Tasks().Execute(null!, settings, CancellationToken.None));
+        int exit = DocsTestCommands.Tasks(Services(fixture), console).Execute(null!, settings, CancellationToken.None);
 
-        Assert.True(execution.Result == 0, execution.Output);
-        string[] lines = execution.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        Assert.True(exit == 0, console.Output);
+        string[] lines = console.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         Assert.Equal(2, lines.Length);
         Assert.StartsWith("T1  needs=", lines[0], StringComparison.Ordinal);
         Assert.Contains("depends-on=", lines[1], StringComparison.Ordinal);

@@ -44,13 +44,12 @@ public sealed class PlanTaskAgentPickTests : IDisposable
         Acceptance criteria: four cards show counts.
         """;
 
-    private readonly TempDirectory _repo = new();
+    private readonly DocFixture _repo = DocFixture.CreateInMemory();
     private readonly List<PlanTaskAgentPick> _pickers = [];
 
     public PlanTaskAgentPickTests()
     {
-        Directory.CreateDirectory(Path.Combine(_repo.Path, "docs", "plans"));
-        File.WriteAllText(Path.Combine(_repo.Path, Plan), Markdown);
+        _ = _repo.Write(Plan, Markdown);
     }
 
     public void Dispose()
@@ -116,7 +115,7 @@ public sealed class PlanTaskAgentPickTests : IDisposable
         Write(Picker(new StubProvider("dev-medium", 0.97)));
         StubProvider second = new("dev-easy", 0.99);
 
-        PlanTaskFileOutcome check = new PlanTaskFileGenerator(_repo.Path, KyberWeaveConfigDefaults.Product, DocsPorts.Files,
+        PlanTaskFileOutcome check = new PlanTaskFileGenerator(_repo.Root, KyberWeaveConfigDefaults.Product, _repo.Store,
             Picker(second)).Run(Plan, PlanTaskFileMode.Check);
         PlanTaskFile rewritten = Write(Picker(second));
 
@@ -128,12 +127,12 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     [Fact]
     public void ProviderNone_BuildsNoPicker_AndMakesNoCall()
     {
-        using TempDirectory home = new();
+        string home = _repo.FullPath("home");
         FakeArbiterUserSettings settings = new();
         ConfiguredArbiterProviderFactory providers = Configured(settings);
 
-        Assert.Null(providers.TryCreate(KyberWeaveConfigDefaults.Product.Arbiter.Provider, home.Path));
-        Assert.Equal([home.Path], settings.Asked);
+        Assert.Null(providers.TryCreate(KyberWeaveConfigDefaults.Product.Arbiter.Provider, home));
+        Assert.Equal([home], settings.Asked);
     }
 
     [Fact]
@@ -141,13 +140,13 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     {
         // A broken override file must not break task-file generation: the repository's own provider stands, and
         // provider none then builds no picker rather than letting the parse failure escape.
-        using TempDirectory home = new();
+        string home = _repo.FullPath("home");
         ConfiguredArbiterProviderFactory providers = Configured(new FakeArbiterUserSettings
         {
             Override = (_, _) => throw new YamlException("The user override could not be read."),
         });
 
-        Assert.Null(providers.TryCreate(KyberWeaveConfigDefaults.Product.Arbiter.Provider, home.Path));
+        Assert.Null(providers.TryCreate(KyberWeaveConfigDefaults.Product.Arbiter.Provider, home));
     }
 
     [Theory]
@@ -170,7 +169,7 @@ public sealed class PlanTaskAgentPickTests : IDisposable
 
     private PlanTaskFile Write(IPlanTaskAgentPicker? picker)
     {
-        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(_repo.Path, KyberWeaveConfigDefaults.Product, DocsPorts.Files, picker)
+        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(_repo.Root, KyberWeaveConfigDefaults.Product, _repo.Store, picker)
             .Run(Plan, PlanTaskFileMode.Write);
         Assert.False(outcome.Report.HasErrors, string.Join("; ", outcome.Report.Items.Select(item => item.Message)));
         return outcome.File!;
