@@ -32,17 +32,23 @@ public sealed class FileKyberWeaveConfigRepository(IRepositoryTreeProbe tree) : 
         {
             path = ResolveConfigPath(root, configPath);
             if (path is null)
-                return KyberWeaveConfigLoadResult.Ok(KyberWeaveConfig.ProductDefaults, null);
+                return new KyberWeaveConfigLoadResult(success: true, config: KyberWeaveConfig.ProductDefaults);
 
-            return KyberWeaveConfigLoadResult.Ok(FromFile(path), path);
+            return new KyberWeaveConfigLoadResult(success: true, config: FromFile(path), configPath: path);
         }
         catch (YamlException ex)
         {
-            return KyberWeaveConfigLoadResult.Fail(ex.Message, path ?? configPath);
+            return new KyberWeaveConfigLoadResult(
+                success: false,
+                error: ex.Message,
+                configPath: path ?? configPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FileNotFoundException)
         {
-            return KyberWeaveConfigLoadResult.Fail(ex.Message, path ?? configPath);
+            return new KyberWeaveConfigLoadResult(
+                success: false,
+                error: ex.Message,
+                configPath: path ?? configPath);
         }
     }
 
@@ -90,30 +96,40 @@ public sealed class FileKyberWeaveConfigRepository(IRepositoryTreeProbe tree) : 
         string root = Path.GetFullPath(homeDirectory);
         string? path = ResolveUserConfigPath(root, configPath);
         if (path is null)
-            return KyberWeaveConfigLoadResult.Ok(KyberWeaveConfig.ProductDefaults, path);
+            return new KyberWeaveConfigLoadResult(
+                success: true,
+                config: KyberWeaveConfig.ProductDefaults,
+                configPath: path);
 
         if (!string.IsNullOrWhiteSpace(configPath) && !File.Exists(path))
         {
-            return KyberWeaveConfigLoadResult.Fail(
-                $"Kyber-Weave config file not found: {path}",
-                path);
+            return new KyberWeaveConfigLoadResult(
+                success: false,
+                error: $"Kyber-Weave config file not found: {path}",
+                configPath: path);
         }
 
         if (!File.Exists(path))
-            return KyberWeaveConfigLoadResult.Ok(KyberWeaveConfig.ProductDefaults, path);
+            return new KyberWeaveConfigLoadResult(
+                success: true,
+                config: KyberWeaveConfig.ProductDefaults,
+                configPath: path);
 
         try
         {
             string yaml = File.ReadAllText(path);
-            return KyberWeaveConfigLoadResult.Ok(KyberWeaveConfigAssembler.FromUserYaml(yaml), path);
+            return new KyberWeaveConfigLoadResult(
+                success: true,
+                config: KyberWeaveConfigAssembler.FromUserYaml(yaml),
+                configPath: path);
         }
         catch (YamlException ex)
         {
-            return KyberWeaveConfigLoadResult.Fail(ex.Message, path);
+            return new KyberWeaveConfigLoadResult(success: false, error: ex.Message, configPath: path);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return KyberWeaveConfigLoadResult.Fail(ex.Message, path);
+            return new KyberWeaveConfigLoadResult(success: false, error: ex.Message, configPath: path);
         }
     }
 

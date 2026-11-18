@@ -104,17 +104,17 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
         {
             path = ResolveConfigPath(root, configPath);
             if (path is null)
-                return KyberWeaveConfigLoadResult.Ok(KyberWeaveConfig.ProductDefaults, null);
+                return KyberWeaveConfigLoadResultFactory.Ok(KyberWeaveConfig.ProductDefaults, null);
 
-            return KyberWeaveConfigLoadResult.Ok(FromFile(path), path);
+            return KyberWeaveConfigLoadResultFactory.Ok(FromFile(path), path);
         }
         catch (YamlException ex)
         {
-            return KyberWeaveConfigLoadResult.Fail(ex.Message, path ?? configPath);
+            return KyberWeaveConfigLoadResultFactory.Fail(ex.Message, path ?? configPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FileNotFoundException)
         {
-            return KyberWeaveConfigLoadResult.Fail(ex.Message, path ?? configPath);
+            return KyberWeaveConfigLoadResultFactory.Fail(ex.Message, path ?? configPath);
         }
     }
 
@@ -162,26 +162,26 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
         string root = Path.GetFullPath(homeDirectory);
         string? path = ResolveUserConfigPath(root, configPath);
         if (path is null)
-            return KyberWeaveConfigLoadResult.Ok(KyberWeaveConfig.ProductDefaults, path);
+            return KyberWeaveConfigLoadResultFactory.Ok(KyberWeaveConfig.ProductDefaults, path);
 
         if (!_files.ContainsKey(path))
         {
             return string.IsNullOrWhiteSpace(configPath)
-                ? KyberWeaveConfigLoadResult.Ok(KyberWeaveConfig.ProductDefaults, path)
-                : KyberWeaveConfigLoadResult.Fail($"Kyber-Weave config file not found: {path}", path);
+                ? KyberWeaveConfigLoadResultFactory.Ok(KyberWeaveConfig.ProductDefaults, path)
+                : KyberWeaveConfigLoadResultFactory.Fail($"Kyber-Weave config file not found: {path}", path);
         }
 
         try
         {
-            return KyberWeaveConfigLoadResult.Ok(KyberWeaveConfigAssembler.FromUserYaml(ReadFile(path)), path);
+            return KyberWeaveConfigLoadResultFactory.Ok(KyberWeaveConfigAssembler.FromUserYaml(ReadFile(path)), path);
         }
         catch (YamlException ex)
         {
-            return KyberWeaveConfigLoadResult.Fail(ex.Message, path);
+            return KyberWeaveConfigLoadResultFactory.Fail(ex.Message, path);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return KyberWeaveConfigLoadResult.Fail(ex.Message, path);
+            return KyberWeaveConfigLoadResultFactory.Fail(ex.Message, path);
         }
     }
 

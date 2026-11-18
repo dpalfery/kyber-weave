@@ -45,13 +45,13 @@ public sealed class ConfigLoadServiceTests
         public KyberWeaveConfig Load(string repoRoot, string? configPath = null) => config;
 
         public KyberWeaveConfigLoadResult TryLoad(string repoRoot, string? configPath = null) =>
-            KyberWeaveConfigLoadResult.Ok(config, configPath);
+            KyberWeaveConfigLoadResultFactory.Ok(config, configPath);
 
         public string? FindConfigPath(string repoRoot) => null;
 
         public KyberWeaveConfig LoadUserConfig(string homeDirectory, string? configPath = null) => config;
 
         public KyberWeaveConfigLoadResult TryLoadUserConfig(string homeDirectory, string? configPath = null) =>
-            KyberWeaveConfigLoadResult.Ok(config, configPath);
+            KyberWeaveConfigLoadResultFactory.Ok(config, configPath);
     }
 }
