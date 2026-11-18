@@ -75,7 +75,7 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
     }
 
     private static ArbiterRule Shipped(string id) =>
-        Assert.Single(ArbiterConfig.ProductDefaults.Rules, rule => string.Equals(rule.Id, id, StringComparison.Ordinal));
+        Assert.Single(ArbiterConfigDefaults.Product.Rules, rule => string.Equals(rule.Id, id, StringComparison.Ordinal));
 
     /// <summary>The shipped rule as an enforced rule: same clauses, shadow off.</summary>
     private static ArbiterRule Enforced(string id) => Shipped(id) with { Shadow = false };

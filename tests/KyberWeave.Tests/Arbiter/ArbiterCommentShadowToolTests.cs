@@ -56,7 +56,7 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
             homeDirectory: () => _home.Path);
         KyberWeaveConfig configured = config ?? new KyberWeaveConfig
         {
-            Arbiter = ArbiterConfig.ProductDefaults with
+            Arbiter = ArbiterConfigDefaults.Product with
             {
                 Enabled = true,
                 CommentTriage = new ArbiterCommentTriageConfig([BotLogin]),

@@ -394,7 +394,7 @@ public sealed class ArbiterServeService(
         // The effective rules, so a host override of the comment rule's shadow state is the one the service honours.
         // A root whose configuration cannot be loaded uses the shipped rules and no bot logins: the fail-safe answer.
         (KyberWeaveConfig? config, _) = Load();
-        IReadOnlyList<ArbiterRule> rules = config?.Arbiter.Rules ?? ArbiterConfig.ProductDefaults.Rules;
+        IReadOnlyList<ArbiterRule> rules = config?.Arbiter.Rules ?? ArbiterConfigDefaults.Product.Rules;
         string ruleSet = ArbiterProvenance.RuleSetHash(rules);
         if (summary)
         {

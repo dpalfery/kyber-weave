@@ -4,7 +4,7 @@ namespace KyberWeave.Domain.StatusLine;
 /// <remarks>
 /// Mirrors <c>SquadDeploymentPlan</c>'s shape: build a plan, inspect it, then apply it. This type is the plan as data;
 /// building it and applying it are <c>IStatusLineDeploymentService</c>, which owns the file system. A plan is built
-/// from injected roots (<see cref="StatusLineTargetRoots"/>) rather than from process state, so a host and a test
+/// from injected roots (<c>StatusLineTargetRoots</c>) rather than from process state, so a host and a test
 /// drive the whole deploy/remove surface the same way. Every mutation is confined to the harness staging root and
 /// cross-checked against that harness's settings paths and auto-load directories, because Kyber Utilities never
 /// writes a harness settings file (A4, C2) and never activates a status line on the user's behalf (A3, C1).

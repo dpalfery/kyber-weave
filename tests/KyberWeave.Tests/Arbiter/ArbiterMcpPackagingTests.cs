@@ -69,7 +69,7 @@ public sealed class ArbiterMcpPackagingTests
     }
 
     private static KyberWeaveConfig EnabledConfig() =>
-        new() { Arbiter = new ArbiterConfig { Enabled = true, Rules = ArbiterConfig.ProductDefaults.Rules } };
+        new() { Arbiter = new ArbiterConfig { Enabled = true, Rules = ArbiterConfigDefaults.Product.Rules } };
 
     private static KyberWeaveConfig RemoteConfig() =>
         new()
@@ -77,7 +77,7 @@ public sealed class ArbiterMcpPackagingTests
             Arbiter = new ArbiterConfig
             {
                 Enabled = true,
-                Rules = ArbiterConfig.ProductDefaults.Rules,
+                Rules = ArbiterConfigDefaults.Product.Rules,
                 Provider = new ArbiterProviderConfig(
                     ArbiterProviderKind.Systemone, "https://typesafe.example.test/v1", "jev-test", 3000),
             },

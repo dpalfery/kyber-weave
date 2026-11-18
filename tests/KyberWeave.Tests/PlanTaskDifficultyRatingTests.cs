@@ -53,7 +53,7 @@ public sealed class PlanTaskDifficultyRatingTests : IDisposable
         PlanTaskAgentPick picker = new(provider, PlanTaskAgentPick.ImplementationAgents());
         _pickers.Add(picker);
         PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(
-            _repo.Path, KyberWeaveConfig.ProductDefaults, DocsPorts.Files, picker)
+            _repo.Path, KyberWeaveConfigDefaults.Product, DocsPorts.Files, picker)
             .Run(Plan, PlanTaskFileMode.Write);
         Assert.False(outcome.Report.HasErrors, string.Join("; ", outcome.Report.Items.Select(item => item.Message)));
         return outcome.File!;

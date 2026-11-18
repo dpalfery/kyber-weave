@@ -70,7 +70,7 @@ public sealed class ArbiterGateReportRuleTests
     private static ArbiterRule Rule()
     {
         return Assert.Single(
-            ArbiterConfig.ProductDefaults.Rules,
+            ArbiterConfigDefaults.Product.Rules,
             rule => string.Equals(rule.Id, GateReportRule, StringComparison.Ordinal));
     }
 

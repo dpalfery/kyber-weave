@@ -47,14 +47,14 @@ public sealed class ArbiterPlanReadRuleTests
     private static ArbiterRule Rule()
     {
         return Assert.Single(
-            ArbiterConfig.ProductDefaults.Rules,
+            ArbiterConfigDefaults.Product.Rules,
             rule => string.Equals(rule.Id, PlanReadRule, StringComparison.Ordinal));
     }
 
     /// <summary>The facts a delegate dispatch supplies for <paramref name="prompt"/>.</summary>
     /// <remarks>
     /// The ontology's docs root is <c>docs</c>, as in every other planning-directory test here:
-    /// <see cref="KyberWeaveConfig.ProductDefaults" /> places it at <c>6-Docs</c>, so a prompt naming
+    /// <see cref="KyberWeaveConfigDefaults.Product" /> places it at <c>6-Docs</c>, so a prompt naming
     /// <c>docs/plans/…</c> would name no configured planning directory and the rule could not fire.
     /// </remarks>
     private static ArbiterFactSet Facts(string prompt, string target = "dev-medium")

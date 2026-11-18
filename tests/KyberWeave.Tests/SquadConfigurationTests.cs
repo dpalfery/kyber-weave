@@ -236,7 +236,7 @@ public sealed class SquadConfigurationTests : IDisposable
         bool success = CommandHelpers.TryLoadConfig(ConfigFileReader.Repository, _temp.Path, null, report, out KyberWeaveConfig config);
 
         Assert.False(success);
-        Assert.Equal(KyberWeaveConfig.ProductDefaults, config);
+        Assert.Equal(KyberWeaveConfigDefaults.Product, config);
         Diagnostic diagnostic = Assert.Single(report.Items);
         Assert.Equal(KyberWeaveConfigDiagnosticCodes.LoadError, diagnostic.Code);
         Assert.Equal(Severity.Error, diagnostic.Severity);

@@ -114,7 +114,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
 
     /// <remarks>
     /// The docs root is <c>docs</c>, matching the planning paths the plan-read cases name:
-    /// <see cref="KyberWeaveConfig.ProductDefaults" /> places it at <c>6-Docs</c>, where a prompt
+    /// <see cref="KyberWeaveConfigDefaults.Product" /> places it at <c>6-Docs</c>, where a prompt
     /// naming <c>docs/plans/…</c> would name no configured planning directory.
     /// </remarks>
     private static KyberWeaveConfig ConfigWith(IReadOnlyList<ArbiterRule> rules) =>
@@ -603,7 +603,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
             "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\n" +
             "Read docs/plans/plan.md and implement the task it describes.";
         ArbiterRule planRead = Assert.Single(
-            ArbiterConfig.ProductDefaults.Rules,
+            ArbiterConfigDefaults.Product.Rules,
             rule => string.Equals(rule.Id, "KW-ARB-PLANREAD-001", StringComparison.Ordinal));
         ArbiterEvaluator evaluator = CreateEvaluator(new NoneProvider());
         KyberWeaveConfig config = ConfigWith([planRead]);

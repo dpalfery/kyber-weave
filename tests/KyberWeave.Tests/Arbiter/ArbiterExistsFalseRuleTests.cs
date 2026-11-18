@@ -23,7 +23,7 @@ public sealed class ArbiterExistsFalseRuleTests
         Arbiter = new ArbiterConfig
         {
             Enabled = true,
-            Rules = [.. ArbiterConfig.ProductDefaults.Rules],
+            Rules = [.. ArbiterConfigDefaults.Product.Rules],
         },
     };
 

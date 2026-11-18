@@ -132,7 +132,7 @@ public sealed class SquadBriefBuilder(
     {
         plan = null;
         DiagnosticReport report = new();
-        KyberWeaveConfig config = request.Config ?? KyberWeaveConfig.ProductDefaults;
+        KyberWeaveConfig config = request.Config ?? KyberWeaveConfigDefaults.Product;
         if (!TryResolvePlan(request.RepositoryRoot, config, request.Plan!, report, out string relative))
         {
             error = string.Join(" ", report.Items.Select(item => item.Message));

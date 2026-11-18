@@ -62,7 +62,7 @@ public sealed class ArchiveCloseoutValidatorTests
             .Write(PlanPath, CloseoutCorpus.PlanDocument(status: "draft"));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(Severity.Error, finding.Severity);
@@ -94,7 +94,7 @@ public sealed class ArchiveCloseoutValidatorTests
             .Write(PlanPath, CloseoutCorpus.PlanDocument(sections: sections));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -127,7 +127,7 @@ public sealed class ArchiveCloseoutValidatorTests
             .Write(PlanPath, CloseoutCorpus.PlanDocument(sections: sections));
 
         DiagnosticReport report = Validate(
-            fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added));
+            fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added));
 
         Assert.DoesNotContain(report.Items, item => item.Code == ArchiveCloseoutValidator.MissingCloseoutEvidence);
     }
@@ -147,7 +147,7 @@ public sealed class ArchiveCloseoutValidatorTests
                 + "status: current\nowner: dpalfery\nlast-reviewed: 2026-11-09\n---\n\n# Archived plan inventory\n");
 
         DiagnosticReport report = Validate(
-            fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(inventory, ChangeKind.Added));
+            fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(inventory, ChangeKind.Added));
 
         Assert.Empty(report.Items);
     }
@@ -161,7 +161,7 @@ public sealed class ArchiveCloseoutValidatorTests
             .Write(specReadme, CloseoutCorpus.PlanDocument(status: "draft"));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(specReadme, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(specReadme, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
     }
@@ -180,7 +180,7 @@ public sealed class ArchiveCloseoutValidatorTests
             .Write(readme, CloseoutCorpus.PlanDocument(status: "draft"));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(readme, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(readme, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(readme, finding.FilePath);
@@ -196,7 +196,7 @@ public sealed class ArchiveCloseoutValidatorTests
                 + CloseoutCorpus.DesignHarvestSection("H1")));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -216,7 +216,7 @@ public sealed class ArchiveCloseoutValidatorTests
                 + CloseoutCorpus.DesignHarvestSection("H1")));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -231,7 +231,7 @@ public sealed class ArchiveCloseoutValidatorTests
             .Write(PlanPath, CloseoutCorpus.PlanDocument(impactLine: string.Empty, componentsLine: string.Empty));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -246,7 +246,7 @@ public sealed class ArchiveCloseoutValidatorTests
             .Write(PlanPath, CloseoutCorpus.PlanDocument(impactLine: "documentation-impact: quantum-entanglement"));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -261,7 +261,7 @@ public sealed class ArchiveCloseoutValidatorTests
             .Write(PlanPath, CloseoutCorpus.PlanDocument(componentsLine: "impact-components: []"));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -285,7 +285,7 @@ public sealed class ArchiveCloseoutValidatorTests
                           + CloseoutCorpus.WaiverlessDesignSection));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -303,7 +303,7 @@ public sealed class ArchiveCloseoutValidatorTests
                     "[Widget architecture](../../reference/widget.md)"))));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -321,7 +321,7 @@ public sealed class ArchiveCloseoutValidatorTests
                 + CloseoutCorpus.DesignHarvestSection("H1")));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -340,7 +340,7 @@ public sealed class ArchiveCloseoutValidatorTests
                 + CloseoutCorpus.DesignHarvestSection("H1", "H2")));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -359,7 +359,7 @@ public sealed class ArchiveCloseoutValidatorTests
                 + CloseoutCorpus.DesignHarvestSection("H1")));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -387,7 +387,7 @@ public sealed class ArchiveCloseoutValidatorTests
 
         Diagnostic finding = Assert.Single(Validate(
             fixture,
-            KyberWeaveConfig.ProductDefaults,
+            KyberWeaveConfigDefaults.Product,
             new ChangedPath(ControlPath, ChangeKind.Added),
             new ChangedPath(WaiverPath, ChangeKind.Added)).Items);
 
@@ -407,7 +407,7 @@ public sealed class ArchiveCloseoutValidatorTests
                 + CloseoutCorpus.DesignHarvestSection("H1")));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -426,7 +426,7 @@ public sealed class ArchiveCloseoutValidatorTests
                 + CloseoutCorpus.DesignHarvestSection("H1")));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -446,7 +446,7 @@ public sealed class ArchiveCloseoutValidatorTests
                 + CloseoutCorpus.DesignHarvestSection("H1")));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -470,7 +470,7 @@ public sealed class ArchiveCloseoutValidatorTests
 
         Assert.Empty(Validate(
             fixture,
-            KyberWeaveConfig.ProductDefaults,
+            KyberWeaveConfigDefaults.Product,
             new ChangedPath(PlanPath, ChangeKind.Added)).Items);
     }
 
@@ -489,7 +489,7 @@ public sealed class ArchiveCloseoutValidatorTests
                 + CloseoutCorpus.DesignHarvestSection("H1")));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -511,7 +511,7 @@ public sealed class ArchiveCloseoutValidatorTests
                 + CloseoutCorpus.DesignHarvestSection("H1")));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -532,7 +532,7 @@ public sealed class ArchiveCloseoutValidatorTests
 
         Diagnostic finding = Assert.Single(Validate(
             fixture,
-            KyberWeaveConfig.ProductDefaults,
+            KyberWeaveConfigDefaults.Product,
             new ChangedPath(ControlPath, ChangeKind.Added),
             new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
@@ -553,7 +553,7 @@ public sealed class ArchiveCloseoutValidatorTests
                 + CloseoutCorpus.DesignHarvestSection("H1")));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -574,7 +574,7 @@ public sealed class ArchiveCloseoutValidatorTests
                 + CloseoutCorpus.DesignHarvestSection("H1")));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -605,7 +605,7 @@ public sealed class ArchiveCloseoutValidatorTests
 
         Diagnostic finding = Assert.Single(Validate(
             fixture,
-            KyberWeaveConfig.ProductDefaults,
+            KyberWeaveConfigDefaults.Product,
             new ChangedPath(ControlPath, ChangeKind.Added),
             new ChangedPath(ResidualPath, ChangeKind.Added)).Items);
 
@@ -622,7 +622,7 @@ public sealed class ArchiveCloseoutValidatorTests
                 componentsLine: "impact-components:\n  - MotorcycleRAG Imaginary"));
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -642,7 +642,7 @@ public sealed class ArchiveCloseoutValidatorTests
             .Write(PlanPath, CloseoutCorpus.PlanDocument());
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -661,7 +661,7 @@ public sealed class ArchiveCloseoutValidatorTests
             .Write(PlanPath, CloseoutCorpus.PlanDocument());
 
         Diagnostic finding = Assert.Single(
-            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+            Validate(fixture, KyberWeaveConfigDefaults.Product, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
 
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
         Assert.Equal(PlanPath, finding.FilePath);
@@ -692,7 +692,7 @@ public sealed class ArchiveCloseoutValidatorTests
 
         Diagnostic finding = Assert.Single(Validate(
             fixture,
-            KyberWeaveConfig.ProductDefaults,
+            KyberWeaveConfigDefaults.Product,
             new ChangedPath(ControlPath, ChangeKind.Added),
             new ChangedPath(MixedPath, ChangeKind.Added)).Items);
 

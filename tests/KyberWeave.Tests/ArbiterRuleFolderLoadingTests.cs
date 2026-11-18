@@ -159,7 +159,7 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
         ArbiterRule replaced = Assert.Single(rules, rule => rule.Id == "KW-ARB-SCOPE-001");
         Assert.Equal("Does the host's own scope question hold?", replaced.Question);
         Assert.Equal(["in-task", "beyond-task"], replaced.Answers);
-        Assert.Equal(ArbiterConfig.ProductDefaults.Rules.Count, rules.Count);
+        Assert.Equal(ArbiterConfigDefaults.Product.Rules.Count, rules.Count);
     }
 
     [Fact]
@@ -734,10 +734,10 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
     private static void AssertShippedRules(IReadOnlyList<ArbiterRule> rules)
     {
         Assert.Equal(
-            ArbiterConfig.ProductDefaults.Rules.Select(rule => (rule.Id, rule.Trigger)),
+            ArbiterConfigDefaults.Product.Rules.Select(rule => (rule.Id, rule.Trigger)),
             rules.Select(rule => (rule.Id, rule.Trigger)));
 
-        foreach (ArbiterRule shipped in ArbiterConfig.ProductDefaults.Rules)
+        foreach (ArbiterRule shipped in ArbiterConfigDefaults.Product.Rules)
         {
             ArbiterRule loaded = rules.Single(
                 rule => string.Equals(rule.Id, shipped.Id, StringComparison.Ordinal)
@@ -795,7 +795,7 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
     {
         ArbiterYamlSection? section = KyberWeaveYamlParser.Parse(yaml).Arbiter;
         return ArbiterConfigLoader.Merge(
-            ArbiterConfig.ProductDefaults,
+            ArbiterConfigDefaults.Product,
             section,
             new ArbiterConfigLoader.RuleFolderRequest(Root, ["docs"], technologies, readFile ?? ReadTestFile));
     }

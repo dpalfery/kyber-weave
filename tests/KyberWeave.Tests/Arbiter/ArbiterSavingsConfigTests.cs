@@ -32,7 +32,7 @@ public sealed class ArbiterSavingsConfigTests
     [Fact]
     public void Defaults_WithNoSavingsKeys_UseShadowModeAndTheShippedLadder()
     {
-        ArbiterConfig config = ArbiterConfig.ProductDefaults;
+        ArbiterConfig config = ArbiterConfigDefaults.Product;
 
         Assert.Equal("shadow", config.ModelTargeting.Mode);
         Assert.Equal("fast", config.ModelTargeting.DifficultyProfiles["easy"]);

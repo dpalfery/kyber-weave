@@ -142,7 +142,7 @@ public sealed class ArbiterCommentCommand(
     /// configuration uses the shipped rules, so the comment rule's shipped shadow state applies.
     /// </summary>
     private static IReadOnlyList<ArbiterRule> RulesFor(IArbiterConfigResolver configs, string root) =>
-        configs.TryLoadRepository(root) is { } config ? config.Arbiter.Rules : ArbiterConfig.ProductDefaults.Rules;
+        configs.TryLoadRepository(root) is { } config ? config.Arbiter.Rules : ArbiterConfigDefaults.Product.Rules;
 
     /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
     public int Execute(CommandContext context, ArbiterCommentSettings settings) =>

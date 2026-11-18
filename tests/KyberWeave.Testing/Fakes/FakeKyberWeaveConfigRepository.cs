@@ -100,7 +100,7 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
         _roots.Add(root);
 
         string? path = ResolveConfigPath(root, configPath);
-        return path is null ? KyberWeaveConfig.ProductDefaults : FromFile(path);
+        return path is null ? KyberWeaveConfigDefaults.Product : FromFile(path);
     }
 
     /// <inheritdoc />
@@ -115,7 +115,7 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
         {
             path = ResolveConfigPath(root, configPath);
             if (path is null)
-                return KyberWeaveConfigLoadResultFactory.Ok(KyberWeaveConfig.ProductDefaults, null);
+                return KyberWeaveConfigLoadResultFactory.Ok(KyberWeaveConfigDefaults.Product, null);
 
             return KyberWeaveConfigLoadResultFactory.Ok(FromFile(path), path);
         }
@@ -149,7 +149,7 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
         string root = Path.GetFullPath(homeDirectory);
         string? path = ResolveUserConfigPath(root, configPath);
         if (path is null)
-            return KyberWeaveConfig.ProductDefaults;
+            return KyberWeaveConfigDefaults.Product;
 
         if (!_files.ContainsKey(path))
         {
@@ -160,7 +160,7 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
                     path);
             }
 
-            return KyberWeaveConfig.ProductDefaults;
+            return KyberWeaveConfigDefaults.Product;
         }
 
         return KyberWeaveConfigAssembler.FromUserYaml(ReadFile(path));
@@ -173,12 +173,12 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
         string root = Path.GetFullPath(homeDirectory);
         string? path = ResolveUserConfigPath(root, configPath);
         if (path is null)
-            return KyberWeaveConfigLoadResultFactory.Ok(KyberWeaveConfig.ProductDefaults, path);
+            return KyberWeaveConfigLoadResultFactory.Ok(KyberWeaveConfigDefaults.Product, path);
 
         if (!_files.ContainsKey(path))
         {
             return string.IsNullOrWhiteSpace(configPath)
-                ? KyberWeaveConfigLoadResultFactory.Ok(KyberWeaveConfig.ProductDefaults, path)
+                ? KyberWeaveConfigLoadResultFactory.Ok(KyberWeaveConfigDefaults.Product, path)
                 : KyberWeaveConfigLoadResultFactory.Fail($"Kyber-Weave config file not found: {path}", path);
         }
 

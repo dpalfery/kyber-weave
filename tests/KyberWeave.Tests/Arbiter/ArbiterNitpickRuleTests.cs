@@ -143,7 +143,7 @@ public sealed class ArbiterNitpickRuleTests : IDisposable
     /// <summary>The rule exactly as shipped, before <see cref="HookAskedRules.AsHookAsked"/>.</summary>
     private static ArbiterRule Raw(string id) =>
         Assert.Single(
-            ArbiterConfig.ProductDefaults.Rules,
+            ArbiterConfigDefaults.Product.Rules,
             rule => string.Equals(rule.Id, id, StringComparison.Ordinal));
 
     /// <summary>The shipped rule as an enforced rule: same clauses, shadow off.</summary>

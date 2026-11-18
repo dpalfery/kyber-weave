@@ -518,8 +518,8 @@ public sealed class DocsCloseoutCommandTests
         Path.Combine(fixture.Root, relative.Replace('/', Path.DirectorySeparatorChar));
 
     private static PlanCloseout Closer(DocFixture fixture, Action<string>? afterActivePlanCheck = null, Action<string>? beforeWriteTarget = null) =>
-        new(fixture.Root, KyberWeaveConfig.ProductDefaults,
-            () => RealDocumentLoader.Create(fixture.Root, KyberWeaveConfig.ProductDefaults.Ontology),
+        new(fixture.Root, KyberWeaveConfigDefaults.Product,
+            () => RealDocumentLoader.Create(fixture.Root, KyberWeaveConfigDefaults.Product.Ontology),
             DocsPorts.Files, DocsPorts.Process, DocsPorts.Exclusive)
         {
             AfterActivePlanCheck = afterActivePlanCheck,

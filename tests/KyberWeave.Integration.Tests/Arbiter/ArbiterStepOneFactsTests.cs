@@ -205,7 +205,7 @@ public sealed class ArbiterStepOneFactsTests : IDisposable
         };
 
         TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, "review-lens", prompt);
-        ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, KyberWeaveConfig.ProductDefaults);
+        ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, KyberWeaveConfigDefaults.Product);
         return ArbiterTestServices.HookGitFacts(_probe.Root, _home.Path).Enrich(facts, classification, ev);
     }
 }

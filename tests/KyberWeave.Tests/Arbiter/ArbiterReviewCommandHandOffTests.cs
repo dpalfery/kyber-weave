@@ -22,9 +22,9 @@ public sealed class ArbiterReviewCommandHandOffTests
             [fact] = new(value, ArbiterFactLabel.Asserted),
         });
 
-        ArbiterOutcome outcome = RuleEngine.EvaluateStep0(ArbiterConfig.ProductDefaults.Rules, facts, trigger);
+        ArbiterOutcome outcome = RuleEngine.EvaluateStep0(ArbiterConfigDefaults.Product.Rules, facts, trigger);
         ArbiterRuleAnswer ruleAnswer = Assert.Single(outcome.RuleAnswers, entry => entry.RuleId == ruleId);
-        ArbiterRule rule = Assert.Single(ArbiterConfig.ProductDefaults.Rules, entry => entry.Id == ruleId);
+        ArbiterRule rule = Assert.Single(ArbiterConfigDefaults.Product.Rules, entry => entry.Id == ruleId);
 
         Assert.Equal(answer, ruleAnswer.Answer);
         Assert.False(rule.ShouldAsk(ruleAnswer.Answer));

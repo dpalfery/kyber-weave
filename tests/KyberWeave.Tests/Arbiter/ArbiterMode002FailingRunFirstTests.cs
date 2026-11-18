@@ -24,7 +24,7 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
     public void Dispose() => Directory.Delete(_root, true);
 
     private static ArbiterRule Rule() =>
-        Assert.Single(ArbiterConfig.ProductDefaults.Rules, rule => string.Equals(rule.Id, RuleId, StringComparison.Ordinal));
+        Assert.Single(ArbiterConfigDefaults.Product.Rules, rule => string.Equals(rule.Id, RuleId, StringComparison.Ordinal));
 
     private string Write(string name, GateReport report, DateTime writtenAt)
     {

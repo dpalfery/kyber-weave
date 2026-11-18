@@ -35,7 +35,7 @@ public sealed class ArbiterModelTargetFactsTests : IDisposable
 
     private static KyberWeaveConfig Config() => new()
     {
-        Arbiter = new ArbiterConfig { Enabled = true, Rules = ArbiterConfig.ProductDefaults.Rules },
+        Arbiter = new ArbiterConfig { Enabled = true, Rules = ArbiterConfigDefaults.Product.Rules },
         Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
     };
 

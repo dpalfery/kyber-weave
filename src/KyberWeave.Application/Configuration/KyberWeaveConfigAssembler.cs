@@ -120,7 +120,7 @@ public static class KyberWeaveConfigAssembler
                 ReviewConfigParser.UnknownKeyWarnings(yaml),
                 facts),
             Arbiter = ArbiterConfigLoader.Merge(
-                ArbiterConfig.ProductDefaults,
+                ArbiterConfigDefaults.Product,
                 document.Arbiter,
                 repositoryRoot is null
                     ? null

@@ -122,7 +122,7 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
         public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification, ArbiterEvent ev) => facts;
     }
 
-    private static ArbiterConfig Shipped(string mode) => ArbiterConfig.ProductDefaults with
+    private static ArbiterConfig Shipped(string mode) => ArbiterConfigDefaults.Product with
     {
         ModelTargeting = new ArbiterModelTargetingConfig(
             mode,

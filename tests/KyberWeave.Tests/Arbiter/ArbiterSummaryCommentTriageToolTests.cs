@@ -65,7 +65,7 @@ public sealed class ArbiterSummaryCommentTriageToolTests : IDisposable
             TextWriter.Null,
             _ => new KyberWeaveConfig
             {
-                Arbiter = ArbiterConfig.ProductDefaults with
+                Arbiter = ArbiterConfigDefaults.Product with
                 {
                     Enabled = true,
                     CommentTriage = new ArbiterCommentTriageConfig(botLogins),

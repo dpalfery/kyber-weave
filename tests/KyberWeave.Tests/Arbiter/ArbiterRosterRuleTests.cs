@@ -24,10 +24,10 @@ public sealed class ArbiterRosterRuleTests
     [InlineData("dev-medium", "research-agent", "no-roster")]
     public void AnswersFromTheCatalogRoster(string caller, string target, string expected)
     {
-        ArbiterRule rule = ArbiterConfig.ProductDefaults.Rules.First(
+        ArbiterRule rule = ArbiterConfigDefaults.Product.Rules.First(
             candidate => string.Equals(candidate.Id, "KW-ARB-ROSTER-001", StringComparison.Ordinal));
         ArbiterFactSet facts = TriggerFactBuilder.Build(
-            "investigate", target, "Do the thing.", caller, ArbiterCallerSources.Harness, KyberWeaveConfig.ProductDefaults);
+            "investigate", target, "Do the thing.", caller, ArbiterCallerSources.Harness, KyberWeaveConfigDefaults.Product);
 
         string answer = RuleEngine.Decide(rule, facts);
 

@@ -176,7 +176,7 @@ public sealed class McpDeclarationSurfaceTests : IDisposable
         bool loaded = CommandHelpers.TryLoadConfig(ConfigFileReader.Repository, _root.Path, null, report, out KyberWeaveConfig config);
 
         Assert.False(loaded);
-        Assert.Equal(KyberWeaveConfig.ProductDefaults, config);
+        Assert.Equal(KyberWeaveConfigDefaults.Product, config);
         Diagnostic diagnostic = Assert.Single(report.Items);
         Assert.Equal(KyberWeaveConfigDiagnosticCodes.LoadError, diagnostic.Code);
         Assert.Equal(Severity.Error, diagnostic.Severity);

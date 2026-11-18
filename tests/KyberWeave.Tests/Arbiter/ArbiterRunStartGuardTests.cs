@@ -148,7 +148,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     public void Rule_EscalatesAPlannerDispatchFromTheConductorWithNoRun(string target)
     {
         Assert.Contains(
-            ArbiterConfig.ProductDefaults.Rules,
+            ArbiterConfigDefaults.Product.Rules,
             rule => string.Equals(rule.Id, RuleId, StringComparison.Ordinal)
                 && string.Equals(rule.Trigger, "delegate.planner", StringComparison.Ordinal));
         Assert.Equal("not-started", Answer("delegate.planner", "conductor", target, "PLAN: true\nPlan the widget.", started: false));
@@ -272,12 +272,12 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     }
 
     private static ArbiterRule Rule() =>
-        ArbiterConfig.ProductDefaults.Rules.First(rule => string.Equals(rule.Id, RuleId, StringComparison.Ordinal));
+        ArbiterConfigDefaults.Product.Rules.First(rule => string.Equals(rule.Id, RuleId, StringComparison.Ordinal));
 
     private static string Answer(string trigger, string caller, string target, string prompt, bool? started)
     {
         ArbiterFactSet facts = TriggerFactBuilder.Build(
-            trigger, target, prompt, caller, ArbiterCallerSources.Harness, KyberWeaveConfig.ProductDefaults);
+            trigger, target, prompt, caller, ArbiterCallerSources.Harness, KyberWeaveConfigDefaults.Product);
         if (started is not null)
         {
             facts = facts.With("run.started", started.Value, ArbiterFactLabel.Derived);
@@ -299,7 +299,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
             IsDispatch = true,
         };
         TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, target, ev.Prompt);
-        ArbiterFactSet facts = TriggerFactBuilder.Build(classification, ev.Prompt, KyberWeaveConfig.ProductDefaults);
+        ArbiterFactSet facts = TriggerFactBuilder.Build(classification, ev.Prompt, KyberWeaveConfigDefaults.Product);
         facts = ArbiterTestServices.HookGitFacts(_repo, _home.Path).Enrich(facts, classification, ev);
         return facts.TryGet("run.started", out ArbiterFact? fact) ? fact.Value : null;
     }

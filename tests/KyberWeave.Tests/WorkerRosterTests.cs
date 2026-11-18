@@ -29,7 +29,7 @@ public sealed class WorkerRosterTests
     [Fact]
     public void AnAbsentSettingIsTheTieredRoster()
     {
-        Assert.Equal(WorkerRosters.Tiered, KyberWeaveConfig.ProductDefaults.WorkerRoster);
+        Assert.Equal(WorkerRosters.Tiered, KyberWeaveConfigDefaults.Product.WorkerRoster);
         Assert.Equal(
             WorkerRosters.Tiered,
             KyberWeaveConfigAssembler.FromYaml("ontology:\n  docs-root: docs\n").WorkerRoster);
@@ -142,7 +142,7 @@ public sealed class WorkerRosterTests
     public void TheTaskFileRecordsTheRosterItWasWrittenUnder()
     {
         using DocFixture fixture = PlanTaskFileProbe.Corpus();
-        KyberWeaveConfig tiered = KyberWeaveConfig.ProductDefaults.WithWorkerRoster(WorkerRosters.Tiered);
+        KyberWeaveConfig tiered = KyberWeaveConfigDefaults.Product.WithWorkerRoster(WorkerRosters.Tiered);
 
         PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(fixture.Root, tiered, DocsPorts.Files)
             .Run(PlanTaskFileProbe.PlanPath, PlanTaskFileMode.Write);
@@ -341,7 +341,7 @@ public sealed class WorkerRosterTests
     private static DiagnosticReport ValidateTiered(DocFixture fixture) =>
         new PlanTaskFileValidator(
             fixture.Root,
-            KyberWeaveConfig.ProductDefaults
+            KyberWeaveConfigDefaults.Product
                 .WithOntology(new OntologyConfig { Technologies = ["csharp"] }),
             DocsPorts.Files).Validate(fixture.Load());
 }

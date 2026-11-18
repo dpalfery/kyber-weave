@@ -52,7 +52,7 @@ public sealed class OpenWorkValidatorTests
 
     /// <summary>Runs the validator over the fixture with the product-default registry.</summary>
     private static DiagnosticReport Validate(DocFixture fixture) =>
-        new OpenWorkValidator(KyberWeaveConfig.ProductDefaults, DocsPorts.Files).Validate(fixture.Load());
+        new OpenWorkValidator(KyberWeaveConfigDefaults.Product, DocsPorts.Files).Validate(fixture.Load());
 
     /// <summary>Lists each finding's code and file, for assertion messages.</summary>
     private static string Describe(DiagnosticReport report) =>
@@ -134,7 +134,7 @@ public sealed class OpenWorkValidatorTests
     [Fact]
     public void AnIndexInASharedFolderReportsOnlyPlanDocuments()
     {
-        KyberWeaveConfig rootPlanIndex = KyberWeaveConfig.ProductDefaults.WithConfigReg(new ConfigRegConfig
+        KyberWeaveConfig rootPlanIndex = KyberWeaveConfigDefaults.Product.WithConfigReg(new ConfigRegConfig
         {
             Additions = [new ConfigRegEntry(ConfigRegConfig.PlanIndexProperty, "6-Docs/README.md")]
         });

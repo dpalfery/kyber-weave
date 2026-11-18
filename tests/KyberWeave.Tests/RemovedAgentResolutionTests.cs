@@ -22,7 +22,7 @@ public sealed class RemovedAgentResolutionTests
 {
     private const string Plan = PlanTaskFileProbe.PlanPath;
 
-    private static KyberWeaveConfig Tiered => KyberWeaveConfig.ProductDefaults
+    private static KyberWeaveConfig Tiered => KyberWeaveConfigDefaults.Product
         .WithOntology(new OntologyConfig { Technologies = ["csharp"] })
         .WithWorkerRoster(WorkerRosters.Tiered);
 

@@ -59,7 +59,7 @@ public sealed class ArbiterEvaluatorModelWriteFailureTests : IDisposable
 
     private static KyberWeaveConfig Config() => new()
     {
-        Arbiter = ArbiterConfig.ProductDefaults with
+        Arbiter = ArbiterConfigDefaults.Product with
         {
             Enabled = true,
             ModelTargeting = new ArbiterModelTargetingConfig(

@@ -212,7 +212,7 @@ public sealed class ArbiterHeaderlessDelegateIdentityTests : IDisposable
     private (TriggerClassification Classification, ArbiterFactSet Facts) Facts(string target, string prompt, string phase = "pre")
     {
         TriggerClassification classification = Assert.Single(TriggerClassifier.Classify(Event(target, prompt, phase: phase)));
-        KyberWeaveConfig config = KyberWeaveConfig.ProductDefaults;
+        KyberWeaveConfig config = KyberWeaveConfigDefaults.Product;
         ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, config);
         facts = facts.With("config.planning-dirs", new List<string> { "docs/plans/**" }, ArbiterFactLabel.Derived);
         return (classification, RealPlanFacts.Create().Enrich(facts, classification, _repo.Path));
@@ -225,5 +225,5 @@ public sealed class ArbiterHeaderlessDelegateIdentityTests : IDisposable
         facts.TryGet(name, out ArbiterFact? fact) ? fact.Value : null;
 
     private static string Decide(string ruleId, ArbiterFactSet facts) =>
-        RuleEngine.Decide(ArbiterConfig.ProductDefaults.Rules.First(rule => rule.Id == ruleId), facts);
+        RuleEngine.Decide(ArbiterConfigDefaults.Product.Rules.First(rule => rule.Id == ruleId), facts);
 }

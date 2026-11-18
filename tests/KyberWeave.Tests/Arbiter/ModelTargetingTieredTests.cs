@@ -128,10 +128,10 @@ public sealed class ModelTargetingTieredTests : IDisposable
 
     private static KyberWeaveConfig Config(string roster, string mode = "enforce") => new()
     {
-        Arbiter = ArbiterConfig.ProductDefaults with
+        Arbiter = ArbiterConfigDefaults.Product with
         {
             Enabled = true,
-            ModelTargeting = ArbiterConfig.ProductDefaults.ModelTargeting with { Mode = mode },
+            ModelTargeting = ArbiterConfigDefaults.Product.ModelTargeting with { Mode = mode },
         },
         Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
         WorkerRoster = roster,

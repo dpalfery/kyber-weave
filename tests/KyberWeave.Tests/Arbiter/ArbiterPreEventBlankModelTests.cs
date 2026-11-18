@@ -52,7 +52,7 @@ public sealed class ArbiterPreEventBlankModelTests : IDisposable
 
     private static KyberWeaveConfig Config() => new()
     {
-        Arbiter = ArbiterConfig.ProductDefaults with { Enabled = true },
+        Arbiter = ArbiterConfigDefaults.Product with { Enabled = true },
         Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
     };
 

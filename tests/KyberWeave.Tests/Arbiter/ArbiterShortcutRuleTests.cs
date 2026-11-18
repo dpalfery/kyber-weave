@@ -95,7 +95,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
 
     private static ArbiterRule Shipped(string id) =>
         Assert.Single(
-            ArbiterConfig.ProductDefaults.Rules,
+            ArbiterConfigDefaults.Product.Rules,
             rule => string.Equals(rule.Id, id, StringComparison.Ordinal));
 
     /// <summary>The shipped rule as an enforced rule: same clauses, shadow off.</summary>

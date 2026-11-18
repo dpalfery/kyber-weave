@@ -134,8 +134,8 @@ public sealed class ArchiveCloseoutScopeTests
     {
         return new ArchiveCloseoutValidator(
                 repo.Root,
-                KyberWeaveConfig.ProductDefaults,
-                () => RealDocumentLoader.Create(repo.Root, KyberWeaveConfig.ProductDefaults.Ontology),
+                KyberWeaveConfigDefaults.Product,
+                () => RealDocumentLoader.Create(repo.Root, KyberWeaveConfigDefaults.Product.Ontology),
                 DocsPorts.Files)
             .Validate(RealDocumentLoader.Create(repo.Root).Load(), changes);
     }
@@ -570,7 +570,7 @@ public sealed class ArchiveCloseoutScopeTests
     {
         const string HandbookPlan = "handbook/archive/plans/2026-10-20-widget.md";
         OntologyConfig handbook = OntologyConfig.ProductDefaults.WithDocsRoot("handbook");
-        KyberWeaveConfig config = KyberWeaveConfig.ProductDefaults.WithOntology(handbook);
+        KyberWeaveConfig config = KyberWeaveConfigDefaults.Product.WithOntology(handbook);
         using DocFixture fixture = new();
         fixture.Write("handbook/catalog.md", CloseoutCorpus.Catalog)
             .Write("handbook/reference/widget.md", CloseoutCorpus.TargetDocument())
@@ -602,7 +602,7 @@ public sealed class ArchiveCloseoutScopeTests
         const string PrimaryPlan = "6-Docs/archive/plans/2026-10-20-widget.md";
         const string HandbookPlan = "handbook/archive/plans/2026-10-20-widget.md";
         OntologyConfig both = OntologyConfig.ProductDefaults.WithDocsRoots(["6-Docs", "handbook"]);
-        KyberWeaveConfig config = KyberWeaveConfig.ProductDefaults.WithOntology(both);
+        KyberWeaveConfig config = KyberWeaveConfigDefaults.Product.WithOntology(both);
         using DocFixture fixture = DocFixture.Create().WithCatalog();
         fixture.Write("6-Docs/reference/widget.md", CloseoutCorpus.TargetDocument())
             .Write(PrimaryPlan, CloseoutCorpus.PlanDocument(bodyStatus: "Ready"))

@@ -115,7 +115,7 @@ public sealed class ModelTargetResolverTests : IDisposable
             ["fast", "general", "dev-hard"]);
         return new()
         {
-            Arbiter = ArbiterConfig.ProductDefaults with
+            Arbiter = ArbiterConfigDefaults.Product with
             {
                 Enabled = true,
                 ModelTargeting = modelTargeting,

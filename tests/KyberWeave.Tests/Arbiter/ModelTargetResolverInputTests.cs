@@ -59,7 +59,7 @@ public sealed class ModelTargetResolverInputTests : IDisposable
 
     private static KyberWeaveConfig Config(string mode = "enforce") => new()
     {
-        Arbiter = ArbiterConfig.ProductDefaults with
+        Arbiter = ArbiterConfigDefaults.Product with
         {
             Enabled = true,
             ModelTargeting = new ArbiterModelTargetingConfig(

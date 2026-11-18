@@ -155,7 +155,7 @@ public sealed class PlanTaskFileScopeTests : IDisposable
         File.WriteAllText(Path.Combine(_repo.Path, "web/src/cards/Card.tsx"), "// written by T3");
     }
 
-    private static readonly KyberWeaveConfig Config = KyberWeaveConfig.ProductDefaults.WithOntology(OntologyConfig.ProductDefaults);
+    private static readonly KyberWeaveConfig Config = KyberWeaveConfigDefaults.Product.WithOntology(OntologyConfig.ProductDefaults);
 
     private PlanTaskFileOutcome Run(PlanTaskFileMode mode) =>
         new PlanTaskFileGenerator(_repo.Path, Config, DocsPorts.Files).Run(Plan, mode);

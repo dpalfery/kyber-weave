@@ -45,7 +45,7 @@ public sealed class CommentTriageService(
     /// <summary>The shipped rule that classifies a comment.</summary>
     public const string CommentRuleId = "KW-ARB-COMMENT-001";
 
-    private readonly IReadOnlyList<ArbiterRule> _rules = rules ?? ArbiterConfig.ProductDefaults.Rules;
+    private readonly IReadOnlyList<ArbiterRule> _rules = rules ?? ArbiterConfigDefaults.Product.Rules;
 
     /// <summary>
     /// The most summary rows sent to the classifier in one call. Rows past the cap stay real and unasked, so a long

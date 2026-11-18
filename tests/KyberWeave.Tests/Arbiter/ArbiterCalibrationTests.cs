@@ -313,7 +313,7 @@ public sealed class ArbiterCalibrationTests
     private static ArbiterRule FindRule(string id) =>
         string.Equals(id, KyberWeave.Core.Docs.Validation.PacketSelfContainment.Rule.Id, StringComparison.Ordinal)
             ? KyberWeave.Core.Docs.Validation.PacketSelfContainment.Rule
-            : Assert.Single(ArbiterConfig.ProductDefaults.Rules, rule => string.Equals(rule.Id, id, StringComparison.Ordinal));
+            : Assert.Single(ArbiterConfigDefaults.Product.Rules, rule => string.Equals(rule.Id, id, StringComparison.Ordinal));
 
     /// <summary>The packet fixtures name the packet question, one of its answers and every fact it reads; run them live with the cases variable.</summary>
     [Fact]

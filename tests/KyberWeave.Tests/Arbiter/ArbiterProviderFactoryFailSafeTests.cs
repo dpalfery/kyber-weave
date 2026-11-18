@@ -34,7 +34,7 @@ public sealed class ArbiterProviderFactoryFailSafeTests : IDisposable
             homeDirectory: () => _home.Path);
         KyberWeaveConfig configured = new()
         {
-            Arbiter = ArbiterConfig.ProductDefaults with { Enabled = true },
+            Arbiter = ArbiterConfigDefaults.Product with { Enabled = true },
         };
         return ArbiterTestServices.Tools(new ArbiterServeContext(
             _repo.Path,

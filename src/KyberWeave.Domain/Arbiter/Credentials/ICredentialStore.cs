@@ -31,7 +31,7 @@ public interface ICredentialStore
 /// The stores shell out to <c>security</c> and <c>secret-tool</c> through this seam so
 /// tests can assert the exact argv and stdin without those tools installed. Production
 /// uses <c>ProcessRunnerCredentialProcessRunner</c>, which delegates to the kernel
-/// process runner. The domain defines the port because <see cref="ArbiterKeyResolver"/>'s
+/// process runner. The domain defines the port because <c>ArbiterKeyResolver</c>'s
 /// resolution order reads it; the composition root picks the implementation.
 /// </remarks>
 public interface ICredentialProcessRunner

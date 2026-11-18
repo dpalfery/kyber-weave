@@ -26,7 +26,7 @@ public sealed class PlanInventoryValidatorTests
     /// The same host overrides plan-index to the repository-root index, so the folder the
     /// validator derives spans the whole docs root, archive subtree included.
     /// </summary>
-    private static readonly KyberWeaveConfig RootPlanIndexOverrides = KyberWeaveConfig.ProductDefaults
+    private static readonly KyberWeaveConfig RootPlanIndexOverrides = KyberWeaveConfigDefaults.Product
         .WithConfigReg(new ConfigRegConfig
         {
             Additions = [new ConfigRegEntry(ConfigRegConfig.PlanIndexProperty, "6-Docs/README.md")]
@@ -67,7 +67,7 @@ public sealed class PlanInventoryValidatorTests
         """;
 
     private static DiagnosticReport Validate(DocFixture fixture) =>
-        new PlanInventoryValidator(KyberWeaveConfig.ProductDefaults).Validate(fixture.Load());
+        new PlanInventoryValidator(KyberWeaveConfigDefaults.Product).Validate(fixture.Load());
 
     private static string Describe(DiagnosticReport report) =>
         string.Join("; ", report.Items.Select(i => $"{i.Code} {i.FilePath}"));

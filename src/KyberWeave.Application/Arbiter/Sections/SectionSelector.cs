@@ -46,7 +46,7 @@ public sealed class SectionSelector(IArbiterProvider provider)
             return new SectionSelection(sections, FailedSafe: false);
         }
 
-        ArbiterRule? shipped = ArbiterConfig.ProductDefaults.Rules
+        ArbiterRule? shipped = ArbiterConfigDefaults.Product.Rules
             .FirstOrDefault(rule => string.Equals(rule.Id, TrimRuleId, StringComparison.Ordinal) && rule.Ask is not null);
         if (shipped?.Ask is not { } ask)
         {
