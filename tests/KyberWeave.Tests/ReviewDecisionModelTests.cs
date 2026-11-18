@@ -168,7 +168,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         ReviewDecisionModel model = Model(new FakeProvider { Choice = "nitpick", Confidence = 0.95 });
 
         (List<ReviewFinding> kept, List<(ReviewFinding Finding, double? Confidence)> nitpicks) =
-            await ReviewVerdictDecisions.DropNitpicksAsync(model, [Finding("a/minor", ReviewSeverity.Minor)]);
+            await ReviewTestServices.DecisionSteps.DropNitpicksAsync(model, [Finding("a/minor", ReviewSeverity.Minor)]);
 
         Assert.Empty(kept);
         Assert.Equal("a/minor", Assert.Single(nitpicks).Finding.Id);
@@ -180,7 +180,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         FakeProvider provider = new() { Choice = "nitpick", Confidence = 1.0 };
 
         (List<ReviewFinding> kept, List<(ReviewFinding Finding, double? Confidence)> nitpicks) =
-            await ReviewVerdictDecisions.DropNitpicksAsync(
+            await ReviewTestServices.DecisionSteps.DropNitpicksAsync(
                 Model(provider), [Finding("a/major", ReviewSeverity.Major), Finding("a/critical", ReviewSeverity.Critical)]);
 
         Assert.Equal(2, kept.Count);
@@ -197,7 +197,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         ReviewDecisionModel model = Model(new FakeProvider { Choice = choice, Confidence = confidence });
 
         (_, List<(ReviewFinding Finding, double? Confidence)> nitpicks) =
-            await ReviewVerdictDecisions.DropNitpicksAsync(model, [Finding("a/minor", ReviewSeverity.Minor)]);
+            await ReviewTestServices.DecisionSteps.DropNitpicksAsync(model, [Finding("a/minor", ReviewSeverity.Minor)]);
 
         Assert.Equal(dropped, nitpicks.Count == 1);
     }
@@ -206,10 +206,10 @@ public sealed class ReviewDecisionModelTests : IDisposable
     public async Task ANitpickRuleInShadowLogsButDropsNothing()
     {
         IReadOnlyList<ArbiterRule> rules = [.. ArbiterConfig.ProductDefaults.Rules
-            .Select(rule => rule.Id == ReviewVerdictDecisions.NitpickRule ? rule with { Shadow = true } : rule)];
+            .Select(rule => rule.Id == ReviewVerdictRules.NitpickRule ? rule with { Shadow = true } : rule)];
         ReviewDecisionModel model = new(new FakeProvider { Choice = "nitpick", Confidence = 0.99 }, rules, LogDirectory, TimeProvider.System);
 
-        (List<ReviewFinding> kept, _) = await ReviewVerdictDecisions.DropNitpicksAsync(model, [Finding("a/minor", ReviewSeverity.Minor)]);
+        (List<ReviewFinding> kept, _) = await ReviewTestServices.DecisionSteps.DropNitpicksAsync(model, [Finding("a/minor", ReviewSeverity.Minor)]);
 
         Assert.Single(kept);
         Assert.Equal("shadow: would drop", Assert.Single(model.Decisions).Effect);
@@ -221,7 +221,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     {
         ReviewDecisionModel model = Model(new FakeProvider { Fault = true });
 
-        (List<ReviewFinding> kept, _) = await ReviewVerdictDecisions.DropNitpicksAsync(model, [Finding("a/minor", ReviewSeverity.Minor)]);
+        (List<ReviewFinding> kept, _) = await ReviewTestServices.DecisionSteps.DropNitpicksAsync(model, [Finding("a/minor", ReviewSeverity.Minor)]);
 
         Assert.Single(kept);
     }
@@ -233,7 +233,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     {
         ReviewDecisionModel model = Model(new FakeProvider { Choice = "same-defect", Confidence = 0.97 });
 
-        (List<ReviewFinding> kept, List<MergedFindings> merged) = await ReviewVerdictDecisions.MergeDuplicatesAsync(
+        (List<ReviewFinding> kept, List<MergedFindings> merged) = await ReviewTestServices.DecisionSteps.MergeDuplicatesAsync(
             model, [Finding("intent/b", ReviewSeverity.Minor, line: 16), Finding("docs/a", ReviewSeverity.Major, line: 16)]);
 
         Assert.Equal("docs/a", Assert.Single(kept).Id);
@@ -246,7 +246,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     {
         FakeProvider provider = new() { Choice = "same-defect", Confidence = 1.0 };
 
-        (List<ReviewFinding> kept, _) = await ReviewVerdictDecisions.MergeDuplicatesAsync(
+        (List<ReviewFinding> kept, _) = await ReviewTestServices.DecisionSteps.MergeDuplicatesAsync(
             Model(provider), [Finding("a", ReviewSeverity.Major, line: 1), Finding("b", ReviewSeverity.Major, line: 300), Finding("c", ReviewSeverity.Major, file: "other.cs")]);
 
         Assert.Equal(3, kept.Count);
@@ -260,10 +260,10 @@ public sealed class ReviewDecisionModelTests : IDisposable
         ReviewDecisionModel model = Model(provider);
         ReviewFinding[] many = [.. Enumerable.Range(1, 30).Select(index => Finding($"x/f{index}", ReviewSeverity.Major, line: index))];
 
-        (List<ReviewFinding> kept, _) = await ReviewVerdictDecisions.MergeDuplicatesAsync(model, many);
+        (List<ReviewFinding> kept, _) = await ReviewTestServices.DecisionSteps.MergeDuplicatesAsync(model, many);
 
         Assert.Equal(30, kept.Count);
-        Assert.Equal(ReviewVerdictDecisions.MaxQuestionsPerStep, provider.Calls);
+        Assert.Equal(ReviewVerdictRules.MaxQuestionsPerStep, provider.Calls);
         Assert.Contains("90 comparison(s) skipped", model.SummaryLine([]), StringComparison.Ordinal);
     }
 
@@ -274,7 +274,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     {
         ReviewDecisionModel model = Model(new FakeProvider { Choice = choice, Confidence = confidence });
 
-        (List<ReviewFinding> kept, List<MergedFindings> merged) = await ReviewVerdictDecisions.MergeDuplicatesAsync(
+        (List<ReviewFinding> kept, List<MergedFindings> merged) = await ReviewTestServices.DecisionSteps.MergeDuplicatesAsync(
             model, [Finding("a", ReviewSeverity.Major), Finding("b", ReviewSeverity.Minor)]);
 
         Assert.Equal(2, kept.Count);
@@ -289,7 +289,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         string root = Repository();
         ReviewDecisionModel model = Model(new FakeProvider { Choice = "supports", Confidence = 0.95 });
 
-        ClaimCheck check = Assert.Single(await ReviewVerdictDecisions.CheckClaimsAsync(model, root, [Finding("a", ReviewSeverity.Major)]));
+        ClaimCheck check = Assert.Single(await ReviewTestServices.DecisionSteps.CheckClaimsAsync(model, root, [Finding("a", ReviewSeverity.Major)]));
 
         Assert.False(check.NeedsRefuter);
     }
@@ -300,7 +300,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         string root = Repository();
         ReviewDecisionModel model = Model(new FakeProvider { Choice = "contradicts", Confidence = 0.99 });
 
-        ClaimCheck check = Assert.Single(await ReviewVerdictDecisions.CheckClaimsAsync(model, root, [Finding("a", ReviewSeverity.Major)]));
+        ClaimCheck check = Assert.Single(await ReviewTestServices.DecisionSteps.CheckClaimsAsync(model, root, [Finding("a", ReviewSeverity.Major)]));
 
         Assert.True(check.NeedsRefuter);
         Assert.Contains("the refuter decides", check.Note, StringComparison.Ordinal);
@@ -312,7 +312,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         string root = Repository();
         ReviewDecisionModel model = Model(new FakeProvider { Choice = "supports", Confidence = 0.6 });
 
-        Assert.True(Assert.Single(await ReviewVerdictDecisions.CheckClaimsAsync(model, root, [Finding("a", ReviewSeverity.Major)])).NeedsRefuter);
+        Assert.True(Assert.Single(await ReviewTestServices.DecisionSteps.CheckClaimsAsync(model, root, [Finding("a", ReviewSeverity.Major)])).NeedsRefuter);
     }
 
     [Fact]
@@ -321,7 +321,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         string root = Repository();
         FakeProvider provider = new() { Choice = "supports", Confidence = 1.0 };
 
-        ClaimCheck check = Assert.Single(await ReviewVerdictDecisions.CheckClaimsAsync(
+        ClaimCheck check = Assert.Single(await ReviewTestServices.DecisionSteps.CheckClaimsAsync(
             Model(provider), root, [Finding("a", ReviewSeverity.Major) with { Excerpt = "code that is not there" }]));
 
         Assert.True(check.NeedsRefuter);
@@ -336,7 +336,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(root, "other.md"), "one\nstatus: archived\nthree\n");
         FakeProvider provider = new() { Choice = "supports", Confidence = 0.95 };
 
-        await ReviewVerdictDecisions.CheckClaimsAsync(
+        await ReviewTestServices.DecisionSteps.CheckClaimsAsync(
             Model(provider), root, [Finding("a", ReviewSeverity.Major) with { Evidence = "other.md line 2 says otherwise" }]);
 
         Assert.Contains("other.md:2: status: archived", provider.LastStateText, StringComparison.Ordinal);
@@ -353,7 +353,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     {
         const string window = "if (count == 0)\n{\n    return total / count;\n}\n";
 
-        Assert.Equal(verified, ReviewVerdictDecisions.ExcerptIsIn(excerpt, window));
+        Assert.Equal(verified, ReviewVerdictRules.ExcerptIsIn(excerpt, window));
     }
 
     [Fact]
@@ -365,7 +365,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
 
         foreach (string file in new[] { new string('d', 5000) + "/x.cs", "../outside.cs", "bad\0name.cs" })
         {
-            ClaimCheck check = Assert.Single(await ReviewVerdictDecisions.CheckClaimsAsync(
+            ClaimCheck check = Assert.Single(await ReviewTestServices.DecisionSteps.CheckClaimsAsync(
                 Model(provider), root, [Finding("a", ReviewSeverity.Major, file: file)]));
 
             Assert.True(check.NeedsRefuter);
@@ -384,7 +384,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         string root = Repository();
         FakeProvider provider = new() { Choice = "supports", Confidence = 0.95 };
 
-        ClaimCheck check = Assert.Single(await ReviewVerdictDecisions.CheckClaimsAsync(
+        ClaimCheck check = Assert.Single(await ReviewTestServices.DecisionSteps.CheckClaimsAsync(
             Model(provider), root, [Finding("a", ReviewSeverity.Major) with { Evidence = evidence }]));
 
         Assert.False(check.NeedsRefuter);
@@ -402,7 +402,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         ReviewDecisionModel model = Model(new FakeProvider { Choice = choice, Confidence = confidence });
 
         IReadOnlyList<(ReviewFinding Finding, string Direction, double? Confidence)> notes =
-            await ReviewVerdictDecisions.CheckSeveritiesAsync(model, [Finding("a", ReviewSeverity.Major)]);
+            await ReviewTestServices.DecisionSteps.CheckSeveritiesAsync(model, [Finding("a", ReviewSeverity.Major)]);
 
         Assert.Equal(direction, notes.Count == 0 ? null : notes[0].Direction);
     }
@@ -413,11 +413,11 @@ public sealed class ReviewDecisionModelTests : IDisposable
         string cache = Path.Combine(_temp.Path, "decision-model.json");
         string root = Repository();
         FakeProvider first = new() { Choice = "supports", Confidence = 0.95 };
-        await ReviewVerdictDecisions.CheckClaimsAsync(
+        await ReviewTestServices.DecisionSteps.CheckClaimsAsync(
             new ReviewDecisionModel(first, ArbiterConfig.ProductDefaults.Rules, null, TimeProvider.System, cachePath: cache), root, [Finding("a", ReviewSeverity.Major)]);
         FakeProvider second = new() { Choice = "contradicts", Confidence = 0.99 };
 
-        ClaimCheck check = Assert.Single(await ReviewVerdictDecisions.CheckClaimsAsync(
+        ClaimCheck check = Assert.Single(await ReviewTestServices.DecisionSteps.CheckClaimsAsync(
             new ReviewDecisionModel(second, ArbiterConfig.ProductDefaults.Rules, null, TimeProvider.System, cachePath: cache), root, [Finding("a", ReviewSeverity.Major)]));
 
         Assert.False(check.NeedsRefuter);
@@ -437,7 +437,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
             Finding("c", ReviewSeverity.Major, line: int.MaxValue),
         ];
 
-        (List<ReviewFinding> kept, List<MergedFindings> merged) = await ReviewVerdictDecisions.MergeDuplicatesAsync(Model(provider), findings);
+        (List<ReviewFinding> kept, List<MergedFindings> merged) = await ReviewTestServices.DecisionSteps.MergeDuplicatesAsync(Model(provider), findings);
 
         Assert.Equal(3, kept.Count);
         Assert.Empty(merged);
@@ -456,7 +456,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
             Finding("other-file", ReviewSeverity.Minor, line: 10, file: "b.cs"),
         ];
 
-        (List<(int A, int B)> pairs, int candidates, int leftOut) = ReviewVerdictDecisions.NearbyPairs(findings);
+        (List<(int A, int B)> pairs, int candidates, int leftOut) = ReviewVerdictRules.NearbyPairs(findings);
 
         Assert.Equal([(1, 2), (0, 2), (0, 1)], pairs);
         Assert.Equal(3, candidates);
@@ -466,12 +466,12 @@ public sealed class ReviewDecisionModelTests : IDisposable
     [Fact]
     public void AFileWhoseFindingsAreAllOverTheStepCapGetsNoGroup()
     {
-        int distinct = ReviewVerdictDecisions.MaxFindingsPerStep + 50;
+        int distinct = ReviewVerdictRules.MaxFindingsPerStep + 50;
         ReviewFinding[] findings = [.. Enumerable.Range(0, distinct).Select(index => Finding($"f{index}", ReviewSeverity.Minor, file: $"f{index}.cs"))];
 
-        Dictionary<string, List<int>> groups = ReviewVerdictDecisions.GroupByFile(findings, out int leftOut);
+        Dictionary<string, List<int>> groups = ReviewVerdictRules.GroupByFile(findings, out int leftOut);
 
-        Assert.Equal(ReviewVerdictDecisions.MaxFindingsPerStep, groups.Count);
+        Assert.Equal(ReviewVerdictRules.MaxFindingsPerStep, groups.Count);
         Assert.Equal(50, leftOut);
         Assert.All(groups.Values, group => Assert.NotEmpty(group));
         Assert.False(groups.ContainsKey($"f{distinct - 1}.cs"));
@@ -482,14 +482,14 @@ public sealed class ReviewDecisionModelTests : IDisposable
     {
         ReviewFinding[] findings =
         [
-            .. Enumerable.Range(0, ReviewVerdictDecisions.MaxFindingsPerFile + 3).Select(index => Finding($"a{index}", ReviewSeverity.Minor, file: "a.cs")),
+            .. Enumerable.Range(0, ReviewVerdictRules.MaxFindingsPerFile + 3).Select(index => Finding($"a{index}", ReviewSeverity.Minor, file: "a.cs")),
             Finding("b", ReviewSeverity.Minor, file: "b.cs"),
         ];
 
-        Dictionary<string, List<int>> groups = ReviewVerdictDecisions.GroupByFile(findings, out int leftOut);
+        Dictionary<string, List<int>> groups = ReviewVerdictRules.GroupByFile(findings, out int leftOut);
 
         Assert.Equal(2, groups.Count);
-        Assert.Equal(ReviewVerdictDecisions.MaxFindingsPerFile, groups["a.cs"].Count);
+        Assert.Equal(ReviewVerdictRules.MaxFindingsPerFile, groups["a.cs"].Count);
         Assert.Single(groups["b.cs"]);
         Assert.Equal(3, leftOut);
     }
@@ -500,7 +500,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         // 32767 characters, then a surrogate pair whose first half would be the last character kept at the cap.
         File.WriteAllText(Path.Combine(_temp.Path, "wide.txt"), new string('a', 32767) + "\U0001F600\U0001F600");
 
-        string? text = ReviewVerdictDecisions.Surroundings(_temp.Path, Finding("f", ReviewSeverity.Minor, line: 1, file: "wide.txt"));
+        string? text = ReviewTestServices.DecisionSteps.Surroundings(_temp.Path, Finding("f", ReviewSeverity.Minor, line: 1, file: "wide.txt"));
 
         Assert.NotNull(text);
         Assert.Equal(32767, text.Length);
@@ -512,8 +512,8 @@ public sealed class ReviewDecisionModelTests : IDisposable
     {
         File.WriteAllText(Path.Combine(_temp.Path, "real.txt"), "first\nsecond secret\nthird");
 
-        string? surroundings = ReviewVerdictDecisions.Surroundings(_temp.Path, Finding("f", ReviewSeverity.Minor, line: 2, file: "real.txt"));
-        string evidence = ReviewVerdictDecisions.EvidenceLines(_temp.Path, WithEvidence("see real.txt:2"));
+        string? surroundings = ReviewTestServices.DecisionSteps.Surroundings(_temp.Path, Finding("f", ReviewSeverity.Minor, line: 2, file: "real.txt"));
+        string evidence = ReviewTestServices.DecisionSteps.EvidenceLines(_temp.Path, WithEvidence("see real.txt:2"));
 
         Assert.Contains("second secret", surroundings, StringComparison.Ordinal);
         Assert.Contains("real.txt:2: second secret", evidence, StringComparison.Ordinal);
@@ -538,8 +538,8 @@ public sealed class ReviewDecisionModelTests : IDisposable
 
         foreach (string cited in new[] { "notes.md", "linked/secret.txt" })
         {
-            string? surroundings = ReviewVerdictDecisions.Surroundings(repository, Finding("f", ReviewSeverity.Minor, line: 2, file: cited));
-            string evidence = ReviewVerdictDecisions.EvidenceLines(repository, WithEvidence($"see {cited}:2"));
+            string? surroundings = ReviewTestServices.DecisionSteps.Surroundings(repository, Finding("f", ReviewSeverity.Minor, line: 2, file: cited));
+            string evidence = ReviewTestServices.DecisionSteps.EvidenceLines(repository, WithEvidence($"see {cited}:2"));
 
             Assert.Null(surroundings);
             Assert.Equal(string.Empty, evidence);
@@ -555,8 +555,8 @@ public sealed class ReviewDecisionModelTests : IDisposable
         using FileStream held = new(path, FileMode.Open, FileAccess.Read, FileShare.None);
         List<string> failures = [];
 
-        string? surroundings = ReviewVerdictDecisions.Surroundings(_temp.Path, Finding("f", ReviewSeverity.Minor, line: 2, file: "locked.txt"), failures.Add);
-        string evidence = ReviewVerdictDecisions.EvidenceLines(_temp.Path, WithEvidence("see locked.txt:2"));
+        string? surroundings = ReviewTestServices.DecisionSteps.Surroundings(_temp.Path, Finding("f", ReviewSeverity.Minor, line: 2, file: "locked.txt"), failures.Add);
+        string evidence = ReviewTestServices.DecisionSteps.EvidenceLines(_temp.Path, WithEvidence("see locked.txt:2"));
 
         Assert.Null(surroundings);
         Assert.Equal(["IOException"], failures);
@@ -572,7 +572,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         using FileStream held = new(path, FileMode.Open, FileAccess.Read, FileShare.None);
         FakeProvider provider = new() { Choice = "supports", Confidence = 0.95 };
 
-        ClaimCheck check = Assert.Single(await ReviewVerdictDecisions.CheckClaimsAsync(
+        ClaimCheck check = Assert.Single(await ReviewTestServices.DecisionSteps.CheckClaimsAsync(
             Model(provider), root, [Finding("locked", ReviewSeverity.Major)]));
 
         Assert.True(check.NeedsRefuter);
@@ -612,10 +612,10 @@ public sealed class ReviewDecisionModelTests : IDisposable
     {
         ReviewFinding[] findings = [.. Enumerable.Range(0, 20_000).Select(index => Finding($"f{index}", ReviewSeverity.Minor, line: index % 40))];
 
-        (List<(int A, int B)> pairs, _, int leftOut) = ReviewVerdictDecisions.NearbyPairs(findings);
+        (List<(int A, int B)> pairs, _, int leftOut) = ReviewVerdictRules.NearbyPairs(findings);
 
-        Assert.Equal(ReviewVerdictDecisions.MaxQuestionsPerStep, pairs.Count);
-        Assert.Equal(20_000 - ReviewVerdictDecisions.MaxFindingsPerFile, leftOut);
+        Assert.Equal(ReviewVerdictRules.MaxQuestionsPerStep, pairs.Count);
+        Assert.Equal(20_000 - ReviewVerdictRules.MaxFindingsPerFile, leftOut);
     }
 
     [Fact]
@@ -623,12 +623,12 @@ public sealed class ReviewDecisionModelTests : IDisposable
     {
         FakeProvider provider = new() { Choice = "different", Confidence = 0.99 };
         ReviewDecisionModel model = Model(provider);
-        ReviewFinding[] findings = [.. Enumerable.Range(0, ReviewVerdictDecisions.MaxFindingsPerFile + 25).Select(index => Finding($"f{index}", ReviewSeverity.Minor, line: 1))];
+        ReviewFinding[] findings = [.. Enumerable.Range(0, ReviewVerdictRules.MaxFindingsPerFile + 25).Select(index => Finding($"f{index}", ReviewSeverity.Minor, line: 1))];
 
-        (List<ReviewFinding> kept, _) = await ReviewVerdictDecisions.MergeDuplicatesAsync(model, findings);
+        (List<ReviewFinding> kept, _) = await ReviewTestServices.DecisionSteps.MergeDuplicatesAsync(model, findings);
 
         Assert.Equal(findings.Length, kept.Count);
-        Assert.Equal(ReviewVerdictDecisions.MaxQuestionsPerStep, provider.Calls);
+        Assert.Equal(ReviewVerdictRules.MaxQuestionsPerStep, provider.Calls);
         Assert.Contains("25 finding(s) left out of the comparison", model.SummaryLine([]), StringComparison.Ordinal);
     }
 
@@ -639,9 +639,9 @@ public sealed class ReviewDecisionModelTests : IDisposable
         ReviewDecisionModel model = Model(provider);
         ReviewFinding[] findings = [.. Enumerable.Range(0, 450).Select(index => Finding($"f{index}", ReviewSeverity.Major, line: index))];
 
-        await ReviewVerdictDecisions.CheckSeveritiesAsync(model, findings);
+        await ReviewTestServices.DecisionSteps.CheckSeveritiesAsync(model, findings);
 
-        Assert.Equal(ReviewVerdictDecisions.MaxQuestionsPerStep, provider.Calls);
+        Assert.Equal(ReviewVerdictRules.MaxQuestionsPerStep, provider.Calls);
         Assert.Contains("150 comparison(s) skipped", model.SummaryLine([]), StringComparison.Ordinal);
     }
 
@@ -656,13 +656,13 @@ public sealed class ReviewDecisionModelTests : IDisposable
         string root = Repository();
         FakeProvider provider = new() { Choice = "supports", Confidence = 0.95 };
         ReviewDecisionModel model = Model(provider);
-        ReviewFinding[] readable = [.. Enumerable.Range(0, ReviewVerdictDecisions.MaxQuestionsPerStep).Select(index => Finding($"ok/f{index}", ReviewSeverity.Major))];
+        ReviewFinding[] readable = [.. Enumerable.Range(0, ReviewVerdictRules.MaxQuestionsPerStep).Select(index => Finding($"ok/f{index}", ReviewSeverity.Major))];
         ReviewFinding[] later = [.. Enumerable.Range(0, 50).Select(index => Finding($"late/f{index}", ReviewSeverity.Major, file: "missing.cs"))];
 
-        IReadOnlyList<ClaimCheck> checks = await ReviewVerdictDecisions.CheckClaimsAsync(model, root, [.. readable, .. later]);
+        IReadOnlyList<ClaimCheck> checks = await ReviewTestServices.DecisionSteps.CheckClaimsAsync(model, root, [.. readable, .. later]);
 
         Assert.Equal(readable.Length + later.Length, checks.Count);
-        Assert.Equal(ReviewVerdictDecisions.MaxQuestionsPerStep, provider.Calls);
+        Assert.Equal(ReviewVerdictRules.MaxQuestionsPerStep, provider.Calls);
         Assert.All(checks.Take(readable.Length), check => Assert.False(check.NeedsRefuter));
         Assert.All(checks.Skip(readable.Length), check =>
         {
@@ -678,14 +678,14 @@ public sealed class ReviewDecisionModelTests : IDisposable
         string root = Repository();
         FakeProvider provider = new() { Choice = "supports", Confidence = 0.95 };
         ReviewDecisionModel model = Model(provider);
-        ReviewFinding[] unreadable = [.. Enumerable.Range(0, ReviewVerdictDecisions.MaxFindingsPerStep + 7).Select(index => Finding($"x/f{index}", ReviewSeverity.Major, file: "missing.cs"))];
+        ReviewFinding[] unreadable = [.. Enumerable.Range(0, ReviewVerdictRules.MaxFindingsPerStep + 7).Select(index => Finding($"x/f{index}", ReviewSeverity.Major, file: "missing.cs"))];
 
-        IReadOnlyList<ClaimCheck> checks = await ReviewVerdictDecisions.CheckClaimsAsync(model, root, unreadable);
+        IReadOnlyList<ClaimCheck> checks = await ReviewTestServices.DecisionSteps.CheckClaimsAsync(model, root, unreadable);
 
         Assert.Equal(unreadable.Length, checks.Count);
         Assert.Equal(0, provider.Calls);
-        Assert.All(checks.Take(ReviewVerdictDecisions.MaxFindingsPerStep), check => Assert.Contains("could not be read", check.Note, StringComparison.Ordinal));
-        Assert.All(checks.Skip(ReviewVerdictDecisions.MaxFindingsPerStep), check => Assert.Null(check.Note));
+        Assert.All(checks.Take(ReviewVerdictRules.MaxFindingsPerStep), check => Assert.Contains("could not be read", check.Note, StringComparison.Ordinal));
+        Assert.All(checks.Skip(ReviewVerdictRules.MaxFindingsPerStep), check => Assert.Null(check.Note));
         Assert.All(checks, check => Assert.True(check.NeedsRefuter));
         Assert.Contains("7 finding(s) left out of the comparison", model.SummaryLine([]), StringComparison.Ordinal);
     }
@@ -700,7 +700,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         string root = Repository();
         FakeProvider provider = new() { Choice = "supports", Confidence = 1.0 };
 
-        ClaimCheck check = Assert.Single(await ReviewVerdictDecisions.CheckClaimsAsync(
+        ClaimCheck check = Assert.Single(await ReviewTestServices.DecisionSteps.CheckClaimsAsync(
             Model(provider), root, [Finding("a", ReviewSeverity.Major, line: line)]));
 
         Assert.True(check.NeedsRefuter);
@@ -721,7 +721,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
 
         foreach (string excerpt in excerpts)
         {
-            ClaimCheck check = Assert.Single(await ReviewVerdictDecisions.CheckClaimsAsync(
+            ClaimCheck check = Assert.Single(await ReviewTestServices.DecisionSteps.CheckClaimsAsync(
                 Model(provider), root, [Finding("a", ReviewSeverity.Major) with { Excerpt = excerpt }]));
 
             Assert.True(check.NeedsRefuter);
@@ -738,7 +738,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         FakeProvider provider = new() { Choice = "supports", Confidence = 0.95 };
         string atLines = "    return total / count;" + string.Concat(Enumerable.Repeat("\n", ReviewSeatInput.MaxExcerptLines - 1));
 
-        ClaimCheck check = Assert.Single(await ReviewVerdictDecisions.CheckClaimsAsync(
+        ClaimCheck check = Assert.Single(await ReviewTestServices.DecisionSteps.CheckClaimsAsync(
             Model(provider), root, [Finding("a", ReviewSeverity.Major) with { Excerpt = atLines }]));
 
         Assert.False(check.NeedsRefuter);
@@ -751,7 +751,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         FakeProvider provider = new() { Choice = "supports", Confidence = 0.95 };
         string huge = new('a', 600_000);
 
-        await ReviewVerdictDecisions.CheckClaimsAsync(
+        await ReviewTestServices.DecisionSteps.CheckClaimsAsync(
             Model(provider), root, [Finding("a", ReviewSeverity.Major) with { Claim = huge, Evidence = huge }]);
 
         Assert.True(provider.LastStateText.Length < 50_000, $"{provider.LastStateText.Length} characters reached the model");
