@@ -3,7 +3,9 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Validation;
 using Xunit;
 
-namespace KyberWeave.Tests;
+using KyberWeave.Tests;
+
+namespace KyberWeave.Application.Tests.Docs.Validation;
 
 /// <summary>
 /// A technology, role or platform folder is complete when it holds four files named after
@@ -78,7 +80,7 @@ public class StandardsFolderShapeTests
         """;
 
     private static DocFixture CompleteFolder(string scope) =>
-        new DocFixture().WithCatalog()
+        DocFixture.CreateInMemory().WithCatalog()
             .Write($"6-Docs/standards/{scope}/{scope}.standards.md", Standard(scope))
             .Write($"6-Docs/standards/{scope}/{scope}.rules.md", Rules(scope))
             .Write($"6-Docs/standards/{scope}/{scope}.skills.md", Skills(scope))
@@ -99,7 +101,7 @@ public class StandardsFolderShapeTests
     [Fact]
     public void ALegacyReadmeWarnsOnceAndRaisesNoErrors()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/dotnet/README.md", Standard("dotnet"));
 
         DiagnosticReport report = fixture.Validate(DotnetDeclared);
@@ -126,7 +128,7 @@ public class StandardsFolderShapeTests
 
             ## Commands
             """;
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet", OwnHeadings))
             .Write("6-Docs/standards/dotnet/dotnet.rules.md", Rules("dotnet"))
             .Write("6-Docs/standards/dotnet/dotnet.skills.md", Skills("dotnet"))
@@ -144,7 +146,7 @@ public class StandardsFolderShapeTests
     [Fact]
     public void AMissingRulesFileIsAnErrorNamingTheFile()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet"))
             .Write("6-Docs/standards/dotnet/dotnet.skills.md", Skills("dotnet"))
             .Write("6-Docs/standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
@@ -180,7 +182,7 @@ public class StandardsFolderShapeTests
 
             ## Done checklist
             """;
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet", MissingTesting))
             .Write("6-Docs/standards/dotnet/dotnet.rules.md", Rules("dotnet"))
             .Write("6-Docs/standards/dotnet/dotnet.skills.md", Skills("dotnet"))
@@ -209,7 +211,7 @@ public class StandardsFolderShapeTests
 
             ## Done checklist
             """;
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet", Reversed))
             .Write("6-Docs/standards/dotnet/dotnet.rules.md", Rules("dotnet"))
             .Write("6-Docs/standards/dotnet/dotnet.skills.md", Skills("dotnet"))
@@ -233,7 +235,7 @@ public class StandardsFolderShapeTests
 
             ## Commands
             """;
-        using DocFixture fixture = new DocFixture()
+        using DocFixture fixture = DocFixture.CreateInMemory()
             .Write("standards/dotnet/dotnet.standards.md", Standard("dotnet", OwnHeadings))
             .Write("standards/dotnet/dotnet.rules.md", Rules("dotnet"))
             .Write("standards/dotnet/dotnet.skills.md", Skills("dotnet"))
@@ -254,12 +256,12 @@ public class StandardsFolderShapeTests
     [Fact]
     public void AFileBehindASymlinkIsNotCountedAsPresent()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet"))
             .Write("6-Docs/standards/dotnet/dotnet.skills.md", Skills("dotnet"))
             .Write("6-Docs/standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n")
             .Write("outside/dotnet.rules.md", Rules("dotnet"));
-        File.CreateSymbolicLink(
+        fixture.Memory!.CreateFileLink(
             Path.Combine(fixture.Root, "6-Docs", "standards", "dotnet", "dotnet.rules.md"),
             Path.Combine(fixture.Root, "outside", "dotnet.rules.md"));
 
@@ -278,13 +280,13 @@ public class StandardsFolderShapeTests
     [Fact]
     public void AStandardsFolderBehindASymlinkIsReportedRatherThanSkipped()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("outside/dotnet/dotnet.standards.md", Standard("dotnet"))
             .Write("outside/dotnet/dotnet.rules.md", Rules("dotnet"))
             .Write("outside/dotnet/dotnet.skills.md", Skills("dotnet"))
             .Write("outside/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
-        Directory.CreateDirectory(Path.Combine(fixture.Root, "6-Docs", "standards"));
-        Directory.CreateSymbolicLink(
+        fixture.Memory!.CreateDirectory(Path.Combine(fixture.Root, "6-Docs", "standards"));
+        fixture.Memory!.CreateDirectoryLink(
             Path.Combine(fixture.Root, "6-Docs", "standards", "dotnet"),
             Path.Combine(fixture.Root, "outside", "dotnet"));
 
@@ -307,10 +309,10 @@ public class StandardsFolderShapeTests
     [InlineData("file")]
     public void AStandardsFolderWhoseLinkIsNotADirectoryIsReportedRatherThanSkipped(string target)
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("outside/not-a-folder.md", "# not a folder\n");
-        Directory.CreateDirectory(Path.Combine(fixture.Root, "6-Docs", "standards"));
-        Directory.CreateSymbolicLink(
+        fixture.Memory!.CreateDirectory(Path.Combine(fixture.Root, "6-Docs", "standards"));
+        fixture.Memory!.CreateDirectoryLink(
             Path.Combine(fixture.Root, "6-Docs", "standards", "dotnet"),
             target == "dangling"
                 ? Path.Combine(fixture.Root, "missing-folder")
@@ -348,7 +350,7 @@ public class StandardsFolderShapeTests
     [Fact]
     public void ADeclaredRoleFolderIsCheckedTheSameWay()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/reviewer/reviewer.standards.md", RoleStandard("reviewer"))
             .Write("6-Docs/standards/reviewer/reviewer.rules.md", RoleRules("reviewer"))
             .Write("6-Docs/standards/reviewer/reviewer.arbiter-rules.yml", "rules: []\n");

@@ -1,34 +1,35 @@
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
-using KyberWeave.Tests.Fakes;
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Docs.Validation;
 
 /// <summary>
 /// The host facts a task packet carries so a worker does not open the host AGENTS.md: Config Reg paths, the task
 /// gates declared for the task's role, and the host's rule section copied, never parsed.
 /// </summary>
-public sealed class PacketHostFactsTests : IDisposable
+public sealed class PacketHostFactsTests
 {
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "kw-hostfacts-" + Guid.NewGuid().ToString("N"));
+    private readonly InMemoryFileSystem _files = new();
+    private readonly string _root;
+    private readonly PacketHostFacts _hostFacts;
 
-    public PacketHostFactsTests() => Directory.CreateDirectory(_root);
-
-    public void Dispose()
+    public PacketHostFactsTests()
     {
-        if (Directory.Exists(_root))
-            Directory.Delete(_root, recursive: true);
+        _root = Path.Combine(_files.Root, "hostfacts");
+        _files.CreateDirectory(_root);
+        _hostFacts = new PacketHostFacts(_files);
     }
 
     private static KyberWeaveConfig Config(string yaml = "ontology:\n  docs-root: handbook\n") => KyberWeaveConfigAssembler.FromYaml(yaml);
 
-    private void Agents(string markdown) => File.WriteAllText(Path.Combine(_root, "AGENTS.md"), markdown);
+    private void Agents(string markdown) => _files.WriteAllText(Path.Combine(_root, "AGENTS.md"), markdown);
 
     [Fact]
     public void TheSectionCarriesTheTaskScratchpadAndTheConfiguredPlanningPaths()
     {
-        string facts = DocsTestCommands.HostFacts.Render(_root, Config(), "csharp-dev", "T4");
+        string facts = _hostFacts.Render(_root, Config(), "csharp-dev", "T4");
 
         Assert.StartsWith(PacketHostFacts.Heading, facts, StringComparison.Ordinal);
         Assert.Contains("`.agent_scratchpad/t4/`", facts, StringComparison.Ordinal);
@@ -38,7 +39,7 @@ public sealed class PacketHostFactsTests : IDisposable
     [Fact]
     public void TheSectionTellsTheWorkerToCommitItsTaskWithTheTaskIdAndNeverToPush()
     {
-        string facts = DocsTestCommands.HostFacts.Render(_root, Config(), "csharp-dev", "T4");
+        string facts = _hostFacts.Render(_root, Config(), "csharp-dev", "T4");
 
         Assert.Contains("-m \"Task: T4\"", facts, StringComparison.Ordinal);
         Assert.Contains("return the sha as COMMIT", facts, StringComparison.Ordinal);
@@ -57,8 +58,8 @@ public sealed class PacketHostFactsTests : IDisposable
                     run: [dotnet, build, "{changed}"]
             """);
 
-        string facts = DocsTestCommands.HostFacts.Render(_root, config, "csharp-dev", "T1");
-        string other = DocsTestCommands.HostFacts.Render(_root, config, "go-dev", "T1");
+        string facts = _hostFacts.Render(_root, config, "csharp-dev", "T1");
+        string other = _hostFacts.Render(_root, config, "go-dev", "T1");
 
         Assert.Contains("- `build`: `dotnet build {changed}`", facts, StringComparison.Ordinal);
         Assert.Contains("Task gates for go-dev: none declared", other, StringComparison.Ordinal);
@@ -67,7 +68,7 @@ public sealed class PacketHostFactsTests : IDisposable
     [Fact]
     public void WithNoAgentKnownTheSectionSaysHowToListTheWorkersOwnGates()
     {
-        string facts = DocsTestCommands.HostFacts.Render(_root, Config(), null, "T1");
+        string facts = _hostFacts.Render(_root, Config(), null, "T1");
 
         Assert.Contains("--agent <your agent name>", facts, StringComparison.Ordinal);
     }
@@ -77,7 +78,7 @@ public sealed class PacketHostFactsTests : IDisposable
     {
         Agents("# Repo\n\n## Non-negotiables\n\n- Never push to main.\n  Ask first.\n\n```bash\n# not a heading\n```\n\n- Keep ids.\n\n## Other\n\ntext\n");
 
-        string facts = DocsTestCommands.HostFacts.Render(_root, Config(), null, null);
+        string facts = _hostFacts.Render(_root, Config(), null, null);
 
         Assert.Contains("verbatim from AGENTS.md § Non-negotiables", facts, StringComparison.Ordinal);
         Assert.Contains("  Ask first.", facts, StringComparison.Ordinal);
@@ -88,7 +89,7 @@ public sealed class PacketHostFactsTests : IDisposable
     private string Render(out List<string> notes)
     {
         notes = [];
-        return DocsTestCommands.HostFacts.Render(_root, Config(), null, null, notes);
+        return _hostFacts.Render(_root, Config(), null, null, notes);
     }
 
     [Fact]
@@ -185,8 +186,8 @@ public sealed class PacketHostFactsTests : IDisposable
     public void TheRulesFolderIsOnePointerLineToItsIndexAndItsTextIsNotCopied()
     {
         Agents("## Rules\n\n- Be kind.\n");
-        Directory.CreateDirectory(Path.Combine(_root, "handbook", "rules"));
-        File.WriteAllText(Path.Combine(_root, "handbook", "rules", "README.md"), "# Rules\n\n- Folder-only rule text.\n");
+        _files.CreateDirectory(Path.Combine(_root, "handbook", "rules"));
+        _files.WriteAllText(Path.Combine(_root, "handbook", "rules", "README.md"), "# Rules\n\n- Folder-only rule text.\n");
 
         string facts = Render(out _);
 
