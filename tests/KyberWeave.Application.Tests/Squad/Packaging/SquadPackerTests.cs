@@ -120,7 +120,27 @@ public sealed class SquadPackerTests
     }
 
     [Fact]
-    public void AFailedWriteKeepsThePreviousArchiveAndWritesNoPartialArchive()
+    public void ARefusedAtomicWriteKeepsThePreviousArchiveAndLeavesNoTemporaryFile()
+    {
+        byte[] previous = Encoding.UTF8.GetBytes("previous archive bytes");
+        _files.CreateDirectory(Out);
+        _files.WriteAllBytes(ArchivePath("9.9.9"), previous);
+        List<(string RelativePath, byte[] Content)> entries = [("first.md", Encoding.UTF8.GetBytes("first\n"))];
+        _files.FailWhen(operation => string.Equals(operation.Name, "WriteAllBytesAtomic", StringComparison.Ordinal));
+
+        Assert.ThrowsAny<IOException>(() => Packer().WriteArchive(ArchivePath("9.9.9"), entries));
+
+        Assert.Equal(previous, _files.ReadAllBytes(ArchivePath("9.9.9")));
+        Assert.Equal([ArchivePath("9.9.9")], _files.EnumerateFiles(Out, "*", recursive: false));
+    }
+
+    /// <summary>
+    /// An entry that throws fails the pack while the archive is still being composed, so nothing has reached the output
+    /// folder. The archive replacement itself is one atomic write, and
+    /// <see cref="ARefusedAtomicWriteKeepsThePreviousArchiveAndLeavesNoTemporaryFile"/> covers a refusal there.
+    /// </summary>
+    [Fact]
+    public void AnEntryFailureDuringCompositionKeepsThePreviousArchiveAndWritesNoPartialArchive()
     {
         byte[] previous = Encoding.UTF8.GetBytes("previous archive bytes");
         _files.CreateDirectory(Out);
