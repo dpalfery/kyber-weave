@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Tests.Fakes;
@@ -91,6 +92,27 @@ public sealed class StandardsFolderMigrationTests
     private StandardsFolderMigration Migration(string repoRoot, OntologyConfig config) =>
         new(_disk, repoRoot, config, _paths, _environment, new FakeIdGenerator());
 
+    /// <summary>A path seam that records every path a caller resolves, delegating the answer.</summary>
+    private sealed class RecordingPathResolver(IPathResolver inner) : IPathResolver
+    {
+        public List<string> Resolved { get; } = [];
+
+        public string GetFullPath(string path, string baseDirectory)
+        {
+            string resolved = inner.GetFullPath(path, baseDirectory);
+            Resolved.Add(resolved);
+            return resolved;
+        }
+
+        public bool AreSame(string first, string second) => inner.AreSame(first, second);
+
+        public bool IsWithin(string root, string candidate) => inner.IsWithin(root, candidate);
+
+        public string Canonicalize(string path) => inner.Canonicalize(path);
+
+        public string ResolvePhysicalRoot(string targetRoot) => inner.ResolvePhysicalRoot(targetRoot);
+    }
+
     [Fact]
     public void ItRenamesALegacyStandardUnderTheInjectedWorkingDirectory()
     {
@@ -145,6 +167,38 @@ public sealed class StandardsFolderMigrationTests
         Assert.Contains(
             _disk.EnumerateEntries(Folder),
             entry => entry.IsLink && entry.Path.EndsWith("csharp.standards.md", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ItResolvesAFolderThroughADotSegmentBeforeReadingIt()
+    {
+        OntologyConfig config = new()
+        {
+            DocsRoots = ["6-Docs/../6-Docs"],
+            Technologies = ["csharp"]
+        };
+        _disk.CreateDirectory(Folder);
+        _disk.WriteAllText($"{Folder}/README.md", LegacyStandard);
+
+        StandardsFolderMigrationResult result = Migration("repo", config).Run();
+
+        Assert.Contains(result.Changes, change => change.Kind == StandardsFolderChangeKind.Rename);
+        Assert.False(_disk.FileExists($"{Folder}/README.md"));
+        Assert.Equal(LegacyStandard, _disk.ReadAllText($"{Folder}/csharp.standards.md"));
+    }
+
+    [Fact]
+    public void EveryPathItReadsIsResolvedThroughThePathSeam()
+    {
+        _disk.CreateDirectory(Folder);
+        _disk.WriteAllText($"{Folder}/README.md", LegacyStandard);
+        RecordingPathResolver paths = new(_paths);
+        StandardsFolderMigration migration =
+            new(_disk, "repo", Declared, paths, _environment, new FakeIdGenerator());
+
+        migration.Run(dryRun: true);
+
+        Assert.Contains($"{Folder}/README.md", paths.Resolved);
     }
 
     [Fact]

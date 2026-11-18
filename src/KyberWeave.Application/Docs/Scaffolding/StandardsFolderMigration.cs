@@ -423,7 +423,9 @@ public sealed partial class StandardsFolderMigration
     }
 
     private string Absolute(string relativePath) =>
-        Path.Combine(_repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        _paths.GetFullPath(
+            Path.Combine(_repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)),
+            _repoRoot);
 
     /// <summary>
     /// The full path a write may reach, refusing one that leaves the repository, whether by a
