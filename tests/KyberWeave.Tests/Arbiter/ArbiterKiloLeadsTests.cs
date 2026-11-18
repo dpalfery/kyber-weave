@@ -18,6 +18,7 @@ using KyberWeave.Core.Arbiter.Sections;
 using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using Microsoft.Extensions.Time.Testing;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -150,10 +151,10 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
     public async Task AnOversizedRetentionPeriodStillStoresTheAppend()
     {
         string arbiterDirectory = Path.Combine(_sandbox.Path, "artifacts", "arbiter");
-        ArbiterRunStore seeded = RealArbiterState.RunStore(arbiterDirectory, new ArbiterStoreOptions(RetainDays: 14), () => Now);
+        ArbiterRunStore seeded = RealArbiterState.RunStore(arbiterDirectory, new ArbiterStoreOptions(RetainDays: 14), new FakeTimeProvider(Now));
         Assert.Equal(ArbiterStoreStatus.Stored, await seeded.AppendFindingAsync("run-1", "id: first"));
 
-        ArbiterRunStore oversized = RealArbiterState.RunStore(arbiterDirectory, new ArbiterStoreOptions(RetainDays: 20_000_000), () => Now);
+        ArbiterRunStore oversized = RealArbiterState.RunStore(arbiterDirectory, new ArbiterStoreOptions(RetainDays: 20_000_000), new FakeTimeProvider(Now));
         ArbiterStoreStatus status = await oversized.AppendFindingAsync("run-1", "id: second");
 
         Assert.Equal(ArbiterStoreStatus.Stored, status);
@@ -165,7 +166,7 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
     public async Task AnAbsentSessionDoesNotShareItsFailureStoreWithAnEmptySession()
     {
         string arbiterDirectory = Path.Combine(_sandbox.Path, "artifacts", "arbiter");
-        ArbiterRunStore store = RealArbiterState.RunStore(arbiterDirectory, null, () => Now);
+        ArbiterRunStore store = RealArbiterState.RunStore(arbiterDirectory, null, new FakeTimeProvider(Now));
         await store.AppendFailureAsync(null, null, null, "failure from an unnamed session");
 
         IReadOnlyList<string> readBack = store.ReadFailures(null, null, string.Empty);

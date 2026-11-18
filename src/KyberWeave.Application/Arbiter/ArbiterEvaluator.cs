@@ -827,7 +827,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         _state.OpenRunStore(
             _ledger.DirectoryPath,
             new ArbiterStoreOptions(config.Arbiter.Stores.MaxItemBytes, config.Arbiter.Stores.RetainDays),
-            () => _clock.GetUtcNow());
+            _clock);
 
     /// <summary>
     /// Appends a lens return's findings to the review store, in return order. Each carries its own drop status,

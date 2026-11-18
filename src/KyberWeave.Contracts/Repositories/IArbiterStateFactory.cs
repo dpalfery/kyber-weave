@@ -18,5 +18,5 @@ public interface IArbiterStateFactory
     /// <param name="arbiterDirectory">The arbiter state directory.</param>
     /// <param name="options">The size and retention limits; the shipped defaults when null.</param>
     /// <param name="clock">The clock retention is measured against; the system clock when null.</param>
-    IArbiterRunStore OpenRunStore(string arbiterDirectory, ArbiterStoreOptions? options = null, Func<DateTimeOffset>? clock = null);
+    IArbiterRunStore OpenRunStore(string arbiterDirectory, ArbiterStoreOptions? options = null, TimeProvider? clock = null);
 }

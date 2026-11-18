@@ -3,6 +3,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Tests.Arbiter;
 using KyberWeave.Tests.FileSystem;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace KyberWeave.Application.Tests.Arbiter;
@@ -136,7 +137,7 @@ public sealed class ArbiterStateStoreTests
             _files,
             _files,
             new ArbiterStoreOptions { RetainDays = 1 },
-            () => Now,
+            new FakeTimeProvider(Now),
             _ => Now.AddDays(-30).UtcDateTime);
 
         await store.AppendFindingAsync("REVIEW-1", "a finding");

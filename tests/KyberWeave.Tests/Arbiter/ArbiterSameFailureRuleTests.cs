@@ -10,6 +10,7 @@ using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using Microsoft.Extensions.Time.Testing;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -214,7 +215,7 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
 
         Assert.Equal(0, provider.CallCount);
         Assert.Equal(RuleEffects.Allow, result.Outcome);
-        string stored = Assert.Single(RealArbiterState.RunStore(ArbiterDirectory, null, () => Now).ReadFailures(null, null, Session));
+        string stored = Assert.Single(RealArbiterState.RunStore(ArbiterDirectory, null, new FakeTimeProvider(Now)).ReadFailures(null, null, Session));
         Assert.Contains(FirstFailure, stored, StringComparison.Ordinal);
     }
 

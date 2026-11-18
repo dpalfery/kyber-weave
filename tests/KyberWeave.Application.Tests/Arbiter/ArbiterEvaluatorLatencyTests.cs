@@ -8,6 +8,7 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Arbiter;
 using KyberWeave.Tests.FileSystem;
+using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
@@ -60,7 +61,8 @@ public sealed class ArbiterEvaluatorLatencyTests
             new FileArbiterModelTargetsReader(_files),
             new GateReportFacts(new InMemoryRepositoryFileStore(_files)),
             new FileArbiterStateFactory(_log, _files, _files),
-            _clock);
+            _clock,
+            new FakeIdGenerator());
 
     private static KyberWeaveConfig Config() => new()
     {
