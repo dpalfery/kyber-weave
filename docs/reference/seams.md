@@ -228,6 +228,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ReviewWorkTreeService` (`Review/ReviewWorkTreeService.cs`) | file system, paths | 4.3 |
 | `SuppressionScanService` (`Review/SuppressionScanService.cs`) | paths | 4.3 |
 | `TaskGateResolver` (`Review/TaskGateResolver.cs`) | file system | 4.3 |
+| `RunCheckoutGuard` (`RunStart/RunCheckoutGuard.cs`) | paths | 4.4 |
 | `RunStartRunner` (`RunStart/RunStartRunner.cs`) | paths | 4.8 |
 | `SkillFileReader` (`Skills/SkillFileReader.cs`) | paths | 4.8 |
 | `SquadBriefBuilder` (`Squad/Briefs/SquadBriefBuilder.cs`) | file system, paths | 4.8 |
@@ -337,7 +338,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `FileSeatFolder` (`Review/FileSeatFolder.cs`) | file system | 4.4 |
 | `FileSeverityOverrideSource` (`Review/FileSeverityOverrideSource.cs`) | file system, paths | 4.4 |
 | `FileTestClassSources` (`Review/FileTestClassSources.cs`) | file system, paths | 4.4 |
-| `RunCheckoutGuard` (`RunStart/RunCheckoutGuard.cs`) | paths | 4.4 |
 | `ZipSkillArchiveWriter` (`Skills/ZipSkillArchiveWriter.cs`) | file system | 4.4 |
 | `DevinImportOverlap` (`Squad/Deployment/DevinImportOverlap.cs`) | file system, paths | 3.5 |
 | `FactoryHooksShadowing` (`Squad/Deployment/FactoryHooksShadowing.cs`) | file system | 3.5 |

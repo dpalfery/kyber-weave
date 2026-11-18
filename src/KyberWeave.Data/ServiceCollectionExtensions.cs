@@ -90,8 +90,6 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IIdGenerator>(_ => new SystemIdGenerator());
         services.TryAddSingleton<IGitCommandRunner>(_ => new ProcessGitCommandRunner(ProcessGitCommandRunner.DefaultTimeout));
         services.TryAddSingleton<ICheckedOutBranchReader>(sp => new GitCheckedOutBranchReader(sp.GetRequiredService<IGitCommandRunner>()));
-        services.TryAddSingleton<IRunStateStore>(sp => new FileRunStateStore(sp.GetRequiredService<IWritableFileSystem>(), sp.GetRequiredService<ICheckedOutBranchReader>()));
-        services.TryAddSingleton<IRunCheckout>(sp => new RunCheckoutGuard(sp.GetRequiredService<IWritableFileSystem>(), sp.GetRequiredService<IRunStateStore>()));
         return services;
     }
 }

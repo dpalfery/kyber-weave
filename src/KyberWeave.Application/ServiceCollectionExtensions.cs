@@ -46,6 +46,7 @@ public static class ServiceCollectionExtensions
 
         _ = services.AddWeaveDataServices();
         services.TryAddSingleton(TimeProvider.System);
+        _ = services.AddWeaveRunStartState();
         services.TryAddSingleton<IHooksConfigSource>(sp => new YamlHooksConfigSource(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IProcessEnvironment>()));
