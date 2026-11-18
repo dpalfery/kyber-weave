@@ -154,8 +154,7 @@ public sealed class DoctorPostCheckoutTests : IDisposable
     {
         WriteGoverned("stop-on-tool-failure: true\n");
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
-        DoctorCommand command = new(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, Mcp());
-
+        DoctorCommand command = DoctorTestEnvironment.Command(false, _ => null, executor, Mcp());
         int exitCode = DoctorAppHarness.Run(command, "doctor", "--post-checkout", "--ensure", Root);
 
         Assert.Equal(2, exitCode);

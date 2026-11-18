@@ -27,13 +27,10 @@ public sealed class DoctorReportRendererTests
             1,
             [new DoctorCheck("mcp.docs_explore", false, "first line\nsecond line", "kyber-weave update\r\nkyber-weave doctor")]);
 
-        CapturedConsoleExecution<object?> execution = ProcessConsoleCapture.Run<object?>(() =>
-        {
-            DoctorReportRenderer.Write(report, asJson: false);
-            return null;
-        });
+        using StringWriter output = new();
+        DoctorReportRenderer.Write(output, report, asJson: false);
 
-        string[] lines = execution.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        string[] lines = output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal(2, lines.Length);
         Assert.Equal("FAIL mcp.docs_explore first line second line", lines[0]);
         Assert.Equal("  fix: kyber-weave update kyber-weave doctor", lines[1]);
@@ -49,13 +46,10 @@ public sealed class DoctorReportRendererTests
             0,
             [new DoctorCheck("codegraph.binary", true, "found on PATH", null)]);
 
-        CapturedConsoleExecution<object?> execution = ProcessConsoleCapture.Run<object?>(() =>
-        {
-            DoctorReportRenderer.Write(report, asJson: false);
-            return null;
-        });
+        using StringWriter output = new();
+        DoctorReportRenderer.Write(output, report, asJson: false);
 
-        Assert.Equal("PASS codegraph.binary found on PATH", execution.Output.Trim());
+        Assert.Equal("PASS codegraph.binary found on PATH", output.ToString().Trim());
     }
 
     /// <summary>
@@ -77,13 +71,10 @@ public sealed class DoctorReportRendererTests
     {
         DoctorReport report = new("/repo", mode, 0, []);
 
-        CapturedConsoleExecution<object?> execution = ProcessConsoleCapture.Run<object?>(() =>
-        {
-            DoctorReportRenderer.Write(report, asJson: true);
-            return null;
-        });
+        using StringWriter output = new();
+        DoctorReportRenderer.Write(output, report, asJson: true);
 
-        using JsonDocument json = JsonDocument.Parse(execution.Output);
+        using JsonDocument json = JsonDocument.Parse(output.ToString());
         Assert.Equal(expectedName, json.RootElement.GetProperty("mode").GetString());
     }
 }

@@ -22,11 +22,15 @@ namespace KyberWeave.Cli.Commands.Squad.Brief;
 /// <param name="configs">Reads the host configuration the brief follows.</param>
 /// <param name="output">Where the brief and the refusals are written.</param>
 /// <param name="environment">Names the working directory the repository root is found from.</param>
+/// <param name="plans">Finds the repository root a plan argument belongs to.</param>
+/// <param name="roots">Finds the repository root above a directory.</param>
 public sealed class SquadBriefCommand(
     ISquadBriefBuilder briefs,
     IKyberWeaveConfigRepository configs,
     SquadConsole output,
-    IProcessEnvironment environment) : Command<SquadBriefSettings>
+    IProcessEnvironment environment,
+    PlanArguments plans,
+    ArbiterRepoRoot roots) : Command<SquadBriefSettings>
 {
     private const int Printed = 0;
     private const int Refused = 2;
@@ -43,7 +47,7 @@ public sealed class SquadBriefCommand(
         }
 
         string current = environment.CurrentDirectory;
-        string root = string.IsNullOrWhiteSpace(settings.Plan) ? ArbiterRepoRoot.Find(current) : PlanArguments.RepositoryRootFor(settings.Plan);
+        string root = string.IsNullOrWhiteSpace(settings.Plan) ? roots.Find(current) : plans.RepositoryRootFor(settings.Plan);
         DiagnosticReport report = new();
         KyberWeaveConfig? config = CommandHelpers.TryLoadConfig(configs, root, null, report, out KyberWeaveConfig loaded) ? loaded : null;
 

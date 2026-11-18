@@ -198,7 +198,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             executor,
             _environment.GetVariable);
 
-        DoctorReportRenderer.Write(report, asJson: false);
+        DoctorReportRenderer.Write(_console.Profile.Out.Writer, report, asJson: false);
         return report.ExitCode;
     }
 
