@@ -555,7 +555,7 @@ public sealed class ReviewGatesCycleTests : IDisposable
         string? note = ReviewTestServices.WorkTrees.LiveRunNote(_repo, home);
 
         Assert.NotNull(note);
-        Assert.Contains(RunCheckout.RealPath(worktree), note, StringComparison.Ordinal);
+        Assert.Contains(RunStartTestServices.RealPath(worktree), note, StringComparison.Ordinal);
         Assert.Contains("run the review there", note, StringComparison.Ordinal);
         Assert.Null(ReviewTestServices.WorkTrees.LiveRunNote(worktree, home));
     }

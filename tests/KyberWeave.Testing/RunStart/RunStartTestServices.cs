@@ -20,6 +20,10 @@ internal static class RunStartTestServices
     /// <summary>The run-start evidence over the real adapters.</summary>
     internal static IRunStartEvidence Evidence() => new RunStartEvidenceService(new GitFacts(), RunStateStore());
 
+    /// <summary>The path with every symbolic link on the way resolved, as the checkout guard reports it.</summary>
+    internal static string RealPath(string path) =>
+        new RunCheckoutGuard(new PhysicalFileSystem(), RunStateStore()).RealPath(path);
+
     /// <summary>The checkout guard over the real file system and the given run records.</summary>
     internal static IRunCheckout Checkout(IRunStateStore? runStates = null) =>
         new RunCheckoutGuard(new PhysicalFileSystem(), runStates ?? RunStateStore());
