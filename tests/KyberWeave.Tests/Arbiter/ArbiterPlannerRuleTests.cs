@@ -22,7 +22,7 @@ public sealed class ArbiterPlannerRuleTests
 
     private static KyberWeaveConfig DocsConfig()
     {
-        return new KyberWeaveConfig { Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs") };
+        return new KyberWeaveConfig { Arbiter = ArbiterConfigDefaults.Product, Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs") };
     }
 
     private static ArbiterRule Shipped(string id)

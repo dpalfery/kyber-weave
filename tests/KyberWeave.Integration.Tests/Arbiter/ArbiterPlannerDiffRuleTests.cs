@@ -31,6 +31,7 @@ public sealed class ArbiterPlannerDiffRuleTests
 
     private static KyberWeaveConfig DocsConfig() => new()
     {
+        Arbiter = ArbiterConfigDefaults.Product,
         Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
     };
 

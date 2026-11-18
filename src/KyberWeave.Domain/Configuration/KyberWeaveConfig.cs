@@ -17,7 +17,7 @@ public sealed class KyberWeaveConfig : IDocsEngineConfig
 
     public ReviewConfig Review { get; init; } = ReviewConfig.ProductDefaults;
 
-    public ArbiterConfig Arbiter { get; init; } = new();
+    public required ArbiterConfig Arbiter { get; init; }
 
     public McpConfig Mcp { get; init; } = McpConfig.ProductDefaults;
 

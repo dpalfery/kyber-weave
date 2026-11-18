@@ -67,6 +67,7 @@ public sealed class ArbiterPlanReadRuleTests
             "harness",
             new KyberWeaveConfig
             {
+                Arbiter = ArbiterConfigDefaults.Product,
                 Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
             });
     }

@@ -6,6 +6,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Squad.Deployment;
 using Xunit;
 using YamlDotNet.Core;
+using KyberWeave.Core.Arbiter;
 
 namespace KyberWeave.Tests;
 
@@ -65,6 +66,7 @@ public sealed class SquadConfigurationTests : IDisposable
 
         KyberWeaveConfig baseConfig = new KyberWeaveConfig
         {
+            Arbiter = ArbiterConfigDefaults.Product,
             Squad = customSquad
         };
 

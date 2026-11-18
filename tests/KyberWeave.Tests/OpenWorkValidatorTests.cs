@@ -5,6 +5,7 @@ using KyberWeave.Core.Docs.Validation;
 using Xunit;
 
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Core.Arbiter;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -272,6 +273,7 @@ public sealed class OpenWorkValidatorTests
 
         KyberWeaveConfig config = new()
         {
+            Arbiter = ArbiterConfigDefaults.Product,
             Ontology = OntologyConfig.ProductDefaults.WithDocsRoots(["6-Docs", "secondary"])
         };
 

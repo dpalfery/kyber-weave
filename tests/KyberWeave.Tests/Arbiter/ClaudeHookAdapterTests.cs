@@ -597,7 +597,7 @@ public sealed class ClaudeHookAdapterTests
     [Fact]
     public void ReadGuard_CsharpDevPowerShellCall_DeniesAPlanningPathRead()
     {
-        string planningDirectory = ReadGuard.ProtectedDirectories(new KyberWeaveConfig())[0];
+        string planningDirectory = ReadGuard.ProtectedDirectories(new KyberWeaveConfig { Arbiter = ArbiterConfigDefaults.Product })[0];
 
         (int exit, string stdout) = Run(
             ShellPayload("PowerShell", $"Get-Content {planningDirectory}/plan.md", "dev-medium"),
@@ -627,7 +627,7 @@ public sealed class ClaudeHookAdapterTests
     public void ShellGuard_CsharpDevBashCall_KeepsTheWorkerPlanningPathDeny()
     {
         // grep is on the architect's list, so an allow here would mean the shell guard reached dev-medium.
-        string planningDirectory = ReadGuard.ProtectedDirectories(new KyberWeaveConfig())[0];
+        string planningDirectory = ReadGuard.ProtectedDirectories(new KyberWeaveConfig { Arbiter = ArbiterConfigDefaults.Product })[0];
 
         (int exit, string stdout) = Run(
             ShellPayload("Bash", $"grep -rn x {planningDirectory}", "dev-medium"),

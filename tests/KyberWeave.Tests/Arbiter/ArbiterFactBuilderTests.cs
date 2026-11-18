@@ -16,7 +16,7 @@ namespace KyberWeave.Tests.Arbiter;
 public sealed class ArbiterFactBuilderTests
 {
     private static KyberWeaveConfig DocsConfig() =>
-        new() { Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs") };
+        new() { Arbiter = ArbiterConfigDefaults.Product, Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs") };
 
     private static TriggerClassification DelegatePlannerClassification(string prompt) =>
         TriggerClassifier.ClassifySingle(

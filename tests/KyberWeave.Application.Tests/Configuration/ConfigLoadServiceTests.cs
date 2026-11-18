@@ -3,6 +3,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using Xunit;
+using KyberWeave.Core.Arbiter;
 
 namespace KyberWeave.Application.Tests.Configuration;
 
@@ -17,6 +18,7 @@ public sealed class ConfigLoadServiceTests
     {
         KyberWeaveConfig configured = new KyberWeaveConfig
         {
+            Arbiter = ArbiterConfigDefaults.Product,
             StopsOnToolFailure = false,
             WorktreeIndexHook = false,
         }.WithConfigReg(ConfigRegConfig.ProductDefaults);
