@@ -107,7 +107,7 @@ public sealed class DocDriftStaleIndexTests : IDisposable
 
     private static DiagnosticReport Drift(string root, params string[] symbols)
     {
-        CodeGraphResolverAdapter resolver = CodeGraphResolverAdapter.ForRepository(root);
+        CodeGraphResolverAdapter resolver = DocsPorts.CodeGraph(root);
         Assert.True(resolver.IsAvailable, resolver.UnavailableReason);
         DocumentSet set = new()
         {

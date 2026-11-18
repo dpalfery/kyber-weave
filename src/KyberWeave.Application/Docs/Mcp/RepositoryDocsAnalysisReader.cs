@@ -31,6 +31,8 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
     private readonly ICodeGraphPortsFactory _codeGraph;
     private readonly IManagedGlossaryFactory _glossaries;
     private readonly IDocumentSourceFactory _documents;
+    private readonly IAnalysisPersistenceFactory _persistence;
+    private readonly IEmbeddingGeneratorFactory _embeddings;
 
     /// <summary>A reader over <paramref name="repositoryRoot"/>.</summary>
     /// <param name="repositoryRoot">The bound repository root.</param>
@@ -40,6 +42,8 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
     /// <param name="documents">Opens the documentation corpus of the repository.</param>
     /// <param name="paths">Resolves the repository root to an absolute path.</param>
     /// <param name="environment">Supplies the current directory a relative root resolves against.</param>
+    /// <param name="persistence">Opens the analysis cache of the repository.</param>
+    /// <param name="embeddings">Creates the client for the local embedding endpoint.</param>
     public RepositoryDocsAnalysisReader(
         string repositoryRoot,
         IDocsHostConfiguration hostConfiguration,
@@ -47,7 +51,9 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
         IManagedGlossaryFactory glossaries,
         IDocumentSourceFactory documents,
         IPathResolver paths,
-        IProcessEnvironment environment)
+        IProcessEnvironment environment,
+        IAnalysisPersistenceFactory persistence,
+        IEmbeddingGeneratorFactory embeddings)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
         ArgumentNullException.ThrowIfNull(paths);
@@ -57,6 +63,8 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
         _codeGraph = codeGraph ?? throw new ArgumentNullException(nameof(codeGraph));
         _glossaries = glossaries ?? throw new ArgumentNullException(nameof(glossaries));
         _documents = documents ?? throw new ArgumentNullException(nameof(documents));
+        _persistence = persistence ?? throw new ArgumentNullException(nameof(persistence));
+        _embeddings = embeddings ?? throw new ArgumentNullException(nameof(embeddings));
     }
 
     /// <inheritdoc />
@@ -72,10 +80,11 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
             codeGraph,
             config.DocsAnalysis.Search.MaxCodeNeighbors);
         cancellationToken.ThrowIfCancellationRequested();
-        SqliteAnalysisPersistence persistence = new SqliteAnalysisPersistence(_repositoryRoot);
-        using OpenAiCompatibleEmbeddingGenerator? embeddingGenerator = config.DocsAnalysis.Embeddings.Mode == DocsAnalysisEmbeddingMode.Off
+        IAnalysisPersistence persistence = _persistence.Open(_repositoryRoot);
+        IEmbeddingGenerator? embeddingGenerator = config.DocsAnalysis.Embeddings.Mode == DocsAnalysisEmbeddingMode.Off
             ? null
-            : new OpenAiCompatibleEmbeddingGenerator();
+            : _embeddings.Create();
+        using IDisposable? embeddingOwner = embeddingGenerator as IDisposable;
         IEmbeddingResolver? embeddingResolver = embeddingGenerator is null
             ? null
             : new EmbeddingCoordinator(embeddingGenerator, persistence);

@@ -161,7 +161,9 @@ internal static class DocsToolsComposition
             provider.GetRequiredService<IManagedGlossaryFactory>(),
             provider.GetRequiredService<IDocumentSourceFactory>(),
             provider.GetRequiredService<IPathResolver>(),
-            provider.GetRequiredService<IProcessEnvironment>());
+            provider.GetRequiredService<IProcessEnvironment>(),
+            provider.GetRequiredService<IAnalysisPersistenceFactory>(),
+            provider.GetRequiredService<IEmbeddingGeneratorFactory>());
     }
 
     /// <summary>The tools over <paramref name="host"/>.</summary>

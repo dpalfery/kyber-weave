@@ -129,6 +129,6 @@ public sealed class RetrievalSourceDocumentTests(ITestOutputHelper output)
         string root = directory.FullName;
         KyberWeaveConfig config = ConfigFileReader.Load(root);
         DocumentSet set = RealDocumentLoader.Create(root, config.Ontology).Load();
-        return DocumentIndex.Build(set, CodeGraphResolverAdapter.ForRepository(root));
+        return DocumentIndex.Build(set, DocsPorts.CodeGraph(root));
     }
 }

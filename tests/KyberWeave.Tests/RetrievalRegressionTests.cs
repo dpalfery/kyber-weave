@@ -189,7 +189,7 @@ public sealed class RetrievalRegressionTests
         KyberWeaveConfig config = ConfigFileReader.Load(root);
         return new DocumentIndexHost(
             root,
-            () => CodeGraphResolverAdapter.ForRepository(root),
+            () => DocsPorts.CodeGraph(root),
             () => RealDocumentLoader.Create(root, config.Ontology).Load(),
             DocsPorts.Files,
             DocsPorts.Paths,

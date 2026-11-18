@@ -31,7 +31,7 @@ public sealed class CodeGraphNeighborhoodPortTests
             fixture.IndexSymbol("Callee", "src/Callee.cs", 20);
             fixture.IndexEdge("id-Caller", "id-Callee", "calls");
 
-            CodeGraphResolverAdapter adapter = new CodeGraphResolverAdapter(fixture.DatabasePath);
+            CodeGraphResolverAdapter adapter = DocsPorts.CodeGraphAt(fixture.DatabasePath);
             ICodeGraphNeighborhoodProvider provider = Assert.IsAssignableFrom<ICodeGraphNeighborhoodProvider>(adapter);
 
             // A neighborhood lookup must be in-memory. Removing the database after the
@@ -59,7 +59,7 @@ public sealed class CodeGraphNeighborhoodPortTests
         fixture.IndexEdge("id-Hub", "id-Second", "references");
 
         ICodeGraphNeighborhoodProvider provider = Assert.IsAssignableFrom<ICodeGraphNeighborhoodProvider>(
-            new CodeGraphResolverAdapter(fixture.DatabasePath));
+            DocsPorts.CodeGraphAt(fixture.DatabasePath));
 
         IReadOnlyList<CodeGraphEdge> capped = provider.GetEdges(["id-Hub", "id-First", "id-Second"], maxDegree: 1);
         Assert.Empty(capped);
