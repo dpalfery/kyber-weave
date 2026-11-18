@@ -106,6 +106,18 @@ public abstract class FileSystemContractTests : IDisposable
     }
 
     [Fact]
+    public void CreateDirectoryCreatesMissingParents()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string nested = At(root, "one/two/three");
+
+        files.CreateDirectory(nested);
+        files.CreateDirectory(nested);
+
+        Assert.True(files.DirectoryExists(nested));
+    }
+
+    [Fact]
     public void ReadAllTextReturnsWhatWasWritten()
     {
         IWritableFileSystem files = Starting(out string root);
