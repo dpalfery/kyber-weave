@@ -21,7 +21,7 @@ internal static class ArbiterCliServices
     /// </remarks>
     internal static IServiceCollection AddArbiterCliServices(this IServiceCollection services)
     {
-        services.TryAddSingleton<IAnsiConsole>(_ => AnsiConsole.Console);
+        services.TryAddSingleton<IAnsiConsole>(_ => new ForwardingAnsiConsole(() => AnsiConsole.Console));
         services.TryAddSingleton<ArbiterGatingConsole>();
         services.TryAddSingleton<IArbiterKeyInput, ConsoleArbiterKeyInput>();
         services.TryAddSingleton<IProcessExecutor>(_ => ProcessExecutor.Instance);
