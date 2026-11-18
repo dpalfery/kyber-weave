@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -9,7 +10,13 @@ namespace KyberWeave.Application.Review;
 /// <summary>Writes the diff and the evidence file a council's gate run starts a review cycle from.</summary>
 /// <param name="git">Names the change and produces its diff.</param>
 /// <param name="files">Writes the files into the cycle folder.</param>
-public sealed class ReviewEvidenceService(IGitChangeReader git, IReviewEvidenceStore files) : IReviewEvidenceService
+/// <param name="paths">Resolves the gate report's path through the path seam.</param>
+/// <param name="environment">Names the working directory a relative gate-report path resolves against.</param>
+public sealed class ReviewEvidenceService(
+    IGitChangeReader git,
+    IReviewEvidenceStore files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IReviewEvidenceService
 {
     /// <summary>
     /// Writes the diff and the evidence file into <paramref name="cycleFolder"/>. When git cannot name the change, the
@@ -67,7 +74,15 @@ public sealed class ReviewEvidenceService(IGitChangeReader git, IReviewEvidenceS
 
         string path = Path.Combine(cycleFolder, ReviewEvidence.FileName);
         files.WriteAtomically(
-            path, ReviewEvidence.Format(tree, baseRef, change, gates, diffPath, Path.GetFullPath(gatesPath), coverageFloor));
+            path,
+            ReviewEvidence.Format(
+                tree,
+                baseRef,
+                change,
+                gates,
+                diffPath,
+                paths.GetFullPath(gatesPath, environment.CurrentDirectory),
+                coverageFloor));
         return path;
     }
 
