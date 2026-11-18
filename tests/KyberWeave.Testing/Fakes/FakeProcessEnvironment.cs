@@ -10,6 +10,7 @@ namespace KyberWeave.Tests.Fakes;
 /// </remarks>
 public sealed class FakeProcessEnvironment : IProcessEnvironment
 {
+    private readonly Func<string> _homeDirectory;
     private readonly Func<string, string?>? _readVariable;
 
     /// <summary>Creates a fake over the values given, and the defaults for the rest.</summary>
@@ -28,13 +29,18 @@ public sealed class FakeProcessEnvironment : IProcessEnvironment
         string tempDirectory = "/kw/temp",
         string userName = "kw-user",
         string machineName = "kw-machine",
-        OperatingSystemKind operatingSystem = OperatingSystemKind.Linux,
+        OperatingSystemKind operatingSystem = OperatingSystemKind.Unknown,
         bool isFileSystemCaseInsensitive = false,
         bool isInputRedirected = true,
         Func<string, string?>? readVariable = null)
     {
+        ArgumentNullException.ThrowIfNull(currentDirectory);
+        ArgumentNullException.ThrowIfNull(homeDirectory);
+        ArgumentNullException.ThrowIfNull(tempDirectory);
+        ArgumentNullException.ThrowIfNull(userName);
+        ArgumentNullException.ThrowIfNull(machineName);
         CurrentDirectory = currentDirectory;
-        HomeDirectory = homeDirectory;
+        _homeDirectory = () => homeDirectory;
         TempDirectory = tempDirectory;
         UserName = userName;
         MachineName = machineName;
@@ -44,23 +50,28 @@ public sealed class FakeProcessEnvironment : IProcessEnvironment
         _readVariable = readVariable;
     }
 
-    /// <summary>Creates a fake whose home is supplied when it is constructed, for a test that follows the running host's other directories.</summary>
+    /// <summary>Creates a fake whose home is supplied as a delegate, read on each access.</summary>
     /// <param name="homeDirectory">Gets the home directory.</param>
     /// <param name="variables">Reads an environment variable; null answers every variable with null.</param>
     public FakeProcessEnvironment(Func<string> homeDirectory, Func<string, string?>? variables = null)
-        : this(
-            currentDirectory: Environment.CurrentDirectory,
-            homeDirectory: homeDirectory(),
-            tempDirectory: Path.GetTempPath(),
-            readVariable: variables)
     {
+        ArgumentNullException.ThrowIfNull(homeDirectory);
+        _homeDirectory = homeDirectory;
+        CurrentDirectory = "/kw/work";
+        TempDirectory = "/kw/temp";
+        UserName = "kw-user";
+        MachineName = "kw-machine";
+        OperatingSystem = OperatingSystemKind.Unknown;
+        IsFileSystemCaseInsensitive = false;
+        IsInputRedirected = true;
+        _readVariable = variables;
     }
 
     /// <inheritdoc />
     public string CurrentDirectory { get; }
 
     /// <inheritdoc />
-    public string HomeDirectory { get; }
+    public string HomeDirectory => _homeDirectory();
 
     /// <inheritdoc />
     public string TempDirectory { get; }
