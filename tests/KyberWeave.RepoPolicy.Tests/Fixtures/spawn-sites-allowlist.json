@@ -1236,6 +1236,18 @@
       "text": "ProcessStartInfo startInfo = new(\"probe\");",
       "count": 1,
       "bound": "Builds only; the scripted fake starts nothing. It proves the IBoundedProcessExecutor view passes its timeout onto the seam."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/DoctorCommandSeamTests.cs",
+      "text": "_ = run.Executor.Run(new ProcessStartInfo(\"codegraph\"), \"in\");",
+      "count": 1,
+      "bound": "Builds only; the doctor's bounded executor in this test wraps a scripted fake that starts nothing. It proves the doctor passes its timeout onto the seam."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReviewIndexTimeoutTests.cs",
+      "text": "_ = executor.Run(new ProcessStartInfo(\"codegraph\"), string.Empty);",
+      "count": 1,
+      "bound": "Builds only; the executor is the time-bounded wrapper over a scripted fake that starts nothing. It proves the 10-minute index limit reaches the run."
     }
   ]
 }
