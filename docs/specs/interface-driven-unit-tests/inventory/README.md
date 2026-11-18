@@ -21,3 +21,4 @@ dependencies, services built with `new`, and the interface that should replace e
 | [data.md](data.md) | `Data` |
 | [hosts.md](hosts.md) | `Cli`, `Mcp`, `Arbiter`, `Hooks` |
 | [tests.md](tests.md) | Every test project, classified by the missing seam that keeps each test off memory |
+| [domain-move.md](domain-move.md) | Every `Domain` file as data (stays) or logic (moves), the callers of that logic, and the move in 24 tasks |
