@@ -15,11 +15,9 @@ namespace KyberWeave.Tests;
 /// <c>squad update</c> cleanup steps, and the new Kyber-Docs home via <c>docs init</c>.
 /// Both facts fail on the phase-1 tree until T15-T17 lands.
 /// </summary>
-public sealed class SquadDoctorRetiredSkillTests : IDisposable
+public sealed class SquadDoctorRetiredSkillTests
 {
-    private readonly TempDirectory _temp = new();
-
-    public void Dispose() => _temp.Dispose();
+    private readonly InMemorySquadState _state = new();
 
     /// <summary>
     /// A retired <c>second-brain</c> directory sitting in a deployed target tree without
@@ -29,10 +27,10 @@ public sealed class SquadDoctorRetiredSkillTests : IDisposable
     [Fact]
     public void Doctor_ProjectWorkspaceWithUnmanagedRetiredSkillDir_WarnsWithPathsAndCleanupSteps()
     {
-        string workingDir = Path.Combine(_temp.Path, "doctor-retired-unmanaged");
+        string workingDir = _state.CreateRoot("doctor-retired-unmanaged");
         string staleDir = Path.Combine(workingDir, ".claude", "skills", "second-brain");
-        Directory.CreateDirectory(staleDir);
-        File.WriteAllText(
+        _state.Files.CreateDirectory(staleDir);
+        _state.Files.WriteAllText(
             Path.Combine(staleDir, "SKILL.md"), "---\nname: second-brain\n---\nStale.\n");
 
         CommandExecution execution = RunProjectDoctor(workingDir);
@@ -56,11 +54,11 @@ public sealed class SquadDoctorRetiredSkillTests : IDisposable
     [Fact]
     public void Doctor_ProjectWorkspaceWithRetainedRetiredReceiptEntry_WarnsAndNamesNewHome()
     {
-        string workingDir = Path.Combine(_temp.Path, "doctor-retired-retained");
+        string workingDir = _state.CreateRoot("doctor-retired-retained");
         string staleDir = Path.Combine(workingDir, ".claude", "skills", "second-brain");
-        Directory.CreateDirectory(staleDir);
+        _state.Files.CreateDirectory(staleDir);
         byte[] staleBytes = Encoding.UTF8.GetBytes("---\nname: second-brain\n---\nStale.\n");
-        File.WriteAllBytes(Path.Combine(staleDir, "SKILL.md"), staleBytes);
+        _state.Files.WriteAllBytes(Path.Combine(staleDir, "SKILL.md"), staleBytes);
         SeedProjectReceipt(workingDir, ".claude/skills/second-brain/SKILL.md", staleBytes);
 
         CommandExecution execution = RunProjectDoctor(workingDir);
@@ -84,13 +82,12 @@ public sealed class SquadDoctorRetiredSkillTests : IDisposable
     [Fact]
     public void Doctor_ProjectWorkspaceWithCorruptReceipt_WarnsAboutUnreadableReceipt()
     {
-        string workingDir = Path.Combine(_temp.Path, "doctor-retired-corrupt");
-        Directory.CreateDirectory(workingDir);
-        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
+        string workingDir = _state.CreateRoot("doctor-retired-corrupt");
+        _state.Files.CreateDirectory(workingDir);
+        SquadStateStore stateStore = _state.Store;
         string receiptPath = stateStore.ResolveReceiptPath(workingDir, SquadDeploymentScope.Project);
-        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
-        File.WriteAllText(receiptPath, "{ not json", Encoding.UTF8);
+        _state.Files.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        _state.Files.WriteAllText(receiptPath, "{ not json");
 
         CommandExecution execution = RunProjectDoctor(workingDir);
         string normalizedOutput = Normalize(execution.Output);
@@ -103,10 +100,9 @@ public sealed class SquadDoctorRetiredSkillTests : IDisposable
     {
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = SquadTestCommands.Doctor(
+        SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(
+            _state,
             executor,
-            userPaths,
             workingDirectory: workingDir);
 
         return Capture(() => command.Execute(
@@ -120,11 +116,10 @@ public sealed class SquadDoctorRetiredSkillTests : IDisposable
 
     private void SeedProjectReceipt(string targetRoot, string relativePath, byte[] content)
     {
-        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
+        SquadStateStore stateStore = _state.Store;
         string receiptPath = stateStore.ResolveReceiptPath(targetRoot, SquadDeploymentScope.Project);
         string lockPath = stateStore.ResolveLockPath(targetRoot, SquadDeploymentScope.Project);
-        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        _state.Files.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
 
         string sha256 = Convert.ToHexStringLower(SHA256.HashData(content));
         SquadReceipt receipt = new SquadReceipt(
@@ -147,8 +142,8 @@ public sealed class SquadDoctorRetiredSkillTests : IDisposable
             AssetDigest: "b".PadRight(64, '0'),
             Apm: SquadApmIdentity.None);
 
-        File.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt), Encoding.UTF8);
-        File.WriteAllText(lockPath, stateStore.SerializeLock(squadLock), Encoding.UTF8);
+        _state.Files.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt));
+        _state.Files.WriteAllText(lockPath, stateStore.SerializeLock(squadLock));
     }
 
     private static CommandExecution Capture(Func<int> execute)

@@ -25,10 +25,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class AntigravityRendererContractTests : IDisposable
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
+    private static string ProductRoot => CanonicalSquadTree.Shared.ProductRoot;
 
     public void Dispose()
     {
@@ -75,6 +73,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
             .ToHashSet(StringComparer.Ordinal);
     }
 
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     [Fact]
     public void ToolRoot_ExistsForCanonicalCorpus()
     {
@@ -98,8 +98,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
     public async Task RenderAsync_Antigravity_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await SquadTestRegistry.Create([new AntigravityRenderer()]).RenderAsync(
-            new SquadRenderRequest(ProductRoot, [SquadTarget.Antigravity], SquadDeploymentScope.Project).Prepared());
+        SquadRenderResult result = await CanonicalSquadTree.Shared.Registry([new AntigravityRenderer()]).RenderAsync(
+            new SquadRenderRequest(ProductRoot, [SquadTarget.Antigravity], SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         // The removal left no distinct-body collision: every shared name is a declared shared identity, so no
@@ -150,12 +150,12 @@ public sealed class AntigravityRendererContractTests : IDisposable
         // for both agent and skill resources. This differs from other native renderers that
         // project resources under separate agents/ and skills/ directories.
         // Verify determinism by rendering twice and confirming identical file output.
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new AntigravityRenderer()]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new AntigravityRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Antigravity],
             SquadDeploymentScope.Project,
-            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
+            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult first = await registry.RenderAsync(request);
         SquadRenderResult second = await registry.RenderAsync(request);
@@ -880,7 +880,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task SquadRendererRegistry_IncludesAntigravityInNativeTargetSet()
     {
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new AntigravityRenderer()]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new AntigravityRenderer()]);
 
         Assert.Contains(SquadTarget.Antigravity, registry.SupportedTargets);
 
@@ -889,7 +889,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Antigravity],
-            SquadDeploymentScope.Project).Prepared();
+            SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -1023,9 +1023,9 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task AnAgentWhoseProfileDeniesFileReadRendersNoMcpServerAndRecordsTheWithholding()
     {
-        using McpDeclarationCorpusFixture fixture =
-            McpDeclarationCorpusFixture.WithFileReadDeniedAgent("review-lens");
-        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
+        McpDeclarationSquadTree fixture =
+            McpDeclarationSquadTree.WithFileReadDeniedAgent("review-lens");
+        SquadSource source = fixture.Tree.Load();
         SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
         Assert.False(
             SquadMcpGrantProjection.GrantsKyberWeave(source, denied, SquadTarget.Antigravity),
@@ -1035,7 +1035,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         SquadRenderResult result = await new AntigravityRenderer().RenderAsync(new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.Antigravity],
-            SquadDeploymentScope.Project).Prepared());
+            SquadDeploymentScope.Project).Prepared(fixture.Tree));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         YamlMappingNode withheldFrontmatter = ReadFrontmatter(Assert.Single(
@@ -1084,8 +1084,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task AnMcpDeclarationWithoutTheKyberWeaveServerGrantsOnlyOrchestratorExcludedServers()
     {
-        using McpDeclarationCorpusFixture fixture = McpDeclarationCorpusFixture.WithServers("other-server");
-        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
+        McpDeclarationSquadTree fixture = McpDeclarationSquadTree.WithServers("other-server");
+        SquadSource source = fixture.Tree.Load();
         Assert.Equal(["other-server"], SquadMcpDeclaration.ServerNames(source));
 
         // The profiles still entitle agents, so a passing render cannot be explained by an empty
@@ -1099,7 +1099,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             fixture.ProductRoot,
             [SquadTarget.Antigravity],
             SquadDeploymentScope.Project,
-            PreloadedSource: source).Prepared());
+            PreloadedSource: source).Prepared(fixture.Tree));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         foreach (SquadAgent agent in source.Agents)
@@ -1175,9 +1175,9 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task AMissingServerAndADenyingProfileAreBothNamedInOneRecord()
     {
-        using McpDeclarationCorpusFixture fixture =
-            McpDeclarationCorpusFixture.WithServersAndFileReadDeniedAgent("review-lens", "codegraph");
-        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
+        McpDeclarationSquadTree fixture =
+            McpDeclarationSquadTree.WithServersAndFileReadDeniedAgent("review-lens", "codegraph");
+        SquadSource source = fixture.Tree.Load();
         SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
         Assert.False(
             SquadMcpGrantProjection.GrantsKyberWeave(source, denied, SquadTarget.Antigravity),
@@ -1187,7 +1187,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             fixture.ProductRoot,
             [SquadTarget.Antigravity],
             SquadDeploymentScope.Project,
-            PreloadedSource: source).Prepared());
+            PreloadedSource: source).Prepared(fixture.Tree));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // review-lens declares no delegates-to roster, so its record set must hold exactly one
@@ -1218,9 +1218,9 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task AShellGapAndAMissingServerAndADenyingProfileAreAllNamedInOneRecord()
     {
-        using McpDeclarationCorpusFixture fixture =
-            McpDeclarationCorpusFixture.WithServersAndFileReadDeniedAgent("review-lens", "codegraph");
-        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
+        McpDeclarationSquadTree fixture =
+            McpDeclarationSquadTree.WithServersAndFileReadDeniedAgent("review-lens", "codegraph");
+        SquadSource source = fixture.Tree.Load();
         SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
 
         // Promote the read-denied profile to a shell gap as well: execute allowed while write
@@ -1247,7 +1247,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             fixture.ProductRoot,
             [SquadTarget.Antigravity],
             SquadDeploymentScope.Project,
-            PreloadedSource: source).Prepared());
+            PreloadedSource: source).Prepared(fixture.Tree));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // review-lens declares no delegates-to roster, so this agent's record set must hold exactly
@@ -1279,9 +1279,9 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task AMalformedDeclarationAndADenyingProfileNameTheDenialAlone()
     {
-        using McpDeclarationCorpusFixture fixture =
-            McpDeclarationCorpusFixture.WithFileReadDeniedAgent("review-lens");
-        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
+        McpDeclarationSquadTree fixture =
+            McpDeclarationSquadTree.WithFileReadDeniedAgent("review-lens");
+        SquadSource source = fixture.Tree.Load();
         SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
 
         using JsonDocument declaration = JsonDocument.Parse("{}");
@@ -1291,7 +1291,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             fixture.ProductRoot,
             [SquadTarget.Antigravity],
             SquadDeploymentScope.Project,
-            PreloadedSource: source).Prepared());
+            PreloadedSource: source).Prepared(fixture.Tree));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // review-lens declares no delegates-to roster, so its record set must hold exactly one
@@ -1315,9 +1315,9 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task AShellGapAndAMalformedDeclarationAndADenyingProfileAreAllNamedInOneRecord()
     {
-        using McpDeclarationCorpusFixture fixture =
-            McpDeclarationCorpusFixture.WithFileReadDeniedAgent("review-lens");
-        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
+        McpDeclarationSquadTree fixture =
+            McpDeclarationSquadTree.WithFileReadDeniedAgent("review-lens");
+        SquadSource source = fixture.Tree.Load();
         SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
 
         Dictionary<string, SquadCapabilityProfile> profiles = new(
@@ -1344,7 +1344,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             fixture.ProductRoot,
             [SquadTarget.Antigravity],
             SquadDeploymentScope.Project,
-            PreloadedSource: source).Prepared());
+            PreloadedSource: source).Prepared(fixture.Tree));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // review-lens declares no delegates-to roster, so its record set must hold exactly one
@@ -1451,7 +1451,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             ProductRoot,
             [SquadTarget.Antigravity],
             SquadDeploymentScope.Project,
-            PreloadedSource: configured).Prepared());
+            PreloadedSource: configured).Prepared(CanonicalSquadTree.Shared));
         Assert.True(result.Success, $"[{caseName}] {string.Join("; ", result.Errors)}");
 
         foreach (string agentName in entitled)

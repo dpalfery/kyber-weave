@@ -833,7 +833,7 @@ public sealed class SquadPackAndReleaseTests
             fixture.Write("KyberWeave.sln", "Microsoft Visual Studio Solution File, Format Version 12.00");
 
             // Copy product source from the shipped corpus if available, or write all 21 agents and 24 skills
-            if (ShippedSquadSource.Exists)
+            if (CanonicalSquadTree.Exists)
             {
                 CopyShippedSource(files, System.IO.Path.Combine(fixture.Path, "products", "kyber-squad"));
                 // Update toolchain.yml to have a qualifying validated-release
@@ -873,7 +873,7 @@ public sealed class SquadPackAndReleaseTests
         /// <param name="destinationDir">Where the tree lands.</param>
         /// <returns>The destination directory.</returns>
         public static string CopyShippedSource(InMemoryFileSystem files, string destinationDir) =>
-            ShippedSquadSource.CopyInto(files, destinationDir);
+            CanonicalSquadTree.CopyInto(files, destinationDir);
 
         private void Write(string relativePath, string content)
         {

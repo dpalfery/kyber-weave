@@ -29,7 +29,7 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISquadReleaseHttpHandlers, SocketSquadReleaseHttpHandlers>();
         services.TryAddSingleton<IFileSystemPathSemantics>(_ => SquadFileSystemPathSemantics.Instance);
         services.TryAddSingleton<ISquadUserPaths>(sp => EnvironmentSquadUserPaths.Create(sp.GetRequiredService<IProcessEnvironment>()));
-        services.TryAddSingleton<ISquadCanonicalProfileStore>(sp => new SquadCanonicalProfileStore(sp.GetRequiredService<ISquadUserPaths>()));
+        services.TryAddSingleton<ISquadCanonicalProfileStore>(sp => new SquadCanonicalProfileStore(sp.GetRequiredService<ISquadUserPaths>(), sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<ISquadCompanionSkills>(sp => new SquadCompanionSkills(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),

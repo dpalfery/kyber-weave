@@ -16,19 +16,13 @@ namespace KyberWeave.Tests.Fakes;
 /// </summary>
 /// <remarks>
 /// Loading the 200+ canonical squad files from disk and rendering them for each test
-/// was the primary bottleneck of the test suite. This fake caches the loaded source once
-/// per test assembly run and provides thread-safe access to default renders. Callers
-/// MUST treat returned objects as immutable and read-only.
+/// was the primary bottleneck of the test suite. The source is read once through the corpus
+/// seam into an in-memory tree (<see cref="CanonicalSquadTree.Shared"/>) and loaded from there,
+/// so no test touches the disk. Callers MUST treat returned objects as immutable and read-only.
 /// </remarks>
 public static class TestSquadCorpus
 {
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
-
-    private static readonly Lazy<SquadSource> LazyCanonicalSource =
-        new(static () => RealSquadServices.Load(ProductRoot));
 
     private static readonly
         ConcurrentDictionary<(SquadTarget Target, SquadDeploymentScope Scope), Task<SquadRenderResult>>
@@ -37,7 +31,7 @@ public static class TestSquadCorpus
     /// <summary>
     /// Thread-safe lazy singleton loaded once from <c>products/kyber-squad</c>.
     /// </summary>
-    public static SquadSource CanonicalSource => LazyCanonicalSource.Value;
+    public static SquadSource CanonicalSource => CanonicalSquadTree.SharedSource;
 
     /// <summary>
     /// The canonical text as a render for <paramref name="target"/> must emit it: the corpus's
@@ -155,19 +149,19 @@ public static class TestSquadCorpus
 
     private static async Task<SquadRenderResult> RenderCoreAsync(SquadTarget target, SquadDeploymentScope scope)
     {
+        CanonicalSquadTree tree = CanonicalSquadTree.Shared;
         ISquadGlobalRootResolver? globalRoots = scope == SquadDeploymentScope.Global
-            ? SquadHostDefaults.ResolveGlobalRoots()
+            ? new SquadGlobalRoots(static _ => null, Path.Combine(tree.Files.Root, "home"), static _ => null)
             : null;
 
-        SquadRenderRequest request = new SquadRenderRequest(
-            ProductRoot,
+        SquadRenderRequest request = tree.Prepare(new SquadRenderRequest(
+            tree.ProductRoot,
             [target],
             scope,
             GlobalRoots: globalRoots,
-            PreloadedSource: CanonicalSource).Prepared();
+            PreloadedSource: CanonicalSource));
 
-        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
-        SquadRenderResult result = await renderer.RenderAsync(request).ConfigureAwait(false);
+        SquadRenderResult result = await tree.Registry(SquadHostDefaults.CreateRenderers()).RenderAsync(request).ConfigureAwait(false);
         if (!result.Success || result.Errors.Count > 0)
         {
             throw new InvalidOperationException(

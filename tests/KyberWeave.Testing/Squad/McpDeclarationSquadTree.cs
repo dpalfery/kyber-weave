@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Fakes;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -17,6 +18,17 @@ public sealed partial class McpDeclarationSquadTree
     private const string FileReadDeniedProfile = "read-only-no-file-read";
 
     private const string ReadOnlyProfile = "read-only";
+
+    /// <summary>The primary agent whose capability profile is the orchestrator and whose degradation receipt carries the entry-point-skill note.</summary>
+    private const string ConductorAgent = "conductor";
+
+    /// <summary>
+    /// The Copilot roster a read-denied orchestrator can still justify: the three tools the catalog marks ungoverned and the one
+    /// its <c>delegate: allow</c> covers. The shipped roster also names read, search and network tools, which the source
+    /// validator rejects against a profile that denies the capability they need.
+    /// </summary>
+    private const string ReadDeniedOrchestratorCopilotTools =
+        "copilot-tools: [vscode/toolSearch, vscode/askQuestions, todo, agent]";
 
     private static readonly JsonSerializerOptions JsonSerializerOptions = new() { WriteIndented = true };
 
@@ -69,6 +81,75 @@ public sealed partial class McpDeclarationSquadTree
         variant.AddReadDeniedVariantOf(ReadOnlyProfile);
         variant.RepointAgent(agentName);
         return variant;
+    }
+
+    /// <summary>Replaces <c>mcp.json</c> with the named servers and repoints one agent at a read-denied clone of the <c>read-only</c> profile.</summary>
+    /// <param name="agentName">The agent to repoint.</param>
+    /// <param name="serverNames">The servers the declaration names.</param>
+    /// <returns>The variant.</returns>
+    public static McpDeclarationSquadTree WithServersAndFileReadDeniedAgent(string agentName, params string[] serverNames)
+    {
+        McpDeclarationSquadTree variant = WithServers(serverNames);
+        variant.AddReadDeniedVariantOf(ReadOnlyProfile);
+        variant.RepointAgent(agentName);
+        return variant;
+    }
+
+    /// <summary>
+    /// Denies <c>filesystem.read</c> in the shipped <c>orchestrator</c> profile in place, keeping every profile name, and narrows
+    /// the conductor's Copilot roster to match.
+    /// </summary>
+    /// <remarks>
+    /// Denied in place rather than through a clone, because the withholding note a renderer states keys on the profile's identity
+    /// as well as its permissions: an agent repointed at a differently named profile is no longer a pure orchestrator.
+    /// </remarks>
+    /// <returns>The variant.</returns>
+    public static McpDeclarationSquadTree WithFileReadDeniedOrchestrator()
+    {
+        McpDeclarationSquadTree variant = new();
+        variant.DenyFileReadInProfile(SquadMcpGrantProjection.PureOrchestratorProfile);
+        variant.NarrowCopilotTools(ConductorAgent, ReadDeniedOrchestratorCopilotTools);
+        return variant;
+    }
+
+    private void DenyFileReadInProfile(string profileName)
+    {
+        string path = Tree.PathOf("profiles/capabilities.yml");
+        string[] lines = Tree.Files.ReadAllText(path).ReplaceLineEndings("\n").Split('\n');
+
+        (int start, int end) = LocateProfileBlock(lines, profileName, path);
+
+        int rewritten = 0;
+        for (int index = start; index < end; index++)
+        {
+            if (lines[index].TrimStart().StartsWith("filesystem.read:", StringComparison.Ordinal))
+            {
+                lines[index] = "      filesystem.read: deny";
+                rewritten++;
+            }
+        }
+
+        // Exactly one, not at least one: a second rewritten read decision would deny the permission somewhere the test did not intend.
+        if (rewritten != 1)
+        {
+            throw new InvalidOperationException(
+                $"Profile '{profileName}' in '{path}' declares {rewritten} 'filesystem.read' permissions; in-place denial needs exactly one.");
+        }
+
+        Tree.Files.WriteAllText(path, string.Join("\n", lines).TrimEnd('\n') + "\n");
+    }
+
+    private void NarrowCopilotTools(string agentName, string tools)
+    {
+        string path = Tree.PathOf($"agents/{agentName}.md");
+        string text = Tree.Files.ReadAllText(path).ReplaceLineEndings("\n");
+        string narrowed = CopilotToolsLine().Replace(text, tools);
+        if (string.Equals(narrowed, text, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Expected '{path}' to declare a 'copilot-tools' line to narrow.");
+        }
+
+        Tree.Files.WriteAllText(path, narrowed);
     }
 
     private void AddReadDeniedVariantOf(string sourceProfileName)

@@ -1,3 +1,4 @@
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Tests.Fakes;
@@ -43,10 +44,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class PiRendererContractTests : IDisposable
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
+    private static string ProductRoot => CanonicalSquadTree.Shared.ProductRoot;
 
     /// <summary>
     /// The capability→tool lowering this suite pins, transcribed independently from plan
@@ -222,13 +221,13 @@ public sealed class PiRendererContractTests : IDisposable
         return normalized.EndsWith('\n') ? normalized : normalized + "\n";
     }
 
-    private static async Task<SquadRenderResult> RenderPiAsync(string sourceDirectory)
+    private static async Task<SquadRenderResult> RenderPiAsync(CanonicalSquadTree tree)
     {
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new PiRenderer()]);
+        SquadRendererRegistry registry = tree.Registry([new PiRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
-            SourceDirectory: sourceDirectory,
+            SourceDirectory: tree.ProductRoot,
             Targets: [SquadTarget.Pi],
-            Scope: SquadDeploymentScope.Project).Prepared();
+            Scope: SquadDeploymentScope.Project).Prepared(tree);
         return await registry.RenderAsync(request);
     }
 
@@ -242,7 +241,7 @@ public sealed class PiRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Pi_RendersTheRealCanonicalCorpus()
     {
-        SquadRenderResult result = await RenderPiAsync(ProductRoot);
+        SquadRenderResult result = await RenderPiAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.All(result.Files, f => Assert.True(
             f.RelativePath.StartsWith(".pi/agents/", StringComparison.Ordinal) ||
@@ -263,7 +262,7 @@ public sealed class PiRendererContractTests : IDisposable
     public async Task RenderAsync_Pi_EachSubagentAgentHasCanonicalFrontmatterAndBody()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderPiAsync(ProductRoot);
+        SquadRenderResult result = await RenderPiAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Subagent))
@@ -433,7 +432,7 @@ public sealed class PiRendererContractTests : IDisposable
     public async Task RenderAsync_Pi_ResearchAgentKeepsItsDeclaredContext7OverlayAlongsideTheDerivedGrant()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderPiAsync(ProductRoot);
+        SquadRenderResult result = await RenderPiAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadDeploymentFile file = Assert.Single(
@@ -486,7 +485,7 @@ public sealed class PiRendererContractTests : IDisposable
     public async Task RenderAsync_Pi_EveryReadEntitledSubagentCarriesTheDerivedKyberWeaveOverlay()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderPiAsync(ProductRoot);
+        SquadRenderResult result = await RenderPiAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         IReadOnlyList<string> derived = DerivedKyberWeaveOverlayTools(source);
@@ -530,8 +529,8 @@ public sealed class PiRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Pi_AgentsOutsideTheFileReadEntitlementRenderNoOverlay()
     {
-        using PiFileReadDeniedFixture fixture = PiFileReadDeniedFixture.Create();
-        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
+        PiFileReadDeniedFixture fixture = PiFileReadDeniedFixture.Create();
+        SquadSource source = fixture.Tree.Load();
 
         SquadAgent agent = Assert.Single(source.Agents, candidate => candidate.Name == PiFileReadDeniedFixture.TestAgentName);
         Assert.False(
@@ -539,12 +538,12 @@ public sealed class PiRendererContractTests : IDisposable
             $"Fixture profile '{PiFileReadDeniedFixture.DeniedProfileName}' must deny "
             + "'filesystem.read', or this test cannot observe a non-entitled agent.");
 
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new PiRenderer()]);
+        SquadRendererRegistry registry = fixture.Tree.Registry([new PiRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: fixture.ProductRoot,
             Targets: [SquadTarget.Pi],
             Scope: SquadDeploymentScope.Project,
-            PreloadedSource: source).Prepared());
+            PreloadedSource: source).Prepared(fixture.Tree));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadDeploymentFile file = Assert.Single(
@@ -570,7 +569,7 @@ public sealed class PiRendererContractTests : IDisposable
     public async Task RenderAsync_Pi_LoweredPrimarySkillRecordsTheKyberWeaveGrantItCannotCarry()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderPiAsync(ProductRoot);
+        SquadRenderResult result = await RenderPiAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
@@ -609,9 +608,9 @@ public sealed class PiRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Pi_OverlayOnlyAgentRendersOnlyOverlayTools()
     {
-        using PiOverlayOnlyFixture fixture = PiOverlayOnlyFixture.Create();
+        PiOverlayOnlyFixture fixture = PiOverlayOnlyFixture.Create();
 
-        SquadRenderResult result = await RenderPiAsync(fixture.ProductRoot);
+        SquadRenderResult result = await RenderPiAsync(fixture.Tree);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadDeploymentFile file = Assert.Single(
@@ -632,7 +631,7 @@ public sealed class PiRendererContractTests : IDisposable
     public async Task RenderAsync_Pi_AgentsDirectoryHasOnlyAgentPrincipalsAtTopLevel()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderPiAsync(ProductRoot);
+        SquadRenderResult result = await RenderPiAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         const string agentsPrefix = ".pi/agents/";
@@ -665,7 +664,7 @@ public sealed class PiRendererContractTests : IDisposable
     public async Task RenderAsync_Pi_LowersThePrimaryAgentToASkill()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderPiAsync(ProductRoot);
+        SquadRenderResult result = await RenderPiAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         HashSet<string> sharedIdentities = SharedIdentities(source);
@@ -763,7 +762,7 @@ public sealed class PiRendererContractTests : IDisposable
     public async Task RenderAsync_Pi_CanonicalSkillsHaveValidFrontmatter()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderPiAsync(ProductRoot);
+        SquadRenderResult result = await RenderPiAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         foreach (SquadSkill skill in source.Skills)
@@ -794,7 +793,7 @@ public sealed class PiRendererContractTests : IDisposable
     public async Task RenderAsync_Pi_RecordsDegradationsPerContract()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderPiAsync(ProductRoot);
+        SquadRenderResult result = await RenderPiAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         Dictionary<string, SquadAgent> agentsByName = source.Agents.ToDictionary(a => a.Name, StringComparer.Ordinal);
@@ -905,9 +904,9 @@ public sealed class PiRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Pi_ResolvesModelOverridesPerHarness()
     {
-        using PiModelOverrideFixture fixture = PiModelOverrideFixture.Create();
+        PiModelOverrideFixture fixture = PiModelOverrideFixture.Create();
 
-        SquadRenderResult result = await RenderPiAsync(fixture.ProductRoot);
+        SquadRenderResult result = await RenderPiAsync(fixture.Tree);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadDeploymentFile overriddenAgentFile = Assert.Single(
@@ -945,10 +944,10 @@ public sealed class PiRendererContractTests : IDisposable
         // canonical skill occupying its identity is a real, unresolvable collision.
         SquadAgent primaryAgent = Assert.Single(baselineSource.Agents, a => a.Name == "conductor");
 
-        using PiPrimaryIdentityCollisionFixture fixture = PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name);
+        PiPrimaryIdentityCollisionFixture fixture = PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name);
 
         SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(
-            () => RenderPiAsync(fixture.ProductRoot));
+            () => RenderPiAsync(fixture.Tree));
 
         Assert.Contains(primaryAgent.Name, exception.Message, StringComparison.Ordinal);
     }
@@ -969,12 +968,12 @@ public sealed class PiRendererContractTests : IDisposable
     [InlineData("max")]
     public async Task RenderAsync_Pi_EmitsThinkingKeyForEachValidLevel(string level)
     {
-        using PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
+        PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
             profileName: "general",
             modelId: "test-model/pi-1.0",
             thinkingLevel: level);
 
-        SquadRenderResult result = await RenderPiAsync(fixture.ProductRoot);
+        SquadRenderResult result = await RenderPiAsync(fixture.Tree);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadDeploymentFile agentFile = Assert.Single(
@@ -1006,13 +1005,13 @@ public sealed class PiRendererContractTests : IDisposable
     [InlineData("high ")]
     public async Task RenderAsync_Pi_ThrowsOnInvalidThinkingLevel(string invalidLevel)
     {
-        using PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
+        PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
             profileName: "general",
             modelId: "test-model/pi-1.0",
             thinkingLevel: invalidLevel);
 
         SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(
-            () => RenderPiAsync(fixture.ProductRoot));
+            () => RenderPiAsync(fixture.Tree));
 
         Assert.Contains($"'{invalidLevel}'", exception.Message, StringComparison.Ordinal);
     }
@@ -1025,13 +1024,13 @@ public sealed class PiRendererContractTests : IDisposable
     public async Task RenderAsync_Pi_ThrowsOnMalformedThinkingSuffixMissingClosingBracket()
     {
         const string malformedModel = "zai/glm-5.3[thinking=high";
-        using PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
+        PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
             profileName: "general",
             modelId: malformedModel,
             thinkingLevel: null);
 
         SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(
-            () => RenderPiAsync(fixture.ProductRoot));
+            () => RenderPiAsync(fixture.Tree));
 
         Assert.Contains(malformedModel, exception.Message, StringComparison.Ordinal);
     }
@@ -1040,13 +1039,13 @@ public sealed class PiRendererContractTests : IDisposable
     public async Task RenderAsync_Pi_ThrowsOnMalformedThinkingSuffixWithTrailingCharacters()
     {
         const string malformedModel = "test-model/pi-1.0[thinking=high]-v2";
-        using PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
+        PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
             profileName: "general",
             modelId: malformedModel,
             thinkingLevel: null);
 
         SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(
-            () => RenderPiAsync(fixture.ProductRoot));
+            () => RenderPiAsync(fixture.Tree));
 
         Assert.Contains(malformedModel, exception.Message, StringComparison.Ordinal);
         Assert.Contains("must be the last element", exception.Message, StringComparison.Ordinal);
@@ -1056,13 +1055,13 @@ public sealed class PiRendererContractTests : IDisposable
     public async Task RenderAsync_Pi_ThrowsOnMalformedThinkingSuffixWithEmptyBareModel()
     {
         const string malformedModel = "[thinking=high]";
-        using PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
+        PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
             profileName: "general",
             modelId: malformedModel,
             thinkingLevel: null);
 
         SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(
-            () => RenderPiAsync(fixture.ProductRoot));
+            () => RenderPiAsync(fixture.Tree));
 
         Assert.Contains(malformedModel, exception.Message, StringComparison.Ordinal);
         Assert.Contains("model id before the thinking suffix is empty", exception.Message, StringComparison.Ordinal);
@@ -1076,12 +1075,12 @@ public sealed class PiRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Pi_EmitsModelWithoutThinkingWhenNoSuffixPresent()
     {
-        using PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
+        PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
             profileName: "general",
             modelId: "test-model/pi-no-suffix",
             thinkingLevel: null);
 
-        SquadRenderResult result = await RenderPiAsync(fixture.ProductRoot);
+        SquadRenderResult result = await RenderPiAsync(fixture.Tree);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadDeploymentFile agentFile = Assert.Single(
@@ -1107,12 +1106,12 @@ public sealed class PiRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Pi_OmitsModelAndThinkingForInheritValue()
     {
-        using PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
+        PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
             profileName: "general",
             modelId: "inherit",
             thinkingLevel: null);
 
-        SquadRenderResult result = await RenderPiAsync(fixture.ProductRoot);
+        SquadRenderResult result = await RenderPiAsync(fixture.Tree);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadDeploymentFile agentFile = Assert.Single(
@@ -1159,7 +1158,7 @@ public sealed class PiRendererContractTests : IDisposable
             a.Invocation == SquadInvocation.Subagent &&
             string.Equals(a.ModelProfile, profileName, StringComparison.Ordinal));
 
-        SquadRenderResult result = await RenderPiAsync(ProductRoot);
+        SquadRenderResult result = await RenderPiAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadDeploymentFile agentFile = Assert.Single(
@@ -1190,7 +1189,7 @@ public sealed class PiRendererContractTests : IDisposable
             a.Invocation == SquadInvocation.Primary &&
             string.Equals(a.Name, "conductor", StringComparison.Ordinal));
 
-        SquadRenderResult result = await RenderPiAsync(ProductRoot);
+        SquadRenderResult result = await RenderPiAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadDeploymentFile skillFile = Assert.Single(
@@ -1233,9 +1232,8 @@ public sealed class PiRendererContractTests : IDisposable
 /// observe both branches of model resolution without hand-authoring a minimal corpus that
 /// could drift from the schema the real one is validated against.
 /// </summary>
-internal sealed class PiModelOverrideFixture : IDisposable
+internal sealed class PiModelOverrideFixture
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     internal const string OverriddenProfile = "general";
     internal const string OverriddenAgentName = "dev-medium";
@@ -1243,23 +1241,18 @@ internal sealed class PiModelOverrideFixture : IDisposable
     internal const string InheritProfile = "fast";
     internal const string InheritAgentName = "dev-easy";
 
-    private readonly TempDirectory _temp = new();
 
-    private PiModelOverrideFixture()
-    {
-        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
-    }
 
-    internal string ProductRoot { get; }
+    internal CanonicalSquadTree Tree { get; } = CanonicalSquadTree.Create();
+
+    internal string ProductRoot => Tree.ProductRoot;
 
     internal static PiModelOverrideFixture Create()
     {
         PiModelOverrideFixture fixture = new();
-        string canonicalRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
-        PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
 
         string modelsPath = Path.Combine(fixture.ProductRoot, "profiles", "models.yml");
-        string original = File.ReadAllText(modelsPath);
+        string original = fixture.Tree.Files.ReadAllText(modelsPath);
 
         // Set or replace pi: values in the target profiles, whether they exist or not.
         // Regex pattern matches a profile section and replaces or inserts its pi: value.
@@ -1273,11 +1266,10 @@ internal sealed class PiModelOverrideFixture : IDisposable
                 $"'{InheritProfile}' to mutate.");
         }
 
-        File.WriteAllText(modelsPath, mutated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        fixture.Tree.Files.WriteAllText(modelsPath, mutated);
         return fixture;
     }
 
-    public void Dispose() => _temp.Dispose();
 }
 
 /// <summary>
@@ -1286,28 +1278,22 @@ internal sealed class PiModelOverrideFixture : IDisposable
 /// <see cref="PiRendererContractTests.RenderAsync_Pi_ThrowsWhenACanonicalSkillOccupiesTheLoweredPrimaryIdentity"/>
 /// can observe the fail-closed behavior R3 requires on a native target.
 /// </summary>
-internal sealed class PiPrimaryIdentityCollisionFixture : IDisposable
+internal sealed class PiPrimaryIdentityCollisionFixture
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private readonly TempDirectory _temp = new();
 
-    private PiPrimaryIdentityCollisionFixture()
-    {
-        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
-    }
 
-    internal string ProductRoot { get; }
+    internal CanonicalSquadTree Tree { get; } = CanonicalSquadTree.Create();
+
+    internal string ProductRoot => Tree.ProductRoot;
 
     internal static PiPrimaryIdentityCollisionFixture Create(string primaryAgentName)
     {
         PiPrimaryIdentityCollisionFixture fixture = new();
-        string canonicalRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
-        PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
 
         string skillDirectory = Path.Combine(fixture.ProductRoot, "skills", primaryAgentName);
-        Directory.CreateDirectory(skillDirectory);
-        File.WriteAllText(
+        fixture.Tree.Files.CreateDirectory(skillDirectory);
+        fixture.Tree.Files.WriteAllText(
             Path.Combine(skillDirectory, "SKILL.md"),
             $"""
              ---
@@ -1316,13 +1302,11 @@ internal sealed class PiPrimaryIdentityCollisionFixture : IDisposable
              license: MIT
              ---
              Fixture body for the '{primaryAgentName}' identity collision.
-             """,
-            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+             """);
 
         return fixture;
     }
 
-    public void Dispose() => _temp.Dispose();
 }
 
 /// <summary>
@@ -1335,29 +1319,23 @@ internal sealed class PiPrimaryIdentityCollisionFixture : IDisposable
 /// <c>vscode/askQuestions</c>, <c>todo</c>) so the repointed profile still passes the Copilot
 /// cross-check.
 /// </summary>
-internal sealed class PiOverlayOnlyFixture : IDisposable
+internal sealed class PiOverlayOnlyFixture
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     internal const string TestAgentName = "review-lens";
 
-    private readonly TempDirectory _temp = new();
 
-    private PiOverlayOnlyFixture()
-    {
-        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
-    }
 
-    internal string ProductRoot { get; }
+    internal CanonicalSquadTree Tree { get; } = CanonicalSquadTree.Create();
+
+    internal string ProductRoot => Tree.ProductRoot;
 
     internal static PiOverlayOnlyFixture Create()
     {
         PiOverlayOnlyFixture fixture = new();
-        string canonicalRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
-        PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
 
         string capabilitiesPath = Path.Combine(fixture.ProductRoot, "profiles", "capabilities.yml");
-        File.AppendAllText(
+        fixture.Tree.Files.AppendAllText(
             capabilitiesPath,
             """
               pi-overlay-only:
@@ -1370,11 +1348,10 @@ internal sealed class PiOverlayOnlyFixture : IDisposable
                   network.publish: deny
                   delegate: deny
                   decision.query: deny
-            """,
-            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            """);
 
         string agentPath = Path.Combine(fixture.ProductRoot, "agents", TestAgentName + ".md");
-        string original = File.ReadAllText(agentPath);
+        string original = fixture.Tree.Files.ReadAllText(agentPath);
         string mutated = original
             .Replace("capability-profile: review-seat", "capability-profile: pi-overlay-only", StringComparison.Ordinal)
             .Replace(
@@ -1390,11 +1367,10 @@ internal sealed class PiOverlayOnlyFixture : IDisposable
                 $"Expected '{agentPath}' to carry the review-seat profile and full Copilot roster to repoint.");
         }
 
-        File.WriteAllText(agentPath, mutated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        fixture.Tree.Files.WriteAllText(agentPath, mutated);
         return fixture;
     }
 
-    public void Dispose() => _temp.Dispose();
 }
 
 /// <summary>
@@ -1406,30 +1382,24 @@ internal sealed class PiOverlayOnlyFixture : IDisposable
 /// <c>vscode/askQuestions</c>, <c>todo</c>) so the repointed profile still passes the Copilot
 /// cross-check, exactly as <see cref="PiOverlayOnlyFixture"/> does.
 /// </summary>
-internal sealed class PiFileReadDeniedFixture : IDisposable
+internal sealed class PiFileReadDeniedFixture
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     internal const string TestAgentName = "review-triage";
     internal const string DeniedProfileName = "pi-file-read-denied";
 
-    private readonly TempDirectory _temp = new();
 
-    private PiFileReadDeniedFixture()
-    {
-        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
-    }
 
-    internal string ProductRoot { get; }
+    internal CanonicalSquadTree Tree { get; } = CanonicalSquadTree.Create();
+
+    internal string ProductRoot => Tree.ProductRoot;
 
     internal static PiFileReadDeniedFixture Create()
     {
         PiFileReadDeniedFixture fixture = new();
-        string canonicalRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
-        PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
 
         string capabilitiesPath = Path.Combine(fixture.ProductRoot, "profiles", "capabilities.yml");
-        File.AppendAllText(
+        fixture.Tree.Files.AppendAllText(
             capabilitiesPath,
             $"""
               {DeniedProfileName}:
@@ -1442,11 +1412,10 @@ internal sealed class PiFileReadDeniedFixture : IDisposable
                   network.publish: deny
                   delegate: deny
                   decision.query: deny
-            """,
-            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            """);
 
         string agentPath = Path.Combine(fixture.ProductRoot, "agents", TestAgentName + ".md");
-        string original = File.ReadAllText(agentPath);
+        string original = fixture.Tree.Files.ReadAllText(agentPath);
         string mutated = original
             .Replace("capability-profile: review-seat", $"capability-profile: {DeniedProfileName}", StringComparison.Ordinal)
             .Replace(
@@ -1460,11 +1429,10 @@ internal sealed class PiFileReadDeniedFixture : IDisposable
                 $"Expected '{agentPath}' to carry the review-seat profile and full Copilot roster to repoint.");
         }
 
-        File.WriteAllText(agentPath, mutated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        fixture.Tree.Files.WriteAllText(agentPath, mutated);
         return fixture;
     }
 
-    public void Dispose() => _temp.Dispose();
 }
 
 /// <summary>
@@ -1473,20 +1441,16 @@ internal sealed class PiFileReadDeniedFixture : IDisposable
 /// if null), so contract tests can validate thinking-level parsing and validation without
 /// needing to edit the canonical corpus itself.
 /// </summary>
-internal sealed class PiThinkingSuffixFixture : IDisposable
+internal sealed class PiThinkingSuffixFixture
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     internal const string TestAgentName = "dev-medium";
 
-    private readonly TempDirectory _temp = new();
 
-    private PiThinkingSuffixFixture()
-    {
-        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
-    }
 
-    internal string ProductRoot { get; }
+    internal CanonicalSquadTree Tree { get; } = CanonicalSquadTree.Create();
+
+    internal string ProductRoot => Tree.ProductRoot;
 
     internal static PiThinkingSuffixFixture Create(
         string profileName,
@@ -1494,11 +1458,9 @@ internal sealed class PiThinkingSuffixFixture : IDisposable
         string? thinkingLevel)
     {
         PiThinkingSuffixFixture fixture = new();
-        string canonicalRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
-        PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
 
         string modelsPath = Path.Combine(fixture.ProductRoot, "profiles", "models.yml");
-        string original = File.ReadAllText(modelsPath);
+        string original = fixture.Tree.Files.ReadAllText(modelsPath);
 
         string piValue = thinkingLevel is null
             ? modelId
@@ -1512,27 +1474,14 @@ internal sealed class PiThinkingSuffixFixture : IDisposable
                 $"Expected '{modelsPath}' to contain profile '{profileName}' to mutate.");
         }
 
-        File.WriteAllText(modelsPath, mutated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        fixture.Tree.Files.WriteAllText(modelsPath, mutated);
         return fixture;
     }
 
-    public void Dispose() => _temp.Dispose();
 }
 
 internal static class PiCorpusFixtureHelpers
 {
-    internal static void CopyDirectory(string sourceDirectory, string destinationDirectory)
-    {
-        Directory.CreateDirectory(destinationDirectory);
-        foreach (string sourcePath in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
-        {
-            string relativePath = Path.GetRelativePath(sourceDirectory, sourcePath);
-            string destinationPath = Path.Combine(destinationDirectory, relativePath);
-            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
-            File.Copy(sourcePath, destinationPath);
-        }
-    }
-
     internal static string ReplaceOrInsertPiValue(string content, string profileName, string piValue)
     {
         Regex profileRegex = new(

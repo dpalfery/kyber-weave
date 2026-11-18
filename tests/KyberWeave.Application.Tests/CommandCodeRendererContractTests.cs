@@ -17,10 +17,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class CommandCodeRendererContractTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
+    private static string ProductRoot => CanonicalSquadTree.Shared.ProductRoot;
 
     /// <summary>Command Code built-in tool names the lowering may emit.</summary>
     private static readonly string[] CommandCodeTools =
@@ -76,8 +74,8 @@ public sealed class CommandCodeRendererContractTests
     ];
 
     private static Task<SquadRenderResult> RenderAsync(SquadDeploymentScope scope) =>
-        SquadTestRegistry.Create([new CommandCodeRenderer()]).RenderAsync(
-            new SquadRenderRequest(ProductRoot, [SquadTarget.CommandCode], scope).Prepared());
+        CanonicalSquadTree.Shared.Registry([new CommandCodeRenderer()]).RenderAsync(
+            new SquadRenderRequest(ProductRoot, [SquadTarget.CommandCode], scope).Prepared(CanonicalSquadTree.Shared));
 
     /// <summary>
     /// The <c>tools</c> value an agent must render: the allow-only built-in lowering followed by
@@ -265,9 +263,9 @@ public sealed class CommandCodeRendererContractTests
     [Fact]
     public async Task RenderAsync_CommandCode_StatesTheParentMcpGapOnlyWhenNothingIsNamed()
     {
-        using McpDeclarationCorpusFixture fixture =
-            McpDeclarationCorpusFixture.WithFileReadDeniedAgent("review-lens");
-        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
+        McpDeclarationSquadTree fixture =
+            McpDeclarationSquadTree.WithFileReadDeniedAgent("review-lens");
+        SquadSource source = fixture.Tree.Load();
         SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
         Assert.True(
             SquadMcpGrantProjection.WithheldServers(source, denied, SquadTarget.CommandCode).Count > 0,
@@ -276,11 +274,11 @@ public sealed class CommandCodeRendererContractTests
         IReadOnlyList<string> kyberWeaveTools = SquadMcpGrantProjection.KyberWeaveToolNames(source);
         Assert.NotEmpty(kyberWeaveTools);
 
-        SquadRenderResult result = await SquadTestRegistry.Create([new CommandCodeRenderer()])
+        SquadRenderResult result = await fixture.Tree.Registry([new CommandCodeRenderer()])
             .RenderAsync(new SquadRenderRequest(
                 fixture.ProductRoot,
                 [SquadTarget.CommandCode],
-                SquadDeploymentScope.Project).Prepared());
+                SquadDeploymentScope.Project).Prepared(fixture.Tree));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // The empty grant is the MCP tail, not the whole list: the agent keeps the built-in tools

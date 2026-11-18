@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Validation;
@@ -31,10 +32,8 @@ namespace KyberWeave.Tests.Squad;
 /// </remarks>
 public sealed class SquadRendererSharedContractTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
+    private static string ProductRoot => CanonicalSquadTree.Shared.ProductRoot;
 
     /// <summary>
     /// Where each harness puts the resource-bearing fixture's agent, and how it treats links inside
@@ -145,7 +144,7 @@ public sealed class SquadRendererSharedContractTests
             ProductRoot,
             [AnotherTarget(target)],
             SquadDeploymentScope.Project,
-            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
+            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared(CanonicalSquadTree.Shared);
 
         await Assert.ThrowsAsync<ArgumentException>(() => RendererFor(target).RenderAsync(request));
     }
@@ -161,7 +160,7 @@ public sealed class SquadRendererSharedContractTests
             ProductRoot,
             [SquadTarget.OpenCode],
             SquadDeploymentScope.Project,
-            WorkerRoster: WorkerRosters.Tiered).Prepared();
+            WorkerRoster: WorkerRosters.Tiered).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult result = await new OpenCodeRenderer().RenderAsync(request);
 
@@ -188,7 +187,7 @@ public sealed class SquadRendererSharedContractTests
         SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.OpenCode],
-            SquadDeploymentScope.Project).Prepared();
+            SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult result = await new OpenCodeRenderer().RenderAsync(request);
 
@@ -226,8 +225,8 @@ public sealed class SquadRendererSharedContractTests
     [MemberData(nameof(ShippedTargets))]
     public async Task EachRendererRendersTheCanonicalCorpusByteForByteTheSameTwice(SquadTarget target)
     {
-        SquadRendererRegistry registry = SquadTestRegistry.Create([RendererFor(target)]);
-        SquadRenderRequest fromDisk = new SquadRenderRequest(ProductRoot, [target], SquadDeploymentScope.Project).Prepared();
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([RendererFor(target)]);
+        SquadRenderRequest fromDisk = new SquadRenderRequest(ProductRoot, [target], SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult first = await registry.RenderAsync(
             fromDisk with { PreloadedSource = TestSquadCorpus.CanonicalSource });
@@ -457,7 +456,7 @@ public sealed class SquadRendererSharedContractTests
 
         SquadSourceValidationException refused = await Assert.ThrowsAsync<SquadSourceValidationException>(() =>
             RendererFor(target).RenderAsync(
-                new SquadRenderRequest(ProductRoot, [target], SquadDeploymentScope.Project, PreloadedSource: tampered).Prepared()));
+                new SquadRenderRequest(ProductRoot, [target], SquadDeploymentScope.Project, PreloadedSource: tampered).Prepared(CanonicalSquadTree.Shared)));
         Assert.Contains("undeclared", refused.Message, StringComparison.Ordinal);
     }
 
@@ -512,7 +511,7 @@ public sealed class SquadRendererSharedContractTests
         };
 
         await Assert.ThrowsAsync<SquadRenderValidationException>(() => RendererFor(target).RenderAsync(
-            new SquadRenderRequest(ProductRoot, [target], SquadDeploymentScope.Project, PreloadedSource: tampered).Prepared()));
+            new SquadRenderRequest(ProductRoot, [target], SquadDeploymentScope.Project, PreloadedSource: tampered).Prepared(CanonicalSquadTree.Shared)));
     }
 
     /// <summary>
@@ -568,13 +567,13 @@ public sealed class SquadRendererSharedContractTests
     public async Task TheRegistryRefusesTheWholeRequestBeforeAnyRendererRunsWhenATargetHasNoRenderer()
     {
         FakeSquadRenderer claude = FakeSquadRenderer.Empty(SquadTarget.Claude);
-        SquadRendererRegistry registry = SquadTestRegistry.Create([claude]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([claude]);
 
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Copilot, SquadTarget.Claude],
             SquadDeploymentScope.Project,
-            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared());
+            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared(CanonicalSquadTree.Shared));
 
         Assert.False(result.Success);
         Assert.Empty(result.Files);

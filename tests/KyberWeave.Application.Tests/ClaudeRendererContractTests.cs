@@ -39,10 +39,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class ClaudeRendererContractTests : IDisposable
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
+    private static string ProductRoot => CanonicalSquadTree.Shared.ProductRoot;
 
     private static readonly string[] SkillFrontmatterKeys = ["name", "description", "license"];
     private static readonly string[] PrimaryAgentDegradationCodes = ["permission-not-expressible", "role-skill-fallback"];
@@ -111,11 +109,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
     public async Task RenderAsync_Claude_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new ClaudeRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Project).Prepared();
+            Scope: SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -354,11 +352,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_ConductorRunsOnTheSessionModel()
     {
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new ClaudeRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Project).Prepared();
+            Scope: SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -381,11 +379,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [InlineData("dev-easy")]
     public async Task RenderAsync_Claude_FastProfileWorkersRunOnHaiku55(string agent)
     {
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new ClaudeRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Project).Prepared();
+            Scope: SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -406,11 +404,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_ProductOwnerRunsOnArchitectModel()
     {
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new ClaudeRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Project).Prepared();
+            Scope: SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -433,11 +431,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [InlineData("docs-dev")]
     public async Task RenderAsync_Claude_GeneralProfileWorkersRunOnSonnet55(string agent)
     {
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new ClaudeRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Project).Prepared();
+            Scope: SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -457,11 +455,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_OnlyFastWorkersRunOnHaiku55()
     {
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new ClaudeRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Project).Prepared();
+            Scope: SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -518,11 +516,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
 
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new ClaudeRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Project).Prepared();
+            Scope: SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -662,11 +660,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
 
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new ClaudeRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Global).Prepared();
+            Scope: SquadDeploymentScope.Global).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -706,23 +704,23 @@ public sealed class ClaudeRendererContractTests : IDisposable
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
 
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new ClaudeRenderer()]);
 
         // Render with skill mode (default).
         SquadRenderRequest skillRequest = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Project).Prepared();
+            Scope: SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
         SquadRenderResult skillResult = await registry.RenderAsync(skillRequest);
         Assert.True(skillResult.Success);
 
         // Render with omit mode.
-        using (var omitFixture = ClaudeNoPrimaryAgentFixture.Create("omit"))
         {
+            var omitFixture = ClaudeNoPrimaryAgentFixture.Create("omit");
             SquadRenderRequest omitRequest = new SquadRenderRequest(
                 SourceDirectory: omitFixture.ProductRoot,
                 Targets: [SquadTarget.Claude],
-                Scope: SquadDeploymentScope.Project).Prepared();
+                Scope: SquadDeploymentScope.Project).Prepared(omitFixture.Tree);
             SquadRenderResult omitResult = await registry.RenderAsync(omitRequest);
             Assert.True(omitResult.Success);
 
@@ -791,13 +789,13 @@ public sealed class ClaudeRendererContractTests : IDisposable
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
 
-        using (var collisionFixture = PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name))
         {
+            var collisionFixture = PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name);
             ClaudeRenderer renderer = new();
             SquadRenderRequest request = new SquadRenderRequest(
                 SourceDirectory: collisionFixture.ProductRoot,
                 Targets: [SquadTarget.Claude],
-                Scope: SquadDeploymentScope.Project).Prepared();
+                Scope: SquadDeploymentScope.Project).Prepared(collisionFixture.Tree);
 
             SquadRenderValidationException ex = await Assert.ThrowsAsync<SquadRenderValidationException>(
                 () => renderer.RenderAsync(request));
@@ -813,13 +811,13 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_FailsClosedOnAnUnsupportedNoPrimaryAgentValue()
     {
-        using (var renameFixture = ClaudeNoPrimaryAgentFixture.Create("rename"))
         {
+            var renameFixture = ClaudeNoPrimaryAgentFixture.Create("rename");
             ClaudeRenderer renderer = new();
             SquadRenderRequest request = new SquadRenderRequest(
                 SourceDirectory: renameFixture.ProductRoot,
                 Targets: [SquadTarget.Claude],
-                Scope: SquadDeploymentScope.Project).Prepared();
+                Scope: SquadDeploymentScope.Project).Prepared(renameFixture.Tree);
 
             SquadSourceValidationException ex = await Assert.ThrowsAsync<SquadSourceValidationException>(() => renderer.RenderAsync(request));
             Assert.Contains("no-primary-agent", ex.Message, StringComparison.Ordinal);
@@ -847,9 +845,9 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_WithholdsKyberWeaveFromAnOrchestratorThatCannotRead()
     {
-        using McpDeclarationCorpusFixture fixture =
-            McpDeclarationCorpusFixture.WithFileReadDeniedOrchestrator();
-        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
+        McpDeclarationSquadTree fixture =
+            McpDeclarationSquadTree.WithFileReadDeniedOrchestrator();
+        SquadSource source = fixture.Tree.Load();
 
         SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
         Assert.Equal(
@@ -860,11 +858,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
             "The fixture's orchestrator profile still allows filesystem.read, so the render reaches "
             + "the granting branch and the denial this test pins is never exercised.");
 
-        SquadRenderResult result = await SquadTestRegistry.Create([new ClaudeRenderer()])
+        SquadRenderResult result = await fixture.Tree.Registry([new ClaudeRenderer()])
             .RenderAsync(new SquadRenderRequest(
                 fixture.ProductRoot,
                 [SquadTarget.Claude],
-                SquadDeploymentScope.Project).Prepared());
+                SquadDeploymentScope.Project).Prepared(fixture.Tree));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // The note states what the subagent file withholds, so the file has to withhold all three:
@@ -977,13 +975,13 @@ public sealed class ClaudeRendererContractTests : IDisposable
         SquadDeploymentScope scope,
         SquadArbiterWiring? wiring)
     {
-        using TempDirectory home = new();
+        string home = Path.Combine(CanonicalSquadTree.Shared.Files.Root, "home");
         return await new ClaudeRenderer().RenderAsync(new SquadRenderRequest(
             SourceDirectory: sourceDirectory,
             Targets: [SquadTarget.Claude],
             Scope: scope,
-            GlobalRoots: new SquadGlobalRoots(_ => null, home.Path),
-            Arbiter: wiring).Prepared());
+            GlobalRoots: new SquadGlobalRoots(_ => null, home),
+            Arbiter: wiring).Prepared(CanonicalSquadTree.Shared));
     }
 
     private static YamlMappingNode ArchitectFrontmatter(SquadRenderResult result, string relativePath)
@@ -1229,26 +1227,20 @@ public sealed class ClaudeRendererContractTests : IDisposable
 /// unsupported value like "rename"), so contract tests can validate rendering behavior under
 /// different profile configurations without editing the canonical corpus.
 /// </summary>
-internal sealed class ClaudeNoPrimaryAgentFixture : IDisposable
+internal sealed class ClaudeNoPrimaryAgentFixture
 {
-    private readonly TempDirectory _temp = new();
 
-    private ClaudeNoPrimaryAgentFixture()
-    {
-        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
-    }
 
-    internal string ProductRoot { get; }
+    internal CanonicalSquadTree Tree { get; } = CanonicalSquadTree.Create();
+
+    internal string ProductRoot => Tree.ProductRoot;
 
     internal static ClaudeNoPrimaryAgentFixture Create(string noPrimaryAgentValue)
     {
         ClaudeNoPrimaryAgentFixture fixture = new();
-        PiCorpusFixtureHelpers.CopyDirectory(
-            Path.Combine(CheckoutCorpusSource.Checkout.Root, "products", "kyber-squad"),
-            fixture.ProductRoot);
 
         string fallbacksPath = Path.Combine(fixture.ProductRoot, "profiles", "fallbacks.yml");
-        string original = File.ReadAllText(fallbacksPath);
+        string original = fixture.Tree.Files.ReadAllText(fallbacksPath);
 
         // Replace "no-primary-agent: skill" with "no-primary-agent: <value>"
         string mutated = original.Replace(
@@ -1262,9 +1254,8 @@ internal sealed class ClaudeNoPrimaryAgentFixture : IDisposable
                 $"Expected '{fallbacksPath}' to contain 'no-primary-agent: skill' to replace.");
         }
 
-        File.WriteAllText(fallbacksPath, mutated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        fixture.Tree.Files.WriteAllText(fallbacksPath, mutated);
         return fixture;
     }
 
-    public void Dispose() => _temp.Dispose();
 }

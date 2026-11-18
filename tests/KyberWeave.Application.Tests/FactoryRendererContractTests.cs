@@ -41,10 +41,8 @@ public sealed class FactoryRendererContractTests : IDisposable
     // Mirrors FactoryRenderer's allow-list (Factory accepts only these); update both together.
     private static readonly string[] AllowedReasoningEfforts = ["low", "medium", "high"];
 
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
+    private static string ProductRoot => CanonicalSquadTree.Shared.ProductRoot;
 
     /// <summary>
     ///     Documented Factory custom-droid tool IDs (docs.factory.ai/harness/subagents,
@@ -121,11 +119,11 @@ public sealed class FactoryRendererContractTests : IDisposable
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
         IReadOnlyList<string> declaredMcpServers = DeclaredFactoryMcpServers(source);
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new FactoryRenderer()]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new FactoryRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project).Prepared();
+            SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -342,14 +340,14 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_WhitelistsDeclaredMcpServersForEntitledDroids()
     {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
+        SquadSource source = CanonicalSquadTree.Shared.Load();
         IReadOnlyList<string> declaredMcpServers = DeclaredFactoryMcpServers(source);
         Assert.NotEmpty(declaredMcpServers);
 
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project).Prepared());
+            SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         foreach (SquadAgent agent in source.Agents)
@@ -406,12 +404,12 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_RecordsMcpWithholdingOnlyWhenTheWhitelistIsEmpty()
     {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
+        SquadSource source = CanonicalSquadTree.Shared.Load();
         IReadOnlyList<string> declaredMcpServers = DeclaredFactoryMcpServers(source);
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project).Prepared());
+            SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         foreach (SquadAgent agent in source.Agents)
@@ -500,12 +498,12 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_EntryPointCaveatNamesTheDroidsRenderedMcpServers()
     {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
+        SquadSource source = CanonicalSquadTree.Shared.Load();
         IReadOnlyList<string> declaredMcpServers = DeclaredFactoryMcpServers(source);
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project).Prepared());
+            SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         List<string> whitelistedPrimaries = [];
@@ -545,16 +543,16 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_EntryPointCaveatMcpServersFragmentParsesAsTheWhitelist()
     {
-        using McpDeclarationCorpusFixture fixture =
-            McpDeclarationCorpusFixture.WithServers("a, b");
-        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
+        McpDeclarationSquadTree fixture =
+            McpDeclarationSquadTree.WithServers("a, b");
+        SquadSource source = fixture.Tree.Load();
         IReadOnlyList<string> declared = DeclaredFactoryMcpServers(source);
         Assert.Equal(["a, b"], declared);
 
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project).Prepared());
+            SquadDeploymentScope.Project).Prepared(fixture.Tree));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadAgent[] whitelistedPrimaries =
@@ -589,15 +587,15 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_EmptyMcpDeclarationFailsClosedForEveryDroid()
     {
-        using McpDeclarationCorpusFixture fixture = McpDeclarationCorpusFixture.WithServers();
-        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
+        McpDeclarationSquadTree fixture = McpDeclarationSquadTree.WithServers();
+        SquadSource source = fixture.Tree.Load();
         Assert.Empty(DeclaredFactoryMcpServers(source));
         Assert.NotEmpty(source.Agents);
 
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project).Prepared());
+            SquadDeploymentScope.Project).Prepared(fixture.Tree));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         foreach (SquadAgent agent in source.Agents)
@@ -651,7 +649,7 @@ public sealed class FactoryRendererContractTests : IDisposable
                 ProductRoot,
                 [SquadTarget.Factory],
                 SquadDeploymentScope.Project,
-                PreloadedSource: source).Prepared()));
+                PreloadedSource: source).Prepared(CanonicalSquadTree.Shared)));
         Assert.Contains(agentName, refused.Message, StringComparison.Ordinal);
         Assert.Contains("unresolved-profile", refused.Message, StringComparison.Ordinal);
     }
@@ -669,16 +667,16 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_McpServerNamesWithFlowIndicatorsStayOneEntry()
     {
-        using McpDeclarationCorpusFixture fixture =
-            McpDeclarationCorpusFixture.WithServers("a,b", "bracket[server]", "plain");
-        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
+        McpDeclarationSquadTree fixture =
+            McpDeclarationSquadTree.WithServers("a,b", "bracket[server]", "plain");
+        SquadSource source = fixture.Tree.Load();
         IReadOnlyList<string> declared = DeclaredFactoryMcpServers(source);
         Assert.Equal(["a,b", "bracket[server]", "plain"], declared);
 
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project).Prepared());
+            SquadDeploymentScope.Project).Prepared(fixture.Tree));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadAgent entitled = Assert.Single(source.Agents, agent => agent.Name == "architect");
@@ -693,16 +691,16 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_OrdersTheWhitelistOrdinalWhateverTheDeclarationOrder()
     {
-        using McpDeclarationCorpusFixture fixture =
-            McpDeclarationCorpusFixture.WithServers("zeta-reader", "alpha-reader");
-        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
+        McpDeclarationSquadTree fixture =
+            McpDeclarationSquadTree.WithServers("zeta-reader", "alpha-reader");
+        SquadSource source = fixture.Tree.Load();
         IReadOnlyList<string> declared = DeclaredFactoryMcpServers(source);
         Assert.Equal(["alpha-reader", "zeta-reader"], declared);
 
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project).Prepared());
+            SquadDeploymentScope.Project).Prepared(fixture.Tree));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         int whitelistedDroids = 0;
@@ -741,9 +739,9 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_WithholdsTheWhitelistWhenTheProfileDeniesFileRead()
     {
-        using McpDeclarationCorpusFixture fixture =
-            McpDeclarationCorpusFixture.WithFileReadDeniedAgent("review-lens");
-        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
+        McpDeclarationSquadTree fixture =
+            McpDeclarationSquadTree.WithFileReadDeniedAgent("review-lens");
+        SquadSource source = fixture.Tree.Load();
         IReadOnlyList<string> declared = DeclaredFactoryMcpServers(source);
         Assert.NotEmpty(declared);
 
@@ -761,7 +759,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project).Prepared());
+            SquadDeploymentScope.Project).Prepared(fixture.Tree));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         Assert.Empty(RenderedMcpServers(result, denied.Name));
@@ -797,11 +795,11 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new FactoryRenderer()]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new FactoryRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project).Prepared();
+            SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -918,11 +916,11 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new FactoryRenderer()]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new FactoryRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Global).Prepared();
+            SquadDeploymentScope.Global).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -974,21 +972,21 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new FactoryRenderer()]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new FactoryRenderer()]);
 
         SquadRenderRequest skillRequest = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project).Prepared();
+            SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
         SquadRenderResult skillResult = await registry.RenderAsync(skillRequest);
         Assert.True(skillResult.Success);
 
-        using (ClaudeNoPrimaryAgentFixture omitFixture = ClaudeNoPrimaryAgentFixture.Create("omit"))
         {
+            ClaudeNoPrimaryAgentFixture omitFixture = ClaudeNoPrimaryAgentFixture.Create("omit");
             SquadRenderRequest omitRequest = new SquadRenderRequest(
                 omitFixture.ProductRoot,
                 [SquadTarget.Factory],
-                SquadDeploymentScope.Project).Prepared();
+                SquadDeploymentScope.Project).Prepared(omitFixture.Tree);
             SquadRenderResult omitResult = await registry.RenderAsync(omitRequest);
             Assert.True(omitResult.Success, string.Join("; ", omitResult.Errors));
 
@@ -1048,14 +1046,13 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
 
-        using (PiPrimaryIdentityCollisionFixture collisionFixture =
-               PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name))
         {
+            PiPrimaryIdentityCollisionFixture collisionFixture = PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name);
             FactoryRenderer renderer = new();
             SquadRenderRequest request = new SquadRenderRequest(
                 collisionFixture.ProductRoot,
                 [SquadTarget.Factory],
-                SquadDeploymentScope.Project).Prepared();
+                SquadDeploymentScope.Project).Prepared(collisionFixture.Tree);
 
             SquadRenderValidationException ex =
                 await Assert.ThrowsAsync<SquadRenderValidationException>(() => renderer.RenderAsync(request));
@@ -1071,13 +1068,13 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_FailsClosedOnAnUnsupportedNoPrimaryAgentValue()
     {
-        using (ClaudeNoPrimaryAgentFixture renameFixture = ClaudeNoPrimaryAgentFixture.Create("rename"))
         {
+            ClaudeNoPrimaryAgentFixture renameFixture = ClaudeNoPrimaryAgentFixture.Create("rename");
             FactoryRenderer renderer = new();
             SquadRenderRequest request = new SquadRenderRequest(
                 renameFixture.ProductRoot,
                 [SquadTarget.Factory],
-                SquadDeploymentScope.Project).Prepared();
+                SquadDeploymentScope.Project).Prepared(renameFixture.Tree);
 
             SquadSourceValidationException ex =
                 await Assert.ThrowsAsync<SquadSourceValidationException>(() => renderer.RenderAsync(request));
@@ -1101,7 +1098,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project).Prepared());
+            SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared));
 
         SquadDeploymentFile rendered = Assert.Single(
             result.Files,
@@ -1219,289 +1216,5 @@ public sealed class FactoryRendererContractTests : IDisposable
                              ?? throw new InvalidOperationException(
                                  $"'{identity}' key '{key}' has a null sequence entry."))
             .ToArray();
-    }
-}
-
-/// <summary>
-///     Copies the real <c>products/kyber-squad</c> corpus and replaces its <c>mcp.json</c> server
-///     declaration with the one a test names, so the declaration is the only variable.
-/// </summary>
-/// <remarks>
-///     A copy rather than an edit keeps the canonical corpus as the thing under test: everything
-///     except the one variable a variant names stays real, including the agent roster the whitelist
-///     is projected onto. <see cref="WithServers" /> keeps the declaration order the caller passes,
-///     so a test can tell ordinal emission from insertion order.
-/// </remarks>
-internal sealed class McpDeclarationCorpusFixture : IDisposable
-{
-    /// <summary>
-    ///     The profile <see cref="WithFileReadDeniedAgent" /> points its agent at: the corpus's own
-    ///     <c>read-only</c> profile with <c>filesystem.read</c> flipped to deny.
-    /// </summary>
-    private const string FileReadDeniedProfile = "read-only-no-file-read";
-
-    private const string ReadOnlyProfile = "read-only";
-
-    /// <summary>
-    ///     The primary agent the pure-orchestrator wording is asserted on. It is the only shipped
-    ///     agent whose capability profile is the orchestrator, and a primary agent is the only one
-    ///     whose degradation receipt carries the entry-point-skill note.
-    /// </summary>
-    private const string ConductorAgent = "conductor";
-
-    /// <summary>
-    ///     The Copilot roster a read-denied orchestrator can still justify: the three tools the
-    ///     catalog marks ungoverned and the one its <c>delegate: allow</c> covers. The shipped
-    ///     roster also names read, search, and network tools, and the source validator rejects any
-    ///     of those against a profile that denies the capability it needs.
-    /// </summary>
-    private const string ReadDeniedOrchestratorCopilotTools =
-        "copilot-tools: [vscode/toolSearch, vscode/askQuestions, todo, agent]";
-
-    private static readonly JsonSerializerOptions JsonSerializerOptions = new() { WriteIndented = true };
-
-    private readonly TempDirectory _temp = new();
-
-    private McpDeclarationCorpusFixture()
-    {
-        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
-    }
-
-    internal string ProductRoot { get; }
-
-    public void Dispose()
-    {
-        _temp.Dispose();
-    }
-
-    internal static McpDeclarationCorpusFixture WithServers(params string[] serverNames)
-    {
-        McpDeclarationCorpusFixture fixture = CopyCanonical();
-
-        Dictionary<string, Dictionary<string, object>> servers = new(StringComparer.Ordinal);
-        foreach (string name in serverNames)
-            servers[name] = new Dictionary<string, object>(StringComparer.Ordinal)
-            {
-                ["command"] = $"{name}-mcp",
-                ["args"] = new[] { "--repo-root", "." }
-            };
-
-        Dictionary<string, Dictionary<string, Dictionary<string, object>>> root =
-            new(StringComparer.Ordinal) { ["mcpServers"] = servers };
-        File.WriteAllText(
-            Path.Combine(fixture.ProductRoot, "mcp.json"),
-            JsonSerializer.Serialize(root, JsonSerializerOptions) + "\n",
-            new UTF8Encoding(false));
-
-        return fixture;
-    }
-
-    /// <summary>
-    ///     Copies the canonical corpus, adds
-    ///     <see cref="FileReadDeniedProfile" /> as a clone of <c>read-only</c> with
-    ///     <c>filesystem.read: deny</c>, and points <paramref name="agentName" /> at it.
-    /// </summary>
-    /// <remarks>
-    ///     The profile is a clone rather than a fresh declaration so the read decision is the only
-    ///     difference from a profile the corpus already ships — the test then isolates the
-    ///     entitlement clause instead of also changing search, execute, and delegation. The Copilot
-    ///     roster is narrowed with it because the source validator checks every Copilot tool against
-    ///     the shared profile, and a read-denied profile cannot justify a read tool.
-    /// </remarks>
-    internal static McpDeclarationCorpusFixture WithFileReadDeniedAgent(string agentName)
-    {
-        McpDeclarationCorpusFixture fixture = CopyCanonical();
-        fixture.AddReadDeniedVariantOf(ReadOnlyProfile);
-        fixture.RepointAgent(agentName);
-        return fixture;
-    }
-
-    internal static McpDeclarationCorpusFixture WithServersAndFileReadDeniedAgent(
-        string agentName,
-        params string[] serverNames)
-    {
-        McpDeclarationCorpusFixture fixture = WithServers(serverNames);
-        fixture.AddReadDeniedVariantOf(ReadOnlyProfile);
-        fixture.RepointAgent(agentName);
-        return fixture;
-    }
-
-    /// <summary>
-    ///     Copies the canonical corpus and denies <c>filesystem.read</c> in the corpus's own
-    ///     <c>orchestrator</c> profile, leaving every profile name intact.
-    /// </summary>
-    /// <remarks>
-    ///     Denied in place rather than through a clone in the manner of
-    ///     <see cref="WithFileReadDeniedAgent" />, because the withholding note a renderer states keys on
-    ///     the profile's identity as well as on its permissions: an agent repointed at a
-    ///     differently-named read-denied profile is no longer a pure orchestrator, so the branch that
-    ///     names the withholding is never reached and a test built on it would assert nothing.
-    ///     The conductor's Copilot roster is narrowed with it. The source validator checks every
-    ///     Copilot tool against the shared profile, so a read-denied orchestrator cannot keep the read,
-    ///     search, or network tools the shipped roster declares and the source would not load at all.
-    /// </remarks>
-    internal static McpDeclarationCorpusFixture WithFileReadDeniedOrchestrator()
-    {
-        McpDeclarationCorpusFixture fixture = CopyCanonical();
-        fixture.DenyFileReadInProfile(SquadMcpGrantProjection.PureOrchestratorProfile);
-        fixture.NarrowCopilotTools(ConductorAgent, ReadDeniedOrchestratorCopilotTools);
-        return fixture;
-    }
-
-    private static McpDeclarationCorpusFixture CopyCanonical()
-    {
-        McpDeclarationCorpusFixture fixture = new();
-        PiCorpusFixtureHelpers.CopyDirectory(
-            Path.Combine(CheckoutCorpusSource.Checkout.Root, "products", "kyber-squad"),
-            fixture.ProductRoot);
-        return fixture;
-    }
-
-    private void AddReadDeniedVariantOf(string sourceProfileName)
-    {
-        string path = Path.Combine(ProductRoot, "profiles", "capabilities.yml");
-        string[] lines = File.ReadAllLines(path);
-
-        (int start, int end) = LocateProfileBlock(lines, sourceProfileName, path);
-
-        List<string> clone = [.. lines[start..end]];
-        clone[0] = $"  {FileReadDeniedProfile}:";
-
-        bool rewroteRead = false;
-        for (int index = 0; index < clone.Count; index++)
-            if (clone[index].TrimStart().StartsWith("filesystem.read:", StringComparison.Ordinal))
-            {
-                clone[index] = "      filesystem.read: deny";
-                rewroteRead = true;
-            }
-
-        if (!rewroteRead)
-            throw new InvalidOperationException(
-                $"Profile '{sourceProfileName}' in '{path}' declares no 'filesystem.read' permission "
-                + $"to deny, so '{FileReadDeniedProfile}' would not differ from it.");
-
-        File.WriteAllText(
-            path,
-            File.ReadAllText(path).TrimEnd('\n') + "\n" + string.Join("\n", clone) + "\n",
-            new UTF8Encoding(false));
-    }
-
-    /// <summary>
-    ///     Rewrites the <c>filesystem.read</c> decision of <paramref name="profileName" /> to
-    ///     <c>deny</c> inside that profile's own block, so the profile keeps its identity and loses
-    ///     one permission.
-    /// </summary>
-    private void DenyFileReadInProfile(string profileName)
-    {
-        string path = Path.Combine(ProductRoot, "profiles", "capabilities.yml");
-        string[] lines = File.ReadAllLines(path);
-
-        (int start, int end) = LocateProfileBlock(lines, profileName, path);
-
-        int rewritten = 0;
-        for (int index = start; index < end; index++)
-            if (lines[index].TrimStart().StartsWith("filesystem.read:", StringComparison.Ordinal))
-            {
-                lines[index] = "      filesystem.read: deny";
-                rewritten++;
-            }
-
-        // Exactly one, not at least one: rewriting a second read decision would deny the
-        // permission somewhere the test did not intend, and the fixture would then differ from
-        // the canonical corpus in two places instead of the one it names.
-        if (rewritten != 1)
-            throw new InvalidOperationException(
-                $"Profile '{profileName}' in '{path}' declares {rewritten} 'filesystem.read' "
-                + "permissions; in-place denial needs exactly one.");
-
-        File.WriteAllText(
-            path,
-            string.Join("\n", lines) + "\n",
-            new UTF8Encoding(false));
-    }
-
-    /// <summary>
-    ///     The half-open line range of one profile block: its <c>  &lt;name&gt;:</c> header up to the
-    ///     next profile header, with trailing blank lines trimmed so a clone does not carry the
-    ///     separator that belongs between blocks.
-    /// </summary>
-    private static (int Start, int End) LocateProfileBlock(
-        string[] lines,
-        string profileName,
-        string path)
-    {
-        int start = Array.IndexOf(lines, $"  {profileName}:");
-        if (start < 0)
-            throw new InvalidOperationException(
-                $"Expected '{path}' to declare profile '{profileName}'.");
-
-        int end = start + 1;
-        while (end < lines.Length && !IsProfileHeader(lines[end])) end++;
-
-        while (end > start + 1 && string.IsNullOrWhiteSpace(lines[end - 1])) end--;
-
-        return (start, end);
-    }
-
-    private void RepointAgent(string agentName)
-    {
-        string path = Path.Combine(ProductRoot, "agents", $"{agentName}.md");
-        string text = File.ReadAllText(path);
-
-        string repointed = Regex.Replace(
-            text,
-            "^capability-profile: .*$",
-            $"capability-profile: {FileReadDeniedProfile}",
-            RegexOptions.Multiline);
-        if (string.Equals(repointed, text, StringComparison.Ordinal))
-            throw new InvalidOperationException(
-                $"Expected '{path}' to declare a 'capability-profile' line to repoint.");
-
-        File.WriteAllText(
-            path,
-            Narrowed(repointed, path, "copilot-tools: [vscode, todo, search, web]"),
-            new UTF8Encoding(false));
-    }
-
-    /// <summary>
-    ///     Replaces the agent's <c>copilot-tools</c> line with the one the caller supplies.
-    /// </summary>
-    /// <remarks>
-    ///     A read-denied profile cannot justify the read, search, or network tools an agent declares,
-    ///     and <c>SquadSourceValidator.ValidateCopilotToolCapabilities</c> rejects the mismatch at load
-    ///     time — so every variant that denies a capability has to narrow the Copilot roster to match,
-    ///     or the render under test never gets as far as running.
-    /// </remarks>
-    private void NarrowCopilotTools(string agentName, string tools)
-    {
-        string path = Path.Combine(ProductRoot, "agents", $"{agentName}.md");
-        File.WriteAllText(
-            path,
-            Narrowed(File.ReadAllText(path), path, tools),
-            new UTF8Encoding(false));
-    }
-
-    private static string Narrowed(string text, string path, string tools)
-    {
-        string narrowed = Regex.Replace(text, "^copilot-tools: .*$", tools, RegexOptions.Multiline);
-        if (string.Equals(narrowed, text, StringComparison.Ordinal))
-            throw new InvalidOperationException(
-                $"Expected '{path}' to declare a 'copilot-tools' line to narrow.");
-
-        return narrowed;
-    }
-
-    /// <summary>
-    ///     A profile entry sits at the mapping's own indent: two spaces, then a non-space, ending
-    ///     with a colon. Every nested line is indented further, so this separates one block from the
-    ///     next without a YAML parse of a file the loader will parse anyway.
-    /// </summary>
-    private static bool IsProfileHeader(string line)
-    {
-        return line.Length > 2
-               && line[0] == ' '
-               && line[1] == ' '
-               && line[2] != ' '
-               && line[^1] == ':';
     }
 }
