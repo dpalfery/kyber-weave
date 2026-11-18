@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Review;
@@ -5,18 +6,25 @@ using KyberWeave.Core.Review;
 namespace KyberWeave.Data.Review;
 
 /// <summary>Reads and writes review cycle folders through the file-system seam.</summary>
-public sealed class FileReviewCycleStore(IWritableFileSystem files) : IReviewCycleStore
+/// <param name="files">Writes and reads every cycle folder entry.</param>
+/// <param name="paths">Resolves a folder the caller spelled relatively.</param>
+/// <param name="environment">Names the working directory a relative folder resolves against.</param>
+public sealed class FileReviewCycleStore(
+    IWritableFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IReviewCycleStore
 {
     /// <inheritdoc />
     public IReadOnlyList<ReviewCycleRecord> ReadFinished(string reviewFolder)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reviewFolder);
 
-        if (!files.DirectoryExists(reviewFolder))
+        string resolved = Resolve(reviewFolder);
+        if (!files.DirectoryExists(resolved))
             return [];
 
         List<ReviewCycleRecord> cycles = [];
-        foreach (string folder in files.EnumerateDirectories(reviewFolder))
+        foreach (string folder in files.EnumerateDirectories(resolved))
         {
             if (ReviewCyclePlanning.TryNumber(Path.GetFileName(folder)) is not { } number
                 || !files.FileExists(Path.Combine(folder, ReviewCyclePlanning.FindingsFile)))
@@ -33,7 +41,7 @@ public sealed class FileReviewCycleStore(IWritableFileSystem files) : IReviewCyc
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(priorFolder);
 
-        string full = Path.GetFullPath(priorFolder);
+        string full = Resolve(priorFolder);
         if (ReviewCyclePlanning.TryNumber(Path.GetFileName(full)) is not { } number)
             return files.DirectoryExists(full) ? [Read(0, full)] : [];
 
@@ -47,27 +55,37 @@ public sealed class FileReviewCycleStore(IWritableFileSystem files) : IReviewCyc
         ArgumentException.ThrowIfNullOrWhiteSpace(cycleFolder);
         ArgumentNullException.ThrowIfNull(identity);
 
-        files.CreateDirectory(cycleFolder);
+        string resolved = Resolve(cycleFolder);
+        files.CreateDirectory(resolved);
         files.WriteAllText(
-            Path.Combine(cycleFolder, ReviewCyclePlanning.IdentityFile),
+            Path.Combine(resolved, ReviewCyclePlanning.IdentityFile),
             ReviewCyclePlanning.SerializeIdentity(identity));
     }
 
     /// <inheritdoc />
     public ReviewCycleIdentity? ReadRecordedIdentity(string cycleFolder) =>
-        ReviewCyclePlanning.ReadRecordedIdentity(ReadText(Path.Combine(cycleFolder, ReviewCyclePlanning.IdentityFile)));
+        ReviewCyclePlanning.ReadRecordedIdentity(
+            ReadText(Path.Combine(Resolve(cycleFolder), ReviewCyclePlanning.IdentityFile)));
 
     /// <inheritdoc />
-    public bool HasIdentity(string cycleFolder) => files.FileExists(Path.Combine(cycleFolder, ReviewCyclePlanning.IdentityFile));
+    public bool HasIdentity(string cycleFolder) =>
+        files.FileExists(Path.Combine(Resolve(cycleFolder), ReviewCyclePlanning.IdentityFile));
 
     /// <inheritdoc />
     public IReadOnlyList<string> TaskFolders(string scratchpad) =>
-        files.DirectoryExists(scratchpad)
-            ? [.. files.EnumerateDirectories(scratchpad)
+        files.DirectoryExists(Resolve(scratchpad))
+            ? [.. files.EnumerateDirectories(Resolve(scratchpad))
                 .Where(dir => files.DirectoryExists(Path.Combine(dir, "review")))
                 .Select(dir => Path.GetFileName(dir))
                 .Order(StringComparer.Ordinal)]
             : [];
+
+    /// <summary>
+    /// The folder as the file system names it: a caller may spell it relative to the working directory, and the seam
+    /// resolves it the same way for every member. An empty folder names nothing to resolve and passes through.
+    /// </summary>
+    private string Resolve(string folder) =>
+        string.IsNullOrWhiteSpace(folder) ? folder : paths.GetFullPath(folder, environment.CurrentDirectory);
 
     private ReviewCycleRecord Read(int number, string folder) =>
         ReviewCyclePlanning.Record(

@@ -1,6 +1,7 @@
 using System.IO;
 using KyberWeave.Core.Review;
 using KyberWeave.Data.Review;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
 
@@ -17,7 +18,8 @@ public sealed class FileReviewCycleStoreTests
 
     private readonly InMemoryFileSystem _files = new();
 
-    private FileReviewCycleStore Store() => new(_files);
+    private FileReviewCycleStore Store(string currentDirectory = "/") =>
+        new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: currentDirectory));
 
     private void SeedFile(string folder, string name, string text)
     {
@@ -68,6 +70,61 @@ public sealed class FileReviewCycleStoreTests
         _files.CreateDirectory(Path.Combine(Scratchpad, "beta"));
 
         Assert.Equal(["alpha"], Store().TaskFolders(Scratchpad));
+    }
+
+    [Fact]
+    public void ReadFinishedReadsARelativeFolderAgainstTheWorkingDirectory()
+    {
+        string folder = Path.Combine("/work", "repo", "review", "cycle-1");
+        SeedFile(folder, ReviewCyclePlanning.FindingsFile, "{}");
+
+        ReviewCycleRecord cycle = Assert.Single(Store(currentDirectory: "/work").ReadFinished("repo/review"));
+
+        Assert.Equal(1, cycle.Number);
+    }
+
+    [Fact]
+    public void HasIdentityReadsARelativeFolderAgainstTheWorkingDirectory()
+    {
+        SeedFile(
+            Path.Combine("/work", "repo", "review", "cycle-1"),
+            ReviewCyclePlanning.IdentityFile,
+            "{}");
+
+        Assert.True(Store(currentDirectory: "/work").HasIdentity("repo/review/cycle-1"));
+    }
+
+    [Fact]
+    public void WriteIdentityResolvesARelativeFolderAgainstTheWorkingDirectory()
+    {
+        string relative = Path.Combine("repo", "review", "cycle-1");
+        ReviewCycleIdentity identity = new("feature/x", "0123456789abcdef0123456789abcdef01234567", "abc123");
+
+        Store(currentDirectory: "/work").WriteIdentity(relative, identity);
+
+        Assert.True(_files.FileExists(
+            Path.Combine("/work", "repo", "review", "cycle-1", ReviewCyclePlanning.IdentityFile)));
+    }
+
+    [Fact]
+    public void TaskFoldersReadsARelativeScratchpadAgainstTheWorkingDirectory()
+    {
+        _files.CreateDirectory(Path.Combine("/work", "repo", "scratchpad", "task-a", "review"));
+
+        Assert.Equal(
+            ["task-a"],
+            Store(currentDirectory: "/work").TaskFolders(Path.Combine("repo", "scratchpad")));
+    }
+
+    [Fact]
+    public void ReadThroughReadsARelativeFolderAgainstTheWorkingDirectory()
+    {
+        string folder = Path.Combine("/repo", "review", "cycle-2");
+        SeedFile(folder, ReviewCyclePlanning.FindingsFile, "{}");
+
+        ReviewCycleRecord cycle = Assert.Single(Store().ReadThrough("repo/review/cycle-2"));
+
+        Assert.Equal(2, cycle.Number);
     }
 
     [Fact]

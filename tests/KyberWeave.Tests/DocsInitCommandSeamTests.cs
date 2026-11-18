@@ -236,7 +236,7 @@ public sealed class DocsInitCommandSeamTests
     {
         FakeProcessEnvironment environment = new(currentDirectory: WorkingDirectory, readVariable: name => _variables.GetValueOrDefault(name));
         FakePathResolver paths = new(_files);
-        FileKyberWeaveConfigRepository configs = new(new FileRepositoryTreeProbe(_files), _files, paths, environment);
+        FileKyberWeaveConfigRepository configs = new(new FileRepositoryTreeProbe(_files, paths, environment), _files, paths, environment);
         DocsInitCommand command = new(_wiring, _scaffolder, _doctor, configs, _console, _files, paths, environment, _processes);
         return command.Execute(null!, settings, CancellationToken.None);
     }

@@ -199,7 +199,7 @@ public sealed class DocsOnboardingCommandTests
     {
         FakeProcessEnvironment environment = new(currentDirectory: WorkingDirectory);
         FakePathResolver paths = new(_files);
-        FileKyberWeaveConfigRepository configs = new(new FileRepositoryTreeProbe(_files), _files, paths, environment);
+        FileKyberWeaveConfigRepository configs = new(new FileRepositoryTreeProbe(_files, paths, environment), _files, paths, environment);
         DocsOnboardingCommand command = new(configs, _console, _files, paths, environment);
         DocsOnboardingSettings settings = path is null
             ? new DocsOnboardingSettings { Answer = answer }
