@@ -18,13 +18,10 @@ namespace KyberWeave.Tests.Arbiter;
 /// a provider that does not answer, a low-confidence answer and an evaluator fault all allow, and the record keeps
 /// what happened.
 /// </summary>
-public sealed class ArbiterFailOpenContractTests : IDisposable
+public sealed class ArbiterFailOpenContractTests
 {
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "kw-fail-open-" + Guid.NewGuid().ToString("N"));
-
-    public ArbiterFailOpenContractTests() => Directory.CreateDirectory(_root);
-
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    private readonly InMemoryArbiterState _state = new();
+    private readonly string _root = ArbiterTestRoots.Under("repo");
 
     /// <summary>Supplies a fixed changed-path set for the return triggers, as git would.</summary>
     private sealed class ChangedPaths(params string[] paths) : IArbiterGitFacts
@@ -36,23 +33,17 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
     }
 
     /// <summary>The shared plan reader every host uses, over this test's repository.</summary>
-    private sealed class RealPlanReader(string root) : IArbiterPlanReader
+    private sealed class SharedPlanReader(PlanFacts plans, string root) : IArbiterPlanReader
     {
         public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) =>
-            RealPlanFacts.Create().Enrich(facts, classification, root);
+            plans.Enrich(facts, classification, root);
     }
 
-    private ArbiterEvaluator Evaluator(IArbiterProvider provider, IArbiterGitFacts? git = null) => new(
-        provider,
-        _ => null,
-        RealArbiterState.Ledger(ArbiterEvaluatorFixtures.DirectoryFor(_root)),
-        RealArbiterState.Decisions(ArbiterEvaluatorFixtures.DirectoryFor(_root)),
-        git ?? new ChangedPaths("src/a.cs"),
-        new RealPlanReader(_root),
-        new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
-        TimeProvider.System, new FakeIdGenerator());
+    private ArbiterEvaluator Evaluator(IArbiterProvider provider, IArbiterGitFacts? git = null) =>
+        _state.Evaluator(
+            provider,
+            planReader: new SharedPlanReader(_state.PlanFacts(), _root),
+            gitFacts: git ?? new ChangedPaths("src/a.cs"));
 
     private static KyberWeaveConfig ShippedConfig() =>
         ArbiterEvaluatorFixtures.ConfigWith(ArbiterConfigDefaults.Product.Rules);
@@ -73,8 +64,8 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
     private void WritePlan(string relativePath)
     {
         string path = Path.Combine(_root, relativePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(
+        _state.Files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _state.Files.WriteAllText(
             path,
             "# Plan\n\n## Tasks\n\n### T3 — Add the parser\nFiles: src/a.cs\nRequired skills: dev-medium\n");
     }
@@ -104,13 +95,13 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
         Assert.False(result.IsError, result.ErrorMessage);
         Assert.Equal(RuleEffects.Allow, result.Outcome);
         ArbiterDecisionRecord record = Assert.Single(
-            ArbiterEvaluatorFixtures.Records(_root), decision => decision.Trigger.StartsWith("delegate", StringComparison.Ordinal)
+            _state.Records, decision => decision.Trigger.StartsWith("delegate", StringComparison.Ordinal)
                 && decision.Trigger != "delegate.model");
         Assert.DoesNotContain(record.Rules, rule => rule.Effect == RuleEffects.Escalate);
     }
 
     [Fact]
-    public async Task APlanFileWithASpace_IsReadFromDiskAndDoesNotBlock()
+    public async Task APlanFileWithASpace_IsReadFromTheRepositoryAndDoesNotBlock()
     {
         WritePlan("docs/plans/my plan.md");
         const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/my plan.md\nTASK: T3\n\nImplement the parser.";
@@ -119,7 +110,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
             Event("pre", "dev-medium", Prompt), ShippedConfig(), null, TestContext.Current.CancellationToken);
 
         Assert.Equal(RuleEffects.Allow, result.Outcome);
-        ArbiterDecisionRecord record = ArbiterEvaluatorFixtures.Records(_root).First(decision => decision.Trigger == "delegate");
+        ArbiterDecisionRecord record = _state.Records.First(decision => decision.Trigger == "delegate");
         // The rejected header's raw value found the plan on disk, a machine fact, so PLAN-001 decided at step 0.
         Assert.Contains(record.Rules, rule => rule.Id == "KW-ARB-PLAN-001" && rule.Answer == "has-tasks" && rule.Step == 0);
         // TASK: T3 matched the plan's task, so the task rules read it rather than their no-task guard.
@@ -140,7 +131,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
             .EvaluateAsync(Event("pre", "dev-medium", "KYBER-ARBITER: true\n\nPlease implement the parser."), ShippedConfig(), null, TestContext.Current.CancellationToken);
 
         Assert.Equal(RuleEffects.Allow, result.Outcome);
-        ArbiterDecisionRecord record = ArbiterEvaluatorFixtures.Records(_root).First(decision => decision.Trigger == "delegate");
+        ArbiterDecisionRecord record = _state.Records.First(decision => decision.Trigger == "delegate");
         ArbiterDecisionRule plan = Assert.Single(record.Rules, rule => rule.Id == "KW-ARB-PLAN-001");
         Assert.Equal(RuleEngine.Undecidable, plan.Answer);
         Assert.Equal(0.5, plan.Confidence);
@@ -159,7 +150,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
             .EvaluateAsync(Event("pre", "dev-medium", "KYBER-ARBITER: true\n\nPlease implement the parser."), ShippedConfig(), null, TestContext.Current.CancellationToken);
 
         Assert.Equal(RuleEffects.Escalate, result.Outcome);
-        ArbiterDecisionRecord record = ArbiterEvaluatorFixtures.Records(_root).First(decision => decision.Trigger == "delegate");
+        ArbiterDecisionRecord record = _state.Records.First(decision => decision.Trigger == "delegate");
         Assert.Contains(record.Rules, rule => rule.Id == "KW-ARB-PLAN-001" && rule.Answer == "no-plan" && rule.Step == 1);
     }
 
@@ -174,7 +165,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
 
         Assert.Equal(RuleEffects.Escalate, result.Outcome);
         Assert.Contains(
-            ArbiterEvaluatorFixtures.Records(_root).SelectMany(decision => decision.Rules),
+            _state.Records.SelectMany(decision => decision.Rules),
             rule => rule.Id == "KW-ARB-READONLY-001" && rule.Answer == "changed");
     }
 
@@ -189,7 +180,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
 
         Assert.Equal(RuleEffects.Escalate, result.Outcome);
         Assert.Contains(
-            ArbiterEvaluatorFixtures.Records(_root).SelectMany(decision => decision.Rules),
+            _state.Records.SelectMany(decision => decision.Rules),
             rule => rule.Id == "KW-ARB-PLANNER-DIFF-001" && rule.Answer == "outside");
     }
 
@@ -211,14 +202,14 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
     public void AGateReportPathWithASpace_IsStillRead()
     {
         string directory = Path.Combine(_root, "gate runs");
-        Directory.CreateDirectory(directory);
+        _state.Files.CreateDirectory(directory);
         string report = Path.Combine(directory, "gates.json");
-        File.WriteAllText(
+        _state.Files.WriteAllText(
             report,
             Core.Review.ReviewJson.Write(new Core.Review.GateReport(
                 Core.Review.GateReport.CurrentSchema, [new Core.Review.GateResult("build", true, 0, "pass")])));
 
-        Assert.True(RealGateReportFacts.Create().Agrees($"TASK_GATE: PASS report={report}", _root));
+        Assert.True(_state.GateReports().Agrees($"TASK_GATE: PASS report={report}", _root));
     }
 
     [Fact]

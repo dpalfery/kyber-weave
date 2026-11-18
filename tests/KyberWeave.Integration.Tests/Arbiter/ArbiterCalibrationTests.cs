@@ -10,7 +10,7 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using Xunit;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Integration.Tests.Arbiter;
 
 /// <summary>
 /// The labelled set the step-1 thresholds are measured against, and the measurement.

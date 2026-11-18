@@ -30,8 +30,6 @@ namespace KyberWeave.Tests.Arbiter;
 /// </remarks>
 public sealed class ArbiterModelDeliveryTests : IDisposable
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
     private const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: T2\n\nImplement T2.";
     private const string DifficultyRule = "KW-ARB-DIFFICULTY-001";
     private const string ScopeRule = "KW-ARB-SCOPE-002";
@@ -43,11 +41,11 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
         new HashSet<string>(StringComparer.Ordinal) { "sonnet", "opus", "haiku", "fable" },
         "https://code.claude.com/docs/en/sub-agents");
 
-    private readonly TempDirectory _repo = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose() => _repo.Dispose();
+    public void Dispose() => _host.Dispose();
 
-    private string ArbiterDirectory => Path.Combine(_repo.Path, "artifacts", "arbiter");
+    private string ArbiterDirectory => _host.ArbiterDirectory;
 
     /// <summary>
     /// The plan stands in for a free T2 owned by a developer tier, standard mode, so the primary allows. It
@@ -86,20 +84,19 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
         Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
     };
 
-    private ArbiterHookDecisionEngine Engine(IArbiterProvider provider) => ArbiterTestServices.Engine(
+    private ArbiterHookDecisionEngine Engine(IArbiterProvider provider) => _host.Engine(
         providerFactory: _ => provider,
         planReaderFactory: _ => new PlanStub(),
-        homeDirectory: () => _repo.Path);
+        homeDirectory: () => _host.RepoRoot);
 
     private HookContext Context() => new(
-        _repo.Path,
+        _host.RepoRoot,
         () => "decision-27",
         TextWriter.Null,
         ModelOverride: ClaudeOverride);
 
     private void WriteTable(string deepToken = "opus")
     {
-        Directory.CreateDirectory(ArbiterDirectory);
         ArbiterModelTargets table = new(
             ArbiterModelTargets.SchemaName,
             "claude",
@@ -115,7 +112,7 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
             {
                 ["dev-medium"] = new("general", "sonnet"),
             });
-        File.WriteAllText(
+        _ = _host.Write(
             Path.Combine(ArbiterDirectory, "model-targets.claude.json"),
             System.Text.Json.JsonSerializer.Serialize(table));
     }
@@ -133,7 +130,7 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
             dispatchModel: dispatchModel);
 
     private ArbiterDecisionRecord DelegateModelRecord() =>
-        Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), record => record.Trigger == ModelTrigger);
+        Assert.Single(_host.Decisions, record => record.Trigger == ModelTrigger);
 
     [Fact]
     public void EnforceWithADeliveringResolver_CarriesTheResolvedTokenOnAllow()
@@ -260,8 +257,9 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
 
     private static string AgentDispatchPayload()
     {
-        JsonNode root = JsonNode.Parse(Corpus.ReadText(
-            "tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/pre-agent-dispatch.json"))
+        JsonNode root = JsonNode.Parse(EmbeddedFixtureText.Read(
+            typeof(ArbiterModelDeliveryTests).Assembly,
+            "arbiter-hooks/claude/pre-agent-dispatch.json"))
             ?? throw new InvalidOperationException("The shipped Claude fixture is not a JSON document.");
         root["tool_input"] = new JsonObject
         {

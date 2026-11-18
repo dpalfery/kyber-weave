@@ -5,6 +5,7 @@ using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Review;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -15,13 +16,23 @@ namespace KyberWeave.Tests.Arbiter;
 /// report older than the passing one, read by <see cref="GateReportFacts.FailingRunFirst" />. Every answer allows and
 /// is logged; the answer is what the decision log records for monitoring, and an unreadable claim leaves it undecidable.
 /// </summary>
-public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
+public sealed class ArbiterMode002FailingRunFirstTests
 {
     private const string RuleId = "KW-ARB-MODE-002";
 
-    private readonly string _root = Directory.CreateTempSubdirectory("kw-mode-002-").FullName;
+    private readonly string _root = ArbiterTestRoots.Under("kw-mode-002");
+    private readonly SettableClock _clock = new();
+    private readonly InMemoryArbiterState _state;
 
-    public void Dispose() => Directory.Delete(_root, true);
+    public ArbiterMode002FailingRunFirstTests() => _state = new InMemoryArbiterState(new InMemoryFileSystem(_clock));
+
+    /// <summary>A clock a test sets to the time a report is written at, since the file system stamps each write with it.</summary>
+    private sealed class SettableClock : TimeProvider
+    {
+        internal DateTimeOffset Now { get; set; }
+
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
 
     private static ArbiterRule Rule() =>
         Assert.Single(ArbiterConfigDefaults.Product.Rules, rule => string.Equals(rule.Id, RuleId, StringComparison.Ordinal));
@@ -29,10 +40,10 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
     private string Write(string name, GateReport report, DateTime writtenAt)
     {
         string folder = Path.Combine(_root, ".agent_scratchpad", "T3");
-        Directory.CreateDirectory(folder);
+        _state.Files.CreateDirectory(folder);
         string path = Path.Combine(folder, name);
-        File.WriteAllText(path, ReviewJson.Write(report));
-        File.SetLastWriteTimeUtc(path, writtenAt);
+        _clock.Now = new DateTimeOffset(writtenAt, TimeSpan.Zero);
+        _state.Files.WriteAllText(path, ReviewJson.Write(report));
         return path;
     }
 
@@ -66,7 +77,7 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
         Write("task-gate-red.json", Failing(), Earlier);
         string pass = Write("task-gate.json", Passing(), Later);
 
-        Assert.True(RealGateReportFacts.Create().FailingRunFirst(Claim(pass), _root));
+        Assert.True(_state.GateReports().FailingRunFirst(Claim(pass), _root));
     }
 
     [Fact]
@@ -74,7 +85,7 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
     {
         string pass = Write("task-gate.json", Passing(), Later);
 
-        Assert.False(RealGateReportFacts.Create().FailingRunFirst(Claim(pass), _root));
+        Assert.False(_state.GateReports().FailingRunFirst(Claim(pass), _root));
     }
 
     [Fact]
@@ -83,7 +94,7 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
         Write("task-gate-red.json", Failing(), Later);
         string pass = Write("task-gate.json", Passing(), Earlier);
 
-        Assert.False(RealGateReportFacts.Create().FailingRunFirst(Claim(pass), _root));
+        Assert.False(_state.GateReports().FailingRunFirst(Claim(pass), _root));
     }
 
     [Fact]
@@ -91,7 +102,7 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
     {
         string red = Write("task-gate.json", Failing(), Later);
 
-        Assert.False(RealGateReportFacts.Create().FailingRunFirst(Claim(red), _root));
+        Assert.False(_state.GateReports().FailingRunFirst(Claim(red), _root));
     }
 
     /// <summary>A rework dispatch adds a new passing run; the failing run of the task's first pass still precedes it.</summary>
@@ -102,7 +113,7 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
         Write("task-gate.json", Passing(), Earlier.AddMinutes(5));
         string rework = Write("task-gate-rework.json", Passing(), Later);
 
-        Assert.True(RealGateReportFacts.Create().FailingRunFirst(Claim(rework), _root));
+        Assert.True(_state.GateReports().FailingRunFirst(Claim(rework), _root));
     }
 
     [Theory]
@@ -111,7 +122,7 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
     [InlineData("TASK_GATE: PASS — agent=dev-medium report=.agent_scratchpad/T3/missing.json")]
     public void AClaimOrReportThatCannotBeReadLeavesTheFactAbsent(string returned)
     {
-        Assert.Null(RealGateReportFacts.Create().FailingRunFirst(returned, _root));
+        Assert.Null(_state.GateReports().FailingRunFirst(returned, _root));
     }
 
     [Fact]
@@ -119,7 +130,7 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
     {
         string failed = Write("task-gate.json", new GateReport(GateReport.CurrentSchema, [new GateResult("tests", true, 1, "1 failed")]), Later);
 
-        Assert.Null(RealGateReportFacts.Create().FailingRunFirst($"TASK_GATE: FAIL report={failed}", _root));
+        Assert.Null(_state.GateReports().FailingRunFirst($"TASK_GATE: FAIL report={failed}", _root));
     }
 
     [Fact]

@@ -32,28 +32,20 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
         "|---|---|---|---|\n" +
         "| warning | `src/Widget.cs` | L12 | Rename this variable to something clearer. |\n";
 
-    private readonly TempDirectory _repo = new();
-    private readonly TempDirectory _home = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose()
-    {
-        _repo.Dispose();
-        _home.Dispose();
-    }
+    public void Dispose() => _host.Dispose();
 
     private void WriteCitedFile()
     {
-        string full = Path.Combine(_repo.Path, CitedPath);
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, string.Join("\n", Enumerable.Range(1, 30).Select(i => $"var v{i} = {i};")));
+        _ = _host.Write(Path.Combine(_host.RepoRoot, CitedPath), string.Join("\n", Enumerable.Range(1, 30).Select(i => $"var v{i} = {i};")));
     }
 
     /// <summary>The served tools over a configuration. The default is the shipped rules with the bot login configured.</summary>
     private ArbiterTools Tools(IArbiterProvider provider, KyberWeaveConfig? config = null)
     {
-        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
-            providerFactory: _ => provider,
-            homeDirectory: () => _home.Path);
+        ArbiterHookDecisionEngine engine = _host.Engine(
+            providerFactory: _ => provider);
         KyberWeaveConfig configured = config ?? new KyberWeaveConfig
         {
             Arbiter = ArbiterConfigDefaults.Product with
@@ -62,12 +54,7 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
                 CommentTriage = new ArbiterCommentTriageConfig([BotLogin]),
             },
         };
-        return ArbiterTestServices.Tools(new ArbiterServeContext(
-            _repo.Path,
-            engine,
-            TextWriter.Null,
-            _ => configured,
-            _ => true));
+        return _host.Tools(engine, loadConfig: _ => configured);
     }
 
     /// <summary>A host configuration that sets the comment rule's shadow state, on top of the shipped rules.</summary>

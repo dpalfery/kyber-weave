@@ -27,35 +27,20 @@ public sealed class ArbiterServedContainmentTests : IDisposable
 {
     private const string OutsideMessageStem = "was not found under the repository root.";
 
-    private readonly TempDirectory _repo = new();
-    private readonly TempDirectory _home = new();
-    private readonly TempDirectory _outside = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose()
-    {
-        _repo.Dispose();
-        _home.Dispose();
-        _outside.Dispose();
-    }
+    public void Dispose() => _host.Dispose();
 
     private ArbiterTools Tools()
     {
-        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
-            providerFactory: _ => new FakeArbiterProvider { RequestSent = false, Model = null },
-            homeDirectory: () => _home.Path);
-        return ArbiterTestServices.Tools(new ArbiterServeContext(
-            _repo.Path,
-            engine,
-            TextWriter.Null,
-            ArbiterTestServices.LoadHostConfig,
-            _ => true));
+        ArbiterHookDecisionEngine engine = _host.Engine(
+            providerFactory: _ => new FakeArbiterProvider { RequestSent = false, Model = null });
+        return _host.Tools(engine);
     }
 
     private string WriteOutsideDocument()
     {
-        string path = Path.Combine(_outside.Path, "guide.md");
-        File.WriteAllText(path, "# Guide\nIntro.\n## Install\nSteps.\n");
-        return path;
+        return _host.Write(Path.Combine(ArbiterTestRoots.Under("outside"), "guide.md"), "# Guide\nIntro.\n## Install\nSteps.\n");
     }
 
     private static JsonElement ErrorOnly(string json)
@@ -71,9 +56,7 @@ public sealed class ArbiterServedContainmentTests : IDisposable
     [Fact]
     public void AnOversizedDocumentThroughTheSectionsToolIsAnErrorAnswer()
     {
-        string path = Path.Combine(_repo.Path, "docs", "big.md");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, "# Big\n" + new string('a', (int)SectionSelector.MaxDocumentBytes));
+        _ = _host.Write(Path.Combine(_host.RepoRoot, "docs", "big.md"), "# Big\n" + new string('a', (int)SectionSelector.MaxDocumentBytes));
 
         JsonElement root = ErrorOnly(Tools().SelectRelevantDocumentSections("docs/big.md", "Change the install steps."));
 
@@ -110,19 +93,19 @@ public sealed class ArbiterServedContainmentTests : IDisposable
     [Fact]
     public void TheCommentCommandRefusesAFileOutsideTheRoot()
     {
-        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+        ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
+        ArbiterCommandRun run = _host.Run(() => command.Execute(
             null!,
             new ArbiterCommentSettings
             {
-                Root = _repo.Path,
+                Root = _host.RepoRoot,
                 Path = WriteOutsideDocument(),
                 Line = 2,
                 Body = "Shorten this heading.",
             }));
 
-        Assert.Equal(1, execution.Result);
-        ConsoleOutputAssert.ContainsUnwrapped(OutsideMessageStem, execution.Output);
-        Assert.DoesNotContain("decision", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, run.ExitCode);
+        ConsoleOutputAssert.ContainsUnwrapped(OutsideMessageStem, run.Output);
+        Assert.DoesNotContain("decision", run.Output, StringComparison.OrdinalIgnoreCase);
     }
 }

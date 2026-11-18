@@ -8,7 +8,6 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
-using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -31,41 +30,9 @@ namespace KyberWeave.Tests.Arbiter;
 /// </remarks>
 public sealed class ArbiterGateReportRuleTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+    private readonly InMemoryArbiterState _state = new();
 
     private const string GateReportRule = "KW-ARB-GATE-REPORT-001";
-
-    private static readonly string[] RoleRulesPaths =
-    [
-        "products/kyber-squad/standards/conductor/conductor.arbiter-rules.yml",
-        "products/kyber-squad/standards/architect/architect.arbiter-rules.yml",
-        "products/kyber-squad/standards/reviewer/reviewer.arbiter-rules.yml"
-    ];
-
-    /// <summary>
-    /// The seventeen rules the file shipped before it that it still ships, pinned so the new one joins without renumbering any.
-    /// Rule ids are permanent: suppressions, baselines and code-scanning alerts key on them.
-    /// </summary>
-    private static readonly string[] ShippedBeforeThisSlice =
-    [
-        "KW-ARB-PLAN-001",
-        "KW-ARB-SCOPE-001",
-        "KW-ARB-SCOPE-002",
-        "KW-ARB-READY-001",
-        "KW-ARB-OWNER-001",
-        "KW-ARB-OWNER-002",
-        "KW-ARB-ROSTER-001",
-        "KW-ARB-DIFF-001",
-        "KW-ARB-PLANNER-001",
-        "KW-ARB-PLANNER-DIFF-001",
-        "KW-ARB-READONLY-001",
-        "KW-ARB-LENS-001",
-        "KW-ARB-QUOTE-001",
-        "KW-ARB-PREEX-001",
-        "KW-ARB-CLAIM-001",
-        "KW-ARB-GATE-CORROBORATED-001",
-        "KW-ARB-GATE-001",
-    ];
 
     /// <summary>The shipped rule, or a failure that names the id it should have.</summary>
     private static ArbiterRule Rule()
@@ -204,8 +171,8 @@ public sealed class ArbiterGateReportRuleTests
     [Fact]
     public void TheDeclaredTaskGateFactUsesTheParentsTechnology()
     {
-        InMemoryFileSystem files = new();
-        string standard = Path.Combine("/repo", "docs", "standards", "react", "react.standards.md");
+        InMemoryFileSystem files = _state.Files;
+        string standard = Path.Combine(ArbiterTestRoots.Under("repo"), "docs", "standards", "react", "react.standards.md");
         files.CreateDirectory(Path.GetDirectoryName(standard)!);
         files.WriteAllText(
             standard,
@@ -237,7 +204,7 @@ public sealed class ArbiterGateReportRuleTests
         ArbiterFactSet facts = TriggerFactBuilder.Build(
             "delegate.returned", "developer",
             "KYBER-ARBITER: true\nTECHNOLOGY: react\n\nDo the work.", "conductor",
-            ArbiterCallerSources.Harness, config, repoRoot: "/repo", files: files);
+            ArbiterCallerSources.Harness, config, repoRoot: ArbiterTestRoots.Under("repo"), files: files);
 
         Assert.True(facts.TryGet("config.task-gates-declared", out ArbiterFact? fact));
         Assert.Equal(true, fact.Value);
@@ -251,8 +218,8 @@ public sealed class ArbiterGateReportRuleTests
     [Fact]
     public void TheDeclaredTaskGateFactSurvivesAStandardTheProcessMayNotRead()
     {
-        InMemoryFileSystem files = new();
-        string standard = Path.Combine("/repo", "docs", "standards", "react", "react.standards.md");
+        InMemoryFileSystem files = _state.Files;
+        string standard = Path.Combine(ArbiterTestRoots.Under("repo"), "docs", "standards", "react", "react.standards.md");
         files.CreateDirectory(Path.GetDirectoryName(standard)!);
         files.WriteAllText(
             standard,
@@ -288,7 +255,7 @@ public sealed class ArbiterGateReportRuleTests
         ArbiterFactSet facts = TriggerFactBuilder.Build(
             "delegate.returned", "developer",
             "KYBER-ARBITER: true\nTECHNOLOGY: react\n\nDo the work.", "conductor",
-            ArbiterCallerSources.Harness, config, repoRoot: "/repo", files: files);
+            ArbiterCallerSources.Harness, config, repoRoot: ArbiterTestRoots.Under("repo"), files: files);
 
         Assert.True(facts.TryGet("config.task-gates-declared", out ArbiterFact? fact));
         Assert.Equal(false, fact.Value);
@@ -297,193 +264,136 @@ public sealed class ArbiterGateReportRuleTests
     [Fact]
     public void AnAgreeingReportAllowsTheDispatch()
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-agree-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempDir);
-        try
-        {
-            string reportPath = Path.Combine(tempDir, "gates.json");
-            GateReport report = new(
-                GateReport.CurrentSchema,
-                [new GateResult("build", true, 0, "pass")]);
-            File.WriteAllText(reportPath, ReviewJson.Write(report));
+        string tempDir = ArbiterTestRoots.Under("kw-test-gate-agree");
+        _state.Files.CreateDirectory(tempDir);
+        string reportPath = Path.Combine(tempDir, "gates.json");
+        GateReport report = new(
+            GateReport.CurrentSchema,
+            [new GateResult("build", true, 0, "pass")]);
+        _state.Files.WriteAllText(reportPath, ReviewJson.Write(report));
 
-            string returned = $"TASK_GATE: PASS report={reportPath}";
-            bool? agrees = RealGateReportFacts.Create().Agrees(returned, tempDir);
-            Assert.True(agrees);
+        string returned = $"TASK_GATE: PASS report={reportPath}";
+        bool? agrees = _state.GateReports().Agrees(returned, tempDir);
+        Assert.True(agrees);
 
-            ArbiterFactSet facts = new ArbiterFactSet()
-                .With(GateReportFacts.AgreesFact, agrees, ArbiterFactLabel.Derived);
+        ArbiterFactSet facts = new ArbiterFactSet()
+            .With(GateReportFacts.AgreesFact, agrees, ArbiterFactLabel.Derived);
 
-            Assert.Equal(RuleEffects.Allow, EffectFor(facts));
-        }
-        finally
-        {
-            Directory.Delete(tempDir, true);
-        }
+        Assert.Equal(RuleEffects.Allow, EffectFor(facts));
     }
 
     [Fact]
     public void ADisagreeingReportEscalatesTheDispatch()
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-disagree-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempDir);
-        try
-        {
-            string reportPath = Path.Combine(tempDir, "gates.json");
-            GateReport report = new(
-                GateReport.CurrentSchema,
-                [new GateResult("build", true, 1, "failed")]);
-            File.WriteAllText(reportPath, ReviewJson.Write(report));
+        string tempDir = ArbiterTestRoots.Under("kw-test-gate-disagree");
+        _state.Files.CreateDirectory(tempDir);
+        string reportPath = Path.Combine(tempDir, "gates.json");
+        GateReport report = new(
+            GateReport.CurrentSchema,
+            [new GateResult("build", true, 1, "failed")]);
+        _state.Files.WriteAllText(reportPath, ReviewJson.Write(report));
 
-            string returned = $"TASK_GATE: PASS report={reportPath}";
-            bool? agrees = RealGateReportFacts.Create().Agrees(returned, tempDir);
-            Assert.False(agrees);
+        string returned = $"TASK_GATE: PASS report={reportPath}";
+        bool? agrees = _state.GateReports().Agrees(returned, tempDir);
+        Assert.False(agrees);
 
-            ArbiterFactSet facts = new ArbiterFactSet()
-                .With(GateReportFacts.AgreesFact, agrees, ArbiterFactLabel.Derived);
+        ArbiterFactSet facts = new ArbiterFactSet()
+            .With(GateReportFacts.AgreesFact, agrees, ArbiterFactLabel.Derived);
 
-            Assert.Equal(RuleEffects.Escalate, EffectFor(facts));
-        }
-        finally
-        {
-            Directory.Delete(tempDir, true);
-        }
+        Assert.Equal(RuleEffects.Escalate, EffectFor(facts));
     }
 
     [Fact]
     public void FieldOrderDoesNotAffectClaimParsing()
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-order-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempDir);
-        try
-        {
-            string passReport = Path.Combine(tempDir, "pass.json");
-            GateReport pass = new(GateReport.CurrentSchema, [new GateResult("build", true, 0, "pass")]);
-            File.WriteAllText(passReport, ReviewJson.Write(pass));
+        string tempDir = ArbiterTestRoots.Under("kw-test-gate-order");
+        _state.Files.CreateDirectory(tempDir);
+        string passReport = Path.Combine(tempDir, "pass.json");
+        GateReport pass = new(GateReport.CurrentSchema, [new GateResult("build", true, 0, "pass")]);
+        _state.Files.WriteAllText(passReport, ReviewJson.Write(pass));
 
-            string returned = $"TASK_GATE: report={passReport} PASS";
-            bool? agrees = RealGateReportFacts.Create().Agrees(returned, tempDir);
-            Assert.True(agrees);
-        }
-        finally
-        {
-            Directory.Delete(tempDir, true);
-        }
+        string returned = $"TASK_GATE: report={passReport} PASS";
+        bool? agrees = _state.GateReports().Agrees(returned, tempDir);
+        Assert.True(agrees);
     }
 
     [Fact]
     public void SuccessfulRetryWithNewReportCorroboratesPass()
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-retry-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempDir);
-        try
-        {
-            string failReport = Path.Combine(tempDir, "fail.json");
-            GateReport fail = new(GateReport.CurrentSchema, [new GateResult("build", true, 1, "failed")]);
-            File.WriteAllText(failReport, ReviewJson.Write(fail));
+        string tempDir = ArbiterTestRoots.Under("kw-test-gate-retry");
+        _state.Files.CreateDirectory(tempDir);
+        string failReport = Path.Combine(tempDir, "fail.json");
+        GateReport fail = new(GateReport.CurrentSchema, [new GateResult("build", true, 1, "failed")]);
+        _state.Files.WriteAllText(failReport, ReviewJson.Write(fail));
 
-            string passReport = Path.Combine(tempDir, "pass.json");
-            GateReport pass = new(GateReport.CurrentSchema, [new GateResult("build", true, 0, "pass")]);
-            File.WriteAllText(passReport, ReviewJson.Write(pass));
+        string passReport = Path.Combine(tempDir, "pass.json");
+        GateReport pass = new(GateReport.CurrentSchema, [new GateResult("build", true, 0, "pass")]);
+        _state.Files.WriteAllText(passReport, ReviewJson.Write(pass));
 
-            string returned = $"TASK_GATE: FAIL report={failReport}\nTASK_GATE: PASS report={passReport}";
-            bool? agrees = RealGateReportFacts.Create().Agrees(returned, tempDir);
-            Assert.True(agrees);
-        }
-        finally
-        {
-            Directory.Delete(tempDir, true);
-        }
+        string returned = $"TASK_GATE: FAIL report={failReport}\nTASK_GATE: PASS report={passReport}";
+        bool? agrees = _state.GateReports().Agrees(returned, tempDir);
+        Assert.True(agrees);
     }
 
     [Fact]
     public void ConflictingStatusesOnSameReportPathDoNotCorroboratePass()
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-same-report-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempDir);
-        try
-        {
-            string report = Path.Combine(tempDir, "gates.json");
-            GateReport pass = new(GateReport.CurrentSchema, [new GateResult("build", true, 0, "pass")]);
-            File.WriteAllText(report, ReviewJson.Write(pass));
+        string tempDir = ArbiterTestRoots.Under("kw-test-gate-same-report");
+        _state.Files.CreateDirectory(tempDir);
+        string report = Path.Combine(tempDir, "gates.json");
+        GateReport pass = new(GateReport.CurrentSchema, [new GateResult("build", true, 0, "pass")]);
+        _state.Files.WriteAllText(report, ReviewJson.Write(pass));
 
-            string returned = $"TASK_GATE: FAIL report={report}\nTASK_GATE: PASS report={report}";
-            bool? agrees = RealGateReportFacts.Create().Agrees(returned, tempDir);
-            Assert.False(agrees);
-        }
-        finally
-        {
-            Directory.Delete(tempDir, true);
-        }
+        string returned = $"TASK_GATE: FAIL report={report}\nTASK_GATE: PASS report={report}";
+        bool? agrees = _state.GateReports().Agrees(returned, tempDir);
+        Assert.False(agrees);
     }
 
     [Fact]
     public void ConflictingStatusesOnSameReportPathWithUnnormalizedSpellingDoNotCorroboratePass()
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-unnormalized-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempDir);
-        try
-        {
-            string report = Path.Combine(tempDir, "gates.json");
-            GateReport pass = new(GateReport.CurrentSchema, [new GateResult("build", true, 0, "pass")]);
-            File.WriteAllText(report, ReviewJson.Write(pass));
+        string tempDir = ArbiterTestRoots.Under("kw-test-gate-unnormalized");
+        _state.Files.CreateDirectory(tempDir);
+        string report = Path.Combine(tempDir, "gates.json");
+        GateReport pass = new(GateReport.CurrentSchema, [new GateResult("build", true, 0, "pass")]);
+        _state.Files.WriteAllText(report, ReviewJson.Write(pass));
 
-            string unnormalized = Path.Combine(tempDir, ".", "gates.json");
-            string returned = $"TASK_GATE: FAIL report={unnormalized}\nTASK_GATE: PASS report={report}";
-            bool? agrees = RealGateReportFacts.Create().Agrees(returned, tempDir);
-            Assert.False(agrees);
-        }
-        finally
-        {
-            Directory.Delete(tempDir, true);
-        }
+        string unnormalized = Path.Combine(tempDir, ".", "gates.json");
+        string returned = $"TASK_GATE: FAIL report={unnormalized}\nTASK_GATE: PASS report={report}";
+        bool? agrees = _state.GateReports().Agrees(returned, tempDir);
+        Assert.False(agrees);
     }
 
     [Fact]
     public void AbsoluteReportPathOutsideRepositoryRootIsRefused()
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-path-" + Guid.NewGuid().ToString("N"));
-        string outsideDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-outside-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempDir);
-        Directory.CreateDirectory(outsideDir);
-        try
-        {
-            string outsideReport = Path.Combine(outsideDir, "gates.json");
-            GateReport pass = new(GateReport.CurrentSchema, [new GateResult("build", true, 0, "pass")]);
-            File.WriteAllText(outsideReport, ReviewJson.Write(pass));
+        string tempDir = ArbiterTestRoots.Under("kw-test-gate-path");
+        string outsideDir = ArbiterTestRoots.Under("kw-test-gate-outside");
+        _state.Files.CreateDirectory(tempDir);
+        _state.Files.CreateDirectory(outsideDir);
+        string outsideReport = Path.Combine(outsideDir, "gates.json");
+        GateReport pass = new(GateReport.CurrentSchema, [new GateResult("build", true, 0, "pass")]);
+        _state.Files.WriteAllText(outsideReport, ReviewJson.Write(pass));
 
-            string returned = $"TASK_GATE: PASS report={outsideReport}";
-            bool? agrees = RealGateReportFacts.Create().Agrees(returned, tempDir);
-            Assert.Null(agrees);
-        }
-        finally
-        {
-            Directory.Delete(tempDir, true);
-            Directory.Delete(outsideDir, true);
-        }
+        string returned = $"TASK_GATE: PASS report={outsideReport}";
+        bool? agrees = _state.GateReports().Agrees(returned, tempDir);
+        Assert.Null(agrees);
     }
 
     [Fact]
     public void AnEmptyOrPrecedingMarkerLineDoesNotAbortClaimExtraction()
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-multi-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempDir);
-        try
-        {
-            string reportPath = Path.Combine(tempDir, "gates.json");
-            GateReport report = new(
-                GateReport.CurrentSchema,
-                [new GateResult("build", true, 0, "pass")]);
-            File.WriteAllText(reportPath, ReviewJson.Write(report));
+        string tempDir = ArbiterTestRoots.Under("kw-test-gate-multi");
+        _state.Files.CreateDirectory(tempDir);
+        string reportPath = Path.Combine(tempDir, "gates.json");
+        GateReport report = new(
+            GateReport.CurrentSchema,
+            [new GateResult("build", true, 0, "pass")]);
+        _state.Files.WriteAllText(reportPath, ReviewJson.Write(report));
 
-            string returned = $"Example: TASK_GATE:\nQuoted: TASK_GATE: PASS\nTASK_GATE: PASS report={reportPath}";
-            bool? agrees = RealGateReportFacts.Create().Agrees(returned, tempDir);
-            Assert.True(agrees);
-        }
-        finally
-        {
-            Directory.Delete(tempDir, true);
-        }
+        string returned = $"Example: TASK_GATE:\nQuoted: TASK_GATE: PASS\nTASK_GATE: PASS report={reportPath}";
+        bool? agrees = _state.GateReports().Agrees(returned, tempDir);
+        Assert.True(agrees);
     }
 
     /// <summary>
@@ -500,49 +410,5 @@ public sealed class ArbiterGateReportRuleTests
         Assert.DoesNotContain(rule.Decide!, clause => string.Equals(clause.Answer, "missing", StringComparison.Ordinal));
         Assert.NotNull(rule.Ask);
         Assert.Contains("missing", rule.Ask.Criteria!.Keys);
-    }
-
-    /// <summary>
-    /// The rule file is the shipped contract, and its header is part of it: a reader checking how many
-    /// rules ship must not have to count them. The new rule is added and the header updated to match,
-    /// with no existing id renumbered.
-    /// </summary>
-    [Fact]
-    public void TheShippedFileCountsTheNewRuleAndRenumbersNone()
-    {
-        Assert.All(RoleRulesPaths, path => Assert.True(Corpus.Exists(path), $"the role rules file must live at '{path}'."));
-        string[] ids =
-        [
-            .. RoleRulesPaths
-                .SelectMany(path => CorpusLines.Split(Corpus.ReadText(path)))
-                .Select(line => line.Trim())
-                .Where(line => line.StartsWith("- id: ", StringComparison.Ordinal))
-                .Select(line => line["- id: ".Length..].Trim())
-        ];
-
-        Assert.Equal(36, ids.Length);
-        Assert.Contains(GateReportRule, ids);
-        Assert.All(ShippedBeforeThisSlice, id => Assert.Contains(id, ids));
-        Assert.True(
-            ids.Length >= ShippedBeforeThisSlice.Length + 1,
-            $"The file ships {ids.Length} rules; '{GateReportRule}' is added to the {ShippedBeforeThisSlice.Length} " +
-            "this tree already ships.");
-    }
-
-    /// <summary>
-    /// The header's own count, read from its first line: "The 18 shipped Arbiter rules. ...".
-    /// </summary>
-    private static int DeclaredRuleCount(string headerLine)
-    {
-        string[] words = headerLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        int shipped = Array.IndexOf(words, "shipped");
-        Assert.True(
-            shipped > 0,
-            $"The first line of the shipped rules file must state how many rules it holds. Read: '{headerLine}'.");
-        string declared = words[shipped - 1];
-        Assert.True(
-            int.TryParse(declared, out int count),
-            $"The first line of the shipped rules file must state its count as a number. Read: '{declared}'.");
-        return count;
     }
 }
