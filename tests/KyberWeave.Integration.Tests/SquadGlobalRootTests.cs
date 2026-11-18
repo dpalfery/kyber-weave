@@ -7,6 +7,7 @@ using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -34,6 +35,8 @@ namespace KyberWeave.Integration.Tests;
 /// </remarks>
 public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private readonly TempDirectory _temp = new();
     private readonly SquadCorpusTemplate _corpus;
 
@@ -1263,7 +1266,7 @@ public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, I
         // Guard: verify that every registered renderer's global output contains no path starting with
         // the target's legacy prefix. This ensures the layout classification cannot mistake per-target
         // renders for legacy single-root paths.
-        string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string productRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
 
         // Map of target to its legacy prefix from the investigation findings.
         Dictionary<SquadTarget, string> legacyPrefixes = new()

@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Fakes;
 
@@ -19,6 +20,8 @@ namespace KyberWeave.Tests.Fakes;
 /// </remarks>
 public static class TestGitRepositoryTemplate
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     internal static readonly string TemplateRoot =
         Path.Combine(Path.GetTempPath(), "kyber-weave-git-templates-" + Guid.NewGuid().ToString("N"));
 
@@ -531,7 +534,7 @@ public static class TestGitRepositoryTemplate
         IReadOnlyList<string> technologies)
     {
         string cleanPath = Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "tests", "fixtures", "gate-catalogue", family, "clean");
+            Corpus.Root, "tests", "fixtures", "gate-catalogue", family, "clean");
         CopyDirectory(cleanPath, repo);
         WriteHostConfig(repo, technologies);
         RunGit(repo, "init", "--quiet");

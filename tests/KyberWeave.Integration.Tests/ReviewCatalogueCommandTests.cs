@@ -4,6 +4,7 @@ using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Processes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -20,6 +21,8 @@ namespace KyberWeave.Integration.Tests;
 /// </remarks>
 public sealed class ReviewCatalogueCommandTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private readonly TempDirectory _temp = new();
 
     public void Dispose() => _temp.Dispose();
@@ -189,7 +192,7 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
 
     private static string FixtureCleanPath(string family) =>
         Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "tests", "fixtures", "gate-catalogue", family, "clean");
+            Corpus.Root, "tests", "fixtures", "gate-catalogue", family, "clean");
 
     private static string ConfigPath(string repo) =>
         Path.Combine(repo, ".kyber-weave", "kyber-weave.yml");

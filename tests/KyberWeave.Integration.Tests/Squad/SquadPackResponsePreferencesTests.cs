@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Packaging;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests.Squad;
 
@@ -19,6 +20,8 @@ namespace KyberWeave.Integration.Tests.Squad;
 /// </summary>
 public sealed class SquadPackResponsePreferencesTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string ConductorAgent = "agents/conductor.md";
     private const string BugCrusherAgent = "agents/bug-crusher.md";
     private const string BugCrusherSkill = "skills/bug-crusher/SKILL.md";
@@ -36,10 +39,10 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     public void Dispose() => _temp.Dispose();
 
     private static string ProductRoot =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     private static string DefaultText =>
-        File.ReadAllText(Path.Combine(ProductRoot, "response-guidance.default.md"), Encoding.UTF8);
+        Corpus.ReadText("products/kyber-squad/response-guidance.default.md");
 
     private const string OperatorText = "operator pack-isolation sentinel: must never reach an archive";
 
@@ -178,7 +181,7 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
         ProcessStartInfo startInfo = new(CliHostPath())
         {
             // squad pack is maintainer-only and resolves its source from the repository root.
-            WorkingDirectory = KyberWeaveTestPaths.ToolRoot,
+            WorkingDirectory = Corpus.Root,
             UseShellExecute = false,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
@@ -263,12 +266,11 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     [Fact]
     public void Packer_SourceContainsNoAmbientHomeOrEnvironmentReads()
     {
-        string packagingDir = Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Data", "Squad", "Packaging");
-        Assert.True(Directory.Exists(packagingDir), $"Expected packaging source at '{packagingDir}'.");
-
-        string[] sources = Directory.GetFiles(packagingDir, "*.cs", SearchOption.AllDirectories);
-        Assert.NotEmpty(sources);
+        const string packagingDir = "src/KyberWeave.Data/Squad/Packaging";
+        string[] sources = [.. Corpus.EnumerateFiles(packagingDir, "*.cs").Order(StringComparer.Ordinal)];
+        Assert.True(
+            sources.Length > 0,
+            $"Expected packaging source under '{packagingDir}'; the scan found none.");
 
         string[] forbidden =
         [
@@ -287,7 +289,7 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
         bool sawAllowedDefaultSeam = false;
         foreach (string sourcePath in sources)
         {
-            string source = File.ReadAllText(sourcePath, Encoding.UTF8);
+            string source = Corpus.ReadText(sourcePath);
             if (source.Contains("SquadResponseGuidanceSource.DefaultText", StringComparison.Ordinal))
                 sawAllowedDefaultSeam = true;
 

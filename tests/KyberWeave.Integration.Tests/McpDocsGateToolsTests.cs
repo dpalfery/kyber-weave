@@ -16,6 +16,7 @@ using ModelContextProtocol.Server;
 using Xunit.Sdk;
 using Xunit;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -26,11 +27,13 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 public sealed class McpDocsGateToolsTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string ValidateToolName = "docs_validate_governed_document_schema";
     private const string DriftToolName = "docs_detect_drift_between_documents_and_code";
 
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     /// <summary>
     /// The header contract a gate tool leads with: root, the branch and git directory it was read

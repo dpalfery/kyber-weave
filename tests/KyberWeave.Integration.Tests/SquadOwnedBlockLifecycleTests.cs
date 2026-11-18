@@ -9,6 +9,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -21,6 +22,8 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 public sealed class SquadOwnedBlockLifecycleTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     /// <summary>
     /// The bare global hook path four of the five formats write beneath their own root; only the
     /// target tells them apart, which is the subject of the global cases below.
@@ -1056,15 +1059,7 @@ public sealed class SquadOwnedBlockLifecycleTests
     /// shape, which is what makes it evidence that an upgrade keeps its state.
     /// </summary>
     private static string Rc20GlobalReceiptJson() =>
-        File.ReadAllText(
-            Path.Combine(
-                KyberWeaveTestPaths.ToolRoot,
-                "tests",
-                "KyberWeave.Tests",
-                "Fixtures",
-                "squad-rc20-global",
-                "two-blocks.receipt.json"),
-            Encoding.UTF8);
+        Corpus.ReadText("tests/KyberWeave.Tests/Fixtures/squad-rc20-global/two-blocks.receipt.json");
 
     private static void DriftOwnedEntry(string root, string relativePath, string marker, string replacement)
     {

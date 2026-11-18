@@ -14,6 +14,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using Xunit.Sdk;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -23,6 +24,8 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTestBase
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     [Theory]
     [InlineData("unknown")]
     [InlineData("duplicate")]
@@ -132,14 +135,7 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
     [Fact]
     public void ExecuteClaimPublicationUsesNoOverwrite()
     {
-        string sourcePath = Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "src",
-            "KyberWeave.Data",
-            "Squad",
-            "Deployment",
-            "SquadTransaction.cs");
-        string source = File.ReadAllText(sourcePath, Encoding.UTF8);
+        string source = Corpus.ReadText("src/KyberWeave.Data/Squad/Deployment/SquadTransaction.cs");
         int applyStart = source.IndexOf("private void ApplyFiles", StringComparison.Ordinal);
         int restoreStart =
             source.IndexOf("private static IReadOnlyList<string> RestoreIntent", StringComparison.Ordinal);
