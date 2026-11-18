@@ -1,5 +1,6 @@
 using KyberWeave.Tests.Configuration;
 
+using KyberWeave.Cli.Commands;
 using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Agents.Parsing;
 using KyberWeave.Core.Agents.Validation;
@@ -147,8 +148,21 @@ public class HarnessProfileConfigTests
             Assert.Null(result.Config);
             Assert.NotNull(result.Error);
             Assert.Contains("not-a-harness", result.Error, StringComparison.Ordinal);
-            Assert.Equal(KyberWeaveConfigDiagnosticCodes.LoadError, "KW-CONFIG-001");
             Assert.NotNull(result.ConfigPath);
+
+            // The rule code is emitted by the CLI's load helper, so it is asserted on the diagnostic that carries it
+            // rather than on the failed result, which holds no code.
+            DiagnosticReport report = new();
+            bool loaded = CommandHelpers.TryLoadConfig(
+                ConfigFileReader.Repository, root, null, report, out KyberWeaveConfig config);
+
+            Assert.False(loaded);
+            Assert.Same(KyberWeaveConfig.ProductDefaults, config);
+            Diagnostic diagnostic = Assert.Single(report.Items);
+            Assert.Equal("KW-CONFIG-001", diagnostic.Code);
+            Assert.Equal(Severity.Error, diagnostic.Severity);
+            Assert.Contains("not-a-harness", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Equal(result.ConfigPath, diagnostic.FilePath);
         }
         finally
         {
