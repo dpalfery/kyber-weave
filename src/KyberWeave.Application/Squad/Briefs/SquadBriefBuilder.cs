@@ -81,7 +81,7 @@ public sealed class SquadBriefBuilder(
         BriefMap map;
         try
         {
-            map = BriefMap.Load();
+            map = BriefMapLoader.Load();
         }
         catch (BriefMapException exception)
         {

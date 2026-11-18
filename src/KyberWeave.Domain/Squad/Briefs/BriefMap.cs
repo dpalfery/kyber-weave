@@ -1,7 +1,3 @@
-using System.Reflection;
-using YamlDotNet.Serialization;
-using YamlDotNet.Serialization.NamingConventions;
-
 namespace KyberWeave.Core.Squad.Briefs;
 
 /// <summary>
@@ -90,16 +86,11 @@ public sealed class BriefMap
     /// <summary>The schema value the map carries.</summary>
     public const string Schema = "kyber-squad.briefs/v1";
 
-    private const string ResourceName = "Squad.briefs.yml";
-
-    private static readonly IDeserializer Yaml = new DeserializerBuilder()
-        .WithNamingConvention(HyphenatedNamingConvention.Instance)
-        .IgnoreUnmatchedProperties()
-        .Build();
-
     private readonly IReadOnlyDictionary<string, IReadOnlyList<BriefFileRule>> _agents;
 
-    private BriefMap(IReadOnlyDictionary<string, IReadOnlyList<BriefFileRule>> agents)
+    /// <summary>Creates a map from the file rules of each agent.</summary>
+    /// <param name="agents">Each agent's file rules in map order.</param>
+    public BriefMap(IReadOnlyDictionary<string, IReadOnlyList<BriefFileRule>> agents)
     {
         _agents = agents;
     }
@@ -107,82 +98,9 @@ public sealed class BriefMap
     /// <summary>The agents the map describes, in map order.</summary>
     public IReadOnlyCollection<string> Agents => _agents.Keys.ToArray();
 
-    /// <summary>The map shipped inside this assembly.</summary>
-    public static BriefMap Load()
-    {
-        Assembly assembly = typeof(BriefMap).Assembly;
-        using Stream stream = assembly.GetManifestResourceStream(ResourceName)
-            ?? throw new BriefMapException($"The shipped brief map '{ResourceName}' is missing from {assembly.GetName().Name}.");
-        using StreamReader reader = new(stream);
-        return Parse(reader.ReadToEnd());
-    }
-
-    /// <summary>Parses a map from its YAML text.</summary>
-    /// <exception cref="BriefMapException">The text is not a valid map.</exception>
-    public static BriefMap Parse(string yaml)
-    {
-        ArgumentNullException.ThrowIfNull(yaml);
-        MapDocument document;
-        try
-        {
-            document = Yaml.Deserialize<MapDocument>(yaml) ?? new MapDocument();
-        }
-        catch (YamlDotNet.Core.YamlException exception)
-        {
-            throw new BriefMapException($"The brief map is not valid YAML: {exception.Message}");
-        }
-
-        if (!string.Equals(document.Schema, Schema, StringComparison.Ordinal))
-        {
-            throw new BriefMapException($"The brief map's schema is '{document.Schema}', expected '{Schema}'.");
-        }
-
-        Dictionary<string, IReadOnlyList<BriefFileRule>> agents = new(StringComparer.Ordinal);
-        foreach ((string agent, List<FileDocument> files) in document.Agents)
-        {
-            List<BriefFileRule> rules = [];
-            foreach (FileDocument file in files)
-            {
-                if (string.IsNullOrWhiteSpace(file.File))
-                {
-                    throw new BriefMapException($"Agent '{agent}' has a file entry with no 'file'.");
-                }
-
-                string where = $"{agent}/{file.File}";
-                Dictionary<string, BriefCondition> sections = new(StringComparer.Ordinal);
-                foreach ((string heading, string when) in file.Sections)
-                {
-                    sections[heading] = BriefCondition.Parse(when, $"{where} § {heading}");
-                }
-
-                rules.Add(new BriefFileRule(file.File, BriefCondition.Parse(file.When ?? "always", where), sections));
-            }
-
-            agents[agent] = rules;
-        }
-
-        return new BriefMap(agents);
-    }
-
     /// <summary>The file rules of <paramref name="agent"/> in map order, or null when the map does not know the agent.</summary>
     public IReadOnlyList<BriefFileRule>? FilesOf(string agent) =>
         _agents.TryGetValue(agent, out IReadOnlyList<BriefFileRule>? files) ? files : null;
-
-    private sealed class MapDocument
-    {
-        public string? Schema { get; set; }
-
-        public Dictionary<string, List<FileDocument>> Agents { get; set; } = [];
-    }
-
-    private sealed class FileDocument
-    {
-        public string? File { get; set; }
-
-        public string? When { get; set; }
-
-        public Dictionary<string, string> Sections { get; set; } = [];
-    }
 }
 
 /// <summary>The brief map is malformed, or a brief was asked for something it does not describe.</summary>
