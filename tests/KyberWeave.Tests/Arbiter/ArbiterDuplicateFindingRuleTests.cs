@@ -10,6 +10,7 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Core.Configuration;
 using Xunit;
+using Microsoft.Extensions.Time.Testing;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -180,7 +181,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
 
     private async Task SeedAsync(string reviewRun, params string[] findings)
     {
-        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, () => Now);
+        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, new FakeTimeProvider(Now));
         foreach (string finding in findings)
         {
             ArbiterStoreStatus status = await store.AppendFindingAsync(reviewRun, finding);
@@ -466,7 +467,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
 
         await evaluator.EvaluateAsync(returned, ConfigWith([Enforced(DuplicateRule)]));
 
-        IReadOnlyList<string> stored = RealArbiterState.RunStore(ArbiterDirectory, null, () => Now).ReadFindings(ThisRun);
+        IReadOnlyList<string> stored = RealArbiterState.RunStore(ArbiterDirectory, null, new FakeTimeProvider(Now)).ReadFindings(ThisRun);
         string item = Assert.Single(stored);
         Assert.Contains(Refuted, item, StringComparison.Ordinal);
     }

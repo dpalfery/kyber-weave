@@ -29,7 +29,7 @@ internal static class RealArbiterState
     internal static ArbiterRunStore RunStore(
         string arbiterDirectory,
         ArbiterStoreOptions? options = null,
-        Func<DateTimeOffset>? clock = null) =>
+        TimeProvider? clock = null) =>
         new(arbiterDirectory, Log(), Files(), Files(), options, clock);
 
     /// <summary>The state factory over the real append lock and the real disk.</summary>
@@ -43,7 +43,7 @@ internal static class RealArbiterState
     internal static ArbiterRunStore RunStore(
         string arbiterDirectory,
         ArbiterStoreOptions? options,
-        Func<DateTimeOffset>? clock,
+        TimeProvider? clock,
         Func<string, DateTime>? newestItemTime) =>
         new(arbiterDirectory, Log(), Files(), Files(), options, clock, newestItemTime);
 
