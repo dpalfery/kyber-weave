@@ -1,6 +1,5 @@
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Graph;
-using KyberWeave.Domain.FileSystem;
 using KyberWeave.Core.Docs.Model;
 
 namespace KyberWeave.Core.Docs.Validation;
