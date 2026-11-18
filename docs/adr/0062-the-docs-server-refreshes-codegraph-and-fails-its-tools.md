@@ -10,7 +10,7 @@ decided-by: []
 supersedes: []
 code-refs:
   - CodeGraphFreshness
-  - CodeGraphProvisioner
+  - CodeGraphIndexProvisioner
   - CorpusProvenance
   - DocsTools
   - McpConfig
