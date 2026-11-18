@@ -19,6 +19,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class PluginHookAdapterTests
 {
+    private static readonly string Cwd = Path.GetFullPath(Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "repo"));
+
     private sealed class ScriptedEngine : IHookDecisionEngine
     {
         public string? SeenPreCaller;
@@ -64,7 +66,7 @@ public sealed class PluginHookAdapterTests
             ["tool"] = tool,
             ["call-id"] = "call-1",
             ["session"] = "sess-1",
-            ["cwd"] = Directory.GetCurrentDirectory(),
+            ["cwd"] = Cwd,
             ["args"] = args,
         };
         if (result is not null)

@@ -87,6 +87,12 @@ internal static class ArbiterTestServices
     internal static HarnessAdapterRegistry Registry(IHookDecisionEngine engine) =>
         HarnessAdapterRegistry.CreateDefault(engine, Get<IFactoryTranscriptSource>());
 
+    /// <summary>Builds the default adapter registry over a transcript source the test supplies.</summary>
+    /// <param name="engine">The decision engine the adapters call.</param>
+    /// <param name="transcripts">Reads the Factory session transcripts.</param>
+    internal static HarnessAdapterRegistry Registry(IHookDecisionEngine engine, IFactoryTranscriptSource transcripts) =>
+        HarnessAdapterRegistry.CreateDefault(engine, transcripts);
+
     /// <summary>The command adapters over <paramref name="engine"/> and the real transcript reader.</summary>
     internal static IReadOnlyList<IHarnessHookAdapter> CommandAdapters(IHookDecisionEngine engine) =>
         CommandHookAdapters.All(engine, Get<IFactoryTranscriptSource>());

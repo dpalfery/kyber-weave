@@ -2,6 +2,7 @@ using System.Text;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
 
@@ -21,7 +22,13 @@ public sealed class ArbiterOpenCodeRenderingTests : IDisposable
     private const string ShimFilePath = ".opencode/plugins/kyber-arbiter.ts";
     private const int HookTimeoutSeconds = 5;
 
-    private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.Create();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly ArbiterSquadFixture _fixture;
+
+    public ArbiterOpenCodeRenderingTests()
+    {
+        _fixture = ArbiterSquadFixture.CreateInMemory(_files);
+    }
 
     public void Dispose() => _fixture.Dispose();
 
@@ -196,12 +203,12 @@ public sealed class ArbiterOpenCodeRenderingTests : IDisposable
         };
         SquadDeploymentScope scope = SquadDeploymentScope.Project;
 
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new OpenCodeRenderer()]);
+        SquadRendererRegistry registry = _fixture.Registry([new OpenCodeRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.OpenCode],
             Scope: scope,
-            Arbiter: wiring).Prepared());
+            Arbiter: wiring).Prepared(_fixture));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.DoesNotContain(result.Files, f => f.RelativePath == ShimFilePath);
@@ -244,12 +251,12 @@ public sealed class ArbiterOpenCodeRenderingTests : IDisposable
 
     private async Task<SquadRenderResult> RenderAsync(SquadArbiterWiring? arbiter, SquadDeploymentScope scope)
     {
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new OpenCodeRenderer()]);
+        SquadRendererRegistry registry = _fixture.Registry([new OpenCodeRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.OpenCode],
             Scope: scope,
-            Arbiter: arbiter).Prepared());
+            Arbiter: arbiter).Prepared(_fixture));
         Assert.True(result.Success, string.Join("; ", result.Errors));
         return result;
     }

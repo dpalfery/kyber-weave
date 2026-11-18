@@ -2,6 +2,7 @@ using System.Text.Json;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
 
@@ -16,7 +17,13 @@ public sealed class ArbiterGlobalClaudeCopilotRenderingTests : IDisposable
 {
     private const int HookTimeoutSeconds = 5;
 
-    private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.Create();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly ArbiterSquadFixture _fixture;
+
+    public ArbiterGlobalClaudeCopilotRenderingTests()
+    {
+        _fixture = ArbiterSquadFixture.CreateInMemory(_files);
+    }
 
     public void Dispose() => _fixture.Dispose();
 
@@ -25,7 +32,7 @@ public sealed class ArbiterGlobalClaudeCopilotRenderingTests : IDisposable
     {
         string home = Path.Combine(_fixture.Path, "home");
         string claudeRoot = Path.Combine(home, "custom-claude");
-        Directory.CreateDirectory(claudeRoot);
+        _files.CreateDirectory(claudeRoot);
         SquadGlobalRoots globalRoots = new(
             name => string.Equals(name, "CLAUDE_CONFIG_DIR", StringComparison.Ordinal) ? claudeRoot : null,
             home);
@@ -35,7 +42,7 @@ public sealed class ArbiterGlobalClaudeCopilotRenderingTests : IDisposable
             Targets: [SquadTarget.Claude],
             Scope: SquadDeploymentScope.Global,
             GlobalRoots: globalRoots,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds)).Prepared());
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds)).Prepared(_fixture));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.NotNull(result.Blocks);
@@ -51,7 +58,7 @@ public sealed class ArbiterGlobalClaudeCopilotRenderingTests : IDisposable
     {
         string home = Path.Combine(_fixture.Path, "home");
         string copilotHome = Path.Combine(home, "custom-copilot");
-        Directory.CreateDirectory(copilotHome);
+        _files.CreateDirectory(copilotHome);
         SquadGlobalRoots globalRoots = new(
             name => string.Equals(name, "COPILOT_HOME", StringComparison.Ordinal) ? copilotHome : null,
             home);
@@ -61,7 +68,7 @@ public sealed class ArbiterGlobalClaudeCopilotRenderingTests : IDisposable
             Targets: [SquadTarget.Copilot],
             Scope: SquadDeploymentScope.Global,
             GlobalRoots: globalRoots,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds)).Prepared());
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds)).Prepared(_fixture));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 

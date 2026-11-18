@@ -9,6 +9,8 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Hooks;
+using KyberWeave.Tests.FileSystem;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -18,7 +20,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// records, so the Arbiter never asks a second time; the ladder climbs the tiers; and a dispatch the conductor
 /// already put on the next tier is left as it is. There is one roster, so these are the rules for every run.
 /// </summary>
-public sealed class ModelTargetingTieredTests : IDisposable
+public sealed class ModelTargetingTieredTests
 {
     private const string DifficultyRule = "KW-ARB-DIFFICULTY-001";
     private const string LadderRule = "KW-ARB-LADDER-001";
@@ -29,24 +31,25 @@ public sealed class ModelTargetingTieredTests : IDisposable
 
     private static readonly DateTimeOffset At = new(2026, 11, 17, 9, 0, 0, TimeSpan.Zero);
 
-    private readonly TempDirectory _repo = new();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly InMemoryArbiterState _state;
+    private readonly string _repoPath = ArbiterTestRoots.Under("repo");
 
     public ModelTargetingTieredTests()
     {
+        _state = new InMemoryArbiterState(_files);
         WritePlan(difficulty: "medium");
     }
 
-    public void Dispose() => _repo.Dispose();
-
-    private string ArbiterDirectory => Path.Combine(_repo.Path, "artifacts", "arbiter");
+    private string ArbiterDirectory => Path.Combine(_repoPath, "artifacts", "arbiter");
 
     /// <summary>A plan whose T2 is the task the dispatch names, with an optional recorded difficulty.</summary>
     private void WritePlan(string? difficulty)
     {
-        Directory.CreateDirectory(Path.Combine(_repo.Path, "docs", "plans"));
+        _files.CreateDirectory(Path.Combine(_repoPath, "docs", "plans"));
         string rating = difficulty is null ? string.Empty : $"\n- **Difficulty:** {difficulty}";
-        File.WriteAllText(
-            Path.Combine(_repo.Path, Plan),
+        _files.WriteAllText(
+            Path.Combine(_repoPath, Plan),
             $$"""
             ---
             id: plans/x
@@ -141,14 +144,14 @@ public sealed class ModelTargetingTieredTests : IDisposable
     private ArbiterEvaluator Evaluator(IArbiterProvider provider) => new(
         provider,
         _ => null,
-        RealArbiterState.Ledger(ArbiterDirectory),
-        RealArbiterState.Decisions(ArbiterDirectory),
+        _state.Ledger(ArbiterDirectory),
+        _state.Decisions(ArbiterDirectory),
         new NoGitFacts(),
-        new RealPlanReader(RealPlanFacts.Create(), _repo.Path),
-        new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-        RealGateReportFacts.Create(),
-        RealArbiterState.Factory(),
-        TimeProvider.System, new FakeIdGenerator(),
+        new RealPlanReader(_state.PlanFacts(), _repoPath),
+        new FileArbiterModelTargetsReader(_files),
+        _state.GateReports(),
+        _state.Factory(),
+        new FakeTimeProvider(At), new FakeIdGenerator(),
         secondaryTriggers: (primary, ev) => string.Equals(primary, "delegate", StringComparison.Ordinal)
             ? [Trigger]
             : []);
@@ -161,7 +164,7 @@ public sealed class ModelTargetingTieredTests : IDisposable
         Prompt = Prompt,
         HarnessCaller = "conductor",
         Session = "s1",
-        Cwd = _repo.Path,
+        Cwd = _repoPath,
         ObservesReturns = true,
         IsDispatch = true,
     };
@@ -175,7 +178,7 @@ public sealed class ModelTargetingTieredTests : IDisposable
         await Evaluator(provider).EvaluateAsync(
             Dispatch(target), Config(roster, mode), null, TestContext.Current.CancellationToken);
 
-        IReadOnlyList<ArbiterDecisionRecord> records = RealArbiterState.Decisions(ArbiterDirectory).ReadAll();
+        IReadOnlyList<ArbiterDecisionRecord> records = _state.Decisions(ArbiterDirectory).ReadAll();
         ArbiterDecisionRecord primary = Assert.Single(records, record => record.Trigger == "delegate");
         string blockers = string.Join(", ", primary.Rules.Where(rule => rule.Effect != "allow").Select(rule => $"{rule.Id}={rule.Answer}"));
         Assert.True(primary.Outcome == "allow", $"fixture precondition: primary outcome {primary.Outcome}: {blockers}");
@@ -187,7 +190,7 @@ public sealed class ModelTargetingTieredTests : IDisposable
 
     private async Task SeedAttemptAsync(string profile, string result, string target)
     {
-        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
+        InFlightLedger ledger = _state.Ledger(ArbiterDirectory);
         await ledger.AppendAsync(new ArbiterLedgerEvent("pre-1", At, "hook", "claude", null, ArbiterLedgerPhases.Pre)
         {
             Trigger = "delegate",
@@ -206,7 +209,7 @@ public sealed class ModelTargetingTieredTests : IDisposable
     /// <summary>The three tiers' model profiles, as the render writes them for this harness.</summary>
     private void WriteModelTargetsTable()
     {
-        Directory.CreateDirectory(ArbiterDirectory);
+        _files.CreateDirectory(ArbiterDirectory);
         ArbiterModelTargets table = new(
             ArbiterModelTargets.SchemaName,
             "claude",
@@ -225,7 +228,7 @@ public sealed class ModelTargetingTieredTests : IDisposable
                 ["dev-medium"] = new("general", "t-general"),
                 ["dev-hard"] = new("dev-hard", "t-hard"),
             });
-        File.WriteAllText(
+        _files.WriteAllText(
             Path.Combine(ArbiterDirectory, "model-targets.claude.json"),
             System.Text.Json.JsonSerializer.Serialize(table));
     }
@@ -328,7 +331,7 @@ public sealed class ModelTargetingTieredTests : IDisposable
     public void ThePlanReaderPublishesTheRecordedDifficulty()
     {
         WritePlan("hard");
-        PlanFacts facts = RealPlanFacts.Create();
+        PlanFacts facts = _state.PlanFacts();
 
         ArbiterFactSet enriched = facts.Enrich(
             new ArbiterFactSet(),
@@ -346,7 +349,7 @@ public sealed class ModelTargetingTieredTests : IDisposable
                 },
                 null,
                 true),
-            _repo.Path);
+            _repoPath);
 
         Assert.True(enriched.TryGet("plan.task.difficulty", out ArbiterFact? difficulty));
         Assert.Equal("hard", difficulty!.Value);

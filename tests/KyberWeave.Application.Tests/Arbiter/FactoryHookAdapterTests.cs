@@ -5,7 +5,9 @@ using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using Xunit;
+using KyberWeave.Data.Hooks.Arbiter;
 using KyberWeave.Tests.Corpus;
+using KyberWeave.Tests.FileSystem;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -27,6 +29,11 @@ namespace KyberWeave.Tests.Arbiter;
 public sealed class FactoryHookAdapterTests
 {
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
+    private static readonly string TranscriptDirectory =
+        Path.GetFullPath(Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "factory"));
+
+    private readonly InMemoryFileSystem _files = new();
 
     private const string TranscriptFixturePath =
         "tests/KyberWeave.Tests/Fixtures/arbiter-hooks/factory/transcript-background-task.jsonl";
@@ -147,14 +154,14 @@ public sealed class FactoryHookAdapterTests
     private static string Fixture(string name) =>
         Corpus.ReadText($"tests/KyberWeave.Tests/Fixtures/arbiter-hooks/factory/{name}");
 
-    private static (int Exit, string Stdout, string Log) Run(
+    private (int Exit, string Stdout, string Log) Run(
         string stdin,
         string? caller,
         IHookDecisionEngine engine,
         Func<string, KyberWeaveConfig>? loader = null)
     {
         HookCommand command = ArbiterTestServices.Command(
-            ArbiterTestServices.Registry(engine),
+            ArbiterTestServices.Registry(engine, new FileFactoryTranscriptSource(_files)),
             loader ?? (_ => EnabledConfig()),
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -434,14 +441,15 @@ public sealed class FactoryHookAdapterTests
         Assert.Equal(1, engine.PostCalls);
     }
 
-    private static string TemporaryTranscript(string content, string extension = ".jsonl")
+    private string TemporaryTranscript(string content, string extension = ".jsonl")
     {
-        string path = Path.Combine(Path.GetTempPath(), "kw-factory-" + Guid.NewGuid().ToString("N") + extension);
-        File.WriteAllText(path, content);
+        string path = Path.Combine(TranscriptDirectory, "transcript-" + _files.OperationCount + extension);
+        _files.CreateDirectory(TranscriptDirectory);
+        _files.WriteAllText(path, content);
         return path;
     }
 
-    private static string TwoLaunches(string firstTask, string secondTask)
+    private string TwoLaunches(string firstTask, string secondTask)
     {
         string fixture = Corpus.ReadText(TranscriptFixturePath);
         string first = fixture.Replace("TASK: T9", "TASK: " + firstTask, StringComparison.Ordinal);
@@ -466,7 +474,7 @@ public sealed class FactoryHookAdapterTests
         }
         finally
         {
-            File.Delete(transcript);
+            _files.DeleteFile(transcript);
         }
     }
 
@@ -475,12 +483,12 @@ public sealed class FactoryHookAdapterTests
     {
         string withHeaders = TwoLaunches("T8", "T9");
         string transcript = TemporaryTranscript(
-            File.ReadAllText(withHeaders)
+            _files.ReadAllText(withHeaders)
                 .Replace("KYBER-ARBITER: true\\nPLAN_FILE: docs/plans/x.md\\nTASK: T8\\n\\n", string.Empty, StringComparison.Ordinal)
                 .Replace("KYBER-ARBITER: true\\nPLAN_FILE: docs/plans/x.md\\nTASK: T9\\n\\n", string.Empty, StringComparison.Ordinal));
         try
         {
-            Assert.DoesNotContain("KYBER-ARBITER", File.ReadAllText(transcript), StringComparison.Ordinal);
+            Assert.DoesNotContain("KYBER-ARBITER", _files.ReadAllText(transcript), StringComparison.Ordinal);
             ContextualEngine engine = new();
 
             Run(SubagentStop(transcript), null, engine);
@@ -489,8 +497,8 @@ public sealed class FactoryHookAdapterTests
         }
         finally
         {
-            File.Delete(transcript);
-            File.Delete(withHeaders);
+            _files.DeleteFile(transcript);
+            _files.DeleteFile(withHeaders);
         }
     }
 
@@ -509,7 +517,7 @@ public sealed class FactoryHookAdapterTests
         }
         finally
         {
-            File.Delete(transcript);
+            _files.DeleteFile(transcript);
         }
     }
 
@@ -540,7 +548,7 @@ public sealed class FactoryHookAdapterTests
         }
         finally
         {
-            File.Delete(notTranscript);
+            _files.DeleteFile(notTranscript);
         }
     }
 
@@ -589,8 +597,7 @@ public sealed class FactoryHookAdapterTests
         return root.ToJsonString();
     }
 
-    private static string TranscriptFixture() =>
-        Path.Combine(Corpus.Root, TranscriptFixturePath);
+    private string TranscriptFixture() => TemporaryTranscript(Corpus.ReadText(TranscriptFixturePath));
 
     [Fact]
     public void SubagentStop_RecordsTheReportAgainstItsDispatch()
@@ -611,9 +618,7 @@ public sealed class FactoryHookAdapterTests
     [Fact]
     public void SubagentStop_StripsHeadersForASpecialist_AsItsDispatchRan()
     {
-        string transcript = Path.Combine(Path.GetTempPath(), "kw-factory-" + Guid.NewGuid().ToString("N") + ".jsonl");
-        File.WriteAllText(
-            transcript,
+        string transcript = TemporaryTranscript(
             Corpus.ReadText(TranscriptFixturePath).Replace("\"echoer\"", "\"dev-medium\"", StringComparison.Ordinal));
         try
         {
@@ -626,7 +631,7 @@ public sealed class FactoryHookAdapterTests
         }
         finally
         {
-            File.Delete(transcript);
+            _files.DeleteFile(transcript);
         }
     }
 

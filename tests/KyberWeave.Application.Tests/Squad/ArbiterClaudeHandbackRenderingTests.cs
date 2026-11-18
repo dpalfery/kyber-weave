@@ -2,6 +2,7 @@ using System.Text;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
 using YamlDotNet.RepresentationModel;
@@ -39,7 +40,13 @@ public sealed class ArbiterClaudeHandbackRenderingTests : IDisposable
         ArbiterSquadFixture.GithubDevops
     ];
 
-    private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.Create();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly ArbiterSquadFixture _fixture;
+
+    public ArbiterClaudeHandbackRenderingTests()
+    {
+        _fixture = ArbiterSquadFixture.CreateInMemory(_files);
+    }
 
     public void Dispose() => _fixture.Dispose();
 
@@ -176,7 +183,7 @@ public sealed class ArbiterClaudeHandbackRenderingTests : IDisposable
         }
     }
 
-    private static async Task<SquadRenderResult> RenderClaudeAsync(
+    private async Task<SquadRenderResult> RenderClaudeAsync(
         string sourceDirectory,
         SquadDeploymentScope scope,
         SquadArbiterWiring? arbiter)
@@ -186,7 +193,7 @@ public sealed class ArbiterClaudeHandbackRenderingTests : IDisposable
             SourceDirectory: sourceDirectory,
             Targets: [SquadTarget.Claude],
             Scope: scope,
-            Arbiter: arbiter).Prepared();
+            Arbiter: arbiter).Prepared(_fixture);
 
         return await renderer.RenderAsync(request);
     }

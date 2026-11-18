@@ -40,7 +40,7 @@ public sealed class TieredRosterDispatchTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_repo.Path, ".kyber-weave"));
         string disabled = string.Join(
             "\n",
-            ArbiterConfigTests.ExpectedRuleIds
+            ArbiterConfigDefaults.Product.Rules.Select(rule => rule.Id).Distinct(StringComparer.Ordinal)
                 .Where(id => !string.Equals(id, RosterRule, StringComparison.Ordinal))
                 .Select(id => $"    - id: {id}\n      enabled: false"));
         File.WriteAllText(

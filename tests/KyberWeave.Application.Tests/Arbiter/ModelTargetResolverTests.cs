@@ -10,6 +10,8 @@ using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.FileSystem;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -27,7 +29,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// source), and <c>RenderedModelToken</c> (the token the target agent is rendered with).
 /// The secondary payload is asserted to carry the resolved token, not a payload format.
 /// </remarks>
-public sealed class ModelTargetResolverTests : IDisposable
+public sealed class ModelTargetResolverTests
 {
     private const string DifficultyRule = "KW-ARB-DIFFICULTY-001";
     private const string ScopeRule = "KW-ARB-SCOPE-002";
@@ -38,11 +40,16 @@ public sealed class ModelTargetResolverTests : IDisposable
 
     private static readonly DateTimeOffset At = new(2026, 11, 10, 9, 0, 0, TimeSpan.Zero);
 
-    private readonly TempDirectory _repo = new();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly InMemoryArbiterState _state;
+    private readonly string _repoPath = ArbiterTestRoots.Under("repo");
 
-    public void Dispose() => _repo.Dispose();
+    public ModelTargetResolverTests()
+    {
+        _state = new InMemoryArbiterState(_files);
+    }
 
-    private string ArbiterDirectory => Path.Combine(_repo.Path, "artifacts", "arbiter");
+    private string ArbiterDirectory => Path.Combine(_repoPath, "artifacts", "arbiter");
 
     /// <summary>Answers DIFFICULTY with a confident score for <see cref="Difficulty"/>, or with nothing when <see cref="Hard"/> is false.</summary>
     private sealed class HardProvider : IArbiterProvider
@@ -128,14 +135,14 @@ public sealed class ModelTargetResolverTests : IDisposable
     private ArbiterEvaluator Evaluator(IArbiterProvider provider) => new(
         provider,
         _ => null,
-        RealArbiterState.Ledger(ArbiterDirectory),
-        RealArbiterState.Decisions(ArbiterDirectory),
+        _state.Ledger(ArbiterDirectory),
+        _state.Decisions(ArbiterDirectory),
         new NoGitFacts(),
         new PlanFacts(provider is HardProvider { Hard: false } ? null : provider is HardProvider hard ? hard.Difficulty : "hard"),
-        new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
-        TimeProvider.System, new FakeIdGenerator(),
+        new FileArbiterModelTargetsReader(_files),
+            _state.GateReports(),
+            _state.Factory(),
+        new FakeTimeProvider(At), new FakeIdGenerator(),
         secondaryTriggers: (primary, ev) => string.Equals(primary, "delegate", StringComparison.Ordinal)
             ? ["delegate.model"]
             : []);
@@ -151,7 +158,7 @@ public sealed class ModelTargetResolverTests : IDisposable
             Prompt = Prompt,
             HarnessCaller = "conductor",
             Session = "s1",
-            Cwd = _repo.Path,
+            Cwd = _repoPath,
             ModelOverrideField = modelOverrideField,
             Model = model,
             RenderedModelToken = renderedToken,
@@ -167,11 +174,11 @@ public sealed class ModelTargetResolverTests : IDisposable
             (await Evaluator(provider ?? new HardProvider()).EvaluateAsync(
                 ev, config ?? Config(), null, TestContext.Current.CancellationToken)).Dispatches);
         ArbiterDecisionRecord primary = Assert.Single(
-            RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), decision => decision.Trigger == "delegate");
+            _state.Decisions(ArbiterDirectory).ReadAll(), decision => decision.Trigger == "delegate");
         string blockers = string.Join(", ", primary.Rules.Where(rule => rule.Effect != "allow").Select(rule => $"{rule.Id}={rule.Answer}"));
         Assert.True(primary.Outcome == "allow", $"fixture precondition: primary outcome {primary.Outcome}: {blockers}");
         ArbiterDecisionRecord record = Assert.Single(
-            RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), decision => decision.Trigger == "delegate.model");
+            _state.Decisions(ArbiterDirectory).ReadAll(), decision => decision.Trigger == "delegate.model");
         return (record, result);
     }
 
@@ -184,7 +191,7 @@ public sealed class ModelTargetResolverTests : IDisposable
         string harness = Harness,
         string? deepToken = "opus")
     {
-        Directory.CreateDirectory(ArbiterDirectory);
+        _files.CreateDirectory(ArbiterDirectory);
         ArbiterModelTargets table = new(
             ArbiterModelTargets.SchemaName,
             harness,
@@ -202,7 +209,7 @@ public sealed class ModelTargetResolverTests : IDisposable
                     ["dev-medium"] = new("general", generalToken),
                 }
                 : new Dictionary<string, ArbiterModelTargetsAgent>(StringComparer.Ordinal));
-        File.WriteAllText(
+        _files.WriteAllText(
             Path.Combine(ArbiterDirectory, $"model-targets.{harness}.json"),
             JsonSerializer.Serialize(table));
     }
@@ -212,7 +219,7 @@ public sealed class ModelTargetResolverTests : IDisposable
     /// <summary>Seeds one earlier attempt at T2: the profile it ran on (null when unrecorded) and its task review.</summary>
     private async Task SeedPriorAttemptAsync(string? profile, string taskReview)
     {
-        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
+        InFlightLedger ledger = _state.Ledger(ArbiterDirectory);
         await ledger.AppendAsync(new ArbiterLedgerEvent("pre-1", At, "hook", Harness, null, ArbiterLedgerPhases.Pre)
         {
             Trigger = "delegate",
@@ -386,7 +393,7 @@ public sealed class ModelTargetResolverTests : IDisposable
 
         (ArbiterDecisionRecord record, _) = await RunAsync(Dispatch(renderedToken: null));
 
-        Assert.Equal("rendered", PreEventOf(RealArbiterState.Ledger(ArbiterDirectory)).ModelSource);
+        Assert.Equal("rendered", PreEventOf(_state.Ledger(ArbiterDirectory)).ModelSource);
         ArbiterModelBlock block = BlockOf(record);
         Assert.False(block.Delivered);
         Assert.Equal("same-as-rendered", block.Reason);
@@ -461,7 +468,7 @@ public sealed class ModelTargetResolverTests : IDisposable
 
         await RunAsync(Dispatch(model: null, renderedToken: Model));
 
-        ArbiterLedgerEvent pre = PreEventOf(RealArbiterState.Ledger(ArbiterDirectory));
+        ArbiterLedgerEvent pre = PreEventOf(_state.Ledger(ArbiterDirectory));
         Assert.Equal("rendered", pre.ModelSource);
     }
 
@@ -472,7 +479,7 @@ public sealed class ModelTargetResolverTests : IDisposable
 
         await RunAsync(Dispatch(model: "claude-opus-5-5"));
 
-        ArbiterLedgerEvent pre = PreEventOf(RealArbiterState.Ledger(ArbiterDirectory));
+        ArbiterLedgerEvent pre = PreEventOf(_state.Ledger(ArbiterDirectory));
         Assert.Equal("caller", pre.ModelSource);
     }
 
@@ -484,7 +491,7 @@ public sealed class ModelTargetResolverTests : IDisposable
 
         await RunAsync(Dispatch(model: null, renderedToken: null));
 
-        ArbiterLedgerEvent pre = PreEventOf(RealArbiterState.Ledger(ArbiterDirectory));
+        ArbiterLedgerEvent pre = PreEventOf(_state.Ledger(ArbiterDirectory));
         Assert.Equal("unknown", pre.ModelSource);
     }
 

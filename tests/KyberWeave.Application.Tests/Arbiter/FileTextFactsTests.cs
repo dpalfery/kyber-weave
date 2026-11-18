@@ -1,9 +1,6 @@
-using KyberWeave.Data.Arbiter;
-using KyberWeave.Data.Hooks;
-using KyberWeave.Core.Arbiter.Plans;
 using System.Globalization;
-using System.Text;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -15,23 +12,21 @@ namespace KyberWeave.Tests.Arbiter;
 /// RED: <c>KyberWeave.Core.Arbiter.Facts.FileTextFacts</c> and <c>FileExcerpt</c> do not exist yet.
 /// </summary>
 /// <remarks>
-/// Names (GREEN must match): <c>RealFileTextFacts.Create().ReadExcerpt(string repoRoot, string path, int line)</c> returns
+/// Names (GREEN must match): <c>InMemoryFileTextFacts.Create(_files).ReadExcerpt(string repoRoot, string path, int line)</c> returns
 /// <c>FileExcerpt(string Path, int StartLine, int EndLine, string Text, bool Truncated)</c> or <c>null</c> when the
 /// file is absent or outside the root; <c>FileTextFacts.MaxExcerptCharacters</c> bounds <c>Text</c>.
 /// </remarks>
-public sealed class FileTextFactsTests : IDisposable
+public sealed class FileTextFactsTests
 {
-    private readonly TempDirectory _sandbox = new();
+    private readonly InMemoryFileSystem _files = new();
 
-    public void Dispose() => _sandbox.Dispose();
-
-    private string Root => Path.Combine(_sandbox.Path, "repo");
+    private static string Root { get; } = ArbiterTestRoots.Under("repo");
 
     private string WriteRepoFile(string relativePath, string content)
     {
         string full = Path.Combine(Root, relativePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, content, Encoding.UTF8);
+        _files.CreateDirectory(Path.GetDirectoryName(full)!);
+        _files.WriteAllText(full, content);
         return relativePath;
     }
 
@@ -42,7 +37,7 @@ public sealed class FileTextFactsTests : IDisposable
         string content = string.Join("\n", Enumerable.Range(1, 100).Select(i => $"line {i}"));
         string path = WriteRepoFile("src/Widget.cs", content);
 
-        FileExcerpt excerpt = Assert.IsType<FileExcerpt>(RealFileTextFacts.Create().ReadExcerpt(Root, path, 50));
+        FileExcerpt excerpt = Assert.IsType<FileExcerpt>(InMemoryFileTextFacts.Create(_files).ReadExcerpt(Root, path, 50));
 
         Assert.True(excerpt.StartLine <= 50 && excerpt.EndLine >= 50, $"{excerpt.StartLine}-{excerpt.EndLine}");
         Assert.True(excerpt.EndLine - excerpt.StartLine < 40, $"{excerpt.StartLine}-{excerpt.EndLine}");
@@ -59,7 +54,7 @@ public sealed class FileTextFactsTests : IDisposable
     {
         string path = WriteRepoFile("src/Generated.cs", "// header\n" + new string('x', 200_000) + "\n");
 
-        FileExcerpt excerpt = Assert.IsType<FileExcerpt>(RealFileTextFacts.Create().ReadExcerpt(Root, path, 2));
+        FileExcerpt excerpt = Assert.IsType<FileExcerpt>(InMemoryFileTextFacts.Create(_files).ReadExcerpt(Root, path, 2));
 
         Assert.True(
             excerpt.Text.Length <= FileTextFacts.MaxExcerptCharacters,
@@ -74,19 +69,20 @@ public sealed class FileTextFactsTests : IDisposable
     [Fact]
     public void APathThatLeavesTheRootIsNotRead()
     {
-        File.WriteAllText(Path.Combine(_sandbox.Path, "outside.txt"), "secret\n");
-        Directory.CreateDirectory(Root);
+        string outside = Path.Combine(ArbiterTestRoots.Under(), "outside.txt");
+        _files.WriteAllText(outside, "secret\n");
+        _files.CreateDirectory(Root);
 
-        Assert.Null(RealFileTextFacts.Create().ReadExcerpt(Root, "../outside.txt", 1));
-        Assert.Null(RealFileTextFacts.Create().ReadExcerpt(Root, Path.Combine(_sandbox.Path, "outside.txt"), 1));
+        Assert.Null(InMemoryFileTextFacts.Create(_files).ReadExcerpt(Root, "../outside.txt", 1));
+        Assert.Null(InMemoryFileTextFacts.Create(_files).ReadExcerpt(Root, outside, 1));
     }
 
     /// <summary>A file the branch has since deleted has no current text to judge a comment against.</summary>
     [Fact]
     public void AMissingCitedFileHasNoExcerpt()
     {
-        Directory.CreateDirectory(Root);
+        _files.CreateDirectory(Root);
 
-        Assert.Null(RealFileTextFacts.Create().ReadExcerpt(Root, "src/Deleted.cs", 3));
+        Assert.Null(InMemoryFileTextFacts.Create(_files).ReadExcerpt(Root, "src/Deleted.cs", 3));
     }
 }

@@ -4,6 +4,7 @@ using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
 
@@ -26,7 +27,13 @@ public sealed class ArbiterAntigravityRenderingTests : IDisposable
     private const string Command = "kyber-weave-arbiter hook --harness antigravity";
     private const int HookTimeoutSeconds = 5;
 
-    private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.Create();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly ArbiterSquadFixture _fixture;
+
+    public ArbiterAntigravityRenderingTests()
+    {
+        _fixture = ArbiterSquadFixture.CreateInMemory(_files);
+    }
 
     public void Dispose() => _fixture.Dispose();
 
@@ -144,7 +151,7 @@ public sealed class ArbiterAntigravityRenderingTests : IDisposable
         IReadOnlyList<SquadDegradationRecord> records = result.Degradations
             .Where(d => string.Equals(d.Code, "arbiter-not-enforced", StringComparison.Ordinal))
             .ToList();
-        IReadOnlyList<string> agents = RealSquadServices.Load(_fixture.Path).Agents
+        IReadOnlyList<string> agents = _fixture.Load().Agents
             .Select(agent => agent.Name)
             .Order(StringComparer.Ordinal)
             .ToList();
@@ -173,12 +180,12 @@ public sealed class ArbiterAntigravityRenderingTests : IDisposable
         };
         SquadDeploymentScope scope = SquadDeploymentScope.Project;
 
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new AntigravityRenderer()]);
+        SquadRendererRegistry registry = _fixture.Registry([new AntigravityRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Antigravity],
             Scope: scope,
-            Arbiter: wiring).Prepared());
+            Arbiter: wiring).Prepared(_fixture));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.True(result.Blocks is null || result.Blocks.Count == 0, "Expected no owned blocks when the Arbiter block is not rendered.");
@@ -222,12 +229,12 @@ public sealed class ArbiterAntigravityRenderingTests : IDisposable
 
     private async Task<SquadRenderResult> RenderAsync(SquadArbiterWiring? arbiter, SquadDeploymentScope scope)
     {
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new AntigravityRenderer()]);
+        SquadRendererRegistry registry = _fixture.Registry([new AntigravityRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Antigravity],
             Scope: scope,
-            Arbiter: arbiter).Prepared());
+            Arbiter: arbiter).Prepared(_fixture));
         Assert.True(result.Success, string.Join("; ", result.Errors));
         return result;
     }
