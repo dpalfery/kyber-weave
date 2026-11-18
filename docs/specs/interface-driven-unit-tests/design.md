@@ -77,9 +77,9 @@ duplicated: 30 for `IArbiterProvider`, 11 each for `ISquadReleaseSource` and `IS
         │
  Contracts ── the seams (interfaces) and data records
         ▲
- Data ── stores, planners, transactions: logic over seams
+ Data ── adapters and stores only: the only code that calls System.IO, Process, Environment, Console, clock, Mutex
         │
- Kernel ── adapters: the only code that calls System.IO, Process, Environment, Console, clock, Mutex
+ Kernel ── shared low-level types with no project references (an adapter cannot live here: it would need Contracts)
 ```
 
 Tests mirror it:
