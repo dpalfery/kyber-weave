@@ -3,10 +3,12 @@ using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Processes;
+using KyberWeave.Tests;
+using KyberWeave.Tests.Doctor;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Doctor;
 
 /// <summary>
 /// Pins <c>doctor --post-checkout</c>, the entry the git hook starts in the background on a new worktree: it indexes
@@ -16,23 +18,16 @@ namespace KyberWeave.Tests;
 /// The hook fires on every new checkout, including ones where a person has uncommitted work. So this path must not
 /// rewind an edit it did not cause, and the tests use the scripted executor the ensure tests use, so no child spawns.
 /// </remarks>
-public sealed class DoctorPostCheckoutTests : IDisposable
+public sealed class DoctorPostCheckoutTests
 {
     private const string EditedFile = "src/edited.cs";
     private const string RestoreCheckId = "codegraph.restore";
 
-    private readonly TempDirectory _root = new();
-    private readonly TempDirectory _stubs = new();
-    private readonly TempDirectory _locks = new();
+    private const string McpExecutable = "kyber-weave-mcp";
 
-    public void Dispose()
-    {
-        _locks.Dispose();
-        _stubs.Dispose();
-        _root.Dispose();
-    }
+    private readonly InMemoryDoctorWorld _world = new();
 
-    private string Root => _root.Path;
+    private string Root => _world.Root;
 
     /// <summary>
     /// With the setting off, a new worktree gets no index run at all. The hook is still installed, so the switch is the
@@ -44,7 +39,7 @@ public sealed class DoctorPostCheckoutTests : IDisposable
         WriteGoverned("worktree-index-hook: false\n");
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
 
-        DoctorReport report = DoctorTestServices.Doctor.RunPostCheckout(Root, DoctorHarness.Options(Mcp()), executor, _locks.Path);
+        DoctorReport report = _world.Doctor.RunPostCheckout(Root, DoctorHarness.Options(McpExecutable), executor, _world.Locks);
 
         Assert.Empty(executor.CallsTo("codegraph"));
         Assert.Equal(0, report.ExitCode);
@@ -96,7 +91,7 @@ public sealed class DoctorPostCheckoutTests : IDisposable
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorReport report = DoctorTestServices.Doctor.RunPostCheckout(Root, DoctorHarness.Options(Mcp()), executor, _locks.Path);
+        DoctorReport report = _world.Doctor.RunPostCheckout(Root, DoctorHarness.Options(McpExecutable), executor, _world.Locks);
 
         string[] restored = executor.CallsTo("git")
             .Where(call => call.ArgumentList.Contains("restore", StringComparer.Ordinal))
@@ -121,14 +116,13 @@ public sealed class DoctorPostCheckoutTests : IDisposable
     public void PostCheckoutNeverStartsTheMcpExecutable()
     {
         WriteGoverned("stop-on-tool-failure: true\n");
-        string startedRecord = Path.Combine(_stubs.Path, "mcp-started.txt");
-        string mcp = DoctorHarness.RecordingStub(_stubs.Path, Root, startedRecord);
+        _world.HealthyMcp(Root);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
 
-        DoctorTestServices.Doctor.RunPostCheckout(Root, DoctorHarness.Options(mcp), executor, _locks.Path);
+        _world.Doctor.RunPostCheckout(Root, DoctorHarness.Options(McpExecutable), executor, _world.Locks);
 
-        Assert.False(File.Exists(startedRecord), "The MCP server must not start on the post-checkout path.");
-        Assert.DoesNotContain(executor.Calls, call => call.FileName == mcp);
+        Assert.Null(_world.Mcp.Executable);
+        Assert.DoesNotContain(executor.Calls, call => call.FileName == McpExecutable);
     }
 
     /// <summary>
@@ -137,10 +131,11 @@ public sealed class DoctorPostCheckoutTests : IDisposable
     [Fact]
     public void PostCheckoutInARepositoryWithoutGovernedDocsStartsNoCodeGraphChild()
     {
-        using TempDirectory bare = new();
-        ScriptedProcessExecutor executor = DoctorHarness.Executor(bare.Path);
+        string bare = Path.Combine(_world.Files.Root, "kw", "bare");
+        _world.Files.CreateDirectory(bare);
+        ScriptedProcessExecutor executor = DoctorHarness.Executor(bare);
 
-        DoctorTestServices.Doctor.RunPostCheckout(bare.Path, DoctorHarness.Options(Mcp()), executor, _locks.Path);
+        _world.Doctor.RunPostCheckout(bare, DoctorHarness.Options(McpExecutable), executor, _world.Locks);
 
         Assert.Empty(executor.CallsTo("codegraph"));
     }
@@ -154,7 +149,7 @@ public sealed class DoctorPostCheckoutTests : IDisposable
     {
         WriteGoverned("stop-on-tool-failure: true\n");
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
-        DoctorCommand command = DoctorTestEnvironment.Command(false, _ => null, executor, Mcp());
+        DoctorCommand command = _world.Command(false, executor, McpExecutable);
         int exitCode = DoctorAppHarness.Run(command, "doctor", "--post-checkout", "--ensure", Root);
 
         Assert.Equal(2, exitCode);
@@ -170,8 +165,8 @@ public sealed class DoctorPostCheckoutTests : IDisposable
     {
         WriteGoverned("stop-on-tool-failure: true\n");
         string hooks = Path.Combine(Root, ".git", "hooks");
-        Directory.CreateDirectory(hooks);
-        File.WriteAllText(Path.Combine(hooks, "post-checkout"), "#!/usr/bin/env python3\nprint('mine')\n");
+        _world.Files.CreateDirectory(hooks);
+        _world.Files.WriteAllText(Path.Combine(hooks, "post-checkout"), "#!/usr/bin/env python3\nprint('mine')\n");
         ScriptedProcessExecutor executor = new(startInfo =>
         {
             if (startInfo.FileName == "git")
@@ -203,13 +198,14 @@ public sealed class DoctorPostCheckoutTests : IDisposable
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        _world.HealthyMcp(Root);
+        DoctorReport report = _world.Doctor.Run(
             Root,
             DoctorMode.Ensure,
-            DoctorHarness.Options(Mcp()),
+            DoctorHarness.Options(McpExecutable),
             executor,
             _ => null,
-            _locks.Path);
+            _world.Locks);
 
         DoctorCheck hook = Assert.Single(report.Checks, check => check.Id == PostCheckoutHookInstaller.CheckId);
         Assert.True(hook.Passed);
@@ -217,16 +213,9 @@ public sealed class DoctorPostCheckoutTests : IDisposable
         Assert.Equal(0, report.ExitCode);
     }
 
-    private string Mcp() => DoctorHarness.HealthyStub(_stubs.Path, Root);
-
     private string DirtyAfterInit() =>
         " M " + EditedFile + "\n"
         + string.Concat(CodeGraphIndexRules.InitConfigFiles.Select(file => " M " + file + "\n"));
 
-    private void WriteGoverned(string config)
-    {
-        Directory.CreateDirectory(Path.Combine(Root, ".kyber-weave"));
-        File.WriteAllText(Path.Combine(Root, ".kyber-weave", "kyber-weave.yml"), config);
-        Directory.CreateDirectory(Path.Combine(Root, "docs"));
-    }
+    private void WriteGoverned(string config) => _world.WriteGoverned(config);
 }

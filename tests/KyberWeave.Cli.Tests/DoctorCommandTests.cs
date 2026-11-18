@@ -1,6 +1,5 @@
-using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Cli.Commands.Doctor;
-using KyberWeave.Core.Doctor;
+using KyberWeave.Tests.Doctor;
 using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Processes;
 using KyberWeave.Tests.Fakes;
@@ -13,23 +12,17 @@ namespace KyberWeave.Tests;
 ///     a specified canonical repository path when invoked with an explicit path argument from within an
 ///     arbitrary directory (simulating a worktree checking its canonical parent) (T3).
 /// </summary>
-[Collection(DoctorCommandWorkingDirectoryCollection.Name)]
-public sealed class DoctorCommandTests : IDisposable
+public sealed class DoctorCommandTests
 {
-    private readonly TempDirectory _arbitraryWorktree = new();
-    private readonly TempDirectory _canonicalRepo = new();
-    private readonly TempDirectory _stubs = new();
+    private const string McpExecutable = "kyber-weave-mcp";
 
-    private string CanonicalPath => _canonicalRepo.Path;
+    private readonly InMemoryDoctorWorld _world = new();
 
-    private string WorktreePath => _arbitraryWorktree.Path;
+    private string CanonicalPath => _world.Root;
 
-    public void Dispose()
-    {
-        _stubs.Dispose();
-        _arbitraryWorktree.Dispose();
-        _canonicalRepo.Dispose();
-    }
+    private string WorktreePath => _world.Environment.CurrentDirectory;
+
+    public DoctorCommandTests() => _world.Files.CreateDirectory(WorktreePath);
 
     /// <summary>
     ///     When invoked with an explicit path argument pointing to the canonical repository from an arbitrary
@@ -39,10 +32,8 @@ public sealed class DoctorCommandTests : IDisposable
     [Fact]
     public void DoctorCommand_Check_WithExplicitCanonicalPathFromArbitraryDirectory_InspectsCanonicalRepository()
     {
-        string codegraphDir = Path.Combine(CanonicalPath, ".codegraph");
-        Directory.CreateDirectory(codegraphDir);
-
-        string stubPath = DoctorHarness.HealthyStub(_stubs.Path, CanonicalPath);
+        _world.Files.CreateDirectory(Path.Combine(CanonicalPath, ".codegraph"));
+        _world.HealthyMcp(CanonicalPath);
 
         bool gitInvokedOnCanonical = false;
         ScriptedProcessExecutor executor = new(startInfo =>
@@ -60,17 +51,16 @@ public sealed class DoctorCommandTests : IDisposable
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorCommand command = DoctorTestEnvironment.Command(true, _ => null, executor, stubPath);
+        DoctorCommand command = _world.Command(true, executor, McpExecutable);
         DoctorSettings settings = new()
         {
             Path = CanonicalPath,
             Check = true
         };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-            command.Execute(null!, settings, CancellationToken.None));
+        int exitCode = command.Execute(null!, settings, CancellationToken.None);
 
-        Assert.Equal(0, execution.Result);
+        Assert.Equal(0, exitCode);
         Assert.True(gitInvokedOnCanonical,
             "Git rev-parse must be invoked with WorkingDirectory pointing to the canonical repository.");
     }
@@ -82,14 +72,11 @@ public sealed class DoctorCommandTests : IDisposable
     [Fact]
     public void DoctorCommand_Check_WithRelativePathToCanonicalParent_ResolvesAndInspectsCanonicalPath()
     {
-        string codegraphDir = Path.Combine(CanonicalPath, ".codegraph");
-        Directory.CreateDirectory(codegraphDir);
-
-        string stubPath = DoctorHarness.HealthyStub(_stubs.Path, CanonicalPath);
+        _world.Files.CreateDirectory(Path.Combine(CanonicalPath, ".codegraph"));
+        _world.HealthyMcp(CanonicalPath);
 
         string relativePath = Path.GetRelativePath(WorktreePath, CanonicalPath);
-        string originalDirectory = Environment.CurrentDirectory;
-        string expectedCanonicalPath = string.Empty;
+        string expectedCanonicalPath = Path.GetFullPath(relativePath, WorktreePath);
 
         bool gitInvokedOnCanonical = false;
         ScriptedProcessExecutor executor = new(startInfo =>
@@ -112,23 +99,13 @@ public sealed class DoctorCommandTests : IDisposable
             Check = true
         };
 
-        try
-        {
-            Environment.CurrentDirectory = WorktreePath;
-            DoctorCommand command = DoctorTestEnvironment.Command(true, _ => null, executor, stubPath);
-            expectedCanonicalPath = Path.GetFullPath(relativePath);
+        DoctorCommand command = _world.Command(true, executor, McpExecutable);
 
-            CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-                command.Execute(null!, settings, CancellationToken.None));
+        int exitCode = command.Execute(null!, settings, CancellationToken.None);
 
-            Assert.Equal(0, execution.Result);
-            Assert.True(gitInvokedOnCanonical,
-                "Git rev-parse must be invoked with WorkingDirectory pointing to the canonical repository.");
-        }
-        finally
-        {
-            Environment.CurrentDirectory = originalDirectory;
-        }
+        Assert.Equal(0, exitCode);
+        Assert.True(gitInvokedOnCanonical,
+            "Git rev-parse must be invoked with WorkingDirectory pointing to the canonical repository.");
     }
 
     /// <summary>
@@ -138,16 +115,14 @@ public sealed class DoctorCommandTests : IDisposable
     [Fact]
     public void RepositoryDoctor_Run_WithExplicitCanonicalPath_InspectsCanonicalRootAndPassesChecks()
     {
-        string codegraphDir = Path.Combine(CanonicalPath, ".codegraph");
-        Directory.CreateDirectory(codegraphDir);
-
-        string stubPath = DoctorHarness.HealthyStub(_stubs.Path, CanonicalPath);
+        _world.Files.CreateDirectory(Path.Combine(CanonicalPath, ".codegraph"));
+        _world.HealthyMcp(CanonicalPath);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(CanonicalPath);
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = _world.Doctor.Run(
             CanonicalPath,
             DoctorMode.Check,
-            DoctorHarness.Options(stubPath),
+            DoctorHarness.Options(McpExecutable),
             executor,
             _ => null);
 
@@ -173,17 +148,16 @@ public sealed class DoctorCommandTests : IDisposable
                 ? new ProcessResult(128, string.Empty, "fatal: not a git repository")
                 : throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'."));
 
-        DoctorCommand command = DoctorTestEnvironment.Command(true, _ => null, executor, "kyber-weave-mcp-absent");
+        DoctorCommand command = _world.Command(true, executor, "kyber-weave-mcp-absent");
         DoctorSettings settings = new()
         {
             Path = WorktreePath,
             Check = true
         };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-            command.Execute(null!, settings, CancellationToken.None));
+        int exitCode = command.Execute(null!, settings, CancellationToken.None);
 
-        Assert.Equal(2, execution.Result);
+        Assert.Equal(2, exitCode);
     }
 
     /// <summary>
@@ -197,13 +171,14 @@ public sealed class DoctorCommandTests : IDisposable
     [Fact]
     public void DoctorCommand_ProvisionWithAnExistingIndex_SyncsAndNeverInitialises()
     {
-        Directory.CreateDirectory(Path.Combine(CanonicalPath, ".codegraph"));
+        _world.Files.CreateDirectory(Path.Combine(CanonicalPath, ".codegraph"));
+        _world.HealthyMcp(CanonicalPath);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(CanonicalPath);
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = _world.Doctor.Run(
             CanonicalPath,
             DoctorMode.Provision,
-            DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, CanonicalPath)),
+            DoctorHarness.Options(McpExecutable),
             executor,
             _ => null);
 
@@ -230,26 +205,11 @@ public sealed class DoctorCommandTests : IDisposable
             _ => throw DoctorHarness.BinaryNotFound());
 
         int exitCode = DoctorAppHarness.Run(
-            DoctorTestEnvironment.Command(false, _ => null, executor, "kyber-weave-mcp-absent"),
+            _world.Command(false, executor, "kyber-weave-mcp-absent"),
             "doctor",
             "--ensure",
             CanonicalPath);
 
         Assert.Equal(3, exitCode);
     }
-}
-
-/// <summary>
-///     Serializes the one test that changes <see cref="Environment.CurrentDirectory" /> so it cannot
-///     race a parallel test that resolves a relative path.
-/// </summary>
-[CollectionDefinition(Name, DisableParallelization = true)]
-[SuppressMessage(
-    "Naming",
-    "CA1711:Identifiers should not have incorrect suffix",
-    Justification = "xUnit collection definitions are named <Name>Collection by convention; "
-        + "the suffix is the framework idiom, not a claim to be a collection type.")]
-public sealed class DoctorCommandWorkingDirectoryCollection
-{
-    public const string Name = "DoctorCommandWorkingDirectory";
 }
