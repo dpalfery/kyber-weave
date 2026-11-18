@@ -351,20 +351,22 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
       done
     done
     touched_classes=()
-    integration_test_args=()
+    integration_classes=()
     while IFS= read -r file; do
       [[ -z "${file}" ]] && continue
       namespace_name="$(sed -nE 's/^namespace[[:space:]]+([A-Za-z0-9_.]+).*/\1/p' "${file}" | head -1)"
       [[ -z "${namespace_name}" ]] && namespace_name="KyberWeave.Tests"
       while IFS= read -r class_name; do
         if [[ "${file}" == tests/KyberWeave.Integration.Tests/*.cs ]]; then
-          integration_test_args+=(-class "${namespace_name}.${class_name}")
+          integration_classes+=("${namespace_name}.${class_name}")
         else
           touched_classes+=("${namespace_name}.${class_name}")
         fi
       done < <(grep -oE '^[[:space:]]*public[[:space:]]+(sealed[[:space:]]+|partial[[:space:]]+)*class[[:space:]]+[A-Za-z0-9_]+' "${file}" | awk '{print $NF}')
     done < <(printf '%s\n' "${touched_files[@]+"${touched_files[@]}"}" | sort -u)
-    touched_total=$(printf '%s\n' "${touched_classes[@]+"${touched_classes[@]}"}" "${integration_test_args[@]+"${integration_test_args[@]}"}" | grep -c . || true)
+    # The ceiling counts classes, not argv words: each integration class is named by a "-class" pair,
+    # and counting the pairs doubled that half of the total and took the fast tier on a change inside it.
+    touched_total=$(printf '%s\n' "${touched_classes[@]+"${touched_classes[@]}"}" "${integration_classes[@]+"${integration_classes[@]}"}" | sort -u | grep -c . || true)
     if [[ ${#touched_classes[@]} -gt 0 && ${touched_total} -le 40 ]]; then
       while IFS= read -r class; do
         test_args+=(-class "${class}")
@@ -372,8 +374,13 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
       step "tests (touched: $(printf '%s\n' "${touched_classes[@]}" | sort -u | wc -l | tr -d ' ') classes)"
     elif [[ ${#touched_classes[@]} -gt 0 ]]; then
       printf 'fast-loop: --touched found %s test classes; running the fast tier instead.\n' "${touched_total}" >&2
-      integration_test_args=()
+      integration_classes=()
     fi
+    integration_test_args=()
+    while IFS= read -r class; do
+      [[ -z "${class}" ]] && continue
+      integration_test_args+=(-class "${class}")
+    done < <(printf '%s\n' "${integration_classes[@]+"${integration_classes[@]}"}" | sort -u)
   fi
 
   if [[ ${#test_args[@]} -eq 0 && ${#integration_test_args[@]} -eq 0 ]]; then
