@@ -62,58 +62,44 @@ public sealed class MutexLeaseContractTests : LeaseContractTests
         TimeSpan timeout = TimeSpan.FromMilliseconds(800);
         IDisposable first = lease.Acquire(name, GenerousTimeout);
 
-        // The second request queues behind the first inside the process, then meets a mutex that another owner holds:
-        // together the two waits must stay within the one timeout it was given.
-        Thread release = new(() =>
+        // Another owner is already queued on the system mutex, so when the first holder lets go it is that owner, not
+        // the request below, that takes it.
+        using ManualResetEventSlim foreignHolds = new(initialState: false);
+        using ManualResetEventSlim foreignRelease = new(initialState: false);
+        Thread foreign = new(() =>
         {
-            Thread.Sleep(400);
-            first.Dispose();
-        });
-        release.Start();
-        IDisposable foreign = HoldElsewhereAfterRelease(name, release);
-        System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
-
-        _ = Assert.Throws<LeaseTimeoutException>(() => lease.Acquire(name, timeout));
-
-        clock.Stop();
-        foreign.Dispose();
-        Assert.True(clock.Elapsed < TimeSpan.FromMilliseconds(1100), $"The request waited {clock.Elapsed}.");
-    }
-
-    private IDisposable HoldElsewhereAfterRelease(string name, Thread release)
-    {
-        // The other owner takes the system mutex the moment the in-process holder lets go, so the queued request has
-        // to wait on the mutex as well.
-        ManualResetEventSlim ready = new(initialState: false);
-        IDisposable owner = new NoOwner();
-        Thread thread = new(() =>
-        {
-            release.Join();
-            owner = HoldElsewhere(name);
-            ready.Set();
+            using Mutex mutex = new(initiallyOwned: false, name);
+            bool held = mutex.WaitOne(TimeSpan.FromSeconds(30));
+            foreignHolds.Set();
+            _ = foreignRelease.Wait(TimeSpan.FromSeconds(30));
+            if (held)
+            {
+                mutex.ReleaseMutex();
+            }
         })
         {
             IsBackground = true
         };
-        thread.Start();
-        return new Waiter(thread, ready, () => owner);
-    }
-
-    private sealed class NoOwner : IDisposable
-    {
-        public void Dispose()
+        foreign.Start();
+        Thread.Sleep(100);
+        Thread release = new(() =>
         {
-        }
-    }
+            Thread.Sleep(300);
+            first.Dispose();
+        });
+        System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+        release.Start();
 
-    private sealed class Waiter(Thread thread, ManualResetEventSlim ready, Func<IDisposable> owner) : IDisposable
-    {
-        public void Dispose()
-        {
-            _ = thread.Join(TimeSpan.FromSeconds(30));
-            _ = ready.Wait(TimeSpan.FromSeconds(30));
-            owner().Dispose();
-        }
+        // The request queues behind the first holder inside the process, then meets a mutex the other owner holds:
+        // the two waits together must stay within the one timeout it was given.
+        _ = Assert.Throws<LeaseTimeoutException>(() => lease.Acquire(name, timeout));
+
+        clock.Stop();
+        foreignRelease.Set();
+        release.Join();
+        foreign.Join();
+        Assert.True(foreignHolds.IsSet, "The other owner never took the mutex.");
+        Assert.True(clock.Elapsed < TimeSpan.FromMilliseconds(1050), $"The request waited {clock.Elapsed}.");
     }
 
     [Fact]
