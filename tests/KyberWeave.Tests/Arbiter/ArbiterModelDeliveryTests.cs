@@ -137,11 +137,13 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
     {
         WriteTable();
 
-        HookOutcome outcome = Decide(new FakeArbiterProvider
-    {
-        Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
-        Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
-    }, "enforce");
+        HookOutcome outcome = Decide(
+            new FakeArbiterProvider
+            {
+                Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
+                Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
+            },
+            "enforce");
 
         Assert.Equal(HookOutcomeKind.Allow, outcome.Kind);
         Assert.Equal("opus", outcome.ModelToken);
@@ -152,11 +154,14 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
     {
         WriteTable();
 
-        HookOutcome outcome = Decide(new FakeArbiterProvider
-    {
-        Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
-        Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
-    }, "enforce", dispatchModel: "claude-opus-5-5");
+        HookOutcome outcome = Decide(
+            new FakeArbiterProvider
+            {
+                Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
+                Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
+            },
+            "enforce",
+            dispatchModel: "claude-opus-5-5");
 
         Assert.Null(outcome.ModelToken);
         ArbiterModelBlock block = Assert.IsType<ArbiterModelBlock>(DelegateModelRecord().Model);
@@ -169,11 +174,13 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
     {
         WriteTable();
 
-        HookOutcome outcome = Decide(new FakeArbiterProvider
-    {
-        Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
-        Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
-    }, "shadow");
+        HookOutcome outcome = Decide(
+            new FakeArbiterProvider
+            {
+                Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
+                Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
+            },
+            "shadow");
 
         Assert.Equal(HookOutcomeKind.Allow, outcome.Kind);
         Assert.Null(outcome.Reason);
@@ -191,11 +198,13 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
         // t-deep is not an alias the Agent tool accepts, so no adapter writes it. The decision must not claim it was delivered.
         WriteTable("t-deep");
 
-        HookOutcome outcome = Decide(new FakeArbiterProvider
-    {
-        Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
-        Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
-    }, "enforce");
+        HookOutcome outcome = Decide(
+            new FakeArbiterProvider
+            {
+                Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
+                Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
+            },
+            "enforce");
 
         Assert.Null(outcome.ModelToken);
         ArbiterModelBlock block = Assert.IsType<ArbiterModelBlock>(DelegateModelRecord().Model);
@@ -208,11 +217,13 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
     {
         WriteTable("haiku");
 
-        HookOutcome outcome = Decide(new FakeArbiterProvider
-    {
-        Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
-        Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
-    }, "enforce");
+        HookOutcome outcome = Decide(
+            new FakeArbiterProvider
+            {
+                Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
+                Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
+            },
+            "enforce");
 
         Assert.Equal("haiku", outcome.ModelToken);
         ArbiterModelBlock block = Assert.IsType<ArbiterModelBlock>(DelegateModelRecord().Model);
@@ -226,11 +237,15 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
         // The engine decides before the adapter writes. When the adapter's write fails the dispatch runs without
         // the model, so the decision must not say the model was delivered.
         WriteTable("haiku");
-        ClaudeHookAdapter adapter = new(Engine(new FakeArbiterProvider
-    {
-        Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
-        Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
-    })) { ModelWriteFault = new IOException("write refused") };
+        ClaudeHookAdapter adapter = new(Engine(
+            new FakeArbiterProvider
+            {
+                Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
+                Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
+            }))
+        {
+            ModelWriteFault = new IOException("write refused"),
+        };
         string raw = AgentDispatchPayload();
         using JsonDocument doc = JsonDocument.Parse(raw);
 

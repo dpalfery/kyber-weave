@@ -107,11 +107,12 @@ public sealed class ModelTargetResolverInputTests : IDisposable
 
     private async Task<ArbiterDecisionRecord> RunAsync(ArbiterEvent ev, KyberWeaveConfig config)
     {
-        _ = await Evaluator(new FakeArbiterProvider
-    {
-        Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
-        Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
-    }).EvaluateAsync(ev, config, null, TestContext.Current.CancellationToken);
+        _ = await Evaluator(
+            new FakeArbiterProvider
+            {
+                Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
+                Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
+            }).EvaluateAsync(ev, config, null, TestContext.Current.CancellationToken);
         return Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll(), decision => decision.Trigger == "delegate.model");
     }
 

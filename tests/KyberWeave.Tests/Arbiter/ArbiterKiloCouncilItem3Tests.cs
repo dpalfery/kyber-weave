@@ -137,11 +137,11 @@ public sealed class ArbiterKiloCouncilItem3Tests : IDisposable
     {
         WriteTable();
         FakeArbiterProvider provider = new FakeArbiterProvider
-    {
-        Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard", [FailureRule] = "same" },
-        Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8), [FailureRule] = new(null, 0.9, 0.85) },
-        Model = "stub",
-    };
+        {
+            Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard", [FailureRule] = "same" },
+            Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8), [FailureRule] = new(null, 0.9, 0.85) },
+            Model = "stub",
+        };
         KyberWeaveConfig config = EnforcedConfig();
 
         HookOutcome first = Engine(provider).DecidePreDispatch(
