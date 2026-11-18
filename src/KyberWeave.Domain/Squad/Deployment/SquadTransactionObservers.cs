@@ -22,7 +22,10 @@ public enum SquadTransactionCheckpointKind
     Prepared,
     ActiveTransitionWritten,
     OriginalClaimed,
-    AfterImagePublished
+    AfterImagePublished,
+
+    /// <summary>The deployment has committed: its receipt is published and only cleanup is left.</summary>
+    Committed
 }
 
 public sealed record SquadTransactionCheckpoint(

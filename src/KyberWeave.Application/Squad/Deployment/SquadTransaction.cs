@@ -137,6 +137,7 @@ public sealed class SquadTransaction : ISquadTransaction
             journalDirectory,
             workDirectory);
         string intentPath = Path.Combine(journalDirectory, IntentFileName);
+        RecoverUnfinishedBeforeStart(plan, journalDirectory, workDirectory, intentPath, sameTransactionDirectory);
         bool workExisted = _files.DirectoryExists(workDirectory);
         string stateAuthorityRoot = Physical(_stateStore.ResolveStateAuthorityRoot(root, plan.Scope));
         string lockPath = PhysicalLeaf(_stateStore.ResolveLockPath(root, plan.Scope));
@@ -355,6 +356,13 @@ public sealed class SquadTransaction : ISquadTransaction
 
             lease.ReleaseJournal();
             TryMarkCleanupOnly(intentPath, intent);
+
+            // The commit marker is durable here and the artifacts are still on disk: the only window a kill can
+            // leave a committed journal behind, and the one the crash sweep stops at to recover it.
+            NotifyCheckpoint(
+                ref checkpointSequence,
+                _observer,
+                SquadTransactionCheckpointKind.Committed);
             CleanupOwnedArtifacts(journalDirectory, workDirectory, keepIntent: true);
             RecordProjectRegistration(plan, stateDirectory);
         }
@@ -384,9 +392,9 @@ public sealed class SquadTransaction : ISquadTransaction
 
     /// <summary>Rolls back an interrupted transaction. Repeated recovery is a no-op.</summary>
     /// <remarks>
-    ///     A journal in its final committed phase is only cleaned up, not rolled back, and that cleanup deletes
-    ///     everything in the journal folder, including a file another tool put there: the folder belongs to the
-    ///     transaction while a journal exists in it.
+    ///     A journal in its final committed phase is only cleaned up, not rolled back, and it removes exactly the
+    ///     entries the transaction writes into its folder. Anything else found beside them is another tool's or the
+    ///     user's, so recovery refuses and removes nothing.
     /// </remarks>
     public void Recover(string targetRoot, SquadDeploymentScope scope)
     {
@@ -394,6 +402,13 @@ public sealed class SquadTransaction : ISquadTransaction
 
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentities.Resolve(targetRoot, _semantics);
         using TransactionLease lease = AcquireLease(_stateStore.ResolveLeaseIdentity(identity.PhysicalPath, scope));
+        RecoveryOutcome outcome = RecoverLeased(identity, scope);
+        AddRecoveryNotice(outcome, Physical(_stateStore.ResolveTransactionDirectory(identity.PhysicalPath, scope)));
+    }
+
+    /// <summary>Recovers the root's interrupted transaction, if any; the caller holds the root's lease.</summary>
+    private RecoveryOutcome RecoverLeased(SquadPhysicalRootIdentity identity, SquadDeploymentScope scope)
+    {
         string root = identity.PhysicalPath;
         string journalDirectory = Physical(_stateStore.ResolveTransactionDirectory(root, scope));
         if (!_files.DirectoryExists(journalDirectory))
@@ -404,7 +419,7 @@ public sealed class SquadTransaction : ISquadTransaction
             string toolFolder = Path.GetDirectoryName(journalDirectory)!;
             if (string.Equals(Path.GetFileName(toolFolder), ".kyber-weave", StringComparison.Ordinal))
                 DeleteEmptyDirectory(toolFolder);
-            return;
+            return RecoveryOutcome.None;
         }
 
         string workDirectory = Physical(_stateStore.ResolveFileWorkDirectory(root, scope));
@@ -441,7 +456,7 @@ public sealed class SquadTransaction : ISquadTransaction
                 if (string.Equals(Path.GetFileName(toolFolder), ".kyber-weave", StringComparison.Ordinal))
                     DeleteEmptyDirectory(toolFolder);
                 recoveryCompleted = true;
-                return;
+                return RecoveryOutcome.DiscardedUnstarted;
             }
 
             IntentDocument intent = ReadIntent(
@@ -457,11 +472,14 @@ public sealed class SquadTransaction : ISquadTransaction
             string receiptPath = PhysicalLeaf(_stateStore.ResolveReceiptPath(root, scope));
             if (intent.Phase == TransactionPhase.Committed)
             {
-                // The deployment finished; a kill during cleanup left a partial transaction tree. Finish forward.
+                // The deployment finished; a kill during cleanup left a partial transaction tree. Finish forward,
+                // removing only the names this transaction makes: the committed journal no longer lists its
+                // artifacts, so anything else in the folder belongs to someone else and is left alone.
+                VerifyCommittedJournalHoldsOnlyItsOwnArtifacts(journalDirectory);
                 createdDirectoriesToRemove = intent.CreatedDirectories;
                 CleanupOwnedArtifacts(journalDirectory, workDirectory);
                 recoveryCompleted = true;
-                return;
+                return RecoveryOutcome.FinishedForward;
             }
 
             ResolveActiveClaims(
@@ -481,6 +499,7 @@ public sealed class SquadTransaction : ISquadTransaction
             MarkCleanupOnly(intentPath, intent);
             CleanupOwnedArtifacts(journalDirectory, workDirectory);
             recoveryCompleted = true;
+            return RecoveryOutcome.RolledBack;
         }
         finally
         {
@@ -495,6 +514,74 @@ public sealed class SquadTransaction : ISquadTransaction
             }
         }
     }
+
+    /// <summary>
+    ///     Recovers a transaction an earlier, killed run left for this root, under the lease the caller holds, so a
+    ///     new deployment never starts over an unfinished journal. A recovery that cannot finish refuses the
+    ///     deployment, naming the cause and the journal, and starts nothing.
+    /// </summary>
+    /// <remarks>
+    ///     A recovery that changed the tree also refuses: the plan was read from the tree the killed run left, so
+    ///     it may treat a half-applied file as the host's own edit and skip it, and nothing in it can show that.
+    ///     The next run plans against the recovered tree. The lifecycle recovers before it plans, so a command run
+    ///     through it completes in one go; this refusal covers a journal that appears between that recovery and
+    ///     this lease, and every caller that does not recover first.
+    /// </remarks>
+    private void RecoverUnfinishedBeforeStart(
+        SquadDeploymentPlan plan,
+        string journalDirectory,
+        string workDirectory,
+        string intentPath,
+        bool sameTransactionDirectory)
+    {
+        string toolFolder = Path.GetDirectoryName(journalDirectory)!;
+        if (!_files.DirectoryExists(journalDirectory) &&
+            !_files.DirectoryExists(toolFolder) &&
+            (sameTransactionDirectory || !_files.DirectoryExists(workDirectory)))
+            return;
+
+        RecoveryOutcome outcome;
+        try
+        {
+            outcome = RecoverLeased(
+                new SquadPhysicalRootIdentity(plan.PhysicalRootPath, plan.PhysicalRootKey),
+                plan.Scope);
+        }
+        catch (Exception cause) when (cause is not OperationCanceledException)
+        {
+            // Name the entry that exists: with no intent the remaining evidence is the journal folder itself, so
+            // pointing at a file that is not there would send the operator looking for the wrong thing.
+            string location = _files.FileExists(intentPath) ? intentPath : journalDirectory;
+            string message =
+                $"An unfinished Squad transaction exists at '{location}' and could not be recovered: " +
+                $"{cause.Message} The new deployment was not started. Fix the cause and run the command again.";
+            throw cause is SquadDeploymentConflictException
+                ? new SquadDeploymentConflictException(message, cause)
+                : new InvalidOperationException(message, cause);
+        }
+
+        AddRecoveryNotice(outcome, journalDirectory);
+        if (outcome is RecoveryOutcome.FinishedForward or RecoveryOutcome.RolledBack)
+            throw new SquadDeploymentConflictException(
+                $"Recovered an unfinished Squad transaction at '{journalDirectory}': {DescribeRecovery(outcome)}. " +
+                "This deployment was planned before the recovery, so it was not applied. Run the command again.");
+    }
+
+    private void AddRecoveryNotice(RecoveryOutcome outcome, string journalDirectory)
+    {
+        if (outcome is RecoveryOutcome.None)
+            return;
+
+        _warnings.Add($"Recovered an unfinished Squad transaction at '{journalDirectory}': {DescribeRecovery(outcome)}.");
+    }
+
+    private static string DescribeRecovery(RecoveryOutcome outcome) =>
+        outcome switch
+        {
+            RecoveryOutcome.FinishedForward => "it had already committed, so its cleanup was finished and its changes kept",
+            RecoveryOutcome.RolledBack => "it had not committed, so its changes were rolled back",
+            _ => "it had changed nothing, so its leftover folders were removed"
+        };
 
     private IntentDocument CaptureIntent(
         SquadDeploymentPlan plan,
@@ -2261,6 +2348,60 @@ public sealed class SquadTransaction : ISquadTransaction
         return new TransactionLease(held, _files);
     }
 
+    /// <summary>
+    ///     Refuses to finish a committed journal that holds anything this transaction did not make. A committed
+    ///     journal has already published its receipt and dropped its artifact list, so it cannot prove ownership of
+    ///     anything beyond the fixed names the transaction writes; removing the rest would delete another tool's file.
+    /// </summary>
+    private void VerifyCommittedJournalHoldsOnlyItsOwnArtifacts(string journalDirectory)
+    {
+        foreach (FileSystemEntry entry in _files.EnumerateEntries(journalDirectory).ToArray())
+        {
+            string name = Path.GetFileName(entry.Path);
+            if (IsOwnedJournalEntry(name))
+                continue;
+
+            throw new InvalidDataException(
+                $"Squad transaction journal at '{journalDirectory}' holds '{name}', which this transaction did not " +
+                "write. Its prepared artifact authority does not exactly describe its transaction tree, so nothing " +
+                "was removed. Move that entry out of the journal folder and run the command again.");
+        }
+    }
+
+    /// <summary>The names a transaction writes directly into its journal folder, which is also its work folder.</summary>
+    private static bool IsOwnedJournalEntry(string name) =>
+        string.Equals(name, IntentFileName, StringComparison.Ordinal) ||
+        IsIntentTemporary(name) ||
+        IsClaimFile(name) ||
+        name is "backups" or "staging" or "links" or "state-originals" or "state-original-links" or "state-staging";
+
+    /// <summary>
+    ///     Whether a name is a claim file this transaction generates, <c>claimed-&lt;transaction id&gt;-&lt;digest&gt;</c>.
+    ///     Another tool's file that merely starts with <c>claimed-</c> is not one, so a committed journal holding it is
+    ///     refused rather than deleted.
+    /// </summary>
+    /// <param name="name">The journal folder entry's name.</param>
+    /// <returns>True for a claim file this transaction wrote.</returns>
+    private static bool IsClaimFile(string name)
+    {
+        const string prefix = "claimed-";
+        const int transactionIdLength = 32;
+        const int digestLength = 64;
+        if (!name.StartsWith(prefix, StringComparison.Ordinal))
+            return false;
+
+        string remainder = name[prefix.Length..];
+        return remainder.Length == transactionIdLength + 1 + digestLength &&
+               remainder[transactionIdLength] == '-' &&
+               IsLowerHex(remainder[..transactionIdLength], transactionIdLength) &&
+               IsLowerHex(remainder[(transactionIdLength + 1)..], digestLength);
+    }
+
+    private static bool IsLowerHex(string? value, int length) =>
+        value is { } text &&
+        text.Length == length &&
+        text.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
     private void CleanupOwnedArtifacts(
         string journalDirectory,
         string workDirectory,
@@ -3229,12 +3370,7 @@ public sealed class SquadTransaction : ISquadTransaction
         }
     }
 
-    private bool IsTransactionId(string? value)
-    {
-        return value is { Length: 32 } &&
-               value.All(character =>
-                   character is >= '0' and <= '9' or >= 'a' and <= 'f');
-    }
+    private static bool IsTransactionId(string? value) => IsLowerHex(value, 32);
 
     private string ResolveArtifactNode(string areaRoot, string relativePath)
     {
@@ -3260,12 +3396,7 @@ public sealed class SquadTransaction : ISquadTransaction
                    .Any(path => Path.GetFileName(path).Contains("tmp", StringComparison.OrdinalIgnoreCase));
     }
 
-    private bool IsDigest(string? digest)
-    {
-        return digest is { Length: 64 } &&
-               digest.All(character =>
-                   character is >= '0' and <= '9' or >= 'a' and <= 'f');
-    }
+    private static bool IsDigest(string? digest) => IsLowerHex(digest, 64);
 
     private string StateOriginalPath(string workDirectory, string name)
     {
@@ -3456,6 +3587,14 @@ public sealed class SquadTransaction : ISquadTransaction
         ReadOnlyMemory<byte> Content,
         string ContentSha256,
         string LinkTarget);
+
+    private enum RecoveryOutcome
+    {
+        None,
+        DiscardedUnstarted,
+        FinishedForward,
+        RolledBack
+    }
 
     private enum TransactionPhase
     {

@@ -72,6 +72,8 @@ public abstract class SquadCrashSafetyFixture : IDisposable
     /// <summary>A second managed file that an update changes, in a directory of its own so a recovery can be stopped between the two.</summary>
     public const string TwoPath = ".warp/agents/two.md";
 
+    private const string ToolFolder = ".kyber-weave";
+
     /// <summary>A file the host already had, adopted by the install, whose bytes never change.</summary>
     public const string AdoptedPath = ".codex/agents/adopted.md";
 
@@ -123,6 +125,13 @@ public abstract class SquadCrashSafetyFixture : IDisposable
 
     /// <summary>Runs recovery twice over the interrupted tree, as a restarted process would.</summary>
     public abstract void Recover();
+
+    /// <summary>
+    /// Plans the flow afresh over whatever tree is on disk and executes it, as the next command a user runs would:
+    /// no explicit recovery, so an interrupted transaction left behind is the transaction's own to recover.
+    /// </summary>
+    /// <param name="flow">The flow to run next.</param>
+    public abstract void ExecuteNext(SquadCrashFlow flow);
 
     /// <summary>Snapshots every path beneath <see cref="Root"/>.</summary>
     /// <returns>The tree, keyed by '/'-separated relative path in ordinal order.</returns>
@@ -214,6 +223,62 @@ public abstract class SquadCrashSafetyFixture : IDisposable
             BaselineReceipt()),
         _ => throw new ArgumentOutOfRangeException(nameof(flow), flow, null)
     };
+
+    /// <summary>
+    /// Builds the plan the next command would, from the receipt now on disk as the lifecycle reads it: nothing to
+    /// run (null) when the flow has nothing left to do, such as an install over an installed tree.
+    /// </summary>
+    /// <param name="flow">The flow to run again.</param>
+    /// <returns>The plan, or null when there is nothing to run.</returns>
+    protected SquadDeploymentPlan? CreateNextPlan(SquadCrashFlow flow)
+    {
+        // The tool folder, or a journal in it, is what tells a tree caught mid-transaction from one with nothing left to do.
+        bool unfinished = Capture().Keys.Any(key =>
+            string.Equals(key, ToolFolder, StringComparison.Ordinal) ||
+            key.StartsWith(ToolFolder + "/", StringComparison.Ordinal));
+        SquadReceipt? onDisk = StateStore.ReadReceipt(Root, Scope);
+        if (onDisk is null)
+        {
+            return flow == SquadCrashFlow.Install || unfinished ? CreatePlan(flow) : null;
+        }
+
+        return flow switch
+        {
+            // An install over an installed tree is refused before any deployment, so the next run is the update
+            // that keeps what is there; it still has a transaction to start when a journal was left behind.
+            SquadCrashFlow.Install => unfinished
+                ? Planner.CreateUpdate(
+                    Root,
+                    SquadDeploymentScope.Project,
+                    Lock("1.2.4"),
+                    [
+                        Rendered(ConductorPath, "installed body"),
+                        Rendered(AdoptedPath, "adopted body"),
+                        Rendered(EditedPath, "installed edited body")
+                    ],
+                    onDisk,
+                    [],
+                    replaceManaged: false,
+                    new FixedTimeProvider(InstalledAt))
+                : null,
+            SquadCrashFlow.Update => Planner.CreateUpdate(
+                Root,
+                SquadDeploymentScope.Project,
+                Lock("1.2.5"),
+                [
+                    Rendered(ConductorPath, "updated body"),
+                    Rendered(TwoPath, "updated two"),
+                    Rendered(AdoptedPath, "adopted body"),
+                    Rendered(EditedPath, "updated edited body")
+                ],
+                onDisk,
+                [],
+                replaceManaged: false,
+                new FixedTimeProvider(InstalledAt.AddDays(1))),
+            SquadCrashFlow.Uninstall => Planner.CreateUninstall(Root, SquadDeploymentScope.Project, onDisk),
+            _ => throw new ArgumentOutOfRangeException(nameof(flow), flow, null)
+        };
+    }
 
     /// <summary>The path of a baseline file under <see cref="Root"/>.</summary>
     /// <param name="relativePath">The '/'-separated path.</param>
@@ -313,6 +378,7 @@ public sealed class SquadCrashInjectedException : Exception
 public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
 {
     private readonly TempDirectory _temp = new();
+    private string? _committedPoint;
 
     /// <inheritdoc />
     public override string Root => _temp.Path;
@@ -345,6 +411,7 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
     {
         RecordingObserver observer = new(Capture);
         RealSquadDeployment.Transaction(StateStore, observer).Execute(CreatePlan(flow));
+        _committedPoint = observer.CommittedPoint;
         return observer.FaultPoints;
     }
 
@@ -377,6 +444,11 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
     /// <inheritdoc />
     public override string? ExecuteToRollback(SquadCrashFlow flow, string faultPoint)
     {
+        // A failure at or after the commit marker is a committed deployment whose cleanup failed, not one to roll
+        // back: the receipt is already published, and the kill sweep proves the tree it leaves recovers forward.
+        if (string.Equals(faultPoint, _committedPoint, StringComparison.Ordinal))
+            return null;
+
         RecordingObserver observer = new(failAt: faultPoint);
         try
         {
@@ -401,10 +473,19 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
     }
 
     /// <inheritdoc />
+    public override void ExecuteNext(SquadCrashFlow flow)
+    {
+        if (CreateNextPlan(flow) is { } plan)
+        {
+            RealSquadDeployment.Transaction(StateStore).Execute(plan);
+        }
+    }
+
+    /// <inheritdoc />
     public override IReadOnlyDictionary<string, SquadTreeEntry> Capture()
     {
         SortedDictionary<string, SquadTreeEntry> tree = new(StringComparer.Ordinal);
-        CaptureDirectory(new DirectoryInfo(Root), Root, tree);
+        CaptureDirectory(new DirectoryInfo(Root), Root, tree, StateStore.ResolveHomeStateDirectory());
         return tree;
     }
 
@@ -509,12 +590,18 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
         }
     }
 
-    private void CaptureDirectory(DirectoryInfo directory, string root, IDictionary<string, SquadTreeEntry> tree)
+    private void CaptureDirectory(
+        DirectoryInfo directory,
+        string root,
+        IDictionary<string, SquadTreeEntry> tree,
+        string registryDirectory)
     {
         foreach (FileSystemInfo entry in directory.EnumerateFileSystemInfos()
                      .OrderBy(value => value.Name, StringComparer.Ordinal))
         {
             string relativePath = RelativeKey(Path.GetRelativePath(root, entry.FullName));
+            if (IsRegistryFile(entry, registryDirectory))
+                continue;
             if (entry.LinkTarget is not null)
             {
                 bool namesDirectory = entry is DirectoryInfo;
@@ -531,7 +618,7 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
             if (entry is DirectoryInfo childDirectory)
             {
                 tree.Add(relativePath, new SquadTreeEntry(SquadTreeEntryKind.Directory));
-                CaptureDirectory(childDirectory, root, tree);
+                CaptureDirectory(childDirectory, root, tree, registryDirectory);
                 continue;
             }
 
@@ -539,6 +626,26 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
                 relativePath,
                 new SquadTreeEntry(SquadTreeEntryKind.File, File.ReadAllBytes(entry.FullName)));
         }
+    }
+
+    /// <summary>
+    /// The home-level project registry, which a snapshot leaves out: it is a cache written after the commit and
+    /// rebuilt by a later status run, so a kill after the commit marker leaves a whole tree without it. It is not
+    /// content the deployment installs.
+    /// </summary>
+    /// <param name="entry">The entry under the root.</param>
+    /// <param name="registryDirectory">The home state directory the registry sits in.</param>
+    /// <returns>True for the registry file itself.</returns>
+    private static bool IsRegistryFile(FileSystemInfo entry, string registryDirectory)
+    {
+        if (!string.Equals(entry.Name, "registry.json", StringComparison.Ordinal))
+            return false;
+
+        SquadFileSystemPathSemantics semantics = SquadFileSystemPathSemantics.Instance;
+        return string.Equals(
+            semantics.Canonicalize(Path.GetDirectoryName(entry.FullName)!),
+            semantics.Canonicalize(registryDirectory),
+            StringComparison.Ordinal);
     }
 
     private static void DeleteContents(DirectoryInfo directory)
@@ -588,6 +695,8 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
 
         public IReadOnlyList<string> FaultPoints => _faultPoints;
 
+        public string? CommittedPoint { get; private set; }
+
         public void AfterStep(SquadTransactionStep transactionStep)
         {
             _steps++;
@@ -597,7 +706,10 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
         public void AfterCheckpoint(SquadTransactionCheckpoint checkpoint)
         {
             _checkpoints++;
-            Record($"checkpoint:{Invariant(checkpoint.Sequence)}");
+            string point = $"checkpoint:{Invariant(checkpoint.Sequence)}";
+            if (checkpoint.Kind == SquadTransactionCheckpointKind.Committed)
+                CommittedPoint = point;
+            Record(point);
         }
 
         private void Record(string point)

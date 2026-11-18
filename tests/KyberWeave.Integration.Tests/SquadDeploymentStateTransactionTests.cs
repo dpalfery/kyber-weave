@@ -229,7 +229,8 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
                 SquadTransactionCheckpointKind.Prepared,
                 SquadTransactionCheckpointKind.ActiveTransitionWritten,
                 SquadTransactionCheckpointKind.OriginalClaimed,
-                SquadTransactionCheckpointKind.AfterImagePublished
+                SquadTransactionCheckpointKind.AfterImagePublished,
+                SquadTransactionCheckpointKind.Committed
             ],
             Enum.GetValues<SquadTransactionCheckpointKind>());
         Assert.Equal(

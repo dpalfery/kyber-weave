@@ -26,6 +26,59 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
 {
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
+    [Fact]
+    public async Task UninstallRecoversAnInterruptedUpdateFirstThenUninstallsInTheSameRun()
+    {
+        using TransactionFixture fixture = TransactionFixture.Create();
+        SortedDictionary<string, TreeEntry> interrupted = InterruptTransactionAfter(
+            fixture,
+            SquadTransactionStepKind.FileBackedUp);
+        RestoreTree(fixture.Path, interrupted);
+        string journal = Path.Combine(fixture.Path, ".kyber-weave", ".squad-transaction", "intent.json");
+        Assert.True(File.Exists(journal));
+        SquadLifecycleService lifecycle = SquadHostDefaults.CreateLifecycleService(stateStore: Store(fixture.Path));
+
+        SquadLifecycleResult result = await lifecycle.UninstallAsync(
+            new SquadUninstallRequest(fixture.Path, SquadDeploymentScope.Project),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success);
+        Assert.False(File.Exists(journal));
+        Assert.False(File.Exists(ToPlatformPath(fixture.Path, fixture.RelativePath)));
+        Assert.Contains(
+            result.Warnings!,
+            warning => warning.StartsWith("Recovered an unfinished Squad transaction", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task UninstallRefusesWhenTheInterruptedTransactionCannotBeRecoveredAndChangesNothing()
+    {
+        using TransactionFixture fixture = TransactionFixture.Create();
+        SortedDictionary<string, TreeEntry> interrupted = InterruptTransactionAfter(
+            fixture,
+            SquadTransactionStepKind.FileBackedUp);
+        RestoreTree(fixture.Path, interrupted);
+        string journal = Path.Combine(fixture.Path, ".kyber-weave", ".squad-transaction", "intent.json");
+        string document = await File.ReadAllTextAsync(journal, Encoding.UTF8, TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(
+            journal,
+            CorruptJournalDocument(document, "unknown"),
+            new UTF8Encoding(false),
+            TestContext.Current.CancellationToken);
+        SortedDictionary<string, TreeEntry> before = CaptureTree(fixture.Path);
+        SquadLifecycleService lifecycle = SquadHostDefaults.CreateLifecycleService(stateStore: Store(fixture.Path));
+
+        InvalidOperationException refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            lifecycle.UninstallAsync(
+                new SquadUninstallRequest(fixture.Path, SquadDeploymentScope.Project),
+                TestContext.Current.CancellationToken));
+
+        Assert.Contains("could not be recovered", refused.Message, StringComparison.Ordinal);
+        Assert.Contains(".squad-transaction", refused.Message, StringComparison.Ordinal);
+        Assert.IsType<InvalidDataException>(refused.InnerException);
+        AssertTreesEqual(before, CaptureTree(fixture.Path));
+    }
+
     [Theory]
     [InlineData("unknown")]
     [InlineData("duplicate")]

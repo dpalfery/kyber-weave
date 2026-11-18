@@ -851,6 +851,8 @@ When an interrupted deployment or crash occurs, `SquadTransaction.Recover` resto
 - **Dual Fingerprint Resolution**: Recovery inspects both the destination path and the claimed backup slot to determine whether a transition completed, failed, or was interrupted mid-flight.
 - **External Modification Preservation**: If an external process or operator modified a file during or after the transaction, recovery leaves the modified file intact, preserves the journal and backup evidence, and emits actionable repair guidance.
 - **Clean Reversibility**: Uncontended rollbacks restore the pre-transaction state, clean up empty directories created by the transaction, and restore application-data topologies.
+- **Owned Artifacts Only**: A committed journal is finished forward by removing only the entries the transaction wrote — its intent and unpublished temporaries, `backups/`, the staging folders, `state-originals/`, `state-staging/` and `claimed-*`. Any other entry in `.kyber-weave/.squad-transaction` stops recovery, which refuses naming the journal and removes nothing.
+- **Empty Tool Folder Removal**: A run that finds an empty `.kyber-weave` folder removes it, including one that existed before the run; it holds no state, and the next run recreates it.
 
 ---
 

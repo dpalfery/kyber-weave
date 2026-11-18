@@ -38,12 +38,27 @@ public sealed class InMemorySquadCrashSafetyFixture : SquadCrashSafetyFixture
         nameof(InMemoryFileSystem.CreateDirectoryLink)
     };
 
-    private readonly InMemorySquadState _state = new();
+    // The project registry is a cache written after the commit and rebuilt by a later status run, so a kill between
+    // the commit and that write leaves a whole new tree without it. A kill before the journal exists can leave the
+    // empty state folders its run had made, which hold nothing for a later run to recover. Both are left out of every
+    // snapshot; the lock and receipt files are not.
+    private const string RegistryKey = "home/.kyber-weave/squad/registry.json";
+
+    private readonly InMemorySquadState _state;
     private readonly string _root;
+    private readonly HashSet<string> _leftOutOfSnapshots;
     private int _commitOrdinal;
 
-    /// <summary>Creates a workspace with an empty project directory.</summary>
-    public InMemorySquadCrashSafetyFixture() => _root = _state.CreateRoot("crash");
+    /// <summary>
+    /// Creates a workspace with an empty project directory. The state sits inside it, as in the real-disk workspace,
+    /// so every snapshot and restore covers the lock and receipt as well as the project's files.
+    /// </summary>
+    public InMemorySquadCrashSafetyFixture()
+    {
+        _state = new InMemorySquadState(stateRoot: "/kw/projects/crash");
+        _root = _state.CreateRoot("crash");
+        _leftOutOfSnapshots = ResolveLeftOutOfSnapshots();
+    }
 
     /// <inheritdoc />
     public override string Root => _root;
@@ -167,9 +182,44 @@ public sealed class InMemorySquadCrashSafetyFixture : SquadCrashSafetyFixture
         _state.Transaction().Recover(Root, SquadDeploymentScope.Project);
     }
 
+    /// <summary>
+    /// The snapshot keys this workspace leaves out: the registry, and the state-folder chain a kill can leave empty.
+    /// The chain is resolved from the store rather than matched by name, so a folder beside it under the home is
+    /// compared like any other.
+    /// </summary>
+    /// <returns>The keys, relative to the root in ordinal order.</returns>
+    private HashSet<string> ResolveLeftOutOfSnapshots()
+    {
+        HashSet<string> leftOut = new(StringComparer.Ordinal) { RegistryKey };
+        string? directory = _state.Store.ResolveStateDirectory(_root, SquadDeploymentScope.Project);
+        while (directory is not null &&
+               _state.Semantics.IsWithin(_root, directory) &&
+               !_state.Semantics.AreSame(_root, directory))
+        {
+            leftOut.Add(Path.GetRelativePath(_root, directory).Replace(Path.DirectorySeparatorChar, '/'));
+            directory = Path.GetDirectoryName(directory);
+        }
+
+        return leftOut;
+    }
+
+    private bool IsLeftOutOfSnapshots(KeyValuePair<string, SquadTreeEntry> entry) =>
+        _leftOutOfSnapshots.Contains(entry.Key);
+
+    /// <inheritdoc />
+    public override void ExecuteNext(SquadCrashFlow flow)
+    {
+        if (CreateNextPlan(flow) is { } plan)
+        {
+            _state.Transaction().Execute(plan);
+        }
+    }
+
     /// <inheritdoc />
     public override IReadOnlyDictionary<string, SquadTreeEntry> Capture() =>
-        SquadStateTreeCapture.Capture(_state.Files, Root);
+        SquadStateTreeCapture.Capture(_state.Files, Root)
+            .Where(entry => !IsLeftOutOfSnapshots(entry))
+            .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
 
     /// <inheritdoc />
     public override void Restore(IReadOnlyDictionary<string, SquadTreeEntry> tree)

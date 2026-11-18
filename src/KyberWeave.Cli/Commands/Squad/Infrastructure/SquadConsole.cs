@@ -43,6 +43,19 @@ public sealed class SquadConsole(IAnsiConsole ansi, IConsole standardStreams)
         foreach (string warning in warnings ?? []) WriteLine($"[yellow]warning:[/] {Markup.Escape(warning)}");
     }
 
+    /// <summary>
+    ///     Reports a failure a Squad command caught: the recovery notices that travel beside a failure of a type the
+    ///     lifecycle must not replace, then the failure's message as the command's error. Every failure goes through
+    ///     here, so none escapes as an unhandled exception.
+    /// </summary>
+    /// <param name="failure">The failure.</param>
+    public void WriteFailure(Exception failure)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+        WriteTransactionWarnings(SquadLifecycleService.RecoveryNotices(failure));
+        WriteClientInputError(failure.Message);
+    }
+
     /// <summary>Writes the notes a state migration produced.</summary>
     /// <param name="report">What the migration did.</param>
     /// <param name="includeRetainedLegacyRoots">Whether to name the legacy roots the migration left behind.</param>

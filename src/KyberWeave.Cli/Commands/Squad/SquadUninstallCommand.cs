@@ -197,6 +197,7 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
                 {
                     _output.Ansi.MarkupLine(
                         $"[grey]No Kyber-Squad deployment found at [bold]{Markup.Escape(targetRoot)}[/]. Nothing to uninstall.[/]");
+                    _output.WriteTransactionWarnings(result.Warnings);
                     return 0;
                 }
 
@@ -216,6 +217,7 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
                             $"  [red]remove[/] {Markup.Escape(removal.RelativePath)} ({Markup.Escape(removal.Target)})");
                     }
 
+                    _output.WriteTransactionWarnings(result.Warnings);
                     return 0;
                 }
 
@@ -237,7 +239,7 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         }
         catch (Exception ex)
         {
-            _output.Ansi.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(ex.Message)}[/]");
+            _output.WriteFailure(ex);
             return 1;
         }
     }

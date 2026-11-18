@@ -573,7 +573,10 @@ internal static class SquadTestCommands
         SquadConsole console) =>
         new(userPaths, presets, new FuncProfileResolver(canonicalProfileResolver), console, RealSquadServices.PresetValidator());
 
-    /// <summary>The use verb over the stores, roots, file system and console a test supplies; it never starts a transaction.</summary>
+    /// <summary>
+    /// The use verb over the stores, roots, file system and console a test supplies; it never starts a transaction
+    /// unless the test supplies the factory one would run through.
+    /// </summary>
     public static SquadPresetUseCommand PresetUseOver(
         ISquadStateStore stateStore,
         ISquadModelPresetStore presets,
@@ -581,15 +584,17 @@ internal static class SquadTestCommands
         Func<string?, SquadCanonicalProfiles?> canonicalProfileResolver,
         SquadCommandRoots roots,
         IFileSystem files,
-        SquadConsole console) =>
+        SquadConsole console,
+        ISquadTransactionFactory? transactions = null,
+        ISquadDeploymentPlanner? planner = null) =>
         new(
             stateStore,
             SquadHostDefaults.ResolveGlobalRoots(_ => null),
             presets,
             selections,
             new FuncProfileResolver(canonicalProfileResolver),
-            RealSquadDeployment.Planner,
-            new UnusedTransactions(),
+            planner ?? RealSquadDeployment.Planner,
+            transactions ?? new UnusedTransactions(),
             SquadFileSystemPathSemantics.Instance,
             roots,
             files,
@@ -597,7 +602,7 @@ internal static class SquadTestCommands
             TimeProvider.System,
             RealSquadServices.PresetValidator());
 
-    /// <summary>The clear verb over the stores, roots, file system and console a test supplies; it never starts a transaction.</summary>
+    /// <summary>The clear verb over the stores, roots, file system and console a test supplies; it never starts a transaction unless the test supplies the factory one would run through.</summary>
     public static SquadPresetClearCommand PresetClearOver(
         ISquadStateStore stateStore,
         ISquadModelPresetStore presets,
@@ -605,15 +610,17 @@ internal static class SquadTestCommands
         Func<string?, SquadCanonicalProfiles?> canonicalProfileResolver,
         SquadCommandRoots roots,
         IFileSystem files,
-        SquadConsole console) =>
+        SquadConsole console,
+        ISquadTransactionFactory? transactions = null,
+        ISquadDeploymentPlanner? planner = null) =>
         new(
             stateStore,
             SquadHostDefaults.ResolveGlobalRoots(_ => null),
             presets,
             selections,
             new FuncProfileResolver(canonicalProfileResolver),
-            RealSquadDeployment.Planner,
-            new UnusedTransactions(),
+            planner ?? RealSquadDeployment.Planner,
+            transactions ?? new UnusedTransactions(),
             SquadFileSystemPathSemantics.Instance,
             roots,
             files,

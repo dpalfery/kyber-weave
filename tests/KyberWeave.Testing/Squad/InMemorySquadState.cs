@@ -19,15 +19,25 @@ public sealed class InMemorySquadState
     /// <summary>Creates a state over a file system and lease host of its own.</summary>
     /// <param name="leaseHost">The simulated machine whose lease table the migration contends in; a new one when null.</param>
     /// <param name="storeLease">The lease the store takes for registry writes; one on the lease host when null.</param>
-    /// <param name="applicationDataDirectory">The user's application-data directory; a fixed one when null.</param>
+    /// <param name="stateRoot">
+    /// A directory to hold the application data and the home beneath, so a snapshot of that directory holds every state
+    /// file; the default keeps them apart from the projects, as a real machine does. Takes precedence over
+    /// <paramref name="applicationDataDirectory"/>.
+    /// </param>
+    /// <param name="applicationDataDirectory">
+    /// The user's application-data directory on its own, with the home kept apart from it; a fixed one when null.
+    /// </param>
     public InMemorySquadState(
         InProcessLeaseHost? leaseHost = null,
         ILease? storeLease = null,
+        string? stateRoot = null,
         string? applicationDataDirectory = null)
     {
         Files = new InMemoryFileSystem(caseSensitive: true);
-        string home = Path.GetFullPath("/kw/home");
-        string applicationData = applicationDataDirectory ?? Path.GetFullPath("/kw/application-data");
+        string applicationData = stateRoot is not null
+            ? Path.GetFullPath(stateRoot)
+            : applicationDataDirectory ?? Path.GetFullPath("/kw/application-data");
+        string home = stateRoot is null ? Path.GetFullPath("/kw/home") : Path.Combine(applicationData, "home");
         Files.CreateDirectory(home);
         Files.CreateDirectory(applicationData);
         UserPaths = new FakeSquadUserPaths(applicationData, home);

@@ -536,12 +536,12 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         }
         catch (SquadDeploymentConflictException ex)
         {
-            _output.WriteClientInputError(ex.Message);
+            _output.WriteFailure(ex);
             return 1;
         }
         catch (Exception ex)
         {
-            _output.WriteClientInputError(ex.Message);
+            _output.WriteFailure(ex);
             return 1;
         }
     }

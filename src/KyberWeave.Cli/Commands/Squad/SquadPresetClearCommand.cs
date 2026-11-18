@@ -312,7 +312,20 @@ internal sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings
             effectiveGlobalRoots);
 
         ISquadTransaction transaction = _transactions.Create(null);
-        transaction.Execute(plan);
+        try
+        {
+            transaction.Execute(plan);
+        }
+        catch (Exception failure)
+        {
+            // A recovery under this deployment's lease can refuse the stale plan, or fail and name the journal. Both
+            // are this command's ordinary error output, not an unhandled exception.
+            _output.WriteTransactionWarnings(transaction.Warnings);
+            _output.WriteFailure(failure);
+            return 1;
+        }
+
+        _output.WriteTransactionWarnings(transaction.Warnings);
 
         foreach (ISquadModelPresetSelectionStore store in selectionStores)
         {
