@@ -1,3 +1,4 @@
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using YamlDotNet.Core;
@@ -30,11 +31,12 @@ internal static class SquadTaskGateHint
     /// </summary>
     /// <param name="projectRoot">The project root whose host config is read.</param>
     /// <param name="configs">The repository the host config is read from.</param>
-    internal static void WriteIfNoTaskGates(string projectRoot, IKyberWeaveConfigRepository configs)
+    /// <param name="output">Where the hint is written.</param>
+    internal static void WriteIfNoTaskGates(string projectRoot, IKyberWeaveConfigRepository configs, SquadConsole output)
     {
         if (!HasTaskGates(configs, projectRoot))
         {
-            SquadCommandComposition.WriteLine(Message);
+            output.WriteLine(Message);
         }
     }
 

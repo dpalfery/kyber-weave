@@ -24,6 +24,7 @@ internal static class SquadCliServices
     {
         services.TryAddSingleton<IAnsiConsole>(_ => AnsiConsole.Console);
         services.TryAddSingleton(sp => new SquadConsole(sp.GetRequiredService<IAnsiConsole>(), sp.GetRequiredService<IConsole>()));
+        services.TryAddSingleton(sp => new SquadTargetRootConfirmation(sp.GetRequiredService<SquadConsole>()));
         services.TryAddSingleton<ISquadRenderer>(sp => new SquadRendererRegistry(
             SquadRendererSet.Create(),
             sp.GetRequiredService<ISquadRenderInputReader>()));
