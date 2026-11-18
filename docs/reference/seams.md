@@ -390,7 +390,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `HooksCli` (`HooksCli.cs`) | environment | 4.7 |
 
 #### KyberWeave.Kernel (3 classes)
 
@@ -404,10 +403,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `CodeGraphFreshness` (`CodeGraphFreshness.cs`) | file system, paths, clock | 4.6 |
-| `DocsRootRegistry` (`DocsRootRegistry.cs`) | paths, console | 4.6 |
-| `DocsTools` (`DocsTools.cs`) | paths | 4.6 |
-| `RepositoryRootResolver` (`RepositoryRootResolver.cs`) | paths | 4.6 |
 
 ## Gaps in the task list
 

@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 
@@ -15,7 +16,7 @@ namespace KyberWeave.Mcp;
 /// configurations can use an explicit path or the generic
 /// <c>KYBER_WEAVE_REPO_ROOT</c> override.
 /// </remarks>
-public static class RepositoryRootResolver
+public sealed class RepositoryRootResolver
 {
     public const string EnvironmentVariable = "KYBER_WEAVE_REPO_ROOT";
 
@@ -26,18 +27,41 @@ public static class RepositoryRootResolver
     /// </summary>
     public const string ExpectRootEnvironmentVariable = "KYBER_WEAVE_EXPECT_ROOT";
 
-    public static string Resolve(
-        IKyberWeaveConfigRepository configs,
+    private readonly IKyberWeaveConfigRepository _configs;
+    private readonly IPathResolver _paths;
+    private readonly IProcessEnvironment _environment;
+
+    /// <summary>A resolver that reads configuration, spells paths and learns the working directory through seams.</summary>
+    /// <param name="configs">Says whether a candidate root holds a host configuration.</param>
+    /// <param name="paths">Turns an argument or a variable into a full path.</param>
+    /// <param name="environment">Names the directory a relative working directory is resolved against.</param>
+    public RepositoryRootResolver(IKyberWeaveConfigRepository configs, IPathResolver paths, IProcessEnvironment environment)
+    {
+        ArgumentNullException.ThrowIfNull(configs);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
+        _configs = configs;
+        _paths = paths;
+        _environment = environment;
+    }
+
+    /// <summary>The root the process serves, from <c>--repo-root</c>, then the environment, then the working directory.</summary>
+    /// <param name="args">The command-line arguments.</param>
+    /// <param name="workingDirectory">The directory the process started in.</param>
+    /// <param name="environmentRoot">The value of <see cref="EnvironmentVariable"/>, or null.</param>
+    /// <returns>The full path of an initialized root.</returns>
+    /// <exception cref="ExpectedRootMismatchException">A client-asserted root names another repository.</exception>
+    /// <exception cref="InvalidOperationException">The chosen root holds no host configuration.</exception>
+    public string Resolve(
         IReadOnlyList<string> args,
         string workingDirectory,
         string? environmentRoot)
     {
-        ArgumentNullException.ThrowIfNull(configs);
         ArgumentNullException.ThrowIfNull(args);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
 
-        string baseDirectory = Path.GetFullPath(workingDirectory);
-        string resolved = ResolveBoundRoot(configs, args, baseDirectory, environmentRoot);
+        string baseDirectory = _paths.GetFullPath(workingDirectory, _environment.CurrentDirectory);
+        string resolved = ResolveBoundRoot(args, baseDirectory, environmentRoot);
 
         // A client-asserted expectation is a safety rail, not part of binding: the root is
         // resolved first (so the error can name both paths) and only then compared. It
@@ -68,18 +92,17 @@ public static class RepositoryRootResolver
     }
 
     /// <summary>
-    /// Ordinal path equality after <see cref="Path.GetFullPath(string)"/> normalisation.
+    /// Ordinal path equality after both spellings are resolved to full paths with no trailing separator.
     /// Symlinks are not resolved, so a temp path reported differently by the OS is still
     /// compared exactly as the caller supplied it.
     /// </summary>
-    public static bool PathsEqual(string first, string second) =>
+    public bool PathsEqual(string first, string second) =>
         string.Equals(
-            Path.TrimEndingDirectorySeparator(Path.GetFullPath(first)),
-            Path.TrimEndingDirectorySeparator(Path.GetFullPath(second)),
+            _paths.GetFullPath(first, _environment.CurrentDirectory),
+            _paths.GetFullPath(second, _environment.CurrentDirectory),
             StringComparison.Ordinal);
 
-    private static string ResolveBoundRoot(
-        IKyberWeaveConfigRepository configs,
+    private string ResolveBoundRoot(
         IReadOnlyList<string> args,
         string baseDirectory,
         string? environmentRoot)
@@ -88,7 +111,6 @@ public static class RepositoryRootResolver
         if (explicitRoot is not null)
         {
             return RequireInitializedRoot(
-                configs,
                 ResolvePath(explicitRoot, baseDirectory),
                 "--repo-root");
         }
@@ -96,12 +118,11 @@ public static class RepositoryRootResolver
         if (!string.IsNullOrWhiteSpace(environmentRoot))
         {
             return RequireInitializedRoot(
-                configs,
                 ResolvePath(environmentRoot, baseDirectory),
                 EnvironmentVariable);
         }
 
-        return RequireInitializedRoot(configs, baseDirectory, "the working directory");
+        return RequireInitializedRoot(baseDirectory, "the working directory");
     }
 
     private static string? ExpectRootArgument(IReadOnlyList<string> args)
@@ -174,12 +195,12 @@ public static class RepositoryRootResolver
         return null;
     }
 
-    private static string ResolvePath(string path, string baseDirectory) =>
-        Path.GetFullPath(path, baseDirectory);
+    private string ResolvePath(string path, string baseDirectory) =>
+        _paths.GetFullPath(path, baseDirectory);
 
-    private static string RequireInitializedRoot(IKyberWeaveConfigRepository configs, string root, string source)
+    private string RequireInitializedRoot(string root, string source)
     {
-        KyberWeaveConfigLoadResult loaded = configs.TryLoad(root);
+        KyberWeaveConfigLoadResult loaded = _configs.TryLoad(root);
         if (loaded.ConfigPath is not null)
         {
             return root;

@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -119,7 +120,13 @@ internal static class DocsTestCommands
     public static DocsRootRegistry Registry(string root, Func<string, DocsTools> factory)
     {
         IServiceProvider provider = Services();
-        return new DocsRootRegistry(root, factory, provider.GetRequiredService<IGitWorktreeIdentity>(), provider.GetRequiredService<IFileSystem>());
+        return new DocsRootRegistry(
+            root,
+            factory,
+            provider.GetRequiredService<IGitWorktreeIdentity>(),
+            provider.GetRequiredService<IFileSystem>(),
+            provider.GetRequiredService<IPathResolver>(),
+            provider.GetRequiredService<IProcessEnvironment>());
     }
 
     public static IPacketHostFacts HostFacts => Services().GetRequiredService<IPacketHostFacts>();
@@ -142,6 +149,11 @@ internal static class DocsTestCommands
             provider.GetRequiredService<ICodeGraphProvisioner>(),
             provider.GetRequiredService<IKyberWeaveConfigRepository>(),
             provider.GetRequiredService<TimeProvider>(),
+            provider.GetRequiredService<IFileSystem>(),
+            provider.GetRequiredService<IPathResolver>(),
+            provider.GetRequiredService<IProcessEnvironment>(),
+            provider.GetRequiredService<IProcessRunner>(),
+            provider.GetRequiredService<IBoundedProcessExecutor>(),
             executor,
             pause);
     }

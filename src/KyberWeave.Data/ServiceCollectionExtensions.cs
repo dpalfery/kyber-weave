@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -75,6 +76,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IProcessEnvironment>(_ => new ProcessEnvironment());
         services.TryAddSingleton<IProcessRunner>(_ => new KernelProcessRunner());
         services.TryAddSingleton<IIdGenerator>(_ => new SystemIdGenerator());
+        services.TryAddSingleton<IConsole>(_ => new SystemConsole());
         services.TryAddSingleton<IGitCommandRunner>(_ => new ProcessGitCommandRunner(ProcessGitCommandRunner.DefaultTimeout));
         services.TryAddSingleton<ICheckedOutBranchReader>(sp => new GitCheckedOutBranchReader(sp.GetRequiredService<IGitCommandRunner>()));
         services.TryAddSingleton<IArbiterLogStore>(_ => new KyberWeave.Core.Arbiter.Facts.ArbiterLogFiles());
