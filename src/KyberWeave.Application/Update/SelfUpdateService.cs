@@ -19,7 +19,7 @@ internal sealed class SelfUpdateService(
     IArbiterHookRefresherFactory refreshers,
     IArbiterRefreshTargets targets,
     CopilotPromptRefresher copilotPrompt,
-    HttpMessageHandler handler) : ISelfUpdateService
+    HttpMessageHandler? handler = null) : ISelfUpdateService
 {
     /// <inheritdoc />
     public SelfUpdateOutcome Run(SelfUpdateOptions options, Action<string> log)
@@ -28,8 +28,9 @@ internal sealed class SelfUpdateService(
 
         SelfUpdateHost snapshot = host();
         IArbiterHookRefresher refresher = refreshers.Create(log);
+        HttpMessageHandler? owned = handler is null ? new SocketsHttpHandler { AllowAutoRedirect = true } : null;
         using SelfUpdater updater = new(
-            handler,
+            handler ?? owned!,
             snapshot,
             files,
             paths,
@@ -39,6 +40,13 @@ internal sealed class SelfUpdateService(
             arbiterHookRefresher: refresher,
             arbiterTargets: targets,
             copilotPrompt: copilotPrompt);
-        return updater.Run(options);
+        try
+        {
+            return updater.Run(options);
+        }
+        finally
+        {
+            owned?.Dispose();
+        }
     }
 }

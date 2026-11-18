@@ -133,6 +133,30 @@ public sealed class SelfUpdaterTests
         Assert.Contains(_log, line => line.Contains("/kw/home/.kyberdash/tray.json", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// One update does not own the release transport: the service holds it for the process, so a second update over
+    /// the same handler must still send. Disposing the handler with the first updater breaks every later update.
+    /// </summary>
+    [Fact]
+    public void TwoUpdatesOverTheSameHandlerBothRun()
+    {
+        _files.WriteAllText(ProcessPath, "old-cli");
+        using MapHandler handler = ServeRelease(CliBaseName, McpBaseName);
+
+        using (SelfUpdater first = CreateUpdater(handler))
+        {
+            Assert.Equal(0, first.Run(
+                new SelfUpdateOptions("0.2.0", ReleaseCandidate: false, NoMcp: false, NoKyberDash: true, NoArbiter: true)).ExitCode);
+        }
+
+        using SelfUpdater second = CreateUpdater(handler);
+        SelfUpdateOutcome outcome = second.Run(
+            new SelfUpdateOptions("0.2.0", ReleaseCandidate: false, NoMcp: false, NoKyberDash: true, NoArbiter: true));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.False(handler.IsDisposed);
+    }
+
     /// <summary>The install directory is checked through the file-system and update-system seams.</summary>
     [Fact]
     public void AnAbsentInstallDirectoryIsRefused()
@@ -178,14 +202,23 @@ public sealed class SelfUpdaterTests
     {
         private readonly Dictionary<string, byte[]> _map = new(StringComparer.Ordinal);
 
+        public bool IsDisposed { get; private set; }
+
         public void MapFile(string uri, byte[] bytes) => _map[uri] = bytes;
 
         public void MapText(string uri, string text) => _map[uri] = Encoding.UTF8.GetBytes(text);
+
+        protected override void Dispose(bool disposing)
+        {
+            IsDisposed = true;
+            base.Dispose(disposing);
+        }
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
+            ObjectDisposedException.ThrowIf(IsDisposed, this);
             string uri = request.RequestUri?.AbsoluteUri ?? string.Empty;
             if (_map.TryGetValue(uri, out byte[]? bytes))
             {

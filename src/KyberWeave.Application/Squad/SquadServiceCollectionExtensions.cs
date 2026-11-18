@@ -69,7 +69,7 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IArbiterHookRefresherFactory>(),
             sp.GetRequiredService<IArbiterRefreshTargets>(),
             sp.GetRequiredService<CopilotPromptRefresher>(),
-            sp.GetService<HttpMessageHandler>() ?? new SocketsHttpHandler { AllowAutoRedirect = true }));
+            sp.GetService<HttpMessageHandler>()));
         services.TryAddSingleton<ISquadLifecycleService>(sp => CreateLifecycle(sp, sp.GetRequiredService<ISquadReleaseSource>()));
         services.TryAddSingleton<ISquadInstanceService>(sp => new SquadInstanceService(
             CreateLifecycle(sp, sp.GetService<ISquadInstanceReleaseSource>() ?? sp.GetRequiredService<ISquadReleaseSource>()),
