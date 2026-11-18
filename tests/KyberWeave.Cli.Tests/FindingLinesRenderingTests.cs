@@ -2,6 +2,7 @@ using KyberWeave.Cli.Commands;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Rendering;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -31,7 +32,14 @@ public sealed class FindingLinesRenderingTests
     private readonly FakePathResolver _paths;
     private readonly FakeProcessEnvironment _environment = new(currentDirectory: "/kw/work");
 
-    public FindingLinesRenderingTests() => _paths = new FakePathResolver(_files);
+    public FindingLinesRenderingTests()
+    {
+        _paths = new FakePathResolver(_files);
+
+        // A terminal wide enough that the table draws each cell on one line; a narrower one wraps the
+        // rule id and the message, which is the wrapping the Lines format exists to avoid.
+        _console.Profile.Width = 200;
+    }
 
     private static DiagnosticReport Report()
     {
@@ -68,11 +76,30 @@ public sealed class FindingLinesRenderingTests
     {
         DocsCloseoutSettings settings = new() { Path = "no-such-plan" };
 
-        _ = Closeout().Execute(null!, settings, CancellationToken.None);
+        int exit = Closeout().Execute(null!, settings, CancellationToken.None);
 
         string[] lines = _console.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        Assert.Contains(lines, line => line.StartsWith("ERROR KW-DOC-CLOSEOUT-001 ", StringComparison.Ordinal) && line.Contains("no-such-plan", StringComparison.Ordinal));
+        Assert.Equal(1, exit);
+        Assert.Contains(lines, line => line.StartsWith("ERROR KW-DOC-CLOSEOUT-001 ", StringComparison.Ordinal)
+            && line.Contains("'no-such-plan' does not exist.", StringComparison.Ordinal));
         Assert.Contains(lines, line => line.Contains("1 error", StringComparison.Ordinal));
+        Assert.DoesNotContain("│", _console.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A path that climbs out of the repository reaches the closeout as the path the resolver computed, not as the text
+    /// the caller typed, so the refusal names a location outside the tree instead of hiding it.
+    /// </summary>
+    [Fact]
+    public void APathThatClimbsOutOfTheRepositoryIsRefusedByName()
+    {
+        DocsCloseoutSettings settings = new() { Path = "../../etc/passwd" };
+
+        int exit = Closeout().Execute(null!, settings, CancellationToken.None);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("KW-DOC-CLOSEOUT-001", _console.Output, StringComparison.Ordinal);
+        Assert.Contains("passwd", _console.Output, StringComparison.Ordinal);
         Assert.DoesNotContain("│", _console.Output, StringComparison.Ordinal);
     }
 
@@ -81,9 +108,12 @@ public sealed class FindingLinesRenderingTests
     {
         DocsCloseoutSettings settings = new() { Path = "no-such-plan", Format = "table" };
 
-        _ = Closeout().Execute(null!, settings, CancellationToken.None);
+        int exit = Closeout().Execute(null!, settings, CancellationToken.None);
 
+        Assert.Equal(1, exit);
         Assert.Contains("│", _console.Output, StringComparison.Ordinal);
+        Assert.Contains("KW-DOC-CLOSEOUT-001", _console.Output, StringComparison.Ordinal);
+        Assert.Contains("no-such-plan", _console.Output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -99,7 +129,13 @@ public sealed class FindingLinesRenderingTests
     }
 
     private DocsCloseoutCommand Closeout() => new(
-        new MissingPlanCloseout(),
+        new PlanCloseoutService(
+            new InMemoryRepositoryFileStore(_files),
+            ThrowingProcess,
+            new RefusingExclusiveWriter(),
+            new ThrowingDocumentSourceFactory(),
+            _paths,
+            _environment),
         new InMemoryRepositoryFileStore(_files),
         _configs,
         new FakeTimeProvider(),
@@ -111,25 +147,23 @@ public sealed class FindingLinesRenderingTests
             _environment,
             _console));
 
-    /// <summary>Answers the outcome the real closeout reports for a plan file that does not exist.</summary>
-    private sealed class MissingPlanCloseout : IPlanCloseoutService
+    private static ScriptedProcessExecutor ThrowingProcess { get; } =
+        new(_ => throw new InvalidOperationException("The closeout runs no program for a plan that does not exist."));
+
+    /// <summary>Refuses to write, so a run that tried to archive would fail loudly instead of reaching disk.</summary>
+    private sealed class RefusingExclusiveWriter : IExclusiveFileWriter
     {
-        public PlanCloseoutOutcome Run(
-            string repoRoot,
-            KyberWeaveConfig config,
-            string planPath,
-            DateOnly archiveDate,
-            bool archive)
-        {
-            DiagnosticReport report = new();
-            report.Add(new Diagnostic(
-                "KW-DOC-CLOSEOUT-001",
-                Severity.Error,
-                $"{planPath} does not exist under the plans folder, so there is nothing to archive.",
-                planPath,
-                planPath,
-                "Name a plan file directly under the plans folder."));
-            return new PlanCloseoutOutcome(report, false);
-        }
+        public bool TryWriteNew(string path, string text) =>
+            throw new InvalidOperationException($"The closeout wrote '{path}' before the plan was checked.");
+
+        public bool TryWriteNew(string path, string text, Action<string> deletePartial) =>
+            throw new InvalidOperationException($"The closeout wrote '{path}' before the plan was checked.");
+    }
+
+    /// <summary>Refuses to load, so a run that reached the corpus would fail loudly.</summary>
+    private sealed class ThrowingDocumentSourceFactory : IDocumentSourceFactory
+    {
+        public IDocumentSource Create(string repoRoot, KyberWeave.Core.Configuration.OntologyConfig ontology) =>
+            throw new InvalidOperationException("The corpus is not loaded before the plan is checked.");
     }
 }
