@@ -103,7 +103,8 @@ public static class TaskGateResolver
 
     /// <summary>
     /// The technology a template names in its standard's <c>builds-on</c> key, or null when it names none, has
-    /// no standard of its own, cannot read its standard, or the name is not something a folder can be called.
+    /// no standard of its own, its standard's frontmatter does not parse, or the name is not something a folder
+    /// can be called. A standard this process may not read throws: a permission failure is not an absent parent.
     /// </summary>
     /// <param name="repoRoot">The repository root the standards folders sit under.</param>
     /// <param name="config">The effective configuration, whose ontology names the documentation root.</param>
@@ -139,10 +140,12 @@ public static class TaskGateResolver
                 if (Clean(parent.BuildsOn) is { } buildsOn && ConfigSlug.IsValid(buildsOn))
                     return buildsOn;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is IOException or YamlDotNet.Core.YamlException)
             {
-                // An unreadable or malformed standard names no parent. Gate resolution falls back to the mapped
-                // agent's entry, which is what it does for a technology with no standard of its own.
+                // A standard that cannot be read or parsed names no parent. Gate resolution falls back to the
+                // mapped agent's entry, which is what it does for a technology with no standard of its own.
+                // A permission failure, or anything else unexpected, is a broken checkout rather than an
+                // absent parent, so it propagates.
                 continue;
             }
         }

@@ -208,6 +208,74 @@ public sealed class TaskGateResolverTests : IDisposable
 
         Assert.Null(TaskGateResolver.ParentTechnology(_root.Path, config, "react"));
     }
+
+    /// <summary>
+    /// A malformed standard names no parent, but a standard this process may not read is a broken
+    /// checkout rather than an absent parent: it must throw, so an operator repairs the file instead of a
+    /// task resolving against the wrong gates.
+    /// </summary>
+    [Fact]
+    public void AStandardTheProcessMayNotReadThrowsInsteadOfNamingNoParent()
+    {
+        Standard("react", "builds-on: dotnet");
+        KyberWeaveConfig config = Config("ontology:\n  docs-root: docs\n");
+        string path = Path.Combine(_root.Path, "docs", "standards", "react", "react.standards.md");
+
+        if (!TryRemoveReadPermission(path, out UnixFileMode originalMode))
+            Assert.Skip("A Unix file mode denies a read only off Windows and to an unprivileged process.");
+
+        try
+        {
+            Assert.Throws<UnauthorizedAccessException>(
+                () => TaskGateResolver.ParentTechnology(_root.Path, config, "react"));
+        }
+        finally
+        {
+            RestoreFileMode(path, originalMode);
+        }
+    }
+
+    /// <summary>
+    /// Denies this process every permission on <paramref name="path"/>, answering false when the platform
+    /// or the process cannot carry that denial. The caller restores the mode with
+    /// <see cref="RestoreFileMode"/>.
+    /// </summary>
+    private static bool TryRemoveReadPermission(string path, out UnixFileMode originalMode)
+    {
+        originalMode = default;
+        if (OperatingSystem.IsWindows())
+            return false;
+
+        originalMode = File.GetUnixFileMode(path);
+        File.SetUnixFileMode(path, UnixFileMode.None);
+        return !CanRead(path);
+    }
+
+    private static void RestoreFileMode(string path, UnixFileMode mode)
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        File.SetUnixFileMode(path, mode);
+    }
+
+    private static bool CanRead(string path)
+    {
+        try
+        {
+            File.ReadAllText(path);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     [Fact]
     public void TechnologyGatesAreKeyedByTechnologyAndReadInDeclarationOrder()
     {
