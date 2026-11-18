@@ -231,22 +231,30 @@ public sealed partial class StandardsFolderMigration
     /// something already sits at <paramref name="to"/>.
     /// </summary>
     /// <remarks>
-    /// The destination is created before the source is removed. Creation is one call that refuses
-    /// an existing path instead of replacing it, so what is at the destination is decided by the
-    /// write itself rather than by a check a later write could contradict: the same "create, never
-    /// replace" rule every other write here follows, applied to a rename. Copying rather than
-    /// moving keeps the bytes identical and leaves the source in place if the create fails, so a
-    /// refused rename loses nothing; the cost is that a crash between the two calls leaves both
-    /// names holding the standard, which the next run reports rather than resolves.
+    /// One move, not a copy and a delete. The file keeps its bytes, its mode and its identity, and
+    /// there is no moment at which both names hold the standard: a copy followed by a delete would
+    /// leave two standards for one scope if the delete never happened, and the next run plans a
+    /// rename only when the prefixed name is missing, so nothing would report it. A destination
+    /// that already exists is answered before the move rather than by failing it, so the move's
+    /// own failure is never read as "someone else got there first"; a destination that appears in
+    /// between is the one case the move's failure means it.
     /// </remarks>
     private bool TryRenameNew(string from, string to)
     {
         string source = RequireWritable(from);
         string target = RequireWritable(to);
-        byte[] content = File.ReadAllBytes(source);
-        if (!TryCreateNew(target, content)) return false;
+        if (File.Exists(target)) return false;
 
-        File.Delete(source);
+        try
+        {
+            File.Move(source, target, overwrite: false);
+        }
+        catch (IOException) when (File.Exists(target))
+        {
+            return false;
+        }
+
+        VerifyStillWritable(target);
         return true;
     }
 

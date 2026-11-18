@@ -399,6 +399,32 @@ public class DocsStandardsMigrateCommandTests
     }
 
     /// <summary>
+    /// The rename is one move, not a copy followed by a delete: the prefixed standard keeps the
+    /// file it was — its bytes, its mode and its identity — and there is no moment at which both
+    /// names hold the standard. A copy would leave the source behind until the delete succeeds, and
+    /// a crash between the two leaves two standards for one scope with nothing left to report it.
+    /// </summary>
+    [Fact]
+    public void TheRenameMovesTheStandardRatherThanCopyingIt()
+    {
+        if (OperatingSystem.IsWindows())
+            Assert.Skip("Comparing a file's mode needs a POSIX mode, so this case cannot be arranged here.");
+
+        using TempDirectory repo = new();
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        string legacy = Path.Combine(folder, "README.md");
+        File.WriteAllText(legacy, LegacyCsharp);
+        UnixFileMode hostMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        if (!TrySetMode(legacy, hostMode))
+            Assert.Skip("Comparing a file's mode needs a POSIX mode, so this case cannot be arranged here.");
+
+        new StandardsFolderMigration(repo.Path, Declared).Run();
+
+        Assert.Equal(hostMode, ModeOf(StandardPath(repo.Path, "csharp")));
+    }
+
+    /// <summary>
     /// A standards folder kept as a symbolic link is refused: a migration writes stubs beside the
     /// host's standard and must not put them at the end of a link.
     /// </summary>
@@ -509,6 +535,20 @@ public class DocsStandardsMigrateCommandTests
             RestoreReadable(standard);
         }
     }
+
+    /// <summary>Sets a file's POSIX mode, answering false on a platform that has none.</summary>
+    private static bool TrySetMode(string path, UnixFileMode mode)
+    {
+        if (OperatingSystem.IsWindows())
+            return false;
+
+        File.SetUnixFileMode(path, mode);
+        return true;
+    }
+
+    /// <summary>Reads a file's POSIX mode, or null on a platform that has none.</summary>
+    private static UnixFileMode? ModeOf(string path) =>
+        OperatingSystem.IsWindows() ? null : File.GetUnixFileMode(path);
 
     /// <summary>Clears a file's read bits, answering false on a platform that has none.</summary>
     private static bool TryMakeUnreadable(string path)
