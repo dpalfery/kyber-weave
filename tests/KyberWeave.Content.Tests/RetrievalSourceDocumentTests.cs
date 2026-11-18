@@ -1,18 +1,19 @@
-using KyberWeave.Tests.Configuration;
-
-
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
-using KyberWeave.Data.CodeGraph;
+using KyberWeave.Tests.Corpus;
+using KyberWeave.Tests.Fakes;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace KyberWeave.Tests;
 
 /// <summary>
 /// Which document answers: questions asked the way an agent asks them, against this repository's own
-/// documentation, each with the page(s) that cover the subject.
+/// documentation, each with the page(s) that cover the subject. The documents are read through the corpus
+/// seam into an in-memory store, with no code index.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -28,15 +29,19 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class RetrievalSourceDocumentTests(ITestOutputHelper output)
 {
+    private const string HostConfig = ".kyber-weave/kyber-weave.yml";
+
+    private const string DocsRoot = "docs";
+
     private const string Arbiter = "docs/kyber-arbiter/";
 
     /// <summary>
     /// The index over this checkout's documentation, built once per test run rather than once
     /// per case: loading the corpus and reading the code index is the expensive part, the
     /// corpus is read-only while the run executes, and <c>DocumentIndex.Explore</c> only reads
-    /// it. Null when the repository is not found, which is how these tests skip.
+    /// it.
     /// </summary>
-    private static readonly Lazy<DocumentIndex?> Index = new(IndexOverThisRepository);
+    private static readonly Lazy<DocumentIndex> Index = new(IndexOverThisRepository);
 
     public static TheoryData<string, string> Cases() => new()
     {
@@ -70,8 +75,7 @@ public sealed class RetrievalSourceDocumentTests(ITestOutputHelper output)
     [MemberData(nameof(Cases))]
     public void TheAnswerComesFromAPageThatCoversTheSubject(string query, string acceptablePaths)
     {
-        DocumentIndex? index = Index.Value;
-        if (index is null) return;
+        DocumentIndex index = Index.Value;
 
         ExploreAnswer answer = index.Explore(query);
         string actual = answer.SourceDocument?.RelativePath.Replace('\\', '/') ?? "(miss)";
@@ -90,8 +94,7 @@ public sealed class RetrievalSourceDocumentTests(ITestOutputHelper output)
     [InlineData("What does the Kyber-Squad architecture look like?")]
     public void ALongSectionAnswersWithABoundedCompleteWindow(string query)
     {
-        DocumentIndex? index = Index.Value;
-        if (index is null) return;
+        DocumentIndex index = Index.Value;
 
         ExploreAnswer answer = index.Explore(query);
         output.WriteLine($"{query}\n  prose {answer.Prose.Length} chars, more={answer.MoreAvailable}");
@@ -114,21 +117,18 @@ public sealed class RetrievalSourceDocumentTests(ITestOutputHelper output)
             "docs/standards/csharp/README.md|docs/adr/0074-cleanupcode-is-removed-from-the-squad.md");
     }
 
-    private static DocumentIndex? IndexOverThisRepository()
+    private static DocumentIndex IndexOverThisRepository()
     {
-        DirectoryInfo? directory = new(AppContext.BaseDirectory);
-        while (directory is not null
-               && !(File.Exists(Path.Combine(directory.FullName, "KyberWeave.sln"))
-                    && File.Exists(Path.Combine(directory.FullName, "AGENTS.md"))))
+        ICorpusSource corpus = CheckoutCorpusSource.Checkout;
+        MemoryDocsHost host = new();
+        host.WriteBytesInRepo(HostConfig, corpus.ReadBytes(HostConfig));
+        foreach (string path in corpus.EnumerateFiles(DocsRoot))
         {
-            directory = directory.Parent;
+            host.WriteBytesInRepo(path, corpus.ReadBytes(path));
         }
 
-        if (directory is null) return null;
-
-        string root = directory.FullName;
-        KyberWeaveConfig config = ConfigFileReader.Load(root);
-        DocumentSet set = RealDocumentLoader.Create(root, config.Ontology).Load();
-        return DocumentIndex.Build(set, DocsPorts.CodeGraph(root));
+        KyberWeaveConfig config = host.Services().GetRequiredService<IKyberWeaveConfigRepository>().Load(host.Repo);
+        DocumentSet set = new DocumentLoader(host.Store, host.Repo, host.Paths, host.Environment, config.Ontology).Load();
+        return DocumentIndex.Build(set, new UnavailableCodeGraphResolver());
     }
 }
