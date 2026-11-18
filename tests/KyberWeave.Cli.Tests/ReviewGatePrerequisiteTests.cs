@@ -1,11 +1,11 @@
 using System.Text.Json;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
-using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 using YamlDotNet.Core;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 /// Pins the optional <c>requires-paths</c> gate key: a gate whose declared path is missing does not start, and says
@@ -19,9 +19,9 @@ namespace KyberWeave.Integration.Tests;
 /// started, which is not the same as a check that ran and failed (<c>KW-REVIEW-022</c>), and it is never a pass.
 /// </para>
 /// <para>
-/// Every gate here is a marker write into the repository's git configuration, and the test reads that file back as
-/// text. "The gate did not start" is therefore a fact about the repository rather than an absent log line, and the
-/// test starts no process of its own.
+/// Every gate here is a marker write into the repository's git configuration, run through the scripted process
+/// seam. "The gate did not start" is therefore a fact about the seam's recorded calls rather than an absent log
+/// line, and no process is started.
 /// </para>
 /// </remarks>
 public sealed class ReviewGatePrerequisiteTests : IDisposable
@@ -31,20 +31,21 @@ public sealed class ReviewGatePrerequisiteTests : IDisposable
     private const string RequiredPath = "dash/node_modules";
     private const string MarkerValue = "t32-prerequisite-ran";
 
+    private readonly InMemoryReviewServices _services = new();
     private readonly string _repo;
-    private readonly TempDirectory _temp = new();
 
     public ReviewGatePrerequisiteTests()
     {
-        _repo = Path.Combine(_temp.Path, "repo");
-        TestGitRepositoryTemplate.CreateReviewGatesCouncilRepository(_repo);
+        _repo = Path.Combine(_services.Root, "repo");
+        _services.Files.CreateDirectory(_repo);
+        _services.ScriptProgram("git", TimeSpan.Zero);
     }
 
-    private string ReportPath => Path.Combine(_temp.Path, "gates.json");
+    private string ReportPath => Path.Combine(_services.Root, "gates.json");
 
     public void Dispose()
     {
-        _temp.Dispose();
+        _services.Dispose();
     }
 
     /// <summary>
@@ -104,7 +105,7 @@ public sealed class ReviewGatePrerequisiteTests : IDisposable
     [Fact]
     public void AGateWhoseRequiredPathIsPresentStarts()
     {
-        Directory.CreateDirectory(Path.Combine(_repo, "dash", "node_modules"));
+        _services.Files.CreateDirectory(Path.Combine(_repo, "dash", "node_modules"));
         WriteGateConfiguration(true);
 
         CliRun run = Cli(GatesCommand());
@@ -205,7 +206,7 @@ public sealed class ReviewGatePrerequisiteTests : IDisposable
             RequiresPaths = ["invalid\0path"]
         };
 
-        GateReport report = ReviewTestServices.Gates.Run(new ReviewConfig { Gates = [gate] }, _repo);
+        GateReport report = _services.Gates.Run(new ReviewConfig { Gates = [gate] }, _repo);
         GateResult result = Assert.Single(report.Gates);
         Assert.Equal(GateOutcome.NotStarted, result.Outcome);
         Assert.False(result.Passed);
@@ -220,8 +221,8 @@ public sealed class ReviewGatePrerequisiteTests : IDisposable
     {
         string blocked = blocking ? "true" : "false";
         string path = Path.Combine(_repo, ".kyber-weave", "kyber-weave.yml");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, $"""
+        _services.Files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _services.Files.WriteAllText(path, $"""
                                  review:
                                    gates:
                                      - id: dash-typecheck
@@ -231,29 +232,25 @@ public sealed class ReviewGatePrerequisiteTests : IDisposable
                                  """);
     }
 
-    /// <summary>Whether the marker gate started, read from the repository's git configuration as text.</summary>
-    private bool GateStarted()
-    {
-        string gitConfig = Path.Combine(_repo, ".git", "config");
-        return File.Exists(gitConfig)
-               && File.ReadAllText(gitConfig).Contains(MarkerValue, StringComparison.Ordinal);
-    }
+    /// <summary>Whether the marker gate started, read from the calls the process seam recorded.</summary>
+    private bool GateStarted() =>
+        _services.Processes.Calls.Any(call =>
+            call.Program == "git" && call.Arguments.Contains(MarkerValue, StringComparer.Ordinal));
 
     private string[] GatesCommand()
     {
         return ["review", "gates", _repo, "--format", "json", "--out", ReportPath];
     }
 
-    private static CliRun Cli(string[] arguments)
+    private CliRun Cli(string[] arguments)
     {
-        CapturedConsoleExecution<int> execution =
-            ProcessConsoleCapture.Run(() => CommandAppFixture.ReviewGates().Run(arguments));
+        CapturedConsoleExecution<int> execution = _services.Run(_services.ReviewGatesApp(), arguments);
         return new CliRun(execution.Result, execution.Output);
     }
 
     private JsonDocument ReadReport()
     {
-        return JsonDocument.Parse(File.ReadAllText(ReportPath));
+        return JsonDocument.Parse(_services.Files.ReadAllText(ReportPath));
     }
 
     private static bool GatePassed(JsonDocument report, string id)
