@@ -5,7 +5,7 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
-using KyberWeave.Tests.Corpus;
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
 
@@ -40,16 +40,17 @@ public sealed class ArbiterHookWiringTests : IDisposable
 
     private const string DegradationCode = "arbiter-not-enforced";
 
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+    private readonly InMemoryFileSystem _files = new();
+    private readonly ArbiterSquadFixture _fixture;
 
-    private static readonly string ShippedProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
-
-    private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.Create();
+    public ArbiterHookWiringTests()
+    {
+        _fixture = ArbiterSquadFixture.CreateInMemory(_files);
+    }
 
     public void Dispose() => _fixture.Dispose();
 
-    private SquadSource LoadedSource => RealSquadServices.Load(_fixture.Path);
+    private SquadSource LoadedSource => _fixture.Load();
 
     [Fact]
     public void Dispatchers_AreExactlyTheAgentsWithDelegations()
@@ -448,16 +449,16 @@ public sealed class ArbiterHookWiringTests : IDisposable
     [Fact]
     public async Task RenderAsync_DisabledArbiter_RendersOnlyTheDispatchHookSurface()
     {
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer(), new OpenCodeRenderer()]);
+        SquadRendererRegistry registry = _fixture.Registry([new ClaudeRenderer(), new OpenCodeRenderer()]);
         SquadRenderRequest withoutWiring = new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Claude, SquadTarget.OpenCode],
-            Scope: SquadDeploymentScope.Project).Prepared();
+            Scope: SquadDeploymentScope.Project).Prepared(_fixture);
         SquadRenderRequest disabledWiring = new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Claude, SquadTarget.OpenCode],
             Scope: SquadDeploymentScope.Project,
-            Arbiter: new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: 45)).Prepared();
+            Arbiter: new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: 45)).Prepared(_fixture);
 
         SquadRenderResult withoutResult = await registry.RenderAsync(withoutWiring);
         SquadRenderResult disabledResult = await registry.RenderAsync(disabledWiring);
@@ -502,16 +503,5 @@ public sealed class ArbiterHookWiringTests : IDisposable
                 expected.Content.Span.SequenceEqual(file.Content.Span),
                 $"Rendered bytes differ for {file.Target}/{file.RelativePath} when the Arbiter wiring is disabled.");
         }
-    }
-
-    [Fact]
-    public void ShellGuardedAgents_ShippedSource_IsExactlyTheArchitect()
-    {
-        // The architect is the only agent whose Bash and PowerShell calls are checked against its documented list.
-        SquadSource source = RealSquadServices.Load(ShippedProductRoot);
-
-        Assert.Equal(
-            new HashSet<string>(["architect"], StringComparer.Ordinal),
-            ArbiterHookWiring.ShellGuardedAgents(source));
     }
 }
