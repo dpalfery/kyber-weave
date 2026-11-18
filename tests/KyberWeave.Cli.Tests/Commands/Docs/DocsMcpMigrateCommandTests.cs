@@ -1,6 +1,3 @@
-using KyberWeave.Tests.Configuration;
-using KyberWeave.Tests.Fakes;
-
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -10,13 +7,13 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Mcp;
-using KyberWeave.Data.Hooks;
-using KyberWeave.Data.Host;
-using KyberWeave.Data.Paths;
+using KyberWeave.Tests;
+using KyberWeave.Tests.Fakes;
+using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console.Testing;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Cli.Tests.Commands.Docs;
 
 /// <summary>
 /// The <c>docs mcp-migrate</c> surface: which old MCP server keys are renamed in an existing
@@ -41,7 +38,7 @@ namespace KyberWeave.Tests;
 /// home itself is the operator-named tree, so the refusal is the only outcome the fixtures can see.
 /// </para>
 /// </remarks>
-public sealed class DocsMcpMigrateCommandTests : IDisposable
+public sealed class DocsMcpMigrateCommandTests
 {
     /// <summary>The old key a first-party server was written under.</summary>
     private const string OldKey = "kyber-weave";
@@ -82,24 +79,30 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
 
     private const string DeclarationFile = ".kyber-weave/kyber-weave.yml";
 
-    private readonly TempDirectory _root = new();
+    private readonly MemoryDocsHost _host = new(workingFolderName: "elsewhere");
+
+    private IServiceProvider? _container;
 
     public DocsMcpMigrateCommandTests()
     {
-        Directory.CreateDirectory(Repo);
-        Directory.CreateDirectory(Bin);
-        Directory.CreateDirectory(FakeHome);
-        McpWiringFixture.WriteExecutable(Bin, "kyber-weave-mcp");
-        McpWiringFixture.WriteExecutable(Bin, "kyber-weave-arbiter");
-        McpWiringFixture.WriteExecutable(Bin, "kyberdash");
+        _host.Files.CreateDirectory(Repo);
+        _host.Files.CreateDirectory(Bin);
+        _host.Files.CreateDirectory(FakeHome);
+        _host.WriteExecutable(Bin, "kyber-weave-mcp");
+        _host.WriteExecutable(Bin, "kyber-weave-arbiter");
+        _host.WriteExecutable(Bin, "kyberdash");
     }
 
-    public void Dispose() => _root.Dispose();
+    private IServiceProvider Container => _container ??= _host.Services();
 
-    private string Repo => Path.Combine(_root.Path, "repo");
+    private IMcpWiringService Wiring => Container.GetRequiredService<IMcpWiringService>();
+
+    private IMcpWiringReceipts Receipts => Container.GetRequiredService<IMcpWiringReceipts>();
+
+    private string Repo => _host.Repo;
 
     /// <summary>Where the fake launch binaries live: never on <c>PATH</c>, always declared by path.</summary>
-    private string Bin => Path.Combine(_root.Path, "bin");
+    private string Bin => Path.Combine(_host.Files.Root, "bin");
 
     /// <summary>
     /// A stand-in for the user's home directory, holding a user-scope configuration file.
@@ -109,7 +112,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     /// on its first line, so a directory named <c>home</c> would satisfy "the refusal names the home
     /// directory" from the path alone, and the assertion would pass on a run that refused nothing.
     /// </remarks>
-    private string FakeHome => Path.Combine(_root.Path, "user-profile");
+    private string FakeHome => Path.Combine(_host.Files.Root, "user-profile");
 
     /// <summary>The shipped server's binary, by absolute path.</summary>
     private string ShippedBinary => Path.Combine(Bin, "kyber-weave-mcp");
@@ -129,13 +132,13 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     public void ANoTargetPreviewWritesNothingAndListsEveryOldKeyWithItsProof()
     {
         WriteClaudeEntry(OldKey, ShippedBinary, "--repo-root", ".");
-        byte[] before = File.ReadAllBytes(InRepo(ClaudeFile));
+        byte[] before = _host.Files.ReadAllBytes(InRepo(ClaudeFile));
 
         CapturedConsoleExecution<int> execution = Migrate(NoTarget);
 
         Assert.Equal(0, execution.Result);
-        Assert.Equal(before, File.ReadAllBytes(InRepo(ClaudeFile)));
-        Assert.False(File.Exists(ReceiptPath), "a preview must not write a receipt");
+        Assert.Equal(before, _host.Files.ReadAllBytes(InRepo(ClaudeFile)));
+        Assert.False(_host.Files.FileExists(ReceiptPath), "a preview must not write a receipt");
         Assert.Contains(WarningCode, execution.Output, StringComparison.Ordinal);
         Assert.Contains(ClaudeFile, execution.Output, StringComparison.Ordinal);
         Assert.Contains(ClaudeCode, execution.Output, StringComparison.Ordinal);
@@ -168,19 +171,19 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     public void ADryRunPrintsTheRenameAndWritesNoBytesAndNoReceipt()
     {
         WriteClaudeEntry(OldKey, ShippedBinary, "--repo-root", ".");
-        byte[] before = File.ReadAllBytes(InRepo(ClaudeFile));
+        byte[] before = _host.Files.ReadAllBytes(InRepo(ClaudeFile));
 
         CapturedConsoleExecution<int> dryRun = Migrate(ClaudeCode, dryRun: true);
 
         Assert.Equal(0, dryRun.Result);
-        Assert.Equal(before, File.ReadAllBytes(InRepo(ClaudeFile)));
-        Assert.False(File.Exists(ReceiptPath), "a dry run writes no receipt, not even one");
+        Assert.Equal(before, _host.Files.ReadAllBytes(InRepo(ClaudeFile)));
+        Assert.False(_host.Files.FileExists(ReceiptPath), "a dry run writes no receipt, not even one");
         Assert.Contains("renamed", dryRun.Output, StringComparison.OrdinalIgnoreCase);
 
         CapturedConsoleExecution<int> real = Migrate(ClaudeCode);
 
         Assert.Equal(real.Result, dryRun.Result);
-        Assert.NotEqual(before, File.ReadAllBytes(InRepo(ClaudeFile)));
+        Assert.NotEqual(before, _host.Files.ReadAllBytes(InRepo(ClaudeFile)));
     }
 
     // ----------------------------------------------------------------------------------------
@@ -201,12 +204,12 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     {
         WriteClaudeEntry(NewKey, ShippedBinary, "--repo-root", ".");
         WriteFile(FactoryFile, StdioDocument(ClaudeKey, OldKey, ShippedBinary, "--repo-root", "."));
-        byte[] before = File.ReadAllBytes(InRepo(ClaudeFile));
+        byte[] before = _host.Files.ReadAllBytes(InRepo(ClaudeFile));
 
         CapturedConsoleExecution<int> execution = Migrate(ClaudeCode);
 
         Assert.Equal(0, execution.Result);
-        Assert.Equal(before, File.ReadAllBytes(InRepo(ClaudeFile)));
+        Assert.Equal(before, _host.Files.ReadAllBytes(InRepo(ClaudeFile)));
         Assert.DoesNotContain(WarningCode, execution.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(InfoCode, execution.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(ErrorCode, execution.Output, StringComparison.Ordinal);
@@ -215,7 +218,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         CapturedConsoleExecution<int> control = Migrate(Factory);
 
         Assert.Equal(0, control.Result);
-        string controlled = File.ReadAllText(InRepo(FactoryFile));
+        string controlled = _host.Files.ReadAllText(InRepo(FactoryFile));
         Assert.Contains($"\"{NewKey}\"", controlled, StringComparison.Ordinal);
         Assert.DoesNotContain($"\"{OldKey}\"", controlled, StringComparison.Ordinal);
     }
@@ -228,14 +231,14 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     public void AProvenOldKeyWithNoNewKeyBesideItIsRenamedAndReportedAsRenamed()
     {
         WriteClaudeEntry(OldKey, ShippedBinary, "--repo-root", ".");
-        string before = File.ReadAllText(InRepo(ClaudeFile));
+        string before = _host.Files.ReadAllText(InRepo(ClaudeFile));
 
         CapturedConsoleExecution<int> execution = Migrate(ClaudeCode);
 
         Assert.Equal(0, execution.Result);
         Assert.Equal(
             before.Replace($"\"{OldKey}\"", $"\"{NewKey}\"", StringComparison.Ordinal),
-            File.ReadAllText(InRepo(ClaudeFile)));
+            _host.Files.ReadAllText(InRepo(ClaudeFile)));
         Assert.Contains("renamed", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(WarningCode, execution.Output, StringComparison.Ordinal);
     }
@@ -250,12 +253,12 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         WriteClaudeTwoEntries(
             (OldKey, ShippedBinary, ["--repo-root", "."]),
             (NewKey, ShippedBinary, ["--repo-root", "."]));
-        string before = File.ReadAllText(InRepo(ClaudeFile));
+        string before = _host.Files.ReadAllText(InRepo(ClaudeFile));
 
         CapturedConsoleExecution<int> execution = Migrate(ClaudeCode);
 
         Assert.Equal(0, execution.Result);
-        string after = File.ReadAllText(InRepo(ClaudeFile));
+        string after = _host.Files.ReadAllText(InRepo(ClaudeFile));
         Assert.DoesNotContain($"\"{OldKey}\"", after, StringComparison.Ordinal);
         Assert.Contains($"\"{NewKey}\"", after, StringComparison.Ordinal);
         Assert.Contains("removed duplicate", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -272,16 +275,16 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         WriteClaudeTwoEntries(
             (OldKey, ShippedBinary, ["--repo-root", "."]),
             (NewKey, Path.Combine(Bin, "kyber-weave-arbiter"), ["serve"]));
-        byte[] before = File.ReadAllBytes(InRepo(ClaudeFile));
+        byte[] before = _host.Files.ReadAllBytes(InRepo(ClaudeFile));
 
         CapturedConsoleExecution<int> execution = Migrate(ClaudeCode);
 
         Assert.Equal(1, execution.Result);
-        Assert.Equal(before, File.ReadAllBytes(InRepo(ClaudeFile)));
+        Assert.Equal(before, _host.Files.ReadAllBytes(InRepo(ClaudeFile)));
         Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
         Assert.Contains("kyber-weave-mcp", execution.Output, StringComparison.Ordinal);
         Assert.Contains("kyber-weave-arbiter", execution.Output, StringComparison.Ordinal);
-        Assert.False(File.Exists(ReceiptPath), "a refusal writes no receipt");
+        Assert.False(_host.Files.FileExists(ReceiptPath), "a refusal writes no receipt");
     }
 
     /// <summary>
@@ -292,12 +295,12 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     public void AnOldKeyWhoseLaunchIsNotProvenIsNeverTouchedAndGetsTheManualEdit()
     {
         WriteClaudeEntry(OldKey, "npx", "kyber-weave-mcp");
-        byte[] before = File.ReadAllBytes(InRepo(ClaudeFile));
+        byte[] before = _host.Files.ReadAllBytes(InRepo(ClaudeFile));
 
         CapturedConsoleExecution<int> execution = Migrate(ClaudeCode);
 
         Assert.Equal(0, execution.Result);
-        Assert.Equal(before, File.ReadAllBytes(InRepo(ClaudeFile)));
+        Assert.Equal(before, _host.Files.ReadAllBytes(InRepo(ClaudeFile)));
         Assert.Contains(InfoCode, execution.Output, StringComparison.Ordinal);
         Assert.Contains(NewKey, execution.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(WarningCode, execution.Output, StringComparison.Ordinal);
@@ -313,17 +316,17 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     [Fact]
     public void ASymlinkedTargetIsRefusedBeforeAnyReadAndExitsOne()
     {
-        string elsewhere = Path.Combine(_root.Path, "elsewhere.json");
-        File.WriteAllText(elsewhere, StdioDocument(ClaudeKey, OldKey, ShippedBinary, "--repo-root", "."));
-        Directory.CreateDirectory(Repo);
-        McpWiringFixture.CreateSymlink(InRepo(ClaudeFile), elsewhere);
-        byte[] before = File.ReadAllBytes(elsewhere);
+        string elsewhere = Path.Combine(_host.Files.Root, "elsewhere.json");
+        _host.Files.WriteAllText(elsewhere, StdioDocument(ClaudeKey, OldKey, ShippedBinary, "--repo-root", "."));
+        _host.Files.CreateDirectory(Repo);
+        _host.Files.CreateFileLink(InRepo(ClaudeFile), elsewhere);
+        byte[] before = _host.Files.ReadAllBytes(elsewhere);
 
         CapturedConsoleExecution<int> execution = Migrate(ClaudeCode);
 
         Assert.Equal(1, execution.Result);
         Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
-        Assert.Equal(before, File.ReadAllBytes(elsewhere));
+        Assert.Equal(before, _host.Files.ReadAllBytes(elsewhere));
     }
 
     /// <summary>
@@ -335,14 +338,14 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     [InlineData("{ \"mcpServers\": [ \"kyber-weave\" ] }", "foreign shape")]
     public void AMalformedOrForeignShapedTargetIsRefusedWithZeroBytes(string content, string shape)
     {
-        McpWiringFixture.WriteText(Repo, ClaudeFile, content);
-        byte[] before = File.ReadAllBytes(InRepo(ClaudeFile));
+        _host.WriteText(Repo, ClaudeFile, content);
+        byte[] before = _host.Files.ReadAllBytes(InRepo(ClaudeFile));
 
         CapturedConsoleExecution<int> execution = Migrate(ClaudeCode);
 
         Assert.True(execution.Result == 1, $"a {shape} target must be refused. Output:{Environment.NewLine}{execution.Output}");
         Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
-        Assert.Equal(before, File.ReadAllBytes(InRepo(ClaudeFile)));
+        Assert.Equal(before, _host.Files.ReadAllBytes(InRepo(ClaudeFile)));
     }
 
     /// <summary>
@@ -352,18 +355,18 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     [Fact]
     public void ACodexOldKeyIsReportedWithTheSnippetAndNeverWritten()
     {
-        McpWiringFixture.WriteText(
+        _host.WriteText(
             Repo,
             CodexFile,
             "[mcp_servers.kyber-weave]\n"
             + $"command = \"{ShippedBinary}\"\n"
             + "args = [\"--repo-root\", \".\"]\n");
-        byte[] before = File.ReadAllBytes(InRepo(CodexFile));
+        byte[] before = _host.Files.ReadAllBytes(InRepo(CodexFile));
 
         CapturedConsoleExecution<int> execution = Migrate(NoTarget);
 
         Assert.Equal(0, execution.Result);
-        Assert.Equal(before, File.ReadAllBytes(InRepo(CodexFile)));
+        Assert.Equal(before, _host.Files.ReadAllBytes(InRepo(CodexFile)));
         Assert.Contains(InfoCode, execution.Output, StringComparison.Ordinal);
         Assert.Contains($"[mcp_servers.{NewKey}]", execution.Output, StringComparison.Ordinal);
     }
@@ -375,7 +378,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     [Fact]
     public void AZCodeOldKeyIsReportedWithTheNewKeyInPreviewAndNamedRunAndNeverWritten()
     {
-        McpWiringFixture.WriteText(
+        _host.WriteText(
             Repo,
             ZCodeFile,
             new JsonObject
@@ -385,14 +388,14 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
                     ["servers"] = new JsonObject { [OldKey] = Entry(ShippedBinary, "--repo-root", ".") }
                 }
             }.ToJsonString());
-        byte[] before = File.ReadAllBytes(InRepo(ZCodeFile));
+        byte[] before = _host.Files.ReadAllBytes(InRepo(ZCodeFile));
 
         CapturedConsoleExecution<int> preview = Migrate(NoTarget);
         CapturedConsoleExecution<int> named = Migrate(ZCode);
 
         Assert.Equal(0, preview.Result);
         Assert.Equal(0, named.Result);
-        Assert.Equal(before, File.ReadAllBytes(InRepo(ZCodeFile)));
+        Assert.Equal(before, _host.Files.ReadAllBytes(InRepo(ZCodeFile)));
         Assert.Contains(InfoCode, preview.Output, StringComparison.Ordinal);
         Assert.Contains(InfoCode, named.Output, StringComparison.Ordinal);
         Assert.Contains(NewKey, named.Output, StringComparison.Ordinal);
@@ -410,18 +413,18 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     [Fact]
     public void ACodexNamedTargetIsReportOnlyExitsZeroAndPrintsTheSnippet()
     {
-        McpWiringFixture.WriteText(
+        _host.WriteText(
             Repo,
             CodexFile,
             "[mcp_servers.kyber-weave]\n"
             + $"command = \"{ShippedBinary}\"\n"
             + "args = [\"--repo-root\", \".\"]\n");
-        byte[] before = File.ReadAllBytes(InRepo(CodexFile));
+        byte[] before = _host.Files.ReadAllBytes(InRepo(CodexFile));
 
         CapturedConsoleExecution<int> execution = Migrate(Codex);
 
         Assert.Equal(0, execution.Result);
-        Assert.Equal(before, File.ReadAllBytes(InRepo(CodexFile)));
+        Assert.Equal(before, _host.Files.ReadAllBytes(InRepo(CodexFile)));
         Assert.Contains(InfoCode, execution.Output, StringComparison.Ordinal);
         Assert.Contains($"[mcp_servers.{NewKey}]", execution.Output, StringComparison.Ordinal);
     }
@@ -439,7 +442,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         CapturedConsoleExecution<int> execution = Migrate(Copilot);
 
         Assert.Equal(0, execution.Result);
-        Assert.False(Directory.Exists(InRepo(".github")), "a report-only target must create no directory");
+        Assert.False(_host.Files.DirectoryExists(InRepo(".github")), "a report-only target must create no directory");
         Assert.Contains(InfoCode, execution.Output, StringComparison.Ordinal);
         Assert.Contains("repository settings", execution.Output, StringComparison.OrdinalIgnoreCase);
 
@@ -472,12 +475,12 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
 
         string original = header + string.Concat(entries) + footer;
         string expected = header + string.Concat(entries.Where(line => line != oldLine)) + footer;
-        McpWiringFixture.WriteBytes(Repo, ClaudeFile, Encoding.UTF8.GetBytes(original));
+        _host.WriteBytes(Repo, ClaudeFile, Encoding.UTF8.GetBytes(original));
 
         CapturedConsoleExecution<int> execution = Migrate(ClaudeCode);
 
         Assert.Equal(0, execution.Result);
-        Assert.Equal(Encoding.UTF8.GetBytes(expected), File.ReadAllBytes(InRepo(ClaudeFile)));
+        Assert.Equal(Encoding.UTF8.GetBytes(expected), _host.Files.ReadAllBytes(InRepo(ClaudeFile)));
         Assert.Contains("removed duplicate", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -498,12 +501,12 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
 
         string original = header + otherLine + oldLine + newLine + footer;
         string expected = header + otherLine + newLine + footer;
-        McpWiringFixture.WriteBytes(Repo, VsCodeFile, Encoding.UTF8.GetBytes(original));
+        _host.WriteBytes(Repo, VsCodeFile, Encoding.UTF8.GetBytes(original));
 
         CapturedConsoleExecution<int> execution = Migrate(VsCode);
 
         Assert.Equal(0, execution.Result);
-        Assert.Equal(Encoding.UTF8.GetBytes(expected), File.ReadAllBytes(InRepo(VsCodeFile)));
+        Assert.Equal(Encoding.UTF8.GetBytes(expected), _host.Files.ReadAllBytes(InRepo(VsCodeFile)));
         Assert.Contains("removed duplicate", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -524,12 +527,12 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
 
         string original = header + otherLine + oldLine + newLine + footer;
         string expected = header + otherLine + newLine + footer;
-        McpWiringFixture.WriteBytes(Repo, VsCodeFile, Encoding.UTF8.GetBytes(original));
+        _host.WriteBytes(Repo, VsCodeFile, Encoding.UTF8.GetBytes(original));
 
         CapturedConsoleExecution<int> execution = Migrate(VsCode);
 
         Assert.Equal(0, execution.Result);
-        Assert.Equal(Encoding.UTF8.GetBytes(expected), File.ReadAllBytes(InRepo(VsCodeFile)));
+        Assert.Equal(Encoding.UTF8.GetBytes(expected), _host.Files.ReadAllBytes(InRepo(VsCodeFile)));
         Assert.Contains("removed duplicate", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(ErrorCode, execution.Output, StringComparison.Ordinal);
     }
@@ -543,14 +546,14 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     {
         WriteDeclarationWithComments();
         WriteClaudeEntry(OldKey, ShippedBinary, "--repo-root", ".");
-        string before = File.ReadAllText(InRepo(DeclarationFile));
+        string before = _host.Files.ReadAllText(InRepo(DeclarationFile));
 
         CapturedConsoleExecution<int> execution = Migrate(ClaudeCode);
 
         Assert.Equal(0, execution.Result);
         Assert.Equal(
             before.Replace($"    {OldKey}:", $"    {NewKey}:", StringComparison.Ordinal),
-            File.ReadAllText(InRepo(DeclarationFile)));
+            _host.Files.ReadAllText(InRepo(DeclarationFile)));
         Assert.Contains(NewKey, LoadConfig().ServerNames, StringComparer.Ordinal);
     }
 
@@ -567,19 +570,19 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     {
         WriteDeclarationWithComments();
         WriteClaudeEntry(OldKey, ShippedBinary, "--repo-root", ".");
-        byte[] declarationBefore = File.ReadAllBytes(InRepo(DeclarationFile));
-        byte[] claudeBefore = File.ReadAllBytes(InRepo(ClaudeFile));
+        byte[] declarationBefore = _host.Files.ReadAllBytes(InRepo(DeclarationFile));
+        byte[] claudeBefore = _host.Files.ReadAllBytes(InRepo(ClaudeFile));
 
         CapturedConsoleExecution<int> execution = Migrate(ClaudeCode, dryRun: true);
 
         Assert.Equal(0, execution.Result);
-        Assert.Equal(declarationBefore, File.ReadAllBytes(InRepo(DeclarationFile)));
-        Assert.Equal(claudeBefore, File.ReadAllBytes(InRepo(ClaudeFile)));
+        Assert.Equal(declarationBefore, _host.Files.ReadAllBytes(InRepo(DeclarationFile)));
+        Assert.Equal(claudeBefore, _host.Files.ReadAllBytes(InRepo(ClaudeFile)));
 
         // The control: the same run without --dry-run writes both.
         Assert.Equal(0, Migrate(ClaudeCode).Result);
-        Assert.NotEqual(declarationBefore, File.ReadAllBytes(InRepo(DeclarationFile)));
-        Assert.NotEqual(claudeBefore, File.ReadAllBytes(InRepo(ClaudeFile)));
+        Assert.NotEqual(declarationBefore, _host.Files.ReadAllBytes(InRepo(DeclarationFile)));
+        Assert.NotEqual(claudeBefore, _host.Files.ReadAllBytes(InRepo(ClaudeFile)));
     }
 
     /// <summary>
@@ -597,12 +600,12 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
             + "      command: [npx, kyber-weave-mcp]\n"
             + "      provenance: third-party\n"
             + "      level: required\n");
-        byte[] before = File.ReadAllBytes(InRepo(DeclarationFile));
+        byte[] before = _host.Files.ReadAllBytes(InRepo(DeclarationFile));
 
         CapturedConsoleExecution<int> execution = Migrate(Declaration);
 
         Assert.Equal(0, execution.Result);
-        Assert.Equal(before, File.ReadAllBytes(InRepo(DeclarationFile)));
+        Assert.Equal(before, _host.Files.ReadAllBytes(InRepo(DeclarationFile)));
         Assert.Contains(InfoCode, execution.Output, StringComparison.Ordinal);
 
         // Left alone, but told what to do: the notice names the declaration and the key to use instead.
@@ -634,12 +637,12 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         string program = Path.Combine(Bin, binary);
         string[] arguments = nextArgument.Length == 0 ? ["--repo-root", "."] : [nextArgument];
         WriteClaudeEntry(oldKey, program, arguments);
-        string before = File.ReadAllText(InRepo(ClaudeFile));
+        string before = _host.Files.ReadAllText(InRepo(ClaudeFile));
 
         CapturedConsoleExecution<int> execution = Migrate(ClaudeCode);
 
         Assert.Equal(0, execution.Result);
-        string after = File.ReadAllText(InRepo(ClaudeFile));
+        string after = _host.Files.ReadAllText(InRepo(ClaudeFile));
         if (proven)
         {
             Assert.Equal(before.Replace($"\"{oldKey}\"", $"\"{newKey}\"", StringComparison.Ordinal), after);
@@ -659,14 +662,14 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     public void AUserHomeLaunchWithTheShippedFileNameIsProven()
     {
         WriteClaudeEntry(OldKey, "${userHome}/.local/bin/kyber-weave-mcp", "--repo-root", ".");
-        string before = File.ReadAllText(InRepo(ClaudeFile));
+        string before = _host.Files.ReadAllText(InRepo(ClaudeFile));
 
         CapturedConsoleExecution<int> execution = Migrate(ClaudeCode);
 
         Assert.Equal(0, execution.Result);
         Assert.Equal(
             before.Replace($"\"{OldKey}\"", $"\"{NewKey}\"", StringComparison.Ordinal),
-            File.ReadAllText(InRepo(ClaudeFile)));
+            _host.Files.ReadAllText(InRepo(ClaudeFile)));
     }
 
     /// <summary>
@@ -675,16 +678,16 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     [Fact]
     public void AnExecutableSuffixOnTheShippedFileNameIsProven()
     {
-        McpWiringFixture.WriteExecutable(Bin, "kyber-weave-mcp.exe");
+        _host.WriteExecutable(Bin, "kyber-weave-mcp.exe");
         WriteClaudeEntry(OldKey, Path.Combine(Bin, "kyber-weave-mcp.exe"), "--repo-root", ".");
-        string before = File.ReadAllText(InRepo(ClaudeFile));
+        string before = _host.Files.ReadAllText(InRepo(ClaudeFile));
 
         CapturedConsoleExecution<int> execution = Migrate(ClaudeCode);
 
         Assert.Equal(0, execution.Result);
         Assert.Equal(
             before.Replace($"\"{OldKey}\"", $"\"{NewKey}\"", StringComparison.Ordinal),
-            File.ReadAllText(InRepo(ClaudeFile)));
+            _host.Files.ReadAllText(InRepo(ClaudeFile)));
     }
 
     /// <summary>
@@ -695,12 +698,12 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     public void AWrapperLaunchSuchAsNpxIsUnprovenAndLeftAlone()
     {
         WriteClaudeEntry(OldKey, "npx", "kyber-weave-mcp");
-        byte[] before = File.ReadAllBytes(InRepo(ClaudeFile));
+        byte[] before = _host.Files.ReadAllBytes(InRepo(ClaudeFile));
 
         CapturedConsoleExecution<int> execution = Migrate(ClaudeCode);
 
         Assert.Equal(0, execution.Result);
-        Assert.Equal(before, File.ReadAllBytes(InRepo(ClaudeFile)));
+        Assert.Equal(before, _host.Files.ReadAllBytes(InRepo(ClaudeFile)));
         Assert.Contains(InfoCode, execution.Output, StringComparison.Ordinal);
     }
 
@@ -725,14 +728,14 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
             + "  },\n"
             + "}\n";
         byte[] before = Encoding.UTF8.GetBytes(text);
-        McpWiringFixture.WriteBytes(Repo, ClaudeFile, before);
+        _host.WriteBytes(Repo, ClaudeFile, before);
 
         CapturedConsoleExecution<int> execution = Migrate(ClaudeCode);
 
         Assert.Equal(0, execution.Result);
         byte[] expected = Encoding.UTF8.GetBytes(
             text.Replace($"\"{OldKey}\"", $"\"{NewKey}\"", StringComparison.Ordinal));
-        Assert.Equal(expected, File.ReadAllBytes(InRepo(ClaudeFile)));
+        Assert.Equal(expected, _host.Files.ReadAllBytes(InRepo(ClaudeFile)));
     }
 
     /// <summary>
@@ -748,14 +751,14 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
             + $"    \"{OldKey}\": {{ \"type\": \"local\", \"command\": [\"{ShippedBinary}\", \"--repo-root\", \".\"] }}\n"
             + "  }\n"
             + "}\n";
-        McpWiringFixture.WriteText(Repo, OpenCodeFile, text);
+        _host.WriteText(Repo, OpenCodeFile, text);
 
         CapturedConsoleExecution<int> execution = Migrate(OpenCode);
 
         Assert.Equal(0, execution.Result);
         Assert.Equal(
             text.Replace($"\"{OldKey}\"", $"\"{NewKey}\"", StringComparison.Ordinal),
-            File.ReadAllText(InRepo(OpenCodeFile)));
+            _host.Files.ReadAllText(InRepo(OpenCodeFile)));
     }
 
     // ----------------------------------------------------------------------------------------
@@ -772,22 +775,22 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         WriteDeclaration();
 
         Assert.Equal(0, Wire(Factory).Result);
-        Assert.True(File.Exists(InRepo(FactoryFile)), "the wire must have created the file first");
+        Assert.True(_host.Files.FileExists(InRepo(FactoryFile)), "the wire must have created the file first");
 
         CapturedConsoleExecution<int> migrate = Migrate(Factory);
         Assert.Equal(0, migrate.Result);
 
         // The rename really happened after the wire, so the receipt kept for this file is a rebased one
         // and not the original the wire wrote.
-        string migrated = File.ReadAllText(InRepo(FactoryFile));
+        string migrated = _host.Files.ReadAllText(InRepo(FactoryFile));
         Assert.Contains($"\"{NewKey}\"", migrated, StringComparison.Ordinal);
         Assert.DoesNotContain($"\"{OldKey}\"", migrated, StringComparison.Ordinal);
 
         CapturedConsoleExecution<int> unwire = Unwire(Factory);
 
         Assert.Equal(0, unwire.Result);
-        Assert.False(File.Exists(InRepo(FactoryFile)), "a file the wire created is deleted on removal");
-        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(FactoryFile));
+        Assert.False(_host.Files.FileExists(InRepo(FactoryFile)), "a file the wire created is deleted on removal");
+        Assert.Null(Receipts.Load(Repo).Find(FactoryFile));
     }
 
     /// <summary>
@@ -799,21 +802,21 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     {
         WriteDeclaration();
         byte[] original = Encoding.UTF8.GetBytes("""{"mcpServers": {"other": {"command": "other-mcp"}}}""");
-        McpWiringFixture.WriteBytes(Repo, FactoryFile, original);
+        _host.WriteBytes(Repo, FactoryFile, original);
 
         Assert.Equal(0, Wire(Factory).Result);
 
         CapturedConsoleExecution<int> migrate = Migrate(Factory);
         Assert.Equal(0, migrate.Result);
 
-        string migrated = File.ReadAllText(InRepo(FactoryFile));
+        string migrated = _host.Files.ReadAllText(InRepo(FactoryFile));
         Assert.Contains($"\"{NewKey}\"", migrated, StringComparison.Ordinal);
         Assert.DoesNotContain($"\"{OldKey}\"", migrated, StringComparison.Ordinal);
 
         CapturedConsoleExecution<int> unwire = Unwire(Factory);
 
         Assert.Equal(0, unwire.Result);
-        Assert.Equal(original, File.ReadAllBytes(InRepo(FactoryFile)));
+        Assert.Equal(original, _host.Files.ReadAllBytes(InRepo(FactoryFile)));
     }
 
     /// <summary>
@@ -825,16 +828,16 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     {
         WriteDeclaration();
         WriteClaudeEntry(OldKey, ShippedBinary, "--repo-root", ".");
-        byte[] preMigrate = File.ReadAllBytes(InRepo(ClaudeFile));
-        Assert.False(File.Exists(ReceiptPath));
+        byte[] preMigrate = _host.Files.ReadAllBytes(InRepo(ClaudeFile));
+        Assert.False(_host.Files.FileExists(ReceiptPath));
 
         Assert.Equal(0, Migrate(ClaudeCode).Result);
-        Assert.NotNull(McpWiringTestServices.Receipts.Load(Repo).Find(ClaudeFile));
+        Assert.NotNull(Receipts.Load(Repo).Find(ClaudeFile));
 
         CapturedConsoleExecution<int> unwire = Unwire(ClaudeCode);
 
         Assert.Equal(0, unwire.Result);
-        Assert.Equal(preMigrate, File.ReadAllBytes(InRepo(ClaudeFile)));
+        Assert.Equal(preMigrate, _host.Files.ReadAllBytes(InRepo(ClaudeFile)));
     }
 
     // ----------------------------------------------------------------------------------------
@@ -849,12 +852,12 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     public void TheDeclarationKeyIsEditedOnItsOwnLineKeepingCommentsAndReloadsAsKwDocs()
     {
         WriteDeclarationWithComments();
-        string before = File.ReadAllText(InRepo(DeclarationFile));
+        string before = _host.Files.ReadAllText(InRepo(DeclarationFile));
 
         CapturedConsoleExecution<int> execution = Migrate(Declaration);
 
         Assert.Equal(0, execution.Result);
-        string after = File.ReadAllText(InRepo(DeclarationFile));
+        string after = _host.Files.ReadAllText(InRepo(DeclarationFile));
         Assert.Equal(before.Replace($"    {OldKey}:", $"    {NewKey}:", StringComparison.Ordinal), after);
         Assert.Contains("# Host declaration: keep this comment.", after, StringComparison.Ordinal);
         Assert.Contains("# The shipped server.", after, StringComparison.Ordinal);
@@ -879,13 +882,13 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
             + "  required-servers: {"
             + $"{OldKey}: {{command: ['{ShippedBinary}', --repo-root, .], provenance: first-party, level: required}}"
             + "}\n");
-        byte[] before = File.ReadAllBytes(InRepo(DeclarationFile));
+        byte[] before = _host.Files.ReadAllBytes(InRepo(DeclarationFile));
 
         CapturedConsoleExecution<int> execution = Migrate(Declaration);
 
         Assert.Equal(1, execution.Result);
         Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
-        Assert.Equal(before, File.ReadAllBytes(InRepo(DeclarationFile)));
+        Assert.Equal(before, _host.Files.ReadAllBytes(InRepo(DeclarationFile)));
 
         // A refusal an operator cannot act on is only half a refusal: the edit to make is naming the new key.
         Assert.Contains(NewKey, execution.Output, StringComparison.Ordinal);
@@ -905,12 +908,12 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         WriteClaudeEntry(OldKey, ShippedBinary, "--repo-root", ".");
 
         Assert.Equal(0, Migrate(ClaudeCode).Result);
-        byte[] afterFirst = File.ReadAllBytes(InRepo(ClaudeFile));
+        byte[] afterFirst = _host.Files.ReadAllBytes(InRepo(ClaudeFile));
 
         CapturedConsoleExecution<int> second = Migrate(ClaudeCode);
 
         Assert.Equal(0, second.Result);
-        Assert.Equal(afterFirst, File.ReadAllBytes(InRepo(ClaudeFile)));
+        Assert.Equal(afterFirst, _host.Files.ReadAllBytes(InRepo(ClaudeFile)));
         Assert.Contains("nothing to do", second.Output, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -924,10 +927,10 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     {
         const string marker = "home-secret-marker";
         string userFile = Path.Combine(FakeHome, ".claude.json");
-        File.WriteAllText(
+        _host.Files.WriteAllText(
             userFile,
             "{\"mcpServers\": {\"kyberdash\": {\"command\": \"/" + marker + "/kyberdash\", \"args\": [\"mcp\"]}}}");
-        byte[] before = File.ReadAllBytes(userFile);
+        byte[] before = _host.Files.ReadAllBytes(userFile);
         WriteClaudeEntry(OldKey, ShippedBinary, "--repo-root", ".");
 
         CapturedConsoleExecution<int> preview = Migrate(NoTarget);
@@ -935,13 +938,13 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
 
         Assert.Equal(0, preview.Result);
         Assert.Equal(0, named.Result);
-        Assert.Equal(before, File.ReadAllBytes(userFile));
+        Assert.Equal(before, _host.Files.ReadAllBytes(userFile));
         Assert.DoesNotContain(marker, preview.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(marker, named.Output, StringComparison.Ordinal);
 
         // The repository entry the named run was pointed at was renamed, so the user-scope file staying
         // identical is the command writing only where it was told to, not the command writing nothing.
-        Assert.Contains($"\"{NewKey}\"", File.ReadAllText(InRepo(ClaudeFile)), StringComparison.Ordinal);
+        Assert.Contains($"\"{NewKey}\"", _host.Files.ReadAllText(InRepo(ClaudeFile)), StringComparison.Ordinal);
     }
 
     // ----------------------------------------------------------------------------------------
@@ -969,13 +972,13 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         string body = shippedLaunch
             ? $"command = \"{ShippedBinary}\"\nargs = [\"--repo-root\", \".\"]\n"
             : "command = \"npx\"\nargs = [\"some-other-server\"]\n";
-        McpWiringFixture.WriteText(Repo, CodexFile, $"[mcp_servers.{OldKey}]\n{body}");
-        byte[] before = File.ReadAllBytes(InRepo(CodexFile));
+        _host.WriteText(Repo, CodexFile, $"[mcp_servers.{OldKey}]\n{body}");
+        byte[] before = _host.Files.ReadAllBytes(InRepo(CodexFile));
 
         CapturedConsoleExecution<int> execution = Migrate(Codex);
 
         Assert.Equal(0, execution.Result);
-        Assert.Equal(before, File.ReadAllBytes(InRepo(CodexFile)));
+        Assert.Equal(before, _host.Files.ReadAllBytes(InRepo(CodexFile)));
         Assert.Contains(InfoCode, execution.Output, StringComparison.Ordinal);
 
         // The unqualified remedy is the claim that the entry is provably ours, and a body nobody
@@ -1002,13 +1005,13 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     [Fact]
     public void AReportOnlyFileWithNoRetiredKeyIsNothingToDoAndGetsNoLeftoverKeyLine()
     {
-        McpWiringFixture.WriteText(Repo, ZCodeFile, """{"mcp":{"servers":{}}}""");
-        byte[] before = File.ReadAllBytes(InRepo(ZCodeFile));
+        _host.WriteText(Repo, ZCodeFile, """{"mcp":{"servers":{}}}""");
+        byte[] before = _host.Files.ReadAllBytes(InRepo(ZCodeFile));
 
         CapturedConsoleExecution<int> execution = Migrate(ZCode);
 
         Assert.Equal(0, execution.Result);
-        Assert.Equal(before, File.ReadAllBytes(InRepo(ZCodeFile)));
+        Assert.Equal(before, _host.Files.ReadAllBytes(InRepo(ZCodeFile)));
         Assert.DoesNotContain(InfoCode, execution.Output, StringComparison.Ordinal);
         Assert.True(
             execution.Output.Contains("nothing to do", StringComparison.OrdinalIgnoreCase),
@@ -1030,12 +1033,12 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     [InlineData("{ \"mcp\": { \"servers\": [ \"kyber-weave\" ] } }")]
     public void AReportOnlyFileThatCannotBeAnalysedReportsTheProblemAndNotALeftoverKey(string content)
     {
-        McpWiringFixture.WriteText(Repo, ZCodeFile, content);
-        byte[] before = File.ReadAllBytes(InRepo(ZCodeFile));
+        _host.WriteText(Repo, ZCodeFile, content);
+        byte[] before = _host.Files.ReadAllBytes(InRepo(ZCodeFile));
 
         CapturedConsoleExecution<int> execution = Migrate(ZCode);
 
-        Assert.Equal(before, File.ReadAllBytes(InRepo(ZCodeFile)));
+        Assert.Equal(before, _host.Files.ReadAllBytes(InRepo(ZCodeFile)));
         Assert.True(
             execution.Output.Contains("cannot be migrated", StringComparison.Ordinal),
             "a file this command could not analyse has an analysis problem to report, and the report is the only "
@@ -1057,20 +1060,20 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     [Fact]
     public void ASecondRunOfAReportOnlyTargetOverAMigratedTreeReportsNothingToDo()
     {
-        McpWiringFixture.WriteText(
+        _host.WriteText(
             Repo,
             CodexFile,
             $"[mcp_servers.{NewKey}]\n"
             + $"command = \"{ShippedBinary}\"\n"
             + "args = [\"--repo-root\", \".\"]\n");
-        byte[] before = File.ReadAllBytes(InRepo(CodexFile));
+        byte[] before = _host.Files.ReadAllBytes(InRepo(CodexFile));
 
         CapturedConsoleExecution<int> first = Migrate(Codex);
         CapturedConsoleExecution<int> second = Migrate(Codex);
 
         CapturedConsoleExecution<int>[] runs = [first, second];
 
-        Assert.Equal(before, File.ReadAllBytes(InRepo(CodexFile)));
+        Assert.Equal(before, _host.Files.ReadAllBytes(InRepo(CodexFile)));
         foreach (CapturedConsoleExecution<int> run in runs)
         {
             Assert.Equal(0, run.Result);
@@ -1104,7 +1107,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
             (OldKey, ShippedBinary, ["--repo-root", "."]),
             ("kyberdash", "npx", []));
 
-        IReadOnlyList<McpRenameChange> changes = McpWiringTestServices.Wiring.Migrate(Repo, [ClaudeCode]);
+        IReadOnlyList<McpRenameChange> changes = Wiring.Migrate(Repo, [ClaudeCode]);
 
         McpRenameChange renamed = Assert.Single(changes, change => change.OldKey == OldKey);
         Assert.Equal(McpRenameOutcome.Renamed, renamed.Outcome);
@@ -1120,7 +1123,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         // The flag is not the only evidence: the file shows the rename really happened and the
         // unproven entry really survived, so "not written" describes a held-back edit and not a run
         // that did nothing.
-        string after = File.ReadAllText(InRepo(ClaudeFile));
+        string after = _host.Files.ReadAllText(InRepo(ClaudeFile));
         Assert.Contains($"\"{NewKey}\"", after, StringComparison.Ordinal);
         Assert.Contains("\"kyberdash\"", after, StringComparison.Ordinal);
     }
@@ -1155,24 +1158,24 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     [Fact]
     public void AHomeDirectoryRootIsRefusedAndLeavesTheUserScopeFileByteIdentical()
     {
-        McpWiringFixture.WriteText(
+        _host.WriteText(
             FakeHome,
             CursorFile,
             StdioDocument(ClaudeKey, OldKey, ShippedBinary, "--repo-root", "."));
 
         // A home directory is where a harness keeps its user-scope files, and this one holds the one
         // this suite already stands in for: the reason the root is refused at all.
-        McpWiringFixture.WriteText(FakeHome, ".claude.json", """{"mcpServers": {}}""");
+        _host.WriteText(FakeHome, ".claude.json", """{"mcpServers": {}}""");
 
-        byte[] before = File.ReadAllBytes(InHome(CursorFile));
+        byte[] before = _host.Files.ReadAllBytes(InHome(CursorFile));
         string receipt = Path.Combine(FakeHome, ".kyber-weave", "receipts", "mcp-wiring.json");
 
         CapturedConsoleExecution<int> execution = MigrateAt(FakeHome, Cursor);
 
         Assert.Equal(1, execution.Result);
         Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
-        Assert.Equal(before, File.ReadAllBytes(InHome(CursorFile)));
-        Assert.False(File.Exists(receipt), "a refused root records nothing, so a write there could not be undone");
+        Assert.Equal(before, _host.Files.ReadAllBytes(InHome(CursorFile)));
+        Assert.False(_host.Files.FileExists(receipt), "a refused root records nothing, so a write there could not be undone");
         Assert.DoesNotContain(WarningCode, execution.Output, StringComparison.Ordinal);
         Assert.True(
             execution.Output.Contains("home", StringComparison.OrdinalIgnoreCase),
@@ -1192,7 +1195,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
 
         CapturedConsoleExecution<int> execution = Run(console =>
             new DocsMcpMigrateCommand(
-                McpWiringTestServices.Wiring,
+                Wiring,
                 FakePathResolver.OverEmptyFileSystem(),
                 new FakeProcessEnvironment(
                     currentDirectory: Path.Combine(FakeAnchor, "work"),
@@ -1238,7 +1241,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     /// platform spells one: the path seam refuses a base the platform does not call fully
     /// qualified, and a Unix-absolute base is drive-relative on Windows.
     /// </summary>
-    private static string FakeAnchor => OperatingSystem.IsWindows() ? @"C:\kw" : "/kw";
+    private string FakeAnchor => Path.Combine(_host.Files.Root, "kw");
 
     /// <summary>
     /// A root the path seam cannot canonicalize is refused, not treated as "not the home": the
@@ -1320,14 +1323,8 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     [Fact]
     public void ASymlinkedDeclarationIsRefusedAndLeavesItsTargetByteIdentical()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            Assert.Skip("Creating symbolic links requires elevation on Windows, so the case cannot be simulated.");
-            return;
-        }
-
-        string outside = Path.Combine(_root.Path, "outside-declaration.yml");
-        File.WriteAllText(
+        string outside = Path.Combine(_host.Files.Root, "outside-declaration.yml");
+        _host.Files.WriteAllText(
             outside,
             $$"""
             mcp:
@@ -1337,15 +1334,15 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
                   provenance: first-party
                   level: required
             """);
-        Directory.CreateDirectory(Path.GetDirectoryName(InRepo(DeclarationFile))!);
-        File.CreateSymbolicLink(InRepo(DeclarationFile), outside);
-        byte[] before = File.ReadAllBytes(outside);
+        _host.Files.CreateDirectory(Path.GetDirectoryName(InRepo(DeclarationFile))!);
+        _host.Files.CreateFileLink(InRepo(DeclarationFile), outside);
+        byte[] before = _host.Files.ReadAllBytes(outside);
 
         CapturedConsoleExecution<int> execution = Migrate(ClaudeCode);
 
         Assert.Equal(1, execution.Result);
         Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
-        Assert.Equal(before, File.ReadAllBytes(outside));
+        Assert.Equal(before, _host.Files.ReadAllBytes(outside));
         Assert.Contains("symbolic link", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -1357,12 +1354,6 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     [Fact]
     public void AnUnreadableTomlTargetIsRefusedRatherThanReportedClean()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            Assert.Skip("Unix file modes are not enforced on Windows, so a denied read cannot be simulated.");
-            return;
-        }
-
         WriteFile(
             CodexFile,
             $$"""
@@ -1370,40 +1361,17 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
             command = "kyber-weave-mcp"
             """);
         string fullPath = InRepo(CodexFile);
+        _host.Files.FailWhen(
+            operation => string.Equals(operation.Path, fullPath, StringComparison.Ordinal)
+                && (operation.Name.StartsWith("Read", StringComparison.Ordinal) || operation.Name == "OpenRead"),
+            new UnauthorizedAccessException($"Access to the path '{fullPath}' is denied."));
 
-        File.SetUnixFileMode(fullPath, UnixFileMode.None);
-        try
-        {
-            if (!ReadIsDenied(fullPath))
-            {
-                Assert.Skip("The process can read a mode-000 file (running as root?), so a denied read cannot be simulated.");
-                return;
-            }
+        CapturedConsoleExecution<int> execution = Migrate(Codex);
 
-            CapturedConsoleExecution<int> execution = Migrate(Codex);
-
-            Assert.Equal(1, execution.Result);
-            Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
-            Assert.Contains("could not be read:", execution.Output, StringComparison.Ordinal);
-            Assert.DoesNotContain("nothing to do", execution.Output, StringComparison.OrdinalIgnoreCase);
-        }
-        finally
-        {
-            File.SetUnixFileMode(fullPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        }
-    }
-
-    private static bool ReadIsDenied(string path)
-    {
-        try
-        {
-            _ = File.ReadAllText(path);
-            return false;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return true;
-        }
+        Assert.Equal(1, execution.Result);
+        Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
+        Assert.Contains("could not be read:", execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("nothing to do", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
 
     // ----------------------------------------------------------------------------------------
@@ -1420,7 +1388,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     /// </summary>
     private CapturedConsoleExecution<int> MigrateAt(string root, string targets, bool dryRun = false) =>
         Run(console => new DocsMcpMigrateCommand(
-            McpWiringTestServices.Wiring,
+            Wiring,
             FakePathResolver.OverEmptyFileSystem(),
             new FakeProcessEnvironment(() => FakeHome),
             console).Execute(
@@ -1430,11 +1398,11 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     /// <summary>Runs the wire verb, to produce a receipt the migrate verb must rebase.</summary>
     private CapturedConsoleExecution<int> Wire(string targets) =>
         Run(console => new DocsMcpWireCommand(
-            McpWiringTestServices.Wiring,
-            ConfigFileReader.Repository,
-            new PhysicalFileSystem(),
-            new PhysicalPathResolver(new PhysicalFileSystem()),
-            new ProcessEnvironment(),
+            Wiring,
+            Container.GetRequiredService<IKyberWeaveConfigRepository>(),
+            _host.Files,
+            _host.Paths,
+            _host.Environment,
             console).Execute(
             null!,
             new DocsMcpWireSettings { Path = Repo, Target = targets }));
@@ -1442,10 +1410,10 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     /// <summary>Runs the removal verb against the receipt the wire and migrate verbs wrote.</summary>
     private CapturedConsoleExecution<int> Unwire(string targets) =>
         Run(console => new DocsMcpUnwireCommand(
-            McpWiringTestServices.Wiring,
-            McpWiringTestServices.Receipts,
-            new PhysicalPathResolver(new PhysicalFileSystem()),
-            new ProcessEnvironment(),
+            Wiring,
+            Receipts,
+            _host.Paths,
+            _host.Environment,
             console).Execute(
             null!,
             new DocsMcpUnwireSettings { Path = Repo, Target = targets }));
@@ -1487,7 +1455,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
 
     /// <summary>Writes one Claude Code entry under the old or new key, with the given launch.</summary>
     private void WriteClaudeEntry(string key, string program, params string[] arguments) =>
-        McpWiringFixture.WriteText(Repo, ClaudeFile, StdioDocument(ClaudeKey, key, program, arguments));
+        _host.WriteText(Repo, ClaudeFile, StdioDocument(ClaudeKey, key, program, arguments));
 
     /// <summary>Writes a Claude Code file holding two entries, each with its own launch.</summary>
     private void WriteClaudeTwoEntries(
@@ -1499,7 +1467,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
             [first.Key] = Entry(first.Program, first.Arguments),
             [second.Key] = Entry(second.Program, second.Arguments)
         };
-        McpWiringFixture.WriteText(Repo, ClaudeFile, new JsonObject { [ClaudeKey] = servers }.ToJsonString());
+        _host.WriteText(Repo, ClaudeFile, new JsonObject { [ClaudeKey] = servers }.ToJsonString());
     }
 
     private static string StdioDocument(string rootKey, string key, string program, params string[] arguments) =>
@@ -1520,7 +1488,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     }
 
     private void WriteFile(string relativePath, string content) =>
-        McpWiringFixture.WriteText(Repo, relativePath, content);
+        _host.WriteText(Repo, relativePath, content);
 
     private string InRepo(string relativePath) =>
         Path.Combine(Repo, relativePath.Replace('/', Path.DirectorySeparatorChar));
@@ -1534,7 +1502,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
 
     private LoadResult LoadConfig()
     {
-        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(Repo);
+        KyberWeaveConfigLoadResult result = Container.GetRequiredService<IKyberWeaveConfigRepository>().TryLoad(Repo);
         IReadOnlyList<string> names = result.Config?.Mcp is { } mcp
             ? [.. mcp.RequiredServers.Keys]
             : [];
