@@ -1,5 +1,3 @@
-using KyberWeave.Tests.Configuration;
-
 using KyberWeave.Core.Configuration;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Review.Catalogue;
@@ -11,18 +9,22 @@ namespace KyberWeave.Tests;
 /// <summary>
 /// <see cref="GateCatalogueRenderer"/> loads the five embedded family files and renders the <c>review:</c>
 /// block <c>docs init</c> writes. Every rendered block must load through
-/// <see cref="ConfigFileReader"/>, so a bad catalogue entry fails here rather than in a host's
+/// <see cref="IKyberWeaveConfigRepository"/>, so a bad catalogue entry fails here rather than in a host's
 /// first review. Gates aimed at a root the repository does not have are written commented out, so
 /// they never run against the wrong directory. Test-dev receives only format and lint gates, so a
 /// developer agent's test run is never mixed into another agent's checks.
 /// </summary>
 /// <remarks>
 /// Roots are passed in directly, so a test controls exactly which roots exist. Repository-reading
-/// inputs (<c>package.json</c> scripts and <c>global.json</c>) are written into a temp tree, and every
+/// inputs (<c>package.json</c> scripts and <c>global.json</c>) are written into an in-memory tree, and every
 /// declared root directory is created there so the loader's working-directory check can pass.
 /// </remarks>
-public sealed class GateCatalogueRenderTests
+public sealed class GateCatalogueRenderTests : IDisposable
 {
+    private readonly InMemoryReviewServices _services = new();
+
+    public void Dispose() => _services.Dispose();
+
     private const string ArtifactsPathValue = ".agent_scratchpad/{task}/artifacts";
 
     /// <summary>One argument per embedded family, so each family is checked on its own.</summary>
@@ -39,11 +41,11 @@ public sealed class GateCatalogueRenderTests
     public void EachFamilyRendersAtTheRepositoryRootAndLoadsThroughTheConfigLoader(string familyName)
     {
         GateCatalogueFamily family = Family(familyName);
-        using TempDirectory repository = new();
+        string repository = _services.Root;
         Dictionary<string, ProjectRootSet> roots = AtRepositoryRoot([family]);
 
-        RenderedReviewBlock block = Render(family.Technologies, roots, repository.Path);
-        KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
+        RenderedReviewBlock block = Render(family.Technologies, roots, repository);
+        KyberWeaveConfig config = LoadRendered(repository, block, roots);
 
         Assert.True(
             config.Review.Gates.Count > 0,
@@ -60,11 +62,11 @@ public sealed class GateCatalogueRenderTests
     {
         IReadOnlyList<GateCatalogueFamily> families = GateCatalogueRenderer.LoadEmbedded();
         string[] declared = families.SelectMany(family => family.Technologies).ToArray();
-        using TempDirectory repository = new();
+        string repository = _services.Root;
         Dictionary<string, ProjectRootSet> roots = AtRepositoryRoot(families);
 
-        RenderedReviewBlock block = Render(declared, roots, repository.Path);
-        KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
+        RenderedReviewBlock block = Render(declared, roots, repository);
+        KyberWeaveConfig config = LoadRendered(repository, block, roots);
 
         string[] duplicates = config.Review.Gates
             .GroupBy(gate => gate.Id, StringComparer.Ordinal)
@@ -84,11 +86,11 @@ public sealed class GateCatalogueRenderTests
     {
         GateCatalogueFamily family = Family("typescript");
         string[] declared = ["typescript", "react"];
-        using TempDirectory repository = new();
+        string repository = _services.Root;
         Dictionary<string, ProjectRootSet> roots = AtRepositoryRoot([family]);
 
-        RenderedReviewBlock block = Render(declared, roots, repository.Path);
-        KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
+        RenderedReviewBlock block = Render(declared, roots, repository);
+        KyberWeaveConfig config = LoadRendered(repository, block, roots);
 
         Assert.Single(config.Review.Gates, gate => gate.Id == "typescript-typecheck");
         Assert.Contains("typescript-dev", config.Review.TaskGates.Keys);
@@ -103,11 +105,11 @@ public sealed class GateCatalogueRenderTests
     public void TheGoFormatGatesListFilesAndFailOnOutputSoTheyFailOnEveryGoVersion()
     {
         GateCatalogueFamily family = Family("go");
-        using TempDirectory repository = new();
+        string repository = _services.Root;
         Dictionary<string, ProjectRootSet> roots = AtRepositoryRoot([family]);
 
-        RenderedReviewBlock block = Render(family.Technologies, roots, repository.Path);
-        KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
+        RenderedReviewBlock block = Render(family.Technologies, roots, repository);
+        KyberWeaveConfig config = LoadRendered(repository, block, roots);
 
         ReviewGate council = Assert.Single(config.Review.Gates, gate => gate.Id == "go-fmt");
         Assert.Equal(["gofmt", "-l", "."], council.Run);
@@ -141,10 +143,10 @@ public sealed class GateCatalogueRenderTests
             [family.Family] = new ProjectRootSet([crates, tauri], false)
         };
         string[] declared = ["rust", "tauri"];
-        using TempDirectory repository = new();
+        string repository = _services.Root;
 
-        RenderedReviewBlock block = Render(declared, roots, repository.Path);
-        KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
+        RenderedReviewBlock block = Render(declared, roots, repository);
+        KyberWeaveConfig config = LoadRendered(repository, block, roots);
 
         IReadOnlyList<ReviewTaskGate> rustGates = config.Review.TaskGates["rust-dev"];
         IReadOnlyList<ReviewTaskGate> tauriGates = config.Review.TaskGates["tauri-dev"];
@@ -165,11 +167,11 @@ public sealed class GateCatalogueRenderTests
     public void TestDevReceivesOnlyTheFormatAndLintGatesOfTheDeclaredTechnology()
     {
         GateCatalogueFamily family = Family("csharp");
-        using TempDirectory repository = new();
+        string repository = _services.Root;
         Dictionary<string, ProjectRootSet> roots = AtRepositoryRoot([family]);
 
-        RenderedReviewBlock block = Render(["csharp"], roots, repository.Path);
-        KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
+        RenderedReviewBlock block = Render(["csharp"], roots, repository);
+        KyberWeaveConfig config = LoadRendered(repository, block, roots);
 
         // `csharp-suppressions` joined this set when the conductor run-speed programme added the
         // suppression gate: test-dev writes C# tests and can add a `#pragma` or a SuppressMessage
@@ -203,10 +205,10 @@ public sealed class GateCatalogueRenderTests
         {
             [family.Family] = new ProjectRootSet([first, second], false)
         };
-        using TempDirectory repository = new();
+        string repository = _services.Root;
 
-        RenderedReviewBlock block = Render(["rust"], roots, repository.Path);
-        KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
+        RenderedReviewBlock block = Render(["rust"], roots, repository);
+        KyberWeaveConfig config = LoadRendered(repository, block, roots);
 
         string[] councilIds = config.Review.Gates.Select(gate => gate.Id).ToArray();
         Assert.Contains("rust-fmt-crates-a", councilIds);
@@ -248,10 +250,10 @@ public sealed class GateCatalogueRenderTests
         {
             [family.Family] = new ProjectRootSet(Array.Empty<ProjectRoot>(), false)
         };
-        using TempDirectory repository = new();
+        string repository = _services.Root;
 
-        RenderedReviewBlock block = Render(["csharp"], roots, repository.Path);
-        KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
+        RenderedReviewBlock block = Render(["csharp"], roots, repository);
+        KyberWeaveConfig config = LoadRendered(repository, block, roots);
 
         Assert.Contains("# - id: csharp-build", block.Yaml, StringComparison.Ordinal);
         Assert.Contains($"no {marker} found", block.Yaml, StringComparison.Ordinal);
@@ -270,12 +272,12 @@ public sealed class GateCatalogueRenderTests
     public void AnUnmetScriptConditionCommentsTheGateOutWithItsReason()
     {
         GateCatalogueFamily family = Family("typescript");
-        using TempDirectory repository = new();
-        File.WriteAllText(Path.Combine(repository.Path, "package.json"), "{ \"scripts\": {} }");
+        string repository = _services.Root;
+        _services.Files.WriteAllText(Path.Combine(repository, "package.json"), "{ \"scripts\": {} }");
         Dictionary<string, ProjectRootSet> roots = AtRepositoryRoot([family]);
 
-        RenderedReviewBlock block = Render(["typescript"], roots, repository.Path);
-        KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
+        RenderedReviewBlock block = Render(["typescript"], roots, repository);
+        KyberWeaveConfig config = LoadRendered(repository, block, roots);
 
         Assert.Contains(block.CommentedOut, entry =>
             entry.GateId == "typescript-lint" && entry.Reason.Contains("lint", StringComparison.Ordinal));
@@ -299,10 +301,10 @@ public sealed class GateCatalogueRenderTests
         {
             [family.Family] = new ProjectRootSet(roots, true)
         };
-        using TempDirectory repository = new();
+        string repository = _services.Root;
 
-        RenderedReviewBlock block = Render(["csharp"], rootsByFamily, repository.Path);
-        KyberWeaveConfig config = LoadRendered(repository.Path, block, rootsByFamily);
+        RenderedReviewBlock block = Render(["csharp"], rootsByFamily, repository);
+        KyberWeaveConfig config = LoadRendered(repository, block, rootsByFamily);
 
         Assert.Empty(config.Review.Gates);
         Assert.Empty(config.Review.TaskGates);
@@ -322,11 +324,11 @@ public sealed class GateCatalogueRenderTests
     public void TheCsharpBuildTaskGateDirectsItsOutputUnderThePerTaskPath()
     {
         GateCatalogueFamily family = Family("csharp");
-        using TempDirectory repository = new();
+        string repository = _services.Root;
         Dictionary<string, ProjectRootSet> roots = AtRepositoryRoot([family]);
 
-        RenderedReviewBlock block = Render(["csharp"], roots, repository.Path);
-        KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
+        RenderedReviewBlock block = Render(["csharp"], roots, repository);
+        KyberWeaveConfig config = LoadRendered(repository, block, roots);
 
         ReviewTaskGate build = config.Review.TaskGates["csharp-dev"].Single(gate => gate.Id == "csharp-build");
         int flag = build.Run.ToList().IndexOf("--artifacts-path");
@@ -344,10 +346,10 @@ public sealed class GateCatalogueRenderTests
     [Fact]
     public void ATechnologyWithNoFamilyAppearsInNoFamily()
     {
-        using TempDirectory repository = new();
+        string repository = _services.Root;
         Dictionary<string, ProjectRootSet> roots = AtRepositoryRoot(GateCatalogueRenderer.LoadEmbedded());
 
-        RenderedReviewBlock block = Render(["csharp", "azure"], roots, repository.Path);
+        RenderedReviewBlock block = Render(["csharp", "azure"], roots, repository);
 
         Assert.Equal(["azure"], block.NoFamily);
     }
@@ -361,14 +363,14 @@ public sealed class GateCatalogueRenderTests
     public void AGlobalJsonSelectingMtpSwitchesTheCsharpTestGateToSolution()
     {
         GateCatalogueFamily family = Family("csharp");
-        using TempDirectory repository = new();
-        File.WriteAllText(
-            Path.Combine(repository.Path, "global.json"),
+        string repository = _services.Root;
+        _services.Files.WriteAllText(
+            Path.Combine(repository, "global.json"),
             "{ \"test\": { \"runner\": \"Microsoft.Testing.Platform\" } }");
         Dictionary<string, ProjectRootSet> roots = AtRepositoryRoot([family]);
 
-        RenderedReviewBlock block = Render(["csharp"], roots, repository.Path);
-        KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
+        RenderedReviewBlock block = Render(["csharp"], roots, repository);
+        KyberWeaveConfig config = LoadRendered(repository, block, roots);
 
         ReviewGate test = config.Review.Gates.Single(gate => gate.Id == "csharp-test");
         Assert.Contains("--solution", test.Run);
@@ -379,11 +381,11 @@ public sealed class GateCatalogueRenderTests
     public void WithoutAnMtpGlobalJsonTheCsharpTestGateIsTheVsTestForm()
     {
         GateCatalogueFamily family = Family("csharp");
-        using TempDirectory repository = new();
+        string repository = _services.Root;
         Dictionary<string, ProjectRootSet> roots = AtRepositoryRoot([family]);
 
-        RenderedReviewBlock block = Render(["csharp"], roots, repository.Path);
-        KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
+        RenderedReviewBlock block = Render(["csharp"], roots, repository);
+        KyberWeaveConfig config = LoadRendered(repository, block, roots);
 
         ReviewGate test = config.Review.Gates.Single(gate => gate.Id == "csharp-test");
         Assert.DoesNotContain("--solution", test.Run);
@@ -463,11 +465,11 @@ public sealed class GateCatalogueRenderTests
     {
         IReadOnlyList<GateCatalogueFamily> families = GateCatalogueRenderer.LoadEmbedded();
         string[] declared = families.SelectMany(family => family.Technologies).ToArray();
-        using TempDirectory repository = new();
+        string repository = _services.Root;
         Dictionary<string, ProjectRootSet> roots = AtRepositoryRoot(families);
 
-        RenderedReviewBlock block = Render(declared, roots, repository.Path);
-        KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
+        RenderedReviewBlock block = Render(declared, roots, repository);
+        KyberWeaveConfig config = LoadRendered(repository, block, roots);
 
         HashSet<string> wholeSuite = new(StringComparer.Ordinal);
         foreach (GateCatalogueFamily family in families)
@@ -513,28 +515,28 @@ public sealed class GateCatalogueRenderTests
 
     /// <summary>The catalogue is rendered from the repository file store it is given, not from the process's disk.</summary>
     /// <remarks>
-    /// Production renders through the injected store. A test that built its facts over <see cref="File"/> directly
+    /// Production renders through the injected store. A test that built its facts over <see cref="System.IO.File"/> directly
     /// would keep passing while a seam fault made <c>docs init</c> fail, so this pins the store as the source.
     /// </remarks>
     [Fact]
     public void TheCatalogueIsRenderedFromTheRepositoryFileStoreItIsGiven()
     {
         GateCatalogueFamily family = GateCatalogueRenderer.LoadEmbedded().First(item => item.Family == "csharp");
-        using TempDirectory repository = new();
+        string repository = _services.Root;
         FakeRepositoryFileStore files = new();
 
-        Render(family.Technologies, AtRepositoryRoot([family]), repository.Path, files);
+        Render(family.Technologies, AtRepositoryRoot([family]), repository, files);
 
         Assert.NotEmpty(files.ExistsProbes);
     }
 
-    private static RenderedReviewBlock Render(
+    private RenderedReviewBlock Render(
         IReadOnlyList<string> declaredTechnologies,
         IReadOnlyDictionary<string, ProjectRootSet> rootsByFamily,
         string repositoryRoot,
         IRepositoryFileStore? files = null)
     {
-        IRepositoryFileStore store = files ?? DocsPorts.Files;
+        IRepositoryFileStore store = files ?? _services.Get<IRepositoryFileStore>();
         return GateCatalogueRenderer.Render(
             declaredTechnologies, rootsByFamily, repositoryRoot, new GateCatalogueFacts(store.FileExists, store.ReadAllText));
     }
@@ -547,15 +549,15 @@ public sealed class GateCatalogueRenderTests
     [Fact]
     public void NonCsharpHostWithGithubActionsRendersPlumbingGatesLive()
     {
-        using TempDirectory repository = new();
+        string repository = _services.Root;
         Dictionary<string, ProjectRootSet> roots = new(StringComparer.Ordinal)
         {
             ["go"] = new ProjectRootSet([new ProjectRoot(".", "go.mod", "root")], false),
             ["csharp"] = new ProjectRootSet([], false)
         };
 
-        RenderedReviewBlock block = Render(["go", "github-actions"], roots, repository.Path);
-        KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
+        RenderedReviewBlock block = Render(["go", "github-actions"], roots, repository);
+        KyberWeaveConfig config = LoadRendered(repository, block, roots);
 
         // Zero csharp council gates rendered
         Assert.DoesNotContain(config.Review.Gates, gate => gate.Id.StartsWith("csharp-", StringComparison.Ordinal));
@@ -591,10 +593,10 @@ public sealed class GateCatalogueRenderTests
 
     /// <summary>
     /// Writes the rendered block as the host's <c>.kyber-weave/kyber-weave.yml</c>, creates every declared
-    /// root directory, and loads the repository through <see cref="ConfigFileReader"/>. A load failure
+    /// root directory, and loads the repository through <see cref="IKyberWeaveConfigRepository"/>. A load failure
     /// throws here, so every test that calls this also proves the block is valid.
     /// </summary>
-    private static KyberWeaveConfig LoadRendered(
+    private KyberWeaveConfig LoadRendered(
         string repository,
         RenderedReviewBlock block,
         IReadOnlyDictionary<string, ProjectRootSet> roots)
@@ -603,14 +605,14 @@ public sealed class GateCatalogueRenderTests
         {
             if (root.RootDirectory != ".")
             {
-                Directory.CreateDirectory(Path.Combine(repository, root.RootDirectory));
+                _services.Files.CreateDirectory(Path.Combine(repository, root.RootDirectory));
             }
         }
 
         string configDirectory = Path.Combine(repository, ".kyber-weave");
-        Directory.CreateDirectory(configDirectory);
-        File.WriteAllText(Path.Combine(configDirectory, "kyber-weave.yml"), block.Yaml);
+        _services.Files.CreateDirectory(configDirectory);
+        _services.Files.WriteAllText(Path.Combine(configDirectory, "kyber-weave.yml"), block.Yaml);
 
-        return ConfigFileReader.Load(repository);
+        return _services.Get<IKyberWeaveConfigRepository>().Load(repository);
     }
 }
