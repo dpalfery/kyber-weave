@@ -39,9 +39,10 @@ jobs:
   # Anything that is not a pull request runs everything. A change to this workflow
   # or to the CodeQL config also runs everything, so an edit to the filters is itself fully exercised.
   #
-  # build-test, gitleaks and the skill and docs gate always run: the .NET tests read
-  # files under docs/, products/, .kyber-weave/, .github/, scripts/ and a few under
-  # dash/, so no path set can prove they are irrelevant.
+  # build-test, integration-test, gitleaks and skill-docs-gate (the skill and docs gate) carry
+  # no path filter and always run: the .NET tests read files under docs/, products/,
+  # .kyber-weave/, .github/, scripts/ and a few under dash/, so no path set can prove them
+  # irrelevant.
   changes:
     name: Detect changed areas
     runs-on: ubuntu-latest
