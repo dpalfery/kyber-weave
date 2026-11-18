@@ -1,4 +1,5 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Data.Arbiter;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,5 +24,6 @@ public sealed class ArbiterSettingsCompositionTests
         _ = Assert.IsType<FileArbiterModelTargetsReader>(provider.GetRequiredService<IArbiterModelTargetsReader>());
         _ = Assert.IsType<FileTextFacts>(provider.GetRequiredService<IFileTextFacts>());
         _ = Assert.IsType<GateReportFacts>(provider.GetRequiredService<IGateReportFacts>());
+        _ = Assert.IsType<ClaudeHookCoverage>(provider.GetRequiredService<IClaudeHookCoverage>());
     }
 }
