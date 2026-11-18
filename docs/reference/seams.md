@@ -106,7 +106,7 @@ task's list.
 | `DrainingStreamServerTransport` | Console (standard streams) | `KyberWeave.Arbiter` | `Mcp/DrainingStreamServerTransport.cs` | Opens the standard streams for the Arbiter host |
 | `MutexLease` | Lease | `KyberWeave.Data` | `Host/MutexLease.cs` | The named-mutex lease |
 | `AssemblyEmbeddedResources` | Embedded resource | `KyberWeave.Data` | `Host/AssemblyEmbeddedResources.cs` | Manifest resource reads |
-| `FileKyberWeaveConfigRepository` | Configuration | `KyberWeave.Data` | `Configuration/FileKyberWeaveConfigRepository.cs` | Configuration load and save over the tree probe |
+| `FileKyberWeaveConfigRepository` | Configuration | `KyberWeave.Data` | `Configuration/FileKyberWeaveConfigRepository.cs` | Configuration load and try-load over the tree probe |
 | `CheckoutCorpusSource` | Shipped content (tests) | `KyberWeave.Testing` | `Corpus/CheckoutCorpusSource.cs` | The test-side adapter over this checkout |
 
 `ICredentialStore` is a product interface, not one of the eleven seams. Two of its adapters are
@@ -168,7 +168,7 @@ The totals before adapters and roots are taken out are 68 classes and 212 sites 
 all of them `ProcessStartInfo` in an interface or a request record; it holds no implementation.
 `Environment.NewLine` sites are excluded from both sets of numbers.
 
-#### KyberWeave.Application (67 classes)
+#### KyberWeave.Application (64 classes)
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
@@ -310,7 +310,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `SystemOneProviderFactory` (`Arbiter/SystemOneProviderFactory.cs`) | network | 4.4 |
 | `CodeGraphResolverAdapter` (`CodeGraph/CodeGraphResolverAdapter.cs`) | file system, paths | 4.4 |
 | `FileUserHostConfigStore` (`Configuration/FileUserHostConfigStore.cs`) | file system | 4.4 |
-| `FileCodeGraphIndexWorkspace` (`Doctor/FileCodeGraphIndexWorkspace.cs`) | file system, clock, identifiers | clock: unassigned |
 | `OpenAiCompatibleEmbeddingGenerator` (`Docs/Analysis/Embeddings/OpenAiCompatibleEmbeddingGenerator.cs`) | environment, network | 4.4 |
 | `AnalysisCacheSafety` (`Docs/Analysis/Persistence/AnalysisCacheSafety.cs`) | file system, paths | 4.4 |
 | `SqliteAnalysisPersistence` (`Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs`) | file system, paths | 4.4 |
@@ -320,6 +319,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `GitWorktreeIdentity` (`Docs/Mcp/GitWorktreeIdentity.cs`) | paths | 4.4 |
 | `LaunchCommandResolver` (`Docs/Mcp/LaunchCommandResolver.cs`) | file system, paths, environment | 4.4 |
 | `DocumentLoader` (`Docs/Parsing/DocumentLoader.cs`) | file system, paths | 4.4 |
+| `FileCodeGraphIndexWorkspace` (`Doctor/FileCodeGraphIndexWorkspace.cs`) | file system, clock, identifiers | clock: unassigned |
 | `DocsRootPath` (`FileSystem/DocsRootPath.cs`) | file system | 4.4 |
 | `FileBackgroundDispatchStore` (`Hooks/Arbiter/FileBackgroundDispatchStore.cs`) | file system, clock, identifiers | 4.4 |
 | `FileDispatchClaimStore` (`Hooks/Arbiter/FileDispatchClaimStore.cs`) | file system, clock, identifiers | 4.4 |
@@ -426,7 +426,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `CodeGraphFreshness` (`CodeGraphFreshness.cs`) | file system, paths, environment, clock | 4.6 |
+| `CodeGraphFreshness` (`CodeGraphFreshness.cs`) | file system, paths, clock | 4.6 |
 | `DocsRootRegistry` (`DocsRootRegistry.cs`) | paths, console | 4.6 |
 | `DocsTools` (`DocsTools.cs`) | paths | 4.6 |
 | `RepositoryRootResolver` (`RepositoryRootResolver.cs`) | paths | 4.6 |
