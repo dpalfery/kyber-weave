@@ -217,6 +217,21 @@ public sealed class UtilitiesStatusLineCommandSeamTests
         Assert.Contains("the artifact tree is missing", _console.Output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The activation path is resolved through the path policy, which refuses a traversal. An artifact set that names
+    /// one is reported like any other deploy error, not thrown out of the command.
+    /// </summary>
+    [Fact]
+    public void DeployReportsAnArtifactThatResolvesOutsideTheStagingRoot()
+    {
+        _host.Artifacts.With(StatusLineTarget.Claude, Artifact("../statusline.sh"));
+
+        int result = Deploy().Execute(null!, new UtilitiesStatusLineDeploySettings { Target = "claude" });
+
+        Assert.Equal(1, result);
+        Assert.Contains("kyber-weave utilities statusline: error:", _console.Output, StringComparison.Ordinal);
+    }
+
     // -----------------------------------------------------------------------------------------
     // doctor
     // -----------------------------------------------------------------------------------------
@@ -311,6 +326,25 @@ public sealed class UtilitiesStatusLineCommandSeamTests
         Assert.Contains("Apply this snippet yourself.", _console.Output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The activation path is resolved through the path policy. A containment answer that refuses it is reported as a
+    /// failure for that harness, not thrown out of doctor.
+    /// </summary>
+    [Fact]
+    public void DoctorReportsAnActivationPathThePolicyRefuses()
+    {
+        InstallClaude();
+
+        int result = DoctorOver(
+                (_, _) => new ProcessResult(0, "1.2.3\n", string.Empty),
+                new RefusingPathSemantics())
+            .Execute(null!, new UtilitiesStatusLineSettings());
+
+        Assert.Equal(1, result);
+        Assert.Contains("fail", _console.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Activation — claude", _console.Output, StringComparison.Ordinal);
+    }
+
     private UtilitiesStatusLineStatusCommand Status() =>
         new(new FakeProcessEnvironment(currentDirectory: Work, homeDirectory: Home), _plans, _host, _semantics, _console);
 
@@ -322,6 +356,11 @@ public sealed class UtilitiesStatusLineCommandSeamTests
 
     private UtilitiesStatusLineDoctorCommand Doctor(UtilitiesStatusLineProcessRunner probe) =>
         new(new FakeProcessEnvironment(currentDirectory: Work, homeDirectory: Home), _plans, _host, probe, _semantics, _console);
+
+    private UtilitiesStatusLineDoctorCommand DoctorOver(
+        UtilitiesStatusLineProcessRunner probe,
+        IFileSystemPathSemantics semantics) =>
+        new(new FakeProcessEnvironment(currentDirectory: Work, homeDirectory: Home), _plans, _host, probe, semantics, _console);
 
     /// <summary>Puts Claude's harness binary and prerequisites on the fake <c>PATH</c>, optionally leaving one out.</summary>
     private void InstallClaude(string? without = null)
@@ -344,4 +383,16 @@ public sealed class UtilitiesStatusLineCommandSeamTests
         "denied" => new UnauthorizedAccessException("permission denied"),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "No receipt read failure is defined.")
     };
+
+    /// <summary>The path seam answering that nothing is contained, so a resolution is refused.</summary>
+    private sealed class RefusingPathSemantics : IFileSystemPathSemantics
+    {
+        public bool AreSame(string first, string second) => false;
+
+        public bool IsWithin(string root, string candidate) => false;
+
+        public string Canonicalize(string path) => path;
+
+        public string ResolvePhysicalRoot(string targetRoot) => targetRoot;
+    }
 }

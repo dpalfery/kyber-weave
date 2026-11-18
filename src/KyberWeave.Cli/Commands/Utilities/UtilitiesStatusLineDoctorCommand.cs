@@ -132,10 +132,22 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
         healthy &= ReportOwnedFiles(target, roots, token);
 
         string stagingRoot = roots.ResolveStagingRoot(target);
-        string commandPath = SquadPathPolicy.ResolveFile(
-            stagingRoot,
-            UtilitiesStatusLineArtifacts.PrimaryFileName(target),
-            _semantics);
+        string commandPath;
+        try
+        {
+            commandPath = SquadPathPolicy.ResolveFile(
+                stagingRoot,
+                UtilitiesStatusLineArtifacts.PrimaryFileName(target),
+                _semantics);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            _console.MarkupLine(
+                $"  [red]fail[/] {Markup.Escape(token)}: the activation path could not be resolved: " +
+                $"{Markup.Escape(ex.Message)}");
+            return false;
+        }
+
         UtilitiesStatusLineOutput.PrintActivationGuidance(_console, target, commandPath);
 
         return healthy;

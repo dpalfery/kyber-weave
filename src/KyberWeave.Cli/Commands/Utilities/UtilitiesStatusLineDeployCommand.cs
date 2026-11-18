@@ -160,7 +160,22 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
                 $"{Markup.Escape(plan.StagingRoot)}");
         }
 
-        string? commandPath = UtilitiesStatusLineOutput.ResolvePrimaryCommandPath(target, plan.StagingRoot, files, _semantics);
+        string? commandPath;
+        try
+        {
+            commandPath = UtilitiesStatusLineOutput.ResolvePrimaryCommandPath(
+                target,
+                plan.StagingRoot,
+                files,
+                _semantics);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            _console.MarkupLine(
+                $"[red]kyber-weave utilities statusline: error:[/] {Markup.Escape(ex.Message)}");
+            return false;
+        }
+
         if (commandPath is null)
         {
             _console.MarkupLine(
