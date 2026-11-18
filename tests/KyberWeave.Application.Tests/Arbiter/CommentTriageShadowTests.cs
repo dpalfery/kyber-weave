@@ -9,6 +9,7 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -25,7 +26,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// constructor argument, <c>IReadOnlyList&lt;ArbiterRule&gt;? rules = null</c>, which defaults to the shipped rules.
 /// <c>WouldClass</c> is null when the rule is not in shadow, and when the model gave no class at all.
 /// </remarks>
-public sealed class CommentTriageShadowTests : IDisposable
+public sealed class CommentTriageShadowTests
 {
     private const string BotLogin = "kilo-code-bot";
     private const string HumanLogin = "dave";
@@ -41,13 +42,14 @@ public sealed class CommentTriageShadowTests : IDisposable
         "| warning | `src/Widget.cs` | L12 | Rename this variable to something clearer. |\n" +
         "| nit | `src/Widget.cs` | 8-10 | Prefer a constant for the magic number. |\n";
 
-    private readonly TempDirectory _sandbox = new();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly InMemoryArbiterState _state;
 
-    public void Dispose() => _sandbox.Dispose();
+    public CommentTriageShadowTests() => _state = new InMemoryArbiterState(_files);
 
-    private string Root => Path.Combine(_sandbox.Path, "repo");
+    private static string Root => ArbiterTestRoots.Under("sandbox", "repo");
 
-    private string ArbiterDirectory => Path.Combine(_sandbox.Path, "artifacts", "arbiter");
+    private static string ArbiterDirectory => ArbiterTestRoots.Under("sandbox", "artifacts", "arbiter");
 
     private static DateTimeOffset Now => new(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
 
@@ -69,13 +71,13 @@ public sealed class CommentTriageShadowTests : IDisposable
         foreach (string relative in new[] { CitedPath, "src/Gadget.cs" })
         {
             string full = Path.Combine(Root, relative);
-            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-            File.WriteAllText(full, string.Join("\n", Enumerable.Range(1, 30).Select(i => $"var v{i} = {i};")));
+            _files.CreateDirectory(Path.GetDirectoryName(full)!);
+            _files.WriteAllText(full, string.Join("\n", Enumerable.Range(1, 30).Select(i => $"var v{i} = {i};")));
         }
     }
 
     private CommentTriageService Service(IArbiterProvider provider, IReadOnlyList<string>? botLogins = null, IReadOnlyList<ArbiterRule>? rules = null) =>
-        new(provider, Root, ArbiterDirectory, new FixedClock(Now), new FakeIdGenerator(), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>(), botLogins: botLogins, rules: rules);
+        new(provider, Root, ArbiterDirectory, new FixedClock(Now), new FakeIdGenerator(), InMemoryFileTextFacts.Create(_files), _state.Factory(), botLogins: botLogins, rules: rules);
 
     private static CommentTriageRequest Request(string path = CitedPath) =>
         new(path, 12, "Rename this variable to something clearer.", null);
@@ -129,7 +131,7 @@ public sealed class CommentTriageShadowTests : IDisposable
 
         CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick)).ClassifyAsync(Request());
 
-        ArbiterDecisionRecord record = Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), entry => entry.Id == result.DecisionId);
+        ArbiterDecisionRecord record = Assert.Single(_state.Decisions(ArbiterDirectory).ReadAll(), entry => entry.Id == result.DecisionId);
         Assert.Equal(Nitpick, record.Outcome);
         ArbiterDecisionRule rule = Assert.Single(record.Rules);
         Assert.Equal(CommentTriageService.CommentRuleId, rule.Id);
@@ -203,7 +205,7 @@ public sealed class CommentTriageShadowTests : IDisposable
     [Fact]
     public async Task AMissingCitedFileInShadowIsRealWithNoWouldClass()
     {
-        Directory.CreateDirectory(Root);
+        _files.CreateDirectory(Root);
 
         CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, AlreadyFixed)).ClassifyAsync(Request());
 
