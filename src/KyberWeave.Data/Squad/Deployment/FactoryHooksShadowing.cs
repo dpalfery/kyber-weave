@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Rendering;
 
 namespace KyberWeave.Core.Squad.Deployment;
@@ -26,7 +27,8 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// <see cref="Resolve"/> while building the plan, so a dry run reports the drop too.
 /// </para>
 /// </remarks>
-public static class FactoryHooksShadowing
+/// <param name="files">Reads the target's Factory settings and hook files.</param>
+public sealed class FactoryHooksShadowing(IFileSystem files) : ISquadFactoryHooksShadowing
 {
     private const string FactoryTargetToken = "factory";
     private const string HooksJsonRelativePath = ".factory/hooks.json";
@@ -51,7 +53,7 @@ public static class FactoryHooksShadowing
     /// unparsable <c>settings.json</c> is <see cref="FactoryHooksShadowState.Unparsable"/>,
     /// not shadowed: <see cref="Resolve"/> drops the block for it too.
     /// </remarks>
-    public static bool IsShadowed(string targetRoot) =>
+    public bool IsShadowed(string targetRoot) =>
         Inspect(targetRoot) == FactoryHooksShadowState.Shadowed;
 
     /// <summary>
@@ -59,24 +61,24 @@ public static class FactoryHooksShadowing
     /// <c>settings.json</c> that does not parse as strict JSON is <see cref="FactoryHooksShadowState.Unparsable"/>:
     /// whether it holds hooks is unknown, and a blind <c>hooks.json</c> could disable them.
     /// </summary>
-    public static FactoryHooksShadowState Inspect(string targetRoot)
+    public FactoryHooksShadowState Inspect(string targetRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
 
-        if (File.Exists(Path.Combine(targetRoot, HooksJsonRelativePath)))
+        if (files.FileExists(Path.Combine(targetRoot, HooksJsonRelativePath)))
         {
             return FactoryHooksShadowState.Clear;
         }
 
         string settingsPath = Path.Combine(targetRoot, SettingsJsonRelativePath);
-        if (!File.Exists(settingsPath))
+        if (!files.FileExists(settingsPath))
         {
             return FactoryHooksShadowState.Clear;
         }
 
         try
         {
-            if (JsonNode.Parse(File.ReadAllText(settingsPath)) is not JsonObject settings)
+            if (JsonNode.Parse(files.ReadAllText(settingsPath)) is not JsonObject settings)
             {
                 return FactoryHooksShadowState.Unparsable;
             }
@@ -98,7 +100,7 @@ public static class FactoryHooksShadowing
     /// The Details carry the reason plus the fix, since a finding that cannot be acted on
     /// is noise.
     /// </remarks>
-    public static SquadDegradationRecord Degradation() => DegradationFor(FactoryHooksShadowState.Shadowed);
+    public SquadDegradationRecord Degradation() => DegradationFor(FactoryHooksShadowState.Shadowed);
 
     private static SquadDegradationRecord DegradationFor(FactoryHooksShadowState state) => new(
         Target: FactoryTargetToken,
@@ -124,7 +126,7 @@ public static class FactoryHooksShadowing
     /// under which a Factory block exists to drop, so a disabled wiring leaves both the
     /// blocks and the records untouched.
     /// </remarks>
-    public static FactoryHooksShadowingOutcome Resolve(
+    public FactoryHooksShadowingOutcome Resolve(
         string targetRoot,
         IReadOnlyList<SquadTarget> targets,
         SquadArbiterWiring? arbiter,

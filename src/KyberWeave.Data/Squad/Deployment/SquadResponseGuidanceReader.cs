@@ -1,4 +1,4 @@
-using System.Text;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
@@ -6,7 +6,8 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// Resolves the effective response-preferences text for a user session, prioritising the
 /// operator's home file and otherwise falling back to the shipped default.
 /// </summary>
-public static class SquadResponseGuidanceReader
+/// <param name="files">Reads the user's guidance file.</param>
+public sealed class SquadResponseGuidanceReader(IFileSystem files) : ISquadResponseGuidanceStore
 {
     /// <summary>Returns the effective advice text for the current user home.</summary>
     /// <remarks>
@@ -14,14 +15,14 @@ public static class SquadResponseGuidanceReader
     ///     <see cref="IOException"/>) when the build shipped without its default, so callers that already
     ///     degrade on I/O failures handle it without a new path.
     /// </remarks>
-    public static string ReadEffective(string homeDirectory, ICollection<string> warnings)
+    public string ReadEffective(string homeDirectory, ICollection<string> warnings)
         => ReadEffective(homeDirectory, warnings, readDefault: null);
 
     /// <summary>
     ///     Resolves the effective text, reading the shipped default through <paramref name="readDefault"/>
     ///     when given. Injected so a test can drive a build that shipped without its default.
     /// </summary>
-    public static string ReadEffective(string homeDirectory, ICollection<string> warnings, Func<string>? readDefault)
+    public string ReadEffective(string homeDirectory, ICollection<string> warnings, Func<string>? readDefault)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
         ArgumentNullException.ThrowIfNull(warnings);
@@ -29,11 +30,11 @@ public static class SquadResponseGuidanceReader
         string path = Path.Combine(homeDirectory, SquadResponseGuidanceDeployer.FileName);
 
         // One read, no existence probe: a probe-then-read leaves a window where the file can change or
-        // vanish, and File.Exists answers false for a directory, which must be reported rather than skipped.
+        // vanish, and FileExists answers false for a directory, which must be reported rather than skipped.
         string homeText;
         try
         {
-            homeText = File.ReadAllText(path, Encoding.UTF8);
+            homeText = files.ReadAllText(path);
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
@@ -54,6 +55,12 @@ public static class SquadResponseGuidanceReader
         warnings.Add($"Response guidance at '{path}' is blank; using the shipped default instead.");
         return ShippedDefault(readDefault);
     }
+
+    /// <inheritdoc />
+    public ISquadResponseGuidanceDeployer CreateDeployer(string homeStateRoot) => new SquadResponseGuidanceDeployer(homeStateRoot);
+
+    /// <inheritdoc />
+    public bool IsDegradableFailure(Exception exception) => SquadResponseGuidanceDeployer.IsDegradableFailure(exception);
 
     private static string ShippedDefault(Func<string>? readDefault)
         => readDefault is null ? SquadResponseGuidanceSource.DefaultText : readDefault();

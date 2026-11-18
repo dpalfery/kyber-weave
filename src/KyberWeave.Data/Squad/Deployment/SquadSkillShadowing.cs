@@ -1,3 +1,5 @@
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Core.FileSystem;
 
@@ -20,7 +22,13 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// (<see cref="SquadSkillOutputPaths.ProjectSkillRoots"/>), so the list cannot drift from the renderers.
 /// </para>
 /// </remarks>
-public static class SquadSkillShadowing
+/// <param name="files">Reads the installed and project skill files.</param>
+/// <param name="paths">Turns the roots and managed paths into full paths.</param>
+/// <param name="environment">Supplies the base directory a relative root resolves against.</param>
+public sealed class SquadSkillShadowing(
+    IFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : ISquadSkillShadowing
 {
     private const string SkillFileName = "SKILL.md";
 
@@ -28,7 +36,7 @@ public static class SquadSkillShadowing
     /// <param name="projectRoot">The repository root.</param>
     /// <param name="installed">The installed squad skills, project and global.</param>
     /// <param name="managedPaths">Absolute paths the deployment owns, which are never reported.</param>
-    public static IReadOnlyList<SquadSkillShadow> Find(
+    public IReadOnlyList<SquadSkillShadow> Find(
         string projectRoot,
         IReadOnlyList<SquadInstalledSkill> installed,
         IReadOnlySet<string> managedPaths)
@@ -37,8 +45,8 @@ public static class SquadSkillShadowing
         ArgumentNullException.ThrowIfNull(installed);
         ArgumentNullException.ThrowIfNull(managedPaths);
 
-        string root = Path.GetFullPath(projectRoot);
-        HashSet<string> managed = new(managedPaths.Select(Path.GetFullPath), StringComparer.Ordinal);
+        string root = FullPath(projectRoot);
+        HashSet<string> managed = new(managedPaths.Select(FullPath), StringComparer.Ordinal);
         List<SquadSkillShadow> shadows = [];
 
         foreach (IGrouping<string, SquadInstalledSkill> skill in installed.GroupBy(i => i.Name, StringComparer.Ordinal))
@@ -53,9 +61,9 @@ public static class SquadSkillShadowing
 
             foreach (string location in SquadSkillOutputPaths.ProjectSkillRoots())
             {
-                string candidate = Path.GetFullPath(Path.Combine(
+                string candidate = FullPath(Path.Combine(
                     root, location.Replace('/', Path.DirectorySeparatorChar), skill.Key, SkillFileName));
-                if (managed.Contains(candidate) || !File.Exists(candidate)) continue;
+                if (managed.Contains(candidate) || !files.FileExists(candidate)) continue;
                 if (ReadBody(candidate) is not { } projectBody) continue;
                 if (copies.Exists(c => string.Equals(c.Body, projectBody, StringComparison.Ordinal))) continue;
 
@@ -66,12 +74,14 @@ public static class SquadSkillShadowing
         return shadows;
     }
 
-    private static string? ReadBody(string path)
+    private string FullPath(string path) => paths.GetFullPath(path, environment.CurrentDirectory);
+
+    private string? ReadBody(string path)
     {
         string text;
         try
         {
-            text = File.ReadAllText(path);
+            text = files.ReadAllText(path);
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {

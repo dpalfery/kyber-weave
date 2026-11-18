@@ -215,14 +215,10 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `DocsRootWalk` (`FileSystem/DocsRootWalk.cs`) | file system | 4.4 |
 | `ZipSkillArchiveWriter` (`Skills/ZipSkillArchiveWriter.cs`) | file system | 4.4 |
 | `DevinImportOverlap` (`Squad/Deployment/DevinImportOverlap.cs`) | file system, paths | 3.5 |
-| `FactoryHooksShadowing` (`Squad/Deployment/FactoryHooksShadowing.cs`) | file system | 3.5 |
 | `SquadDeploymentAdapters` (`Squad/Deployment/SquadDeploymentAdapters.cs`) | file system, paths, identifiers | 3.5 |
 | `SquadHookJsonFile` (`Squad/Deployment/SquadHookJsonFile.cs`) | file system, paths | 3.5 |
 | `SquadMigrationLedger` (`Squad/Deployment/SquadMigrationLedger.cs`) | file system | 3.5 |
 | `SquadResponseGuidanceDeployer` (`Squad/Deployment/SquadResponseGuidanceDeployer.cs`) | file system, paths, identifiers | 3.5 |
-| `SquadResponseGuidanceReader` (`Squad/Deployment/SquadResponseGuidanceReader.cs`) | file system | 3.5 |
-| `SquadSkillShadowing` (`Squad/Deployment/SquadSkillShadowing.cs`) | file system, paths | 3.5 |
-| `SquadTargetResolver` (`Squad/Deployment/SquadTargetResolver.cs`) | file system, paths | 3.5 |
 | `SquadTransaction` (`Squad/Deployment/SquadTransaction.cs`) | file system, paths, identifiers, lease | 3.4 |
 | `SquadWorkerBaselineFile` (`Squad/Deployment/SquadWorkerBaselineFile.cs`) | file system, paths | 3.5 |
 | `SquadWorktreeMcp` (`Squad/Deployment/SquadWorktreeMcp.cs`) | file system, paths | 3.5 |

@@ -14,33 +14,6 @@ public sealed class SquadTransactionFactory(ISquadStateStore stateStore) : ISqua
     public ISquadTransaction Create(ISquadTransactionObserver? observer) => new SquadTransaction(stateStore, observer);
 }
 
-/// <summary>Reads and deploys the response guidance under the user's home.</summary>
-public sealed class FileSquadResponseGuidanceStore : ISquadResponseGuidanceStore
-{
-    /// <inheritdoc />
-    public string ReadEffective(string homeDirectory, ICollection<string> warnings) =>
-        SquadResponseGuidanceReader.ReadEffective(homeDirectory, warnings);
-
-    /// <inheritdoc />
-    public ISquadResponseGuidanceDeployer CreateDeployer(string homeStateRoot) => new SquadResponseGuidanceDeployer(homeStateRoot);
-
-    /// <inheritdoc />
-    public bool IsDegradableFailure(Exception exception) => SquadResponseGuidanceDeployer.IsDegradableFailure(exception);
-}
-
-/// <summary>Resolves Factory hook shadowing from the target's files.</summary>
-public sealed class FileFactoryHooksShadowing : ISquadFactoryHooksShadowing
-{
-    /// <inheritdoc />
-    public FactoryHooksShadowingOutcome Resolve(
-        string targetRoot,
-        IReadOnlyList<SquadTarget> targets,
-        SquadArbiterWiring? arbiter,
-        SquadDeploymentScope scope,
-        IReadOnlyList<SquadRenderedBlock>? blocks) =>
-        FactoryHooksShadowing.Resolve(targetRoot, targets, arbiter, scope, blocks);
-}
-
 /// <summary>Probes the files of a release's extraction tree and of the checkout the binary runs from.</summary>
 public sealed class PhysicalSquadFileAccess : ISquadFileAccess
 {
@@ -155,11 +128,4 @@ public sealed class CheckoutOrSnapshotCanonicalProfileResolver(
             return null;
         }
     }
-}
-
-/// <summary>Resolves targets, probing the root for each harness's marker files.</summary>
-public sealed class FileSquadTargetResolver : ISquadTargetResolver
-{
-    /// <inheritdoc />
-    public SquadTargetResolutionDecision Resolve(SquadTargetResolutionRequest request) => SquadTargetResolver.Resolve(request);
 }
