@@ -1,8 +1,11 @@
 using KyberWeave.Cli.Commands.Arbiter;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.RunStart;
 using KyberWeave.Tests.Arbiter;
 using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
@@ -114,35 +117,77 @@ public sealed class ArbiterConsoleSeamTests
     }
 
     /// <summary>
-    /// Every Arbiter command the composition registers resolves, and the console it writes to is the one the root
-    /// registered, so a test substituting one sees the output.
+    /// Every Arbiter command the composition registers writes its output to the console the root registered. Resolution
+    /// alone would not prove that: a command that still called the static console resolves just as well, so each one is
+    /// run and its own output is read back.
     /// </summary>
     [Fact]
-    public void Composition_HandsEveryArbiterCommandTheRegisteredConsole()
+    public void Composition_HandsEveryArbiterCommandTheConsoleItRegistered()
     {
         TestConsole console = new();
         console.Profile.Width = 200;
-        using ArbiterTestHost host = ArbiterTestHost.Create(services => services.AddSingleton<IAnsiConsole>(console));
+        using ArbiterTestHost host = ArbiterTestHost.Create(services =>
+        {
+            services.AddSingleton<IAnsiConsole>(console);
+            services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(homeDirectory: "/kw/home"));
+            services.AddSingleton<IProcessExecutor>(new FakeProcessExecutor());
+            services.AddSingleton<IGitCommandRunner>(
+                new FakeGitCommandRunner((_, _) => new GitOutcome(1, string.Empty, string.Empty)));
+        });
 
-        // Resolution proves the wiring: a command with an unregistered constructor parameter throws here.
-        _ = host.Command<ArbiterAuditCommand>();
-        _ = host.Command<ArbiterCommentCommand>();
-        _ = host.Command<ArbiterDoctorCommand>();
-        _ = host.Command<ArbiterEvalCommand>();
-        _ = host.Command<ArbiterInstallCommand>();
-        _ = host.Command<ArbiterPlanCommand>();
-        _ = host.Command<ArbiterSectionsCommand>();
-        _ = host.Command<ArbiterSetupCommand>();
-        _ = host.Command<ArbiterStatusCommand>();
-        _ = host.Command<ArbiterTuneCommand>();
-        _ = host.Command<ArbiterUninstallCommand>();
-        _ = host.Command<ArbiterValidateCommand>();
+        // Each command runs in a state that prints and changes nothing: a usage error, an unreadable path, or the
+        // defaults an empty configuration yields.
+        List<(string Command, Func<int> Run)> commands =
+        [
+            ("arbiter validate", () => host.Command<ArbiterValidateCommand>()
+                .Execute(null!, new ArbiterSettings { Path = NoRepository, Format = "json" })),
+            ("arbiter rules", () => host.Command<ArbiterRulesCommand>()
+                .Execute(null!, new ArbiterSettings { Path = NoRepository })),
+            ("arbiter plan", () => host.Command<ArbiterPlanCommand>()
+                .Execute(null!, new ArbiterSettings { Path = NoRepository + "/plan.md", Format = "json" })),
+            ("arbiter eval", () => host.Command<ArbiterEvalCommand>()
+                .Execute(null!, new ArbiterSettings { Path = NoRepository, Format = "json" })),
+            ("arbiter audit", () => host.Command<ArbiterAuditCommand>()
+                .Execute(null!, new ArbiterSettings { Path = NoRepository })),
+            ("arbiter tune", () => host.Command<ArbiterTuneCommand>()
+                .Execute(null!, new ArbiterSettings { Path = NoRepository })),
+            ("arbiter setup", () => host.Command<ArbiterSetupCommand>()
+                .Execute(null!, new ArbiterSettings { Path = NoRepository, Provider = "no-such-provider" })),
+            ("arbiter status", () => host.Command<ArbiterStatusCommand>()
+                .Execute(null!, new ArbiterSettings { Path = NoRepository })),
+            ("arbiter doctor", () => host.Command<ArbiterDoctorCommand>()
+                .Execute(null!, new ArbiterSettings { Path = NoRepository })),
+            ("arbiter sections", () => host.Command<ArbiterSectionsCommand>()
+                .Execute(null!, new ArbiterSectionsSettings())),
+            ("arbiter comment", () => host.Command<ArbiterCommentCommand>()
+                .Execute(null!, new ArbiterCommentSettings())),
+            ("arbiter install", () => host.Command<ArbiterInstallCommand>()
+                .Execute(null!, new ArbiterInstallSettings { Target = "no-such-target" })),
+            ("arbiter uninstall", () => host.Command<ArbiterUninstallCommand>()
+                .Execute(null!, new ArbiterUninstallSettings { Target = "no-such-target" })),
+        ];
 
-        int exitCode = host.Command<ArbiterRulesCommand>().Execute(null!, new ArbiterSettings { Path = "/nowhere" });
+        foreach ((string command, Func<int> run) in commands)
+        {
+            int before = console.Output.Length;
+            int exitCode = 0;
 
-        Assert.Equal(0, exitCode);
-        Assert.Contains("rule(s) listed", console.Output, StringComparison.Ordinal);
+            // The process-wide console is captured for the run, so a command that still reaches it is caught even when
+            // it also writes something to the injected one.
+            CapturedConsoleExecution<int> processConsole =
+                ProcessConsoleCapture.Run(() => exitCode = run(), width: 200);
+
+            Assert.True(
+                console.Output.Length > before,
+                $"{command} wrote nothing to the console it was given (exit code {exitCode}).");
+            Assert.True(
+                processConsole.Output.Length == 0,
+                $"{command} also wrote to the process-wide console: {processConsole.Output}");
+        }
     }
+
+    /// <summary>A repository path that exists nowhere, so every command takes its not-found path.</summary>
+    private const string NoRepository = "/kw/none";
 
     /// <summary>A configuration resolver that answers with the product defaults and reads nothing.</summary>
     private sealed class FixedArbiterConfigs : IArbiterConfigResolver
