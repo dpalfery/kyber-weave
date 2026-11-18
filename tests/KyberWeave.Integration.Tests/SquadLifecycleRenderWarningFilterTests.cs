@@ -97,8 +97,8 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
                 Version: UpdateVersion));
 
         Assert.True(
-            h.Renderer.Codes.Contains(AgentBodyTooLongCode),
-            $"Precondition: the fixture must make the renderer emit '{AgentBodyTooLongCode}', but it emitted: {string.Join(", ", h.Renderer.Codes)}.");
+            h.Renderer.WarningCodes.Contains(AgentBodyTooLongCode),
+            $"Precondition: the fixture must make the renderer emit '{AgentBodyTooLongCode}', but it emitted: {string.Join(", ", h.Renderer.WarningCodes)}.");
         IReadOnlyList<string> warnings = WarningsOf(result);
         Assert.True(
             warnings.Count == 0,
@@ -219,7 +219,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
                 [SquadTarget.Copilot],
                 Version: UpdateVersion));
 
-        AssertOverflowWarningShown(h.Renderer.Codes, WarningsOf(result));
+        AssertOverflowWarningShown(h.Renderer.WarningCodes, WarningsOf(result));
     }
 
     /// <summary>
@@ -431,7 +431,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
                     Encoding.UTF8);
             }
 
-            RecordingRenderer renderer = new(SquadTestRegistry.Create([new CopilotRenderer()]));
+            FakeSquadRenderer renderer = FakeSquadRenderer.Wrapping(SquadTestRegistry.Create([new CopilotRenderer()]));
             FakeSquadUserPaths userPaths = new(userHome);
             SquadStateStore store = new(userPaths);
             using ISquadReleaseSource releaseSource = ReleaseSource(kind, paddingCharacters);
@@ -460,7 +460,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
                 anchor,
                 copilotHome,
                 userHome,
-                renderer.Codes,
+                renderer.WarningCodes,
                 SquadInstallRecord.FromLifecycle(result));
             directory = null;
             return prepared;
@@ -580,26 +580,6 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     }
 
     /// <summary>
-    ///     Records every warning code the real renderer emits for a render, so each fact can prove its
-    ///     precondition before it asserts what the lifecycle result carries. Delegates all behaviour unchanged.
-    /// </summary>
-    private sealed class RecordingRenderer(ISquadRenderer inner) : ISquadRenderer
-    {
-        public List<string> Codes { get; } = [];
-
-        public IReadOnlyCollection<SquadTarget> SupportedTargets => inner.SupportedTargets;
-
-        public async Task<SquadRenderResult> RenderAsync(
-            SquadRenderRequest request,
-            CancellationToken cancellationToken = default)
-        {
-            SquadRenderResult result = await inner.RenderAsync(request, cancellationToken);
-            Codes.AddRange(result.Warnings.Select(static warning => warning.Code));
-            return result;
-        }
-    }
-
-    /// <summary>
     ///     One prepared install, with the renderer warnings its own render emitted and a copy of the installed
     ///     home and user data for the facts that must update over it.
     /// </summary>
@@ -659,7 +639,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
             UserHome = userHome;
             Store = new SquadStateStore(new FakeSquadUserPaths(userHome));
             GlobalRoots = SquadOperatorChannelFixture.GlobalRoots(copilotHome, userHome);
-            Renderer = new RecordingRenderer(SquadTestRegistry.Create([new CopilotRenderer()]));
+            Renderer = FakeSquadRenderer.Wrapping(SquadTestRegistry.Create([new CopilotRenderer()]));
             Oversized = new OversizedConductorReleaseSource();
         }
 
@@ -673,7 +653,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
 
         public ISquadGlobalRootResolver GlobalRoots { get; }
 
-        public RecordingRenderer Renderer { get; }
+        public FakeSquadRenderer Renderer { get; }
 
         public OversizedConductorReleaseSource Oversized { get; }
 

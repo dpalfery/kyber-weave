@@ -43,7 +43,7 @@ public sealed class SquadHomeStateTemplate : IDisposable
         _directory = new TempDirectory();
         try
         {
-            ScriptedAgentRenderer renderer = new("architect");
+            FakeSquadRenderer renderer = FakeSquadRenderer.ScriptedAgents("architect");
 
             _globalHarness = BuildGlobalTemplate(renderer);
             _projectHarness = Path.Combine(_directory.Path, "project-template");
@@ -191,35 +191,5 @@ public sealed class SquadHomeStateTemplate : IDisposable
 
         /// <summary>Where the project's receipt was written.</summary>
         internal string ReceiptPath => Path.Combine(StateDirectory, "squad.receipt.json");
-    }
-}
-
-/// <summary>
-/// Renders one agent file per requested target at a path the test controls, so a receipt and a
-/// collision can be planned against exact bytes instead of a renderer's own harness layout.
-/// </summary>
-internal sealed class ScriptedAgentRenderer(params string[] agentNames) : ISquadRenderer
-{
-    public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = SquadTargetCatalog.All;
-
-    public Task<SquadRenderResult> RenderAsync(
-        SquadRenderRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        List<SquadDeploymentFile> files = [];
-        foreach (SquadTarget target in request.Targets)
-            foreach (string agent in agentNames)
-                files.Add(new SquadDeploymentFile(
-                    $"agents/{agent}.md",
-                    Encoding.UTF8.GetBytes($"canonical {agent}\n"),
-                    SquadTargetCatalog.GetToken(target)));
-
-        return Task.FromResult(new SquadRenderResult(
-            true,
-            files,
-            [],
-            [],
-            []));
     }
 }

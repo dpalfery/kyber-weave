@@ -887,7 +887,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
                 _userPaths,
                 _store,
                 _releaseSource,
-                new ScriptedAgentRenderer("architect"),
+                FakeSquadRenderer.ScriptedAgents("architect"),
                 isInteractive,
                 readAnswer ?? (_ => true),
                 _globalRoots,
@@ -900,7 +900,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
                 _userPaths,
                 _store,
                 _releaseSource,
-                new ScriptedAgentRenderer("architect"),
+                FakeSquadRenderer.ScriptedAgents("architect"),
                 false,
                 _ => true,
                 _globalRoots,
@@ -922,32 +922,6 @@ public sealed class SquadCapturePluginStepTests : IDisposable
         public string ResolveGlobalRoot(SquadTarget target)
         {
             return Path.Combine(root, SquadTargetCatalog.GetToken(target));
-        }
-    }
-
-    private sealed class ScriptedAgentRenderer(params string[] agentNames) : ISquadRenderer
-    {
-        public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = SquadTargetCatalog.All;
-
-        public Task<SquadRenderResult> RenderAsync(
-            SquadRenderRequest request,
-            CancellationToken cancellationToken = default)
-        {
-            ArgumentNullException.ThrowIfNull(request);
-            List<SquadDeploymentFile> files = [];
-            foreach (SquadTarget target in request.Targets)
-                foreach (string agent in agentNames)
-                    files.Add(new SquadDeploymentFile(
-                        $"agents/{agent}.md",
-                        Encoding.UTF8.GetBytes($"canonical {agent}\n"),
-                        SquadTargetCatalog.GetToken(target)));
-
-            return Task.FromResult(new SquadRenderResult(
-                true,
-                files,
-                [],
-                [],
-                []));
         }
     }
 }

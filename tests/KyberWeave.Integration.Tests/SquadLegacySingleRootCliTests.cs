@@ -240,7 +240,7 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
         public SquadUninstallCommand Uninstall() => SquadTestCommands.Uninstall(
             userPaths: UserPaths,
             stateStore: Store,
-            lifecycleService: SquadHostDefaults.CreateLifecycleService(ReleaseSource, new EmptyRenderer(), Store, globalRoots: GlobalRoots),
+            lifecycleService: SquadHostDefaults.CreateLifecycleService(ReleaseSource, FakeSquadRenderer.Empty(), Store, globalRoots: GlobalRoots),
             isInteractive: false,
             readAnswer: null,
             globalRoots: GlobalRoots);
@@ -249,7 +249,7 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
             userPaths: UserPaths,
             stateStore: Store,
             releaseSource: ReleaseSource,
-            renderer: new EmptyRenderer(),
+            renderer: FakeSquadRenderer.Empty(),
             isInteractive: false,
             readAnswer: _ => true,
             globalRoots: GlobalRoots);
@@ -261,22 +261,6 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
     {
         public string ResolveGlobalRoot(SquadTarget target) =>
             Path.Combine(root, SquadTargetCatalog.GetToken(target));
-    }
-
-    /// <summary>Renders nothing. The paths under test never reach a render: uninstall plans from the receipt, and update is refused first.</summary>
-    private sealed class EmptyRenderer : ISquadRenderer
-    {
-        public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = SquadTargetCatalog.All;
-
-        public Task<SquadRenderResult> RenderAsync(
-            SquadRenderRequest request,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new SquadRenderResult(
-                Success: true,
-                Files: [],
-                Degradations: [],
-                Warnings: [],
-                Errors: []));
     }
 
     #endregion
