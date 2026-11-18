@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.ExceptionServices;
 using KyberWeave.Contracts.Host;
@@ -9,7 +8,8 @@ namespace KyberWeave.Data.Host;
 /// <remarks>
 /// <para>
 /// It mirrors how the Squad deployment takes its lease today: a named mutex, an abandoned mutex treated as taken, and a
-/// second request from this process refused at once rather than waiting for the thread's own recursive mutex.
+/// second request from this process queued behind the first, up to its timeout, rather than slipping through the
+/// thread's own recursive mutex.
 /// </para>
 /// <para>
 /// A mutex belongs to the thread that took it, so this adapter takes it on a thread of its own and releases it there.
@@ -21,7 +21,39 @@ namespace KyberWeave.Data.Host;
 /// </remarks>
 public sealed class MutexLease : ILease
 {
-    private static readonly ConcurrentDictionary<string, byte> HeldInProcess = new(StringComparer.Ordinal);
+    private static readonly object Gate = new();
+    private static readonly HashSet<string> HeldInProcess = new(StringComparer.Ordinal);
+
+    // A mutex is recursive on its own thread, so the process keeps its own table: a second request from this process
+    // waits here, up to its timeout, for the first to release, and is then refused like any other contender.
+    private static bool TryTakeInProcess(string name, TimeSpan timeout)
+    {
+        DateTime deadline = DateTime.UtcNow + timeout;
+        lock (Gate)
+        {
+            while (!HeldInProcess.Add(name))
+            {
+                TimeSpan remaining = deadline - DateTime.UtcNow;
+                if (remaining <= TimeSpan.Zero)
+                {
+                    return false;
+                }
+
+                _ = Monitor.Wait(Gate, remaining);
+            }
+
+            return true;
+        }
+    }
+
+    private static void ReleaseInProcess(string name)
+    {
+        lock (Gate)
+        {
+            _ = HeldInProcess.Remove(name);
+            Monitor.PulseAll(Gate);
+        }
+    }
 
     /// <inheritdoc />
     [SuppressMessage(
@@ -33,7 +65,7 @@ public sealed class MutexLease : ILease
         _ = LeaseNames.Validate(name);
         ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
 
-        if (!HeldInProcess.TryAdd(name, 0))
+        if (!TryTakeInProcess(name, timeout))
         {
             throw new LeaseTimeoutException(name, timeout);
         }
@@ -54,7 +86,7 @@ public sealed class MutexLease : ILease
         catch (Exception exception)
         {
             owner?.Dispose();
-            _ = HeldInProcess.TryRemove(name, out _);
+            ReleaseInProcess(name);
             if (exception is IOException or UnauthorizedAccessException)
             {
                 throw new LeaseTimeoutException(name, timeout, exception);
@@ -82,7 +114,7 @@ public sealed class MutexLease : ILease
             }
             finally
             {
-                _ = HeldInProcess.TryRemove(name, out _);
+                ReleaseInProcess(name);
             }
         }
     }

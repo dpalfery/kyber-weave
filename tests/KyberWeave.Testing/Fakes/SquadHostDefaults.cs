@@ -54,7 +54,8 @@ internal static class SquadHostDefaults
             new PhysicalFileSystem(),
             SquadFileSystemPathSemantics.Instance,
             new PhysicalPathResolver(new PhysicalFileSystem()),
-            new ProcessEnvironment());
+            new ProcessEnvironment(),
+            new MutexLease());
 
     /// <summary>Creates the per-target global root resolver over the environment.</summary>
     public static ISquadGlobalRootResolver ResolveGlobalRoots(Func<string, string?>? environmentReader = null)

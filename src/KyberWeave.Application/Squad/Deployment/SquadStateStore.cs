@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using System.Globalization;
@@ -63,6 +64,9 @@ public sealed class SquadStateStore : ISquadStateStore
     private readonly IFileSystemPathSemantics _semantics;
     private readonly IPathResolver _paths;
     private readonly IProcessEnvironment _environment;
+    private readonly ILease _lease;
+    private readonly TimeSpan _registryLeaseTimeout;
+    private static readonly TimeSpan DefaultRegistryLeaseTimeout = TimeSpan.FromSeconds(10);
 
     /// <summary>Creates a store over the user paths, the file-system and path seams, and the process environment.</summary>
     /// <param name="userPaths">The home and application-data directories the state is anchored to.</param>
@@ -70,18 +74,25 @@ public sealed class SquadStateStore : ISquadStateStore
     /// <param name="semantics">The canonical spelling and alias rules the state locations are resolved with.</param>
     /// <param name="paths">Turns a configured spelling into a full path.</param>
     /// <param name="environment">The process environment; its working directory resolves a relative spelling.</param>
+    /// <param name="lease">Serializes writers of the home-level project registry, across processes.</param>
+    /// <param name="registryLeaseTimeout">How long a registry write waits for another writer; ten seconds when null.</param>
     public SquadStateStore(
         ISquadUserPaths userPaths,
         IWritableFileSystem files,
         IFileSystemPathSemantics semantics,
         IPathResolver paths,
-        IProcessEnvironment environment)
+        IProcessEnvironment environment,
+        ILease lease,
+        TimeSpan? registryLeaseTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(userPaths);
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(semantics);
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(lease);
+        _lease = lease;
+        _registryLeaseTimeout = registryLeaseTimeout ?? DefaultRegistryLeaseTimeout;
         UserPaths = userPaths;
         _files = files;
         _semantics = semantics;
@@ -216,7 +227,7 @@ public sealed class SquadStateStore : ISquadStateStore
     private IReadOnlyList<SquadProjectRegistryEntry> ListProjects(bool persistRebuild)
     {
         Dictionary<string, RegistryRecord> registry = ReadRegistry();
-        bool rebuilt = false;
+        Dictionary<string, RegistryRecord> rebuiltRecords = new(StringComparer.Ordinal);
         foreach (string projectDirectory in EnumerateProjectStateDirectories())
         {
             string key = Path.GetFileName(projectDirectory);
@@ -239,15 +250,27 @@ public sealed class SquadStateStore : ISquadStateStore
                 continue;
             }
 
-            registry[key] = new RegistryRecord(
+            RegistryRecord record = new(
                 receipt.TargetRoot,
                 receipt.InstalledAtUtc,
                 DistinctTargets(receipt.Files));
-            rebuilt = true;
+            registry[key] = record;
+            rebuiltRecords[key] = record;
         }
 
-        if (rebuilt && persistRebuild)
-            WriteRegistry(registry);
+        if (rebuiltRecords.Count > 0 && persistRebuild)
+        {
+            // Another writer may have registered a project since the registry was read, so the write-back re-reads it
+            // under the lease and adds only the entries it rebuilt.
+            using (_lease.Acquire(RegistryLeaseName(), _registryLeaseTimeout))
+            {
+                Dictionary<string, RegistryRecord> current = ReadRegistry();
+                foreach (KeyValuePair<string, RegistryRecord> rebuilt in rebuiltRecords)
+                    current.TryAdd(rebuilt.Key, rebuilt.Value);
+
+                WriteRegistry(current);
+            }
+        }
 
         return registry
             .OrderBy(pair => pair.Key, StringComparer.Ordinal)
@@ -267,12 +290,18 @@ public sealed class SquadStateStore : ISquadStateStore
         ArgumentNullException.ThrowIfNull(targets);
 
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(root, _semantics);
-        Dictionary<string, RegistryRecord> registry = ReadRegistry();
-        registry[identity.Key] = new RegistryRecord(
-            identity.PhysicalPath,
-            now.ToUniversalTime(),
-            targets.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray());
-        WriteRegistry(registry);
+
+        // The registry is shared by every project of this user, so two writers reading it before either writes would
+        // drop one entry. The lease makes the read-modify-write one step, across processes.
+        using (_lease.Acquire(RegistryLeaseName(), _registryLeaseTimeout))
+        {
+            Dictionary<string, RegistryRecord> registry = ReadRegistry();
+            registry[identity.Key] = new RegistryRecord(
+                identity.PhysicalPath,
+                now.ToUniversalTime(),
+                targets.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray());
+            WriteRegistry(registry);
+        }
     }
 
     /// <summary>Removes a project root from the home-level Squad registry.</summary>
@@ -284,13 +313,18 @@ public sealed class SquadStateStore : ISquadStateStore
 
         string key = SquadPhysicalRootIdentity.KeyOf(
             SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(root, _semantics));
-        Dictionary<string, RegistryRecord> registry = ReadRegistry();
-        if (!registry.Remove(key))
-            return false;
+        using (_lease.Acquire(RegistryLeaseName(), _registryLeaseTimeout))
+        {
+            Dictionary<string, RegistryRecord> registry = ReadRegistry();
+            if (!registry.Remove(key))
+                return false;
 
-        WriteRegistry(registry);
-        return true;
+            WriteRegistry(registry);
+            return true;
+        }
     }
+
+    private string RegistryLeaseName() => SquadLeaseNames.ForRegistry(ResolveHomeStateDirectory());
 
     /// <summary>Serializes a lock using stable, portable YAML field ordering.</summary>
     public string SerializeLock(SquadLock squadLock)
