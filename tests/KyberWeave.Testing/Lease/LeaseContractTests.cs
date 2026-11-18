@@ -73,6 +73,23 @@ public abstract class LeaseContractTests
     }
 
     [Fact]
+    public void RefusesALeaseThatASecondSeamInstanceHolds()
+    {
+        ILease holder = CreateLease();
+        ILease contender = CreateLease();
+        string name = NewName();
+
+        using (holder.Acquire(name, GenerousTimeout))
+        {
+            _ = Assert.Throws<LeaseTimeoutException>(() => contender.Acquire(name, ShortTimeout));
+        }
+
+        using (contender.Acquire(name, GenerousTimeout))
+        {
+        }
+    }
+
+    [Fact]
     public void RefusesTheSameLeaseTwiceInOneProcess()
     {
         ILease lease = CreateLease();

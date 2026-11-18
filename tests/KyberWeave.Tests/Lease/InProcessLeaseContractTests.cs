@@ -10,7 +10,7 @@ public sealed class InProcessLeaseContractTests : LeaseContractTests
     private readonly InProcessLease _lease = new();
 
     /// <inheritdoc />
-    protected override ILease CreateLease() => _lease;
+    protected override ILease CreateLease() => new InProcessLease();
 
     /// <inheritdoc />
     protected override IDisposable HoldElsewhere(string name) => _lease.Hold(name);
