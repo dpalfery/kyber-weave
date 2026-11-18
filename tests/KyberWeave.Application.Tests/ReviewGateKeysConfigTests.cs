@@ -1,4 +1,4 @@
-using KyberWeave.Tests.Configuration;
+using KyberWeave.Contracts.Repositories;
 
 using KyberWeave.Core.Configuration;
 using Xunit;
@@ -13,9 +13,9 @@ namespace KyberWeave.Tests;
 /// fails when it runs surfaces in the middle of someone else's task.
 /// </summary>
 /// <remarks>
-/// Working-directory checks need a real repository root, so they write a
-/// <c>.kyber-weave/kyber-weave.yml</c> into a temp tree and load it through the path a command
-/// takes. Refusals are asserted through <see cref="ConfigFileReader.TryLoad(string, string?)"/>
+/// Working-directory checks need a repository root, so they write a
+/// <c>.kyber-weave/kyber-weave.yml</c> into an in-memory tree and load it through the path a command
+/// takes. Refusals are asserted through <see cref="Configuration.TryLoad(string, string?)"/>
 /// because that is where a refusal becomes KW-CONFIG-001 naming the gate.
 /// </remarks>
 public sealed class ReviewGateKeysConfigTests : IDisposable
@@ -24,15 +24,25 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     private const string TaskGateId = "typecheck";
     private const string TaskAgent = "typescript-dev";
 
-    private readonly TempDirectory _root = new();
-    private readonly TempDirectory _outside = new();
+    private readonly InMemoryReviewServices _services = new();
+    private readonly string _root;
+    private readonly string _outside;
 
-    /// <summary>Deletes the repository and outside temp directories.</summary>
+    public ReviewGateKeysConfigTests()
+    {
+        _root = Path.Combine(_services.Root, "repo");
+        _outside = Path.Combine(_services.Root, "outside");
+        _services.Files.CreateDirectory(_root);
+        _services.Files.CreateDirectory(_outside);
+    }
+
+    /// <summary>Releases the services.</summary>
     public void Dispose()
     {
-        _root.Dispose();
-        _outside.Dispose();
+        _services.Dispose();
     }
+
+    private IKyberWeaveConfigRepository Configuration => _services.Get<IKyberWeaveConfigRepository>();
 
     [Fact]
     public void CouncilGateIncludeAndOsAreReadAsWritten()
@@ -89,10 +99,10 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     [Fact]
     public void CouncilWorkingDirectoryIsKeptNormalizedAndRepositoryRelative()
     {
-        Directory.CreateDirectory(Path.Combine(_root.Path, "tools", "lint"));
+        _services.Files.CreateDirectory(Path.Combine(_root, "tools", "lint"));
         WriteConfig(CouncilYaml("./tools/lint/"));
 
-        ReviewConfig config = ConfigFileReader.Load(_root.Path).Review;
+        ReviewConfig config = Configuration.Load(_root).Review;
 
         ReviewGate gate = Assert.Single(config.Gates);
         Assert.Equal("tools/lint", gate.WorkingDirectory?.Replace('\\', '/'));
@@ -101,10 +111,10 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     [Fact]
     public void TaskGateWorkingDirectoryIsKeptNormalizedAndRepositoryRelative()
     {
-        Directory.CreateDirectory(Path.Combine(_root.Path, "web"));
+        _services.Files.CreateDirectory(Path.Combine(_root, "web"));
         WriteConfig(TaskYaml("./web/"));
 
-        ReviewConfig config = ConfigFileReader.Load(_root.Path).Review;
+        ReviewConfig config = Configuration.Load(_root).Review;
 
         ReviewTaskGate gate = Assert.Single(config.TaskGates[TaskAgent]);
         Assert.Equal("web", gate.WorkingDirectory?.Replace('\\', '/'));
@@ -116,10 +126,10 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     [InlineData(" \" C:/web\"")]
     public void WorkingDirectoryWithLeadingWhitespaceAbsoluteIsRefused(string workingDirectory)
     {
-        Directory.CreateDirectory(Path.Combine(_root.Path, "web"));
+        _services.Files.CreateDirectory(Path.Combine(_root, "web"));
         WriteConfig(CouncilYaml(workingDirectory));
 
-        AssertRefused(ConfigFileReader.TryLoad(_root.Path), CouncilGateId);
+        AssertRefused(Configuration.TryLoad(_root), CouncilGateId);
     }
 
     [Theory]
@@ -130,7 +140,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     {
         WriteConfig(CouncilYaml(workingDirectory));
 
-        AssertRefused(ConfigFileReader.TryLoad(_root.Path), CouncilGateId);
+        AssertRefused(Configuration.TryLoad(_root), CouncilGateId);
     }
 
     [Theory]
@@ -141,25 +151,25 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     {
         WriteConfig(TaskYaml(workingDirectory));
 
-        AssertRefused(ConfigFileReader.TryLoad(_root.Path), TaskGateId);
+        AssertRefused(Configuration.TryLoad(_root), TaskGateId);
     }
 
     [Fact]
     public void CouncilWorkingDirectoryThatLeavesTheRootThroughASymlinkIsRefusedNamingTheGate()
     {
-        Directory.CreateSymbolicLink(Path.Combine(_root.Path, "linked"), _outside.Path);
+        _services.Files.CreateDirectoryLink(Path.Combine(_root, "linked"), _outside);
         WriteConfig(CouncilYaml("linked"));
 
-        AssertRefused(ConfigFileReader.TryLoad(_root.Path), CouncilGateId);
+        AssertRefused(Configuration.TryLoad(_root), CouncilGateId);
     }
 
     [Fact]
     public void TaskGateWorkingDirectoryThatLeavesTheRootThroughASymlinkIsRefusedNamingTheGate()
     {
-        Directory.CreateSymbolicLink(Path.Combine(_root.Path, "linked"), _outside.Path);
+        _services.Files.CreateDirectoryLink(Path.Combine(_root, "linked"), _outside);
         WriteConfig(TaskYaml("linked"));
 
-        AssertRefused(ConfigFileReader.TryLoad(_root.Path), TaskGateId);
+        AssertRefused(Configuration.TryLoad(_root), TaskGateId);
     }
 
     /// <summary>
@@ -169,19 +179,19 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     [Fact]
     public void CouncilGateWithChangedTokenAndWorkingDirectoryIsRefusedNamingTheGate()
     {
-        Directory.CreateDirectory(Path.Combine(_root.Path, "web"));
+        _services.Files.CreateDirectory(Path.Combine(_root, "web"));
         WriteConfig(CouncilYaml("web", """[npx, tsc, "{changed}"]"""));
 
-        AssertRefused(ConfigFileReader.TryLoad(_root.Path), CouncilGateId);
+        AssertRefused(Configuration.TryLoad(_root), CouncilGateId);
     }
 
     [Fact]
     public void TaskGateWithChangedTokenAndWorkingDirectoryIsRefusedNamingTheGate()
     {
-        Directory.CreateDirectory(Path.Combine(_root.Path, "web"));
+        _services.Files.CreateDirectory(Path.Combine(_root, "web"));
         WriteConfig(TaskYaml("web", """[npx, tsc, "{changed}"]"""));
 
-        AssertRefused(ConfigFileReader.TryLoad(_root.Path), TaskGateId);
+        AssertRefused(Configuration.TryLoad(_root), TaskGateId);
     }
 
     /// <summary>
@@ -347,9 +357,9 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
 
     private void WriteConfig(string yaml)
     {
-        string configDirectory = Path.Combine(_root.Path, ".kyber-weave");
-        Directory.CreateDirectory(configDirectory);
-        File.WriteAllText(Path.Combine(configDirectory, "kyber-weave.yml"), yaml);
+        string configDirectory = Path.Combine(_root, ".kyber-weave");
+        _services.Files.CreateDirectory(configDirectory);
+        _services.Files.WriteAllText(Path.Combine(configDirectory, "kyber-weave.yml"), yaml);
     }
 
     private static void AssertRefused(KyberWeaveConfigLoadResult result, string gateId)
