@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Update;
 using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Configuration;
 using System.ComponentModel;
@@ -682,7 +683,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
             new PhysicalFileSystem(),
             new PhysicalPathResolver(new PhysicalFileSystem()),
             new FakeProcessEnvironment(readVariable: readEnvironment),
-            new SelfUpdateSystem(),
+            RealSelfUpdateSystem.Create(),
             record.Log.Add,
             runProcess: spawn,
             captureProcess: capture,

@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Update;
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Formats.Tar;
@@ -511,14 +512,14 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void CanWriteDirectoryReportsAWritableDirectoryAndLeavesNoProbeBehind()
     {
-        Assert.True(SelfUpdateSystem.CanWriteDirectory(_install.Path));
+        Assert.True(RealSelfUpdateSystem.Create().CanWriteDirectory(_install.Path));
         Assert.Empty(Directory.GetFiles(_install.Path, ".kyber-weave-update-*"));
     }
 
     [Fact]
     public void CanWriteDirectoryReportsFalseWhenTheProbeCannotBeCreated()
     {
-        Assert.False(SelfUpdateSystem.CanWriteDirectory(Path.Combine(_install.Path, "missing")));
+        Assert.False(RealSelfUpdateSystem.Create().CanWriteDirectory(Path.Combine(_install.Path, "missing")));
     }
 
     [Fact]
@@ -698,7 +699,7 @@ public sealed class UpdateCommandTests : IDisposable
             new PhysicalFileSystem(),
             new PhysicalPathResolver(new PhysicalFileSystem()),
             new FakeProcessEnvironment(readVariable: _ => null),
-            new SelfUpdateSystem(),
+            RealSelfUpdateSystem.Create(),
             log.Add,
             captureProcess: (_, _) => QuietSuccess,
             finishingProcess: loopback.Invoke);
@@ -732,7 +733,7 @@ public sealed class UpdateCommandTests : IDisposable
             new PhysicalFileSystem(),
             new PhysicalPathResolver(new PhysicalFileSystem()),
             new FakeProcessEnvironment(readVariable: _ => null),
-            new SelfUpdateSystem(),
+            RealSelfUpdateSystem.Create(),
             log.Add,
             captureProcess: (_, _) => QuietSuccess);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
@@ -955,7 +956,7 @@ public sealed class UpdateCommandTests : IDisposable
             new PhysicalFileSystem(),
             new PhysicalPathResolver(new PhysicalFileSystem()),
             new ProcessEnvironment(),
-            new SelfUpdateSystem(),
+            RealSelfUpdateSystem.Create(),
             log.Add);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
@@ -998,7 +999,7 @@ public sealed class UpdateCommandTests : IDisposable
             new PhysicalFileSystem(),
             new PhysicalPathResolver(new PhysicalFileSystem()),
             new FakeProcessEnvironment(readVariable: _ => null),
-            new SelfUpdateSystem(),
+            RealSelfUpdateSystem.Create(),
             log.Add,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
@@ -1036,7 +1037,7 @@ public sealed class UpdateCommandTests : IDisposable
             new PhysicalFileSystem(),
             new PhysicalPathResolver(new PhysicalFileSystem()),
             new FakeProcessEnvironment(readVariable: _ => null),
-            new SelfUpdateSystem(),
+            RealSelfUpdateSystem.Create(),
             log.Add,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
@@ -1119,7 +1120,7 @@ public sealed class UpdateCommandTests : IDisposable
             new PhysicalFileSystem(),
             new PhysicalPathResolver(new PhysicalFileSystem()),
             new FakeProcessEnvironment(readVariable: readEnvironment),
-            new SelfUpdateSystem(),
+            RealSelfUpdateSystem.Create(),
             log.Add,
             runProcess: runProcess,
             captureProcess: (_, _) => QuietSuccess,
@@ -1276,7 +1277,7 @@ public sealed class UpdateCommandTests : IDisposable
             new PhysicalFileSystem(),
             new PhysicalPathResolver(new PhysicalFileSystem()),
             new FakeProcessEnvironment(readVariable: readEnvironment),
-            new SelfUpdateSystem(),
+            RealSelfUpdateSystem.Create(),
             log.Add,
             runProcess: runProcess,
             captureProcess: captureProcess,
@@ -1888,7 +1889,7 @@ public sealed class UpdateCommandTests : IDisposable
             new PhysicalFileSystem(),
             new PhysicalPathResolver(new PhysicalFileSystem()),
             new FakeProcessEnvironment(readVariable: readEnvironment),
-            new SelfUpdateSystem(),
+            RealSelfUpdateSystem.Create(),
             log.Add,
             runProcess: runProcess,
             captureProcess: captureProcess,
@@ -2025,7 +2026,7 @@ public sealed class UpdateCommandTests : IDisposable
             new PhysicalFileSystem(),
             new PhysicalPathResolver(new PhysicalFileSystem()),
             new FakeProcessEnvironment(readVariable: readEnvironment),
-            new SelfUpdateSystem(),
+            RealSelfUpdateSystem.Create(),
             log: _ => { },
             canWriteDirectory: canWriteDirectory,
             captureProcess: (_, _) => QuietSuccess,
