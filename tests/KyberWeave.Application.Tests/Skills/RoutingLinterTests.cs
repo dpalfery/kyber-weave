@@ -1,61 +1,30 @@
+using KyberWeave.Application.Skills;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Parsing;
 using KyberWeave.Core.Skills.Validation;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
-namespace KyberWeave.Tests;
-
-public class SpecValidatorTests
-{
-    private static Skill Make(string content, string dir = "/tmp/skill-x") =>
-        GovernanceTestFiles.Skills.Read(content, $"{dir}/SKILL.md", dir);
-
-    [Fact]
-    public void FlagsMissingDescription()
-    {
-        Skill skill = Make("---\nname: skill-x\n---\nbody");
-        IEnumerable<string> codes = SpecValidator.Validate(skill, Directory.Exists(skill.DirectoryPath)).Select(d => d.Code);
-        Assert.Contains("KW-SKILL-SPEC-005", codes);
-    }
-
-    [Fact]
-    public void FlagsInvalidNameCharacters()
-    {
-        Skill skill = Make("---\nname: Bad_Name\ndescription: d\n---\nbody");
-        IEnumerable<string> codes = SpecValidator.Validate(skill, Directory.Exists(skill.DirectoryPath)).Select(d => d.Code);
-        Assert.Contains("KW-SKILL-SPEC-003", codes);
-    }
-
-    [Fact]
-    public void FlagsAngleBracketsInFrontmatter()
-    {
-        Skill skill = Make("---\nname: skill-x\ndescription: use <tool> now\n---\nbody");
-        IEnumerable<string> codes = SpecValidator.Validate(skill, Directory.Exists(skill.DirectoryPath)).Select(d => d.Code);
-        Assert.Contains("KW-SKILL-SPEC-008", codes);
-    }
-
-    [Fact]
-    public void ValidSkillHasNoErrors()
-    {
-        Skill skill = Make("---\nname: skill-x\ndescription: Use to do X. Use when Y. Do NOT use for Z.\n---\nbody");
-        List<Diagnostic> diags = SpecValidator.Validate(skill, Directory.Exists(skill.DirectoryPath)).ToList();
-        Assert.DoesNotContain(diags, d => d.Severity is Severity.Error or Severity.Critical);
-    }
-}
+namespace KyberWeave.Application.Tests.Skills;
 
 public class RoutingLinterTests
 {
-    private static Skill Make(string name, string description, string dir)
+    private readonly InMemoryFileSystem _files = new();
+
+    private Skill Make(string name, string description, string folder)
     {
         string content = $"---\nname: {name}\ndescription: {description}\n---\n\n# {name}\nbody";
-        return GovernanceTestFiles.Skills.Read(content, $"{dir}/SKILL.md", dir);
+        string dir = Path.Combine(_files.Root, folder);
+        return new SkillFileReader(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: _files.Root))
+            .Read(content, Path.Combine(dir, "SKILL.md"), dir);
     }
 
     [Fact]
     public void LowQualityDescriptionScoresBelowThreshold()
     {
-        Skill skill = Make("helper", "Helps with stuff.", "/tmp/helper");
+        Skill skill = Make("helper", "Helps with stuff.", "helper");
         DescriptionScore score = DescriptionScorer.Score(skill);
         Assert.True(score.Total < 70, $"expected < 70 but was {score.Total}");
     }
@@ -65,7 +34,7 @@ public class RoutingLinterTests
     {
         Skill skill = Make("password-reset",
             "Use to reset a corporate password. Use when a user is locked out. Do NOT use for service accounts or MFA enrollment.",
-            "/tmp/password-reset");
+            "password-reset");
         DescriptionScore score = DescriptionScorer.Score(skill);
         Assert.True(score.Total >= 70, $"expected >= 70 but was {score.Total}");
     }
@@ -75,8 +44,8 @@ public class RoutingLinterTests
     {
         SkillSet set = new SkillSet(
         [
-            Make("dup", "Use to do A. Use when A. Do NOT use for B.", "/tmp/a"),
-            Make("dup", "Use to do C. Use when C. Do NOT use for D.", "/tmp/b")
+            Make("dup", "Use to do A. Use when A. Do NOT use for B.", "a"),
+            Make("dup", "Use to do C. Use when C. Do NOT use for D.", "b")
         ]);
         IEnumerable<string> codes = new RoutingLinter().LintSet(set).Select(d => d.Code);
         Assert.Contains("KW-SKILL-LINT-010", codes);
@@ -87,8 +56,8 @@ public class RoutingLinterTests
     {
         SkillSet set = new SkillSet(
         [
-            Make("reset-one", "Use to reset a corporate password when a user is locked out. Do NOT use for service accounts.", "/tmp/one"),
-            Make("reset-two", "Use to reset a corporate password when a user is locked out. Do NOT use for service accounts.", "/tmp/two")
+            Make("reset-one", "Use to reset a corporate password when a user is locked out. Do NOT use for service accounts.", "one"),
+            Make("reset-two", "Use to reset a corporate password when a user is locked out. Do NOT use for service accounts.", "two")
         ]);
         IEnumerable<string> codes = new RoutingLinter().LintSet(set).Select(d => d.Code);
         Assert.Contains("KW-SKILL-LINT-011", codes);
@@ -103,7 +72,7 @@ public class RoutingLinterTests
     [InlineData("Validates authentication tokens and manages OAuth session lifecycles.")]
     public void FlagsActionSummaryWithoutTrigger(string description)
     {
-        Skill skill = Make("action-skill", description, "/tmp/action-skill");
+        Skill skill = Make("action-skill", description, "action-skill");
         RoutingLinter linter = new RoutingLinter();
 
         List<Diagnostic> diags = linter.LintSkill(skill).ToList();
@@ -122,7 +91,7 @@ public class RoutingLinterTests
     [InlineData("Use this skill when analyzing memory leaks in .NET applications.")]
     public void DoesNotFlagKWSKILLLINT007WhenExplicitTriggerClausePresent(string description)
     {
-        Skill skill = Make("trigger-skill", description, "/tmp/trigger-skill");
+        Skill skill = Make("trigger-skill", description, "trigger-skill");
         RoutingLinter linter = new RoutingLinter();
 
         List<Diagnostic> diags = linter.LintSkill(skill).ToList();
@@ -138,7 +107,7 @@ public class RoutingLinterTests
     [InlineData("This skill can be used by the agent to triage pull requests.")]
     public void FlagsExcessiveFillerAndVerbosity(string description)
     {
-        Skill skill = Make("filler-skill", description, "/tmp/filler-skill");
+        Skill skill = Make("filler-skill", description, "filler-skill");
         RoutingLinter linter = new RoutingLinter();
 
         List<Diagnostic> diags = linter.LintSkill(skill).ToList();
@@ -154,7 +123,7 @@ public class RoutingLinterTests
     [InlineData("Invoke when security scan fails on pull requests.")]
     public void DoesNotFlagKWSKILLLINT008WhenConciseAndDirect(string description)
     {
-        Skill skill = Make("concise-skill", description, "/tmp/concise-skill");
+        Skill skill = Make("concise-skill", description, "concise-skill");
         RoutingLinter linter = new RoutingLinter();
 
         List<Diagnostic> diags = linter.LintSkill(skill).ToList();
