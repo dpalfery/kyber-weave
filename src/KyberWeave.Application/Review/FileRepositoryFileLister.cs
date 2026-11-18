@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Processes;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Review.Catalogue;
@@ -7,7 +8,8 @@ namespace KyberWeave.Data.Review;
 
 /// <summary>Lists a repository's files from git when it can answer, otherwise by walking the file system.</summary>
 /// <param name="programs">Starts git.</param>
-public sealed class FileRepositoryFileLister(IProgramRunner programs) : IRepositoryFileLister
+/// <param name="files">Answers every existence, listing and link question.</param>
+public sealed class FileRepositoryFileLister(IProgramRunner programs, IFileSystem files) : IRepositoryFileLister
 {
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(60);
 
@@ -16,7 +18,7 @@ public sealed class FileRepositoryFileLister(IProgramRunner programs) : IReposit
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
 
-        if (!Directory.Exists(repositoryRoot))
+        if (!files.DirectoryExists(repositoryRoot))
             throw new DirectoryNotFoundException($"Repository root '{repositoryRoot}' does not exist.");
 
         return ListFiles(repositoryRoot)
@@ -61,50 +63,56 @@ public sealed class FileRepositoryFileLister(IProgramRunner programs) : IReposit
     /// Walks one directory level at a time. Links are skipped rather than followed, so the walk cannot
     /// leave the repository, and excluded directories are never entered.
     /// </summary>
-    private static IReadOnlyList<string> WalkFiles(string repositoryRoot)
+    private IReadOnlyList<string> WalkFiles(string repositoryRoot)
     {
-        List<string> files = [];
+        List<string> found = [];
         Stack<string> pending = new();
         pending.Push(string.Empty);
-
-        EnumerationOptions options = new()
-        {
-            RecurseSubdirectories = false,
-            AttributesToSkip = 0,
-            IgnoreInaccessible = true
-        };
 
         while (pending.Count > 0)
         {
             string relative = pending.Pop();
-            DirectoryInfo directory =
-                new(relative.Length == 0 ? repositoryRoot : Path.Combine(repositoryRoot, relative));
+            string directory = relative.Length == 0 ? repositoryRoot : Path.Combine(repositoryRoot, relative);
 
-            foreach (FileSystemInfo entry in directory.EnumerateFileSystemInfos("*", options))
+            foreach (FileSystemEntry entry in ListEntries(directory))
             {
-                if (entry.LinkTarget is not null)
+                if (entry.IsLink)
                     continue;
 
-                string child = relative.Length == 0 ? entry.Name : $"{relative}/{entry.Name}";
-                if (entry is DirectoryInfo)
+                string name = Path.GetFileName(entry.Path);
+                string child = relative.Length == 0 ? name : $"{relative}/{name}";
+                if (entry.IsDirectory)
                 {
-                    if (!ProjectRootDetection.ExcludedDirectories.Contains(entry.Name))
+                    if (!ProjectRootDetection.ExcludedDirectories.Contains(name))
                         pending.Push(child);
                 }
                 else
                 {
-                    files.Add(child);
+                    found.Add(child);
                 }
             }
         }
 
-        return files;
+        return found;
+    }
+
+    /// <summary>A directory's immediate entries, or none when it cannot be listed, so one locked folder does not stop the walk.</summary>
+    private IReadOnlyList<FileSystemEntry> ListEntries(string directory)
+    {
+        try
+        {
+            return files.EnumerateEntries(directory).ToArray();
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            return [];
+        }
     }
 
     /// <summary>A regular file that still exists. A deleted-but-tracked file and a link are not markers.</summary>
-    private static bool IsRegularFile(string repositoryRoot, string file)
+    private bool IsRegularFile(string repositoryRoot, string file)
     {
-        FileInfo info = new(Path.Combine(repositoryRoot, file));
-        return info.Exists && info.LinkTarget is null;
+        string path = Path.Combine(repositoryRoot, file);
+        return files.FileExists(path) && files.GetLinkTarget(path) is null;
     }
 }

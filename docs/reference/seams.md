@@ -328,7 +328,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `FileCitedSourceFiles` (`Review/FileCitedSourceFiles.cs`) | file system, paths | 4.4 |
 | `FileCoverageReportSource` (`Review/FileCoverageReportSource.cs`) | file system | 4.4 |
 | `FileProjectFileLocator` (`Review/FileProjectFileLocator.cs`) | file system, paths | 4.4 |
-| `FileRepositoryFileLister` (`Review/FileRepositoryFileLister.cs`) | file system | 4.4 |
 | `FileReviewCycleStore` (`Review/FileReviewCycleStore.cs`) | file system, paths | 4.4 |
 | `FileReviewDecisionCacheStore` (`Review/FileReviewDecisionCacheStore.cs`) | file system, paths | 4.4 |
 | `FileReviewEvidenceStore` (`Review/FileReviewEvidenceStore.cs`) | file system | 4.4 |
