@@ -1956,23 +1956,6 @@ public abstract class SquadDeploymentStateTestBase
         string LiveRelativePath,
         TreeEntry ExpectedLiveAfterImage);
 
-    internal sealed class RecordingReleaseSource : ISquadReleaseSource
-    {
-        public int CallCount { get; private set; }
-
-        public Task<SquadReleaseResult> DownloadAndExtractAsync(
-            SquadReleaseRequest request,
-            CancellationToken cancellationToken)
-        {
-            CallCount++;
-            throw new NotImplementedException();
-        }
-
-        public void Dispose()
-        {
-        }
-    }
-
     internal sealed class FakeGlobalRootResolver(IReadOnlyDictionary<SquadTarget, string> roots)
         : ISquadGlobalRootResolver
     {

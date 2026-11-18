@@ -1,5 +1,4 @@
 using System.IO.Compression;
-using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
@@ -324,7 +323,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         string archive = ArchivePath(_pack.ApmPack, $"kyber-squad-{PackedVersion}.zip");
         using SquadHomeHarness harness = new(Path.Combine(_temp.Path, "home"));
         ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
-        using ISquadReleaseSource releaseSource = new ArchiveSquadReleaseSource(archive);
+        using ISquadReleaseSource releaseSource = FakeSquadReleaseSource.FromArchive(archive);
         string anchor = harness.MakeDirectory("anchor");
         string claudeRoot = harness.GlobalRoot(SquadTarget.Claude);
         string receiptPath = Path.Combine(harness.Home, ".kyber-weave", "squad", "global", "squad.receipt.json");
@@ -1065,48 +1064,5 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     private static string Compact(string text)
     {
         return new string(NormalizePath(text).Where(static character => !char.IsWhiteSpace(character)).ToArray());
-    }
-
-    /// <summary>
-    /// Stands in for a downloaded release: extracts a pack archive into the requested destination, as the lifecycle
-    /// receives a real release. The archive is the fixture's own pack output, never a copy of the working tree.
-    /// </summary>
-    private sealed class ArchiveSquadReleaseSource(string archivePath) : ISquadReleaseSource
-    {
-        public async Task<SquadReleaseResult> DownloadAndExtractAsync(
-            SquadReleaseRequest request,
-            CancellationToken cancellationToken)
-        {
-            ArgumentNullException.ThrowIfNull(request);
-
-            await ZipFile.ExtractToDirectoryAsync(
-                archivePath,
-                request.DestinationPath,
-                true,
-                cancellationToken);
-            List<string> extracted = Directory.EnumerateFiles(request.DestinationPath, "*", SearchOption.AllDirectories)
-                .Select(path => NormalizePath(Path.GetRelativePath(request.DestinationPath, path)))
-                .Order(StringComparer.Ordinal)
-                .ToList();
-
-            byte[] archiveBytes = await File.ReadAllBytesAsync(archivePath, cancellationToken);
-            string assetName = $"kyber-squad-{request.Version}.zip";
-            return new SquadReleaseResult(
-                request.Version,
-                new SquadReleaseAsset(
-                    assetName,
-                    new Uri($"https://localhost/{assetName}"),
-                    new FileInfo(archivePath).Length),
-                new SquadReleaseChecksum(
-                    assetName,
-                    Convert.ToHexStringLower(SHA256.HashData(archiveBytes))),
-                Path.GetFullPath(request.DestinationPath),
-                extracted);
-        }
-
-        public void Dispose()
-        {
-            // No unmanaged resources.
-        }
     }
 }

@@ -2,7 +2,6 @@ using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
@@ -352,7 +351,14 @@ public sealed class SquadInstanceServiceTests : IDisposable
         SquadModelPresetStore presetStore = new(userPaths);
         SquadStateStore stateStore = new(userPaths);
 
-        FakeReleaseSource releaseSource = new(_fixture.Path);
+        FakeSquadReleaseSource releaseSource = new()
+        {
+            SourceDirectory = _fixture.Path,
+            AssetName = "test-asset.tar.gz",
+            DownloadUri = new Uri("https://example.com/asset.tar.gz"),
+            AssetSize = 100,
+            Sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        };
         ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
 
         SquadLifecycleService lifecycleService = SquadHostDefaults.CreateLifecycleService(
@@ -373,7 +379,7 @@ public sealed class SquadInstanceServiceTests : IDisposable
 
     private sealed class TestContext : IDisposable
     {
-        private readonly FakeReleaseSource _releaseSource;
+        private readonly FakeSquadReleaseSource _releaseSource;
 
         public TestContext(
             FakeSquadUserPaths userPaths,
@@ -381,7 +387,7 @@ public sealed class SquadInstanceServiceTests : IDisposable
             FakeSquadLinkFileSystem linkFileSystem,
             SquadModelPresetStore presetStore,
             SquadLifecycleService lifecycleService,
-            FakeReleaseSource releaseSource)
+            FakeSquadReleaseSource releaseSource)
         {
             UserPaths = userPaths;
             GlobalRoots = globalRoots;
@@ -469,46 +475,6 @@ public sealed class SquadInstanceServiceTests : IDisposable
         private static string Normalize(string path)
         {
             return path.Replace('\\', '/').TrimEnd('/');
-        }
-    }
-
-    private sealed class FakeReleaseSource : ISquadReleaseSource
-    {
-        private readonly string _extractSourceDir;
-
-        public FakeReleaseSource(string extractSourceDir)
-        {
-            _extractSourceDir = extractSourceDir;
-        }
-
-        public Task<SquadReleaseResult> DownloadAndExtractAsync(
-            SquadReleaseRequest request,
-            CancellationToken cancellationToken)
-        {
-            Directory.CreateDirectory(request.DestinationPath);
-            if (Directory.Exists(_extractSourceDir))
-                foreach (string file in Directory.EnumerateFiles(_extractSourceDir, "*", SearchOption.AllDirectories))
-                {
-                    string relative = Path.GetRelativePath(_extractSourceDir, file);
-                    string dest = Path.Combine(request.DestinationPath, relative);
-                    string? dir = Path.GetDirectoryName(dest);
-                    if (dir is not null) Directory.CreateDirectory(dir);
-                    File.Copy(file, dest, true);
-                }
-
-            SquadReleaseResult result = new(
-                request.Version,
-                new SquadReleaseAsset("test-asset.tar.gz", new Uri("https://example.com/asset.tar.gz"), 100),
-                new SquadReleaseChecksum("test-asset.tar.gz",
-                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
-                request.DestinationPath,
-                []);
-
-            return Task.FromResult(result);
-        }
-
-        public void Dispose()
-        {
         }
     }
 }

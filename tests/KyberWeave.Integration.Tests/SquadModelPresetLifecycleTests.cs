@@ -536,7 +536,17 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         await WritePresetAsync(userPaths, "fast", FastPresetYaml);
 
         SquadStateStore stateStore = new(userPaths);
-        using TruncatedReleaseSource releaseSource = new();
+        using FakeSquadReleaseSource releaseSource = new()
+        {
+            FileContents = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["squad.yml"] = "name: kyber-squad\nschema: invalid-schema-v999\n",
+                ["toolchain.yml"] =
+                    "schema: kyber-squad.toolchain/v1\nrequired-features: []\nvalidated-release: null\n",
+            },
+            AssetName = "asset",
+            DownloadUri = new Uri("https://example.com/asset.zip"),
+        };
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
@@ -755,37 +765,6 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
             Assert.True(actual.TryGetValue(kvp.Key, out byte[]? actualBytes),
                 $"File '{kvp.Key}' missing from snapshot.");
             Assert.True(actualBytes.SequenceEqual(kvp.Value), $"File '{kvp.Key}' contents differed from snapshot.");
-        }
-    }
-
-    private sealed class TruncatedReleaseSource : ISquadReleaseSource, IDisposable
-    {
-        public async Task<SquadReleaseResult> DownloadAndExtractAsync(
-            SquadReleaseRequest request,
-            CancellationToken cancellationToken = default)
-        {
-            Directory.CreateDirectory(request.DestinationPath);
-            string squadYmlPath = Path.Combine(request.DestinationPath, "squad.yml");
-            await File.WriteAllTextAsync(squadYmlPath, "name: kyber-squad\nschema: invalid-schema-v999\n",
-                cancellationToken);
-
-            string toolchainYmlPath = Path.Combine(request.DestinationPath, "toolchain.yml");
-            await File.WriteAllTextAsync(toolchainYmlPath,
-                "schema: kyber-squad.toolchain/v1\nrequired-features: []\nvalidated-release: null\n",
-                cancellationToken);
-
-            SquadReleaseResult result = new(
-                request.Version,
-                new SquadReleaseAsset("asset", new Uri("https://example.com/asset.zip"), 1024),
-                new SquadReleaseChecksum("asset", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
-                Path.GetFullPath(request.DestinationPath),
-                ["squad.yml", "toolchain.yml"]);
-
-            return result;
-        }
-
-        public void Dispose()
-        {
         }
     }
 }
