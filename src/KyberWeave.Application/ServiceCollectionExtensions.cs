@@ -153,6 +153,11 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ITestClassSources>(sp => new FileTestClassSources(
             sp.GetRequiredService<IFileSystem>(), sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IGitChangeReader>(sp => new GitChangeReader(sp.GetRequiredService<IProgramRunner>()));
+        services.TryAddSingleton<ICoverageReportSource>(sp => new FileCoverageReportSource(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<IContainedFileReader>(sp => new FileContainedFileReader(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<ICitedSourceFiles>(sp => new FileCitedSourceFiles(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IContainedFileReader>()));
         services.TryAddSingleton<ISeverityOverrideSource>(sp => new FileSeverityOverrideSource(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IReviewCycleStore>(sp => new FileReviewCycleStore(sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<IReviewEvidenceService, ReviewEvidenceService>();
