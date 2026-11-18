@@ -53,8 +53,18 @@ public sealed class PlanRootResolver(
             return hookRoot;
         }
 
-        IReadOnlyList<string> others = [.. listWorktrees(hookRoot)
-            .Where(worktree => !paths.AreSame(worktree, hookRoot) && files.DirectoryExists(worktree))];
+        // A git call that cannot answer, or a worktree entry that is no full path, is no worktree list: the
+        // hook's own directory stands and the rules decide on the absence.
+        IReadOnlyList<string> others;
+        try
+        {
+            others = [.. listWorktrees(hookRoot).Where(worktree => IsOtherRoot(worktree, hookRoot))];
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            return hookRoot;
+        }
+
         if (others.Count == 0)
         {
             return hookRoot;
@@ -95,6 +105,20 @@ public sealed class PlanRootResolver(
             // A copy whose metadata cannot be read cannot be compared with the others, so no copy is picked and
             // the hook's own directory stands.
             return hookRoot;
+        }
+    }
+
+    /// <summary>Whether a listed worktree is another root this dispatch may be evaluated in.</summary>
+    /// <remarks>An entry that is not a fully qualified path cannot be compared, so it is not one.</remarks>
+    private bool IsOtherRoot(string worktree, string hookRoot)
+    {
+        try
+        {
+            return !paths.AreSame(worktree, hookRoot) && files.DirectoryExists(worktree);
+        }
+        catch (ArgumentException)
+        {
+            return false;
         }
     }
 

@@ -85,6 +85,35 @@ public sealed class PlanRootResolverTests
     }
 
     [Fact]
+    public void Resolve_TheWorktreeListCannotBeRead_KeepsTheHookRoot()
+    {
+        PlanRootResolver resolver = new(
+            new StubGitFacts(failure: new IOException("git could not run")),
+            _planPaths,
+            _files,
+            _paths);
+
+        string root = resolver.Resolve(HookRoot, Prompt());
+
+        Assert.Equal(HookRoot, root);
+    }
+
+    [Fact]
+    public void Resolve_TheWorktreeListHoldsAnEntryThatIsNoFullPath_SkipsItRatherThanThrowing()
+    {
+        WritePlan(Worktree, "# Plan\n");
+        PlanRootResolver resolver = new(
+            new StubGitFacts(["relative/worktree", string.Empty, Worktree]),
+            _planPaths,
+            _files,
+            _paths);
+
+        string root = resolver.Resolve(HookRoot, Prompt());
+
+        Assert.Equal(Worktree, root);
+    }
+
+    [Fact]
     public void TheHostRegistersTheResolverWithTheFileAndPathSeamsItReads()
     {
         IPlanRootResolver resolver = ArbiterTestServices.Get<IPlanRootResolver>();
@@ -98,7 +127,7 @@ public sealed class PlanRootResolverTests
         _files.WriteAllText($"{worktree}/docs/plans/task.md", text);
     }
 
-    private PlanRootResolver Resolver() => new(new NeverCalledGitFacts(), _planPaths, _files, _paths);
+    private PlanRootResolver Resolver() => new(new StubGitFacts(), _planPaths, _files, _paths);
 
     private static string Prompt() => "PLAN_FILE: docs/plans/task.md\n\nWork on the task.";
 
@@ -111,12 +140,13 @@ public sealed class PlanRootResolverTests
                 : Path.Combine(repositoryRoot, planFile);
     }
 
-    /// <summary>The resolver takes every worktree list from the delegate the test passes, never from git.</summary>
-    private sealed class NeverCalledGitFacts : IGitRepositoryFacts
+    /// <summary>Answers only the worktree list: the resolver asks git nothing else.</summary>
+    private sealed class StubGitFacts(IReadOnlyList<string>? worktrees = null, Exception? failure = null) : IGitRepositoryFacts
     {
         public string? GetRoot(string workingDirectory, string gitExecutable = "git") => throw Unsupported();
 
-        public IReadOnlyList<string> ListWorktrees(string workingDirectory, string gitExecutable = "git") => throw Unsupported();
+        public IReadOnlyList<string> ListWorktrees(string workingDirectory, string gitExecutable = "git") =>
+            failure is null ? worktrees ?? [] : throw failure;
 
         public string? GetCommonDirectory(string workingDirectory, string gitExecutable = "git") => throw Unsupported();
 
@@ -149,6 +179,6 @@ public sealed class PlanRootResolverTests
         public IReadOnlySet<string> GetChangedPathsSinceSnapshot(string workingDirectory, GitSnapshot snapshot, string gitExecutable = "git") => throw Unsupported();
 
         private static NotSupportedException Unsupported() =>
-            new("The plan root resolver never asks git: the test passes the worktree list itself.");
+            new("The plan root resolver asks git for its worktree list only.");
     }
 }
