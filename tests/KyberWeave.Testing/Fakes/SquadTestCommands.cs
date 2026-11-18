@@ -131,7 +131,7 @@ internal static class SquadTestCommands
             ensureOverride is not null
                 ? new FuncInstanceService(ensureOverride)
                 : new LazyInstanceService(() => SquadHostDefaults.CreateInstanceService(paths)),
-            selectionStore ?? new SquadModelPresetSelectionStore(paths),
+            selectionStore ?? RealSquadSelectionStore.Create(paths),
             ensureOverride is not null ? new AnyPresetStore() : new SquadModelPresetStore(paths),
             new ProcessSquadHarnessLauncher(),
             new ProcessEnvironment(),
@@ -194,7 +194,7 @@ internal static class SquadTestCommands
             store,
             globalRoots ?? SquadHostDefaults.ResolveGlobalRoots(),
             new SquadModelPresetStore(store.UserPaths),
-            new SquadModelPresetSelectionStore(store.UserPaths),
+            RealSquadSelectionStore.Create(store.UserPaths),
             Profiles(store, canonicalProfileResolver),
             new FileSquadDeploymentPlanner(),
             new SquadTransactionFactory(store),
@@ -212,7 +212,7 @@ internal static class SquadTestCommands
             store,
             globalRoots ?? SquadHostDefaults.ResolveGlobalRoots(),
             new SquadModelPresetStore(store.UserPaths),
-            new SquadModelPresetSelectionStore(store.UserPaths),
+            RealSquadSelectionStore.Create(store.UserPaths),
             Profiles(store, canonicalProfileResolver),
             new FileSquadDeploymentPlanner(),
             new SquadTransactionFactory(store),
@@ -240,7 +240,7 @@ internal static class SquadTestCommands
             paths,
             store,
             new SquadModelPresetStore(paths),
-            new SquadModelPresetSelectionStore(paths));
+            RealSquadSelectionStore.Create(paths));
     }
 
     private static ISquadCanonicalProfileResolver Profiles(

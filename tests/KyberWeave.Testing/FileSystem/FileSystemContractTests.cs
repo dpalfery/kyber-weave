@@ -381,6 +381,20 @@ public abstract class FileSystemContractTests : IDisposable
         Assert.Equal([At(root, "atomic.txt")], files.EnumerateFiles(root, "*", recursive: false));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AtomicTextWriteWithAFlushChoiceReplacesTheFileAndLeavesNoTemporary(bool flushToDisk)
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string path = WriteFile(files, root, "flushed.txt", "old");
+
+        files.WriteAllTextAtomic(path, "new", flushToDisk);
+
+        Assert.Equal("new", files.ReadAllText(path));
+        Assert.Equal([At(root, "flushed.txt")], files.EnumerateFiles(root, "*", recursive: false));
+    }
+
     [Fact]
     public void AtomicTextWriteCreatesTheDirectoryItNeeds()
     {

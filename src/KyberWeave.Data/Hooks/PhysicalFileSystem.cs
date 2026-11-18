@@ -30,6 +30,10 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
     public void WriteAllTextAtomic(string path, string contents) => AtomicFile.WriteAllText(path, contents);
 
     /// <inheritdoc />
+    public void WriteAllTextAtomic(string path, string contents, bool flushToDisk) =>
+        AtomicFile.WriteAllText(path, contents, flushToDisk);
+
+    /// <inheritdoc />
     public void WriteAllBytesAtomic(string path, byte[] bytes) => AtomicFile.WriteAllBytes(path, bytes);
 
     /// <inheritdoc />

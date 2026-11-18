@@ -29,7 +29,6 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<SquadStateStore>(sp => new SquadStateStore(sp.GetRequiredService<ISquadUserPaths>()));
         services.TryAddSingleton<ISquadStateStore>(sp => sp.GetRequiredService<SquadStateStore>());
         services.TryAddSingleton<ISquadModelPresetStore>(sp => new SquadModelPresetStore(sp.GetRequiredService<ISquadUserPaths>()));
-        services.TryAddSingleton<ISquadModelPresetSelectionStore>(sp => new SquadModelPresetSelectionStore(sp.GetRequiredService<ISquadUserPaths>()));
         services.TryAddSingleton<ISquadCanonicalProfileStore>(sp => new SquadCanonicalProfileStore(sp.GetRequiredService<ISquadUserPaths>()));
         services.TryAddSingleton<ISquadSourceLoader, FileSquadSourceLoader>();
         services.TryAddSingleton<ISquadCompanionSkills, FileSquadCompanionSkills>();
