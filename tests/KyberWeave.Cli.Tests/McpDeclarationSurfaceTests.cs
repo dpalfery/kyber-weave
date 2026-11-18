@@ -1,9 +1,9 @@
-using KyberWeave.Tests.Configuration;
-
 using System.Text;
 using KyberWeave.Cli.Commands;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -18,19 +18,19 @@ namespace KyberWeave.Tests;
 /// into a TOML table header, so what is wrong with a blank or repeated one only shows up on the
 /// path that reads the file.
 /// </remarks>
-public sealed class McpDeclarationSurfaceTests : IDisposable
+public sealed class McpDeclarationSurfaceTests
 {
-    private const string ConfigFileName = "kyber-weave.yml";
     private const string SectionPath = "mcp.required-servers";
     private const string ThirdPartyServer = "codegraph";
 
     /// <summary>Today's first-party server: the binary Kyber-Weave itself ships (R1.1).</summary>
     private const string ShippedBinary = "kyber-weave-mcp";
 
-    private readonly TempDirectory _root = new();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly FakeKyberWeaveConfigRepository _configs = new();
+    private readonly string _root;
 
-    /// <summary>Deletes the repository tree the cases wrote.</summary>
-    public void Dispose() => _root.Dispose();
+    public McpDeclarationSurfaceTests() => _root = _files.CreateTemporaryDirectory("kw-mcp-declaration-");
 
     /// <summary>
     /// A blank key names nothing, so it is refused where it was written rather than carried into
@@ -132,7 +132,7 @@ public sealed class McpDeclarationSurfaceTests : IDisposable
             $"command: ['{executable}', --repo-root, .]",
             "provenance: first-party");
 
-        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(_root.Path);
+        KyberWeaveConfigLoadResult result = _configs.TryLoad(_root);
 
         Assert.True(
             result.Success,
@@ -156,24 +156,21 @@ public sealed class McpDeclarationSurfaceTests : IDisposable
 
     private string WriteRepositoryConfig(string yaml)
     {
-        string directory = Path.Combine(_root.Path, ".kyber-weave");
-        Directory.CreateDirectory(directory);
-        string path = Path.Combine(directory, ConfigFileName);
-        File.WriteAllText(path, yaml);
-        return path;
+        _configs.WriteRepositoryConfig(_root, yaml);
+        return FakeKyberWeaveConfigRepository.RepositoryConfigPath(_root);
     }
 
     /// <summary>Takes the refusal through the <c>KW-CONFIG-001</c> path and returns the message.</summary>
     private string AssertRefusedAsConfigError(string configPath)
     {
-        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(_root.Path);
+        KyberWeaveConfigLoadResult result = _configs.TryLoad(_root);
 
         Assert.False(result.Success, "the declaration must be refused");
         Assert.Null(result.Config);
         Assert.Equal(configPath, result.ConfigPath);
 
         DiagnosticReport report = new();
-        bool loaded = CommandHelpers.TryLoadConfig(ConfigFileReader.Repository, _root.Path, null, report, out KyberWeaveConfig config);
+        bool loaded = CommandHelpers.TryLoadConfig(_configs, _root, null, report, out KyberWeaveConfig config);
 
         Assert.False(loaded);
         Assert.Equal(KyberWeaveConfigDefaults.Product, config);
