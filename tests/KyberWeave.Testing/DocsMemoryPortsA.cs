@@ -39,6 +39,9 @@ internal sealed class MemoryDocsHost
         Console = new TestConsole { EmitAnsiSequences = false };
         Console.Profile.Width = 400;
         Files.CreateDirectory(Repo);
+
+        // The in-memory repository is not a git work tree, so a file listing falls back to walking the tree.
+        _ = Processes.WithMissingProgram("git");
     }
 
     /// <summary>Gets the clock every seam reads.</summary>

@@ -1,49 +1,50 @@
-using KyberWeave.Tests.Configuration;
-
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Scaffolding;
-using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Docs.Scaffolding;
 
 /// <summary>
 /// Onboarding and <c>docs init</c> install only the template folders the operator names.
 /// A file the host already has is left byte-for-byte unchanged and reported, and a declared
 /// technology with no shipped template gets the same four files as stubs.
 /// </summary>
-public class DocsInitTemplateChoiceTests : IDisposable
+public class DocsInitTemplateChoiceTests
 {
     private static readonly IKyberStandardsTemplates Templates = ShippedKyberStandards.Templates;
 
-    private readonly TempDirectory _temp = new();
+    private readonly MemoryDocsHost _host = new();
 
-    public void Dispose()
-    {
-        _temp.Dispose();
-        GC.SuppressFinalize(this);
-    }
+    private string PathOf(string relative) => _host.InRepo(relative);
 
-    private string PathOf(string relative) =>
-        Path.Combine(_temp.Path, relative.Replace('/', Path.DirectorySeparatorChar));
+    private IServiceProvider Container => _host.Services();
 
-    private static IDocsScaffoldingService Scaffolding => DocsTestCommands.Scaffolding;
+    private IDocsScaffoldingService Scaffolding => Container.GetRequiredService<IDocsScaffoldingService>();
+
+    private KyberWeaveConfig LoadConfig() =>
+        Container.GetRequiredService<IKyberWeaveConfigRepository>().Load(_host.Repo);
+
+    private string Today =>
+        _host.Clock.GetUtcNow().UtcDateTime.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 
     [Fact]
     public void NamingTwoTechnologiesInstallsExactlyThoseFoldersAndTheSharedRulesFile()
     {
-        ScaffoldResult result = Scaffolding.Scaffold(_temp.Path, standards: ["csharp", "python"]);
+        ScaffoldResult result = Scaffolding.Scaffold(_host.Repo, standards: ["csharp", "python"]);
 
-        Assert.True(File.Exists(PathOf("docs/standards/csharp/csharp.standards.md")));
-        Assert.True(File.Exists(PathOf("docs/standards/csharp/csharp.rules.md")));
-        Assert.True(File.Exists(PathOf("docs/standards/csharp/csharp.skills.md")));
-        Assert.True(File.Exists(PathOf("docs/standards/csharp/csharp.arbiter-rules.yml")));
-        Assert.True(File.Exists(PathOf("docs/standards/python/python.standards.md")));
-        Assert.False(Directory.Exists(PathOf("docs/standards/typescript")));
-        Assert.True(File.Exists(PathOf("docs/standards/shared-rules.md")));
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/csharp/csharp.standards.md")));
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/csharp/csharp.rules.md")));
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/csharp/csharp.skills.md")));
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/csharp/csharp.arbiter-rules.yml")));
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/python/python.standards.md")));
+        Assert.False(_host.Files.DirectoryExists(PathOf("docs/standards/typescript")));
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/shared-rules.md")));
 
-        KyberWeaveConfig config = ConfigFileReader.Load(_temp.Path);
+        KyberWeaveConfig config = LoadConfig();
         Assert.Equal(["csharp", "python"], config.Ontology.Technologies);
         Assert.Empty(config.Ontology.Roles);
     }
@@ -53,12 +54,12 @@ public class DocsInitTemplateChoiceTests : IDisposable
     {
         const string custom = "---\nid: standards/csharp\ntitle: Mine\n---\n\n# Mine\n";
         string path = PathOf("docs/standards/csharp/csharp.standards.md");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, custom);
+        _host.Files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _host.Files.WriteAllText(path, custom);
 
-        ScaffoldResult result = Scaffolding.Scaffold(_temp.Path, standards: ["csharp"]);
+        ScaffoldResult result = Scaffolding.Scaffold(_host.Repo, standards: ["csharp"]);
 
-        Assert.Equal(custom, File.ReadAllText(path));
+        Assert.Equal(custom, _host.Files.ReadAllText(path));
         Assert.Contains(result.Files, file =>
             file.RelativePath == "docs/standards/csharp/csharp.standards.md"
             && file.Outcome == ScaffoldOutcome.Skipped);
@@ -74,14 +75,14 @@ public class DocsInitTemplateChoiceTests : IDisposable
     {
         const string legacy = "---\nid: standards/csharp\ntitle: Mine\n---\n\n# Mine\n";
         string path = PathOf("docs/standards/csharp/README.md");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, legacy);
+        _host.Files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _host.Files.WriteAllText(path, legacy);
 
-        ScaffoldResult result = Scaffolding.Scaffold(_temp.Path, standards: ["csharp"]);
+        ScaffoldResult result = Scaffolding.Scaffold(_host.Repo, standards: ["csharp"]);
 
-        Assert.False(File.Exists(PathOf("docs/standards/csharp/csharp.standards.md")));
-        Assert.Equal(legacy, File.ReadAllText(path));
-        Assert.True(File.Exists(PathOf("docs/standards/csharp/csharp.rules.md")));
+        Assert.False(_host.Files.FileExists(PathOf("docs/standards/csharp/csharp.standards.md")));
+        Assert.Equal(legacy, _host.Files.ReadAllText(path));
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/csharp/csharp.rules.md")));
         Assert.Contains(result.Files, file =>
             file.RelativePath == "docs/standards/csharp/csharp.standards.md"
             && file.Outcome == ScaffoldOutcome.Skipped
@@ -93,38 +94,38 @@ public class DocsInitTemplateChoiceTests : IDisposable
     public void ADeclaredTechnologyWithNoTemplateGetsFourStubs()
     {
         string configPath = PathOf(".kyber-weave/kyber-weave.yml");
-        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-        File.WriteAllText(configPath, """
+        _host.Files.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        _host.Files.WriteAllText(configPath, """
             ontology:
               docs-root: docs
               technologies:
                 - elixir
             """);
 
-        Scaffolding.Scaffold(_temp.Path);
+        Scaffolding.Scaffold(_host.Repo);
 
-        Assert.True(File.Exists(PathOf("docs/standards/elixir/elixir.standards.md")));
-        Assert.True(File.Exists(PathOf("docs/standards/elixir/elixir.rules.md")));
-        Assert.True(File.Exists(PathOf("docs/standards/elixir/elixir.skills.md")));
-        Assert.True(File.Exists(PathOf("docs/standards/elixir/elixir.arbiter-rules.yml")));
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/elixir/elixir.standards.md")));
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/elixir/elixir.rules.md")));
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/elixir/elixir.skills.md")));
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/elixir/elixir.arbiter-rules.yml")));
         Assert.Contains(
             "technology: elixir",
-            File.ReadAllText(PathOf("docs/standards/elixir/elixir.standards.md")),
+            _host.Files.ReadAllText(PathOf("docs/standards/elixir/elixir.standards.md")),
             StringComparison.Ordinal);
     }
 
     [Fact]
     public void NamingARoleInstallsItUnderOntologyRoles()
     {
-        Scaffolding.Scaffold(_temp.Path, standards: ["reviewer"]);
+        Scaffolding.Scaffold(_host.Repo, standards: ["reviewer"]);
 
-        Assert.True(File.Exists(PathOf("docs/standards/reviewer/reviewer.standards.md")));
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/reviewer/reviewer.standards.md")));
         Assert.Contains(
             "role: reviewer",
-            File.ReadAllText(PathOf("docs/standards/reviewer/reviewer.standards.md")),
+            _host.Files.ReadAllText(PathOf("docs/standards/reviewer/reviewer.standards.md")),
             StringComparison.Ordinal);
 
-        KyberWeaveConfig config = ConfigFileReader.Load(_temp.Path);
+        KyberWeaveConfig config = LoadConfig();
         Assert.Equal(["reviewer"], config.Ontology.Roles);
         Assert.Empty(config.Ontology.Technologies);
     }
@@ -132,14 +133,13 @@ public class DocsInitTemplateChoiceTests : IDisposable
     [Fact]
     public void NamingATechnologyThatShipsATemplateInstallsTheTemplateNotAStub()
     {
-        string today = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 
-        Scaffolding.Scaffold(_temp.Path, standards: ["csharp"]);
+        Scaffolding.Scaffold(_host.Repo, standards: ["csharp"]);
 
         Assert.Equal(
             Templates.RenderPart(
-                "csharp", KyberStandardsTemplates.Part.Standard, "unassigned", today),
-            File.ReadAllText(PathOf("docs/standards/csharp/csharp.standards.md")));
+                "csharp", KyberStandardsTemplates.Part.Standard, "unassigned", Today),
+            _host.Files.ReadAllText(PathOf("docs/standards/csharp/csharp.standards.md")));
     }
 
     /// <summary>
@@ -151,21 +151,20 @@ public class DocsInitTemplateChoiceTests : IDisposable
     public void KyberStandardsRendersAPlatformTemplateForADeclaredPlatform()
     {
         string configPath = PathOf(".kyber-weave/kyber-weave.yml");
-        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-        File.WriteAllText(configPath, """
+        _host.Files.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        _host.Files.WriteAllText(configPath, """
             ontology:
               docs-root: docs
               technologies:
                 - github
             """);
 
-        Scaffolding.Scaffold(_temp.Path, kyberStandards: true);
+        Scaffolding.Scaffold(_host.Repo, kyberStandards: true);
 
-        string today = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
         Assert.Equal(
             Templates.RenderPart(
-                "github", KyberStandardsTemplates.Part.Standard, "unassigned", today),
-            File.ReadAllText(PathOf("docs/standards/github/github.standards.md")));
+                "github", KyberStandardsTemplates.Part.Standard, "unassigned", Today),
+            _host.Files.ReadAllText(PathOf("docs/standards/github/github.standards.md")));
     }
 
     /// <summary>
@@ -177,25 +176,24 @@ public class DocsInitTemplateChoiceTests : IDisposable
     public void NamingOneTechnologyDoesNotGiveAPreexistingTechnologyItsTemplate()
     {
         string configPath = PathOf(".kyber-weave/kyber-weave.yml");
-        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-        File.WriteAllText(configPath, """
+        _host.Files.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        _host.Files.WriteAllText(configPath, """
             ontology:
               docs-root: docs
               technologies:
                 - csharp
             """);
         string folder = PathOf("docs/standards/csharp");
-        Directory.CreateDirectory(folder);
-        File.WriteAllText(
+        _host.Files.CreateDirectory(folder);
+        _host.Files.WriteAllText(
             Path.Combine(folder, "csharp.standards.md"),
             "---\nid: standards/csharp\ntitle: Mine\n---\n\n# Mine\n");
 
-        Scaffolding.Scaffold(_temp.Path, standards: ["python"]);
+        Scaffolding.Scaffold(_host.Repo, standards: ["python"]);
 
-        string today = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-        string rules = File.ReadAllText(PathOf("docs/standards/csharp/csharp.rules.md"));
+        string rules = _host.Files.ReadAllText(PathOf("docs/standards/csharp/csharp.rules.md"));
         Assert.NotEqual(
-            Templates.RenderPart("csharp", KyberStandardsTemplates.Part.Rules, "unassigned", today),
+            Templates.RenderPart("csharp", KyberStandardsTemplates.Part.Rules, "unassigned", Today),
             rules);
         Assert.Contains("technology: csharp", rules, StringComparison.Ordinal);
         Assert.Contains("doc-type: rule", rules, StringComparison.Ordinal);
@@ -208,12 +206,12 @@ public class DocsInitTemplateChoiceTests : IDisposable
     [Fact]
     public void NamingARoleBesideKyberStandardsInstallsBoth()
     {
-        Scaffolding.Scaffold(_temp.Path, kyberStandards: true, standards: ["reviewer"]);
+        Scaffolding.Scaffold(_host.Repo, kyberStandards: true, standards: ["reviewer"]);
 
-        Assert.True(File.Exists(PathOf("docs/standards/reviewer/reviewer.standards.md")));
-        Assert.True(File.Exists(PathOf("docs/standards/csharp/csharp.standards.md")));
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/reviewer/reviewer.standards.md")));
+        Assert.True(_host.Files.FileExists(PathOf("docs/standards/csharp/csharp.standards.md")));
 
-        KyberWeaveConfig config = ConfigFileReader.Load(_temp.Path);
+        KyberWeaveConfig config = LoadConfig();
         Assert.Contains("reviewer", config.Ontology.Roles);
     }
 
@@ -221,7 +219,7 @@ public class DocsInitTemplateChoiceTests : IDisposable
     public void AnUnknownNameIsRefusedWithTheNearestMatch()
     {
         ArgumentException error = Assert.Throws<ArgumentException>(() =>
-            Scaffolding.Scaffold(_temp.Path, standards: ["cshar"]));
+            Scaffolding.Scaffold(_host.Repo, standards: ["cshar"]));
 
         Assert.Contains("csharp", error.Message, StringComparison.Ordinal);
     }
@@ -229,12 +227,12 @@ public class DocsInitTemplateChoiceTests : IDisposable
     [Fact]
     public void KyberStandardsStillInstallsEveryTechnologyTemplate()
     {
-        Scaffolding.Scaffold(_temp.Path, kyberStandards: true);
+        Scaffolding.Scaffold(_host.Repo, kyberStandards: true);
 
         foreach (string technology in KyberStandardsTemplates.All)
         {
             Assert.True(
-                File.Exists(PathOf($"docs/standards/{technology}/{technology}.standards.md")),
+                _host.Files.FileExists(PathOf($"docs/standards/{technology}/{technology}.standards.md")),
                 $"{technology} was not installed.");
         }
     }

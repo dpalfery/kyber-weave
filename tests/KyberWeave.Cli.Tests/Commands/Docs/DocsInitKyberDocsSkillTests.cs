@@ -1,18 +1,19 @@
+using KyberWeave.Tests;
 using Spectre.Console.Cli;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Cli.Tests.Commands.Docs;
 
 /// <summary>
 /// T14 RED: <c>docs init</c> deploys the renamed Kyber-Docs authoring skill and warns
 /// about a leftover retired skill directory the install leaves behind. Both facts fail
 /// on the phase-1 tree until T15-T17 lands.
 /// </summary>
-public sealed class DocsInitKyberDocsSkillTests : IDisposable
+public sealed class DocsInitKyberDocsSkillTests
 {
-    private readonly TempDirectory _temp = new();
+    private readonly MemoryDocsHost _host = new();
 
-    public void Dispose() => _temp.Dispose();
+    private CommandApp App() => CommandAppFixture.DocsInit(_host.Register, _host.Console);
 
     /// <summary>
     /// The skill <c>docs init</c> deploys and points at is the renamed
@@ -21,14 +22,11 @@ public sealed class DocsInitKyberDocsSkillTests : IDisposable
     [Fact]
     public void ExecuteNamesKyberDocsAuthoringSkill()
     {
-        CommandApp app = CommandAppFixture.DocsInit();
+        int exit = App().Run(["docs", "init", _host.Repo, "--no-skill"]);
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture
-            .Run(() => app.Run(["docs", "init", _temp.Path, "--no-skill"]));
-
-        Assert.Equal(0, execution.Result);
-        Assert.Contains("kyber-docs-authoring", execution.Output, StringComparison.Ordinal);
-        Assert.DoesNotContain("kyber-weave-docs", execution.Output, StringComparison.Ordinal);
+        Assert.Equal(0, exit);
+        Assert.Contains("kyber-docs-authoring", _host.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("kyber-weave-docs", _host.Output, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -43,22 +41,19 @@ public sealed class DocsInitKyberDocsSkillTests : IDisposable
     [InlineData("0.35.0")]
     public void ExecuteWithStaleRetiredSkillDirAndNoLockfileWarnsWithCleanupCommand(string apmVersion)
     {
-        string repoRoot = Path.Combine(_temp.Path, $"stale-{apmVersion}");
+        string repoRoot = Path.Combine(_host.Files.Root, $"stale-{apmVersion}");
         string skillsRoot = Path.Combine(repoRoot, ".agents", "skills");
         string staleDir = Path.Combine(skillsRoot, "kyber-weave-docs");
-        Directory.CreateDirectory(staleDir);
-        File.WriteAllText(
+        _host.Files.CreateDirectory(staleDir);
+        _host.Files.WriteAllText(
             Path.Combine(staleDir, "SKILL.md"), "---\nname: kyber-weave-docs\n---\nStale.\n");
-        Assert.Empty(Directory.EnumerateFiles(skillsRoot, "*.lock", SearchOption.AllDirectories));
+        Assert.Empty(_host.Files.EnumerateFiles(skillsRoot, "*.lock", recursive: true));
 
-        CommandApp app = CommandAppFixture.DocsInit();
+        int exit = App().Run(["docs", "init", repoRoot, "--no-skill"]);
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture
-            .Run(() => app.Run(["docs", "init", repoRoot, "--no-skill"]));
+        string normalizedOutput = Normalize(_host.Output);
 
-        string normalizedOutput = Normalize(execution.Output);
-
-        Assert.Equal(0, execution.Result);
+        Assert.Equal(0, exit);
         Assert.Contains("warn", normalizedOutput, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("kyber-weave-docs", normalizedOutput, StringComparison.Ordinal);
         Assert.Contains(Normalize(staleDir), normalizedOutput, StringComparison.Ordinal);

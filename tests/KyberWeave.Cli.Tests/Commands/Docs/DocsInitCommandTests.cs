@@ -1,20 +1,20 @@
 using System.Reflection;
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Docs.Scaffolding;
+using KyberWeave.Tests;
+using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console.Cli;
 using Xunit;
-using KyberWeave.Tests.Fakes;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Cli.Tests.Commands.Docs;
 
 /// <summary>
 /// Verifies the docs init command execution, CLI option binding, and delegation to the scaffolder.
 /// </summary>
-public sealed class DocsInitCommandTests : IDisposable
+public sealed class DocsInitCommandTests
 {
-    private readonly TempDirectory _temp = new();
-
-    public void Dispose() => _temp.Dispose();
+    private readonly MemoryDocsHost _host = new();
 
     /// <summary>
     /// Verifies that DocsInitSettings binds the --kyber-standards command option, defaults to false,
@@ -39,38 +39,32 @@ public sealed class DocsInitCommandTests : IDisposable
         Assert.False(defaultSettings.KyberStandards);
 
         // 2. CommandApp binds --kyber-standards from command line arguments
-        CommandApp app = CommandAppFixture.DocsInit();
+        CommandApp app = CommandAppFixture.DocsInit(_host.Register, _host.Console);
 
-        // Driving a real CommandApp writes through the process-global AnsiConsole. Another
-        // test holding ProcessConsoleCapture's gate swaps that console for a StringWriter and
-        // disposes it on the way out; a render racing that teardown fails and the command
-        // returns non-zero. Taking the same gate is what the other command-driving test
-        // classes do, and it is why this one flaked in full runs but never in isolation.
-        int exitCode = ProcessConsoleCapture
-            .Run(() => app.Run(["docs", "init", _temp.Path, "--kyber-standards", "--no-skill"]))
-            .Result;
+        int exitCode = app.Run(["docs", "init", _host.Repo, "--kyber-standards", "--no-skill"]);
         Assert.Equal(0, exitCode);
 
         // 3. Verifies that every shipped standard was created
         foreach (string tech in KyberStandardsTemplates.All)
         {
-            string standardPath = Path.Combine(_temp.Path, "docs", "standards", tech, $"{tech}.standards.md");
-            Assert.True(File.Exists(standardPath), $"Expected standard for '{tech}' to exist at '{standardPath}'.");
-            string content = File.ReadAllText(standardPath);
+            string standardPath = Path.Combine(_host.Repo, "docs", "standards", tech, $"{tech}.standards.md");
+            Assert.True(_host.Files.FileExists(standardPath), $"Expected standard for '{tech}' to exist at '{standardPath}'.");
+            string content = _host.Files.ReadAllText(standardPath);
             Assert.Contains($"technology: {tech}", content, StringComparison.Ordinal);
             Assert.Contains("doc-type: coding-standard", content, StringComparison.Ordinal);
         }
 
         // 4. DocsInitCommand.TryScaffold forwards KyberStandards flag
-        using TempDirectory secondTemp = new TempDirectory();
+        string second = Path.Combine(_host.Files.Root, "second");
+        _host.Files.CreateDirectory(second);
         DocsInitSettings initSettings = new DocsInitSettings
         {
-            Path = secondTemp.Path,
+            Path = second,
             KyberStandards = true,
             NoSkill = true
         };
 
-        (int tryExitCode, ScaffoldResult? result, string? error) = DocsInitCommand.TryScaffold(DocsTestCommands.Scaffolding, initSettings);
+        (int tryExitCode, ScaffoldResult? result, string? error) = DocsInitCommand.TryScaffold(_host.Services().GetRequiredService<IDocsScaffoldingService>(), initSettings);
         Assert.Equal(0, tryExitCode);
         Assert.Null(error);
         Assert.NotNull(result);
