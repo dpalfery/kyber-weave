@@ -3,6 +3,7 @@ using KyberWeave.Application.Doctor;
 using KyberWeave.Application.Arbiter;
 using KyberWeave.Application.Hooks;
 using KyberWeave.Contracts.Docs;
+using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Mcp;
@@ -113,7 +114,9 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IRunStateStore>(),
             sp.GetRequiredService<IReviewCycleStore>(),
             sp.GetRequiredService<IProcessEnvironment>(),
-            sp.GetRequiredService<TimeProvider>()));
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IEmbeddedResources>()));
         services.TryAddSingleton<IRunDeliveryRunner, RunDeliveryRunner>();
         services.TryAddSingleton<IStatusLineDeploymentService>(sp => new StatusLineDeploymentService(
             sp.GetRequiredService<IStatusLineFiles>(),
