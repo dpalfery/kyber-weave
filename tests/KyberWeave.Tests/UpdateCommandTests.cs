@@ -1670,7 +1670,7 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Equal(0, outcome.ExitCode);
 
         FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput("kyberdash", stdout);
-        KyberDashCapturePluginStep step = new(executor, () => "/fake/bin/kyberdash");
+        KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => "/fake/bin/kyberdash");
         CapturedConsoleExecution<CapturePluginStepOutcome> captured = ProcessConsoleCapture.Run(() =>
             step.Run(TargetOf(harness), harness == "opencode" ? "/fake/opencode" : null, false));
 

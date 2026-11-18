@@ -1,4 +1,5 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using Spectre.Console.Cli;
@@ -15,6 +16,8 @@ internal sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
     private readonly ISquadModelPresetStore _presetStore;
     private readonly ISquadModelPresetSelectionStore _selectionStore;
     private readonly SquadCommandRoots _roots;
+    private readonly IFileSystem _files;
+    private readonly SquadConsole _output;
 
     /// <summary>Creates the command over the Squad services the host registers.</summary>
     /// <param name="userPaths">Names the home the presets and selections live under.</param>
@@ -22,23 +25,31 @@ internal sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
     /// <param name="presetStore">Lists the presets.</param>
     /// <param name="selectionStore">Reads the project's selection.</param>
     /// <param name="roots">Resolves the target root and anchors a global run.</param>
+    /// <param name="files">Lists and reads the selection files under the home.</param>
+    /// <param name="output">Where the preset lines are written.</param>
     public SquadPresetListCommand(
         ISquadUserPaths userPaths,
         ISquadStateStore stateStore,
         ISquadModelPresetStore presetStore,
         ISquadModelPresetSelectionStore selectionStore,
-        SquadCommandRoots roots)
+        SquadCommandRoots roots,
+        IFileSystem files,
+        SquadConsole output)
     {
         ArgumentNullException.ThrowIfNull(userPaths);
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(presetStore);
         ArgumentNullException.ThrowIfNull(selectionStore);
         ArgumentNullException.ThrowIfNull(roots);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(output);
         _userPaths = userPaths;
         _stateStore = stateStore;
         _presetStore = presetStore;
         _selectionStore = selectionStore;
         _roots = roots;
+        _files = files;
+        _output = output;
     }
 
     /// <inheritdoc />
@@ -126,13 +137,13 @@ internal sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
         }
 
         string selectionsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "selections");
-        if (Directory.Exists(selectionsDir))
+        if (_files.DirectoryExists(selectionsDir))
         {
-            foreach (string file in Directory.EnumerateFiles(selectionsDir, "*.yml"))
+            foreach (string file in _files.EnumerateFiles(selectionsDir, "*.yml", recursive: false))
             {
                 try
                 {
-                    string[] lines = File.ReadAllLines(file);
+                    IEnumerable<string> lines = _files.ReadLines(file);
                     string? root = null;
                     foreach (string line in lines)
                     {
@@ -176,7 +187,7 @@ internal sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
                 usedByText = string.Join(", ", tokens.OrderBy(t => t, StringComparer.OrdinalIgnoreCase));
             }
 
-            SquadCommandComposition.WriteLine($"{name}  {presetPath}  used by: {usedByText}");
+            _output.WriteLine($"{name}  {presetPath}  used by: {usedByText}");
         }
 
         return 0;

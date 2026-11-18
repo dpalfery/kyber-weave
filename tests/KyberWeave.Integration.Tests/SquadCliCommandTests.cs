@@ -1660,11 +1660,11 @@ public sealed class SquadCliCommandTests : IDisposable
     [Fact]
     public void SquadCommandComposition_ResolveProbe_ResolvesWithDefaultAndCustomExecutor()
     {
-        McpProcessProbe defaultMcp = SquadCommandComposition.ResolveProbe();
+        McpProcessProbe defaultMcp = SquadCommandComposition.ResolveProbe(null, new FakeProcessEnvironment());
         Assert.NotNull(defaultMcp);
 
         FakeProcessExecutor executor = new FakeProcessExecutor();
-        McpProcessProbe customMcp = SquadCommandComposition.ResolveProbe(executor);
+        McpProcessProbe customMcp = SquadCommandComposition.ResolveProbe(executor, new FakeProcessEnvironment());
         Assert.NotNull(customMcp);
     }
 
@@ -1717,13 +1717,6 @@ public sealed class SquadCliCommandTests : IDisposable
     public void SquadCommandComposition_ResolveScope_MapsCorrectly(bool isGlobal, SquadDeploymentScope expected)
     {
         Assert.Equal(expected, SquadCommandComposition.ResolveScope(isGlobal));
-    }
-
-    [Fact]
-    public void SquadCommandComposition_IsInteractiveConsole_ReturnsBooleanWithoutThrowing()
-    {
-        bool isInteractive = SquadCommandComposition.IsInteractiveConsole();
-        Assert.True(isInteractive || !isInteractive);
     }
 
     #endregion

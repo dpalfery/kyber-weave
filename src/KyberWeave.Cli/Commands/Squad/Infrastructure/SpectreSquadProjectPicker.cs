@@ -12,8 +12,11 @@ namespace KyberWeave.Cli.Commands.Squad.Infrastructure;
 /// layer lives here; the choices and the rule come from <see cref="SquadProjectPickerChoices"/>, which
 /// is what the tests exercise.
 /// </remarks>
-internal sealed class SpectreSquadProjectPicker : ISquadProjectPicker
+/// <param name="console">The console the prompt is shown on and answered from.</param>
+internal sealed class SpectreSquadProjectPicker(IAnsiConsole console) : ISquadProjectPicker
 {
+    private readonly IAnsiConsole _console = console ?? throw new ArgumentNullException(nameof(console));
+
     /// <inheritdoc />
     public IReadOnlyList<string> Pick(IReadOnlyList<SquadProjectRegistryEntry> projects)
     {
@@ -26,7 +29,7 @@ internal sealed class SpectreSquadProjectPicker : ISquadProjectPicker
         IReadOnlyList<string> labels = SquadProjectPickerChoices.Build(projects);
         while (true)
         {
-            List<string> chosen = AnsiConsole.Prompt(
+            List<string> chosen = _console.Prompt(
                 new MultiSelectionPrompt<string>()
                     .Title("Also update these registered projects?")
                     .InstructionsText("(space toggles a choice, enter accepts)")
@@ -39,7 +42,7 @@ internal sealed class SpectreSquadProjectPicker : ISquadProjectPicker
                 return SquadProjectPickerChoices.ToPaths(chosen, projects);
             }
 
-            AnsiConsole.MarkupLine($"[red]{Markup.Escape(error ?? "That selection is not valid.")}[/]");
+            _console.MarkupLine($"[red]{Markup.Escape(error ?? "That selection is not valid.")}[/]");
         }
     }
 }

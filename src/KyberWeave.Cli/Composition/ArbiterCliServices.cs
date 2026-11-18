@@ -27,7 +27,7 @@ internal static class ArbiterCliServices
         services.TryAddSingleton<ArbiterRepoRoot>();
         services.TryAddSingleton<PlanArguments>();
         services.TryAddSingleton<IProcessExecutor>(_ => ProcessExecutor.Instance);
-        services.TryAddSingleton(sp => new ArbiterProcessProbe(sp.GetRequiredService<IProcessExecutor>()));
+        services.TryAddSingleton(sp => new ArbiterProcessProbe(sp.GetRequiredService<IProcessExecutor>(), sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IArbiterBinaryProbe>(sp => sp.GetRequiredService<ArbiterProcessProbe>());
         return services;
     }

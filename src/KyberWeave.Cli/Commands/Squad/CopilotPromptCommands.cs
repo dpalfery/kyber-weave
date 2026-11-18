@@ -1,7 +1,8 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
-using KyberWeave.Cli.Commands;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Host;
 using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Core.FileSystem;
@@ -51,24 +52,40 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
     private readonly CopilotPromptEnvironment? _environment;
     private readonly IDoctorFileSystem _files;
     private readonly IEmbeddedResources _resources;
+    private readonly IProcessEnvironment? _processEnvironment;
+    private readonly SquadConsole _console;
 
-    /// <summary>Creates the command over the file-system and embedded-resource seams the container resolves.</summary>
-    public CopilotPromptInstallCommand(IDoctorFileSystem files, IEmbeddedResources resources)
+    /// <summary>Creates the command over the file-system, embedded-resource, environment and console seams the container resolves.</summary>
+    public CopilotPromptInstallCommand(
+        IDoctorFileSystem files,
+        IEmbeddedResources resources,
+        IProcessEnvironment processEnvironment,
+        SquadConsole console)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(resources);
+        ArgumentNullException.ThrowIfNull(processEnvironment);
+        ArgumentNullException.ThrowIfNull(console);
         _files = files;
         _resources = resources;
+        _processEnvironment = processEnvironment;
+        _console = console;
     }
 
     /// <summary>Creates the command for an injected environment.</summary>
-    internal CopilotPromptInstallCommand(CopilotPromptEnvironment environment, IDoctorFileSystem files, IEmbeddedResources resources)
+    internal CopilotPromptInstallCommand(
+        CopilotPromptEnvironment environment,
+        IDoctorFileSystem files,
+        IEmbeddedResources resources,
+        SquadConsole console)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(resources);
+        ArgumentNullException.ThrowIfNull(console);
         _environment = environment;
         _files = files;
         _resources = resources;
+        _console = console;
     }
 
     /// <inheritdoc />
@@ -79,26 +96,26 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
     public override int Execute(CommandContext context, CopilotPromptSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.RealEnvironment();
-        if (!CopilotPromptCommandSupport.HasHome(environment))
+        CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.EnvironmentOf(_processEnvironment!, _console);
+        if (!CopilotPromptCommandSupport.HasHome(environment, _console))
             return 2;
 
         if (!CopilotPromptCommandSupport.TryParseFlavour(settings.Flavour, out VsCodeFlavour? requested))
         {
-            CopilotPromptCommandSupport.Fail("--flavour must be stable or insiders.");
+            CopilotPromptCommandSupport.Fail(_console, "--flavour must be stable or insiders.");
             return 2;
         }
 
         if (!settings.DryRun && !settings.Yes && !environment.IsInteractive)
         {
-            CopilotPromptCommandSupport.Fail("install changes every Copilot chat on this machine. Pass --yes to confirm when no terminal is attached.");
+            CopilotPromptCommandSupport.Fail(_console, "install changes every Copilot chat on this machine. Pass --yes to confirm when no terminal is attached.");
             return 2;
         }
 
-        IReadOnlyList<VsCodeFlavour> targets = CopilotPromptCommandSupport.DetectedTargets(environment, requested);
+        IReadOnlyList<VsCodeFlavour> targets = CopilotPromptCommandSupport.DetectedTargets(environment, _files, requested);
         if (targets.Count == 0)
         {
-            CopilotPromptCommandSupport.Fail("no VS Code user data was found for the requested build. Open VS Code once, then run this again.");
+            CopilotPromptCommandSupport.Fail(_console, "no VS Code user data was found for the requested build. Open VS Code once, then run this again.");
             return 1;
         }
 
@@ -143,16 +160,16 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
         if (refusals.Count > 0)
         {
             foreach (string refusal in refusals)
-                CopilotPromptCommandSupport.Fail(refusal);
+                CopilotPromptCommandSupport.Fail(_console, refusal);
             return 1;
         }
 
         if (settings.DryRun)
         {
-            CopilotPromptCommandSupport.Say($"Dry run: would write the prompt to {Markup.Escape(promptPath)}.");
+            CopilotPromptCommandSupport.Say(_console, $"Dry run: would write the prompt to {Markup.Escape(promptPath)}.");
             foreach ((string file, _) in writes)
-                CopilotPromptCommandSupport.Say($"Dry run: would set the override in {Markup.Escape(file)}.");
-            CopilotPromptCommandSupport.Say("Dry run: nothing was written.");
+                CopilotPromptCommandSupport.Say(_console, $"Dry run: would set the override in {Markup.Escape(file)}.");
+            CopilotPromptCommandSupport.Say(_console, "Dry run: nothing was written.");
             return 0;
         }
 
@@ -165,7 +182,7 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
                 $"Set the Copilot system prompt in {Markup.Escape(files)}? It affects every Copilot chat on this machine.");
             if (!confirmed)
             {
-                CopilotPromptCommandSupport.Say("No change was made.");
+                CopilotPromptCommandSupport.Say(_console, "No change was made.");
                 return 0;
             }
         }
@@ -180,16 +197,16 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
             or ArgumentException or NotSupportedException or System.Security.SecurityException)
         {
-            CopilotPromptCommandSupport.Fail($"could not write the prompt or a settings file: {ex.Message}");
+            CopilotPromptCommandSupport.Fail(_console, $"could not write the prompt or a settings file: {ex.Message}");
             return 1;
         }
 
-        CopilotPromptCommandSupport.Say($"Installed the Copilot system prompt at {Markup.Escape(promptPath)}.");
+        CopilotPromptCommandSupport.Say(_console, $"Installed the Copilot system prompt at {Markup.Escape(promptPath)}.");
         foreach ((string file, _) in writes)
-            CopilotPromptCommandSupport.Say($"Set the override in {Markup.Escape(file)}.");
+            CopilotPromptCommandSupport.Say(_console, $"Set the override in {Markup.Escape(file)}.");
         foreach (string file in alreadySet)
-            CopilotPromptCommandSupport.Say($"The override was already set in {Markup.Escape(file)}.");
-        CopilotPromptCommandSupport.Say("This affects every Copilot chat on this machine, not only this repository. Restart VS Code to apply it.");
+            CopilotPromptCommandSupport.Say(_console, $"The override was already set in {Markup.Escape(file)}.");
+        CopilotPromptCommandSupport.Say(_console, "This affects every Copilot chat on this machine, not only this repository. Restart VS Code to apply it.");
         return 0;
     }
 }
@@ -202,19 +219,41 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
     private readonly CopilotPromptEnvironment? _environment;
     private readonly IDoctorFileSystem _files;
 
-    /// <summary>Creates the command over the file-system seam the container resolves.</summary>
-    public CopilotPromptUninstallCommand(IDoctorFileSystem files)
+    private readonly IWritableFileSystem _writer;
+    private readonly IProcessEnvironment? _processEnvironment;
+    private readonly SquadConsole _console;
+
+    /// <summary>Creates the command over the file-system, environment and console seams the container resolves.</summary>
+    public CopilotPromptUninstallCommand(
+        IDoctorFileSystem files,
+        IWritableFileSystem writer,
+        IProcessEnvironment processEnvironment,
+        SquadConsole console)
     {
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(writer);
+        ArgumentNullException.ThrowIfNull(processEnvironment);
+        ArgumentNullException.ThrowIfNull(console);
         _files = files;
+        _writer = writer;
+        _processEnvironment = processEnvironment;
+        _console = console;
     }
 
     /// <summary>Creates the command for an injected environment.</summary>
-    internal CopilotPromptUninstallCommand(CopilotPromptEnvironment environment, IDoctorFileSystem files)
+    internal CopilotPromptUninstallCommand(
+        CopilotPromptEnvironment environment,
+        IDoctorFileSystem files,
+        IWritableFileSystem writer,
+        SquadConsole console)
     {
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(writer);
+        ArgumentNullException.ThrowIfNull(console);
         _environment = environment;
         _files = files;
+        _writer = writer;
+        _console = console;
     }
 
     /// <inheritdoc />
@@ -225,19 +264,19 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
     public override int Execute(CommandContext context, CopilotPromptSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.RealEnvironment();
-        if (!CopilotPromptCommandSupport.HasHome(environment))
+        CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.EnvironmentOf(_processEnvironment!, _console);
+        if (!CopilotPromptCommandSupport.HasHome(environment, _console))
             return 2;
 
         if (!CopilotPromptCommandSupport.TryParseFlavour(settings.Flavour, out VsCodeFlavour? requested))
         {
-            CopilotPromptCommandSupport.Fail("--flavour must be stable or insiders.");
+            CopilotPromptCommandSupport.Fail(_console, "--flavour must be stable or insiders.");
             return 2;
         }
 
         if (!settings.DryRun && !settings.Yes && !environment.IsInteractive)
         {
-            CopilotPromptCommandSupport.Fail("uninstall changes every Copilot chat on this machine. Pass --yes to confirm when no terminal is attached.");
+            CopilotPromptCommandSupport.Fail(_console, "uninstall changes every Copilot chat on this machine. Pass --yes to confirm when no terminal is attached.");
             return 2;
         }
 
@@ -245,7 +284,7 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
         List<(string File, byte[] Document)> removals = [];
         List<string> refusals = [];
 
-        foreach (VsCodeFlavour flavour in CopilotPromptCommandSupport.DetectedTargets(environment, requested))
+        foreach (VsCodeFlavour flavour in CopilotPromptCommandSupport.DetectedTargets(environment, _files, requested))
         {
             string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
             SettingsFileRead read = CopilotPromptCommandSupport.ReadSettingsFile(_files, file);
@@ -284,18 +323,18 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
         if (refusals.Count > 0)
         {
             foreach (string refusal in refusals)
-                CopilotPromptCommandSupport.Fail(refusal);
+                CopilotPromptCommandSupport.Fail(_console, refusal);
             return 1;
         }
 
-        bool promptInstalled = File.Exists(promptPath);
+        bool promptInstalled = _files.FileExists(promptPath);
         if (settings.DryRun)
         {
             foreach ((string file, _) in removals)
-                CopilotPromptCommandSupport.Say($"Dry run: would remove the override from {Markup.Escape(file)}.");
+                CopilotPromptCommandSupport.Say(_console, $"Dry run: would remove the override from {Markup.Escape(file)}.");
             if (promptInstalled)
-                CopilotPromptCommandSupport.Say($"Dry run: would delete {Markup.Escape(promptPath)}.");
-            CopilotPromptCommandSupport.Say("Dry run: nothing was changed.");
+                CopilotPromptCommandSupport.Say(_console, $"Dry run: would delete {Markup.Escape(promptPath)}.");
+            CopilotPromptCommandSupport.Say(_console, "Dry run: nothing was changed.");
             return 0;
         }
 
@@ -306,7 +345,7 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
                 $"Remove the Copilot system prompt override from {Markup.Escape(files)}? Copilot chats on this machine return to the default prompt.");
             if (!confirmed)
             {
-                CopilotPromptCommandSupport.Say("No change was made.");
+                CopilotPromptCommandSupport.Say(_console, "No change was made.");
                 return 0;
             }
         }
@@ -317,23 +356,23 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
             foreach ((string file, byte[] document) in removals)
                 AtomicFile.WriteAllBytes(file, document, writeThroughSymlink: true);
             if (promptInstalled)
-                File.Delete(promptPath);
+                _writer.DeleteFile(promptPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
             or ArgumentException or NotSupportedException or System.Security.SecurityException)
         {
-            CopilotPromptCommandSupport.Fail($"could not finish the uninstall: {ex.Message}");
+            CopilotPromptCommandSupport.Fail(_console, $"could not finish the uninstall: {ex.Message}");
             return 1;
         }
 
         foreach ((string file, _) in removals)
-            CopilotPromptCommandSupport.Say($"Removed the override from {Markup.Escape(file)}.");
+            CopilotPromptCommandSupport.Say(_console, $"Removed the override from {Markup.Escape(file)}.");
         if (promptInstalled)
-            CopilotPromptCommandSupport.Say($"Deleted {Markup.Escape(promptPath)}.");
+            CopilotPromptCommandSupport.Say(_console, $"Deleted {Markup.Escape(promptPath)}.");
         if (removals.Count == 0 && !promptInstalled)
-            CopilotPromptCommandSupport.Say("Nothing to remove: the Copilot prompt override is not installed.");
+            CopilotPromptCommandSupport.Say(_console, "Nothing to remove: the Copilot prompt override is not installed.");
         else
-            CopilotPromptCommandSupport.Say("Restart VS Code to apply it.");
+            CopilotPromptCommandSupport.Say(_console, "Restart VS Code to apply it.");
         return 0;
     }
 }
@@ -346,41 +385,50 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
     private readonly CopilotPromptEnvironment? _environment;
     private readonly IDoctorFileSystem _files;
 
-    /// <summary>Creates the command over the file-system seam the container resolves.</summary>
-    public CopilotPromptStatusCommand(IDoctorFileSystem files)
+    private readonly IProcessEnvironment? _processEnvironment;
+    private readonly SquadConsole _console;
+
+    /// <summary>Creates the command over the file-system, environment and console seams the container resolves.</summary>
+    public CopilotPromptStatusCommand(IDoctorFileSystem files, IProcessEnvironment processEnvironment, SquadConsole console)
     {
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(processEnvironment);
+        ArgumentNullException.ThrowIfNull(console);
         _files = files;
+        _processEnvironment = processEnvironment;
+        _console = console;
     }
 
     /// <summary>Creates the command for an injected environment.</summary>
-    internal CopilotPromptStatusCommand(CopilotPromptEnvironment environment, IDoctorFileSystem files)
+    internal CopilotPromptStatusCommand(CopilotPromptEnvironment environment, IDoctorFileSystem files, SquadConsole console)
     {
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(console);
         _environment = environment;
         _files = files;
+        _console = console;
     }
 
     /// <inheritdoc />
     public override int Execute(CommandContext context, CopilotPromptSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.RealEnvironment();
-        if (!CopilotPromptCommandSupport.HasHome(environment))
+        CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.EnvironmentOf(_processEnvironment!, _console);
+        if (!CopilotPromptCommandSupport.HasHome(environment, _console))
             return 2;
 
         if (!CopilotPromptCommandSupport.TryParseFlavour(settings.Flavour, out VsCodeFlavour? requested))
         {
-            CopilotPromptCommandSupport.Fail("--flavour must be stable or insiders.");
+            CopilotPromptCommandSupport.Fail(_console, "--flavour must be stable or insiders.");
             return 2;
         }
 
         string promptPath = CopilotPromptFile.InstalledPath(CopilotPromptCommandSupport.Home(environment));
-        CopilotPromptCommandSupport.Say(File.Exists(promptPath)
+        CopilotPromptCommandSupport.Say(_console, _files.FileExists(promptPath)
             ? $"Prompt file: installed at {Markup.Escape(promptPath)}."
             : $"Prompt file: not installed (expected {Markup.Escape(promptPath)}).");
 
-        IReadOnlyList<VsCodeFlavour> detected = CopilotPromptCommandSupport.DetectedTargets(environment, null);
+        IReadOnlyList<VsCodeFlavour> detected = CopilotPromptCommandSupport.DetectedTargets(environment, _files, null);
         bool unreadable = false;
         foreach (VsCodeFlavour flavour in Enum.GetValues<VsCodeFlavour>())
         {
@@ -390,7 +438,7 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
             string label = CopilotPromptCommandSupport.FlavourLabel(flavour);
             if (!detected.Contains(flavour))
             {
-                CopilotPromptCommandSupport.Say($"{label}: VS Code is not installed for this user.");
+                CopilotPromptCommandSupport.Say(_console, $"{label}: VS Code is not installed for this user.");
                 continue;
             }
 
@@ -398,7 +446,7 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
             SettingsFileRead read = CopilotPromptCommandSupport.ReadSettingsFile(_files, file);
             if (read.Error is not null)
             {
-                CopilotPromptCommandSupport.Say($"{label}: {Markup.Escape(file)} could not be read: {Markup.Escape(read.Error)}");
+                CopilotPromptCommandSupport.Say(_console, $"{label}: {Markup.Escape(file)} could not be read: {Markup.Escape(read.Error)}");
                 unreadable = true;
                 continue;
             }
@@ -408,17 +456,17 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
                 : new CopilotOverrideState(false, null, []);
             if (state is null)
             {
-                CopilotPromptCommandSupport.Say($"{label}: {Markup.Escape(file)} is not a readable JSON object.");
+                CopilotPromptCommandSupport.Say(_console, $"{label}: {Markup.Escape(file)} is not a readable JSON object.");
                 unreadable = true;
                 continue;
             }
 
-            CopilotPromptCommandSupport.Say($"{label}: {Markup.Escape(file)}");
-            CopilotPromptCommandSupport.Say(DescribeStarEntry(state, promptPath));
+            CopilotPromptCommandSupport.Say(_console, $"{label}: {Markup.Escape(file)}");
+            CopilotPromptCommandSupport.Say(_console, DescribeStarEntry(state, promptPath));
             if (state.ModelSpecificIds.Count > 0)
             {
                 string models = string.Join(", ", state.ModelSpecificIds);
-                CopilotPromptCommandSupport.Say(
+                CopilotPromptCommandSupport.Say(_console,
                     $"  a model-specific entry overrides '*' for: {Markup.Escape(models)}");
             }
         }
@@ -447,11 +495,13 @@ internal static class CopilotPromptCommandSupport
     private const string Prefix = "kyber-weave squad copilot-prompt";
 
     /// <summary>The environment a person's terminal runs in: their home, their roaming app data, and whether they can answer a prompt.</summary>
-    internal static CopilotPromptEnvironment RealEnvironment() => EnvironmentFrom(
-        Environment.GetEnvironmentVariable,
-        OperatingSystem.IsWindows() ? OSPlatform.Windows : OperatingSystem.IsMacOS() ? OSPlatform.OSX : OSPlatform.Linux,
-        !Console.IsInputRedirected,
-        question => AnsiConsole.Confirm(question, false));
+    internal static CopilotPromptEnvironment EnvironmentOf(IProcessEnvironment environment, SquadConsole console) => EnvironmentFrom(
+        environment.GetVariable,
+        environment.OperatingSystem == OperatingSystemKind.Windows ? OSPlatform.Windows
+            : environment.OperatingSystem == OperatingSystemKind.MacOS ? OSPlatform.OSX
+            : OSPlatform.Linux,
+        !environment.IsInputRedirected,
+        question => console.Ansi.Confirm(question, false));
 
     /// <summary>
     /// Builds the environment from environment variables. Home resolves as doctor resolves it, so doctor finds
@@ -480,12 +530,12 @@ internal static class CopilotPromptCommandSupport
     /// False, after saying why, when no home directory is known. Writing then would put the prompt file under the
     /// working directory, where doctor would never look.
     /// </summary>
-    internal static bool HasHome(CopilotPromptEnvironment environment)
+    internal static bool HasHome(CopilotPromptEnvironment environment, SquadConsole console)
     {
         if (!string.IsNullOrWhiteSpace(environment.HomeDirectory))
             return true;
 
-        Fail("no home directory is known. Set HOME (or USERPROFILE on Windows) to an absolute path and run the command again.");
+        Fail(console, "no home directory is known. Set HOME (or USERPROFILE on Windows) to an absolute path and run the command again.");
         return false;
     }
 
@@ -511,9 +561,9 @@ internal static class CopilotPromptCommandSupport
     }
 
     /// <summary>The detected builds in scope: all of them, or only the one the person named.</summary>
-    internal static IReadOnlyList<VsCodeFlavour> DetectedTargets(CopilotPromptEnvironment environment, VsCodeFlavour? requested)
+    internal static IReadOnlyList<VsCodeFlavour> DetectedTargets(CopilotPromptEnvironment environment, IDoctorFileSystem files, VsCodeFlavour? requested)
     {
-        IReadOnlyList<VsCodeFlavour> detected = VsCodeUserSettingsPaths.Detect(Home(environment), environment.AppDataDirectory, environment.Platform, Directory.Exists, environment.XdgConfigHome);
+        IReadOnlyList<VsCodeFlavour> detected = VsCodeUserSettingsPaths.Detect(Home(environment), environment.AppDataDirectory, environment.Platform, files.DirectoryExists, environment.XdgConfigHome);
         return requested is null ? detected : detected.Where(flavour => flavour == requested.Value).ToList();
     }
 
@@ -537,10 +587,9 @@ internal static class CopilotPromptCommandSupport
             files.ReadAllBytes);
 
     /// <summary>Writes one line of console output. Callers escape any value from a file or the operator.</summary>
-    internal static void Say(string markup) =>
-        CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine(markup));
+    internal static void Say(SquadConsole console, string markup) => console.WriteLine(markup);
 
     /// <summary>Writes one refusal or error line, in the squad command's error style.</summary>
-    internal static void Fail(string message) =>
-        Say($"[red]{Prefix}: error: {Markup.Escape(message)}[/]");
+    internal static void Fail(SquadConsole console, string message) =>
+        Say(console, $"[red]{Prefix}: error: {Markup.Escape(message)}[/]");
 }
