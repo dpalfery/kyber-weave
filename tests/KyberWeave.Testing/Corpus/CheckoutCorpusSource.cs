@@ -78,4 +78,14 @@ public sealed class CheckoutCorpusSource : ICorpusSource
             .EnumerateFiles(directory, string.IsNullOrEmpty(searchPattern) ? "*" : searchPattern, recursive)
             .Select(file => Path.GetRelativePath(Root, file).Replace('\\', '/'));
     }
+
+    /// <inheritdoc />
+    public IEnumerable<string> EnumerateDirectories(string relativeDirectory)
+    {
+        string directory = CorpusPath.Resolve(Root, CorpusPath.Normalize(relativeDirectory));
+
+        return _files
+            .EnumerateDirectories(directory)
+            .Select(child => Path.GetRelativePath(Root, child).Replace('\\', '/'));
+    }
 }

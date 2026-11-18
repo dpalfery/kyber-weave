@@ -55,4 +55,13 @@ public interface ICorpusSource
         string relativeDirectory,
         string searchPattern = "*",
         bool recursive = true);
+
+    /// <summary>Lists the child directories of a directory, as paths relative to <see cref="Root"/>.</summary>
+    /// <param name="relativeDirectory">The directory's path relative to <see cref="Root"/>, with forward slashes.</param>
+    /// <returns>
+    /// One path per immediate child directory, relative to <see cref="Root"/> with forward slashes; empty when the
+    /// directory is missing.
+    /// </returns>
+    /// <exception cref="ArgumentException">The path is rooted or climbs above the root.</exception>
+    IEnumerable<string> EnumerateDirectories(string relativeDirectory);
 }

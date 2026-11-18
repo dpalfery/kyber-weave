@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -14,6 +15,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class CiSkillGateCoverageTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     /// <summary>The gate step enumerates <c>.apm/skills/*/</c> instead of listing skills by hand.</summary>
     [Fact]
     public void SkillGateEnumeratesTheSkillsFolder()
@@ -29,8 +32,7 @@ public sealed class CiSkillGateCoverageTests
     public void EverySkillFolderHasASarifUploadStep()
     {
         string ci = ReadCi();
-        string skillsRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, ".apm", "skills");
-        string[] skills = Directory.GetDirectories(skillsRoot).Select(d => Path.GetFileName(d)!).Order().ToArray();
+        string[] skills = SkillFolders();
         Assert.NotEmpty(skills);
 
         List<string> missing = skills
@@ -47,8 +49,7 @@ public sealed class CiSkillGateCoverageTests
     public void EverySkillFolderHasAValidateLintAndScanGate()
     {
         string config = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, ".kyber-weave", "kyber-weave.yml"));
-        string skillsRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, ".apm", "skills");
-        string[] skills = Directory.GetDirectories(skillsRoot).Select(d => Path.GetFileName(d)!).Order().ToArray();
+        string[] skills = SkillFolders();
         Assert.NotEmpty(skills);
 
         List<string> missing = [];
@@ -67,6 +68,8 @@ public sealed class CiSkillGateCoverageTests
             $"kyber-weave.yml has no review gate for: {string.Join("; ", missing)}. Add the validate, lint and scan triplet under review.gates.");
     }
 
-    private static string ReadCi() =>
-        File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, ".github", "workflows", "ci.yml"));
+    private static string[] SkillFolders() =>
+        [.. Corpus.EnumerateDirectories(".apm/skills").Select(directory => Path.GetFileName(directory)!).Order(StringComparer.Ordinal)];
+
+    private static string ReadCi() => Corpus.ReadText(".github/workflows/ci.yml");
 }

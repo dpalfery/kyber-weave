@@ -111,6 +111,30 @@ public abstract class CorpusSourceContractTests
     }
 
     [Fact]
+    public void ListsTheChildDirectoriesUnderADirectory()
+    {
+        ICorpusSource corpus = CreateCorpus();
+
+        string[] directories = [.. corpus.EnumerateDirectories("products")];
+
+        Assert.Contains("products/kyber-squad", directories, StringComparer.Ordinal);
+        Assert.All(directories, directory =>
+        {
+            Assert.StartsWith("products/", directory, StringComparison.Ordinal);
+            Assert.DoesNotContain('/', directory["products/".Length..]);
+            Assert.False(Path.IsPathRooted(directory), $"'{directory}' is not relative to the corpus root.");
+        });
+    }
+
+    [Fact]
+    public void ReturnsNoDirectoriesForAMissingDirectory()
+    {
+        ICorpusSource corpus = CreateCorpus();
+
+        Assert.Empty(corpus.EnumerateDirectories("products/no-such-product"));
+    }
+
+    [Fact]
     public void ReturnsNoFilesForAMissingDirectory()
     {
         ICorpusSource corpus = CreateCorpus();

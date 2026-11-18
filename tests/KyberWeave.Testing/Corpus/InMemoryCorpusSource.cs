@@ -72,4 +72,19 @@ public sealed class InMemoryCorpusSource : ICorpusSource
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToList();
     }
+
+    /// <inheritdoc />
+    public IEnumerable<string> EnumerateDirectories(string relativeDirectory)
+    {
+        string prefix = CorpusPath.Normalize(relativeDirectory) + "/";
+
+        return _files.Keys
+            .Where(path => path.StartsWith(prefix, StringComparison.Ordinal))
+            .Select(path => path[prefix.Length..])
+            .Select(rest => rest.IndexOf('/', StringComparison.Ordinal) is int slash and >= 0 ? prefix + rest[..slash] : null)
+            .OfType<string>()
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToList();
+    }
 }
