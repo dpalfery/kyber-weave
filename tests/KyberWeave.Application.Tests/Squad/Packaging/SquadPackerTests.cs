@@ -84,6 +84,20 @@ public sealed class SquadPackerTests
     }
 
     [Fact]
+    public void PackApmDoesNotDescendIntoADirectoryLinkSoALoopCannotRecurseForever()
+    {
+        WriteSourceFile("squad.yml", "name: demo\n");
+        WriteSourceFile("skills/demo/SKILL.md", "---\nname: demo\n---\nbody\n");
+        _files.CreateDirectoryLink(Path.Combine(Source, "loop"), Source);
+
+        string archivePath = Packer().PackApm(Source, Out, "1.2.3");
+
+        Assert.Equal(
+            ["skills/demo/SKILL.md", "squad.yml"],
+            ReadTextEntries(archivePath).Keys.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
     public void PackApmOfTheSameTreeTwiceWritesTheSameBytes()
     {
         WriteSourceFile("squad.yml", "name: demo\n");

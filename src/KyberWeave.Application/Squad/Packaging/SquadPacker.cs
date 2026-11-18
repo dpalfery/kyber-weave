@@ -214,20 +214,30 @@ public sealed class SquadPacker(IWritableFileSystem files, ISquadCompanionSkills
     /// listing, because that listing skips build output and dependency folders: an archive is a function of the
     /// source tree, so a folder named <c>out</c> or <c>dist</c> in it must still be packed.
     /// </summary>
+    /// <remarks>
+    /// A linked directory is reported and never read through, as the seam's entries promise: a link may point at an
+    /// ancestor, which would recurse until the stack ran out, or out of the source tree, which would put content in
+    /// the archive under an in-tree name that the source validation never saw. A linked file is packed like any
+    /// other file, because reading it reads its bytes.
+    /// </remarks>
     private IEnumerable<string> EnumerateTree(string directory)
     {
         foreach (FileSystemEntry entry in files.EnumerateEntries(directory))
         {
-            if (entry.IsDirectory)
-            {
-                foreach (string file in EnumerateTree(entry.Path))
-                {
-                    yield return file;
-                }
-            }
-            else
+            if (!entry.IsDirectory)
             {
                 yield return entry.Path;
+                continue;
+            }
+
+            if (entry.IsLink)
+            {
+                continue;
+            }
+
+            foreach (string file in EnumerateTree(entry.Path))
+            {
+                yield return file;
             }
         }
     }
