@@ -43,11 +43,11 @@ string? expectRootEnvironment = Environment.GetEnvironmentVariable(
     RepositoryRootResolver.ExpectRootEnvironmentVariable);
 bool expectRootFromFlag = RepositoryRootResolver.HasExpectRootArgument(args);
 
+RepositoryRootResolver rootResolver = RealRootResolver();
 string repoRoot;
 try
 {
-    repoRoot = RepositoryRootResolver.Resolve(
-        RealConfigRepository(),
+    repoRoot = rootResolver.Resolve(
         args,
         workingDirectory,
         Environment.GetEnvironmentVariable(RepositoryRootResolver.EnvironmentVariable));
@@ -84,7 +84,7 @@ if (!expectRootFromFlag && !string.IsNullOrWhiteSpace(expectRootEnvironment))
         return 1;
     }
 
-    if (!RepositoryRootResolver.PathsEqual(expectedRoot, repoRoot))
+    if (!rootResolver.PathsEqual(expectedRoot, repoRoot))
     {
         await Console.Error.WriteLineAsync(
             $"KW-MCP-ROOT-002: The KYBER_WEAVE_EXPECT_ROOT value '{expectedRoot}' does not match " +
@@ -121,14 +121,15 @@ builder.Services.Replace(ServiceDescriptor.Singleton<ITransport>(services =>
 await builder.Build().RunAsync().ConfigureAwait(false);
 return 0;
 
-static FileKyberWeaveConfigRepository RealConfigRepository()
+static RepositoryRootResolver RealRootResolver()
 {
     PhysicalFileSystem files = new();
-    return new FileKyberWeaveConfigRepository(
-        new FileRepositoryTreeProbe(files),
-        files,
-        new PhysicalPathResolver(files),
-        new ProcessEnvironment());
+    PhysicalPathResolver paths = new(files);
+    ProcessEnvironment environment = new();
+    return new RepositoryRootResolver(
+        new FileKyberWeaveConfigRepository(new FileRepositoryTreeProbe(files), files, paths, environment),
+        paths,
+        environment);
 }
 
 static string GetVersion()

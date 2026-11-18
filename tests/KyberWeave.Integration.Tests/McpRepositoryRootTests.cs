@@ -8,6 +8,9 @@ using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Processes;
 using KyberWeave.Data.CodeGraph;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Host;
+using KyberWeave.Data.Paths;
 using KyberWeave.Mcp;
 using Xunit;
 using KyberWeave.Tests.Fakes;
@@ -26,12 +29,18 @@ public sealed class McpRepositoryRootTests : IDisposable
 
     private readonly TempDirectory _parent = new();
 
+    private static RepositoryRootResolver Resolver()
+    {
+        PhysicalFileSystem files = new();
+        return new RepositoryRootResolver(ConfigFileReader.Repository, new PhysicalPathResolver(files), new ProcessEnvironment());
+    }
+
     [Fact]
     public void DocsInitEstablishesTheCurrentDirectoryAsAnMcpRoot()
     {
         DocsTestCommands.Scaffolding.Scaffold(_parent.Path);
 
-        string resolved = RepositoryRootResolver.Resolve(ConfigFileReader.Repository, [], _parent.Path, null);
+        string resolved = Resolver().Resolve([], _parent.Path, null);
 
         Assert.Equal(Path.GetFullPath(_parent.Path), resolved);
     }
@@ -48,8 +57,8 @@ public sealed class McpRepositoryRootTests : IDisposable
         WriteMarker(first, "first-only-marker");
         WriteMarker(second, "second-only-marker");
 
-        string firstRoot = RepositoryRootResolver.Resolve(ConfigFileReader.Repository, ["--repo-root", "."], first, null);
-        string secondRoot = RepositoryRootResolver.Resolve(ConfigFileReader.Repository, ["--repo-root", "."], second, null);
+        string firstRoot = Resolver().Resolve(["--repo-root", "."], first, null);
+        string secondRoot = Resolver().Resolve(["--repo-root", "."], second, null);
 
         ExploreAnswer firstAnswer = CreateHost(firstRoot).Current().Explore("first-only-marker");
         ExploreAnswer secondAnswer = CreateHost(secondRoot).Current().Explore("second-only-marker");
@@ -65,7 +74,7 @@ public sealed class McpRepositoryRootTests : IDisposable
     public void AnUninitializedWorkingDirectoryFailsInsteadOfGuessingAParentRepository()
     {
         InvalidOperationException error = Assert.Throws<InvalidOperationException>(() =>
-            RepositoryRootResolver.Resolve(ConfigFileReader.Repository, [], _parent.Path, null));
+            Resolver().Resolve([], _parent.Path, null));
 
         Assert.Contains("kyber-weave docs init", error.Message, StringComparison.Ordinal);
         Assert.Contains("will not guess a parent repository", error.Message, StringComparison.Ordinal);
@@ -82,8 +91,7 @@ public sealed class McpRepositoryRootTests : IDisposable
         (string first, string second) = CreateTwoInitializedRepositories();
 
         ExpectedRootMismatchException error = Assert.Throws<ExpectedRootMismatchException>(() =>
-            RepositoryRootResolver.Resolve(
-                ConfigFileReader.Repository,
+            Resolver().Resolve(
                 ["--repo-root", first, "--expect-root", second],
                 first,
                 null));
@@ -97,8 +105,7 @@ public sealed class McpRepositoryRootTests : IDisposable
     {
         (string first, _) = CreateTwoInitializedRepositories();
 
-        string resolved = RepositoryRootResolver.Resolve(
-            ConfigFileReader.Repository,
+        string resolved = Resolver().Resolve(
             ["--repo-root", ".", "--expect-root", first],
             first,
             null);
@@ -111,8 +118,7 @@ public sealed class McpRepositoryRootTests : IDisposable
     {
         (string first, _) = CreateTwoInitializedRepositories();
 
-        string resolved = RepositoryRootResolver.Resolve(
-            ConfigFileReader.Repository,
+        string resolved = Resolver().Resolve(
             ["--repo-root", ".", "--expect-root", "."],
             first,
             null);
