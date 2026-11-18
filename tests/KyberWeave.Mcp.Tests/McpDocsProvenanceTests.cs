@@ -1,22 +1,21 @@
-using KyberWeave.Tests.Configuration;
-
 using System.ComponentModel;
 using System.Globalization;
 using System.Reflection;
 using System.Text.RegularExpressions;
 
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
-using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Search;
-using KyberWeave.Data.CodeGraph;
-using KyberWeave.Mcp;
+using KyberWeave.Tests;
+using KyberWeave.Tests.Fakes;
+using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using Xunit;
 
-using KyberWeave.Tests.Fakes;
-namespace KyberWeave.Tests;
+namespace KyberWeave.Mcp.Tests;
 
 /// <summary>
 /// T1/T2 RED — every docs tool response discloses the corpus it answered from, and
@@ -28,7 +27,7 @@ namespace KyberWeave.Tests;
 /// corpus could outrank the checkout actually being edited with no visible tell. The header
 /// contract is the tell: root, revision/dirty, and the live document count.
 /// </remarks>
-public sealed class McpDocsProvenanceTests : IDisposable
+public sealed class McpDocsProvenanceTests
 {
     /// <summary>
     /// The header contract from the plan: exactly one line, root first, then the branch and the
@@ -46,7 +45,7 @@ public sealed class McpDocsProvenanceTests : IDisposable
         + @"dirty=(?<dirty>yes|no|unknown) documents=(?<documents>\d+)$",
         RegexOptions.CultureInvariant);
 
-    private readonly TempDirectory _parent = new();
+    private readonly MemoryDocsHost _host = new();
 
     [Fact]
     public void EachDocsToolLeadsWithProvenanceForItsOwnRepositoryRoot()
@@ -150,26 +149,22 @@ public sealed class McpDocsProvenanceTests : IDisposable
         Assert.Equal(expected, actual.TrimEnd('\n', '\r'));
     }
 
-    public void Dispose() => _parent.Dispose();
-
     /// <summary>
     /// Two initialized roots whose corpora differ by exactly one document, so a header that
     /// did not actually reflect the live index could not report the same count for both.
     /// </summary>
     private (string RootA, string RootB) CreateTwoCorpora()
     {
-        string rootA = Path.Combine(_parent.Path, "repo-a");
-        string rootB = Path.Combine(_parent.Path, "repo-b");
-        Directory.CreateDirectory(rootA);
-        Directory.CreateDirectory(rootB);
-        DocsTestCommands.Scaffolding.Scaffold(rootA, owner: "alpha-team");
-        DocsTestCommands.Scaffolding.Scaffold(rootB, owner: "beta-team");
-        // Stop git from walking up into a parent checkout when TMPDIR sits inside one:
-        // an invalid local gitdir keeps rev=unavailable / dirty=unknown deterministic.
-        IsolateFromParentGit(rootA);
-        IsolateFromParentGit(rootB);
-        File.WriteAllText(
-            Path.Combine(rootB, "docs", "second-only.md"),
+        string rootA = Path.Combine(_host.Files.Root, "repo-a");
+        string rootB = Path.Combine(_host.Files.Root, "repo-b");
+        _host.Files.CreateDirectory(rootA);
+        _host.Files.CreateDirectory(rootB);
+        IDocsScaffoldingService scaffolding = _host.Services().GetRequiredService<IDocsScaffoldingService>();
+        scaffolding.Scaffold(rootA, owner: "alpha-team");
+        scaffolding.Scaffold(rootB, owner: "beta-team");
+        _host.WriteText(
+            rootB,
+            "docs/second-only.md",
             "# second-only-marker\n\nThis repository owns a marker no other corpus has.\n");
         return (rootA, rootB);
     }
@@ -195,24 +190,25 @@ public sealed class McpDocsProvenanceTests : IDisposable
     private static string AgentCodingStandardsMiss(DocsTools tools) =>
         tools.AgentCodingStandards("zzz-no-such-technology-zzz");
 
-    private static void IsolateFromParentGit(string root) =>
-        File.WriteAllText(
-            Path.Combine(root, ".git"),
-            $"gitdir: {Path.Combine(root, ".git-missing")}{Environment.NewLine}");
-
-    private static DocsTools CreateTools(string root) =>
-        DocsToolsComposition.Create(CreateHost(root), McpTestServices.AnalysisReader(root));
-
-    private static DocumentIndexHost CreateHost(string root)
+    private DocsTools CreateTools(string root)
     {
-        KyberWeaveConfig config = ConfigFileReader.Load(root);
+        IServiceProvider services = _host.Services();
+        return DocsToolsComposition.Create(
+            CreateHost(root),
+            DocsToolsComposition.AnalysisReader(services, root),
+            services: services);
+    }
+
+    private DocumentIndexHost CreateHost(string root)
+    {
+        KyberWeaveConfig config = _host.Services().GetRequiredService<IKyberWeaveConfigRepository>().Load(root);
         return new DocumentIndexHost(
             root,
-            () => DocsPorts.CodeGraph(root),
-            () => RealDocumentLoader.Create(root, config.Ontology).Load(),
-            DocsPorts.Files,
-            DocsPorts.Paths,
-            DocsPorts.Environment,
+            () => FakeCodeGraphResolver.WithSymbols(),
+            () => new DocumentLoader(_host.Store, root, _host.Paths, _host.Environment, config.Ontology).Load(),
+            _host.Store,
+            _host.Paths,
+            _host.Environment,
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
     }
