@@ -54,6 +54,30 @@ public sealed class UpdateCommandOutputTests
         Assert.Equal("downloading…\n", Output());
     }
 
+    /// <summary>A missing updater is refused at construction, as every other command refuses its collaborators.</summary>
+    [Fact]
+    public void Constructor_NullUpdater_Throws()
+    {
+        _ = Assert.Throws<ArgumentNullException>(() => new UpdateCommand(null!, _ansi));
+    }
+
+    /// <summary>A missing console is refused at construction.</summary>
+    [Fact]
+    public void Constructor_NullConsole_Throws()
+    {
+        _ = Assert.Throws<ArgumentNullException>(() => new UpdateCommand(new ScriptedService(0, string.Empty), null!));
+    }
+
+    /// <summary>An outcome that carries no message prints no outcome line rather than failing on it.</summary>
+    [Fact]
+    public void Execute_SuccessWithNullMessage_WritesNoOutcomeLine()
+    {
+        int exit = Command(0, null!).Execute(null!, new UpdateSettings());
+
+        Assert.Equal(0, exit);
+        Assert.Equal("downloading…\n", Output());
+    }
+
     private UpdateCommand Command(int exitCode, string message) => Command(new ScriptedService(exitCode, message));
 
     private UpdateCommand Command(ISelfUpdateService service) => new(service, _ansi);
