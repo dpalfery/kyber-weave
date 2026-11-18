@@ -204,6 +204,42 @@ public sealed class SquadPresetCommandsTests
     }
 
     [Fact]
+    public void Use_AJournalThatCannotBeRecovered_ReportsItInsteadOfLettingTheExceptionEscape()
+    {
+        ArrangeDeployedWorker();
+        StubTransactions transactions = new()
+        {
+            Failure = new InvalidOperationException(UnrecoverableJournal)
+        };
+
+        int exit = Use(transactions).Execute(
+            null!,
+            new SquadPresetUseSettings { Name = "alpha", Targets = ["codex"] },
+            CancellationToken.None);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("kyber-weave squad: error: " + UnrecoverableJournal + "\n", Output(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Clear_AJournalThatCannotBeRecovered_ReportsItInsteadOfLettingTheExceptionEscape()
+    {
+        ArrangeDeployedWorker();
+        StubTransactions transactions = new()
+        {
+            Failure = new InvalidOperationException(UnrecoverableJournal)
+        };
+
+        int exit = Clear(transactions).Execute(
+            null!,
+            new SquadPresetClearSettings { Targets = ["codex"] },
+            CancellationToken.None);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("kyber-weave squad: error: " + UnrecoverableJournal + "\n", Output(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Use_ARefusedDeploymentAfterARecovery_PrintsTheNoticeWithTheErrorAndExitsOne()
     {
         ArrangeDeployedWorker();
@@ -361,6 +397,10 @@ public sealed class SquadPresetCommandsTests
     private const string RecoveryNotice =
         "Recovered an unfinished Squad transaction at '/kw/work/.kyber-weave/.squad-transaction': " +
         "it had not committed, so its changes were rolled back.";
+
+    private const string UnrecoverableJournal =
+        "An unfinished Squad transaction exists at '/kw/work/.kyber-weave/.squad-transaction' and could not be " +
+        "recovered: The disk refused the write. The new deployment was not started.";
 
     /// <summary>Plans the update the preset verbs ask for without touching a real tree, so the test reaches the transaction.</summary>
     private sealed class StubPlanner : ISquadDeploymentPlanner

@@ -380,12 +380,12 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
         {
             transaction.Execute(plan);
         }
-        catch (SquadDeploymentConflictException refused)
+        catch (Exception failure)
         {
-            // A recovery that ran under this deployment's lease refuses a plan read before it, so the user runs the
-            // command again. That is this command's ordinary error output, not an unhandled exception.
+            // A recovery under this deployment's lease can refuse the stale plan, or fail and name the journal. Both
+            // are this command's ordinary error output, not an unhandled exception.
             _output.WriteTransactionWarnings(transaction.Warnings);
-            _output.WriteClientInputError(refused.Message);
+            _output.WriteClientInputError(failure.Message);
             return 1;
         }
 
