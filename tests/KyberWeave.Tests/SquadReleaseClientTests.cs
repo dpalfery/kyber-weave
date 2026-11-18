@@ -7,6 +7,7 @@ using System.Text;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Release;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 using Xunit.Sdk;
 
@@ -32,7 +33,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
         string checksum = Sha256(archiveBytes);
         using RoutingHandler handler = ReleaseHandler(archiveBytes, $"{checksum}  {AssetName}\n");
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
         string destination = Path.Combine(_temp.Path, "squad");
         SquadReleaseRequest request = new SquadReleaseRequest(Repository, Version, destination);
 
@@ -58,7 +59,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         using RoutingHandler handler = new RoutingHandler();
         SeedDestinationAndState();
         IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
             handler,
             new Uri("http://api.github.test/"));
 
@@ -77,7 +78,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         handler.AllowAutoRedirect = true;
 
         ArgumentException exception = Assert.Throws<ArgumentException>(() =>
-            new GitHubSquadReleaseSource(handler, ApiRoot));
+            RealSquadReleaseSource.Create(handler, ApiRoot));
 
         Assert.Contains("redirect", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -89,7 +90,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         Assert.True(handler.AllowAutoRedirect);
 
         ArgumentException exception = Assert.Throws<ArgumentException>(() =>
-            new GitHubSquadReleaseSource(handler, ApiRoot));
+            RealSquadReleaseSource.Create(handler, ApiRoot));
 
         Assert.Contains("redirect", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -107,7 +108,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         using RoutingHandler handler = new RoutingHandler();
         SeedDestinationAndState();
         IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
         SquadReleaseRequest request = new SquadReleaseRequest(
             Repository,
             version,
@@ -136,7 +137,7 @@ public sealed class SquadReleaseClientTests : IDisposable
             $"{checksum}  {assetName}\n",
             version: version,
             assetName: assetName);
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
         string destination = Path.Combine(_temp.Path, "squad-" + version.Replace('.', '-'));
         SquadReleaseRequest request = new SquadReleaseRequest(Repository, version, destination);
 
@@ -156,7 +157,7 @@ public sealed class SquadReleaseClientTests : IDisposable
             archiveBytes,
             $"{checksum}  {AssetName}\n",
             redirectArchiveTo: new Uri("https://objects.github.test/squad.zip"));
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
 
         SquadReleaseResult result = await source.DownloadAndExtractAsync(Request(), CancellationToken.None);
 
@@ -176,7 +177,7 @@ public sealed class SquadReleaseClientTests : IDisposable
             redirectArchiveTo: insecureLocation);
         SeedDestinationAndState();
         IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
 
         InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             source.DownloadAndExtractAsync(Request(), CancellationToken.None));
@@ -206,7 +207,7 @@ public sealed class SquadReleaseClientTests : IDisposable
             """));
         SeedDestinationAndState();
         IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
 
         InvalidDataException exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
             source.DownloadAndExtractAsync(Request(), CancellationToken.None));
@@ -228,7 +229,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         handler.Enqueue(releaseUri, () => new HttpResponseMessage(HttpStatusCode.NotFound));
         SeedDestinationAndState();
         IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
         SquadReleaseRequest request = new SquadReleaseRequest(
             Repository,
             "9.9.9",
@@ -254,7 +255,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         handler.Enqueue(releaseUri, () => new HttpResponseMessage(HttpStatusCode.InternalServerError));
         SeedDestinationAndState();
         IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
 
         HttpRequestException exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
             source.DownloadAndExtractAsync(Request(), CancellationToken.None));
@@ -408,7 +409,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
         byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
         using RoutingHandler handler = ReleaseHandler(archiveBytes, $"{Sha256(archiveBytes)}  {AssetName}\n");
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
 
         Exception exception = await Assert.ThrowsAnyAsync<Exception>(() =>
             source.DownloadAndExtractAsync(Request(), CancellationToken.None));
@@ -444,7 +445,7 @@ public sealed class SquadReleaseClientTests : IDisposable
             cancelAfterArchiveRead: cancellation);
         SeedStateOnly();
         IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             source.DownloadAndExtractAsync(Request(), cancellation.Token));
@@ -464,7 +465,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         SeedStateOnly();
         IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
         // ReSharper disable once AccessToDisposedClosure
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
             handler,
             ApiRoot,
             onStagingCreated: () =>
@@ -563,7 +564,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         SeedDestinationAndState();
         IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
         using RoutingHandler handler = ReleaseHandler(archiveBytes, checksumManifest);
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
 
         Exception exception = await Assert.ThrowsAnyAsync<Exception>(() =>
             source.DownloadAndExtractAsync(Request(), CancellationToken.None));

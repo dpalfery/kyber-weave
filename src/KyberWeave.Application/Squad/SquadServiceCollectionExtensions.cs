@@ -2,6 +2,7 @@ using KyberWeave.Application.Squad.Packaging;
 using KyberWeave.Application.Update;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.FileSystem;
@@ -31,7 +32,12 @@ public static class SquadServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
 
         services.TryAddSingleton<ISquadReleaseSource>(sp => new GitHubSquadReleaseSource(
-            ReleaseOrigin.Resolve(sp.GetRequiredService<IProcessEnvironment>().GetVariable).ApiRoot));
+            sp.GetRequiredService<ISquadReleaseHttpHandlers>().Create(),
+            ReleaseOrigin.Resolve(sp.GetRequiredService<IProcessEnvironment>().GetVariable).ApiRoot,
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IIdGenerator>()));
         services.TryAddSingleton<ISquadInstanceReleaseSource>(sp => new InstanceReleaseSource(
             FindLocalProductSquadRoot(sp.GetRequiredService<ISquadFileAccess>()) is { } local
                 ? new LocalCheckoutSquadReleaseSource(local)

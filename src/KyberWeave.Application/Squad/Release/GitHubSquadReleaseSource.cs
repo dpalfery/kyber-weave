@@ -7,6 +7,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Release;
 
 namespace KyberWeave.Cli.Commands.Squad.Infrastructure;
@@ -33,36 +35,53 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
     private readonly Uri _apiRoot;
     private readonly string? _token;
     private readonly Action? _onStagingCreated;
-    private readonly long _maximumAssetBytes = DefaultMaximumAssetBytes;
+    private readonly long _maximumAssetBytes;
+    private readonly IWritableFileSystem _files;
+    private readonly IPathResolver _paths;
+    private readonly IProcessEnvironment _environment;
+    private readonly IIdGenerator _ids;
+    private readonly bool _isWindows;
 
     // Derived from the root rather than passed separately: a caller can only reach the
     // relaxed transport by having already supplied a loopback API root, which
     // SquadCommandComposition does only for a validated KYBER_WEAVE_RELEASE_ORIGIN.
     private readonly bool _allowLoopbackHttp;
 
-    /// <summary>Creates a source with a transport that exposes every redirect for validation.</summary>
-    public GitHubSquadReleaseSource(Uri apiRoot)
+    /// <summary>Creates a source over an injected transport and the file, path, environment and identifier seams.</summary>
+    /// <param name="handler">The transport; it must not follow redirects, so every redirect can be inspected. The source disposes it.</param>
+    /// <param name="apiRoot">The release API root: github.com, or a validated loopback override.</param>
+    /// <param name="files">The file system the archive is staged and published through.</param>
+    /// <param name="paths">Resolves the destination to a full path.</param>
+    /// <param name="environment">Supplies the GitHub token, the working directory and the operating-system family.</param>
+    /// <param name="ids">Names the staging directory.</param>
+    public GitHubSquadReleaseSource(
+        HttpMessageHandler handler,
+        Uri apiRoot,
+        IWritableFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        IIdGenerator ids)
+        : this(handler, apiRoot, files, paths, environment, ids, onStagingCreated: null)
     {
-        ArgumentNullException.ThrowIfNull(apiRoot);
-
-        _handler = new SocketsHttpHandler { AllowAutoRedirect = false };
-        _httpClient = new HttpClient(_handler, disposeHandler: false);
-        _apiRoot = apiRoot;
-        _token = ReadToken(Environment.GetEnvironmentVariable);
-        _onStagingCreated = null;
-        _allowLoopbackHttp = ReleaseOrigin.IsLoopbackAuthority(apiRoot);
     }
 
-    /// <summary>Creates a source over an injected handler for deterministic hosting and tests.</summary>
+    /// <summary>Creates a source with the test hooks: a staging notification and a lower asset-size limit.</summary>
     internal GitHubSquadReleaseSource(
         HttpMessageHandler handler,
         Uri apiRoot,
-        Action? onStagingCreated = null,
-        Func<string, string?>? readEnvironment = null,
+        IWritableFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        IIdGenerator ids,
+        Action? onStagingCreated,
         long maximumAssetBytes = DefaultMaximumAssetBytes)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(apiRoot);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(ids);
 
         if (handler is HttpClientHandler { AllowAutoRedirect: true } or
             SocketsHttpHandler { AllowAutoRedirect: true })
@@ -75,7 +94,12 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         _handler = handler;
         _httpClient = new HttpClient(_handler, disposeHandler: false);
         _apiRoot = apiRoot;
-        _token = ReadToken(readEnvironment ?? Environment.GetEnvironmentVariable);
+        _files = files;
+        _paths = paths;
+        _environment = environment;
+        _ids = ids;
+        _isWindows = environment.OperatingSystem == OperatingSystemKind.Windows;
+        _token = ReadToken(environment.GetVariable);
         _maximumAssetBytes = maximumAssetBytes;
         _onStagingCreated = onStagingCreated;
         _allowLoopbackHttp = ReleaseOrigin.IsLoopbackAuthority(apiRoot);
@@ -111,7 +135,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         ValidateRequest(request);
         cancellationToken.ThrowIfCancellationRequested();
 
-        string extractionRoot = Path.GetFullPath(request.DestinationPath);
+        string extractionRoot = _paths.GetFullPath(request.DestinationPath, _environment.CurrentDirectory);
         RejectExistingSymbolicLinks(extractionRoot);
 
         Uri releaseUri = BuildReleaseUri(request.Repository, request.Version);
@@ -177,7 +201,6 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
             archiveBytes,
             extractionRoot,
             entries,
-            _onStagingCreated,
             cancellationToken).ConfigureAwait(false);
 
         return new SquadReleaseResult(
@@ -492,7 +515,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         return true;
     }
 
-    private static IReadOnlyList<ValidatedArchiveEntry> ValidateArchive(
+    private IReadOnlyList<ValidatedArchiveEntry> ValidateArchive(
         byte[] archiveBytes,
         string extractionRoot,
         CancellationToken cancellationToken)
@@ -503,7 +526,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         {
             using MemoryStream stream = new MemoryStream(archiveBytes, writable: false);
             using ZipArchive archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
-            StringComparer comparison = OperatingSystem.IsWindows()
+            StringComparer comparison = _isWindows
                 ? StringComparer.OrdinalIgnoreCase
                 : StringComparer.Ordinal;
             HashSet<string> seen = new HashSet<string>(comparison);
@@ -543,7 +566,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         }
     }
 
-    private static ValidatedArchiveEntry ValidateArchivePath(string entryName, string extractionRoot)
+    private ValidatedArchiveEntry ValidateArchivePath(string entryName, string extractionRoot)
     {
         if (string.IsNullOrEmpty(entryName) ||
             entryName.Contains('\0', StringComparison.Ordinal) ||
@@ -568,12 +591,12 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
 
         string relativePath = string.Join('/', segments.Take(segmentCount));
         string platformPath = relativePath.Replace('/', Path.DirectorySeparatorChar);
-        string fullExtractionRoot = Path.GetFullPath(extractionRoot);
+        string fullExtractionRoot = _paths.GetFullPath(extractionRoot, _environment.CurrentDirectory);
         string containmentPrefix = fullExtractionRoot.EndsWith(Path.DirectorySeparatorChar)
             ? fullExtractionRoot
             : fullExtractionRoot + Path.DirectorySeparatorChar;
-        string candidate = Path.GetFullPath(Path.Combine(fullExtractionRoot, platformPath));
-        StringComparison comparison = OperatingSystem.IsWindows()
+        string candidate = _paths.GetFullPath(Path.Combine(fullExtractionRoot, platformPath), fullExtractionRoot);
+        StringComparison comparison = _isWindows
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
         if (!candidate.StartsWith(containmentPrefix, comparison))
@@ -628,23 +651,22 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         files.Add(entry.RelativePath);
     }
 
-    private static async Task ExtractAtomicallyAsync(
+    private async Task ExtractAtomicallyAsync(
         byte[] archiveBytes,
         string extractionRoot,
         IReadOnlyList<ValidatedArchiveEntry> entries,
-        Action? onStagingCreated,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (Directory.Exists(extractionRoot) || File.Exists(extractionRoot))
+        if (_files.PathExists(extractionRoot))
         {
             throw new IOException(
                 $"Squad extraction destination already exists: '{extractionRoot}'.");
         }
 
         string? parent = Path.GetDirectoryName(extractionRoot);
-        if (string.IsNullOrEmpty(parent) || !Directory.Exists(parent))
+        if (string.IsNullOrEmpty(parent) || !_files.DirectoryExists(parent))
         {
             throw new DirectoryNotFoundException(
                 "The parent directory for the Squad extraction destination must already exist.");
@@ -652,18 +674,17 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
 
         string stagingRoot = Path.Combine(
             parent,
-            $".{Path.GetFileName(extractionRoot)}.kyber-squad-{Guid.NewGuid():N}");
-        string fullStagingRoot = Path.GetFullPath(stagingRoot);
-        string stagingPrefix = fullStagingRoot.EndsWith(Path.DirectorySeparatorChar)
-            ? fullStagingRoot
-            : fullStagingRoot + Path.DirectorySeparatorChar;
-        StringComparison comparison = OperatingSystem.IsWindows()
+            $".{Path.GetFileName(extractionRoot)}.kyber-squad-{_ids.NewGuid():N}");
+        string stagingPrefix = stagingRoot.EndsWith(Path.DirectorySeparatorChar)
+            ? stagingRoot
+            : stagingRoot + Path.DirectorySeparatorChar;
+        StringComparison comparison = _isWindows
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
         try
         {
-            Directory.CreateDirectory(stagingRoot);
-            onStagingCreated?.Invoke();
+            _files.CreateDirectory(stagingRoot);
+            _onStagingCreated?.Invoke();
             cancellationToken.ThrowIfCancellationRequested();
 
             await using MemoryStream stream = new MemoryStream(archiveBytes, writable: false);
@@ -675,10 +696,10 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
 
                 ZipArchiveEntry entry = archive.Entries[index];
                 ValidatedArchiveEntry validated = entries[index];
-                string destination = Path.GetFullPath(Path.Combine(
-                    fullStagingRoot,
-                    validated.RelativePath.Replace('/', Path.DirectorySeparatorChar)));
-                if (!destination.StartsWith(stagingPrefix, comparison))
+                string destination = Path.Combine(
+                    stagingRoot,
+                    validated.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+                if (!_paths.GetFullPath(destination, stagingRoot).StartsWith(stagingPrefix, comparison))
                 {
                     throw new InvalidDataException(
                         $"The Squad archive path escapes its extraction root: '{entry.FullName}'.");
@@ -686,70 +707,80 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
 
                 if (validated.IsDirectory)
                 {
-                    Directory.CreateDirectory(destination);
+                    _files.CreateDirectory(destination);
                     continue;
                 }
 
                 string destinationDirectory = Path.GetDirectoryName(destination)
                     ?? throw new InvalidDataException("The Squad archive contains an invalid file path.");
-                Directory.CreateDirectory(destinationDirectory);
+                _files.CreateDirectory(destinationDirectory);
                 await using Stream source = await entry.OpenAsync(cancellationToken).ConfigureAwait(false);
-                await using FileStream target = new FileStream(destination, new FileStreamOptions
-                {
-                    Mode = FileMode.CreateNew,
-                    Access = FileAccess.Write,
-                    Share = FileShare.None,
-                    Options = FileOptions.Asynchronous | FileOptions.SequentialScan
-                });
+                await using Stream target = _files.OpenWriteNew(destination);
                 await source.CopyToAsync(target, cancellationToken).ConfigureAwait(false);
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            Directory.Move(stagingRoot, extractionRoot);
+            _files.MoveDirectory(stagingRoot, extractionRoot);
         }
         catch
         {
-            if (Directory.Exists(stagingRoot))
-                Directory.Delete(stagingRoot, recursive: true);
+            _files.DeleteTreeNoFollow(stagingRoot);
             throw;
         }
     }
 
-    private static void RejectExistingSymbolicLinks(string extractionRoot)
+    private void RejectExistingSymbolicLinks(string extractionRoot)
     {
         // Platform temporary roots can themselves be links (for example /var on macOS).
         // The release port owns only the requested destination tree; containment above
         // that boundary belongs to the caller's deployment-root policy.
-        if (new FileInfo(extractionRoot).LinkTarget is not null)
+        if (IsLinkEntry(extractionRoot))
         {
             throw new InvalidOperationException(
                 $"Squad extraction rejects an existing symbolic link: '{extractionRoot}'.");
         }
 
-        if (!Path.Exists(extractionRoot))
+        if (!_files.PathExists(extractionRoot))
             return;
 
         RejectSymbolicLink(extractionRoot);
-        if (Directory.Exists(extractionRoot))
+        if (_files.DirectoryExists(extractionRoot))
             RejectSymbolicLinksBelow(extractionRoot);
     }
 
-    private static void RejectSymbolicLinksBelow(string directory)
+    /// <summary>Whether a path is itself a link, including one whose target is gone, which only a listing of its parent reports.</summary>
+    private bool IsLinkEntry(string path)
     {
-        foreach (string entry in Directory.EnumerateFileSystemEntries(
-            directory,
-            "*",
-            SearchOption.TopDirectoryOnly))
+        string? parent = Path.GetDirectoryName(path);
+        if (string.IsNullOrEmpty(parent))
+            return false;
+
+        string name = Path.GetFileName(path);
+        StringComparison comparison = _environment.IsFileSystemCaseInsensitive
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        return _files.EnumerateEntries(parent).Any(
+            entry => entry.IsLink && string.Equals(Path.GetFileName(entry.Path), name, comparison));
+    }
+
+    private void RejectSymbolicLinksBelow(string directory)
+    {
+        foreach (FileSystemEntry entry in _files.EnumerateEntries(directory))
         {
-            RejectSymbolicLink(entry);
-            if (Directory.Exists(entry))
-                RejectSymbolicLinksBelow(entry);
+            if (entry.IsLink)
+            {
+                throw new InvalidOperationException(
+                    $"Squad extraction rejects an existing symbolic link: '{entry.Path}'.");
+            }
+
+            if (entry.IsDirectory)
+                RejectSymbolicLinksBelow(entry.Path);
         }
     }
 
-    private static void RejectSymbolicLink(string path)
+    private void RejectSymbolicLink(string path)
     {
-        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+        if ((_files.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
         {
             throw new InvalidOperationException(
                 $"Squad extraction rejects an existing symbolic link: '{path}'.");

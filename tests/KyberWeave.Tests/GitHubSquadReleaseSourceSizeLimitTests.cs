@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Release;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -41,7 +42,7 @@ public sealed class GitHubSquadReleaseSourceSizeLimitTests
         Uri assetUri = new("https://downloads.github.test/SHA256SUMS.txt");
         Uri releaseUri = new(apiRoot, "repos/dpalfery/kyber-weave/releases/tags/v1.2.3");
         using DeclaredLengthHandler handler = new(releaseUri, assetUri);
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, apiRoot, maximumAssetBytes: 64);
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, apiRoot, maximumAssetBytes: 64);
         string root = Path.Combine(Path.GetTempPath(), "kw-size-" + Guid.NewGuid().ToString("N"));
 
         try

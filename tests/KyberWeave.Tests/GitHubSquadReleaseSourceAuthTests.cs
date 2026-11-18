@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Release;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -28,7 +29,7 @@ public sealed class GitHubSquadReleaseSourceAuthTests
         string checksum = Sha256(archiveBytes);
         using RecordingHandler handler = ReleaseHandler(archiveBytes, $"{checksum}  {AssetName}\n");
         using TempDirectory temp = new();
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
             handler,
             ApiRoot,
             readEnvironment: name => name == "GITHUB_TOKEN" ? Token : null);
@@ -55,7 +56,7 @@ public sealed class GitHubSquadReleaseSourceAuthTests
         string checksum = Sha256(archiveBytes);
         using RecordingHandler handler = ReleaseHandler(archiveBytes, $"{checksum}  {AssetName}\n");
         using TempDirectory temp = new();
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
             handler,
             ApiRoot,
             readEnvironment: name => name switch
@@ -82,7 +83,7 @@ public sealed class GitHubSquadReleaseSourceAuthTests
         string checksum = Sha256(archiveBytes);
         using RecordingHandler handler = ReleaseHandler(archiveBytes, $"{checksum}  {AssetName}\n");
         using TempDirectory temp = new();
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
             handler,
             ApiRoot,
             readEnvironment: name => name == "GH_TOKEN" ? "gh-only-token" : null);
@@ -105,7 +106,7 @@ public sealed class GitHubSquadReleaseSourceAuthTests
         string checksum = Sha256(archiveBytes);
         using RecordingHandler handler = ReleaseHandler(archiveBytes, $"{checksum}  {AssetName}\n");
         using TempDirectory temp = new();
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
             handler,
             ApiRoot,
             readEnvironment: name => name switch
@@ -132,7 +133,7 @@ public sealed class GitHubSquadReleaseSourceAuthTests
         string checksum = Sha256(archiveBytes);
         using RecordingHandler handler = ReleaseHandler(archiveBytes, $"{checksum}  {AssetName}\n");
         using TempDirectory temp = new();
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
             handler,
             ApiRoot,
             readEnvironment: _ => null);
@@ -156,7 +157,7 @@ public sealed class GitHubSquadReleaseSourceAuthTests
             $"{checksum}  {AssetName}\n",
             redirectArchiveTo: redirectTarget);
         using TempDirectory temp = new();
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
             handler,
             ApiRoot,
             readEnvironment: name => name == "GITHUB_TOKEN" ? Token : null);
@@ -187,7 +188,7 @@ public sealed class GitHubSquadReleaseSourceAuthTests
             $"{checksum}  {AssetName}\n",
             redirectArchiveTo: redirectTarget);
         using TempDirectory temp = new();
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
             handler,
             ApiRoot,
             readEnvironment: name => name == "GITHUB_TOKEN" ? Token : null);
@@ -216,7 +217,7 @@ public sealed class GitHubSquadReleaseSourceAuthTests
         using RecordingHandler handler = new();
         handler.Enqueue(releaseUri, _ => new HttpResponseMessage(HttpStatusCode.Forbidden));
         using TempDirectory temp = new();
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
             handler,
             ApiRoot,
             readEnvironment: _ => null);
@@ -238,7 +239,7 @@ public sealed class GitHubSquadReleaseSourceAuthTests
         using RecordingHandler handler = new();
         handler.Enqueue(releaseUri, _ => new HttpResponseMessage(HttpStatusCode.Forbidden));
         using TempDirectory temp = new();
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(
+        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
             handler,
             ApiRoot,
             readEnvironment: name => name == "GITHUB_TOKEN" ? Token : null);
