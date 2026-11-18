@@ -67,7 +67,8 @@ public sealed class CheckoutCorpusSource : ICorpusSource
 
         return _files
             .EnumerateFiles(directory, string.IsNullOrEmpty(searchPattern) ? "*" : searchPattern, recursive)
-            .Select(file => Path.GetRelativePath(Root, file).Replace('\\', '/'));
+            .Select(file => Path.GetRelativePath(Root, file).Replace('\\', '/'))
+            .ToList();
     }
 
     /// <inheritdoc />
@@ -77,6 +78,7 @@ public sealed class CheckoutCorpusSource : ICorpusSource
 
         return _files
             .EnumerateDirectories(directory)
-            .Select(child => Path.GetRelativePath(Root, child).Replace('\\', '/'));
+            .Select(child => Path.GetRelativePath(Root, child).Replace('\\', '/'))
+            .ToList();
     }
 }

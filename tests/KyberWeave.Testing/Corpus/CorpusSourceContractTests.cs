@@ -189,6 +189,15 @@ public abstract class CorpusSourceContractTests
     }
 
     [Fact]
+    public void ReturnsListingsThatAreAlreadyMaterialized()
+    {
+        ICorpusSource corpus = CreateCorpus();
+
+        Assert.IsAssignableFrom<ICollection<string>>(corpus.EnumerateFiles(SampleDirectory, "*"));
+        Assert.IsAssignableFrom<ICollection<string>>(corpus.EnumerateDirectories("products"));
+    }
+
+    [Fact]
     public void ReturnsNoFilesForAMissingDirectory()
     {
         ICorpusSource corpus = CreateCorpus();
