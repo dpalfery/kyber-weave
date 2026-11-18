@@ -431,6 +431,49 @@ public sealed class SquadTransactionWeaknessTests
         }
     }
 
+    [Fact]
+    public void AGlobalJournalFolderWithNoJournalIsRemovedButNothingAboveTheToolFolder()
+    {
+        InMemorySquadState state = new();
+        string target = state.CreateRoot("target");
+        string journalFolder = state.Store.ResolveTransactionDirectory(target, SquadDeploymentScope.Global);
+        state.Files.CreateDirectory(journalFolder);
+        string home = state.Layout.PhysicalOf(state.Layout.Home);
+        Assert.True(state.Files.DirectoryExists(home));
+
+        state.Transaction().Recover(target, SquadDeploymentScope.Global);
+
+        Assert.False(state.Files.DirectoryExists(journalFolder));
+        Assert.True(state.Files.DirectoryExists(home), "The pre-existing home folder was removed.");
+    }
+
+    [Fact]
+    public void AFileThatAppearsWhileTheJournalFolderIsBeingRemovedDoesNotFailACommittedDeployment()
+    {
+        using InMemorySquadCrashSafetyFixture fixture = new();
+        fixture.CreateBaseline(SquadCrashFlow.Install);
+        string toolFolder = Path.Combine(fixture.Root, ".kyber-weave");
+        string userFile = Path.Combine(toolFolder, "kyber-weave.yml");
+        bool written = false;
+
+        // The file lands after the folder was found empty and before it is deleted: the delete itself is refused.
+        fixture.Files.KillWhen(operation =>
+        {
+            if (!written && operation.Name == "DeleteEmptyDirectory" && operation.Path!.EndsWith(".kyber-weave", StringComparison.Ordinal))
+            {
+                written = true;
+                fixture.Files.WriteAllText(userFile, "user content");
+            }
+
+            return false;
+        });
+
+        fixture.Transaction().Execute(fixture.Plan(SquadCrashFlow.Install));
+
+        Assert.True(written, "The tool folder was never removed.");
+        Assert.Equal("user content", fixture.Files.ReadAllText(userFile));
+    }
+
     private static bool IsTransactionDelete(FileSystemOperation operation) =>
         operation.Name.StartsWith("Delete", StringComparison.Ordinal)
         && operation.Path!.Contains(".kyber-weave", StringComparison.Ordinal);

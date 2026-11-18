@@ -433,9 +433,13 @@ public sealed class SquadTransaction : ISquadTransaction
                 // changed nothing: only the folders it made are left, and they are empty.
                 DiscardUnpublishedIntentTemporaries(journalDirectory);
                 CleanupOwnedArtifacts(journalDirectory, workDirectory);
-                RemoveEmptyDirectoriesUpTo(
-                    journalDirectory,
-                    Physical(_stateStore.ResolveStateAuthorityRoot(root, scope)));
+                DeleteEmptyDirectory(journalDirectory);
+
+                // Only the tool's own folder directly above is removed, and only when empty: the folders above it may
+                // predate the transaction, and the journal that recorded which ones it made never existed.
+                string toolFolder = Path.GetDirectoryName(journalDirectory)!;
+                if (string.Equals(Path.GetFileName(toolFolder), ".kyber-weave", StringComparison.Ordinal))
+                    DeleteEmptyDirectory(toolFolder);
                 recoveryCompleted = true;
                 return;
             }
@@ -2189,7 +2193,15 @@ public sealed class SquadTransaction : ISquadTransaction
             _files.EnumerateEntries(path).Any())
             return;
 
-        _files.DeleteEmptyDirectory(path);
+        try
+        {
+            _files.DeleteEmptyDirectory(path);
+        }
+        catch (IOException) when (_files.DirectoryExists(path) && _files.EnumerateEntries(path).Any())
+        {
+            // Another tool wrote into the folder after it was found empty. The folder is theirs now: leave it, and
+            // do not let a committed deployment be reported as failed for it.
+        }
     }
 
     private void DeleteEntry(string path, bool recursiveDirectory)
@@ -2297,10 +2309,6 @@ public sealed class SquadTransaction : ISquadTransaction
     }
 
     /// <summary>
-    ///     Records that the transaction is decided and only cleanup is left, so a kill while the backups and the
-    ///     staging area are being deleted is finished forward instead of refused for the pieces already gone.
-    /// </summary>
-    /// <summary>
     ///     <see cref="MarkCleanupOnly" /> for a deployment that has already been decided: the marker only closes the
     ///     window in which a kill during cleanup would be refused, so an I/O error writing it must not turn a
     ///     committed deployment (or replace the failure of a rolled-back one) into a different error. Recovery's own
@@ -2317,6 +2325,10 @@ public sealed class SquadTransaction : ISquadTransaction
         }
     }
 
+    /// <summary>
+    ///     Records that the transaction is decided and only cleanup is left, so a kill while the backups and the
+    ///     staging area are being deleted is finished forward instead of refused for the pieces already gone.
+    /// </summary>
     private void MarkCleanupOnly(string intentPath, IntentDocument intent) =>
         WriteIntent(
             intentPath,
