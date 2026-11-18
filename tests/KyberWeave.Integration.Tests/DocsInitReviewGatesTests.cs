@@ -204,7 +204,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
         Assert.True(
             execution.Result == 0,
             $"docs init --kyber-standards exited {execution.Result}. Output:{Environment.NewLine}{execution.Output}");
-        IReadOnlyList<GateCatalogueFamily> families = GateCatalogue.LoadEmbedded();
+        IReadOnlyList<GateCatalogueFamily> families = GateCatalogueRenderer.LoadEmbedded();
         GateCatalogueFamily go =
             families.Single(candidate => candidate.Technologies.Contains("go", StringComparer.Ordinal));
         string configText = File.ReadAllText(ConfigPath(repo));
@@ -309,7 +309,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
 
         DocsTestCommands.Scaffolding.Scaffold(repo);
 
-        GateCatalogueFamily catalogue = GateCatalogue.LoadEmbedded()
+        GateCatalogueFamily catalogue = GateCatalogueRenderer.LoadEmbedded()
             .Single(candidate => string.Equals(candidate.Family, family, StringComparison.Ordinal));
         HashSet<string> wholeSuite = catalogue.Gates
             .Where(gate => string.Equals(gate.Role, "test", StringComparison.Ordinal))
@@ -404,7 +404,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
 
     private static IReadOnlyList<string> TechnologiesFor(string family)
     {
-        GateCatalogueFamily catalogue = GateCatalogue.LoadEmbedded()
+        GateCatalogueFamily catalogue = GateCatalogueRenderer.LoadEmbedded()
             .Single(candidate => string.Equals(candidate.Family, family, StringComparison.Ordinal));
         return catalogue.Technologies;
     }

@@ -25,7 +25,7 @@ public sealed class GateCatalogueResourceTests
 
     /// <summary>
     /// Each family file is an embedded resource that parses as YAML and declares <c>schema: 1</c>.
-    /// Without this, <c>GateCatalogue</c> refuses the file at load time and every gate in the family is lost.
+    /// Without this, <c>GateCatalogueRenderer</c> refuses the file at load time and every gate in the family is lost.
     /// </summary>
     [Theory]
     [InlineData("csharp")]

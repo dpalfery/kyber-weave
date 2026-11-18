@@ -190,7 +190,7 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
     {
         Dictionary<string, Dictionary<string, string>> installPaths = InstallPaths();
         List<(GateCatalogueFamily Catalogue, FamilyGate Gate)> matches = [];
-        foreach (GateCatalogueFamily catalogue in GateCatalogue.LoadEmbedded())
+        foreach (GateCatalogueFamily catalogue in GateCatalogueRenderer.LoadEmbedded())
         {
             foreach (FamilyGate gate in catalogue.Gates.Concat(catalogue.TaskGates))
             {
@@ -246,7 +246,7 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
     private static Dictionary<string, Dictionary<string, string>> InstallPaths()
     {
         Dictionary<string, Dictionary<string, string>> byFamily = new(StringComparer.Ordinal);
-        foreach (GateCatalogueFamily catalogue in GateCatalogue.LoadEmbedded())
+        foreach (GateCatalogueFamily catalogue in GateCatalogueRenderer.LoadEmbedded())
         {
             string path = $"products/kyber-squad/standards/{catalogue.Family}/gates.yml";
             Assert.True(Corpus.Exists(path), $"The catalogue family '{catalogue.Family}' has no file at '{path}'.");
@@ -331,7 +331,7 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
 
     private static IReadOnlyList<string> TechnologiesFor(string family)
     {
-        GateCatalogueFamily catalogue = GateCatalogue.LoadEmbedded()
+        GateCatalogueFamily catalogue = GateCatalogueRenderer.LoadEmbedded()
             .Single(candidate => string.Equals(candidate.Family, family, StringComparison.Ordinal));
         return catalogue.Technologies;
     }
