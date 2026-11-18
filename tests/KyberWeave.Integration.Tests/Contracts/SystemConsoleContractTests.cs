@@ -1,19 +1,13 @@
-using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Contracts.Host;
 using KyberWeave.Data.Host;
 using KyberWeave.Tests.ConsoleSeam;
+using Xunit;
 
 namespace KyberWeave.Integration.Tests.Contracts;
 
 /// <summary>Runs the console contract against the real adapter, which forwards to the process's own console.</summary>
 public sealed class SystemConsoleContractTests : ConsoleContractTests
 {
-    [SuppressMessage(
-        "Usage",
-        "CA2213:Disposable fields should be disposed",
-        Justification = "The field holds the process's own standard input reader, which this test puts back and must not close.")]
-    private readonly TextReader _originalInput = Console.In;
-
     /// <inheritdoc />
     protected override IConsole CreateConsole() => new SystemConsole();
 
@@ -21,7 +15,7 @@ public sealed class SystemConsoleContractTests : ConsoleContractTests
     protected override bool ExpectedInputRedirected => Console.IsInputRedirected;
 
     /// <inheritdoc />
-    protected override void FeedInput(IConsole console, string text) => Console.SetIn(new StringReader(text));
+    protected override void FeedInput(IConsole console, string text) => ProcessConsoleCapture.FeedInput(text);
 
     /// <inheritdoc />
     protected override ConsoleWrites Capture(IConsole console, Action<IConsole> write)
@@ -37,10 +31,32 @@ public sealed class SystemConsoleContractTests : ConsoleContractTests
         return new ConsoleWrites(captured.Output, captured.ErrorOutput);
     }
 
-    /// <inheritdoc />
-    public override void Dispose()
+    [Fact]
+    public async Task KeepsTheInputOneReaderFedOutOfAnotherReader()
     {
-        Console.SetIn(_originalInput);
-        base.Dispose();
+        IConsole first = CreateConsole();
+        IConsole second = CreateConsole();
+        TaskCompletionSource bothFed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int fed = 0;
+
+        async Task<string?> ReadFedLineAsync(IConsole console, string text)
+        {
+            FeedInput(console, text);
+            if (Interlocked.Increment(ref fed) == 2)
+            {
+                bothFed.SetResult();
+            }
+
+            await bothFed.Task;
+            return console.ReadLine();
+        }
+
+        Task<string?> firstReader = Task.Run(() => ReadFedLineAsync(first, "first-reader\n"));
+        Task<string?> secondReader = Task.Run(() => ReadFedLineAsync(second, "second-reader\n"));
+
+        string?[] lines = await Task.WhenAll(firstReader, secondReader);
+
+        Assert.Equal("first-reader", lines[0]);
+        Assert.Equal("second-reader", lines[1]);
     }
 }

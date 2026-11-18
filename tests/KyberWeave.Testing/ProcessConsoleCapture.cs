@@ -16,6 +16,7 @@ internal static class ProcessConsoleCapture
     private static readonly Lock InitLock = new();
     private static readonly AsyncLocal<StringWriter?> CurrentWriter = new();
     private static readonly AsyncLocal<StringWriter?> CurrentErrorWriter = new();
+    private static readonly AsyncLocal<TextReader?> CurrentInput = new();
     private static readonly AsyncLocal<IAnsiConsole?> CurrentAnsiConsole = new();
     private static bool _installed;
 
@@ -45,12 +46,28 @@ internal static class ProcessConsoleCapture
 
             TextWriter originalOut = Console.Out;
             TextWriter originalError = Console.Error;
+            TextReader originalInput = Console.In;
             IAnsiConsole originalAnsiConsole = AnsiConsole.Console;
             Console.SetOut(new AsyncLocalTextWriter(originalOut, CurrentWriter));
             Console.SetError(new AsyncLocalTextWriter(originalError, CurrentErrorWriter));
+            Console.SetIn(new AsyncLocalTextReader(originalInput, CurrentInput));
             AnsiConsole.Console = new AsyncLocalAnsiConsole(originalAnsiConsole);
             _installed = true;
         }
+    }
+
+    /// <summary>
+    /// Supplies the lines subsequent reads in this asynchronous context return, leaving the input of every other
+    /// context, and of the process, untouched.
+    /// </summary>
+    /// <param name="text">The input text, one line per line break.</param>
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+        Justification = "The reader is a context-local buffer with no unmanaged resource; it is released with the context.")]
+    public static void FeedInput(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        EnsureInstalled();
+        CurrentInput.Value = new StringReader(text);
     }
 
     /// <summary>
@@ -184,6 +201,38 @@ internal static class ProcessConsoleCapture
         public override Task WriteLineAsync(string? value) => Active.WriteLineAsync(value);
         public override Task WriteLineAsync(StringBuilder? value, CancellationToken cancellationToken = default) =>
             Active.WriteLineAsync(value, cancellationToken);
+    }
+
+    [SuppressMessage("Usage", "CA2213:Disposable fields should be disposed",
+        Justification = "The fallback is the process's own standard input, which this router must not close.")]
+    private sealed class AsyncLocalTextReader : TextReader
+    {
+        private readonly TextReader _fallback;
+        private readonly AsyncLocal<TextReader?> _current;
+
+        public AsyncLocalTextReader(TextReader fallback, AsyncLocal<TextReader?> current)
+        {
+            _fallback = fallback;
+            _current = current;
+        }
+
+        private TextReader Active => _current.Value ?? _fallback;
+
+        public override int Peek() => Active.Peek();
+        public override int Read() => Active.Read();
+        public override int Read(char[] buffer, int index, int count) => Active.Read(buffer, index, count);
+        public override int Read(Span<char> buffer) => Active.Read(buffer);
+
+        public override Task<int> ReadAsync(char[] buffer, int index, int count) =>
+            Active.ReadAsync(buffer, index, count);
+
+        public override ValueTask<int> ReadAsync(Memory<char> buffer, CancellationToken cancellationToken = default) =>
+            Active.ReadAsync(buffer, cancellationToken);
+
+        public override string? ReadLine() => Active.ReadLine();
+        public override Task<string?> ReadLineAsync() => Active.ReadLineAsync();
+        public override string ReadToEnd() => Active.ReadToEnd();
+        public override Task<string> ReadToEndAsync() => Active.ReadToEndAsync();
     }
 
     private sealed class AsyncLocalAnsiConsole : IAnsiConsole
