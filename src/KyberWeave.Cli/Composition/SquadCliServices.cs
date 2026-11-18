@@ -7,6 +7,7 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -47,4 +48,11 @@ internal static class SquadCliServices
     /// </summary>
     /// <returns>A console over <see cref="AnsiConsole.Console"/> and the standard streams.</returns>
     internal static SquadConsole ProcessConsole() => new(AnsiConsole.Console, new SystemConsole());
+
+    /// <summary>
+    /// The process's own file system, for a Squad helper the container does not give a seam yet. A command that is
+    /// given the seam passes it instead.
+    /// </summary>
+    /// <returns>The physical file system.</returns>
+    internal static IWritableFileSystem ProcessFileSystem() => new PhysicalFileSystem();
 }

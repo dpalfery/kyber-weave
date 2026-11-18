@@ -418,10 +418,19 @@ internal static class SquadCommandComposition
     /// <param name="stateStore">The store the global receipt is read from. Its user paths name the home.</param>
     /// <param name="suppliedPath">The path the operator gave, or null when none was given.</param>
     /// <param name="dryRun">Whether the run only plans, so the home directory is not created.</param>
-    public static string ResolveGlobalAnchorRoot(ISquadStateStore stateStore, string? suppliedPath, bool dryRun)
+    /// <param name="files">The file system the home is probed and created through; null uses the process's own.</param>
+    /// <param name="console">Where the ignored-path warning is written; null uses the process's own console.</param>
+    public static string ResolveGlobalAnchorRoot(
+        ISquadStateStore stateStore,
+        string? suppliedPath,
+        bool dryRun,
+        IWritableFileSystem? files = null,
+        SquadConsole? console = null)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
 
+        IWritableFileSystem fileSystem = files ?? SquadCliServices.ProcessFileSystem();
+        SquadConsole output = console ?? SquadCliServices.ProcessConsole();
         string home = Path.GetFullPath(stateStore.UserPaths.HomeDirectory);
         SquadReceipt? legacy = TryReadLegacySingleRootHomeReceipt(stateStore, home);
         if (legacy is not null)
@@ -429,7 +438,7 @@ internal static class SquadCommandComposition
             if (Path.IsPathFullyQualified(legacy.TargetRoot))
             {
                 if (suppliedPath is not null && !string.Equals(suppliedPath, ".", StringComparison.Ordinal))
-                    WriteLine(
+                    output.WriteLine(
                         $"[yellow]warning:[/] the path '{Markup.Escape(suppliedPath)}' is ignored under --global; " +
                         $"this legacy single-root deployment is anchored at its recorded root '{Markup.Escape(legacy.TargetRoot)}'.");
 
@@ -443,10 +452,10 @@ internal static class SquadCommandComposition
 
         // The home directory exists on every real profile; creating it here only matters for a fake home,
         // and a dry run writes nothing, so it is left alone there.
-        if (!dryRun && !Directory.Exists(home)) Directory.CreateDirectory(home);
+        if (!dryRun && !fileSystem.DirectoryExists(home)) fileSystem.CreateDirectory(home);
 
         if (suppliedPath is not null && !string.Equals(suppliedPath, ".", StringComparison.Ordinal))
-            WriteLine(
+            output.WriteLine(
                 $"[yellow]warning:[/] the path '{Markup.Escape(suppliedPath)}' is ignored under --global; " +
                 $"global state lives beneath the home directory '{Markup.Escape(home)}'.");
 
@@ -531,19 +540,26 @@ internal static class SquadCommandComposition
     ///     writes nothing and only reports what the next non-dry-run invocation will move. The project root is
     ///     optional because global verbs have no project to import.
     /// </remarks>
+    /// <param name="migration">The migration that moves the legacy state.</param>
+    /// <param name="invokingCwd">The directory the command was started from, or null.</param>
+    /// <param name="projectRoot">The project root to import, or null for a global verb.</param>
+    /// <param name="dryRun">Whether the run only plans, so nothing is written.</param>
+    /// <param name="files">The file system the project root is probed through; null uses the process's own.</param>
     public static SquadMigrationReport EnsureStateMigrated(
         ISquadStateMigration migration,
         string? invokingCwd,
         string? projectRoot,
-        bool dryRun)
+        bool dryRun,
+        IFileSystem? files = null)
     {
         ArgumentNullException.ThrowIfNull(migration);
 
+        IFileSystem fileSystem = files ?? SquadCliServices.ProcessFileSystem();
         SquadMigrationReport global = migration.MigrateGlobal(invokingCwd, dryRun);
 
         List<string> imported = [];
         List<string> warnings = [.. global.Warnings];
-        if (projectRoot is not null && Directory.Exists(projectRoot))
+        if (projectRoot is not null && fileSystem.DirectoryExists(projectRoot))
         {
             SquadMigrationReport project = migration.ImportProject(projectRoot, dryRun);
             imported.AddRange(project.ImportedProjects);
