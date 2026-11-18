@@ -2,7 +2,9 @@ using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Review;
+using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -21,13 +23,28 @@ public sealed class ArbiterGuardCompositionTests
     {
         using ServiceProvider services = (ServiceProvider)ArbiterContainer.CreateGuards();
 
-        IHostConfigLoader loader = services.GetRequiredService<IHostConfigLoader>();
+        // The type is the proof: building the shipped repository resolves the tree probe, the file system, the path
+        // resolver and the process environment, so a seam this container forgot fails here instead of inside a
+        // guard's catch-all, which would deny every conductor call.
+        Assert.IsType<FileKyberWeaveConfigRepository>(services.GetRequiredService<IKyberWeaveConfigRepository>());
+        Assert.NotNull(services.GetRequiredService<IHostConfigLoader>());
+    }
 
-        Assert.NotNull(loader);
+    [Fact]
+    public void TheGuardsHostConfigLoaderReadsThroughTheInjectedConfigurationRepository()
+    {
+        const string Root = "/kw/guards-config";
+        FakeKyberWeaveConfigRepository configs = new();
+        configs.WriteRepositoryConfig(Root, "task-prompt-budget: 41041\n");
+        ServiceCollection guarded = new();
+        guarded.AddSingleton<IKyberWeaveConfigRepository>(configs);
+        _ = ArbiterContainer.AddArbiterGuards(guarded);
 
-        // Resolving is not enough on its own: the read proves every seam the repository takes was registered.
-        IKyberWeaveConfigRepository configs = services.GetRequiredService<IKyberWeaveConfigRepository>();
-        Assert.Null(configs.FindConfigPath(Path.Combine(AppContext.BaseDirectory, "no-such-repository")));
+        using ServiceProvider services = guarded.BuildServiceProvider();
+        HostConfigLoadResult loaded = services.GetRequiredService<IHostConfigLoader>().TryLoad(Root);
+
+        Assert.True(loaded.Success, loaded.Error);
+        Assert.Equal(41041, loaded.Config!.TaskPromptBudget);
     }
 
     [Fact]
