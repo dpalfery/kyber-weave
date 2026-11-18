@@ -70,6 +70,24 @@ public sealed class ArbiterStateStoreTests
     }
 
     [Fact]
+    public async Task TheCompleteReadTakesTheAdaptersNewestEightMebibytesWindowLikeTheAdapter()
+    {
+        string directory = "/repo/artifacts/arbiter";
+        string oneMebibyte = new('x', 1024 * 1024 - 1);
+        for (int index = 0; index < 9; index++)
+        {
+            await _log.AppendLineAsync(directory, InFlightLedger.FileName, $"{index}{oneMebibyte}", CancellationToken.None);
+        }
+
+        LogTail tail = _log.ReadComplete(Path.Combine(directory, InFlightLedger.FileName));
+
+        Assert.True(tail.Truncated);
+        Assert.Equal(7, tail.Lines.Count);
+        Assert.StartsWith("2", tail.Lines[0], StringComparison.Ordinal);
+        Assert.StartsWith("8", tail.Lines[^1], StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ALogThatRefusesTheAppendReportsTheStoreUnavailableInsteadOfThrowing()
     {
         _log.AppendFailure = new IOException("the lock was never taken");
