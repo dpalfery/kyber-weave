@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Agents.Model;
@@ -10,11 +11,11 @@ using KyberWeave.Core.Diagnostics;
 namespace KyberWeave.Application.Agents;
 
 /// <summary>Runs the agent governance library over a project root and aggregates what it finds.</summary>
-public sealed class AgentGovernanceService(IFileSystem files) : IAgentGovernanceService
+public sealed class AgentGovernanceService(IFileSystem files, IPathResolver paths, IProcessEnvironment environment) : IAgentGovernanceService
 {
     private const string FilterRefusedCode = "KW-PARSE-000";
 
-    private readonly AgentFileReader _reader = new(files);
+    private readonly AgentFileReader _reader = new(files, paths, environment);
 
     /// <inheritdoc />
     public AgentAnalysis Validate(string path, string? harness)

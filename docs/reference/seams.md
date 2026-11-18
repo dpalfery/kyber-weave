@@ -172,7 +172,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `AgentFileReader` (`Agents/AgentFileReader.cs`) | paths | 4.8 |
 | `MarkdownAgentParser` (`Agents/Parsing/MarkdownAgentParser.cs`) | paths | 2.5 |
 | `TomlAgentParser` (`Agents/Parsing/TomlAgentParser.cs`) | paths | 2.5 |
 | `AgentSpecValidator` (`Agents/Validation/AgentSpecValidator.cs`) | paths | 2.5 |
