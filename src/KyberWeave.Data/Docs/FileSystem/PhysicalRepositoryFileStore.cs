@@ -140,11 +140,11 @@ public sealed class PhysicalRepositoryFileStore : IRepositoryFileStore
 
     /// <inheritdoc />
     public IEnumerable<string> EnumerateContainedFiles(string root, string searchPattern) =>
-        DocsRootPath.EnumerateContainedFiles(root, searchPattern);
+        DocsRootWalk.EnumerateContainedFiles(root, searchPattern);
 
     /// <inheritdoc />
     public bool IsContainedFile(string repoRoot, string relativePath, IEnumerable<string> relativeRoots) =>
-        DocsRootPath.IsContainedFile(repoRoot, relativePath, relativeRoots);
+        DocsRootWalk.IsContainedFile(repoRoot, relativePath, relativeRoots);
 
     /// <inheritdoc />
     public bool IsReparsePoint(string path) => (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;

@@ -11,7 +11,7 @@ namespace KyberWeave.Domain.FileSystem;
 /// process can reach. <c>DocsScaffolder.RequireContained</c> already guards the write side;
 /// this is the read side, shared by the config loader and the <c>--docs-root</c> option so
 /// that neither entry point is the lenient one. The file-system walk that uses these
-/// walk stays in the legacy project, beside the callers that need it.
+/// paths is <c>DocsRootWalk</c> in the Data layer.
 /// </remarks>
 internal static class DocsRootPath
 {

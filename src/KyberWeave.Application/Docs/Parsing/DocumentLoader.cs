@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Parsing;
-using DomainDocsRootPath = KyberWeave.Domain.FileSystem.DocsRootPath;
+using KyberWeave.Domain.FileSystem;
 using Markdig;
 using Markdig.Extensions.AutoIdentifiers;
 using Markdig.Renderers.Html;
@@ -45,10 +45,10 @@ public sealed partial class DocumentLoader : IDocumentSource
     }
 
     /// <summary>
-    ///     Path identity follows the same rules as <see cref="DomainDocsRootPath.PathComparer" />,
+    ///     Path identity follows the same rules as <see cref="DocsRootPath.PathComparer" />,
     ///     so a root the normalizer kept as distinct is not later collapsed when walking files.
     /// </summary>
-    private static StringComparer PathComparer => DomainDocsRootPath.PathComparer;
+    private static StringComparer PathComparer => DocsRootPath.PathComparer;
 
     /// <summary>
     ///     Walks every documentation root in configured order, then folds in the catalog when
@@ -171,7 +171,7 @@ public sealed partial class DocumentLoader : IDocumentSource
         string normalized = relativePath.Replace('\\', '/');
         string absolute =
             Path.GetFullPath(Path.Combine(_repoRoot, normalized.Replace('/', Path.DirectorySeparatorChar)));
-        StringComparison comparison = ReferenceEquals(DomainDocsRootPath.PathComparer, StringComparer.OrdinalIgnoreCase)
+        StringComparison comparison = ReferenceEquals(DocsRootPath.PathComparer, StringComparer.OrdinalIgnoreCase)
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
         if (!absolute.Equals(_repoRoot, comparison)

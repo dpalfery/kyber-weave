@@ -8,6 +8,7 @@ using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Review;
+using KyberWeave.Domain.FileSystem;
 using YamlDotNet.Core;
 
 namespace KyberWeave.Core.Docs.Validation;

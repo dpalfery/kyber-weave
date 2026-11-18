@@ -18,7 +18,7 @@ namespace KyberWeave.Core.Docs.Mcp;
 /// <c>.vscode</c> can be the link and the file behind it perfectly ordinary. Each segment is tested
 /// with <see cref="FileSystemInfo.LinkTarget"/> and never <see cref="FileSystemInfo.ResolveLinkTarget"/>:
 /// resolving opens the link, which is the read this guard exists to refuse. The idiom is the one
-/// <c>DocsRootPath.IsContainedFile</c> and <c>ManagedGlossaryService.RejectLinkedPath</c> already
+/// <c>DocsRootWalk.IsContainedFile</c> and <c>ManagedGlossaryService.RejectLinkedPath</c> already
 /// follow, and it is the reason this is a small type of its own: the read path, the write path and
 /// the removal path must agree about what a link is, and three copies of that answer is three
 /// answers waiting to differ.

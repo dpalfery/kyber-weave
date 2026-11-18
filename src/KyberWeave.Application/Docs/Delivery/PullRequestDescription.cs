@@ -74,7 +74,7 @@ public static partial class PullRequestDescription
             if (match is null)
                 continue;
 
-            if (!DocsRootPath.IsContainedFile(repoRoot, Path.GetRelativePath(repoRoot, match), []))
+            if (!DocsRootWalk.IsContainedFile(repoRoot, Path.GetRelativePath(repoRoot, match), []))
             {
                 unreadable.Add(location);
                 continue;

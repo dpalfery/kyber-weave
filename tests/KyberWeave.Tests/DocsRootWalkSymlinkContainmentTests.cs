@@ -4,11 +4,11 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// <see cref="DocsRootPath.EnumerateContainedFiles"/> never descends into symbolic links,
+/// <see cref="DocsRootWalk.EnumerateContainedFiles"/> never descends into symbolic links,
 /// whether they escape the root or point within it, ensuring no symlink encountered during
 /// a walk causes an access attempt to a path outside the directory being listed.
 /// </summary>
-public sealed class DocsRootPathSymlinkContainmentTests : IDisposable
+public sealed class DocsRootWalkSymlinkContainmentTests : IDisposable
 {
     private readonly TempDirectory _root = new();
     private readonly TempDirectory _outside = new();
@@ -42,7 +42,7 @@ public sealed class DocsRootPathSymlinkContainmentTests : IDisposable
         Directory.CreateSymbolicLink(symlinkPath, _outside.Path);
 
         // Act
-        IEnumerable<string> files = DocsRootPath.EnumerateContainedFiles(_root.Path, "*.md");
+        IEnumerable<string> files = DocsRootWalk.EnumerateContainedFiles(_root.Path, "*.md");
 
         // Assert
         List<string> fileList = files.ToList();
@@ -71,7 +71,7 @@ public sealed class DocsRootPathSymlinkContainmentTests : IDisposable
         File.CreateSymbolicLink(symlinkFile, outsideMarkdownFile);
 
         // Act
-        IEnumerable<string> files = DocsRootPath.EnumerateContainedFiles(_root.Path, "*.md");
+        IEnumerable<string> files = DocsRootWalk.EnumerateContainedFiles(_root.Path, "*.md");
 
         // Assert
         List<string> fileList = files.ToList();
@@ -103,7 +103,7 @@ public sealed class DocsRootPathSymlinkContainmentTests : IDisposable
         File.CreateSymbolicLink(symlinkFile, targetFile);
 
         // Act
-        IEnumerable<string> files = DocsRootPath.EnumerateContainedFiles(_root.Path, "*.md");
+        IEnumerable<string> files = DocsRootWalk.EnumerateContainedFiles(_root.Path, "*.md");
 
         // Assert
         List<string> fileList = files.ToList();
@@ -135,7 +135,7 @@ public sealed class DocsRootPathSymlinkContainmentTests : IDisposable
             _outside.Path);
 
         // Act
-        IEnumerable<string> files = DocsRootPath.EnumerateContainedFiles(_root.Path, "*.md");
+        IEnumerable<string> files = DocsRootWalk.EnumerateContainedFiles(_root.Path, "*.md");
 
         // Assert
         List<string> fileList = files.ToList();
@@ -161,7 +161,7 @@ public sealed class DocsRootPathSymlinkContainmentTests : IDisposable
         string dotFile = Path.Combine(_root.Path, ".notes.md");
         File.WriteAllText(dotFile, "# Notes");
 
-        List<string> files = DocsRootPath.EnumerateContainedFiles(_root.Path, "*.md").ToList();
+        List<string> files = DocsRootWalk.EnumerateContainedFiles(_root.Path, "*.md").ToList();
 
         Assert.Equal(2, files.Count);
         Assert.Contains(nestedFile, files);
