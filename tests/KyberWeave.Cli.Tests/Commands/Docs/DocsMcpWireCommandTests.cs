@@ -1,17 +1,17 @@
-using KyberWeave.Tests.Configuration;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Docs.Mcp;
-using KyberWeave.Data.Hooks;
-using KyberWeave.Data.Host;
-using KyberWeave.Data.Paths;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests;
+using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console.Testing;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Cli.Tests.Commands.Docs;
 
 /// <summary>
 /// The <c>docs mcp-wire</c> and <c>docs mcp-unwire</c> surface (R5.1–R5.3, R5.10, R6.2): who is
@@ -42,7 +42,7 @@ namespace KyberWeave.Tests;
 /// preview that writes not one byte, receipt included (R5.3, R5.10).
 /// </para>
 /// </remarks>
-public sealed class DocsMcpWireCommandTests : IDisposable
+public sealed class DocsMcpWireCommandTests
 {
     private const string ServerName = "kw-docs";
 
@@ -91,19 +91,27 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     /// </summary>
     private const string EscapeSequence = "\u001b[31m";
 
-    private readonly TempDirectory _root = new();
+    private readonly MemoryDocsHost _host = new(workingFolderName: "elsewhere");
 
     public DocsMcpWireCommandTests()
     {
-        Directory.CreateDirectory(Repo);
-        Directory.CreateDirectory(Bin);
-        McpWiringFixture.WriteExecutable(Bin, FirstPartyBinaryName);
+        _host.Files.CreateDirectory(Repo);
+        _host.Files.CreateDirectory(Bin);
+        _host.WriteExecutable(Bin, FirstPartyBinaryName);
     }
 
-    private string Repo => Path.Combine(_root.Path, "repo");
+    private IServiceProvider? _container;
+
+    private IServiceProvider Container => _container ??= _host.Services();
+
+    private string Repo => _host.Repo;
+
+    private IMcpWiringService Wiring => Container.GetRequiredService<IMcpWiringService>();
+
+    private IMcpWiringReceipts Receipts => Container.GetRequiredService<IMcpWiringReceipts>();
 
     /// <summary>Where the fake launch binary lives: never on <c>PATH</c>, always declared by path.</summary>
-    private string Bin => Path.Combine(_root.Path, "bin");
+    private string Bin => Path.Combine(_host.Files.Root, "bin");
 
     /// <summary>
     /// The declared command. A path rather than a name, so the declaration resolves on every machine
@@ -118,8 +126,6 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     private string ReceiptPath =>
         Path.Combine(Repo, ".kyber-weave", "receipts", "mcp-wiring.json");
 
-    public void Dispose() => _root.Dispose();
-
     /// <summary>
     /// With no target selected the command is a preview: it reports what it would do, writes nothing —
     /// not the configuration file and not the receipt — and exits 0, because refusing to write is the
@@ -129,15 +135,15 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     public void NoTargetPreviewWritesNothingAndExitsZero()
     {
         WriteDeclaration();
-        Directory.CreateDirectory(Path.Combine(Repo, ".factory"));
+        _host.Files.CreateDirectory(Path.Combine(Repo, ".factory"));
 
         CapturedConsoleExecution<int> execution = Wire(NoTarget);
 
         Assert.Equal(0, execution.Result);
         Assert.False(
-            File.Exists(Path.Combine(Repo, ".factory", "mcp.json")),
+            _host.Files.FileExists(Path.Combine(Repo, ".factory", "mcp.json")),
             "a preview must not create the configuration file it reports on");
-        Assert.False(File.Exists(ReceiptPath), "a preview must not write the receipt");
+        Assert.False(_host.Files.FileExists(ReceiptPath), "a preview must not write the receipt");
         Assert.Contains(Factory, execution.Output, StringComparison.Ordinal);
     }
 
@@ -162,8 +168,8 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.Contains(ClaudeCode, execution.Output, StringComparison.Ordinal);
         Assert.Contains(OpenCode, execution.Output, StringComparison.Ordinal);
         Assert.Contains("mcp-wire", execution.Output, StringComparison.Ordinal);
-        Assert.False(File.Exists(InRepo(".mcp.json")));
-        Assert.False(File.Exists(InRepo("opencode.json")));
+        Assert.False(_host.Files.FileExists(InRepo(".mcp.json")));
+        Assert.False(_host.Files.FileExists(InRepo("opencode.json")));
     }
 
     /// <summary>
@@ -173,7 +179,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     [Fact]
     public void APreviewWithNoDeclarationStillNamesAnUnprovenTomlLeftover()
     {
-        McpWiringFixture.WriteText(
+        _host.WriteText(
             Repo,
             ".codex/config.toml",
             """
@@ -206,7 +212,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     [Fact]
     public void APreviewDoesNotOfferMigrateForAConflictMigrateWouldRefuse()
     {
-        McpWiringFixture.WriteText(
+        _host.WriteText(
             Repo,
             ".mcp.json",
             """
@@ -242,9 +248,9 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.Equal(0, execution.Result);
 
         string path = Path.Combine(Repo, ".factory", "mcp.json");
-        Assert.True(File.Exists(path), "a named target must be written");
+        Assert.True(_host.Files.FileExists(path), "a named target must be written");
 
-        using (JsonDocument document = JsonDocument.Parse(File.ReadAllText(path)))
+        using (JsonDocument document = JsonDocument.Parse(_host.Files.ReadAllText(path)))
         {
             JsonElement servers = document.RootElement.GetProperty("mcpServers");
             Assert.True(
@@ -253,8 +259,8 @@ public sealed class DocsMcpWireCommandTests : IDisposable
             Assert.Equal(BinaryPath, ExecutableOf(entry));
         }
 
-        Assert.True(File.Exists(ReceiptPath), "a real run records what it wrote");
-        Assert.NotNull(McpWiringTestServices.Receipts.Load(Repo).Find(".factory/mcp.json"));
+        Assert.True(_host.Files.FileExists(ReceiptPath), "a real run records what it wrote");
+        Assert.NotNull(Receipts.Load(Repo).Find(".factory/mcp.json"));
     }
 
     /// <summary>
@@ -280,15 +286,15 @@ public sealed class DocsMcpWireCommandTests : IDisposable
                     }
                 }
             });
-        byte[] before = File.ReadAllBytes(Path.Combine(Repo, ".vscode", "mcp.json"));
+        byte[] before = _host.Files.ReadAllBytes(Path.Combine(Repo, ".vscode", "mcp.json"));
 
         CapturedConsoleExecution<int> execution = Wire(VsCode);
 
         Assert.Equal(1, execution.Result);
         Assert.Contains(RefusalCode, execution.Output, StringComparison.Ordinal);
         Assert.Contains("mcp.json", execution.Output, StringComparison.Ordinal);
-        Assert.Equal(before, File.ReadAllBytes(Path.Combine(Repo, ".vscode", "mcp.json")));
-        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(".vscode/mcp.json"));
+        Assert.Equal(before, _host.Files.ReadAllBytes(Path.Combine(Repo, ".vscode", "mcp.json")));
+        Assert.Null(Receipts.Load(Repo).Find(".vscode/mcp.json"));
     }
 
     /// <summary>
@@ -302,14 +308,14 @@ public sealed class DocsMcpWireCommandTests : IDisposable
 
         CapturedConsoleExecution<int> dryRun = Wire(Factory, dryRun: true);
 
-        Assert.False(File.Exists(Path.Combine(Repo, ".factory", "mcp.json")), "a dry run writes nothing");
-        Assert.False(File.Exists(ReceiptPath), "a dry run writes no receipt, not even one");
+        Assert.False(_host.Files.FileExists(Path.Combine(Repo, ".factory", "mcp.json")), "a dry run writes nothing");
+        Assert.False(_host.Files.FileExists(ReceiptPath), "a dry run writes no receipt, not even one");
         Assert.Contains("mcp.json", dryRun.Output, StringComparison.Ordinal);
 
         CapturedConsoleExecution<int> real = Wire(Factory);
 
         Assert.Equal(real.Result, dryRun.Result);
-        Assert.True(File.Exists(Path.Combine(Repo, ".factory", "mcp.json")));
+        Assert.True(_host.Files.FileExists(Path.Combine(Repo, ".factory", "mcp.json")));
     }
 
     /// <summary>
@@ -329,14 +335,14 @@ public sealed class DocsMcpWireCommandTests : IDisposable
                     [ServerName] = new JsonObject { ["command"] = "kyber-weave-mcp-other" }
                 }
             });
-        byte[] before = File.ReadAllBytes(Path.Combine(Repo, ".vscode", "mcp.json"));
+        byte[] before = _host.Files.ReadAllBytes(Path.Combine(Repo, ".vscode", "mcp.json"));
 
         CapturedConsoleExecution<int> execution = Wire(VsCode, dryRun: true);
 
         Assert.Equal(1, execution.Result);
         Assert.Contains(RefusalCode, execution.Output, StringComparison.Ordinal);
-        Assert.Equal(before, File.ReadAllBytes(Path.Combine(Repo, ".vscode", "mcp.json")));
-        Assert.False(File.Exists(ReceiptPath));
+        Assert.Equal(before, _host.Files.ReadAllBytes(Path.Combine(Repo, ".vscode", "mcp.json")));
+        Assert.False(_host.Files.FileExists(ReceiptPath));
     }
 
     /// <summary>
@@ -348,20 +354,20 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     {
         WriteDeclaration();
         byte[] original = Encoding.UTF8.GetBytes("""{"mcpServers": {"other": {"command": "other-mcp"}}}""");
-        McpWiringFixture.WriteBytes(Repo, ".factory/mcp.json", original);
+        _host.WriteBytes(Repo, ".factory/mcp.json", original);
 
         CapturedConsoleExecution<int> wire = Wire($"{Factory},{ClaudeCode}");
         Assert.Equal(0, wire.Result);
-        Assert.True(File.Exists(Path.Combine(Repo, ".mcp.json")), "claude-code must be created");
-        Assert.NotNull(McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json"));
+        Assert.True(_host.Files.FileExists(Path.Combine(Repo, ".mcp.json")), "claude-code must be created");
+        Assert.NotNull(Receipts.Load(Repo).Find(".mcp.json"));
 
         CapturedConsoleExecution<int> unwire = Unwire($"{Factory},{ClaudeCode}");
 
         Assert.Equal(0, unwire.Result);
-        Assert.Equal(original, File.ReadAllBytes(Path.Combine(Repo, ".factory", "mcp.json")));
-        Assert.False(File.Exists(Path.Combine(Repo, ".mcp.json")), "a file the repair created is deleted");
+        Assert.Equal(original, _host.Files.ReadAllBytes(Path.Combine(Repo, ".factory", "mcp.json")));
+        Assert.False(_host.Files.FileExists(Path.Combine(Repo, ".mcp.json")), "a file the repair created is deleted");
 
-        McpWiringReceipt receipt = McpWiringTestServices.Receipts.Load(Repo);
+        McpWiringReceipt receipt = Receipts.Load(Repo);
         Assert.Null(receipt.Find(".factory/mcp.json"));
         Assert.Null(receipt.Find(".mcp.json"));
     }
@@ -385,15 +391,15 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.Equal(0, Wire(Factory).Result);
 
         string path = Path.Combine(Repo, ".factory", "mcp.json");
-        string handEdited = File.ReadAllText(path) + "\n// edited by hand after the repair\n";
-        File.WriteAllText(path, handEdited);
+        string handEdited = _host.Files.ReadAllText(path) + "\n// edited by hand after the repair\n";
+        _host.Files.WriteAllText(path, handEdited);
 
         CapturedConsoleExecution<int> unwire = Unwire(Factory);
 
         Assert.Equal(1, unwire.Result);
         Assert.Contains(DriftCode, unwire.Output, StringComparison.Ordinal);
         Assert.Contains("mcp.json", unwire.Output, StringComparison.Ordinal);
-        Assert.Contains("edited by hand after the repair", File.ReadAllText(path), StringComparison.Ordinal);
+        Assert.Contains("edited by hand after the repair", _host.Files.ReadAllText(path), StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -411,8 +417,8 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.Equal(1, execution.Result);
         Assert.Contains(RefusalCode, execution.Output, StringComparison.Ordinal);
         Assert.Contains($"[mcp_servers.{ServerName}]", execution.Output, StringComparison.Ordinal);
-        Assert.False(File.Exists(Path.Combine(Repo, ".codex", "config.toml")));
-        Assert.False(File.Exists(ReceiptPath));
+        Assert.False(_host.Files.FileExists(Path.Combine(Repo, ".codex", "config.toml")));
+        Assert.False(_host.Files.FileExists(ReceiptPath));
     }
 
     /// <summary>
@@ -439,13 +445,13 @@ public sealed class DocsMcpWireCommandTests : IDisposable
                     }
                 }
             });
-        byte[] before = File.ReadAllBytes(Path.Combine(Repo, ".mcp.json"));
+        byte[] before = _host.Files.ReadAllBytes(Path.Combine(Repo, ".mcp.json"));
 
         CapturedConsoleExecution<int> execution = Wire(ClaudeCode);
 
         Assert.Equal(0, execution.Result);
-        Assert.Equal(before, File.ReadAllBytes(Path.Combine(Repo, ".mcp.json")));
-        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json"));
+        Assert.Equal(before, _host.Files.ReadAllBytes(Path.Combine(Repo, ".mcp.json")));
+        Assert.Null(Receipts.Load(Repo).Find(".mcp.json"));
         Assert.Contains(ClaudeCode, execution.Output, StringComparison.Ordinal);
     }
 
@@ -470,9 +476,9 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.Equal(0, execution.Result);
 
         string path = InRepo(configFile);
-        Assert.True(File.Exists(path), $"{harness} must be created when it is named");
+        Assert.True(_host.Files.FileExists(path), $"{harness} must be created when it is named");
 
-        using (JsonDocument document = JsonDocument.Parse(File.ReadAllText(path)))
+        using (JsonDocument document = JsonDocument.Parse(_host.Files.ReadAllText(path)))
         {
             JsonElement servers = document.RootElement.GetProperty(serverKey);
             Assert.True(
@@ -481,7 +487,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
             Assert.Equal(BinaryPath, ExecutableOf(entry));
         }
 
-        Assert.NotNull(McpWiringTestServices.Receipts.Load(Repo).Find(configFile));
+        Assert.NotNull(Receipts.Load(Repo).Find(configFile));
     }
 
     /// <summary>
@@ -498,8 +504,8 @@ public sealed class DocsMcpWireCommandTests : IDisposable
 
         Assert.Equal(1, execution.Result);
         Assert.Contains(ConfigErrorCode, execution.Output, StringComparison.Ordinal);
-        Assert.False(File.Exists(Path.Combine(Repo, ".factory", "mcp.json")));
-        Assert.False(File.Exists(ReceiptPath));
+        Assert.False(_host.Files.FileExists(Path.Combine(Repo, ".factory", "mcp.json")));
+        Assert.False(_host.Files.FileExists(ReceiptPath));
     }
 
     /// <summary>
@@ -518,8 +524,8 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.Equal(1, execution.Result);
         Assert.Contains(RefusalCode, execution.Output, StringComparison.Ordinal);
         Assert.Contains("claude", execution.Output, StringComparison.Ordinal);
-        Assert.False(File.Exists(InRepo(".mcp.json")));
-        Assert.False(File.Exists(ReceiptPath));
+        Assert.False(_host.Files.FileExists(InRepo(".mcp.json")));
+        Assert.False(_host.Files.FileExists(ReceiptPath));
     }
 
     /// <summary>
@@ -540,7 +546,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         CapturedConsoleExecution<int> dryRun = Wire(Factory, dryRun: true);
 
         Assert.Equal(0, dryRun.Result);
-        Assert.False(File.Exists(InRepo(".factory/mcp.json")), "a dry run writes nothing");
+        Assert.False(_host.Files.FileExists(InRepo(".factory/mcp.json")), "a dry run writes nothing");
         Assert.True(
             dryRun.Output.Contains(ServerName, StringComparison.Ordinal)
                 && dryRun.Output.Contains(SecondServerName, StringComparison.Ordinal),
@@ -576,14 +582,14 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.Equal(0, first.Result);
 
         string path = InRepo(".vscode/mcp.json");
-        Assert.True(File.Exists(path), $"the first run wrote no {path}. Output:{Environment.NewLine}{first.Output}");
-        byte[] written = File.ReadAllBytes(path);
+        Assert.True(_host.Files.FileExists(path), $"the first run wrote no {path}. Output:{Environment.NewLine}{first.Output}");
+        byte[] written = _host.Files.ReadAllBytes(path);
 
         CapturedConsoleExecution<int> second = Wire(VsCode);
 
         Assert.Equal(0, second.Result);
         Assert.DoesNotContain(RefusalCode, second.Output, StringComparison.Ordinal);
-        Assert.Equal(written, File.ReadAllBytes(path));
+        Assert.Equal(written, _host.Files.ReadAllBytes(path));
     }
 
     /// <summary>
@@ -600,8 +606,8 @@ public sealed class DocsMcpWireCommandTests : IDisposable
 
         Assert.Equal(0, execution.Result);
         Assert.Contains("nothing to wire", execution.Output, StringComparison.Ordinal);
-        Assert.False(File.Exists(Path.Combine(Repo, ".factory", "mcp.json")));
-        Assert.False(File.Exists(ReceiptPath));
+        Assert.False(_host.Files.FileExists(Path.Combine(Repo, ".factory", "mcp.json")));
+        Assert.False(_host.Files.FileExists(ReceiptPath));
     }
 
     /// <summary>
@@ -708,7 +714,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     [Fact]
     public void ARepositoryRelativeLaunchCommandResolvesAgainstTheRepositoryRoot()
     {
-        McpWiringFixture.WriteExecutable(Path.Combine(Repo, "tools"), "serve-mcp");
+        _host.WriteExecutable(Path.Combine(Repo, "tools"), "serve-mcp");
         Write(
             ".kyber-weave/kyber-weave.yml",
             "mcp:\n"
@@ -720,7 +726,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
 
         Assert.NotEqual(
             Path.GetFullPath(Repo),
-            Path.GetFullPath(Directory.GetCurrentDirectory()));
+            Path.GetFullPath(_host.Environment.CurrentDirectory));
 
         CapturedConsoleExecution<int> execution = Wire(ClaudeCode);
 
@@ -728,10 +734,10 @@ public sealed class DocsMcpWireCommandTests : IDisposable
 
         string path = InRepo(".mcp.json");
         Assert.True(
-            File.Exists(path),
+            _host.Files.FileExists(path),
             $"a command relative to the repository root was not resolved against it. Output:{Environment.NewLine}{execution.Output}");
 
-        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+        using JsonDocument document = JsonDocument.Parse(_host.Files.ReadAllText(path));
         Assert.True(
             document.RootElement
                 .GetProperty("mcpServers")
@@ -823,7 +829,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     public void ARestoreIsLabelledRestoringRatherThanRemoving()
     {
         WriteDeclaration();
-        McpWiringFixture.WriteBytes(
+        _host.WriteBytes(
             Repo,
             ".factory/mcp.json",
             Encoding.UTF8.GetBytes("""{"mcpServers": {"other": {"command": "other-mcp"}}}"""));
@@ -929,15 +935,15 @@ public sealed class DocsMcpWireCommandTests : IDisposable
                     }
                 }
             });
-        byte[] before = File.ReadAllBytes(InRepo(".factory/mcp.json"));
+        byte[] before = _host.Files.ReadAllBytes(InRepo(".factory/mcp.json"));
 
         CapturedConsoleExecution<int> execution = Wire(Factory);
 
         Assert.Equal(1, execution.Result);
         Assert.Contains(RefusalCode, execution.Output, StringComparison.Ordinal);
         Assert.Contains("docs mcp-migrate", execution.Output, StringComparison.Ordinal);
-        Assert.Equal(before, File.ReadAllBytes(InRepo(".factory/mcp.json")));
-        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(".factory/mcp.json"));
+        Assert.Equal(before, _host.Files.ReadAllBytes(InRepo(".factory/mcp.json")));
+        Assert.Null(Receipts.Load(Repo).Find(".factory/mcp.json"));
     }
 
     /// <summary>
@@ -962,34 +968,34 @@ public sealed class DocsMcpWireCommandTests : IDisposable
                     }
                 }
             });
-        byte[] before = File.ReadAllBytes(InRepo(".mcp.json"));
+        byte[] before = _host.Files.ReadAllBytes(InRepo(".mcp.json"));
 
         CapturedConsoleExecution<int> execution = Wire(NoTarget);
 
         Assert.Equal(0, execution.Result);
         Assert.Contains("KW-MCP-WIRE-007", execution.Output, StringComparison.Ordinal);
         Assert.Contains("docs mcp-migrate", execution.Output, StringComparison.Ordinal);
-        Assert.Equal(before, File.ReadAllBytes(InRepo(".mcp.json")));
-        Assert.False(File.Exists(ReceiptPath), "a preview must not write the receipt");
+        Assert.Equal(before, _host.Files.ReadAllBytes(InRepo(".mcp.json")));
+        Assert.False(_host.Files.FileExists(ReceiptPath), "a preview must not write the receipt");
     }
 
     private CapturedConsoleExecution<int> Wire(string targets, bool dryRun = false) =>
         Run(console => new DocsMcpWireCommand(
-            McpWiringTestServices.Wiring,
-            ConfigFileReader.Repository,
-            new PhysicalFileSystem(),
-            new PhysicalPathResolver(new PhysicalFileSystem()),
-            new ProcessEnvironment(),
+            Wiring,
+            Container.GetRequiredService<IKyberWeaveConfigRepository>(),
+            _host.Files,
+            _host.Paths,
+            _host.Environment,
             console).Execute(
             null!,
             new DocsMcpWireSettings { Path = Repo, Target = targets, DryRun = dryRun }));
 
     private CapturedConsoleExecution<int> Unwire(string targets) =>
         Run(console => new DocsMcpUnwireCommand(
-            McpWiringTestServices.Wiring,
-            McpWiringTestServices.Receipts,
-            new PhysicalPathResolver(new PhysicalFileSystem()),
-            new ProcessEnvironment(),
+            Wiring,
+            Receipts,
+            _host.Paths,
+            _host.Environment,
             console).Execute(
             null!,
             new DocsMcpUnwireSettings { Path = Repo, Target = targets }));
@@ -1026,7 +1032,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     /// </summary>
     private void WriteTwoServerDeclaration()
     {
-        McpWiringFixture.WriteExecutable(Bin, SecondBinaryName);
+        _host.WriteExecutable(Bin, SecondBinaryName);
 
         Write(
             ".kyber-weave/kyber-weave.yml",
@@ -1048,7 +1054,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Write(relativePath, document.ToJsonString());
 
     private void Write(string relativePath, string content) =>
-        McpWiringFixture.WriteText(Repo, relativePath, content);
+        _host.WriteText(Repo, relativePath, content);
 
 
     /// <summary>

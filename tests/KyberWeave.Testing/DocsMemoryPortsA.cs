@@ -22,14 +22,15 @@ internal sealed class MemoryDocsHost
 {
     /// <summary>Creates a host whose repository folder is empty.</summary>
     /// <param name="variables">Environment variables the fake environment answers; none by default.</param>
-    public MemoryDocsHost(IReadOnlyDictionary<string, string?>? variables = null)
+    /// <param name="workingFolderName">A folder under the root the process is said to have started in; the repository folder when null.</param>
+    public MemoryDocsHost(IReadOnlyDictionary<string, string?>? variables = null, string? workingFolderName = null)
     {
         Files = new InMemoryFileSystem(Clock);
         Paths = new FakePathResolver(Files);
         Repo = Path.Combine(Files.Root, "repo");
         Home = Path.Combine(Files.Root, "home");
         Environment = new FakeProcessEnvironment(
-            currentDirectory: Repo,
+            currentDirectory: workingFolderName is null ? Repo : Path.Combine(Files.Root, workingFolderName),
             homeDirectory: Home,
             tempDirectory: Path.Combine(Files.Root, "tmp"),
             isFileSystemCaseInsensitive: !Files.CaseSensitive,
@@ -103,6 +104,39 @@ internal sealed class MemoryDocsHost
     public void WriteBytesInRepo(string relativePath, byte[] content)
     {
         string path = InRepo(relativePath);
+        Files.CreateDirectory(Path.GetDirectoryName(path)!);
+        Files.WriteAllBytes(path, content);
+    }
+
+    /// <summary>
+    /// Writes an empty launch binary the resolver can find, as a file: the resolver is a file-existence check, so an
+    /// empty file proves no launch happened. On Windows the name carries the extension a path search looks for.
+    /// </summary>
+    /// <param name="directory">The folder to write into.</param>
+    /// <param name="name">The binary's name without extension.</param>
+    /// <returns>The path written.</returns>
+    public string WriteExecutable(string directory, string name)
+    {
+        Files.CreateDirectory(directory);
+        string path = Path.Combine(directory, OperatingSystem.IsWindows() ? name + ".exe" : name);
+        Files.WriteAllText(path, string.Empty);
+        return path;
+    }
+
+    /// <summary>Writes UTF-8 text at a path relative to <paramref name="root"/>, creating its folders.</summary>
+    /// <param name="root">The folder the path is relative to.</param>
+    /// <param name="relativePath">The slash-separated path.</param>
+    /// <param name="content">The text.</param>
+    public void WriteText(string root, string relativePath, string content) =>
+        WriteBytes(root, relativePath, System.Text.Encoding.UTF8.GetBytes(content));
+
+    /// <summary>Writes bytes at a path relative to <paramref name="root"/>, creating its folders.</summary>
+    /// <param name="root">The folder the path is relative to.</param>
+    /// <param name="relativePath">The slash-separated path.</param>
+    /// <param name="content">The bytes.</param>
+    public void WriteBytes(string root, string relativePath, byte[] content)
+    {
+        string path = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Files.CreateDirectory(Path.GetDirectoryName(path)!);
         Files.WriteAllBytes(path, content);
     }
