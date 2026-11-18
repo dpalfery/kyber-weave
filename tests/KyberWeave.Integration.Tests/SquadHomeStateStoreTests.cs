@@ -364,7 +364,7 @@ public sealed class SquadHomeStateStoreTests
         SquadPhysicalRootIdentity.Resolve(path, SquadFileSystemPathSemantics.Instance).PhysicalPath;
 
     private static SquadStateStore StoreFor(string home) =>
-        new(new HomeOnlyUserPaths(home));
+        new(FakeSquadUserPaths.FromHome(home));
 
     /// <summary>
     /// Compares two locations by where they physically are. A path may be spelled through a symlinked
@@ -485,14 +485,6 @@ public sealed class SquadHomeStateStoreTests
 
     private static string Digest(string content) =>
         Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(content)));
-
-    private sealed class HomeOnlyUserPaths(string homeDirectory) : ISquadUserPaths
-    {
-        public string ApplicationDataDirectory { get; } =
-            Path.Combine(Path.GetDirectoryName(homeDirectory)!, "application-data");
-
-        public string HomeDirectory { get; } = homeDirectory;
-    }
 
     private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
     {

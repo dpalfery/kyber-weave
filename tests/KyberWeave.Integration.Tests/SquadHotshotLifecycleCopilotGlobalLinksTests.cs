@@ -119,7 +119,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         PreparedCopilotGlobal prepared = PreparedSquadInstalls.Get(RecipeKey, () => BuildTemplate(RecipeKey));
         string home = Path.Combine(_temp.Path, name + "-home");
         Directory.CreateDirectory(home);
-        FakeUserPaths userPaths = new(Path.Combine(_temp.Path, name + "-user"));
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, name + "-user"));
         SquadGlobalRoots globalRoots = new(_ => null, home);
         string root = globalRoots.ResolveGlobalRoot(SquadTarget.Copilot);
         prepared.CopyInto(home, root, userPaths);
@@ -147,7 +147,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         {
             string home = Path.Combine(directory.Path, "home");
             Directory.CreateDirectory(home);
-            FakeUserPaths userPaths = new(Path.Combine(directory.Path, "user"));
+            FakeSquadUserPaths userPaths = new(Path.Combine(directory.Path, "user"));
             SquadGlobalRoots globalRoots = new(_ => null, home);
             SquadStateStore stateStore = new(userPaths);
             using CorpusSquadReleaseSource releaseSource = new();
@@ -226,11 +226,4 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         SquadStateStore StateStore,
         string RootForwardSlashed,
         string ConductorFile);
-
-    private sealed class FakeUserPaths(string appDataDirectory) : ISquadUserPaths
-    {
-        public string ApplicationDataDirectory { get; } = appDataDirectory;
-
-        public string HomeDirectory => Path.Combine(ApplicationDataDirectory, "home");
-    }
 }

@@ -7,6 +7,7 @@ using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -306,13 +307,6 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
             Entries: [new SquadOwnedBlockEntry("/hooks/PreToolUse/0", ZeroDigest)]);
 
     /// <summary>User paths whose home is the temp home, so the store's home-level state lands beside the doctor's reads.</summary>
-    private sealed class TempHomeUserPaths(string homeDirectory, string applicationDataDirectory) : ISquadUserPaths
-    {
-        public string ApplicationDataDirectory { get; } = applicationDataDirectory;
-
-        public string HomeDirectory { get; } = homeDirectory;
-    }
-
     private static SquadOwnedFile OwnedFile(string relativePath, string target) =>
         new(relativePath, ZeroDigest, target, Adopted: false);
 
@@ -325,7 +319,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     private void WriteGlobalReceipt(IReadOnlyList<SquadOwnedFile> files, IReadOnlyList<SquadOwnedBlock> blocks)
     {
         SquadStateStore store = SquadHostDefaults.ResolveStateStore(
-            new TempHomeUserPaths(_home.Path, _userPaths.Path));
+            new FakeSquadUserPaths(_userPaths.Path, _home.Path));
         string path = store.ResolveReceiptPath(_home.Path, SquadDeploymentScope.Global);
         string schema = blocks.Count > 0 ? "kyber-squad.receipt/v3" : "kyber-squad.receipt/v1";
         WriteFile(

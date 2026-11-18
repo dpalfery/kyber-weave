@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -815,20 +816,12 @@ public sealed class SquadStateMigrationTests
         string ApplicationData,
         SquadStateStore Store,
         SquadStateMigration Migration);
-
-    private sealed class FixtureUserPaths(string homeDirectory, string applicationDataDirectory) : ISquadUserPaths
-    {
-        public string HomeDirectory { get; } = homeDirectory;
-
-        public string ApplicationDataDirectory { get; } = applicationDataDirectory;
-    }
-
     private static MigrationScenario CreateScenario(TempDirectory fixture)
     {
         string home = Path.Combine(fixture.Path, "home");
         string applicationData = Path.Combine(fixture.Path, "application-data");
         Directory.CreateDirectory(home);
-        FixtureUserPaths userPaths = new(home, applicationData);
+        FakeSquadUserPaths userPaths = new(applicationData, home);
         SquadStateStore store = new(userPaths);
         return new MigrationScenario(home, applicationData, store, new SquadStateMigration(store, userPaths));
     }

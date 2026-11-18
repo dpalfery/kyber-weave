@@ -379,7 +379,7 @@ public sealed class SquadProjectRegistryTests
             .ToArray();
 
     private static SquadStateStore StoreFor(string home) =>
-        new(new HomeOnlyUserPaths(home));
+        new(FakeSquadUserPaths.FromHome(home));
 
     /// <summary>
     /// A project install renders a codex agent and a warp reviewer. A global install renders relative
@@ -424,14 +424,6 @@ public sealed class SquadProjectRegistryTests
 
     private static string Digest(string content) =>
         Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(content)));
-
-    private sealed class HomeOnlyUserPaths(string homeDirectory) : ISquadUserPaths
-    {
-        public string ApplicationDataDirectory { get; } =
-            Path.Combine(Path.GetDirectoryName(homeDirectory)!, "application-data");
-
-        public string HomeDirectory { get; } = homeDirectory;
-    }
 
     private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
     {

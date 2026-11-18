@@ -23,7 +23,7 @@ internal sealed class SquadHomeHarness : IDisposable
         Directory.CreateDirectory(ApplicationData);
         Directory.CreateDirectory(Home);
         Directory.CreateDirectory(GlobalRootsDirectory);
-        UserPaths = new HomeUserPaths(ApplicationData, Home);
+        UserPaths = FakeSquadUserPaths.UnderTemp(ApplicationData, Home);
         Store = new SquadStateStore(UserPaths);
         ReleaseSource = new SyntheticValidSquadReleaseSource();
         GlobalRoots = new TempGlobalRoots(GlobalRootsDirectory);
@@ -37,7 +37,7 @@ internal sealed class SquadHomeHarness : IDisposable
 
     public string GlobalRootsDirectory { get; }
 
-    public HomeUserPaths UserPaths { get; }
+    public FakeSquadUserPaths UserPaths { get; }
 
     public SquadStateStore Store { get; }
 
@@ -127,30 +127,6 @@ internal sealed class SquadHomeHarness : IDisposable
         public void Dispose()
         {
             File.SetUnixFileMode(path, mode);
-        }
-    }
-
-    internal sealed class HomeUserPaths : ISquadUserPaths
-    {
-        public HomeUserPaths(string applicationDataDirectory, string homeDirectory)
-        {
-            RequireUnderTemp(applicationDataDirectory);
-            RequireUnderTemp(homeDirectory);
-            ApplicationDataDirectory = applicationDataDirectory;
-            HomeDirectory = homeDirectory;
-        }
-
-        public string ApplicationDataDirectory { get; }
-
-        public string HomeDirectory { get; }
-
-        private static void RequireUnderTemp(string path)
-        {
-            string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
-            string temp = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
-            if (!full.StartsWith(temp + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-                throw new InvalidOperationException(
-                    $"Squad CLI tests must keep every fake home and state root beneath the temp directory; got '{full}'.");
         }
     }
 

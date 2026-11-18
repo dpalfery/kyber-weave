@@ -213,7 +213,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "no-receipt-project");
         Directory.CreateDirectory(targetDir);
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadStatusCommand command = SquadTestCommands.Status(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
@@ -234,7 +234,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "valid-project");
         Directory.CreateDirectory(targetDir);
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new SquadStateStore(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
@@ -262,7 +262,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "drifted-project");
         Directory.CreateDirectory(targetDir);
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new SquadStateStore(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
@@ -295,7 +295,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "missing-file-project");
         Directory.CreateDirectory(targetDir);
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new SquadStateStore(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
@@ -328,7 +328,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string globalRoot = Path.Combine(_temp.Path, "global-target");
         Directory.CreateDirectory(globalRoot);
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new SquadStateStore(userPaths);
 
         SeedDeployment(globalRoot, SquadDeploymentScope.Global, stateStore,
@@ -380,7 +380,7 @@ public sealed class SquadCliCommandTests : IDisposable
             .WithProbeOutput("apm", "apm, version 0.28.0\n")
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: installedDir);
 
         CommandExecution execution = Capture(() => command.Execute(
@@ -404,7 +404,7 @@ public sealed class SquadCliCommandTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: workingDir);
 
         CommandExecution execution = Capture(() => command.Execute(
@@ -458,7 +458,7 @@ public sealed class SquadCliCommandTests : IDisposable
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadGlobalRoots globalRoots = new(_ => null, Path.Combine(_temp.Path, "doctor-devin-home"), isWindows: false);
         SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
@@ -492,7 +492,7 @@ public sealed class SquadCliCommandTests : IDisposable
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: workingDir);
 
         CommandExecution execution = Capture(() => command.Execute(
@@ -518,7 +518,7 @@ public sealed class SquadCliCommandTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithFailure("kyber-weave-mcp", "The 'kyber-weave-mcp' executable is not available on PATH.");
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: workingDir);
 
         CommandExecution execution = Capture(() => command.Execute(
@@ -547,7 +547,7 @@ public sealed class SquadCliCommandTests : IDisposable
             .WithProbeOutput("apm", "apm, version 0.28.0\n")
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: repoPath);
 
         CommandExecution execution = Capture(() => command.Execute(
@@ -578,7 +578,7 @@ public sealed class SquadCliCommandTests : IDisposable
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
         SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
@@ -613,7 +613,7 @@ public sealed class SquadCliCommandTests : IDisposable
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "doctor-relative-user"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "doctor-relative-user"));
         SquadGlobalRoots globalRoots = new(
             name => string.Equals(name, "CLAUDE_CONFIG_DIR", StringComparison.Ordinal)
                 ? "relative-dir"
@@ -656,7 +656,7 @@ public sealed class SquadCliCommandTests : IDisposable
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "invalid-source-user"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "invalid-source-user"));
         SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
@@ -687,7 +687,7 @@ public sealed class SquadCliCommandTests : IDisposable
         // edit, so it copies the run-wide prepared install into its own home and re-roots it there.
         string tempHome = Path.Combine(_temp.Path, "doctor-clean-install-home");
         string userHome = Path.Combine(_temp.Path, "doctor-clean-install-user");
-        FakeUserPaths userPaths = new(userHome);
+        FakeSquadUserPaths userPaths = new(userHome);
         prepared.CopyInto(tempHome, userPaths);
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
         SquadStateStore stateStore = new(userPaths);
@@ -758,7 +758,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string tempHome = Path.Combine(_temp.Path, "doctor-corrupt-sibling-home");
         Directory.CreateDirectory(tempHome);
         string userHome = Path.Combine(_temp.Path, "doctor-corrupt-sibling-user");
-        FakeUserPaths userPaths = new(userHome);
+        FakeSquadUserPaths userPaths = new(userHome);
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
         SquadStateStore stateStore = new(userPaths);
 
@@ -798,7 +798,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string tempHome = Path.Combine(_temp.Path, $"doctor-blank-sibling-home-{blankReceipt.Length}");
         Directory.CreateDirectory(tempHome);
         string userHome = Path.Combine(_temp.Path, $"doctor-blank-sibling-user-{blankReceipt.Length}");
-        FakeUserPaths userPaths = new(userHome);
+        FakeSquadUserPaths userPaths = new(userHome);
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
         SquadStateStore stateStore = new(userPaths);
 
@@ -836,7 +836,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string tempHome = Path.Combine(_temp.Path, "doctor-corrupt-local-home");
         Directory.CreateDirectory(tempHome);
         string userHome = Path.Combine(_temp.Path, "doctor-corrupt-local-user");
-        FakeUserPaths userPaths = new(userHome);
+        FakeSquadUserPaths userPaths = new(userHome);
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
         SquadStateStore stateStore = new(userPaths);
 
@@ -878,7 +878,7 @@ public sealed class SquadCliCommandTests : IDisposable
         await File.WriteAllTextAsync(collidingFull, "not-the-canonical-architect-bytes");
 
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "install-global-user"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "install-global-user"));
         SquadStateStore stateStore = new(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
@@ -908,7 +908,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "no-receipt-uninstall");
         Directory.CreateDirectory(targetDir);
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadUninstallCommand command = SquadTestCommands.Uninstall(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
@@ -929,7 +929,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "uninstall-target");
         Directory.CreateDirectory(targetDir);
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new SquadStateStore(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
@@ -970,7 +970,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "uninstall-dryrun-target");
         Directory.CreateDirectory(targetDir);
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new SquadStateStore(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
@@ -1002,7 +1002,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "corrupt-receipt-uninstall");
         Directory.CreateDirectory(targetDir);
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new SquadStateStore(userPaths);
 
         string receiptPath = stateStore.ResolveReceiptPath(targetDir, SquadDeploymentScope.Project);
@@ -1027,7 +1027,7 @@ public sealed class SquadCliCommandTests : IDisposable
     [Fact]
     public void Uninstall_NamedHarness_RemovesOnlyThatHarnessUntilTheLastOneGoes()
     {
-        (string targetDir, FakeUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
+        (string targetDir, FakeSquadUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
             SeedCodexAndCursorProject("uninstall-one-harness");
         SquadUninstallCommand command = SquadTestCommands.Uninstall(userPaths);
 
@@ -1054,7 +1054,7 @@ public sealed class SquadCliCommandTests : IDisposable
     [Fact]
     public void Uninstall_NamedHarnessDryRun_PreservesFilesAndReceipt()
     {
-        (string targetDir, FakeUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
+        (string targetDir, FakeSquadUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
             SeedCodexAndCursorProject("uninstall-one-harness-dry-run");
 
         CommandExecution execution = Capture(() => SquadTestCommands.Uninstall(userPaths).Execute(
@@ -1070,7 +1070,7 @@ public sealed class SquadCliCommandTests : IDisposable
     [Fact]
     public void Uninstall_InvalidHarnessInput_ExitsTwoWithoutChanges()
     {
-        (string targetDir, FakeUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
+        (string targetDir, FakeSquadUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
             SeedCodexAndCursorProject("uninstall-invalid-harness-input");
         SquadUninstallCommand command = SquadTestCommands.Uninstall(userPaths);
 
@@ -1099,7 +1099,7 @@ public sealed class SquadCliCommandTests : IDisposable
     [Fact]
     public void Uninstall_NamedHarnessWithoutProject_UsesTheGlobalScopeAndKeepsTheOtherHarness()
     {
-        FakeUserPaths userPaths = new(Path.Combine(_temp.Path, "uninstall-global-harness"));
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "uninstall-global-harness"));
         string home = userPaths.HomeDirectory;
         Directory.CreateDirectory(home);
         SquadGlobalRoots roots = new(_ => null, home);
@@ -1158,7 +1158,7 @@ public sealed class SquadCliCommandTests : IDisposable
     [InlineData("./deploy")]
     public void Uninstall_DirectoryGivenAsTheHarness_ExitsTwoNamingProjectAndPath(string directory)
     {
-        (string targetDir, FakeUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
+        (string targetDir, FakeSquadUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
             SeedCodexAndCursorProject("uninstall-directory-as-harness");
 
         CommandExecution execution = Capture(() => SquadTestCommands.Uninstall(userPaths).Execute(
@@ -1178,7 +1178,7 @@ public sealed class SquadCliCommandTests : IDisposable
     [InlineData("   ")]
     public void Uninstall_BlankPathOption_ExitsTwoWithoutChanges(string blank)
     {
-        (string targetDir, FakeUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
+        (string targetDir, FakeSquadUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
             SeedCodexAndCursorProject("uninstall-blank-path");
         SquadUninstallCommand command = SquadTestCommands.Uninstall(userPaths);
 
@@ -1203,7 +1203,7 @@ public sealed class SquadCliCommandTests : IDisposable
     public void Uninstall_GlobalAndProjectWithoutAHarness_ExitsTwo()
     {
         CommandExecution execution = Capture(() => SquadTestCommands.Uninstall(
-            new FakeUserPaths(Path.Combine(_temp.Path, "uninstall-global-and-project"))).Execute(
+            new FakeSquadUserPaths(Path.Combine(_temp.Path, "uninstall-global-and-project"))).Execute(
             null!,
             new SquadUninstallSettings { Global = true, Project = true }));
 
@@ -1214,7 +1214,7 @@ public sealed class SquadCliCommandTests : IDisposable
     [Fact]
     public void Uninstall_NamedHarnessWithCorruptReceipt_ReportsTheReadErrorAndChangesNothing()
     {
-        (string targetDir, FakeUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
+        (string targetDir, FakeSquadUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
             SeedCodexAndCursorProject("uninstall-corrupt-receipt");
         File.WriteAllText(receiptPath, "{ not json", Encoding.UTF8);
 
@@ -1230,12 +1230,12 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Equal("{ not json", File.ReadAllText(receiptPath));
     }
 
-    private (string TargetDir, FakeUserPaths UserPaths, string CodexFile, string CursorFile, string ReceiptPath)
+    private (string TargetDir, FakeSquadUserPaths UserPaths, string CodexFile, string CursorFile, string ReceiptPath)
         SeedCodexAndCursorProject(string name)
     {
         string targetDir = Path.Combine(_temp.Path, name);
         Directory.CreateDirectory(targetDir);
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new SquadStateStore(userPaths);
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
             ("agents/architect.md", "You are architect.\n"),
@@ -1305,7 +1305,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "install-invalid-target");
         Directory.CreateDirectory(targetDir);
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadInstallCommand command = SquadTestCommands.Install(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
@@ -1328,7 +1328,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "install-invalid-exclude");
         Directory.CreateDirectory(targetDir);
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadInstallCommand command = SquadTestCommands.Install(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
@@ -1350,7 +1350,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "install-no-target");
         Directory.CreateDirectory(targetDir);
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadInstallCommand command = SquadTestCommands.Install(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
@@ -1371,7 +1371,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "update-target");
         Directory.CreateDirectory(targetDir);
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new SquadStateStore(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
@@ -1401,7 +1401,7 @@ public sealed class SquadCliCommandTests : IDisposable
 
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        FakeUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
@@ -1441,7 +1441,7 @@ public sealed class SquadCliCommandTests : IDisposable
 
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        FakeUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home-explicit"));
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home-explicit"));
         SquadStateStore stateStore = new(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
@@ -1496,7 +1496,7 @@ public sealed class SquadCliCommandTests : IDisposable
 
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        FakeUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home-explicit-dry-run"));
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home-explicit-dry-run"));
         SquadStateStore stateStore = new(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
@@ -1541,7 +1541,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "update-invalid-target");
         Directory.CreateDirectory(targetDir);
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadUpdateCommand command = SquadTestCommands.Update(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
@@ -1562,7 +1562,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "update-empty-receipt");
         Directory.CreateDirectory(targetDir);
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new SquadStateStore(userPaths);
 
         // Seed receipt with 0 files (empty target set)
@@ -1596,7 +1596,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "update-no-receipt");
         Directory.CreateDirectory(targetDir);
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadUpdateCommand command = SquadTestCommands.Update(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
@@ -1641,7 +1641,7 @@ public sealed class SquadCliCommandTests : IDisposable
 
         string existingDir = _temp.Path;
         string appDataDir = Path.Combine(_temp.Path, "custom-appdata");
-        FakeUserPaths fakePaths = new FakeUserPaths(appDataDir);
+        FakeSquadUserPaths fakePaths = new FakeSquadUserPaths(appDataDir);
         SquadStateStore customStore = SquadHostDefaults.ResolveStateStore(fakePaths);
         Assert.NotNull(customStore);
         Assert.StartsWith(
@@ -1667,7 +1667,7 @@ public sealed class SquadCliCommandTests : IDisposable
         SquadTransaction txDefault = SquadHostDefaults.ResolveTransaction();
         Assert.NotNull(txDefault);
 
-        FakeUserPaths fakePaths = new FakeUserPaths("/custom/appdata");
+        FakeSquadUserPaths fakePaths = new FakeSquadUserPaths("/custom/appdata");
         SquadStateStore store = new SquadStateStore(fakePaths);
         SquadTransaction txWithStore = SquadHostDefaults.ResolveTransaction(store);
         Assert.NotNull(txWithStore);
@@ -1756,7 +1756,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string fakeCodexRoot = Path.Combine(fixture.Path, "fake-codex");
         Directory.CreateDirectory(appDataDir);
         Directory.CreateDirectory(fakeCodexRoot);
-        FakeUserPaths userPaths = new(appDataDir);
+        FakeSquadUserPaths userPaths = new(appDataDir);
         SquadStateStore stateStore = new(userPaths);
 
         Directory.CreateDirectory(Path.Combine(targetRoot, ".codex", "agents"));
@@ -1790,7 +1790,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetRoot = fixture.Path;
         string appDataDir = Path.Combine(fixture.Path, "app-data");
         Directory.CreateDirectory(appDataDir);
-        FakeUserPaths userPaths = new(appDataDir);
+        FakeSquadUserPaths userPaths = new(appDataDir);
         SquadStateStore stateStore = new(userPaths);
 
         Directory.CreateDirectory(Path.Combine(targetRoot, ".codex", "agents"));
@@ -1831,7 +1831,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetRoot = fixture.Path;
         string appDataDir = Path.Combine(fixture.Path, "app-data");
         Directory.CreateDirectory(appDataDir);
-        FakeUserPaths userPaths = new(appDataDir);
+        FakeSquadUserPaths userPaths = new(appDataDir);
         SquadStateStore stateStore = new(userPaths);
 
         Directory.CreateDirectory(Path.Combine(targetRoot, ".codex", "agents"));
@@ -1954,7 +1954,7 @@ public sealed class SquadCliCommandTests : IDisposable
         {
             string anchor = Path.Combine(directory.Path, "anchor");
             string globalHome = Path.Combine(directory.Path, "global-home");
-            FakeUserPaths userPaths = new(Path.Combine(directory.Path, "user-paths"));
+            FakeSquadUserPaths userPaths = new(Path.Combine(directory.Path, "user-paths"));
             Directory.CreateDirectory(anchor);
             Directory.CreateDirectory(globalHome);
             Directory.CreateDirectory(userPaths.ApplicationDataDirectory);
@@ -2001,7 +2001,7 @@ public sealed class SquadCliCommandTests : IDisposable
         {
             string targetDir = Path.Combine(directory.Path, "target");
             Directory.CreateDirectory(targetDir);
-            FakeUserPaths userPaths = new(Path.Combine(directory.Path, "user-home"));
+            FakeSquadUserPaths userPaths = new(Path.Combine(directory.Path, "user-home"));
             SquadStateStore stateStore = new(userPaths);
             using FakeSquadReleaseSource? releaseSource = unreleasedToolchain ? null : new FakeSquadReleaseSource();
             FakeSquadRenderer? renderer = unreleasedToolchain ? null : new FakeSquadRenderer();
@@ -2221,7 +2221,7 @@ public sealed class SquadCliCommandTests : IDisposable
         /// </summary>
         /// <param name="home">The test's home the global roots resolve beneath.</param>
         /// <param name="userPaths">The test's fake user paths, which place the state.</param>
-        public void CopyInto(string home, FakeUserPaths userPaths)
+        public void CopyInto(string home, FakeSquadUserPaths userPaths)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(home);
             ArgumentNullException.ThrowIfNull(userPaths);
@@ -2265,13 +2265,6 @@ public sealed class SquadCliCommandTests : IDisposable
 
         /// <summary>The home state directory the install wrote, or would write, for that root.</summary>
         public string HomeStateDirectory { get; } = homeStateDirectory;
-    }
-
-    private sealed class FakeUserPaths(string appDataDirectory) : ISquadUserPaths
-    {
-        public string ApplicationDataDirectory { get; } = appDataDirectory;
-
-        public string HomeDirectory => Path.Combine(ApplicationDataDirectory, "home");
     }
 
     private sealed class FakeGlobalRootResolver(SquadTarget target, string root)

@@ -203,7 +203,7 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
             Directory.CreateDirectory(ApplicationData);
             Directory.CreateDirectory(Home);
             Directory.CreateDirectory(GlobalRootsDirectory);
-            UserPaths = new TempUserPaths(ApplicationData, Home);
+            UserPaths = FakeSquadUserPaths.UnderTemp(ApplicationData, Home);
             Store = new SquadStateStore(UserPaths);
             ReleaseSource = new FakeSquadReleaseSource();
             GlobalRoots = new TempGlobalRoots(GlobalRootsDirectory);
@@ -219,7 +219,7 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
 
         public string Binding { get; set; } = string.Empty;
 
-        public TempUserPaths UserPaths { get; }
+        public FakeSquadUserPaths UserPaths { get; }
 
         public SquadStateStore Store { get; }
 
@@ -257,21 +257,6 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
         public void Dispose() => ReleaseSource.Dispose();
     }
 
-    private sealed class TempUserPaths : ISquadUserPaths
-    {
-        public TempUserPaths(string applicationDataDirectory, string homeDirectory)
-        {
-            RequireUnderTemp(applicationDataDirectory);
-            RequireUnderTemp(homeDirectory);
-            ApplicationDataDirectory = applicationDataDirectory;
-            HomeDirectory = homeDirectory;
-        }
-
-        public string ApplicationDataDirectory { get; }
-
-        public string HomeDirectory { get; }
-    }
-
     private sealed class TempGlobalRoots(string root) : ISquadGlobalRootResolver
     {
         public string ResolveGlobalRoot(SquadTarget target) =>
@@ -292,17 +277,6 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
                 Degradations: [],
                 Warnings: [],
                 Errors: []));
-    }
-
-    private static void RequireUnderTemp(string path)
-    {
-        string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
-        string temp = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
-        if (!full.StartsWith(temp + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                $"Squad CLI tests must keep every fake home and state root beneath the temp directory; got '{full}'.");
-        }
     }
 
     #endregion

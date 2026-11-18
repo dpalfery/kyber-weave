@@ -11,7 +11,6 @@ using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Harness = KyberWeave.Tests.Fakes.SquadHomeHarness;
-using HomeUserPaths = KyberWeave.Tests.Fakes.SquadHomeHarness.HomeUserPaths;
 using Xunit;
 
 namespace KyberWeave.Integration.Tests;
@@ -743,7 +742,8 @@ public sealed class SquadGlobalHomeCliTests : IClassFixture<SquadHomeStateTempla
         Assert.StartsWith(temp, Path.GetFullPath(h.ApplicationData), StringComparison.Ordinal);
         Assert.StartsWith(temp, Path.GetFullPath(h.GlobalRootsDirectory), StringComparison.Ordinal);
         Assert.StartsWith(temp, Path.GetFullPath(h.GlobalRoot(SquadTarget.Codex)), StringComparison.Ordinal);
-        Assert.Throws<InvalidOperationException>(() => new HomeUserPaths(h.ApplicationData, "/Users/not-a-temp-home"));
+        Assert.Throws<InvalidOperationException>(() =>
+            FakeSquadUserPaths.UnderTemp(h.ApplicationData, "/Users/not-a-temp-home"));
     }
 
     #region Response guidance
