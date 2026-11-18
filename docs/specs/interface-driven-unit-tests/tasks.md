@@ -54,7 +54,7 @@ from this file when it is marked Ready.
 
 ## Phase 1: Seams and fakes
 
-- [ ] 1.1 Create the shared testing library
+- [x] 1.1 Create the shared testing library
   - **Objective:** One library, `tests/KyberWeave.Testing`, that every test project references, holding
     the fakes, builders, the in-memory file system and the contract suites.
   - **Files:** `tests/KyberWeave.Testing/**` (new), the solution file, the test project files
@@ -66,7 +66,7 @@ from this file when it is marked Ready.
   - **Depends on:** none
   - _Requirements: 5.5_
 
-- [ ] 1.2 Consolidate and extend the file-system seam
+- [x] 1.2 Consolidate and extend the file-system seam
   - **Objective:** `IFileSystem` and `IWritableFileSystem` cover every member listed in the design;
     the narrow file interfaces become role views over them.
   - **Files:** `src/KyberWeave.Contracts/Repositories/**`, the physical adapters in `src/KyberWeave.Data/` and `src/KyberWeave.Kernel/`
@@ -76,7 +76,7 @@ from this file when it is marked Ready.
   - **Depends on:** none
   - _Requirements: 2.1, 2.10, 3.1_
 
-- [ ] 1.3 Build the in-memory file system and its contract suite
+- [x] 1.3 Build the in-memory file system and its contract suite
   - **Objective:** `InMemoryFileSystem` in the testing library, and one contract suite for the
     file-system seam run against it and against `PhysicalFileSystem`.
   - **Files:** `tests/KyberWeave.Testing/FileSystem/**`, `tests/KyberWeave.Integration.Tests/Contracts/**`
@@ -87,7 +87,7 @@ from this file when it is marked Ready.
   - **Depends on:** 1.1, 1.2
   - _Requirements: 5.3, 5.4_
 
-- [ ] 1.4 Path seam
+- [x] 1.4 Path seam
   - **Objective:** `IPathResolver` with an explicit base directory, and its adapter over the file-system
     and environment seams; `IFileSystemPathSemantics` folded into it.
   - **Files:** `src/KyberWeave.Contracts/**`, `src/KyberWeave.Kernel/**`, `tests/KyberWeave.Testing/**`
@@ -96,7 +96,7 @@ from this file when it is marked Ready.
   - **Depends on:** 1.2, 1.3
   - _Requirements: 2.7_
 
-- [ ] 1.5 Process seam
+- [x] 1.5 Process seam
   - **Objective:** `IProcessRunner` as the one process seam, absorbing `IProcessExecutor`,
     `IProgramRunner` and `IBoundedProcessExecutor`; a scripted fake.
   - **Files:** `src/KyberWeave.Contracts/**`, `src/KyberWeave.Kernel/Processes/**`, `src/KyberWeave.Data/Hooks/KernelProcessRunner.cs`, `tests/KyberWeave.Testing/**`
@@ -106,7 +106,7 @@ from this file when it is marked Ready.
   - **Depends on:** 1.1
   - _Requirements: 2.2_
 
-- [ ] 1.6 Environment, platform, identifier, console, lease and resource seams
+- [x] 1.6 Environment, platform, identifier, console, lease and resource seams
   - **Objective:** extend `IProcessEnvironment` with platform facts; add `IIdGenerator`, `IConsole`,
     `ILease`, `IEmbeddedResources`; adapters and fakes for each.
   - **Files:** `src/KyberWeave.Contracts/**`, `src/KyberWeave.Kernel/**`, `tests/KyberWeave.Testing/**`
@@ -115,7 +115,7 @@ from this file when it is marked Ready.
   - **Depends on:** 1.1
   - _Requirements: 2.3, 2.4, 2.5, 2.6, 2.8, 2.9_
 
-- [ ] 1.7 Corpus seam
+- [x] 1.7 Corpus seam
   - **Objective:** `ICorpusSource` for tests of the shipped content, replacing the repository-root walk
     copied into 159 test files.
   - **Files:** `tests/KyberWeave.Testing/Corpus/**`, the 159 test files
@@ -124,7 +124,7 @@ from this file when it is marked Ready.
   - **Depends on:** 1.1
   - _Requirements: 8.1_
 
-- [ ] 1.8 Adapter and exceptions registers
+- [x] 1.8 Adapter and exceptions registers
   - **Objective:** list every adapter with its seam, and every sealed framework type used directly with
     its reason.
   - **Files:** `docs/reference/seams.md` (new), `docs/reference/cli-composition.md`
