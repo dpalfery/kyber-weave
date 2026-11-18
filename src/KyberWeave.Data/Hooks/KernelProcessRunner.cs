@@ -73,7 +73,7 @@ internal sealed class KernelProcessRunner : IProcessRunner
         }
         catch (Exception ex) when (IsMissingExecutable(ex))
         {
-            throw MapMissingExecutable(ex, request.Program, request.WorkingDirectory ?? string.Empty);
+            throw MapMissingExecutable(ex, request.Program, request.WorkingDirectory);
         }
         catch (TimeoutException)
         {
@@ -87,11 +87,14 @@ internal sealed class KernelProcessRunner : IProcessRunner
     /// <summary>Names the cause of a failed start: a directory removed after the up-front check, or a missing program.</summary>
     /// <remarks>
     /// Linux reports a missing working directory with the same native error as a missing program, so the directory is
-    /// checked again before blaming the command.
+    /// checked again before blaming the command. A null or empty directory means "inherit the host's", so there is no
+    /// directory to blame and the program is the only possible cause.
     /// </remarks>
-    internal static Exception MapMissingExecutable(Exception ex, string program, string workingDirectory)
+    internal static Exception MapMissingExecutable(Exception ex, string program, string? workingDirectory)
     {
-        if (ex is Win32Exception { NativeErrorCode: MissingExecutableErrorCode } && !Directory.Exists(workingDirectory))
+        if (ex is Win32Exception { NativeErrorCode: MissingExecutableErrorCode } &&
+            !string.IsNullOrEmpty(workingDirectory) &&
+            !Directory.Exists(workingDirectory))
         {
             return WorkingDirectoryNotFound(workingDirectory, ex);
         }

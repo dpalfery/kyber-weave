@@ -157,6 +157,21 @@ public abstract class ProcessRunnerContractTests : IDisposable
     }
 
     [Fact]
+    public async Task ReportsAMissingProgramWithoutAWorkingDirectoryAsCommandNotFound()
+    {
+        ProcessRunRequest request = new()
+        {
+            Program = MissingProgram,
+            Timeout = TimeSpan.FromSeconds(5)
+        };
+
+        FileNotFoundException exception = await Assert.ThrowsAsync<FileNotFoundException>(
+            () => CreateRunner().RunAsync(request, CancellationToken.None));
+
+        Assert.Contains("command not found", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ReportsAMissingWorkingDirectoryByItsOwnName()
     {
         ProcessRunRequest request = Probe([ProcessProbeProgram.Echo, "hello"], workingDirectory: MissingDirectory);
