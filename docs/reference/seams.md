@@ -259,7 +259,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterCommentCommand` (`Commands/Arbiter/ArbiterCommentCommand.cs`) | file system, paths | 4.5 |
 | `ArbiterRepoRoot` (`Commands/Arbiter/ArbiterRepoRoot.cs`) | file system, paths | 4.5 |
 | `ArbiterSectionsCommand` (`Commands/Arbiter/ArbiterSectionsCommand.cs`) | file system, paths | 4.5 |
-| `ArbiterUninstallCommand` (`Commands/Arbiter/ArbiterUninstallCommand.cs`) | paths | 4.5 |
 | `CommandHelpers` (`Commands/CommandHelpers.cs`) | file system, paths | 4.5 |
 | `DocsCloseoutCommand` (`Commands/Docs/DocsCloseoutCommand.cs`) | clock | 4.5 |
 | `DocsFinalizeCommand` (`Commands/Docs/DocsFinalizeCommand.cs`) | clock | 4.5 |
