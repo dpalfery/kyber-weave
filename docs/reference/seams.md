@@ -264,8 +264,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `DocsCloseoutCommand` (`Commands/Docs/DocsCloseoutCommand.cs`) | clock | 4.5 |
 | `DocsFinalizeCommand` (`Commands/Docs/DocsFinalizeCommand.cs`) | clock | 4.5 |
 | `DocsInitCommand` (`Commands/Docs/DocsInitCommand.cs`) | file system, paths, environment, console | 4.5 |
-| `DocsMcpMigrateCommand` (`Commands/Docs/DocsMcpMigrateCommand.cs`) | console | 4.5 |
-| `DocsMcpWireCommand` (`Commands/Docs/DocsMcpWireCommand.cs`) | file system, paths | 4.5 |
 | `DocsOnboardingCommand` (`Commands/Docs/DocsOnboardingCommand.cs`) | file system, paths | 4.5 |
 | `DocsPacketCommand` (`Commands/Docs/DocsPacketCommand.cs`) | paths, console | 4.5 |
 | `DocsTasksCommand` (`Commands/Docs/DocsTasksCommand.cs`) | console | 4.5 |

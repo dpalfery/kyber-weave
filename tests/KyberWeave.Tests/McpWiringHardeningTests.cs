@@ -9,6 +9,7 @@ using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Mcp;
+using Spectre.Console.Testing;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -451,13 +452,15 @@ public sealed class McpWiringHardeningTests : IDisposable
         {
             DenyTraversal(directory, target);
 
-            CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-                new DocsMcpMigrateCommand(
-                    McpWiringTestServices.Wiring,
-                    FakePathResolver.OverEmptyFileSystem(),
-                    new FakeProcessEnvironment()).Execute(
-                    null!,
-                    new DocsMcpMigrateSettings { Path = Repo, Target = VsCode }));
+            TestConsole console = new() { EmitAnsiSequences = false };
+            int exit = new DocsMcpMigrateCommand(
+                McpWiringTestServices.Wiring,
+                FakePathResolver.OverEmptyFileSystem(),
+                new FakeProcessEnvironment(),
+                console).Execute(
+                null!,
+                new DocsMcpMigrateSettings { Path = Repo, Target = VsCode });
+            CapturedConsoleExecution<int> execution = new(exit, console.Output);
 
             Assert.Equal(1, execution.Result);
             Assert.Contains("KW-MCP-WIRE-009", execution.Output, StringComparison.Ordinal);

@@ -5,6 +5,10 @@ using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Docs.Mcp;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Host;
+using KyberWeave.Data.Paths;
+using Spectre.Console.Testing;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -887,11 +891,10 @@ public sealed class DocsMcpWireCommandTests : IDisposable
             Outcome: McpWiringChangeOutcome.Created,
             Servers: [ServerName]);
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-        {
-            CommandHelpers.WriteUnfolded(() => DocsMcpWireCommand.PrintChange(change, dryRun: true));
-            return 0;
-        });
+        TestConsole console = new() { EmitAnsiSequences = false };
+
+        CommandHelpers.WriteUnfolded(console, () => DocsMcpWireCommand.PrintChange(console, change, dryRun: true));
+        CapturedConsoleExecution<int> execution = new(0, console.Output);
 
         Assert.DoesNotContain("\u001b", execution.Output, StringComparison.Ordinal);
         Assert.Single(
@@ -971,14 +974,33 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     }
 
     private CapturedConsoleExecution<int> Wire(string targets, bool dryRun = false) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpWireCommand(McpWiringTestServices.Wiring, ConfigFileReader.Repository).Execute(
+        Run(console => new DocsMcpWireCommand(
+            McpWiringTestServices.Wiring,
+            ConfigFileReader.Repository,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new ProcessEnvironment(),
+            console).Execute(
             null!,
             new DocsMcpWireSettings { Path = Repo, Target = targets, DryRun = dryRun }));
 
     private CapturedConsoleExecution<int> Unwire(string targets) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpUnwireCommand(McpWiringTestServices.Wiring, McpWiringTestServices.Receipts).Execute(
+        Run(console => new DocsMcpUnwireCommand(
+            McpWiringTestServices.Wiring,
+            McpWiringTestServices.Receipts,
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new ProcessEnvironment(),
+            console).Execute(
             null!,
             new DocsMcpUnwireSettings { Path = Repo, Target = targets }));
+
+    /// <summary>Runs the command over a test console and returns what the operator read.</summary>
+    private static CapturedConsoleExecution<int> Run(Func<TestConsole, int> execute)
+    {
+        TestConsole console = new() { EmitAnsiSequences = false };
+        int exit = execute(console);
+        return new CapturedConsoleExecution<int>(exit, console.Output);
+    }
 
     /// <summary>
     /// Writes the <c>mcp:</c> declaration in the shape <c>docs init</c> scaffolds, with the command

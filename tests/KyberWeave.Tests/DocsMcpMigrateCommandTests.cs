@@ -10,6 +10,10 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Mcp;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Host;
+using KyberWeave.Data.Paths;
+using Spectre.Console.Testing;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -1186,13 +1190,14 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     {
         string home = Path.Combine(FakeAnchor, "home");
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+        CapturedConsoleExecution<int> execution = Run(console =>
             new DocsMcpMigrateCommand(
                 McpWiringTestServices.Wiring,
                 FakePathResolver.OverEmptyFileSystem(),
                 new FakeProcessEnvironment(
                     currentDirectory: Path.Combine(FakeAnchor, "work"),
-                    homeDirectory: home)).Execute(
+                    homeDirectory: home),
+                console).Execute(
                 null!,
                 new DocsMcpMigrateSettings { Path = Path.Combine(FakeAnchor, "home", "..", "home"), Target = Cursor }));
 
@@ -1213,13 +1218,14 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         paths.Files.CreateDirectory(home);
         paths.Files.CreateDirectoryLink(link, home);
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+        CapturedConsoleExecution<int> execution = Run(console =>
             new DocsMcpMigrateCommand(
                 new UnreachedWiringService(),
                 paths,
                 new FakeProcessEnvironment(
                     currentDirectory: Path.Combine(FakeAnchor, "work"),
-                    homeDirectory: home)).Execute(
+                    homeDirectory: home),
+                console).Execute(
                 null!,
                 new DocsMcpMigrateSettings { Path = link }));
 
@@ -1244,13 +1250,14 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     {
         string home = Path.Combine(FakeAnchor, "home");
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+        CapturedConsoleExecution<int> execution = Run(console =>
             new DocsMcpMigrateCommand(
                 new UnreachedWiringService(),
                 new UnresolvableCanonicalPathResolver(FakePathResolver.OverEmptyFileSystem()),
                 new FakeProcessEnvironment(
                     currentDirectory: Path.Combine(FakeAnchor, "work"),
-                    homeDirectory: home)).Execute(
+                    homeDirectory: home),
+                console).Execute(
                 null!,
                 new DocsMcpMigrateSettings { Path = home }));
 
@@ -1412,24 +1419,44 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     /// fake home, for the cases about which tree the operator pointed the command at.
     /// </summary>
     private CapturedConsoleExecution<int> MigrateAt(string root, string targets, bool dryRun = false) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpMigrateCommand(
+        Run(console => new DocsMcpMigrateCommand(
             McpWiringTestServices.Wiring,
             FakePathResolver.OverEmptyFileSystem(),
-            new FakeProcessEnvironment(() => FakeHome)).Execute(
+            new FakeProcessEnvironment(() => FakeHome),
+            console).Execute(
             null!,
             new DocsMcpMigrateSettings { Path = root, Target = targets, DryRun = dryRun }));
 
     /// <summary>Runs the wire verb, to produce a receipt the migrate verb must rebase.</summary>
     private CapturedConsoleExecution<int> Wire(string targets) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpWireCommand(McpWiringTestServices.Wiring, ConfigFileReader.Repository).Execute(
+        Run(console => new DocsMcpWireCommand(
+            McpWiringTestServices.Wiring,
+            ConfigFileReader.Repository,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new ProcessEnvironment(),
+            console).Execute(
             null!,
             new DocsMcpWireSettings { Path = Repo, Target = targets }));
 
     /// <summary>Runs the removal verb against the receipt the wire and migrate verbs wrote.</summary>
     private CapturedConsoleExecution<int> Unwire(string targets) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpUnwireCommand(McpWiringTestServices.Wiring, McpWiringTestServices.Receipts).Execute(
+        Run(console => new DocsMcpUnwireCommand(
+            McpWiringTestServices.Wiring,
+            McpWiringTestServices.Receipts,
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new ProcessEnvironment(),
+            console).Execute(
             null!,
             new DocsMcpUnwireSettings { Path = Repo, Target = targets }));
+
+    /// <summary>Runs the command over a test console and returns what the operator read.</summary>
+    private static CapturedConsoleExecution<int> Run(Func<TestConsole, int> execute)
+    {
+        TestConsole console = new() { EmitAnsiSequences = false };
+        int exit = execute(console);
+        return new CapturedConsoleExecution<int>(exit, console.Output);
+    }
 
     /// <summary>The declaration <c>docs init</c> scaffolds, naming the shipped binary by absolute path.</summary>
     private void WriteDeclaration() =>
