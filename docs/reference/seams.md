@@ -223,7 +223,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `CopilotPromptFile` (`CopilotPrompt/CopilotPromptFile.cs`) | paths | 2.5 |
 | `CodeGraphIndexProvisioner` (`Doctor/CodeGraphIndexProvisioner.cs`) | clock | 4.8 |
 | `CodeGraphIndexRules` (`Doctor/CodeGraphIndexRules.cs`) | paths | 2.5 |
-| `PostCheckoutHookInstaller` (`Doctor/PostCheckoutHookInstaller.cs`) | paths | 4.8 |
 | `PathContainment` (`Hooks/PathContainment.cs`) | paths | 2.5 |
 | `GateCatalogueRenderer` (`Review/Catalogue/GateCatalogueRenderer.cs`) | file system | 2.5 |
 | `ProjectRootDetection` (`Review/Catalogue/ProjectRootDetection.cs`) | file system | 2.5 |
