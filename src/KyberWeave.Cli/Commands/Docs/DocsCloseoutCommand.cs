@@ -1,4 +1,5 @@
 using System.Globalization;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -11,7 +12,7 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// Does the mechanical half of a plan closeout: checks the closeout evidence the archive gate wants, then archives
 /// the plan, removes its task file and updates the plan index and the archived plan inventory.
 /// </summary>
-public sealed class DocsCloseoutCommand(IPlanCloseoutService closeout) : Command<DocsCloseoutSettings>
+public sealed class DocsCloseoutCommand(IPlanCloseoutService closeout, IRepositoryFileStore files) : Command<DocsCloseoutSettings>
 {
     /// <summary>The <c>--date</c> value is not a date.</summary>
     public const string InvalidDate = "KW-DOC-CLOSEOUT-005";
@@ -50,7 +51,7 @@ public sealed class DocsCloseoutCommand(IPlanCloseoutService closeout) : Command
         }
 
         KyberWeaveConfig effective = config.WithOntology(ontology);
-        if (!PlanArguments.TryResolve(root, effective, typed, settings.WorkingDirectory, "docs closeout", report, out string relative))
+        if (!PlanArguments.TryResolve(root, effective, files, typed, settings.WorkingDirectory, "docs closeout", report, out string relative))
         {
             CommandHelpers.Finish(report, settings, "docs closeout", "Plan");
             return 1;

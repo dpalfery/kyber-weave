@@ -23,7 +23,6 @@
     <InternalsVisibleTo Include="KyberWeave.Testing" />
     <InternalsVisibleTo Include="KyberWeave.Domain.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Core" />
-    <InternalsVisibleTo Include="KyberWeave.Core.Docs" />
     <InternalsVisibleTo Include="KyberWeave.Core.Squad" />
     <InternalsVisibleTo Include="KyberWeave.Data" />
     <InternalsVisibleTo Include="KyberWeave.Application" />
