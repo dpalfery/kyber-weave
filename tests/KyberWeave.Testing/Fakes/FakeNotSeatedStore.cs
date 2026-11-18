@@ -39,14 +39,18 @@ internal sealed class FakeNotSeatedStore : INotSeatedStore
         ArgumentNullException.ThrowIfNull(decisions);
         string[] lenses = [.. owned];
         Replaced.Add((cycleFolder, lenses, decisions));
-        Dictionary<string, string> kept = new(StringComparer.Ordinal);
-        foreach (string lens in lenses)
-        {
-            if (decisions.TryGetValue(lens, out string? reason))
-                kept[lens] = reason;
-        }
 
-        _decisions[cycleFolder] = kept;
+        // The file-backed store merges into what is already recorded: an owned lens is replaced or removed, and a lens
+        // the caller does not own keeps its earlier decision, so a caller test sees the record the product would read.
+        Dictionary<string, string> merged = _decisions.TryGetValue(cycleFolder, out Dictionary<string, string>? kept)
+            ? new Dictionary<string, string>(kept, StringComparer.Ordinal)
+            : new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (string lens in lenses)
+            merged.Remove(lens);
+        foreach ((string lens, string reason) in decisions)
+            merged[lens] = reason;
+
+        _decisions[cycleFolder] = merged;
     }
 
     /// <inheritdoc />
