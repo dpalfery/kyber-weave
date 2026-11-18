@@ -1,17 +1,9 @@
-using KyberWeave.Tests.Configuration;
-using KyberWeave.Data.Configuration;
 using KyberWeave.Contracts.Repositories;
-using KyberWeave.Tests.Arbiter;
-using KyberWeave.Tests.Fakes;
-using Microsoft.Extensions.DependencyInjection;
-using KyberWeave.Data.Arbiter;
-using KyberWeave.Data.Hooks;
 using System.Text.RegularExpressions;
 using KyberWeave.Cli.Commands.Arbiter;
-using KyberWeave.Core.Configuration;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// Contract: <c>arbiter doctor</c> reports both scope sections, falls back to the global
@@ -19,36 +11,23 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ArbiterDoctorCommandTests : IDisposable
 {
-    private readonly TempDirectory _home = new();
-    private readonly TempDirectory _repo = new();
-    private readonly ArbiterTestHost _host;
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public ArbiterDoctorCommandTests()
-    {
-        _host = ArbiterTestHost.Create(services =>
-            services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(() => _home.Path)));
-    }
-
-    public void Dispose()
-    {
-        _host.Dispose();
-        _home.Dispose();
-        _repo.Dispose();
-    }
+    public void Dispose() => _host.Dispose();
 
     [Fact]
     public void Doctor_ReportsScopeSummary_AndWarnsWhenProjectEnabledWithoutHooks()
     {
-        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["warp", "opencode", "pi"]);
+        _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["warp", "opencode", "pi"]);
         WriteProjectConfig(
             """
             arbiter:
               enabled: true
             """);
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
             null!,
-            new ArbiterSettings { Path = _repo.Path }));
+            new ArbiterSettings { Path = _host.WorkingDirectory }));
 
         Assert.Contains("GLOBAL scope", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("PROJECT scope", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -92,11 +71,11 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
 
     /// <summary>The global model-targets file for Claude, under Claude's own global root.</summary>
     private string GlobalModelTargetsPath =>
-        Path.Combine(_home.Path, ".claude", ".kyber-weave", "arbiter", "model-targets.claude.json");
+        Path.Combine(_host.HomeDirectory, ".claude", ".kyber-weave", "arbiter", "model-targets.claude.json");
 
     /// <summary>The global Squad lock, which the targets file must be at least as new as.</summary>
     private string GlobalLockPath =>
-        Path.Combine(_home.Path, ".kyber-weave", "squad", "global", "squad.lock.yml");
+        Path.Combine(_host.HomeDirectory, ".kyber-weave", "squad", "global", "squad.lock.yml");
 
     /// <summary>
     /// Targeting is on and Claude is hooked, but the targets file is absent: a model override
@@ -105,10 +84,10 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     [Fact]
     public void Doctor_WarnsModelMissingWhenTargetingIsOnAndTheHookedTargetHasNoTargetsFile()
     {
-        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["claude"]);
+        _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["claude"]);
         WriteProjectConfig(ShadowModelTargetingYaml);
 
-        CommandExecution execution = RunDoctor();
+        ArbiterCommandRun execution = RunDoctor();
 
         Assert.Contains("KW-ARB-MODEL-001", execution.Output, StringComparison.Ordinal);
         Assert.Contains("Run kyber-weave squad update", execution.Output, StringComparison.Ordinal);
@@ -118,11 +97,11 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     [Fact]
     public void Doctor_WarnsModelUnreadableWhenTheTargetsFileDoesNotParse()
     {
-        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["claude"]);
+        _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["claude"]);
         WriteProjectConfig(ShadowModelTargetingYaml);
         WriteFile(GlobalModelTargetsPath, "{not json");
 
-        CommandExecution execution = RunDoctor();
+        ArbiterCommandRun execution = RunDoctor();
 
         Assert.Contains("KW-ARB-MODEL-001", execution.Output, StringComparison.Ordinal);
         Assert.Contains("Run kyber-weave squad update", execution.Output, StringComparison.Ordinal);
@@ -135,14 +114,13 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     [Fact]
     public void Doctor_WarnsModelStaleWhenTheTargetsFileIsOlderThanTheSquadLock()
     {
-        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["claude"]);
+        _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["claude"]);
         WriteProjectConfig(ShadowModelTargetingYaml);
         WriteFile(GlobalModelTargetsPath, ModelTargetsJson);
+        _host.Clock.Advance(TimeSpan.FromHours(2));
         WriteFile(GlobalLockPath, "schema: kyber-squad.lock/v2\n");
-        File.SetLastWriteTimeUtc(GlobalModelTargetsPath, DateTime.UtcNow.AddHours(-2));
-        File.SetLastWriteTimeUtc(GlobalLockPath, DateTime.UtcNow);
 
-        CommandExecution execution = RunDoctor();
+        ArbiterCommandRun execution = RunDoctor();
 
         Assert.Contains("KW-ARB-MODEL-001", execution.Output, StringComparison.Ordinal);
         Assert.Contains("Run kyber-weave squad update", execution.Output, StringComparison.Ordinal);
@@ -152,14 +130,13 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     [Fact]
     public void Doctor_DoesNotWarnModelWhenTheTargetsFileIsCurrent()
     {
-        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["claude"]);
+        _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["claude"]);
         WriteProjectConfig(ShadowModelTargetingYaml);
-        WriteFile(GlobalModelTargetsPath, ModelTargetsJson);
         WriteFile(GlobalLockPath, "schema: kyber-squad.lock/v2\n");
-        File.SetLastWriteTimeUtc(GlobalLockPath, DateTime.UtcNow.AddHours(-2));
-        File.SetLastWriteTimeUtc(GlobalModelTargetsPath, DateTime.UtcNow);
+        _host.Clock.Advance(TimeSpan.FromHours(2));
+        WriteFile(GlobalModelTargetsPath, ModelTargetsJson);
 
-        CommandExecution execution = RunDoctor();
+        ArbiterCommandRun execution = RunDoctor();
 
         Assert.DoesNotContain("KW-ARB-MODEL-001", execution.Output, StringComparison.Ordinal);
     }
@@ -168,7 +145,7 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     [Fact]
     public void Doctor_DoesNotWarnModelWhenTargetingIsOff()
     {
-        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["claude"]);
+        _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["claude"]);
         WriteProjectConfig(
             """
             arbiter:
@@ -177,7 +154,7 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
                 mode: off
             """);
 
-        CommandExecution execution = RunDoctor();
+        ArbiterCommandRun execution = RunDoctor();
 
         Assert.DoesNotContain("KW-ARB-MODEL-001", execution.Output, StringComparison.Ordinal);
     }
@@ -186,37 +163,24 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     [Fact]
     public void Doctor_DoesNotWarnModelWhenNoHookedTargetIsInstalled()
     {
-        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["warp"]);
+        _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["warp"]);
         WriteProjectConfig(ShadowModelTargetingYaml);
 
-        CommandExecution execution = RunDoctor();
+        ArbiterCommandRun execution = RunDoctor();
 
         Assert.DoesNotContain("KW-ARB-MODEL-001", execution.Output, StringComparison.Ordinal);
     }
 
-    private CommandExecution RunDoctor() =>
-        Capture(() => _host.Command<ArbiterDoctorCommand>().Execute(
+    private ArbiterCommandRun RunDoctor() =>
+        _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
             null!,
-            new ArbiterSettings { Path = _repo.Path }));
+            new ArbiterSettings { Path = _host.WorkingDirectory }));
 
-    private static void WriteFile(string path, string content)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, content);
-    }
+    private void WriteFile(string path, string content) => _ = _host.Write(path, content);
 
     private void WriteProjectConfig(string yaml)
     {
-        string dir = Path.Combine(_repo.Path, ".kyber-weave");
-        Directory.CreateDirectory(dir);
-        File.WriteAllText(Path.Combine(dir, "kyber-weave.yml"), yaml);
+        _ = _host.Write(_host.InWork(".kyber-weave", "kyber-weave.yml"), yaml);
     }
 
-    private static CommandExecution Capture(Func<int> execute)
-    {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
-        return new CommandExecution(execution.Result, execution.Output);
-    }
-
-    private sealed record CommandExecution(int ExitCode, string Output);
 }
