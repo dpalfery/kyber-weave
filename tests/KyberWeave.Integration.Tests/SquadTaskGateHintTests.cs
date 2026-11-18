@@ -3,8 +3,11 @@ using KyberWeave.Tests.Configuration;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Data.Configuration;
+using KyberWeave.Data.Review;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -26,6 +29,14 @@ public sealed class SquadTaskGateHintTests
 {
     private const string HintFragment = "No task gates are declared";
     private const string DocsInitFragment = "kyber-weave docs init";
+
+    /// <summary>
+    /// The real config repository over the real disk. These cases are integration tests of what a prepared project's
+    /// own <c>.kyber-weave/kyber-weave.yml</c> makes the verb print, so an empty fake in its place would always report
+    /// no gates.
+    /// </summary>
+    private static IKyberWeaveConfigRepository ProjectConfigs =>
+        new FileKyberWeaveConfigRepository(new FileRepositoryTreeProbe());
 
     /// <summary>
     /// A project with no config file gets the hint, because there are no task gates to find.
@@ -243,7 +254,8 @@ public sealed class SquadTaskGateHintTests
                 renderer: renderer,
                 isInteractive: false,
                 readAnswer: null,
-                globalRoots: global ? new CodexOnlyGlobalRoots(globalRoot) : null).Execute(null!, new SquadInstallSettings
+                globalRoots: global ? new CodexOnlyGlobalRoots(globalRoot) : null,
+                configs: ProjectConfigs).Execute(null!, new SquadInstallSettings
                 {
                     Path = targetDir,
                     Targets = ["codex"],
@@ -292,7 +304,8 @@ public sealed class SquadTaskGateHintTests
                 stateStore: stateStore,
                 releaseSource: releaseSource,
                 renderer: renderer,
-                isInteractive: false).Execute(null!, new SquadUpdateSettings
+                isInteractive: false,
+                configs: ProjectConfigs).Execute(null!, new SquadUpdateSettings
                 {
                     Path = targetDir,
                     Targets = ["codex"],
