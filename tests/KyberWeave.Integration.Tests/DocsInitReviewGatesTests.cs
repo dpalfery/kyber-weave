@@ -9,6 +9,7 @@ using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review.Catalogue;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -19,6 +20,8 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 public sealed class DocsInitReviewGatesTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string ConfigRelativePath = ".kyber-weave/kyber-weave.yml";
     private const string NoGatesForAgent = "KW-REVIEW-027";
     private const string OptOutLine = "review gates not written (--no-review-gates)";
@@ -58,7 +61,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
         DocsTestCommands.Scaffolding.Scaffold(repo);
 
         string written = NormalizeVersionStamp(ReadReviewSection(repo));
-        string expected = NormalizeVersionStamp(File.ReadAllText(ExpectedReviewPath(family)));
+        string expected = NormalizeVersionStamp(Corpus.ReadText(ExpectedReviewPath(family)));
         Assert.Equal(expected, written);
     }
 
@@ -437,13 +440,12 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     private static string FixtureCleanPath(string family)
     {
         return Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "tests", "fixtures", "gate-catalogue", family, "clean");
+            Corpus.Root, "tests", "fixtures", "gate-catalogue", family, "clean");
     }
 
     private static string ExpectedReviewPath(string family)
     {
-        return Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "tests", "fixtures", "gate-catalogue", family, "expected-review.yml");
+        return $"tests/fixtures/gate-catalogue/{family}/expected-review.yml";
     }
 
     /// <summary>

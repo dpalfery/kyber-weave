@@ -6,6 +6,7 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -22,6 +23,8 @@ namespace KyberWeave.Integration.Tests;
 /// </remarks>
 public sealed class SquadInstanceScopeTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly DateTimeOffset InstalledAt =
         new(2026, 8, 14, 12, 34, 56, TimeSpan.Zero);
 
@@ -295,7 +298,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
         SquadInstanceRootResolver resolver = new(instanceRoot, SquadTarget.Claude);
 
         SquadRenderRequest request = new SquadRenderRequest(
-            SourceDirectory: Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad"),
+            SourceDirectory: Path.Combine(Corpus.Root, "products", "kyber-squad"),
             Targets: [SquadTarget.Claude],
             Scope: SquadDeploymentScope.Global,
             UserScopeDirectory: userPaths.ApplicationDataDirectory,
@@ -332,7 +335,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
         SquadInstanceRootResolver resolver = new(instanceRoot, SquadTarget.Copilot);
 
         SquadRenderRequest request = new SquadRenderRequest(
-            SourceDirectory: Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad"),
+            SourceDirectory: Path.Combine(Corpus.Root, "products", "kyber-squad"),
             Targets: [SquadTarget.Copilot],
             Scope: SquadDeploymentScope.Global,
             UserScopeDirectory: userPaths.ApplicationDataDirectory,

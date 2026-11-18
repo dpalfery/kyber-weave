@@ -12,6 +12,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Harness = KyberWeave.Tests.Fakes.SquadHomeHarness;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -34,6 +35,8 @@ namespace KyberWeave.Integration.Tests;
 /// </remarks>
 public sealed class SquadGlobalHomeCliTests : IClassFixture<SquadHomeStateTemplate>, IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string InstalledVersion = "1.2.3";
     private const string UpdatedVersion = "1.2.4";
 
@@ -1251,7 +1254,7 @@ public sealed class SquadGlobalHomeCliTests : IClassFixture<SquadHomeStateTempla
     private static void WriteCanonicalSourceWithoutResponseBlocks(string anchor)
     {
         File.WriteAllText(Path.Combine(anchor, "KyberWeave.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
-        string source = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string source = Path.Combine(Corpus.Root, "products", "kyber-squad");
         string destination = Path.Combine(anchor, "products", "kyber-squad");
         foreach (string directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
             Directory.CreateDirectory(Path.Combine(destination, Path.GetRelativePath(source, directory)));

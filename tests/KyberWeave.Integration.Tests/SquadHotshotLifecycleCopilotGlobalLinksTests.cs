@@ -4,6 +4,7 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -20,6 +21,8 @@ namespace KyberWeave.Integration.Tests;
 /// </remarks>
 public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string ConductorPath = "agents/conductor.agent.md";
 
     private static readonly string[] ReferenceFiles =
@@ -58,7 +61,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         Assert.DoesNotContain("](conductor/references/", content, StringComparison.Ordinal);
 
         SquadReceipt receipt = Assert.IsType<SquadReceipt>(
-            install.StateStore.ReadReceipt(KyberWeaveTestPaths.ToolRoot, SquadDeploymentScope.Global));
+            install.StateStore.ReadReceipt(Corpus.Root, SquadDeploymentScope.Global));
         SquadOwnedFile owned = Assert.Single(
             receipt.Files,
             file => string.Equals(file.RelativePath, ConductorPath, StringComparison.Ordinal)
@@ -92,7 +95,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             install.UserPaths,
-            KyberWeaveTestPaths.ToolRoot,
+            Corpus.Root,
             install.GlobalRoots,
             SquadTestRegistry.Create([new CopilotRenderer()]));
 
@@ -100,7 +103,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
             null!,
             new SquadDoctorSettings
             {
-                Path = KyberWeaveTestPaths.ToolRoot,
+                Path = Corpus.Root,
                 Global = true
             }));
 
@@ -158,7 +161,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
                 globalRoots: globalRoots);
 
             SquadLifecycleResult result = service.InstallAsync(new SquadInstallRequest(
-                    KyberWeaveTestPaths.ToolRoot,
+                    Corpus.Root,
                     SquadDeploymentScope.Global,
                     [SquadTarget.Copilot],
                     Version: "1.2.3"))
@@ -213,7 +216,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
                 copyRoot);
             _ = SquadInstallCopy.ReRootDeployed(
                 destinationTargetRoot,
-                store.ResolveReceiptPath(KyberWeaveTestPaths.ToolRoot, SquadDeploymentScope.Global),
+                store.ResolveReceiptPath(Corpus.Root, SquadDeploymentScope.Global),
                 store,
                 home,
                 destinationHome);

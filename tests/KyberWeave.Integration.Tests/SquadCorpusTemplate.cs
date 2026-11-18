@@ -1,5 +1,6 @@
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -18,10 +19,12 @@ namespace KyberWeave.Integration.Tests;
 /// </remarks>
 public sealed class SquadCorpusTemplate
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     /// <summary>Loads the checked-in corpus once for the class that declares this fixture.</summary>
     public SquadCorpusTemplate()
     {
-        Source = SquadSourceLoader.Load(Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad"));
+        Source = SquadSourceLoader.Load(Path.Combine(Corpus.Root, "products", "kyber-squad"));
     }
 
     /// <summary>The corpus, parsed once and never mutated.</summary>

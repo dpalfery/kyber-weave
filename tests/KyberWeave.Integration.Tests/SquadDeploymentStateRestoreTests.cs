@@ -14,6 +14,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using Xunit.Sdk;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -23,6 +24,8 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 public sealed class SquadDeploymentStateRestoreTests : SquadDeploymentStateTestBase
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     [Theory]
     [InlineData("target-file")]
     [InlineData("target-link-metadata")]
@@ -138,13 +141,7 @@ public sealed class SquadDeploymentStateRestoreTests : SquadDeploymentStateTestB
     [Fact]
     public void RestoreIntentRestoreSourcesAreReverifiedAtAdjacentUseBoundary()
     {
-        string transactionSource = File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "src",
-            "KyberWeave.Data",
-            "Squad",
-            "Deployment",
-            "SquadTransaction.cs"), Encoding.UTF8);
+        string transactionSource = Corpus.ReadText("src/KyberWeave.Data/Squad/Deployment/SquadTransaction.cs");
         string restoreIntent = ExtractMethod(transactionSource, "RestoreIntent");
         string restoreEntry = ExtractMethod(transactionSource, "RestoreEntry");
 
@@ -203,13 +200,7 @@ public sealed class SquadDeploymentStateRestoreTests : SquadDeploymentStateTestB
     [Fact]
     public void RestoreIntentUsesSingleVerifiedImmutablePayload()
     {
-        string source = File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "src",
-            "KyberWeave.Data",
-            "Squad",
-            "Deployment",
-            "SquadTransaction.cs"), Encoding.UTF8);
+        string source = Corpus.ReadText("src/KyberWeave.Data/Squad/Deployment/SquadTransaction.cs");
         string capture = ExtractMethod(source, "CaptureVerifiedRestorePayload");
         string compare = ExtractMethod(source, "CompareAndRestoreEntry");
         string restore = ExtractMethod(source, "RestoreEntry");

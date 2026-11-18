@@ -14,6 +14,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using Xunit.Sdk;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -23,6 +24,8 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output) : SquadDeploymentStateTestBase
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     [SuppressMessage(
         "Globalization",
         "CA1308:Normalize strings to uppercase",
@@ -351,20 +354,10 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
     [Fact]
     public void ResolvePhysicalRootComparisonPolicyIsNotOperatingSystemWideCaseFolding()
     {
-        string identitySource = File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "src",
-            "KyberWeave.Domain",
-            "Squad",
-            "Deployment",
-            "SquadPhysicalRootIdentity.cs"), Encoding.UTF8);
-        string transactionSource = File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "src",
-            "KyberWeave.Data",
-            "Squad",
-            "Deployment",
-            "SquadTransaction.cs"), Encoding.UTF8);
+        string identitySource = Corpus.ReadText(
+            "src/KyberWeave.Domain/Squad/Deployment/SquadPhysicalRootIdentity.cs");
+        string transactionSource = Corpus.ReadText(
+            "src/KyberWeave.Data/Squad/Deployment/SquadTransaction.cs");
 
         Assert.DoesNotContain("physicalPath.ToUpperInvariant()", identitySource, StringComparison.Ordinal);
         Assert.DoesNotContain(
@@ -526,33 +519,26 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
     [Fact]
     public void AllContainmentHelpersUseCanonicalFileSystemSemantics()
     {
-        string sourceRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "src");
-        string[] deploymentRoots =
+        string[] deploymentSources =
         [
-            .. Directory.EnumerateDirectories(sourceRoot, "Deployment", SearchOption.AllDirectories)
+            .. Corpus.EnumerateFiles("src", "*.cs")
                 .Where(path => path.Contains("Squad", StringComparison.Ordinal)
-                               && !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
-                               && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+                               && path.Split('/').Contains("Deployment", StringComparer.Ordinal))
+                .Order(StringComparer.Ordinal)
         ];
-        string semanticsPath = Path.Combine(
-            sourceRoot,
-            "KyberWeave.Data",
-            "Squad",
-            "Deployment",
-            "SquadFileSystemPathSemantics.cs");
+        const string semanticsPath = "src/KyberWeave.Data/Squad/Deployment/SquadFileSystemPathSemantics.cs";
 
         Assert.True(
-            File.Exists(semanticsPath),
+            Corpus.Exists(semanticsPath),
             "Containment must be centralized in SquadFileSystemPathSemantics.");
 
         List<string> offenders = new();
-        foreach (string sourcePath in deploymentRoots
-                     .SelectMany(root => Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)))
+        foreach (string sourcePath in deploymentSources)
         {
             if (string.Equals(sourcePath, semanticsPath, StringComparison.Ordinal))
                 continue;
 
-            string source = File.ReadAllText(sourcePath, Encoding.UTF8);
+            string source = Corpus.ReadText(sourcePath);
             if (source.Contains("private static StringComparison PathComparison", StringComparison.Ordinal) ||
                 source.Contains("private static bool IsWithin(", StringComparison.Ordinal) ||
                 source.Contains("private static bool PathsEqual(", StringComparison.Ordinal) ||

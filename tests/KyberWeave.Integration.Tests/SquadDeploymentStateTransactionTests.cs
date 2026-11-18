@@ -14,6 +14,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using Xunit.Sdk;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -23,6 +24,8 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateTestBase
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string UpdatedAgentOnePath = ".codex/agents/one.toml";
     private const string UpdatedAgentTwoPath = ".codex/agents/two.toml";
     private const string NewWarpRolePath = ".warp/roles/three.md";
@@ -775,13 +778,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     [Fact]
     public void PublishStageNoOverwriteVerifiesAuthorityAtAdjacentMoveBoundary()
     {
-        string source = File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "src",
-            "KyberWeave.Data",
-            "Squad",
-            "Deployment",
-            "SquadTransaction.cs"), Encoding.UTF8);
+        string source = Corpus.ReadText("src/KyberWeave.Data/Squad/Deployment/SquadTransaction.cs");
         string declaration = ExtractMethodDeclaration(source, "PublishStageNoOverwrite");
         string method = ExtractMethod(source, "PublishStageNoOverwrite");
 

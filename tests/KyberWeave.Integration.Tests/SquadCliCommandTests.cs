@@ -12,6 +12,7 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -22,6 +23,8 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 public sealed class SquadCliCommandTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     /// <summary>
     /// This class's prepared installs, built on the first constructor call so no test body runs one.
     /// </summary>
@@ -583,14 +586,14 @@ public sealed class SquadCliCommandTests : IDisposable
         SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
-            workingDirectory: KyberWeaveTestPaths.ToolRoot,
+            workingDirectory: Corpus.Root,
             globalRoots: globalRoots);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new SquadDoctorSettings
             {
-                Path = KyberWeaveTestPaths.ToolRoot,
+                Path = Corpus.Root,
                 Global = true
             }));
 
@@ -622,14 +625,14 @@ public sealed class SquadCliCommandTests : IDisposable
         SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
-            workingDirectory: KyberWeaveTestPaths.ToolRoot,
+            workingDirectory: Corpus.Root,
             globalRoots: globalRoots);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new SquadDoctorSettings
             {
-                Path = KyberWeaveTestPaths.ToolRoot,
+                Path = Corpus.Root,
                 Global = true
             }));
 
@@ -698,13 +701,13 @@ public sealed class SquadCliCommandTests : IDisposable
         string priorBytes = "prior-release-csharp-dev-content";
         await File.WriteAllTextAsync(csharpDevFile, priorBytes);
         string priorDigest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(priorBytes)));
-        SquadReceipt? receipt = stateStore.ReadReceipt(KyberWeaveTestPaths.ToolRoot, SquadDeploymentScope.Global);
+        SquadReceipt? receipt = stateStore.ReadReceipt(Corpus.Root, SquadDeploymentScope.Global);
         Assert.NotNull(receipt);
         List<SquadOwnedFile> updatedFiles = receipt.Files.Select(f =>
             f.RelativePath == "agents/csharp-dev.md" && f.Target == "cursor"
                 ? f with { Sha256 = priorDigest }
                 : f).ToList();
-        string receiptPath = stateStore.ResolveReceiptPath(KyberWeaveTestPaths.ToolRoot, SquadDeploymentScope.Global);
+        string receiptPath = stateStore.ResolveReceiptPath(Corpus.Root, SquadDeploymentScope.Global);
         await File.WriteAllTextAsync(receiptPath, stateStore.SerializeReceipt(receipt with { Files = updatedFiles }));
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
@@ -713,14 +716,14 @@ public sealed class SquadCliCommandTests : IDisposable
         SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
-            workingDirectory: KyberWeaveTestPaths.ToolRoot,
+            workingDirectory: Corpus.Root,
             globalRoots: globalRoots);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new SquadDoctorSettings
             {
-                Path = KyberWeaveTestPaths.ToolRoot,
+                Path = Corpus.Root,
                 Global = true
             }));
 
@@ -740,7 +743,7 @@ public sealed class SquadCliCommandTests : IDisposable
             null!,
             new SquadDoctorSettings
             {
-                Path = KyberWeaveTestPaths.ToolRoot,
+                Path = Corpus.Root,
                 Global = true
             }));
 
@@ -773,7 +776,7 @@ public sealed class SquadCliCommandTests : IDisposable
         SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
-            workingDirectory: KyberWeaveTestPaths.ToolRoot,
+            workingDirectory: Corpus.Root,
             globalRoots: globalRoots,
             stateStore: stateStore);
 
@@ -781,7 +784,7 @@ public sealed class SquadCliCommandTests : IDisposable
             null!,
             new SquadDoctorSettings
             {
-                Path = KyberWeaveTestPaths.ToolRoot,
+                Path = Corpus.Root,
                 Global = true
             }));
 
@@ -813,7 +816,7 @@ public sealed class SquadCliCommandTests : IDisposable
         SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
-            workingDirectory: KyberWeaveTestPaths.ToolRoot,
+            workingDirectory: Corpus.Root,
             globalRoots: globalRoots,
             stateStore: stateStore);
 
@@ -821,7 +824,7 @@ public sealed class SquadCliCommandTests : IDisposable
             null!,
             new SquadDoctorSettings
             {
-                Path = KyberWeaveTestPaths.ToolRoot,
+                Path = Corpus.Root,
                 Global = true
             }));
 
@@ -840,7 +843,7 @@ public sealed class SquadCliCommandTests : IDisposable
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
         SquadStateStore stateStore = new(userPaths);
 
-        string receiptPath = stateStore.ResolveReceiptPath(KyberWeaveTestPaths.ToolRoot, SquadDeploymentScope.Global);
+        string receiptPath = stateStore.ResolveReceiptPath(Corpus.Root, SquadDeploymentScope.Global);
         Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
         File.WriteAllText(receiptPath, "{ corrupt local json \n");
 
@@ -849,7 +852,7 @@ public sealed class SquadCliCommandTests : IDisposable
         SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
-            workingDirectory: KyberWeaveTestPaths.ToolRoot,
+            workingDirectory: Corpus.Root,
             globalRoots: globalRoots,
             stateStore: stateStore);
 
@@ -857,7 +860,7 @@ public sealed class SquadCliCommandTests : IDisposable
             null!,
             new SquadDoctorSettings
             {
-                Path = KyberWeaveTestPaths.ToolRoot,
+                Path = Corpus.Root,
                 Global = true
             }));
 

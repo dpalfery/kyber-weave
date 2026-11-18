@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using KyberWeave.Core.Processes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -62,6 +63,8 @@ namespace KyberWeave.Integration.Tests;
 /// </remarks>
 public sealed class UtilitiesStatusLineArtifactTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string StatusLineRootRelativePath = "products/kyber-utilities/statusline";
     private const string ClaudeArtifactRelativePath = StatusLineRootRelativePath + "/claude/statusline.sh";
     private const string AgyArtifactRelativePath = StatusLineRootRelativePath + "/antigravity/statusline.py";
@@ -883,7 +886,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         if (OperatingSystem.IsWindows())
             Assert.Skip("Kyber Utilities status-line artifacts are macOS and Linux only (D4).");
 
-        string path = Path.Combine(KyberWeaveTestPaths.ToolRoot, ToNative(relativePath));
+        string path = Path.Combine(Corpus.Root, ToNative(relativePath));
         Assert.True(
             File.Exists(path),
             $"The Kyber-owned artifact '{path}' does not exist yet. T4 is the RED suite for T5's " +
@@ -916,17 +919,17 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
 
     private static string FixtureText(string fixtureFileName)
     {
-        string path = FixturePath(fixtureFileName);
+        string relativePath = $"{FixtureRootRelativePath}/{fixtureFileName}";
         Assert.True(
-            File.Exists(path),
-            $"The synthetic fixture '{path}' is missing; the fixture set is part of this suite, so its " +
+            Corpus.Exists(relativePath),
+            $"The synthetic fixture '{relativePath}' is missing; the fixture set is part of this suite, so its " +
             "absence is a test fault, not the artifact under test.");
-        return File.ReadAllText(path);
+        return Corpus.ReadText(relativePath);
     }
 
     private static string FixturePath(string fixtureFileName)
     {
-        return Path.Combine(KyberWeaveTestPaths.ToolRoot, ToNative(FixtureRootRelativePath), fixtureFileName);
+        return Path.Combine(Corpus.Root, ToNative(FixtureRootRelativePath), fixtureFileName);
     }
 
     private static string[] PiExtensionModules(string artifact)

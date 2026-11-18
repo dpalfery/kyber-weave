@@ -12,6 +12,7 @@ using KyberWeave.Core.Squad.Validation;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using Xunit.Sdk;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests.Squad;
 
@@ -24,11 +25,13 @@ namespace KyberWeave.Integration.Tests.Squad;
 /// </summary>
 public sealed class SquadKyberWeavePackFixture : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     /// <summary>The release version every pack in this fixture is stamped with.</summary>
     public const string PackedVersion = "1.2.3";
 
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     private readonly TempDirectory _temp = new();
 
@@ -153,7 +156,7 @@ public sealed class SquadKyberWeavePackFixture : IDisposable
     {
         string outDirectory = Path.Combine(_temp.Path, format);
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() =>
-            SquadTestCommands.Pack(KyberWeaveTestPaths.ToolRoot).Execute(
+            SquadTestCommands.Pack(Corpus.Root).Execute(
                 null!,
                 new SquadPackSettings { Format = format, Out = outDirectory, Version = PackedVersion }));
         return new SquadPackRun(run.Result, run.Output, outDirectory);
@@ -172,11 +175,13 @@ public sealed record SquadPackRun(int ExitCode, string Output, string OutDirecto
 /// <remarks>
 /// Contract: <c>docs/plans/2026-10-31-kyber-skills-user-level-deploy.md</c>, "Test contract (test-first)". The pinned names
 /// are pinned here, and every <c>.apm/skills/*/SKILL.md</c> is discovered at test time so a later skill is covered
-/// too. Real-repository cases resolve the root through <see cref="KyberWeaveTestPaths.ToolRoot"/>. Every temp directory
+/// too. Real-repository cases resolve the root through <see cref="ICorpusSource.Root"/>. Every temp directory
 /// is disposed, and install, update, and uninstall run against a temp home.
 /// </remarks>
 public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePackFixture>, IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string PackedVersion = SquadKyberWeavePackFixture.PackedVersion;
 
     /// <summary>The Squad skill whose render path each target's Kyber-Weave skill path is derived from.</summary>
@@ -805,9 +810,9 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         }
     }
 
-    private static string ProductRoot => Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+    private static string ProductRoot => Path.Combine(Corpus.Root, "products", "kyber-squad");
 
-    private static string ApmSkillsRoot => Path.Combine(KyberWeaveTestPaths.ToolRoot, ".apm", "skills");
+    private static string ApmSkillsRoot => Path.Combine(Corpus.Root, ".apm", "skills");
 
     /// <summary>The pinned names, plus every <c>.apm/skills</c> directory that holds a <c>SKILL.md</c>, ordinally sorted.</summary>
     private static string[] AllKyberWeaveSkillNames()

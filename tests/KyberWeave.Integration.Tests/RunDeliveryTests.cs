@@ -14,6 +14,7 @@ using KyberWeave.Mcp;
 using KyberWeave.Tests.Fakes;
 using ModelContextProtocol.Server;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -24,6 +25,8 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTemplate>, IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string Branch = "claude/feat/widget-export";
     private const string ArchivedPlan = "docs/archive/plans/2026-11-13-widget-export.md";
     private const string PrUrl = "https://github.com/acme/widgets/pull/42";
@@ -97,8 +100,8 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [Fact]
     public void TheEmbeddedTemplateIsTheSkillsTemplateByteForByte()
     {
-        string product = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "skills",
-            "create-pull-request", "assets", "pull-request-description.md"));
+        string product = Corpus.ReadText(
+            "products/kyber-squad/skills/create-pull-request/assets/pull-request-description.md");
 
         Assert.Equal(product, PullRequestDescription.Template);
     }
