@@ -1,11 +1,19 @@
 using KyberWeave.Tests.Configuration;
+using KyberWeave.Tests.Fakes;
 
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Mcp;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Host;
+using KyberWeave.Data.Paths;
+using Spectre.Console.Testing;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -779,7 +787,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
 
         Assert.Equal(0, unwire.Result);
         Assert.False(File.Exists(InRepo(FactoryFile)), "a file the wire created is deleted on removal");
-        Assert.Null(McpWiringReceipt.Load(Repo).Find(FactoryFile));
+        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(FactoryFile));
     }
 
     /// <summary>
@@ -821,7 +829,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         Assert.False(File.Exists(ReceiptPath));
 
         Assert.Equal(0, Migrate(ClaudeCode).Result);
-        Assert.NotNull(McpWiringReceipt.Load(Repo).Find(ClaudeFile));
+        Assert.NotNull(McpWiringTestServices.Receipts.Load(Repo).Find(ClaudeFile));
 
         CapturedConsoleExecution<int> unwire = Unwire(ClaudeCode);
 
@@ -1173,6 +1181,139 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     }
 
     /// <summary>
+    /// The home refusal resolves both spellings through the path seam and reads the home from the
+    /// environment seam, so a spelling that lands on the home directory is refused without touching
+    /// the disk and without reading the developer's own profile.
+    /// </summary>
+    [Fact]
+    public void TheHomeRefusalResolvesTheSpellingThroughTheSeams()
+    {
+        string home = Path.Combine(FakeAnchor, "home");
+
+        CapturedConsoleExecution<int> execution = Run(console =>
+            new DocsMcpMigrateCommand(
+                McpWiringTestServices.Wiring,
+                FakePathResolver.OverEmptyFileSystem(),
+                new FakeProcessEnvironment(
+                    currentDirectory: Path.Combine(FakeAnchor, "work"),
+                    homeDirectory: home),
+                console).Execute(
+                null!,
+                new DocsMcpMigrateSettings { Path = Path.Combine(FakeAnchor, "home", "..", "home"), Target = Cursor }));
+
+        Assert.Equal(1, execution.Result);
+        Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A home reached through a symbolic link is refused: the comparison follows the link through
+    /// the path seam, so a root spelled as a link to the home directory is the home directory.
+    /// </summary>
+    [Fact]
+    public void AHomeReachedThroughALinkIsRefused()
+    {
+        string home = Path.Combine(FakeAnchor, "home");
+        string link = Path.Combine(FakeAnchor, "linked-home");
+        FakePathResolver paths = FakePathResolver.OverEmptyFileSystem();
+        paths.Files.CreateDirectory(home);
+        paths.Files.CreateDirectoryLink(link, home);
+
+        CapturedConsoleExecution<int> execution = Run(console =>
+            new DocsMcpMigrateCommand(
+                new UnreachedWiringService(),
+                paths,
+                new FakeProcessEnvironment(
+                    currentDirectory: Path.Combine(FakeAnchor, "work"),
+                    homeDirectory: home),
+                console).Execute(
+                null!,
+                new DocsMcpMigrateSettings { Path = link }));
+
+        Assert.Equal(1, execution.Result);
+        Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A fully qualified anchor for the fake paths a case hands the seams, spelled the way the
+    /// platform spells one: the path seam refuses a base the platform does not call fully
+    /// qualified, and a Unix-absolute base is drive-relative on Windows.
+    /// </summary>
+    private static string FakeAnchor => OperatingSystem.IsWindows() ? @"C:\kw" : "/kw";
+
+    /// <summary>
+    /// A root the path seam cannot canonicalize is refused, not treated as "not the home": the
+    /// refusal is a promise never to read or write user-scope files, and a comparison that failed
+    /// has proved nothing about which tree the operator pointed the command at.
+    /// </summary>
+    [Fact]
+    public void AnUnresolvableRootIsRefusedInsteadOfTreatedAsNotTheHome()
+    {
+        string home = Path.Combine(FakeAnchor, "home");
+
+        CapturedConsoleExecution<int> execution = Run(console =>
+            new DocsMcpMigrateCommand(
+                new UnreachedWiringService(),
+                new UnresolvableCanonicalPathResolver(FakePathResolver.OverEmptyFileSystem()),
+                new FakeProcessEnvironment(
+                    currentDirectory: Path.Combine(FakeAnchor, "work"),
+                    homeDirectory: home),
+                console).Execute(
+                null!,
+                new DocsMcpMigrateSettings { Path = home }));
+
+        Assert.Equal(1, execution.Result);
+        Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>A path seam whose canonicalization fails the way an unreadable parent directory does.</summary>
+    private sealed class UnresolvableCanonicalPathResolver(IPathResolver inner) : IPathResolver
+    {
+        public string GetFullPath(string path, string baseDirectory) => inner.GetFullPath(path, baseDirectory);
+
+        public bool AreSame(string first, string second) => inner.AreSame(first, second);
+
+        public bool IsWithin(string root, string candidate) => inner.IsWithin(root, candidate);
+
+        public string Canonicalize(string path) => throw new IOException("a parent directory could not be read");
+
+        public string ResolvePhysicalRoot(string targetRoot) => inner.ResolvePhysicalRoot(targetRoot);
+    }
+
+    /// <summary>An MCP wiring service a refusal must stop the command before it reaches.</summary>
+    private sealed class UnreachedWiringService : IMcpWiringService
+    {
+        public ILaunchCommandResolver ResolverFor(string repositoryRoot) => throw Unreached();
+
+        public McpWiringReport Inspect(string repositoryRoot, McpConfig config) => throw Unreached();
+
+        public McpWiringReport Inspect(string repositoryRoot, McpConfig config, ILaunchCommandResolver resolver) =>
+            throw Unreached();
+
+        public IReadOnlyList<McpWiringFix> Derive(McpWiringReport report, string repositoryRoot) => throw Unreached();
+
+        public IReadOnlyList<string> Harnesses(IEnumerable<McpWiringFix> fixes) => throw Unreached();
+
+        public McpWiringRepairReport Repair(
+            string repositoryRoot,
+            McpConfig config,
+            ILaunchCommandResolver resolver,
+            IReadOnlyList<string> targets,
+            bool dryRun = false) => throw Unreached();
+
+        public McpWiringRepairReport Unwire(string repositoryRoot, IReadOnlyList<string> targets) => throw Unreached();
+
+        public IReadOnlyList<McpRenameChange> Scan(string repositoryRoot, string? harness = null) => throw Unreached();
+
+        public IReadOnlyList<McpRenameChange> Migrate(
+            string repositoryRoot,
+            IReadOnlyList<string> targets,
+            bool dryRun = false) => throw Unreached();
+
+        private static InvalidOperationException Unreached() =>
+            new("the command reached the MCP wiring service, so the home refusal did not stop it");
+    }
+
+    /// <summary>
     /// A declaration that is a symbolic link is refused before it is read: reading it would read a
     /// file the repository does not contain, and writing it would write there.
     /// </summary>
@@ -1278,21 +1419,44 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     /// fake home, for the cases about which tree the operator pointed the command at.
     /// </summary>
     private CapturedConsoleExecution<int> MigrateAt(string root, string targets, bool dryRun = false) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpMigrateCommand(McpWiringTestServices.Wiring, () => FakeHome).Execute(
+        Run(console => new DocsMcpMigrateCommand(
+            McpWiringTestServices.Wiring,
+            FakePathResolver.OverEmptyFileSystem(),
+            new FakeProcessEnvironment(() => FakeHome),
+            console).Execute(
             null!,
             new DocsMcpMigrateSettings { Path = root, Target = targets, DryRun = dryRun }));
 
     /// <summary>Runs the wire verb, to produce a receipt the migrate verb must rebase.</summary>
     private CapturedConsoleExecution<int> Wire(string targets) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpWireCommand(McpWiringTestServices.Wiring, ConfigFileReader.Repository).Execute(
+        Run(console => new DocsMcpWireCommand(
+            McpWiringTestServices.Wiring,
+            ConfigFileReader.Repository,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new ProcessEnvironment(),
+            console).Execute(
             null!,
             new DocsMcpWireSettings { Path = Repo, Target = targets }));
 
     /// <summary>Runs the removal verb against the receipt the wire and migrate verbs wrote.</summary>
     private CapturedConsoleExecution<int> Unwire(string targets) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpUnwireCommand(McpWiringTestServices.Wiring).Execute(
+        Run(console => new DocsMcpUnwireCommand(
+            McpWiringTestServices.Wiring,
+            McpWiringTestServices.Receipts,
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new ProcessEnvironment(),
+            console).Execute(
             null!,
             new DocsMcpUnwireSettings { Path = Repo, Target = targets }));
+
+    /// <summary>Runs the command over a test console and returns what the operator read.</summary>
+    private static CapturedConsoleExecution<int> Run(Func<TestConsole, int> execute)
+    {
+        TestConsole console = new() { EmitAnsiSequences = false };
+        int exit = execute(console);
+        return new CapturedConsoleExecution<int>(exit, console.Output);
+    }
 
     /// <summary>The declaration <c>docs init</c> scaffolds, naming the shipped binary by absolute path.</summary>
     private void WriteDeclaration() =>

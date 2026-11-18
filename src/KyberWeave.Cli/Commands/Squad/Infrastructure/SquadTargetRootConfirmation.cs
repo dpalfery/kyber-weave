@@ -29,11 +29,15 @@ namespace KyberWeave.Cli.Commands.Squad.Infrastructure;
 /// <c>--yes</c> exists for automation running under a pty that would otherwise hang on
 /// the prompt. The <c>readAnswer</c> parameter of <see cref="Confirm"/> is the decision
 /// seam (N7): the question in, the decision out, so hosts and tests inject the decision
-/// without coupling to answer-parsing conventions.
+/// without coupling to answer-parsing conventions. Without one, the question is asked on the
+/// console with <see cref="SquadConsole.ReadAnswer"/>: only an explicit y or yes proceeds.
 /// </para>
 /// </remarks>
-public static class SquadTargetRootConfirmation
+/// <param name="console">Where the echo is written and the question is asked.</param>
+public sealed class SquadTargetRootConfirmation(SquadConsole console)
 {
+    private readonly SquadConsole _console = console ?? throw new ArgumentNullException(nameof(console));
+
     /// <summary>
     /// Echoes the resolved absolute <paramref name="root"/> and its scope, prompts exactly
     /// once when the console is interactive and <paramref name="yes"/> is
@@ -44,25 +48,26 @@ public static class SquadTargetRootConfirmation
     /// <param name="verb">The squad command being confirmed, such as <c>install</c>.</param>
     /// <param name="isInteractive">Whether a human is at the console to answer a prompt.</param>
     /// <param name="yes">Whether <c>--yes</c> was passed, which proceeds without prompting.</param>
-    /// <param name="readAnswer">Asks the question and returns whether the answer confirms.</param>
+    /// <param name="readAnswer">
+    /// Asks the question and returns whether the answer confirms; null asks on the console this instance writes to.
+    /// </param>
     /// <param name="globalTargetRoots">
     /// The physical global root each selected target will be written beneath, for a
     /// <c>--global</c> run; each is echoed and carried into the prompt question. Null or
     /// empty for project scope, where the anchor <paramref name="root"/> is itself the
     /// physical root.
     /// </param>
-    public static bool Confirm(
+    public bool Confirm(
         string root,
         SquadDeploymentScope scope,
         string verb,
         bool isInteractive,
         bool yes,
-        Func<string, bool> readAnswer,
+        Func<string, bool>? readAnswer,
         IReadOnlyList<(SquadTarget Target, string GlobalRoot)>? globalTargetRoots = null)
     {
         ArgumentNullException.ThrowIfNull(root);
         ArgumentNullException.ThrowIfNull(verb);
-        ArgumentNullException.ThrowIfNull(readAnswer);
 
         string scopeWord = scope == SquadDeploymentScope.Global ? "global" : "project";
 
@@ -76,15 +81,15 @@ public static class SquadTargetRootConfirmation
         // the lines exist for — a copy-pastable, log-greppable path. The width is
         // restored immediately; rendering is single-threaded here (a CLI run, and the
         // tests serialize their console captures), so nothing renders inside the window.
-        CommandHelpers.WriteUnfolded(() =>
+        _console.WriteUnfolded(() =>
         {
-            AnsiConsole.MarkupLine(
+            _console.Ansi.MarkupLine(
                 $"[bold]kyber-weave squad {Markup.Escape(verb)}[/]: target root [bold]{Markup.Escape(root)}[/] ({scopeWord} scope).");
             if (globalTargetRoots is { Count: > 0 })
             {
                 foreach ((SquadTarget target, string globalRoot) in globalTargetRoots)
                 {
-                    AnsiConsole.MarkupLine(
+                    _console.Ansi.MarkupLine(
                         $"  [bold]{Markup.Escape(SquadTargetCatalog.GetToken(target))}[/] writes beneath [bold]{Markup.Escape(globalRoot)}[/].");
                 }
             }
@@ -101,22 +106,6 @@ public static class SquadTargetRootConfirmation
                   globalTargetRoots.Select(pair => $"{SquadTargetCatalog.GetToken(pair.Target)} '{pair.GlobalRoot}'")) +
               "? (y/n)"
             : $"Proceed with '{verb}' at '{root}' ({scopeWord} scope)? (y/n)";
-        return readAnswer(question);
-    }
-
-    /// <summary>
-    /// The default answer seam: writes the question and reads one line of console input.
-    /// Only an explicit y/yes proceeds — any other answer, and an end-of-input read,
-    /// declines, because input that cannot be read cannot be taken as confirming a write.
-    /// </summary>
-    public static bool ReadConsoleAnswer(string question)
-    {
-        ArgumentNullException.ThrowIfNull(question);
-
-        AnsiConsole.Markup($"[bold]{Markup.Escape(question)}[/] ");
-        string? answer = Console.ReadLine();
-        return answer is not null &&
-               (string.Equals(answer, "y", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(answer, "yes", StringComparison.OrdinalIgnoreCase));
+        return (readAnswer ?? _console.ReadAnswer)(question);
     }
 }

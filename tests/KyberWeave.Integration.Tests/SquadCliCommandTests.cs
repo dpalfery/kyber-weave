@@ -11,6 +11,9 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Host;
+using KyberWeave.Data.Paths;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using KyberWeave.Tests.Corpus;
@@ -1686,7 +1689,7 @@ public sealed class SquadCliCommandTests : IDisposable
     [InlineData("   ")]
     public void SquadCommandComposition_ResolveTargetRoot_NullOrWhitespace_ReturnsCurrentDirectoryFullPath(string? input)
     {
-        string resolved = SquadCommandComposition.ResolveTargetRoot(input);
+        string resolved = PhysicalRoots().ResolveTargetRoot(input);
         Assert.Equal(Path.GetFullPath("."), resolved);
     }
 
@@ -1694,8 +1697,18 @@ public sealed class SquadCliCommandTests : IDisposable
     public void SquadCommandComposition_ResolveTargetRoot_SpecifiedPath_ReturnsFullPath()
     {
         string relative = "some/relative/dir";
-        string resolved = SquadCommandComposition.ResolveTargetRoot(relative);
+        string resolved = PhysicalRoots().ResolveTargetRoot(relative);
         Assert.Equal(Path.GetFullPath(relative), resolved);
+    }
+
+    private static SquadCommandRoots PhysicalRoots()
+    {
+        PhysicalFileSystem files = new();
+        return new SquadCommandRoots(
+            files,
+            new PhysicalPathResolver(files),
+            new ProcessEnvironment(),
+            new SquadConsole(Spectre.Console.AnsiConsole.Console, new SystemConsole()));
     }
 
     [Theory]

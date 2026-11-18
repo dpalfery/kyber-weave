@@ -9,7 +9,7 @@ namespace KyberWeave.Cli.Commands.Utilities;
 
 /// <summary>
 ///     Checks the status-line deployment and its runtime prerequisites, and prints the activation
-///     snippet. It never reads a harness settings file (D5).
+///     snippet for a harness that is deployed. It never reads a harness settings file (D5).
 /// </summary>
 /// <remarks>
 ///     Doctor checks only what Kyber Utilities can see without touching the operator's settings: the
@@ -25,6 +25,7 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
     private readonly IStatusLineHostService _host;
     private readonly UtilitiesStatusLineProcessRunner _processRunner;
     private readonly IFileSystemPathSemantics _semantics;
+    private readonly IAnsiConsole _console;
 
     /// <summary>Creates a doctor command over the process environment.</summary>
     /// <param name="environment">The process state the per-user roots and <c>PATH</c> are read from.</param>
@@ -32,23 +33,28 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
     /// <param name="host">Probes <c>PATH</c>, the owned files' digests and their executable bits.</param>
     /// <param name="processRunner">Runs the harness version probe.</param>
     /// <param name="semantics">The filesystem's containment rules.</param>
+    /// <param name="console">Receives everything the operator reads.</param>
     public UtilitiesStatusLineDoctorCommand(
         IProcessEnvironment environment,
         IStatusLineDeploymentService plans,
         IStatusLineHostService host,
         UtilitiesStatusLineProcessRunner processRunner,
-        IFileSystemPathSemantics semantics)
+        IFileSystemPathSemantics semantics,
+        IAnsiConsole console)
     {
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(processRunner);
+        ArgumentNullException.ThrowIfNull(semantics);
+        ArgumentNullException.ThrowIfNull(console);
 
         _environment = environment;
         _plans = plans;
         _host = host;
         _processRunner = processRunner;
         _semantics = semantics;
+        _console = console;
     }
 
     /// <inheritdoc />
@@ -59,25 +65,38 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        StatusLineTargetRoots roots = UtilitiesStatusLineCommandComposition.ResolveRoots(_environment);
+        StatusLineTargetRoots roots;
+        try
+        {
+            roots = UtilitiesStatusLineCommandComposition.ResolveRoots(_environment);
+            foreach (StatusLineTarget target in UtilitiesStatusLineTargetCatalog.All)
+            {
+                _ = roots.ResolveStagingRoot(target);
+            }
+        }
+        catch (ArgumentException ex)
+        {
+            UtilitiesStatusLineCommandComposition.WriteClientInputError(_console, ex.Message);
+            return 2;
+        }
 
-        AnsiConsole.MarkupLine("[bold]Kyber Utilities status line — doctor[/]");
-        AnsiConsole.WriteLine();
+        _console.MarkupLine("[bold]Kyber Utilities status line — doctor[/]");
+        _console.WriteLine();
 
         bool hasIssues = false;
         foreach (StatusLineTarget target in UtilitiesStatusLineTargetCatalog.All)
             if (!Diagnose(target, roots))
                 hasIssues = true;
 
-        AnsiConsole.WriteLine();
+        _console.WriteLine();
         if (hasIssues)
         {
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 "[red]Doctor found issues with the status-line deployment or its prerequisites.[/]");
             return 1;
         }
 
-        AnsiConsole.MarkupLine("[green]All checked status-line prerequisites and owned files are healthy.[/]");
+        _console.MarkupLine("[green]All checked status-line prerequisites and owned files are healthy.[/]");
         return 0;
     }
 
@@ -95,7 +114,7 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
         string harnessExecutable = UtilitiesStatusLinePrerequisites.HarnessExecutable(target);
         if (!_host.IsOnPath(harnessExecutable))
         {
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 $"  [grey]skip[/] {Markup.Escape(token)}: '{Markup.Escape(harnessExecutable)}' " +
                 "is not on PATH, so this harness is not installed.");
             return true;
@@ -103,19 +122,19 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
 
         bool healthy = true;
         string? version = UtilitiesStatusLineHarnessProbe.TryVersion(_processRunner, harnessExecutable);
-        AnsiConsole.MarkupLine(
+        _console.MarkupLine(
             $"  [green]ok[/] {Markup.Escape(token)}: harness '{Markup.Escape(harnessExecutable)}' " +
             $"({Markup.Escape(version ?? "version unknown")})");
 
         foreach (UtilitiesStatusLinePrerequisite prerequisite in UtilitiesStatusLinePrerequisites.For(target))
             if (_host.IsOnPath(prerequisite.Executable))
             {
-                AnsiConsole.MarkupLine(
+                _console.MarkupLine(
                     $"  [green]ok[/] {Markup.Escape(token)}: prerequisite '{Markup.Escape(prerequisite.Executable)}'");
             }
             else
             {
-                AnsiConsole.MarkupLine(
+                _console.MarkupLine(
                     $"  [red]fail[/] {Markup.Escape(token)}: prerequisite " +
                     $"'{Markup.Escape(prerequisite.Executable)}' is missing — " +
                     Markup.Escape(prerequisite.Hint));
@@ -124,14 +143,27 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
 
         if (target == StatusLineTarget.Agy) healthy &= ReportKyberDash(token);
 
-        healthy &= ReportOwnedFiles(target, roots, token);
+        healthy &= ReportOwnedFiles(target, roots, token, out bool deployed);
+        if (!deployed) return healthy;
 
         string stagingRoot = roots.ResolveStagingRoot(target);
-        string commandPath = SquadPathPolicy.ResolveFile(
-            stagingRoot,
-            UtilitiesStatusLineArtifacts.PrimaryFileName(target),
-            _semantics);
-        UtilitiesStatusLineOutput.PrintActivationGuidance(target, commandPath);
+        string commandPath;
+        try
+        {
+            commandPath = SquadPathPolicy.ResolveFile(
+                stagingRoot,
+                UtilitiesStatusLineArtifacts.PrimaryFileName(target),
+                _semantics);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            _console.MarkupLine(
+                $"  [red]fail[/] {Markup.Escape(token)}: the activation path could not be resolved: " +
+                $"{Markup.Escape(ex.Message)}");
+            return false;
+        }
+
+        UtilitiesStatusLineOutput.PrintActivationGuidance(_console, target, commandPath);
 
         return healthy;
     }
@@ -144,13 +176,13 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
     {
         if (_host.IsOnPath(UtilitiesStatusLinePrerequisites.KyberDashExecutable))
         {
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 $"  [green]ok[/] {Markup.Escape(token)}: optional recorder " +
                 $"'{UtilitiesStatusLinePrerequisites.KyberDashExecutable}' is on PATH");
             return true;
         }
 
-        AnsiConsole.MarkupLine(
+        _console.MarkupLine(
             $"  [yellow]warn[/] {Markup.Escape(token)}: optional recorder " +
             $"'{UtilitiesStatusLinePrerequisites.KyberDashExecutable}' is not on PATH; the status line " +
             "still renders, but KyberDash will not receive agy status-line data (the hand-off is optional).");
@@ -158,28 +190,42 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
     }
 
     /// <summary>Checks every receipt-owned file's checksum and, where owed, its executable bit.</summary>
-    private bool ReportOwnedFiles(StatusLineTarget target, StatusLineTargetRoots roots, string token)
+    /// <param name="target">The harness being diagnosed.</param>
+    /// <param name="roots">The resolved per-user roots.</param>
+    /// <param name="token">The harness's CLI token, for the report.</param>
+    /// <param name="deployed">Whether a receipt exists, so the activation snippet has a deployed file to name.</param>
+    /// <returns>Whether every owned file is healthy.</returns>
+    private bool ReportOwnedFiles(
+        StatusLineTarget target,
+        StatusLineTargetRoots roots,
+        string token,
+        out bool deployed)
     {
+        deployed = false;
+
         StatusLineReceipt? receipt;
         try
         {
             receipt = _plans.ReadReceipt(target, roots);
         }
-        catch (Exception ex) when (ex is InvalidDataException or StatusLineDeploymentConflictException)
+        catch (Exception ex) when (
+            ex is InvalidDataException or StatusLineDeploymentConflictException or
+                IOException or UnauthorizedAccessException)
         {
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 $"  [red]fail[/] {Markup.Escape(token)}: {Markup.Escape(ex.Message)}");
             return false;
         }
 
         if (receipt is null)
         {
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 $"  [grey]info[/] {Markup.Escape(token)}: not deployed. Run " +
                 "'kyber-weave utilities statusline deploy'.");
             return true;
         }
 
+        deployed = true;
         string stagingRoot = roots.ResolveStagingRoot(target);
         bool healthy = true;
         foreach (StatusLineOwnedFile file in receipt.Files)
@@ -194,7 +240,7 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
             }
             catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
             {
-                AnsiConsole.MarkupLine(
+                _console.MarkupLine(
                     $"  [red]fail[/] {Markup.Escape(token)}: {Markup.Escape(file.RelativePath)} " +
                     $"(outside the staging root): {Markup.Escape(ex.Message)}");
                 healthy = false;
@@ -204,7 +250,7 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
             UtilitiesStatusLineFileState state = _host.EvaluateOwnedFile(physicalPath, file.Sha256);
             if (state != UtilitiesStatusLineFileState.Ok)
             {
-                AnsiConsole.MarkupLine(
+                _console.MarkupLine(
                     $"  [red]fail[/] {Markup.Escape(token)}: {Markup.Escape(file.RelativePath)} " +
                     $"({DescribeState(state)})");
                 healthy = false;
@@ -214,14 +260,14 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
             if (UtilitiesStatusLineArtifacts.RequiresExecutableBit(file.RelativePath) &&
                 !_host.HasExecutableBit(physicalPath))
             {
-                AnsiConsole.MarkupLine(
+                _console.MarkupLine(
                     $"  [red]fail[/] {Markup.Escape(token)}: {Markup.Escape(file.RelativePath)} " +
                     "is not executable. Run 'kyber-weave utilities statusline deploy' again to restore the bit.");
                 healthy = false;
                 continue;
             }
 
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 $"  [green]ok[/] {Markup.Escape(token)}: {Markup.Escape(file.RelativePath)}");
         }
 

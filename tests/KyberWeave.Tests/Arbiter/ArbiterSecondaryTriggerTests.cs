@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Data.Arbiter;
@@ -167,6 +168,7 @@ public sealed class ArbiterSecondaryTriggerTests : IDisposable
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
             new FixedClock(fixedNow),
+            new FakeIdGenerator(),
             secondaryTriggers: SecondaryFor);
     }
 

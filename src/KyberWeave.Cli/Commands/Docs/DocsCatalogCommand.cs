@@ -8,7 +8,10 @@ using Spectre.Console.Cli;
 namespace KyberWeave.Cli.Commands.Docs;
 
 /// <summary>Governance view: doc-type coverage by component.</summary>
-public sealed class DocsCatalogCommand(IKyberWeaveConfigRepository configs, IDocumentSourceFactory documents) : Command<DocsSettings>
+public sealed class DocsCatalogCommand(
+    IKyberWeaveConfigRepository configs,
+    IDocumentSourceFactory documents,
+    IAnsiConsole console) : Command<DocsSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, DocsSettings settings, CancellationToken cancellationToken)
@@ -16,7 +19,7 @@ public sealed class DocsCatalogCommand(IKyberWeaveConfigRepository configs, IDoc
         DiagnosticReport report = new DiagnosticReport();
         if (!DocsCommandComposition.TryCreateLoader(configs, settings, report, documents, out IDocumentSource? loader))
         {
-            CommandHelpers.Finish(report, settings, "docs catalog", "Document");
+            CommandHelpers.Finish(console, report, settings, "docs catalog", "Document");
             return 1;
         }
 
@@ -47,8 +50,8 @@ public sealed class DocsCatalogCommand(IKyberWeaveConfigRepository configs, IDoc
                     : $"[yellow]{missing}[/]"));
         }
 
-        AnsiConsole.Write(table);
-        AnsiConsole.MarkupLine(
+        console.Write(table);
+        console.MarkupLine(
             $"[grey]{set.Documents.Count} documents in scope; " +
             $"{set.Documents.Count(d => d.HasFrontmatter)} with frontmatter.[/]");
         return 0;

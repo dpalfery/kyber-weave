@@ -543,6 +543,7 @@ public sealed class DispatchPromptInsertionTests : IDisposable
             ArbiterTestServices.Get<IDispatchClaimStore>(),
             ArbiterTestServices.Get<IClaudeHookCoverage>(),
             ArbiterTestServices.Get<IProcessEnvironment>(),
+            new FakeIdGenerator(),
             () => "decision-test-1",
             prompts);
     }

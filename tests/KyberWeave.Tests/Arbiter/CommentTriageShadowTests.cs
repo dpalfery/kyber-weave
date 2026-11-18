@@ -75,7 +75,7 @@ public sealed class CommentTriageShadowTests : IDisposable
     }
 
     private CommentTriageService Service(IArbiterProvider provider, IReadOnlyList<string>? botLogins = null, IReadOnlyList<ArbiterRule>? rules = null) =>
-        new(provider, Root, ArbiterDirectory, new FixedClock(Now), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>(), botLogins: botLogins, rules: rules);
+        new(provider, Root, ArbiterDirectory, new FixedClock(Now), new FakeIdGenerator(), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>(), botLogins: botLogins, rules: rules);
 
     private static CommentTriageRequest Request(string path = CitedPath) =>
         new(path, 12, "Rename this variable to something clearer.", null);

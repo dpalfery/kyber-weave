@@ -90,7 +90,7 @@ public sealed class FileFailureGuardTests : IDisposable
         ArbiterRunStore store = RealArbiterState.RunStore(
             arbiter,
             options: null,
-            clock: () => DateTimeOffset.UtcNow,
+            clock: TimeProvider.System,
             newestItemTime: _ => throw new SecurityException("denied"));
 
         ArbiterStoreStatus status = await store.AppendFindingAsync("RUN-A", "a finding");

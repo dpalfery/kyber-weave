@@ -197,6 +197,7 @@ public sealed class HookGitFactsSnapshotTests : IDisposable
         int reads = 0;
 
         string? found = HookGitFacts.PeekUntilSettled<string>(
+            TimeProvider.System,
             () =>
             {
                 reads++;
@@ -220,6 +221,7 @@ public sealed class HookGitFactsSnapshotTests : IDisposable
         Queue<string> documents = new(["before the save", "after the save"]);
 
         string? found = HookGitFacts.PeekUntilSettled(
+            TimeProvider.System,
             documents.Dequeue,
             text => text == "after the save" ? text : null,
             TimeSpan.FromMinutes(5));
@@ -236,6 +238,7 @@ public sealed class HookGitFactsSnapshotTests : IDisposable
         int reads = 0;
 
         string? found = HookGitFacts.PeekUntilSettled<string>(
+            TimeProvider.System,
             () => (++reads).ToString(System.Globalization.CultureInfo.InvariantCulture),
             _ => null,
             TimeSpan.Zero);

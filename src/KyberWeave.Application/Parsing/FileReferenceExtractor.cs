@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Text;
 using Markdig;
 using Markdig.Syntax;
@@ -99,9 +101,12 @@ internal readonly record struct ExtractedFileReference(
 );
 
 /// <summary>
-/// Extracts and validates file references from Markdown documents and text spans.
+/// Extracts and validates file references from Markdown documents and text spans, resolving each against the
+/// file-system and path seams.
 /// </summary>
-internal static partial class FileReferenceExtractor
+/// <param name="files">The file system the references are looked up in.</param>
+/// <param name="paths">Turns a reference into a full path against the owning directory, which must be fully qualified.</param>
+internal sealed partial class FileReferenceExtractor(IFileSystem files, IPathResolver paths)
 {
     private static readonly char[] PathSeparators = ['/', '\\'];
 
@@ -141,7 +146,7 @@ internal static partial class FileReferenceExtractor
     /// <summary>
     /// Extracts file references from a single Markdown text string.
     /// </summary>
-    internal static IReadOnlyList<ExtractedFileReference> ExtractFromText(
+    internal IReadOnlyList<ExtractedFileReference> ExtractFromText(
         string text,
         string directoryPath,
         FileReferenceOptions? options = null)
@@ -160,7 +165,7 @@ internal static partial class FileReferenceExtractor
     /// <summary>
     /// Extracts file references from multiple Markdown text strings.
     /// </summary>
-    internal static IReadOnlyList<ExtractedFileReference> ExtractFromTexts(
+    internal IReadOnlyList<ExtractedFileReference> ExtractFromTexts(
         IEnumerable<string> texts,
         string directoryPath,
         FileReferenceOptions? options = null)
@@ -189,7 +194,7 @@ internal static partial class FileReferenceExtractor
     /// <summary>
     /// Extracts file references from an existing parsed Markdig <see cref="MarkdownDocument"/>.
     /// </summary>
-    internal static IReadOnlyList<ExtractedFileReference> ExtractFromDocument(
+    internal IReadOnlyList<ExtractedFileReference> ExtractFromDocument(
         MarkdownDocument document,
         string directoryPath,
         FileReferenceOptions? options = null)
@@ -206,7 +211,7 @@ internal static partial class FileReferenceExtractor
         return results.Values.ToArray();
     }
 
-    private static void ExtractInternal(
+    private void ExtractInternal(
         MarkdownDocument document,
         string directoryPath,
         FileReferenceOptions options,
@@ -279,7 +284,7 @@ internal static partial class FileReferenceExtractor
         }
     }
 
-    private static void ProcessReference(
+    private void ProcessReference(
         string target,
         string directoryPath,
         FileReferenceOptions options,
@@ -373,7 +378,7 @@ internal static partial class FileReferenceExtractor
 
         try
         {
-            resolvedFullPath = Path.GetFullPath(Path.Combine(directoryPath, normalized));
+            resolvedFullPath = FullPath(normalized, directoryPath);
         }
         catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException)
         {
@@ -394,7 +399,7 @@ internal static partial class FileReferenceExtractor
     /// Checks if a relative path resolves to an existing file or directory on disk,
     /// verifying that it does not escape the directory and respects filesystem case sensitivity.
     /// </summary>
-    internal static bool ResolvesOnDisk(string directoryPath, string relativePath, StringComparer? comparer = null)
+    internal bool ResolvesOnDisk(string directoryPath, string relativePath, StringComparer? comparer = null)
     {
         try
         {
@@ -403,8 +408,8 @@ internal static partial class FileReferenceExtractor
                 relativePath = relativePath.Substring(2);
             }
 
-            string fullPath = Path.GetFullPath(Path.Combine(directoryPath, relativePath));
-            string baseFull = Path.GetFullPath(directoryPath);
+            string fullPath = FullPath(relativePath, directoryPath);
+            string baseFull = FullPath(string.Empty, directoryPath);
 
             string basePrefix = baseFull.EndsWith(Path.DirectorySeparatorChar)
                 ? baseFull
@@ -416,7 +421,7 @@ internal static partial class FileReferenceExtractor
                 return false;
             }
 
-            if (!File.Exists(fullPath) && !Directory.Exists(fullPath))
+            if (!files.FileExists(fullPath) && !files.DirectoryExists(fullPath))
             {
                 return false;
             }
@@ -435,13 +440,13 @@ internal static partial class FileReferenceExtractor
                         continue;
                     }
 
-                    if (!Directory.Exists(currentDir))
+                    if (!files.DirectoryExists(currentDir))
                     {
                         return false;
                     }
 
                     bool matched = false;
-                    foreach (string entry in Directory.EnumerateFileSystemEntries(currentDir))
+                    foreach (string entry in EntryPaths(currentDir))
                     {
                         if (string.Equals(Path.GetFileName(entry), segment, StringComparison.Ordinal))
                         {
@@ -474,19 +479,19 @@ internal static partial class FileReferenceExtractor
     /// Probes case sensitivity by checking if an existing file or directory can be resolved with inverted casing.
     /// Falls back to OS default if probing is impossible (e.g. empty directory tree or access denied).
     /// </remarks>
-    internal static StringComparer GetPathComparer(string directoryPath)
+    internal StringComparer GetPathComparer(string directoryPath)
     {
         try
         {
-            DirectoryInfo? directory = new(Path.GetFullPath(directoryPath));
+            string? directory = FullPath(string.Empty, directoryPath);
             while (directory is not null)
             {
-                if (Directory.Exists(directory.FullName))
+                if (files.DirectoryExists(directory))
                 {
-                    string[] entries = Directory.EnumerateFileSystemEntries(directory.FullName).ToArray();
+                    string[] entries = EntryPaths(directory).ToArray();
                     foreach (string entry in entries)
                     {
-                        if (!File.Exists(entry) && !Directory.Exists(entry))
+                        if (!files.FileExists(entry) && !files.DirectoryExists(entry))
                         {
                             continue;
                         }
@@ -508,9 +513,9 @@ internal static partial class FileReferenceExtractor
                             ? char.ToLowerInvariant(alternateName[letterIndex])
                             : char.ToUpperInvariant(alternateName[letterIndex]);
                         string alternate = new(alternateName);
-                        string alternatePath = Path.Combine(directory.FullName, alternate);
+                        string alternatePath = Path.Combine(directory, alternate);
 
-                        if (!File.Exists(alternatePath) && !Directory.Exists(alternatePath))
+                        if (!files.FileExists(alternatePath) && !files.DirectoryExists(alternatePath))
                         {
                             return StringComparer.Ordinal;
                         }
@@ -522,7 +527,7 @@ internal static partial class FileReferenceExtractor
                     }
                 }
 
-                directory = directory.Parent;
+                directory = Path.GetDirectoryName(directory);
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -541,7 +546,7 @@ internal static partial class FileReferenceExtractor
     /// ensuring no suggestions escape the parent directory boundary.
     /// Computes similarity using <see cref="StringDistance.Levenshtein"/>.
     /// </remarks>
-    internal static string? FindNearestMatch(string directoryPath, string brokenReference)
+    internal string? FindNearestMatch(string directoryPath, string brokenReference)
     {
         string referenceName = Path.GetFileName(brokenReference);
         if (string.IsNullOrWhiteSpace(referenceName))
@@ -554,8 +559,8 @@ internal static partial class FileReferenceExtractor
         try
         {
             string? relativeDirectory = Path.GetDirectoryName(brokenReference);
-            string searchDirectory = Path.GetFullPath(Path.Combine(directoryPath, relativeDirectory ?? string.Empty));
-            string baseFull = Path.GetFullPath(directoryPath);
+            string searchDirectory = FullPath(relativeDirectory ?? string.Empty, directoryPath);
+            string baseFull = FullPath(string.Empty, directoryPath);
 
             string basePrefix = baseFull.EndsWith(Path.DirectorySeparatorChar)
                 ? baseFull
@@ -567,12 +572,12 @@ internal static partial class FileReferenceExtractor
                 return null;
             }
 
-            if (!Directory.Exists(searchDirectory))
+            if (!files.DirectoryExists(searchDirectory))
             {
                 return null;
             }
 
-            foreach (string file in Directory.EnumerateFileSystemEntries(searchDirectory))
+            foreach (string file in EntryPaths(searchDirectory))
             {
                 string fileName = Path.GetFileName(file);
                 int distance = StringDistance.Levenshtein(referenceName, fileName);
@@ -601,4 +606,14 @@ internal static partial class FileReferenceExtractor
 
         return null;
     }
+
+    /// <summary>The full path of <paramref name="relative"/> under <paramref name="directoryPath"/>; the directory itself when it is empty.</summary>
+    private string FullPath(string relative, string directoryPath) =>
+        relative.Length == 0
+            ? paths.GetFullPath(directoryPath, directoryPath)
+            : paths.GetFullPath(relative, directoryPath);
+
+    /// <summary>The immediate children of a directory, files and directories alike.</summary>
+    private IEnumerable<string> EntryPaths(string directory) =>
+        files.EnumerateEntries(directory).Select(static entry => entry.Path);
 }

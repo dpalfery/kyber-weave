@@ -22,6 +22,10 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
     private readonly ISquadTargetResolver _targets;
     private readonly ISquadGlobalRootResolver _globalRoots;
     private readonly SquadConsoleOptions _console;
+    private readonly SquadConsole _output;
+    private readonly SquadTargetRootConfirmation _confirmation;
+    private readonly IProcessEnvironment _environment;
+    private readonly SquadCommandRoots _roots;
     private readonly KyberDashCapturePluginStep? _capturePluginStep;
     private readonly IKyberWeaveConfigRepository _configs;
 
@@ -32,6 +36,10 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
     /// <param name="targets">Chooses the harness targets.</param>
     /// <param name="globalRoots">Names the roots a global install writes beneath.</param>
     /// <param name="console">How the command prompts; the defaults read the console.</param>
+    /// <param name="output">Where the command writes and asks.</param>
+    /// <param name="confirmation">Echoes the target root and asks before anything is written.</param>
+    /// <param name="environment">Names the working directory a relative path resolves against.</param>
+    /// <param name="roots">Resolves the target root, anchors a global run and reads the scope's configuration.</param>
     /// <param name="capturePluginStep">Installs the capture plugin after a global deployment, or null for none.</param>
     /// <param name="configs">Reads the project's host config for the task-gate hint.</param>
     public SquadInstallCommand(
@@ -41,6 +49,10 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         ISquadTargetResolver targets,
         ISquadGlobalRootResolver globalRoots,
         SquadConsoleOptions console,
+        SquadConsole output,
+        SquadTargetRootConfirmation confirmation,
+        IProcessEnvironment environment,
+        SquadCommandRoots roots,
         IKyberWeaveConfigRepository configs,
         KyberDashCapturePluginStep? capturePluginStep = null)
     {
@@ -50,6 +62,10 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         ArgumentNullException.ThrowIfNull(targets);
         ArgumentNullException.ThrowIfNull(globalRoots);
         ArgumentNullException.ThrowIfNull(console);
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(confirmation);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(roots);
         ArgumentNullException.ThrowIfNull(configs);
         _lifecycle = lifecycle;
         _stateStore = stateStore;
@@ -57,6 +73,10 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         _targets = targets;
         _globalRoots = globalRoots;
         _console = console;
+        _output = output;
+        _confirmation = confirmation;
+        _environment = environment;
+        _roots = roots;
         _configs = configs;
         _capturePluginStep = capturePluginStep;
     }
@@ -89,20 +109,20 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         }
         catch (Exception ex) when (ex is ArgumentException or SelfUpdateException)
         {
-            SquadCommandComposition.WriteClientInputError(ex.Message);
+            _output.WriteClientInputError(ex.Message);
             return 2;
         }
 
-        string projectRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
+        string projectRoot = _roots.ResolveTargetRoot(effectivePath);
 
         // Legacy state is migrated before the install reads any of it. A dry run reports what the next
         // real run would move, and stops without reading a deployment it has not yet moved.
-        SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
+        SquadMigrationReport migration = _roots.EnsureStateMigrated(
             _migration,
-            Environment.CurrentDirectory,
+            _environment.CurrentDirectory,
             scope == SquadDeploymentScope.Project ? projectRoot : null,
             settings.DryRun);
-        SquadCommandComposition.WriteMigrationNotes(migration);
+        _output.WriteMigrationNotes(migration);
         if (SquadCommandComposition.IsPendingDryRunMigration(migration, settings.DryRun))
         {
             return 0;
@@ -111,7 +131,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         // A --global install is anchored at the home directory whatever the working directory is, or at the
         // recorded root of a legacy single-root receipt the migration has just copied. Chosen after the migration.
         string targetRoot = scope == SquadDeploymentScope.Global
-            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun)
+            ? _roots.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun)
             : projectRoot;
 
         // Load configuration if present. A project that cannot be read — no config file,
@@ -119,14 +139,14 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         // defaults and the task-gate hint below says where review gates come from. Only a
         // global run, which has no project whose gates could be missing, keeps the load
         // failure fatal.
-        KyberWeaveConfigLoadResult configResult = SquadCommandComposition.TryLoadScopeConfig(
+        KyberWeaveConfigLoadResult configResult = _roots.TryLoadScopeConfig(
             _configs,
             targetRoot,
             scope,
             stateStore.UserPaths.HomeDirectory);
         if (!configResult.Success && scope != SquadDeploymentScope.Project)
         {
-            SquadCommandComposition.WriteClientInputError(configResult.Error ?? "Failed to load configuration.");
+            _output.WriteClientInputError(configResult.Error ?? "Failed to load configuration.");
             return 1;
         }
 
@@ -141,16 +161,16 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
             ConfiguredTargets = squadConfig.Targets,
             ExplicitExclusions = settings.Exclusions,
             ConfiguredExclusions = squadConfig.Exclusions,
-            IsInteractive = SquadCommandComposition.IsInteractiveConsole()
+            IsInteractive = _output.IsInteractive
         };
 
         SquadTargetResolutionDecision decision = _targets.Resolve(request);
         if (decision.Kind == SquadTargetResolutionKind.Failure)
         {
-            AnsiConsole.MarkupLine("[red]No deployment targets specified or detected.[/]");
+            _output.Ansi.MarkupLine("[red]No deployment targets specified or detected.[/]");
             if (decision.RecoveryCommand is not null)
             {
-                AnsiConsole.MarkupLine($"Specify target(s) using [bold]{Markup.Escape(decision.RecoveryCommand)}[/].");
+                _output.Ansi.MarkupLine($"Specify target(s) using [bold]{Markup.Escape(decision.RecoveryCommand)}[/].");
             }
 
             return decision.ExitCode ?? 2;
@@ -187,16 +207,16 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         // The confirmation is the last gate before the lifecycle call — the only
         // side-effecting step — so a decline aborts with zero writes (plan N3/N5);
         // a dry-run's output already names the root, so it never prompts (N4).
-        if (!settings.DryRun && !SquadTargetRootConfirmation.Confirm(
+        if (!settings.DryRun && !_confirmation.Confirm(
                 targetRoot,
                 scope,
                 "install",
-                _console.IsInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
+                _console.IsInteractive ?? _output.IsInteractive,
                 settings.Yes,
-                _console.ReadAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer,
+                _console.ReadAnswer,
                 globalTargetRoots))
         {
-            AnsiConsole.MarkupLine("[yellow]Declined. No changes were made.[/]");
+            _output.Ansi.MarkupLine("[yellow]Declined. No changes were made.[/]");
             return 2;
         }
 
@@ -209,18 +229,18 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
                 if (settings.DryRun)
                 {
                     int fileCount = result.Receipt?.Files.Count ?? 0;
-                    SquadCommandComposition.WriteLine(
+                    _output.WriteLine(
                         $"[bold]Dry-run:[/] planned {fileCount} deployed files for [bold]{Markup.Escape(targetRoot)}[/].");
                 }
                 else
                 {
-                    SquadCommandComposition.WriteLine(
+                    _output.WriteLine(
                         $"[green]Successfully installed Kyber-Squad to [bold]{Markup.Escape(targetRoot)}[/].[/]");
                 }
 
                 if (deployedTargets.Count > decision.Targets.Count)
                 {
-                    SquadCommandComposition.WriteLine(
+                    _output.WriteLine(
                         "Extended the existing global install; it now has "
                         + $"{Markup.Escape(string.Join(", ", deployedTargets.Select(SquadTargetCatalog.GetToken)))}.");
                 }
@@ -229,27 +249,27 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
                 // each selected target's trust gate where the audit cannot observe the gap.
                 // Global Warp stays fallback-only: the install still prints the MCP registration
                 // guidance, but it never mutates ~/.warp/.mcp.json.
-                WriteArbiterTrustSteps(decision.Targets, arbiterWiring);
+                WriteArbiterTrustSteps(_output, decision.Targets, arbiterWiring);
                 if (arbiterWiring.Enabled && scope == SquadDeploymentScope.Project && decision.Targets.Contains(SquadTarget.OpenCode)
                     && OpenCodeArbiterRegistrationStep(scope) is { } openCodeStep)
                 {
-                    Console.WriteLine(openCodeStep);
+                    _output.Out.WriteLine(openCodeStep);
                 }
 
                 if (scope == SquadDeploymentScope.Global && (decision.Targets.Contains(SquadTarget.Warp) || decision.Targets.Contains(SquadTarget.ZCode)))
                 {
                     string targetToken = decision.Targets.Contains(SquadTarget.Warp) ? "warp" : "zcode";
                     string configPath = targetToken == "warp" ? "~/.warp/.mcp.json" : "~/.zcode/.mcp.json";
-                    Console.WriteLine(RegistrationStepMessage(configPath));
+                    _output.Out.WriteLine(RegistrationStepMessage(configPath));
                 }
 
-                SquadCommandComposition.WriteTransactionWarnings(result.Warnings);
+                _output.WriteTransactionWarnings(result.Warnings);
 
                 // A project with no task gates learns where they come from. Squad writes no
                 // configuration itself, and the hint never changes this exit code.
                 if (scope == SquadDeploymentScope.Project)
                 {
-                    SquadTaskGateHint.WriteIfNoTaskGates(targetRoot, _configs);
+                    SquadTaskGateHint.WriteIfNoTaskGates(targetRoot, _configs, _output);
                 }
 
                 // The capture plugin is global, so only a global deployment reaches it. It runs after the
@@ -268,7 +288,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
             {
                 foreach (string error in result.Errors)
                 {
-                    SquadCommandComposition.WriteClientInputError(error);
+                    _output.WriteClientInputError(error);
                 }
             }
 
@@ -276,12 +296,12 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         }
         catch (SquadDeploymentConflictException ex)
         {
-            SquadCommandComposition.WriteClientInputError(ex.Message);
+            _output.WriteClientInputError(ex.Message);
             return 1;
         }
         catch (Exception ex)
         {
-            SquadCommandComposition.WriteClientInputError(ex.Message);
+            _output.WriteClientInputError(ex.Message);
             return 1;
         }
     }
@@ -318,6 +338,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
     /// <see cref="ArbiterHookWiring.TrustSteps"/> so the operator can copy it.
     /// </remarks>
     internal static void WriteArbiterTrustSteps(
+        SquadConsole output,
         IReadOnlyList<SquadTarget> targets,
         SquadArbiterWiring wiring)
     {
@@ -330,13 +351,13 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         // Unfolded: a redirected console folds at 80 columns, splitting the step
         // mid-phrase — corrupting the one thing the line exists for: a copy-pastable
         // gate the operator must grant where the audit cannot observe the gap.
-        CommandHelpers.WriteUnfolded(() =>
+        output.WriteUnfolded(() =>
         {
             foreach (SquadTarget target in targets)
             {
                 if (ArbiterHookWiring.TrustSteps.TryGetValue(target, out string? step))
                 {
-                    AnsiConsole.MarkupLine(
+                    output.Ansi.MarkupLine(
                         $"[yellow]Arbiter trust ({Markup.Escape(SquadTargetCatalog.GetToken(target))}):[/] {Markup.Escape(step)}");
                 }
             }

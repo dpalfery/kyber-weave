@@ -9,7 +9,7 @@ using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Agents;
 
-public sealed class AgentCatalogCommand(IAgentGovernanceService agents, IKyberWeaveConfigRepository configs) : Command<AgentCatalogSettings>
+public sealed class AgentCatalogCommand(IAgentGovernanceService agents, IKyberWeaveConfigRepository configs, IAnsiConsole console) : Command<AgentCatalogSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, AgentCatalogSettings settings, CancellationToken cancellationToken)
@@ -17,7 +17,7 @@ public sealed class AgentCatalogCommand(IAgentGovernanceService agents, IKyberWe
         DiagnosticReport report = new DiagnosticReport();
         if (!CommandHelpers.TryLoadConfig(configs, settings.Path, settings.Config, report, out KyberWeaveConfig config))
         {
-            ReportRenderer.Render(report, OutputFormat.Table, "agent catalog", "Config");
+            ReportRenderer.Render(console, report, OutputFormat.Table, "agent catalog", "Config");
             return 1;
         }
 
@@ -56,8 +56,8 @@ public sealed class AgentCatalogCommand(IAgentGovernanceService agents, IKyberWe
             table.AddRow(row.ToArray());
         }
 
-        AnsiConsole.Write(table);
-        AnsiConsole.MarkupLine($"\nTotal agent roles: [bold]{matrix.Count}[/]");
+        console.Write(table);
+        console.MarkupLine($"\nTotal agent roles: [bold]{matrix.Count}[/]");
         return 0;
     }
 }

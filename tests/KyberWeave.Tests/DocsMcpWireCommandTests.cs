@@ -5,6 +5,10 @@ using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Docs.Mcp;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Host;
+using KyberWeave.Data.Paths;
+using Spectre.Console.Testing;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -250,7 +254,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         }
 
         Assert.True(File.Exists(ReceiptPath), "a real run records what it wrote");
-        Assert.NotNull(McpWiringReceipt.Load(Repo).Find(".factory/mcp.json"));
+        Assert.NotNull(McpWiringTestServices.Receipts.Load(Repo).Find(".factory/mcp.json"));
     }
 
     /// <summary>
@@ -284,7 +288,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.Contains(RefusalCode, execution.Output, StringComparison.Ordinal);
         Assert.Contains("mcp.json", execution.Output, StringComparison.Ordinal);
         Assert.Equal(before, File.ReadAllBytes(Path.Combine(Repo, ".vscode", "mcp.json")));
-        Assert.Null(McpWiringReceipt.Load(Repo).Find(".vscode/mcp.json"));
+        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(".vscode/mcp.json"));
     }
 
     /// <summary>
@@ -349,7 +353,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         CapturedConsoleExecution<int> wire = Wire($"{Factory},{ClaudeCode}");
         Assert.Equal(0, wire.Result);
         Assert.True(File.Exists(Path.Combine(Repo, ".mcp.json")), "claude-code must be created");
-        Assert.NotNull(McpWiringReceipt.Load(Repo).Find(".mcp.json"));
+        Assert.NotNull(McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json"));
 
         CapturedConsoleExecution<int> unwire = Unwire($"{Factory},{ClaudeCode}");
 
@@ -357,7 +361,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.Equal(original, File.ReadAllBytes(Path.Combine(Repo, ".factory", "mcp.json")));
         Assert.False(File.Exists(Path.Combine(Repo, ".mcp.json")), "a file the repair created is deleted");
 
-        McpWiringReceipt receipt = McpWiringReceipt.Load(Repo);
+        McpWiringReceipt receipt = McpWiringTestServices.Receipts.Load(Repo);
         Assert.Null(receipt.Find(".factory/mcp.json"));
         Assert.Null(receipt.Find(".mcp.json"));
     }
@@ -441,7 +445,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
 
         Assert.Equal(0, execution.Result);
         Assert.Equal(before, File.ReadAllBytes(Path.Combine(Repo, ".mcp.json")));
-        Assert.Null(McpWiringReceipt.Load(Repo).Find(".mcp.json"));
+        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json"));
         Assert.Contains(ClaudeCode, execution.Output, StringComparison.Ordinal);
     }
 
@@ -477,7 +481,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
             Assert.Equal(BinaryPath, ExecutableOf(entry));
         }
 
-        Assert.NotNull(McpWiringReceipt.Load(Repo).Find(configFile));
+        Assert.NotNull(McpWiringTestServices.Receipts.Load(Repo).Find(configFile));
     }
 
     /// <summary>
@@ -887,11 +891,10 @@ public sealed class DocsMcpWireCommandTests : IDisposable
             Outcome: McpWiringChangeOutcome.Created,
             Servers: [ServerName]);
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-        {
-            CommandHelpers.WriteUnfolded(() => DocsMcpWireCommand.PrintChange(change, dryRun: true));
-            return 0;
-        });
+        TestConsole console = new() { EmitAnsiSequences = false };
+
+        CommandHelpers.WriteUnfolded(console, () => DocsMcpWireCommand.PrintChange(console, change, dryRun: true));
+        CapturedConsoleExecution<int> execution = new(0, console.Output);
 
         Assert.DoesNotContain("\u001b", execution.Output, StringComparison.Ordinal);
         Assert.Single(
@@ -934,7 +937,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.Contains(RefusalCode, execution.Output, StringComparison.Ordinal);
         Assert.Contains("docs mcp-migrate", execution.Output, StringComparison.Ordinal);
         Assert.Equal(before, File.ReadAllBytes(InRepo(".factory/mcp.json")));
-        Assert.Null(McpWiringReceipt.Load(Repo).Find(".factory/mcp.json"));
+        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(".factory/mcp.json"));
     }
 
     /// <summary>
@@ -971,14 +974,33 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     }
 
     private CapturedConsoleExecution<int> Wire(string targets, bool dryRun = false) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpWireCommand(McpWiringTestServices.Wiring, ConfigFileReader.Repository).Execute(
+        Run(console => new DocsMcpWireCommand(
+            McpWiringTestServices.Wiring,
+            ConfigFileReader.Repository,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new ProcessEnvironment(),
+            console).Execute(
             null!,
             new DocsMcpWireSettings { Path = Repo, Target = targets, DryRun = dryRun }));
 
     private CapturedConsoleExecution<int> Unwire(string targets) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpUnwireCommand(McpWiringTestServices.Wiring).Execute(
+        Run(console => new DocsMcpUnwireCommand(
+            McpWiringTestServices.Wiring,
+            McpWiringTestServices.Receipts,
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new ProcessEnvironment(),
+            console).Execute(
             null!,
             new DocsMcpUnwireSettings { Path = Repo, Target = targets }));
+
+    /// <summary>Runs the command over a test console and returns what the operator read.</summary>
+    private static CapturedConsoleExecution<int> Run(Func<TestConsole, int> execute)
+    {
+        TestConsole console = new() { EmitAnsiSequences = false };
+        int exit = execute(console);
+        return new CapturedConsoleExecution<int>(exit, console.Output);
+    }
 
     /// <summary>
     /// Writes the <c>mcp:</c> declaration in the shape <c>docs init</c> scaffolds, with the command

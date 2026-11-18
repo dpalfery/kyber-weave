@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
-using KyberWeave.Contracts.Repositories;
+using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Application.Squad;
 using KyberWeave.Cli.Update;
 using KyberWeave.Core.Squad.Deployment;
@@ -12,12 +13,11 @@ using KyberWeave.Data.Host;
 using KyberWeave.Data.Paths;
 using KyberWeave.Data.Squad.Release;
 
-namespace KyberWeave.Cli.Commands.Squad;
+namespace KyberWeave.Tests.Fakes;
 
 /// <summary>
-/// Builds the concrete Squad collaborators for the callers that run outside the container: the Arbiter commands,
-/// the self-updater's hook refresh and the tests that name each collaborator they replace. The Squad commands take
-/// theirs from the container.
+/// Builds the concrete Squad collaborators over the physical adapters for the tests that name each collaborator they
+/// replace. No product code calls it: the Squad commands take theirs from the container.
 /// </summary>
 internal static class SquadHostDefaults
 {

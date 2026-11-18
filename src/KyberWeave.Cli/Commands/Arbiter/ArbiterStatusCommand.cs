@@ -23,7 +23,8 @@ public sealed class ArbiterStatusCommand(
     IProcessEnvironment environment,
     IUserHostConfigStore userConfig,
     IArbiterRepositoryLocator locator,
-    IArbiterHarnessGating gating) : Command<ArbiterSettings>
+    IArbiterHarnessGating gating,
+    IAnsiConsole console) : Command<ArbiterSettings>
 {
     /// <summary>A remote provider is configured, and no key resolves for its origin.</summary>
     public const string KeyMissing = ArbiterKeyResolver.MissingKeyCode;
@@ -37,9 +38,9 @@ public sealed class ArbiterStatusCommand(
     {
         ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = new();
-        CommandHelpers.WriteUnfolded(() => Inspect(settings, report));
+        CommandHelpers.WriteUnfolded(console, () => Inspect(settings, report));
 
-        CommandHelpers.Finish(report, settings, "arbiter status", "Rule");
+        CommandHelpers.Finish(console, report, settings, "arbiter status", "Rule");
         return report.HasErrors ? 1 : 0;
     }
 
@@ -60,18 +61,18 @@ public sealed class ArbiterStatusCommand(
         string root = locator.ResolveRepositoryRoot(settings.Path);
         HarnessGatingReport gatingReport = gating.Build(root, home, config, globalTargets);
 
-        AnsiConsole.MarkupLine("[bold]Arbiter status[/]");
-        AnsiConsole.MarkupLine($"  Provider: [bold]{Markup.Escape(KindName(provider.Kind))}[/]");
-        AnsiConsole.MarkupLine($"  Model: [bold]{Markup.Escape(provider.Model)}[/]");
-        AnsiConsole.MarkupLine($"  Endpoint: [bold]{Markup.Escape(provider.Endpoint)}[/]");
-        AnsiConsole.MarkupLine($"  Origin: [bold]{Markup.Escape(origin ?? "none")}[/]");
+        console.MarkupLine("[bold]Arbiter status[/]");
+        console.MarkupLine($"  Provider: [bold]{Markup.Escape(KindName(provider.Kind))}[/]");
+        console.MarkupLine($"  Model: [bold]{Markup.Escape(provider.Model)}[/]");
+        console.MarkupLine($"  Endpoint: [bold]{Markup.Escape(provider.Endpoint)}[/]");
+        console.MarkupLine($"  Origin: [bold]{Markup.Escape(origin ?? "none")}[/]");
         if (!remote)
         {
-            AnsiConsole.MarkupLine("  Key: [grey]not needed (none or loopback provider).[/]");
+            console.MarkupLine("  Key: [grey]not needed (none or loopback provider).[/]");
         }
         else if (key is null)
         {
-            AnsiConsole.MarkupLine("  Key: [yellow]missing.[/]");
+            console.MarkupLine("  Key: [yellow]missing.[/]");
             report.Add(new Diagnostic(
                 KeyMissing,
                 Severity.Warning,
@@ -81,7 +82,7 @@ public sealed class ArbiterStatusCommand(
         }
         else
         {
-            AnsiConsole.MarkupLine("  Key: [green]found.[/]");
+            console.MarkupLine("  Key: [green]found.[/]");
         }
 
         WriteGlobalScope(globalTargets);
@@ -92,12 +93,12 @@ public sealed class ArbiterStatusCommand(
     public int Execute(CommandContext context, ArbiterSettings settings) =>
         Execute(context, settings, CancellationToken.None);
 
-    private static void WriteGlobalScope(IReadOnlyList<string> targets)
+    private void WriteGlobalScope(IReadOnlyList<string> targets)
     {
-        AnsiConsole.MarkupLine("[bold]GLOBAL scope[/]");
+        console.MarkupLine("[bold]GLOBAL scope[/]");
         if (targets.Count == 0)
         {
-            AnsiConsole.MarkupLine("  [grey]no global targets configured.[/]");
+            console.MarkupLine("  [grey]no global targets configured.[/]");
             return;
         }
 
@@ -105,14 +106,14 @@ public sealed class ArbiterStatusCommand(
         {
             string reason = GlobalReason(token);
             string label = TargetDisplayName(token);
-            AnsiConsole.MarkupLine($"  {Markup.Escape(label)}: {Markup.Escape(reason)}");
+            console.MarkupLine($"  {Markup.Escape(label)}: {Markup.Escape(reason)}");
         }
     }
 
-    private static void WriteProjectScope(HarnessGatingReport gating)
+    private void WriteProjectScope(HarnessGatingReport gating)
     {
-        AnsiConsole.MarkupLine("[bold]PROJECT scope[/]");
-        ArbiterGatingConsole.WriteRows(gating, TargetDisplayName);
+        console.MarkupLine("[bold]PROJECT scope[/]");
+        ArbiterGatingConsole.WriteRows(console, gating, TargetDisplayName);
     }
 
     private static string GlobalReason(string token)

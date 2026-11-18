@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Data.Arbiter;
@@ -231,7 +232,7 @@ public sealed class ArbiterLensNoCodeChangeRuleTests : IDisposable
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
-            TimeProvider.System);
+            TimeProvider.System, new FakeIdGenerator());
         KyberWeaveConfig config = new()
         {
             Arbiter = new ArbiterConfig { Enabled = true, Rules = ArbiterConfigDefaults.Product.Rules },

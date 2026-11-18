@@ -35,7 +35,8 @@ public sealed class ArbiterServeService(
     IFileTextFacts files,
     ICommentTriageFactory triage,
     IArbiterSectionSelectionService sections,
-    TimeProvider clock) : IArbiterServeService
+    TimeProvider clock,
+    IIdGenerator ids) : IArbiterServeService
 {
     private const string Harness = "serve";
     private const string UnidentifiedCaller = "unidentified";
@@ -165,7 +166,7 @@ public sealed class ArbiterServeService(
             pending.Add(new PendingEvaluation(classification.Caller ?? UnidentifiedCaller, target, prompt, unit.Refute));
         }
 
-        HookContext hookContext = new(context.RepoRoot, () => ArbiterRecordId.New(clock.GetUtcNow()), context.Log);
+        HookContext hookContext = new(context.RepoRoot, () => ids.NewSortableId(clock.GetUtcNow()), context.Log);
         ArbiterModelBlock? retarget = null;
         foreach (PendingEvaluation item in pending)
         {

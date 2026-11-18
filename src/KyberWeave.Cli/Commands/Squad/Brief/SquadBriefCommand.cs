@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Arbiter;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -17,7 +18,19 @@ namespace KyberWeave.Cli.Commands.Squad.Brief;
 /// Read-only. Exit codes: <c>0</c> the brief was printed (an unmapped heading is included, never an
 /// error), <c>2</c> refused input or reference files that cannot be found or read.
 /// </remarks>
-public sealed class SquadBriefCommand(ISquadBriefBuilder briefs, IKyberWeaveConfigRepository configs) : Command<SquadBriefSettings>
+/// <param name="briefs">Builds the brief from the installed reference files.</param>
+/// <param name="configs">Reads the host configuration the brief follows.</param>
+/// <param name="output">Where the brief and the refusals are written.</param>
+/// <param name="environment">Names the working directory the repository root is found from.</param>
+/// <param name="plans">Finds the repository root a plan argument belongs to.</param>
+/// <param name="roots">Finds the repository root above a directory.</param>
+public sealed class SquadBriefCommand(
+    ISquadBriefBuilder briefs,
+    IKyberWeaveConfigRepository configs,
+    SquadConsole output,
+    IProcessEnvironment environment,
+    PlanArguments plans,
+    ArbiterRepoRoot roots) : Command<SquadBriefSettings>
 {
     private const int Printed = 0;
     private const int Refused = 2;
@@ -33,8 +46,8 @@ public sealed class SquadBriefCommand(ISquadBriefBuilder briefs, IKyberWeaveConf
             return Refuse($"'{settings.Format}' is not a format. Use text or json.");
         }
 
-        string current = Directory.GetCurrentDirectory();
-        string root = string.IsNullOrWhiteSpace(settings.Plan) ? ArbiterRepoRoot.Find(current) : PlanArguments.RepositoryRootFor(settings.Plan);
+        string current = environment.CurrentDirectory;
+        string root = string.IsNullOrWhiteSpace(settings.Plan) ? roots.Find(current) : plans.RepositoryRootFor(settings.Plan);
         DiagnosticReport report = new();
         KyberWeaveConfig? config = CommandHelpers.TryLoadConfig(configs, root, null, report, out KyberWeaveConfig loaded) ? loaded : null;
 
@@ -55,13 +68,13 @@ public sealed class SquadBriefCommand(ISquadBriefBuilder briefs, IKyberWeaveConf
             return Refuse(error);
         }
 
-        Console.Out.Write(json ? BriefFormatter.ToJson(result!) + "\n" : BriefFormatter.ToText(result!));
+        output.Out.Write(json ? BriefFormatter.ToJson(result!) + "\n" : BriefFormatter.ToText(result!));
         return Printed;
     }
 
-    private static int Refuse(string message)
+    private int Refuse(string message)
     {
-        AnsiConsole.MarkupLine($"[red]kyber-weave squad brief: error:[/] {Markup.Escape(message)}");
+        output.Ansi.MarkupLine($"[red]kyber-weave squad brief: error:[/] {Markup.Escape(message)}");
         return Refused;
     }
 }

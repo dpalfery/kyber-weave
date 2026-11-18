@@ -27,17 +27,39 @@ public static class ReportRenderer
     /// about — "Skill", "Agent", "Document" — because the diagnostic model is shared
     /// across artifact classes and only the caller knows which one it is running over.
     /// </summary>
-    public static void Render(DiagnosticReport report, OutputFormat format, string command, string subjectLabel)
+    public static void Render(DiagnosticReport report, OutputFormat format, string command, string subjectLabel) =>
+        Render(AnsiConsole.Console, report, format, command, subjectLabel);
+
+    /// <summary>Renders a report to <paramref name="console"/>.</summary>
+    /// <param name="console">The console the report is written to.</param>
+    /// <param name="report">The report to render.</param>
+    /// <param name="format">The requested format.</param>
+    /// <param name="command">The command name a document format records.</param>
+    /// <param name="subjectLabel">Names what the findings are about.</param>
+    public static void Render(
+        IAnsiConsole console,
+        DiagnosticReport report,
+        OutputFormat format,
+        string command,
+        string subjectLabel)
     {
+        ArgumentNullException.ThrowIfNull(console);
+
         switch (format)
         {
-            case OutputFormat.Json: Console.WriteLine(ToJson(report)); break;
-            case OutputFormat.Sarif: Console.WriteLine(ToSarif(report)); break;
-            case OutputFormat.Markdown: Console.WriteLine(ToMarkdown(report, command, subjectLabel)); break;
-            case OutputFormat.Lines: RenderLines(report); break;
-            default: RenderTable(report, subjectLabel); break;
+            case OutputFormat.Json: WriteLine(console, ToJson(report)); break;
+            case OutputFormat.Sarif: WriteLine(console, ToSarif(report)); break;
+            case OutputFormat.Markdown: WriteLine(console, ToMarkdown(report, command, subjectLabel)); break;
+            case OutputFormat.Lines: RenderLines(console, report); break;
+            default: RenderTable(console, report, subjectLabel); break;
         }
     }
+
+    /// <summary>
+    /// Writes one line of plain text, byte for byte as <see cref="System.Console"/> would: no markup parsing and no
+    /// folding, because a document format or a finding line is read by a program that greps it.
+    /// </summary>
+    private static void WriteLine(IAnsiConsole console, string text) => console.Profile.Out.Writer.WriteLine(text);
 
     /// <summary>
     /// Whether output goes to a terminal that can lay a table out. A redirected stream, or a console that cannot
@@ -54,12 +76,12 @@ public static class ReportRenderer
     /// folding so each line can be grepped whole. Informational findings are listed only when nothing actionable exists,
     /// as in the table.
     /// </summary>
-    private static void RenderLines(DiagnosticReport report)
+    private static void RenderLines(IAnsiConsole console, DiagnosticReport report)
     {
         if (report.Items.Count == 0)
         {
-            AnsiConsole.WriteLine(NoFindings);
-            WriteMetricLines(report);
+            WriteLine(console, NoFindings);
+            WriteMetricLines(console, report);
             return;
         }
 
@@ -68,16 +90,17 @@ public static class ReportRenderer
         int omitted = report.Items.Count - rows.Count();
         if (omitted > 0)
         {
-            Console.WriteLine(
+            WriteLine(
+                console,
                 $"{omitted.ToString(CultureInfo.InvariantCulture)} informational findings omitted. Use --format json to list them.");
         }
 
         foreach (Diagnostic d in rows.OrderByDescending(item => item.Severity))
         {
-            Console.WriteLine(FormatLine(d));
+            WriteLine(console, FormatLine(d));
         }
 
-        WriteMetricLines(report);
+        WriteMetricLines(console, report);
     }
 
     /// <summary>One finding as a single line.</summary>
@@ -112,11 +135,11 @@ public static class ReportRenderer
     private static string OneLine(string text) =>
         string.Join(' ', text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
-    private static void WriteMetricLines(DiagnosticReport report)
+    private static void WriteMetricLines(IAnsiConsole console, DiagnosticReport report)
     {
         foreach (KeyValuePair<string, object?> metric in report.Metrics)
         {
-            Console.WriteLine($"metric {metric.Key}: {OneLine(FormatMetric(metric.Value))}");
+            WriteLine(console, $"metric {metric.Key}: {OneLine(FormatMetric(metric.Value))}");
         }
     }
 
@@ -136,12 +159,12 @@ public static class ReportRenderer
         _ => "ℹ"
     };
 
-    private static void RenderTable(DiagnosticReport report, string subjectLabel)
+    private static void RenderTable(IAnsiConsole console, DiagnosticReport report, string subjectLabel)
     {
         if (report.Items.Count == 0)
         {
-            AnsiConsole.MarkupLine("[green]No findings.[/]");
-            RenderMetricsTable(report);
+            console.MarkupLine("[green]No findings.[/]");
+            RenderMetricsTable(console, report);
             return;
         }
 
@@ -158,7 +181,7 @@ public static class ReportRenderer
         int omitted = report.Items.Count - rows.Count;
         if (omitted > 0)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[grey]{omitted.ToString(CultureInfo.InvariantCulture)} informational findings omitted from the table. Use --format json to list them.[/]");
         }
 
@@ -180,13 +203,20 @@ public static class ReportRenderer
                 new Markup(Markup.Escape(d.Message) + (d.Hint is null ? "" : $"\n[grey]→ {Markup.Escape(d.Hint)}[/]")));
         }
 
-        AnsiConsole.Write(table);
-        RenderMetricsTable(report);
+        console.Write(table);
+        RenderMetricsTable(console, report);
     }
 
-    public static void RenderSummary(DiagnosticReport report)
+    public static void RenderSummary(DiagnosticReport report) => RenderSummary(AnsiConsole.Console, report);
+
+    /// <summary>Renders the one-line severity summary to <paramref name="console"/>.</summary>
+    /// <param name="console">The console the summary is written to.</param>
+    /// <param name="report">The report the counts are read from.</param>
+    public static void RenderSummary(IAnsiConsole console, DiagnosticReport report)
     {
-        AnsiConsole.MarkupLine(
+        ArgumentNullException.ThrowIfNull(console);
+
+        console.MarkupLine(
             $"[red]{report.Count(Severity.Critical)} critical[/], " +
             $"[red3_1]{report.Count(Severity.Error)} error[/], " +
             $"[yellow]{report.Warnings} warning[/], " +
@@ -371,7 +401,7 @@ public static class ReportRenderer
         return sarif.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
     }
 
-    private static void RenderMetricsTable(DiagnosticReport report)
+    private static void RenderMetricsTable(IAnsiConsole console, DiagnosticReport report)
     {
         if (report.Metrics.Count == 0)
         {
@@ -388,7 +418,7 @@ public static class ReportRenderer
                 new Markup(Markup.Escape(FormatMetric(metric.Value))));
         }
 
-        AnsiConsole.Write(table);
+        console.Write(table);
     }
 
     private static void AppendMarkdownMetrics(StringBuilder sb, DiagnosticReport report)

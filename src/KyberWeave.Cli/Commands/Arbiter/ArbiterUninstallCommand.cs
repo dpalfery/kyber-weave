@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text.Json;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Credentials;
@@ -24,7 +25,9 @@ public sealed class ArbiterUninstallCommand(
     IUserHostConfigStore userConfig,
     IArbiterConfigResolver configs,
     ICredentialStore credentials,
-    IFileSystem files) : Command<ArbiterUninstallSettings>
+    IFileSystem files,
+    IPathResolver paths,
+    IAnsiConsole console) : Command<ArbiterUninstallSettings>
 {
     /// <inheritdoc />
     public override int Execute(
@@ -36,7 +39,7 @@ public sealed class ArbiterUninstallCommand(
 
         if (settings.Project && settings.Global)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 "[red]kyber-weave arbiter: error: " +
                 "--global and --project are mutually exclusive. " +
                 $"[bold]{RuleValidator.InstallScopeConflict}[/] is the permanent rule id for this scope conflict.[/]");
@@ -45,7 +48,7 @@ public sealed class ArbiterUninstallCommand(
 
         if (!string.IsNullOrWhiteSpace(settings.PathOption) && !settings.Project)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 "[red]kyber-weave arbiter: error: --path is only valid with --project. " +
                 "Use --project to target a project root, or omit --path for the default global scope.[/]");
             return 2;
@@ -54,7 +57,7 @@ public sealed class ArbiterUninstallCommand(
         if (!SquadTargetCatalog.TryResolve(settings.Target, out SquadTarget target))
         {
             string roster = string.Join(", ", SquadTargetCatalog.All.Select(SquadTargetCatalog.GetToken));
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 "[red]kyber-weave arbiter: error: " +
                 $"Unknown target '{Markup.Escape(settings.Target ?? string.Empty)}'. " +
                 $"Known targets: {Markup.Escape(roster)}, all.[/]");
@@ -66,14 +69,14 @@ public sealed class ArbiterUninstallCommand(
         if (settings.Project)
         {
             scope = SquadDeploymentScope.Project;
-            root = Path.GetFullPath(string.IsNullOrWhiteSpace(settings.PathOption)
+            root = FullPath(string.IsNullOrWhiteSpace(settings.PathOption)
                 ? (string.IsNullOrWhiteSpace(settings.Path) ? "." : settings.Path)
                 : settings.PathOption);
         }
         else if (settings.Global)
         {
             scope = SquadDeploymentScope.Global;
-            root = Path.GetFullPath(string.IsNullOrWhiteSpace(settings.Path) || string.Equals(settings.Path, ".", StringComparison.Ordinal)
+            root = FullPath(string.IsNullOrWhiteSpace(settings.Path) || string.Equals(settings.Path, ".", StringComparison.Ordinal)
                 ? environment.HomeDirectory
                 : settings.Path);
         }
@@ -81,8 +84,8 @@ public sealed class ArbiterUninstallCommand(
         {
             if (!string.IsNullOrWhiteSpace(settings.Path) && !string.Equals(settings.Path, ".", StringComparison.Ordinal))
             {
-                string candidate = Path.GetFullPath(settings.Path);
-                string home = Path.GetFullPath(environment.HomeDirectory);
+                string candidate = FullPath(settings.Path);
+                string home = FullPath(environment.HomeDirectory);
                 if (string.Equals(candidate, home, StringComparison.Ordinal))
                 {
                     scope = SquadDeploymentScope.Global;
@@ -102,7 +105,7 @@ public sealed class ArbiterUninstallCommand(
                                                    or InvalidDataException
                                                    or InvalidOperationException)
                     {
-                        AnsiConsole.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(ex.Message)}[/]");
+                        console.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(ex.Message)}[/]");
                         return 1;
                     }
 
@@ -121,7 +124,7 @@ public sealed class ArbiterUninstallCommand(
             else
             {
                 scope = SquadDeploymentScope.Global;
-                root = Path.GetFullPath(environment.HomeDirectory);
+                root = FullPath(environment.HomeDirectory);
             }
         }
 
@@ -138,13 +141,13 @@ public sealed class ArbiterUninstallCommand(
                                        or InvalidDataException
                                        or InvalidOperationException)
         {
-            AnsiConsole.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(ex.Message)}[/]");
+            console.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(ex.Message)}[/]");
             return 1;
         }
 
         if (!deployed)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[grey]No Arbiter deployment found at [bold]{Markup.Escape(root)}[/] " +
                 $"for target '[bold]{Markup.Escape(SquadTargetCatalog.GetToken(target))}[/]'. " +
                 "Nothing to uninstall.[/]");
@@ -165,7 +168,7 @@ public sealed class ArbiterUninstallCommand(
                                        or InvalidDataException
                                        or InvalidOperationException)
         {
-            AnsiConsole.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(ex.Message)}[/]");
+            console.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(ex.Message)}[/]");
             return 1;
         }
 
@@ -177,18 +180,20 @@ public sealed class ArbiterUninstallCommand(
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
             {
-                AnsiConsole.MarkupLine($"[yellow]warn:[/] Could not update user configuration: {Markup.Escape(ex.Message)}");
+                console.MarkupLine($"[yellow]warn:[/] Could not update user configuration: {Markup.Escape(ex.Message)}");
             }
         }
 
         if (settings.RemoveKey && !RemoveKey(root, scope, settings, target))
             return 1;
 
-        AnsiConsole.MarkupLine(
+        console.MarkupLine(
             $"[green]Removed Arbiter hooks for target '[bold]{Markup.Escape(SquadTargetCatalog.GetToken(target))}[/]' " +
             $"from [bold]{Markup.Escape(root)}[/].[/]");
         return 0;
     }
+
+    private string FullPath(string path) => paths.GetFullPath(path, environment.CurrentDirectory);
 
     /// <summary>Runs the command without cancellation; the entry-point tests use this.</summary>
     public int Execute(CommandContext context, ArbiterUninstallSettings settings)
@@ -205,7 +210,7 @@ public sealed class ArbiterUninstallCommand(
         KyberWeaveConfigLoadResult loaded = configs.Load(root, settings.Config, scope == SquadDeploymentScope.Project);
         if (!loaded.Success)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 "[red]kyber-weave arbiter: error: the host configuration could not be loaded, so " +
                 $"the stored key's origin is unknown: {Markup.Escape(loaded.Error ?? "unknown load failure")}[/]");
             return false;
@@ -219,7 +224,7 @@ public sealed class ArbiterUninstallCommand(
 
         if (uninstaller.AnotherTargetIsDeployed(root, target))
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[yellow]warn:[/] The key for {Markup.Escape(origin)} is stored per endpoint origin " +
                 "and shared by every target that uses it. Another target is still deployed here, " +
                 "so it will need the key re-stored.");
@@ -234,11 +239,11 @@ public sealed class ArbiterUninstallCommand(
                                        or UnauthorizedAccessException
                                        or Win32Exception)
         {
-            AnsiConsole.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(ex.Message)}[/]");
+            console.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(ex.Message)}[/]");
             return false;
         }
 
-        AnsiConsole.MarkupLine($"[grey]Removed the stored key for {Markup.Escape(origin)}.[/]");
+        console.MarkupLine($"[grey]Removed the stored key for {Markup.Escape(origin)}.[/]");
         return true;
     }
 }

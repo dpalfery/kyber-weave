@@ -12,9 +12,13 @@ namespace KyberWeave.Cli.Commands.Utilities;
 internal static class UtilitiesStatusLineCommandComposition
 {
     /// <summary>Writes the exit-2 client-input error line, following the Squad branch's wording.</summary>
-    public static void WriteClientInputError(string message)
+    /// <param name="console">Receives the refusal.</param>
+    /// <param name="message">The client-input error to report.</param>
+    public static void WriteClientInputError(IAnsiConsole console, string message)
     {
-        AnsiConsole.MarkupLine($"[red]kyber-weave utilities statusline: error: {Markup.Escape(message)}[/]");
+        ArgumentNullException.ThrowIfNull(console);
+
+        console.MarkupLine($"[red]kyber-weave utilities statusline: error: {Markup.Escape(message)}[/]");
     }
 
     /// <summary>

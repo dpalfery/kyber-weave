@@ -9,7 +9,12 @@ using Spectre.Console.Cli;
 namespace KyberWeave.Cli.Commands.Arbiter;
 
 /// <summary>Prints what the plan parser understood for a plan file.</summary>
-public sealed class ArbiterPlanCommand(IArbiterPlanService plans, IRepositoryFileStore files, IKyberWeaveConfigRepository configs) : Command<ArbiterSettings>
+public sealed class ArbiterPlanCommand(
+    IArbiterPlanService plans,
+    IRepositoryFileStore files,
+    IKyberWeaveConfigRepository configs,
+    IAnsiConsole console,
+    PlanArguments planArguments) : Command<ArbiterSettings>
 {
     /// <summary>
     /// Parses the plan file named by the positional path and prints its tasks,
@@ -25,16 +30,16 @@ public sealed class ArbiterPlanCommand(IArbiterPlanService plans, IRepositoryFil
     public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
-        string root = PlanArguments.RepositoryRootFor(settings.Path, settings.WorkingDirectory);
-        if (!PlanArguments.TryResolve(root, PlanArguments.ConfigForResolving(root, settings.Config, configs), files, settings.Path, settings.WorkingDirectory, "arbiter plan", report, out string relative))
+        string root = planArguments.RepositoryRootFor(settings.Path, settings.WorkingDirectory);
+        if (!planArguments.TryResolve(root, PlanArguments.ConfigForResolving(root, settings.Config, configs), files, settings.Path, settings.WorkingDirectory, "arbiter plan", report, out string relative))
         {
-            CommandHelpers.Finish(report, settings, "arbiter plan", "Task");
+            CommandHelpers.Finish(console, report, settings, "arbiter plan", "Task");
             return 1;
         }
 
         if (plans.TryRead(root, relative, settings.Path, report) is not { } read)
         {
-            CommandHelpers.Finish(report, settings, "arbiter plan", "Task");
+            CommandHelpers.Finish(console, report, settings, "arbiter plan", "Task");
             return 1;
         }
 
@@ -52,7 +57,7 @@ public sealed class ArbiterPlanCommand(IArbiterPlanService plans, IRepositoryFil
             Print(read);
         }
 
-        CommandHelpers.Finish(report, settings, "arbiter plan", "Task");
+        CommandHelpers.Finish(console, report, settings, "arbiter plan", "Task");
         return report.HasErrors ? 1 : 0;
     }
 
@@ -60,16 +65,16 @@ public sealed class ArbiterPlanCommand(IArbiterPlanService plans, IRepositoryFil
     public int Execute(CommandContext context, ArbiterSettings settings) =>
         Execute(context, settings, CancellationToken.None);
 
-    private static void Print(ArbiterPlanRead read)
+    private void Print(ArbiterPlanRead read)
     {
         PlanDocument document = read.Document;
-        CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine($"[bold]Plan:[/] {Markup.Escape(read.ResolvedPath)}"));
-        AnsiConsole.MarkupLine($"[grey]Status: {Markup.Escape(document.Status ?? "—")}; mode: {Markup.Escape(document.DevelopmentMode)}.[/]");
+        CommandHelpers.WriteUnfolded(console, () => console.MarkupLine($"[bold]Plan:[/] {Markup.Escape(read.ResolvedPath)}"));
+        console.MarkupLine($"[grey]Status: {Markup.Escape(document.Status ?? "—")}; mode: {Markup.Escape(document.DevelopmentMode)}.[/]");
 
         if (read.Digest is { } printed)
         {
             // Written unfolded so a narrow console cannot wrap the 64 characters across lines.
-            CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine($"Execution digest: {Markup.Escape(printed)}"));
+            CommandHelpers.WriteUnfolded(console, () => console.MarkupLine($"Execution digest: {Markup.Escape(printed)}"));
         }
 
         if (document.Tasks.Count > 0)
@@ -88,19 +93,19 @@ public sealed class ArbiterPlanCommand(IArbiterPlanService plans, IRepositoryFil
                     new Markup(Markup.Escape(task.DependsOn.Count > 0 ? string.Join(", ", task.DependsOn) : "—")));
             }
 
-            AnsiConsole.Write(tasks);
+            console.Write(tasks);
         }
 
         if (document.ContractRows.Count > 0)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[grey]{document.ContractRows.Count} contract row(s): " +
                 $"{Markup.Escape(string.Join(", ", document.ContractRows.Select(row => row.TaskId)))}.[/]");
         }
 
         if (document.OutOfScope.Count > 0)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[grey]Out of scope: {Markup.Escape(string.Join(", ", document.OutOfScope))}.[/]");
         }
     }

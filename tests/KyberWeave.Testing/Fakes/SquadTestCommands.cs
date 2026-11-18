@@ -15,7 +15,9 @@ using KyberWeave.Data.Host;
 using KyberWeave.Data.Paths;
 using KyberWeave.Data.Review;
 using KyberWeave.Testing.Squad;
+using Spectre.Console;
 using KyberWeave.Tests.Configuration;
+using KyberWeave.Tests.FileSystem;
 
 namespace KyberWeave.Tests.Fakes;
 
@@ -35,8 +37,10 @@ internal static class SquadTestCommands
         ISquadGlobalRootResolver? globalRoots = null,
         KyberDashCapturePluginStep? capturePluginStep = null,
         Func<string, string?>? environmentReader = null,
-        IKyberWeaveConfigRepository? configs = null)
+        IKyberWeaveConfigRepository? configs = null,
+        SquadConsole? output = null)
     {
+        SquadConsole console = output ?? CapturedSquadConsole();
         SquadStateStore store = stateStore ?? SquadHostDefaults.ResolveStateStore(userPaths, environmentReader);
         ISquadGlobalRootResolver roots = globalRoots ?? SquadHostDefaults.ResolveGlobalRoots(environmentReader);
         return new SquadInstallCommand(
@@ -46,6 +50,10 @@ internal static class SquadTestCommands
             new FileSquadTargetResolver(),
             roots,
             new SquadConsoleOptions(isInteractive, readAnswer),
+            console,
+            new SquadTargetRootConfirmation(console),
+            new ProcessEnvironment(),
+            PhysicalRoots(console),
             configs ?? RealFileKyberWeaveConfigRepository.Create(),
             capturePluginStep);
     }
@@ -62,8 +70,10 @@ internal static class SquadTestCommands
         ISquadInstanceService? instanceService = null,
         KyberDashCapturePluginStep? capturePluginStep = null,
         Func<string, string?>? environmentReader = null,
-        IKyberWeaveConfigRepository? configs = null)
+        IKyberWeaveConfigRepository? configs = null,
+        SquadConsole? output = null)
     {
+        SquadConsole console = output ?? CapturedSquadConsole();
         SquadStateStore store = stateStore ?? SquadHostDefaults.ResolveStateStore(userPaths, environmentReader);
         ISquadGlobalRootResolver roots = globalRoots ?? SquadHostDefaults.ResolveGlobalRoots(environmentReader);
         return new SquadUpdateCommand(
@@ -75,6 +85,10 @@ internal static class SquadTestCommands
             roots,
             new PhysicalSquadFileAccess(),
             new SquadConsoleOptions(isInteractive, readAnswer),
+            console,
+            new SquadTargetRootConfirmation(console),
+            new ProcessEnvironment(),
+            PhysicalRoots(console),
             configs ?? RealFileKyberWeaveConfigRepository.Create(),
             picker,
             capturePluginStep);
@@ -87,8 +101,10 @@ internal static class SquadTestCommands
         bool? isInteractive = null,
         Func<string, bool>? readAnswer = null,
         ISquadGlobalRootResolver? globalRoots = null,
-        Func<string, string?>? environmentReader = null)
+        Func<string, string?>? environmentReader = null,
+        SquadConsole? output = null)
     {
+        SquadConsole console = output ?? CapturedSquadConsole();
         SquadStateStore store = stateStore ?? SquadHostDefaults.ResolveStateStore(userPaths, environmentReader);
         ISquadGlobalRootResolver roots = globalRoots ?? SquadHostDefaults.ResolveGlobalRoots(environmentReader);
         return new SquadUninstallCommand(
@@ -96,21 +112,29 @@ internal static class SquadTestCommands
             store,
             RealSquadState.Migration(store, store.UserPaths),
             roots,
-            new SquadConsoleOptions(isInteractive, readAnswer));
+            new SquadConsoleOptions(isInteractive, readAnswer),
+            console,
+            new SquadTargetRootConfirmation(console),
+            new ProcessEnvironment(),
+            PhysicalRoots(console));
     }
 
     public static SquadInstanceRemoveCommand InstanceRemove(
         ISquadUserPaths? userPaths = null,
         ISquadInstanceService? instanceService = null,
         bool? isInteractive = null,
-        Func<string, bool>? readAnswer = null)
+        Func<string, bool>? readAnswer = null,
+        SquadConsole? output = null)
     {
         ISquadUserPaths paths = userPaths ?? SquadHostDefaults.ResolveUserPaths();
         return new SquadInstanceRemoveCommand(
             instanceService ?? new LazyInstanceService(() => SquadHostDefaults.CreateInstanceService(paths)),
             paths,
             new PhysicalSquadFileAccess(),
-            new SquadConsoleOptions(isInteractive, readAnswer));
+            new SquadConsoleOptions(isInteractive, readAnswer),
+            output ?? CapturedSquadConsole(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new ProcessEnvironment());
     }
 
     public static SquadPackCommand Pack(string? workingDirectory = null) =>
@@ -118,7 +142,8 @@ internal static class SquadTestCommands
             new FakeProcessEnvironment(currentDirectory: workingDirectory ?? "/kw/work"),
             new PhysicalPathResolver(new PhysicalFileSystem()),
             new FileSquadSourceLocator(),
-            new FileSquadPackager(RealSquadPacker.Create())));
+            new FileSquadPackager(RealSquadPacker.Create())),
+            CapturedConsole());
 
     public static SquadRunCommand Run(
         ISquadUserPaths? userPaths = null,
@@ -127,7 +152,8 @@ internal static class SquadTestCommands
         Func<string, string?>? getEnv = null,
         Func<string, string?>? findOnPath = null,
         string? workingDirectory = null,
-        Func<SquadTarget, string, Task<SquadInstanceEnsureResult>>? ensureOverride = null)
+        Func<SquadTarget, string, Task<SquadInstanceEnsureResult>>? ensureOverride = null,
+        SquadConsole? output = null)
     {
         ISquadUserPaths paths = userPaths ?? SquadHostDefaults.ResolveUserPaths();
         return new SquadRunCommand(
@@ -138,7 +164,9 @@ internal static class SquadTestCommands
             ensureOverride is not null ? new AnyPresetStore() : new SquadModelPresetStore(paths),
             new ProcessSquadHarnessLauncher(),
             new ProcessEnvironment(),
-            new SquadRunOptions(runner, getEnv, findOnPath, workingDirectory));
+            new SquadRunOptions(runner, getEnv, findOnPath, workingDirectory),
+            output ?? CapturedSquadConsole(),
+            new PhysicalPathResolver(new PhysicalFileSystem()));
     }
 
     public static SquadStatusCommand Status(
@@ -147,13 +175,18 @@ internal static class SquadTestCommands
         ISquadGlobalRootResolver? globalRoots = null,
         Func<string, string?>? environmentReader = null)
     {
+        SquadConsole console = CapturedSquadConsole();
         SquadStateStore store = stateStore ?? SquadHostDefaults.ResolveStateStore(userPaths, environmentReader);
         return new SquadStatusCommand(
             store,
             RealSquadState.Migration(store, store.UserPaths),
             globalRoots ?? SquadHostDefaults.ResolveGlobalRoots(environmentReader),
             new SquadModelPresetStore(store.UserPaths),
-            SquadFileSystemPathSemantics.Instance);
+            SquadFileSystemPathSemantics.Instance,
+            console,
+            new PhysicalFileSystem(),
+            new ProcessEnvironment(),
+            PhysicalRoots(console));
     }
 
     public static SquadDoctorCommand Doctor(
@@ -164,7 +197,9 @@ internal static class SquadTestCommands
         ISquadRenderer? renderer = null,
         SquadStateStore? stateStore = null,
         Func<string, string?>? environmentReader = null,
-        IKyberWeaveConfigRepository? configs = null)
+        IKyberWeaveConfigRepository? configs = null,
+        SquadConsole? output = null,
+        IWritableFileSystem? files = null)
     {
         SquadStateStore store = stateStore ?? SquadHostDefaults.ResolveStateStore(userPaths, environmentReader);
         return new SquadDoctorCommand(
@@ -183,7 +218,10 @@ internal static class SquadTestCommands
             new FileZCodeMcpInspector(),
             new SquadDoctorOptions(executor, workingDirectory),
             SquadFileSystemPathSemantics.Instance,
-            configs ?? RealFileKyberWeaveConfigRepository.Create());
+            configs ?? RealFileKyberWeaveConfigRepository.Create(),
+            output ?? CapturedSquadConsole(),
+            files ?? new PhysicalFileSystem(),
+            PhysicalRoots(CapturedSquadConsole()));
     }
 
     public static SquadPresetUseCommand PresetUse(
@@ -201,7 +239,8 @@ internal static class SquadTestCommands
             Profiles(store, canonicalProfileResolver),
             new FileSquadDeploymentPlanner(),
             new SquadTransactionFactory(store),
-            SquadFileSystemPathSemantics.Instance);
+            SquadFileSystemPathSemantics.Instance,
+            PhysicalRoots(CapturedSquadConsole()));
     }
 
     public static SquadPresetClearCommand PresetClear(
@@ -219,7 +258,8 @@ internal static class SquadTestCommands
             Profiles(store, canonicalProfileResolver),
             new FileSquadDeploymentPlanner(),
             new SquadTransactionFactory(store),
-            SquadFileSystemPathSemantics.Instance);
+            SquadFileSystemPathSemantics.Instance,
+            PhysicalRoots(CapturedSquadConsole()));
     }
 
     public static SquadPresetShowCommand PresetShow(
@@ -243,7 +283,40 @@ internal static class SquadTestCommands
             paths,
             store,
             new SquadModelPresetStore(paths),
-            RealSquadSelectionStore.Create(paths));
+            RealSquadSelectionStore.Create(paths),
+            PhysicalRoots(CapturedSquadConsole()));
+    }
+
+    /// <summary>The roots over an in-memory file system and a fake environment, for a command test that touches no disk.</summary>
+    public static SquadCommandRoots InMemoryRoots(
+        SquadConsole console,
+        string currentDirectory = "/kw/work",
+        InMemoryFileSystem? files = null)
+    {
+        InMemoryFileSystem fileSystem = files ?? new InMemoryFileSystem();
+        return new SquadCommandRoots(
+            fileSystem,
+            new FakePathResolver(fileSystem),
+            new FakeProcessEnvironment(currentDirectory: currentDirectory),
+            console);
+    }
+
+    private static SquadCommandRoots PhysicalRoots(SquadConsole console)
+    {
+        PhysicalFileSystem files = new();
+        return new SquadCommandRoots(files, new PhysicalPathResolver(files), new ProcessEnvironment(), console);
+    }
+
+    /// <summary>
+    /// The console a command writes to in a test: the process's router, installed before the command is built, so
+    /// output goes to whichever test is capturing when the command writes.
+    /// </summary>
+    private static SquadConsole CapturedSquadConsole() => new(CapturedConsole(), new SystemConsole());
+
+    private static IAnsiConsole CapturedConsole()
+    {
+        ProcessConsoleCapture.EnsureInstalled();
+        return AnsiConsole.Console;
     }
 
     private static ISquadCanonicalProfileResolver Profiles(

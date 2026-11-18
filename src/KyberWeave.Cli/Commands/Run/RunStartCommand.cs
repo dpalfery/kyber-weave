@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Doctor;
 using System.Text.Json.Nodes;
+using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Cli.Commands.Squad.Brief;
@@ -61,6 +62,8 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     private readonly ISquadBriefBuilder _briefs;
     private readonly IConfigLoadService _configs;
     private readonly IProcessEnvironment _environment;
+    private readonly IAnsiConsole _console;
+    private readonly IConsole _standard;
     private readonly IProcessExecutor? _executor;
 
     /// <summary>Creates the command over the services it reads and writes through.</summary>
@@ -69,6 +72,8 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     /// <param name="briefs">Builds the conductor's brief.</param>
     /// <param name="configs">Loads the repository's configuration.</param>
     /// <param name="environment">The current directory.</param>
+    /// <param name="console">Where the report, the messages and the refusals are written.</param>
+    /// <param name="standard">Standard output for the JSON document and the brief, and standard error for the messages a JSON caller must not mix in.</param>
     /// <param name="executor">The executor the CodeGraph index run goes through; the bounded production executor when none is registered.</param>
     public RunStartCommand(
         IRunStartRunnerFactory runners,
@@ -76,6 +81,8 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         ISquadBriefBuilder briefs,
         IConfigLoadService configs,
         IProcessEnvironment environment,
+        IAnsiConsole console,
+        IConsole standard,
         IProcessExecutor? executor = null)
     {
         ArgumentNullException.ThrowIfNull(runners);
@@ -83,12 +90,16 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         ArgumentNullException.ThrowIfNull(briefs);
         ArgumentNullException.ThrowIfNull(configs);
         ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(console);
+        ArgumentNullException.ThrowIfNull(standard);
 
         _runners = runners;
         _starts = starts;
         _briefs = briefs;
         _configs = configs;
         _environment = environment;
+        _console = console;
+        _standard = standard;
         _executor = executor;
     }
 
@@ -196,7 +207,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                 document["brief"] = JsonNode.Parse(BriefFormatter.ToJson(brief));
             }
 
-            Console.Out.WriteLine(document.ToJsonString(JsonOptions));
+            _standard.Out.WriteLine(document.ToJsonString(JsonOptions));
             return Ready;
         }
 
@@ -220,7 +231,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
 
         if (brief is not null)
         {
-            Console.Out.Write("\n" + BriefFormatter.ToText(brief));
+            _standard.Out.Write("\n" + BriefFormatter.ToText(brief));
         }
 
         return Ready;
@@ -229,13 +240,13 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     /// <summary>Prints what the step has to tell the operator, in the order it came.</summary>
     /// <param name="messages">The lines the service collected.</param>
     /// <param name="json">Whether standard output must stay one JSON document.</param>
-    private static void WriteMessages(IReadOnlyList<RunStartMessage> messages, bool json)
+    private void WriteMessages(IReadOnlyList<RunStartMessage> messages, bool json)
     {
         foreach (RunStartMessage message in messages)
         {
             if (json && message.StandardErrorWhenJson)
             {
-                Console.Error.WriteLine(message.Kind switch
+                _standard.Error.WriteLine(message.Kind switch
                 {
                     RunStartMessageKind.Error => $"{CommandName}: error: {message.Text}",
                     RunStartMessageKind.Remedy => $"→ {message.Text}",
@@ -245,7 +256,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                 continue;
             }
 
-            AnsiConsole.MarkupLine(message.Kind switch
+            _console.MarkupLine(message.Kind switch
             {
                 RunStartMessageKind.Error => $"[red]{Markup.Escape(CommandName)}: error:[/] {Markup.Escape(message.Text)}",
                 RunStartMessageKind.Remedy => $"[grey]→ {Markup.Escape(message.Text)}[/]",
@@ -297,17 +308,17 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         string warning = $"the conductor's brief could not be built ({error}); read its reference files whole.";
         if (settings.Json)
         {
-            Console.Error.WriteLine($"{CommandName}: warn: {warning}");
+            _standard.Error.WriteLine($"{CommandName}: warn: {warning}");
         }
         else
         {
-            AnsiConsole.MarkupLine($"[yellow]warn[/] {Markup.Escape(warning)}");
+            _console.MarkupLine($"[yellow]warn[/] {Markup.Escape(warning)}");
         }
 
         return null;
     }
 
-    private static void WriteReport(
+    private void WriteReport(
         string baseBranch,
         string startRef,
         string branch,
@@ -327,41 +338,41 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     {
         string where = worktreePath is null ? "in place" : worktreePath;
 
-        CommandHelpers.WriteUnfolded(() =>
+        CommandHelpers.WriteUnfolded(_console, () =>
         {
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 $"[bold]{Markup.Escape(CommandName)}[/] " +
                 $"{(resumed is null ? "ready" : "resumed")}");
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 $"  base      {Markup.Escape(baseBranch)} ({Markup.Escape(startRef)})");
-            AnsiConsole.MarkupLine($"  branch    {Markup.Escape(branch)}");
-            AnsiConsole.MarkupLine($"  where     {Markup.Escape(where)}");
-            AnsiConsole.MarkupLine($"  index     {Markup.Escape(indexLabel)}");
-            AnsiConsole.MarkupLine($"  revision  {Markup.Escape(revision ?? "unknown")}");
-            AnsiConsole.MarkupLine("  versions");
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine($"  branch    {Markup.Escape(branch)}");
+            _console.MarkupLine($"  where     {Markup.Escape(where)}");
+            _console.MarkupLine($"  index     {Markup.Escape(indexLabel)}");
+            _console.MarkupLine($"  revision  {Markup.Escape(revision ?? "unknown")}");
+            _console.MarkupLine("  versions");
+            _console.MarkupLine(
                 $"    failing  {Markup.Escape(failingVersion ?? "not given")}");
-            AnsiConsole.MarkupLine($"    HEAD     {Markup.Escape(headVersion)}");
-            AnsiConsole.MarkupLine($"    {Markup.Escape(baseBranch),-7}  {Markup.Escape(baseVersion)}");
+            _console.MarkupLine($"    HEAD     {Markup.Escape(headVersion)}");
+            _console.MarkupLine($"    {Markup.Escape(baseBranch),-7}  {Markup.Escape(baseVersion)}");
 
             string alignment = ahead is null || behind is null
                 ? "unknown"
                 : $"{ahead.Value.ToString(CultureInfo.InvariantCulture)} ahead, " +
                   $"{behind.Value.ToString(CultureInfo.InvariantCulture)} behind";
             string subject = resumed is null ? "HEAD" : $"'{resumed}'";
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 $"  server    {Markup.Escape(RunStartPlanner.Remote)}: {Markup.Escape(alignment)} " +
                 $"against {Markup.Escape(baseBranch)}, for {Markup.Escape(subject)}");
 
             if (resumed is not null && headRevision is null)
             {
-                AnsiConsole.MarkupLine(
+                _console.MarkupLine(
                     $"  [yellow]warn[/] '{Markup.Escape(resumed)}' has no commit yet, so it cannot be " +
                     "compared with the base.");
             }
 
             if (completedWarning is not null)
-                AnsiConsole.MarkupLine($"  [yellow]warn[/] {Markup.Escape(completedWarning)}");
+                _console.MarkupLine($"  [yellow]warn[/] {Markup.Escape(completedWarning)}");
 
             if (resumed is not null)
                 WriteCompletedTasks(resumed, completed);
@@ -374,56 +385,56 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     /// </summary>
     /// <param name="branch">The branch whose commits were read.</param>
     /// <param name="completed">The tasks its trailer areas record, in the order the commits were made.</param>
-    private static void WriteCompletedTasks(string branch, IReadOnlyList<RunStartCompletedTask> completed)
+    private void WriteCompletedTasks(string branch, IReadOnlyList<RunStartCompletedTask> completed)
     {
         if (completed.Count == 0)
         {
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 $"  completed none — no commit on '{Markup.Escape(branch)}' ends with a 'Task:' line, so no " +
                 "finished task is recorded there.");
             return;
         }
 
-        AnsiConsole.MarkupLine(
+        _console.MarkupLine(
             $"  completed {completed.Count.ToString(CultureInfo.InvariantCulture)}");
         foreach (RunStartCompletedTask task in completed)
         {
-            AnsiConsole.MarkupLine($"    {Markup.Escape(task.Id)}");
+            _console.MarkupLine($"    {Markup.Escape(task.Id)}");
             if (task.Report.Length == 0)
                 continue;
 
             foreach (string line in task.Report.Split('\n'))
             {
                 string text = line.TrimEnd('\r');
-                AnsiConsole.MarkupLine(text.Length == 0 ? string.Empty : $"      {Markup.Escape(text)}");
+                _console.MarkupLine(text.Length == 0 ? string.Empty : $"      {Markup.Escape(text)}");
             }
         }
     }
 
-    private static int Refuse(string message)
+    private int Refuse(string message)
     {
-        AnsiConsole.MarkupLine(
+        _console.MarkupLine(
             $"[red]{Markup.Escape(CommandName)}: error:[/] {Markup.Escape(message)}");
         return RefusedInput;
     }
 
-    private static int Fail(string message)
+    private int Fail(string message)
     {
-        AnsiConsole.MarkupLine(
+        _console.MarkupLine(
             $"[red]{Markup.Escape(CommandName)}: error:[/] {Markup.Escape(message)}");
         return ToolFailure;
     }
 
-    private static void WriteDiagnostics(DiagnosticReport report)
+    private void WriteDiagnostics(DiagnosticReport report)
     {
-        CommandHelpers.WriteUnfolded(() =>
+        CommandHelpers.WriteUnfolded(_console, () =>
         {
             foreach (Diagnostic diagnostic in report.Items)
             {
-                AnsiConsole.MarkupLine(
+                _console.MarkupLine(
                     $"[red]{Markup.Escape(diagnostic.Code)}[/] {Markup.Escape(diagnostic.Message)}");
                 if (!string.IsNullOrEmpty(diagnostic.Hint))
-                    AnsiConsole.MarkupLine($"  [grey]→ {Markup.Escape(diagnostic.Hint)}[/]");
+                    _console.MarkupLine($"  [grey]→ {Markup.Escape(diagnostic.Hint)}[/]");
             }
         });
     }

@@ -17,7 +17,8 @@ public sealed class DocsExportGraphCommand(
     ICodeGraphPortsFactory codeGraph,
     IKyberWeaveConfigRepository configs,
     IWritableFileSystem files,
-    IDocumentSourceFactory documents) : Command<DocsExportGraphSettings>
+    IDocumentSourceFactory documents,
+    IAnsiConsole console) : Command<DocsExportGraphSettings>
 {
     public override int Execute(CommandContext context, DocsExportGraphSettings settings, CancellationToken cancellationToken)
     {
@@ -30,7 +31,7 @@ public sealed class DocsExportGraphCommand(
                 out IDocumentSource? loader,
                 out KyberWeaveConfig config))
         {
-            CommandHelpers.Finish(report, settings, "docs export-graph", "Document");
+            CommandHelpers.Finish(console, report, settings, "docs export-graph", "Document");
             return 1;
         }
 
@@ -39,7 +40,7 @@ public sealed class DocsExportGraphCommand(
 
         if (!resolver.IsAvailable)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[red]{Markup.Escape(resolver.UnavailableReason ?? "CodeGraph index unavailable.")}[/] " +
                 "Document-to-code join edges cannot be emitted.");
             return 1;
@@ -65,9 +66,9 @@ public sealed class DocsExportGraphCommand(
             settings.Out,
             contributors: [glossaryContributor]);
 
-        AnsiConsole.MarkupLine(
+        console.MarkupLine(
             $"[green]{result.NodeCount} nodes[/] → {Markup.Escape(result.NodesPath)}");
-        AnsiConsole.MarkupLine(
+        console.MarkupLine(
             $"[green]{result.EdgeCount} edges[/] → {Markup.Escape(result.EdgesPath)}");
         return 0;
     }

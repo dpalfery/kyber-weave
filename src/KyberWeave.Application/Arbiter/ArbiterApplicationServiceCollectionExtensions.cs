@@ -94,13 +94,15 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton(sp =>
         {
             TimeProvider clock = sp.GetRequiredService<TimeProvider>();
+            IIdGenerator ids = sp.GetRequiredService<IIdGenerator>();
             return new HookCommand(
                 sp.GetRequiredService<HarnessAdapterRegistry>(),
                 sp.GetRequiredService<IArbiterHostConfig>(),
                 sp.GetRequiredService<IDispatchClaimStore>(),
                 sp.GetRequiredService<IClaudeHookCoverage>(),
                 sp.GetRequiredService<IProcessEnvironment>(),
-                () => ArbiterRecordId.New(clock.GetUtcNow()),
+                ids,
+                () => ids.NewSortableId(clock.GetUtcNow()),
                 sp.GetRequiredService<ITaskPromptServiceFactory>());
         });
         services.TryAddSingleton<IArbiterHookHost>(sp => sp.GetRequiredService<HookCommand>());
@@ -123,7 +125,10 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton(TimeProvider.System);
         _ = services.AddWeaveRunData();
         _ = services.AddWeaveRunStartState();
-        services.TryAddSingleton<IRepositoryTreeProbe>(sp => new FileRepositoryTreeProbe(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<IRepositoryTreeProbe>(sp => new FileRepositoryTreeProbe(
+                sp.GetRequiredService<IFileSystem>(),
+                sp.GetRequiredService<IPathResolver>(),
+                sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IKyberWeaveConfigRepository>(sp =>
             new FileKyberWeaveConfigRepository(
                 sp.GetRequiredService<IRepositoryTreeProbe>(),

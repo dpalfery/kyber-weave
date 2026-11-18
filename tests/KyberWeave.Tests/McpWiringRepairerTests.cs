@@ -383,7 +383,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         Assert.False(string.IsNullOrWhiteSpace(change.Message), "a refusal must say why");
 
         Assert.Equal(before, File.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json")));
-        Assert.Null(McpWiringReceipt.Load(Repo).Find(".vscode/mcp.json"));
+        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(".vscode/mcp.json"));
     }
 
     /// <summary>
@@ -601,7 +601,7 @@ public sealed class McpWiringRepairerTests : IDisposable
 
         // The undo record names only what was written, so a removal never claims to take out an entry
         // the repair declined to insert.
-        McpWiringReceiptRecord? record = McpWiringReceipt.Load(Repo).Find(".mcp.json");
+        McpWiringReceiptRecord? record = McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json");
         Assert.NotNull(record);
         Assert.Equal(ServerName, Assert.Single(record.Servers));
     }

@@ -1,9 +1,11 @@
 using System.Globalization;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
+using Spectre.Console;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Docs;
@@ -15,7 +17,10 @@ namespace KyberWeave.Cli.Commands.Docs;
 public sealed class DocsFinalizeCommand(
     IPlanFinalizeService finalize,
     IRepositoryFileStore files,
-    IKyberWeaveConfigRepository configs) : Command<DocsFinalizeSettings>
+    IKyberWeaveConfigRepository configs,
+    TimeProvider time,
+    IAnsiConsole console,
+    PlanArguments plans) : Command<DocsFinalizeSettings>
 {
     /// <summary>A <c>--date</c> or <c>--approval-mode</c> value is not usable.</summary>
     public const string InvalidOption = "KW-DOC-FINALIZE-007";
@@ -32,7 +37,7 @@ public sealed class DocsFinalizeCommand(
         ArgumentNullException.ThrowIfNull(settings);
 
         DiagnosticReport report = new();
-        DateOnly date = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly date = DateOnly.FromDateTime(time.GetUtcNow().UtcDateTime);
         if (settings.Date is not null
             && !DateOnly.TryParseExact(settings.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out date))
         {
@@ -46,35 +51,35 @@ public sealed class DocsFinalizeCommand(
         }
 
         string typed = settings.Path;
-        string root = PlanArguments.RepositoryRootFor(typed, settings.WorkingDirectory);
+        string root = plans.RepositoryRootFor(typed, settings.WorkingDirectory);
         settings.Path = root;
         if (!DocsCommandComposition.TryResolveConfig(configs, settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
         {
-            CommandHelpers.Finish(report, settings, "docs finalize", "Plan");
+            CommandHelpers.Finish(console, report, settings, "docs finalize", "Plan");
             return 1;
         }
 
         KyberWeaveConfig effective = config.WithOntology(ontology);
-        if (!PlanArguments.TryResolve(root, effective, files, typed, settings.WorkingDirectory, "docs finalize", report, out string relative))
+        if (!plans.TryResolve(root, effective, files, typed, settings.WorkingDirectory, "docs finalize", report, out string relative))
         {
-            CommandHelpers.Finish(report, settings, "docs finalize", "Plan");
+            CommandHelpers.Finish(console, report, settings, "docs finalize", "Plan");
             return 1;
         }
 
-        PlanArguments.Announce(report, settings, relative);
+        plans.Announce(report, settings, relative);
         PlanFinalizeOutcome outcome = finalize.Run(root, effective, relative, mode, settings.Approval, date);
         report.AddRange(outcome.Report.Items);
         report.AddMetric("finalized", outcome.Finalized);
         report.AddMetric("task-file", outcome.TaskFilePath);
 
-        CommandHelpers.Finish(report, settings, "docs finalize", "Plan");
+        CommandHelpers.Finish(console, report, settings, "docs finalize", "Plan");
         return report.HasErrors ? 1 : 0;
     }
 
-    private static int Fail(DiagnosticReport report, DocsFinalizeSettings settings, string message, string hint)
+    private int Fail(DiagnosticReport report, DocsFinalizeSettings settings, string message, string hint)
     {
         report.Add(new Diagnostic(InvalidOption, Severity.Error, message, "docs finalize", Hint: hint));
-        CommandHelpers.Finish(report, settings, "docs finalize", "Plan");
+        CommandHelpers.Finish(console, report, settings, "docs finalize", "Plan");
         return 1;
     }
 }

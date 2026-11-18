@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Cli.Commands.Arbiter;
@@ -22,7 +23,9 @@ public sealed class DocsTasksCommand(
     IArbiterKeyService arbiterKeys,
     IArbiterDryRunService arbiterDryRun,
     IRepositoryFileStore files,
-    IKyberWeaveConfigRepository configs) : Command<DocsTasksSettings>
+    IKyberWeaveConfigRepository configs,
+    IAnsiConsole console,
+    PlanArguments plans) : Command<DocsTasksSettings>
 {
     /// <summary>Both <c>--write</c> and <c>--check</c> were given; they ask for opposite things.</summary>
     public const string ConflictingModes = "KW-DOC-TASKS-CLI-001";
@@ -56,7 +59,7 @@ public sealed class DocsTasksCommand(
                 "--list cannot be used with --write, --check or --convert.",
                 "docs tasks",
                 Hint: "Run --list alone to see the tasks, or --check, --write or --convert alone."));
-            CommandHelpers.Finish(report, settings, "docs tasks", "Task file");
+            CommandHelpers.Finish(console, report, settings, "docs tasks", "Task file");
             return 1;
         }
 
@@ -69,29 +72,29 @@ public sealed class DocsTasksCommand(
                 "--write, --check and --convert ask for different things and cannot be combined.",
                 "docs tasks",
                 Hint: "Run --check to see what differs, --write to fix it, or --convert to replace a JSON file."));
-            CommandHelpers.Finish(report, settings, "docs tasks", "Task file");
+            CommandHelpers.Finish(console, report, settings, "docs tasks", "Task file");
             return 1;
         }
 
         string typed = settings.Path;
-        string root = PlanArguments.RepositoryRootFor(typed, settings.WorkingDirectory);
+        string root = plans.RepositoryRootFor(typed, settings.WorkingDirectory);
         settings.Path = root;
         if (!DocsCommandComposition.TryResolveConfig(configs, settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
         {
-            CommandHelpers.Finish(report, settings, "docs tasks", "Task file");
+            CommandHelpers.Finish(console, report, settings, "docs tasks", "Task file");
             return 1;
         }
 
         KyberWeaveConfig effective = config.WithOntology(ontology);
-        if (!PlanArguments.TryResolve(root, effective, files, typed, settings.WorkingDirectory, "docs tasks", report, out string relative))
+        if (!plans.TryResolve(root, effective, files, typed, settings.WorkingDirectory, "docs tasks", report, out string relative))
         {
-            CommandHelpers.Finish(report, settings, "docs tasks", "Task file");
+            CommandHelpers.Finish(console, report, settings, "docs tasks", "Task file");
             return 1;
         }
 
         if (!settings.List)
         {
-            PlanArguments.Announce(report, settings, relative);
+            plans.Announce(report, settings, relative);
         }
 
         PlanTaskFileMode mode = settings.Write ? PlanTaskFileMode.Write
@@ -123,30 +126,30 @@ public sealed class DocsTasksCommand(
         {
             foreach (PlanTaskFileEntry task in outcome.File.Tasks ?? [])
             {
-                Console.Out.WriteLine(PlanTaskPacket.ListLine(task));
+                console.Profile.Out.Writer.WriteLine(PlanTaskPacket.ListLine(task));
             }
 
             return 0;
         }
 
-        CommandHelpers.Finish(report, settings, "docs tasks", "Task file");
+        CommandHelpers.Finish(console, report, settings, "docs tasks", "Task file");
 
         if (ReportRenderer.IsHuman(settings.ParsedFormat) && !report.HasErrors && outcome.Json is not null)
         {
             if (mode == PlanTaskFileMode.Preview)
             {
-                Console.Out.Write(outcome.Json);
+                console.Profile.Out.Writer.Write(outcome.Json);
             }
             else if (mode is PlanTaskFileMode.Write or PlanTaskFileMode.Convert)
             {
-                AnsiConsole.MarkupLine(
+                console.MarkupLine(
                     outcome.Wrote
                         ? $"[green]Wrote[/] {Markup.Escape(outcome.TaskFilePath)} ({outcome.TaskCount} task(s))."
                         : $"{Markup.Escape(outcome.TaskFilePath)} is already current ({outcome.TaskCount} task(s)); nothing written.");
             }
             else
             {
-                AnsiConsole.MarkupLine($"{Markup.Escape(outcome.TaskFilePath)} is current ({outcome.TaskCount} task(s)).");
+                console.MarkupLine($"{Markup.Escape(outcome.TaskFilePath)} is current ({outcome.TaskCount} task(s)).");
             }
         }
 

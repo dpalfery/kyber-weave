@@ -128,7 +128,7 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
             new FixedClock(Now),
-            SecondaryTriggers.For);
+            new FakeIdGenerator(), SecondaryTriggers.For);
 
     /// <summary>A conductor's rework dispatch to an implementation worker, carrying the cluster key and the failing output.</summary>
     private static ArbiterEvent Rework(string failureText) => new()

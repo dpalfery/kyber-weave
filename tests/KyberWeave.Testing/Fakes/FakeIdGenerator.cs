@@ -30,5 +30,10 @@ public sealed class FakeIdGenerator : IIdGenerator
     /// <inheritdoc />
     public string NewRandomFileName() => "file-" + Next().ToString(CultureInfo.InvariantCulture) + ".tmp";
 
+    /// <inheritdoc />
+    public string NewSortableId(DateTimeOffset at) =>
+        $"{at.ToUniversalTime().UtcTicks.ToString("x16", CultureInfo.InvariantCulture)}-"
+        + Next().ToString("x8", CultureInfo.InvariantCulture);
+
     private int Next() => Interlocked.Increment(ref _next);
 }

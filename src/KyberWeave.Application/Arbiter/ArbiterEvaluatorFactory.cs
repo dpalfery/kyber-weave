@@ -10,7 +10,8 @@ public sealed class ArbiterEvaluatorFactory(
     IArbiterStateFactory state,
     IArbiterModelTargetsReader modelTargets,
     IGateReportFacts gateReports,
-    TimeProvider defaultClock) : IArbiterEvaluatorFactory
+    TimeProvider defaultClock,
+    IIdGenerator ids) : IArbiterEvaluatorFactory
 {
     /// <inheritdoc />
     public IArbiterEvaluator Create(
@@ -32,6 +33,7 @@ public sealed class ArbiterEvaluatorFactory(
             gateReports,
             state,
             clock ?? defaultClock,
+            ids,
             modelTargetsDirectory: modelTargetsDirectory);
 }
 
@@ -39,7 +41,8 @@ public sealed class ArbiterEvaluatorFactory(
 public sealed class CommentTriageFactory(
     IFileTextFacts fileText,
     IArbiterStateFactory state,
-    TimeProvider clock) : ICommentTriageFactory
+    TimeProvider clock,
+    IIdGenerator ids) : ICommentTriageFactory
 {
     /// <inheritdoc />
     public ICommentTriage Create(
@@ -49,5 +52,5 @@ public sealed class CommentTriageFactory(
         string? ruleSet = null,
         IReadOnlyList<string>? botLogins = null,
         IReadOnlyList<ArbiterRule>? rules = null) =>
-        new CommentTriageService(provider, repoRoot, arbiterDirectory, clock, fileText, state, ruleSet, botLogins, rules);
+        new CommentTriageService(provider, repoRoot, arbiterDirectory, clock, ids, fileText, state, ruleSet, botLogins, rules);
 }

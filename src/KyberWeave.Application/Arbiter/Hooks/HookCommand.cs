@@ -45,7 +45,8 @@ public sealed class HookCommand : IArbiterHookHost
     /// <param name="claims">The one-evaluation-per-dispatch claim store.</param>
     /// <param name="coverage">Reads the hook sources a project declares, so the user-level hook can tell whether a project hook covers a dispatch.</param>
     /// <param name="environment">The process directory a payload with no <c>cwd</c> falls back to.</param>
-    /// <param name="newDecisionId">Builds a decision id; a new GUID when null.</param>
+    /// <param name="ids">The identifier seam; its GUID, as 32 hex digits, is the decision id when <paramref name="newDecisionId"/> is null.</param>
+    /// <param name="newDecisionId">Builds a decision id; null uses <paramref name="ids"/>.</param>
     /// <param name="prompts">Builds the task prompt a dispatch's identity line is replaced with; null installs no
     /// prompt service, so no dispatch is expanded.</param>
     public HookCommand(
@@ -54,6 +55,7 @@ public sealed class HookCommand : IArbiterHookHost
         IDispatchClaimStore claims,
         IClaudeHookCoverage coverage,
         IProcessEnvironment environment,
+        IIdGenerator ids,
         Func<string>? newDecisionId = null,
         ITaskPromptServiceFactory? prompts = null)
     {
@@ -62,12 +64,13 @@ public sealed class HookCommand : IArbiterHookHost
         ArgumentNullException.ThrowIfNull(claims);
         ArgumentNullException.ThrowIfNull(coverage);
         ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(ids);
         _registry = registry;
         _hostConfig = hostConfig;
         _claims = claims;
         _coverage = coverage;
         _environment = environment;
-        _newDecisionId = newDecisionId ?? (() => Guid.NewGuid().ToString("N"));
+        _newDecisionId = newDecisionId ?? (() => ids.NewGuid().ToString("N"));
         _promptFactory = prompts;
     }
 

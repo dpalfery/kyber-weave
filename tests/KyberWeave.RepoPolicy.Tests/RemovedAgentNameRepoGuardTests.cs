@@ -80,7 +80,7 @@ public sealed class RemovedAgentNameRepoGuardTests
     private static List<string> TrackedFiles()
     {
         List<string> tracked = [];
-        using StdioSession session = new("git", ["-C", RepoRoot, "ls-files", "-z"], TimeSpan.FromSeconds(60));
+        using StdioSession session = new("git", ["-C", RepoRoot, "ls-files", "-z"], TimeSpan.FromSeconds(60), TimeProvider.System);
         while (true)
         {
             string line;

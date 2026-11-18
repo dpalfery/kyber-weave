@@ -734,7 +734,7 @@ public sealed class McpRenameRepoGuardTests
         // enough to cross it fails this guard loudly instead of scanning a shortened list. The
         // session starts the child in the test's own working directory, so `-C` sets the root
         // rather than a shell `cd`.
-        using StdioSession session = new("git", ["-C", RepoRoot, "ls-files", "-z"], TimeSpan.FromSeconds(60));
+        using StdioSession session = new("git", ["-C", RepoRoot, "ls-files", "-z"], TimeSpan.FromSeconds(60), TimeProvider.System);
 
         while (true)
         {

@@ -1,4 +1,6 @@
 using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Host;
+using KyberWeave.Data.Paths;
 using KyberWeave.Data.Review;
 
 namespace KyberWeave.Tests.Configuration;
@@ -10,5 +12,9 @@ namespace KyberWeave.Tests.Configuration;
 public static class RealRepositoryTreeProbe
 {
     /// <summary>The tree probe over the real file system.</summary>
-    public static FileRepositoryTreeProbe Create() => new(new PhysicalFileSystem());
+    public static FileRepositoryTreeProbe Create()
+    {
+        PhysicalFileSystem files = new();
+        return new FileRepositoryTreeProbe(files, new PhysicalPathResolver(files), new ProcessEnvironment());
+    }
 }

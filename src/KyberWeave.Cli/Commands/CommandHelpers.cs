@@ -75,8 +75,28 @@ public static class CommandHelpers
         return true;
     }
 
-    public static void Finish(DiagnosticReport report, AnalysisSettings settings, string command, string subjectLabel)
+    public static void Finish(DiagnosticReport report, AnalysisSettings settings, string command, string subjectLabel) =>
+        Finish(AnsiConsole.Console, report, settings, command, subjectLabel);
+
+    /// <summary>
+    /// Applies <c>--no-info</c>, renders <paramref name="report"/> in the requested format through
+    /// <paramref name="console"/>, and prints the summary, so a command that writes to an injected console renders its
+    /// findings there too.
+    /// </summary>
+    /// <param name="console">The console the findings are written to.</param>
+    /// <param name="report">The findings to render.</param>
+    /// <param name="settings">The command's settings, which choose the format.</param>
+    /// <param name="command">The command name a document format records.</param>
+    /// <param name="subjectLabel">Names what the findings are about.</param>
+    public static void Finish(
+        IAnsiConsole console,
+        DiagnosticReport report,
+        AnalysisSettings settings,
+        string command,
+        string subjectLabel)
     {
+        ArgumentNullException.ThrowIfNull(console);
+
         if (settings.NoInfo)
         {
             DiagnosticReport filtered = new DiagnosticReport();
@@ -89,21 +109,21 @@ public static class CommandHelpers
             report = filtered;
         }
 
-        ReportRenderer.Render(report, settings.ParsedFormat, command, subjectLabel);
+        ReportRenderer.Render(console, report, settings.ParsedFormat, command, subjectLabel);
         OutputFormat format = settings.ParsedFormat;
         if (format == OutputFormat.Table)
         {
-            AnsiConsole.WriteLine();
-            ReportRenderer.RenderSummary(report);
+            console.WriteLine();
+            ReportRenderer.RenderSummary(console, report);
         }
         else if (format == OutputFormat.Lines)
         {
-            ReportRenderer.RenderSummary(report);
+            ReportRenderer.RenderSummary(console, report);
         }
     }
 
     /// <summary>
-    /// Runs <paramref name="write"/> with console folding lifted, then restores the width.
+    /// Runs <paramref name="write"/> with the static console's folding lifted, then restores the width.
     /// </summary>
     /// <param name="write">The output to produce at full width.</param>
     /// <remarks>
@@ -121,19 +141,32 @@ public static class CommandHelpers
     /// one of them, and two commands that then render the same finding differently.
     /// </para>
     /// </remarks>
-    public static void WriteUnfolded(Action write)
+    public static void WriteUnfolded(Action write) => WriteUnfolded(AnsiConsole.Console, write);
+
+    /// <summary>
+    /// Runs <paramref name="write"/> with <paramref name="console"/>'s folding lifted, then restores its width.
+    /// </summary>
+    /// <param name="console">The console whose width is lifted for the write.</param>
+    /// <param name="write">The output to produce at full width.</param>
+    /// <remarks>The width belongs to the console the output goes to, so a command that writes to an injected
+    /// console lifts that one rather than the process-wide console.</remarks>
+    public static void WriteUnfolded(IAnsiConsole console, Action write)
     {
+        ArgumentNullException.ThrowIfNull(console);
         ArgumentNullException.ThrowIfNull(write);
 
-        int originalWidth = AnsiConsole.Profile.Width;
-        AnsiConsole.Profile.Width = int.MaxValue;
+        // The profile is read once: the console a caller holds may name a different console by the time the write
+        // returns, and restoring through it would leave this one unfolded and overwrite that one's width.
+        Profile profile = console.Profile;
+        int originalWidth = profile.Width;
+        profile.Width = int.MaxValue;
         try
         {
             write();
         }
         finally
         {
-            AnsiConsole.Profile.Width = originalWidth > 0 ? originalWidth : ConsoleWidth.Default;
+            profile.Width = originalWidth > 0 ? originalWidth : ConsoleWidth.Default;
         }
     }
 

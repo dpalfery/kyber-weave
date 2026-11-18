@@ -1,9 +1,11 @@
+using KyberWeave.Tests.Fakes;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Arbiter.Stores;
 using Xunit;
+using Microsoft.Extensions.Time.Testing;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -25,6 +27,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// </remarks>
 public sealed class ArbiterRunStoreTests : IDisposable
 {
+    private static readonly FakeIdGenerator Ids = new();
+
     private const string SentinelSecret = "KW-TEST-SENTINEL-SECRET-do-not-store-4d1e";
 
     private static readonly string[] NoRuleIds = ["KW-ARB-SCOPE-002"];
@@ -48,10 +52,10 @@ public sealed class ArbiterRunStoreTests : IDisposable
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     private ArbiterRunStore Store(DateTimeOffset at, ArbiterStoreOptions? options = null) =>
-        RealArbiterState.RunStore(ArbiterDirectory, options, () => at);
+        RealArbiterState.RunStore(ArbiterDirectory, options, new FakeTimeProvider(at));
 
     private static ArbiterLedgerEvent PreEvent(DateTimeOffset at) =>
-        new(ArbiterRecordId.New(at), at, ArbiterSources.Hook, "test-harness", "session-1", ArbiterLedgerPhases.Pre)
+        new(Ids.NewSortableId(at), at, ArbiterSources.Hook, "test-harness", "session-1", ArbiterLedgerPhases.Pre)
         {
             Trigger = "delegate",
             Target = "dev-medium",
@@ -60,7 +64,7 @@ public sealed class ArbiterRunStoreTests : IDisposable
 
     private static ArbiterDecisionRecord Decision(DateTimeOffset at, string ledgerId) =>
         new(
-            ArbiterRecordId.New(at),
+            Ids.NewSortableId(at),
             at,
             ArbiterSources.Hook,
             "test-harness",
@@ -429,7 +433,7 @@ public sealed class ArbiterRunStoreTests : IDisposable
         ArbiterRunStore store = RealArbiterState.RunStore(
             ArbiterDirectory,
             null,
-            () => Now,
+            TimeProvider.System,
             directory => throw new DirectoryNotFoundException($"'{directory}' was removed during the sweep."));
 
         ArbiterStoreStatus status = await store.AppendFindingAsync("RUN-OK", "still stored");
@@ -481,7 +485,7 @@ public sealed class ArbiterRunStoreTests : IDisposable
     [Fact]
     public async Task ARunAppendedToRecentlyIsNotSweptWhenItsDirectoryIsOld()
     {
-        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, () => Now);
+        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, new FakeTimeProvider(Now));
         await store.AppendFindingAsync("RUN-OLD", "id: old-1\nclaim: first");
         string runDirectory = Assert.Single(Directory.GetDirectories(Path.Combine(ArbiterDirectory, "stores")));
         Directory.SetLastWriteTimeUtc(runDirectory, Now.UtcDateTime.AddDays(-30));

@@ -1,4 +1,7 @@
+using KyberWeave.Cli.Commands;
+using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -9,6 +12,7 @@ using KyberWeave.Mcp;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using KyberWeave.Application;
+using Spectre.Console;
 
 namespace KyberWeave.Tests.Fakes;
 
@@ -39,34 +43,81 @@ internal static class DocsTestCommands
         return services.AddWeaveApplication().BuildServiceProvider();
     }
 
-    public static DocsCloseoutCommand Closeout(IServiceProvider? services = null)
+    /// <summary>
+    /// <c>docs init</c> over the container's real services, with the doctor and console a test supplies. A test that
+    /// reads the report passes a capturing console; one that only checks exit codes takes the default.
+    /// </summary>
+    public static DocsInitCommand Init(
+        IRepositoryDoctor doctor,
+        IAnsiConsole? console = null,
+        IServiceProvider? services = null,
+        IProcessExecutor? executor = null,
+        string? mcpExecutable = null)
+    {
+        IServiceProvider provider = services ?? Services();
+        return new DocsInitCommand(
+            McpWiringTestServices.Wiring,
+            provider.GetRequiredService<IDocsScaffoldingService>(),
+            doctor,
+            provider.GetRequiredService<IKyberWeaveConfigRepository>(),
+            console ?? AnsiConsole.Console,
+            provider.GetRequiredService<IFileSystem>(),
+            provider.GetRequiredService<IPathResolver>(),
+            provider.GetRequiredService<IProcessEnvironment>(),
+            provider.GetRequiredService<IBoundedProcessExecutor>())
+        {
+            Executor = executor,
+            McpExecutable = mcpExecutable,
+        };
+    }
+
+    private static ArbiterRepoRoot RepoRootFor(IServiceProvider provider) => new(
+        provider.GetRequiredService<IFileSystem>(),
+        provider.GetRequiredService<IPathResolver>(),
+        provider.GetRequiredService<IProcessEnvironment>());
+
+    private static PlanArguments PlanArgumentsFor(IServiceProvider provider, IAnsiConsole? console) => new(
+        RepoRootFor(provider),
+        provider.GetRequiredService<IFileSystem>(),
+        provider.GetRequiredService<IPathResolver>(),
+        provider.GetRequiredService<IProcessEnvironment>(),
+        console ?? AnsiConsole.Console);
+
+    public static DocsCloseoutCommand Closeout(IServiceProvider? services = null, IAnsiConsole? console = null)
     {
         IServiceProvider provider = services ?? Services();
         return new DocsCloseoutCommand(
             provider.GetRequiredService<IPlanCloseoutService>(),
             provider.GetRequiredService<IRepositoryFileStore>(),
-            provider.GetRequiredService<IKyberWeaveConfigRepository>());
+            provider.GetRequiredService<IKyberWeaveConfigRepository>(),
+            provider.GetRequiredService<TimeProvider>(),
+            console ?? AnsiConsole.Console,
+            PlanArgumentsFor(provider, console));
     }
 
-    public static DocsFinalizeCommand Finalize(IServiceProvider? services = null)
+    public static DocsFinalizeCommand Finalize(IServiceProvider? services = null, IAnsiConsole? console = null)
     {
         IServiceProvider provider = services ?? Services();
         return new DocsFinalizeCommand(
             provider.GetRequiredService<IPlanFinalizeService>(),
             provider.GetRequiredService<IRepositoryFileStore>(),
-            provider.GetRequiredService<IKyberWeaveConfigRepository>());
+            provider.GetRequiredService<IKyberWeaveConfigRepository>(),
+            provider.GetRequiredService<TimeProvider>(),
+            console ?? AnsiConsole.Console,
+            PlanArgumentsFor(provider, console));
     }
 
-    public static DocsValidateCommand Validate(IServiceProvider? services = null)
+    public static DocsValidateCommand Validate(IServiceProvider? services = null, IAnsiConsole? console = null)
     {
         IServiceProvider provider = services ?? Services();
         return new DocsValidateCommand(
             provider.GetRequiredService<IDocsSchemaGate>(),
             provider.GetRequiredService<IDocumentSourceFactory>(),
-            provider.GetRequiredService<IKyberWeaveConfigRepository>());
+            provider.GetRequiredService<IKyberWeaveConfigRepository>(),
+            console ?? AnsiConsole.Console);
     }
 
-    public static DocsPacketCommand Packet(IServiceProvider? services = null)
+    public static DocsPacketCommand Packet(IServiceProvider? services = null, IAnsiConsole? console = null)
     {
         IServiceProvider provider = services ?? Services();
         return new DocsPacketCommand(
@@ -80,10 +131,15 @@ internal static class DocsTestCommands
             provider.GetRequiredService<IRepositoryFileStore>(),
             provider.GetRequiredService<IGitRepositoryFacts>(),
             provider.GetRequiredService<IKyberWeaveConfigRepository>(),
-            provider.GetRequiredService<IDocumentSourceFactory>());
+            provider.GetRequiredService<IDocumentSourceFactory>(),
+            provider.GetRequiredService<IPathResolver>(),
+            console ?? AnsiConsole.Console,
+            provider.GetRequiredService<IConsole>(),
+            PlanArgumentsFor(provider, console),
+            RepoRootFor(provider));
     }
 
-    public static DocsTasksCommand Tasks(IServiceProvider? services = null)
+    public static DocsTasksCommand Tasks(IServiceProvider? services = null, IAnsiConsole? console = null)
     {
         IServiceProvider provider = services ?? Services();
         return new DocsTasksCommand(
@@ -92,7 +148,9 @@ internal static class DocsTestCommands
             provider.GetRequiredService<IArbiterKeyService>(),
             provider.GetRequiredService<IArbiterDryRunService>(),
             provider.GetRequiredService<IRepositoryFileStore>(),
-            provider.GetRequiredService<IKyberWeaveConfigRepository>());
+            provider.GetRequiredService<IKyberWeaveConfigRepository>(),
+            console ?? AnsiConsole.Console,
+            PlanArgumentsFor(provider, console));
     }
 
     public static IDocsSchemaGate SchemaGate => Services().GetRequiredService<IDocsSchemaGate>();
@@ -110,12 +168,13 @@ internal static class DocsTestCommands
     public static DocsReviewImportCommand ReviewImport(IDocsAnalysisCommandService service) =>
         new(service, Services().GetRequiredService<IFileSystem>());
 
-    public static DocsExportGraphCommand ExportGraph() => new(
+    public static DocsExportGraphCommand ExportGraph(IAnsiConsole? console = null) => new(
         Services().GetRequiredService<IManagedGlossaryFactory>(),
         Services().GetRequiredService<ICodeGraphPortsFactory>(),
         Services().GetRequiredService<IKyberWeaveConfigRepository>(),
         Services().GetRequiredService<IWritableFileSystem>(),
-        Services().GetRequiredService<IDocumentSourceFactory>());
+        Services().GetRequiredService<IDocumentSourceFactory>(),
+        console ?? AnsiConsole.Console);
 
     public static DocsRootRegistry Registry(string root, Func<string, DocsTools> factory)
     {

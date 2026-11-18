@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Contracts.Repositories;
@@ -47,6 +46,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
     private readonly IGateReportFacts _gateReports;
     private readonly IArbiterStateFactory _state;
     private readonly TimeProvider _clock;
+    private readonly IIdGenerator _ids;
     private readonly Func<string, ArbiterEvent, IReadOnlyList<string>> _secondaryTriggers;
     private readonly string? _modelTargetsDirectory;
 
@@ -61,6 +61,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
     /// <param name="gateReports">Reads the gate reports a return cites.</param>
     /// <param name="state">Opens the run stores under the arbiter directory.</param>
     /// <param name="clock">The evaluation clock.</param>
+    /// <param name="ids">Makes the ledger and decision record ids.</param>
     /// <param name="secondaryTriggers">Derives the secondary triggers of a primary dispatch; defaults to none.</param>
     /// <param name="modelTargetsDirectory">
     /// The directory holding the harness's model targets table, or null for the ledger's own directory. A
@@ -78,6 +79,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         IGateReportFacts gateReports,
         IArbiterStateFactory state,
         TimeProvider clock,
+        IIdGenerator ids,
         Func<string, ArbiterEvent, IReadOnlyList<string>>? secondaryTriggers = null,
         string? modelTargetsDirectory = null)
     {
@@ -91,6 +93,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         ArgumentNullException.ThrowIfNull(gateReports);
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(ids);
         _provider = provider;
         _keyResolver = keyResolver;
         _ledger = ledger;
@@ -101,6 +104,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         _gateReports = gateReports;
         _state = state;
         _clock = clock;
+        _ids = ids;
         _secondaryTriggers = secondaryTriggers ?? SecondaryTriggers.For;
         _modelTargetsDirectory = modelTargetsDirectory;
     }
@@ -115,7 +119,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         ArgumentNullException.ThrowIfNull(ev);
         ArgumentNullException.ThrowIfNull(config);
         ArbiterEvaluatorOptions effective = options ?? new ArbiterEvaluatorOptions();
-        Stopwatch elapsed = Stopwatch.StartNew();
+        long elapsed = _clock.GetTimestamp();
         // Under the tiered roster the model-targeting block and the two rules follow the developer tiers; the
         // configuration a host loads keeps the shipped block, and this is the run's effective one.
         ArbiterModelTargetingConfig targeting = ModelTargetingRules.Targeting(config.Arbiter.ModelTargeting);
@@ -131,7 +135,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             DateTimeOffset now = _clock.GetUtcNow();
             IReadOnlyList<TriggerClassification> classifications = TriggerClassifier.Classify(ev);
             List<string> prompts = PromptsFor(ev);
-            ledgerId = ArbiterRecordId.New(now);
+            ledgerId = _ids.NewSortableId(now);
             TriggerClassification first = classifications.Count > 0
                 ? classifications[0]
                 : new TriggerClassification(
@@ -232,7 +236,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         ArbiterModelTargets? table,
         ArbiterEvaluatorOptions effective,
         string ledgerId,
-        Stopwatch elapsed,
+        long elapsed,
         CancellationToken cancellationToken)
     {
         string? trigger = classification.Trigger;
@@ -242,7 +246,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         }
 
         // The primary's decision record id, allocated up front: a stored failure names the decision that judged it.
-        string recordId = ArbiterRecordId.New(_clock.GetUtcNow());
+        string recordId = _ids.NewSortableId(_clock.GetUtcNow());
 
         // Derived once: the bag declares the facts of every secondary, and the loop below plans them.
         // Derived from this dispatch's own target and prompt: a multi-dispatch event carries a target per dispatch,
@@ -823,7 +827,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         _state.OpenRunStore(
             _ledger.DirectoryPath,
             new ArbiterStoreOptions(config.Arbiter.Stores.MaxItemBytes, config.Arbiter.Stores.RetainDays),
-            () => _clock.GetUtcNow());
+            _clock);
 
     /// <summary>
     /// Appends a lens return's findings to the review store, in return order. Each carries its own drop status,
@@ -984,7 +988,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         ArbiterEvaluatorOptions effective,
         string ledgerId,
         string? planDigest,
-        Stopwatch elapsed,
+        long elapsed,
         CancellationToken cancellationToken)
     {
         List<ArbiterDecisionRule> rules = [];
@@ -1030,7 +1034,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         string ledgerId,
         string? planDigest,
         string? priorDecisionId,
-        Stopwatch elapsed,
+        long elapsed,
         CancellationToken cancellationToken)
     {
         string neutral = ArbiterTriggerFamilies.NeutralEffect(plan.Family);
@@ -1040,7 +1044,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         bool primaryAllows = string.Equals(
             primaryOutcome, ArbiterTriggerFamilies.NeutralEffect(primaryFamily), StringComparison.Ordinal);
         // The record's own id is allocated up front: a same-failure advisory names the record it is written on.
-        string secondaryRecordId = ArbiterRecordId.New(_clock.GetUtcNow());
+        string secondaryRecordId = _ids.NewSortableId(_clock.GetUtcNow());
         List<ArbiterDecisionRule> rules = Step0Rules(plan);
         List<string> effects = new(Step0EffectsOf(plan));
         List<string> payload = [];
@@ -1258,18 +1262,21 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             ? ArbiterTriggerFamilies.NeutralEffect(family)
             : MapStep1AnswerToEffect(rule, answer, family);
 
-    private static ArbiterProviderRecord ProviderRecord(
+    private ArbiterProviderRecord ProviderRecord(
         KyberWeaveConfig config,
         Step1Call call,
         string status,
-        Stopwatch elapsed) =>
+        long elapsed) =>
         new(
             ProviderKindName(config),
             EndpointOrigin(config),
             call.Model,
             call.Usage is null ? null : new ArbiterProviderUsage(call.Usage.InputTokens, call.Usage.OutputTokens),
-            (int)Math.Min(int.MaxValue, elapsed.ElapsedMilliseconds),
+            ElapsedMilliseconds(elapsed),
             status);
+
+    private int ElapsedMilliseconds(long startedAt) =>
+        (int)Math.Min(int.MaxValue, (long)_clock.GetElapsedTime(startedAt).TotalMilliseconds);
 
     private async Task AppendRecordAsync(
         TriggerClassification classification,
@@ -1284,7 +1291,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         string? planDigest,
         KyberWeaveConfig config,
         IReadOnlyList<ArbiterRule> effectiveRules,
-        Stopwatch elapsed,
+        long elapsed,
         CancellationToken cancellationToken,
         ArbiterModelBlock? model = null,
         string? recordId = null)
@@ -1295,7 +1302,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         string repeatKey = rules.Count > 0 ? rules[0].Id : trigger;
         int repeat = _decisionLog.Repeat(repeatKey, planFile, planDigest, task, ev.Session);
         ArbiterDecisionRecord record = new(
-            recordId ?? ArbiterRecordId.New(now),
+            recordId ?? _ids.NewSortableId(now),
             now,
             effective.Source,
             ev.Harness,
@@ -1313,7 +1320,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             provider,
             outcome,
             repeat,
-            (int)Math.Min(int.MaxValue, elapsed.ElapsedMilliseconds),
+            ElapsedMilliseconds(elapsed),
             primaryLedgerId: primaryLedgerId,
             model: model);
         if (!effective.DryRun)

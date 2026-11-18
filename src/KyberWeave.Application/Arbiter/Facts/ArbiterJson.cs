@@ -1,22 +1,8 @@
 using System.Globalization;
-using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace KyberWeave.Core.Arbiter.Facts;
-
-/// <summary>
-/// Sortable unique record ids: sixteen fixed-width hex digits of UTC ticks
-/// followed by eight random hex characters, so lexicographic order is
-/// chronological and ids generated in the same tick stay unique.
-/// </summary>
-public static class ArbiterRecordId
-{
-    /// <summary>Creates a new sortable unique id for the given time.</summary>
-    public static string New(DateTimeOffset at) =>
-        $"{at.ToUniversalTime().UtcTicks.ToString("x16", CultureInfo.InvariantCulture)}-"
-        + RandomNumberGenerator.GetHexString(8, lowercase: true);
-}
 
 /// <summary>Serializer settings shared by both append-only files.</summary>
 internal static class ArbiterJson

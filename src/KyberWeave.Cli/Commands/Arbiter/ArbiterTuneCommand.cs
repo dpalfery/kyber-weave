@@ -19,7 +19,7 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// change side at each candidate threshold. A decision whose ledger event carries a return shows that return's
 /// <c>RESULT</c> beside its score.
 /// </remarks>
-public sealed class ArbiterTuneCommand(IArbiterTuneService tune) : Command<ArbiterSettings>
+public sealed class ArbiterTuneCommand(IArbiterTuneService tune, IAnsiConsole console) : Command<ArbiterSettings>
 {
     /// <summary>The candidate thresholds when <c>--thresholds</c> is not given.</summary>
     public static readonly double[] DefaultThresholds = [0.5, 0.6, 0.7, 0.8, 0.9];
@@ -42,17 +42,17 @@ public sealed class ArbiterTuneCommand(IArbiterTuneService tune) : Command<Arbit
                 problem!,
                 "--thresholds",
                 Hint: "Pass values between 0 and 1, for example 0.5,0.6,0.7."));
-            CommandHelpers.Finish(report, settings, CommandName, "Event");
+            CommandHelpers.Finish(console, report, settings, CommandName, "Event");
             return 1;
         }
 
         if (tune.Score(settings.Path, thresholds, settings.Rule, report) is not { } scored)
         {
-            CommandHelpers.Finish(report, settings, CommandName, "Event");
+            CommandHelpers.Finish(console, report, settings, CommandName, "Event");
             return 1;
         }
 
-        CommandHelpers.WriteUnfolded(() =>
+        CommandHelpers.WriteUnfolded(console, () =>
         {
             if (settings.Json)
             {
@@ -62,7 +62,7 @@ public sealed class ArbiterTuneCommand(IArbiterTuneService tune) : Command<Arbit
             {
                 if (scored.TruncationNote is not null)
                 {
-                    AnsiConsole.WriteLine($"warning {ArbiterAuditCommand.LogWindowTruncated}: {scored.TruncationNote} The tallies below cover only the newest records.");
+                    console.WriteLine($"warning {ArbiterAuditCommand.LogWindowTruncated}: {scored.TruncationNote} The tallies below cover only the newest records.");
                 }
 
                 WriteText(scored);
@@ -113,22 +113,22 @@ public sealed class ArbiterTuneCommand(IArbiterTuneService tune) : Command<Arbit
         return true;
     }
 
-    private static void WriteText(ArbiterTuneReport report)
+    private void WriteText(ArbiterTuneReport report)
     {
         if (report.Rules.Count == 0)
         {
-            AnsiConsole.WriteLine(NoScoredAnswers);
+            console.WriteLine(NoScoredAnswers);
             return;
         }
 
         foreach (ArbiterTuneRule rule in report.Rules)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[bold]{Markup.Escape(rule.Id)}[/]  scored {rule.Scored}  shadow {rule.Shadow}  enforced {rule.Enforced}{UnreadableSuffix(rule)}");
-            AnsiConsole.MarkupLine($"  confidence (tenths): {string.Join(' ', rule.Histogram)}");
+            console.MarkupLine($"  confidence (tenths): {string.Join(' ', rule.Histogram)}");
             foreach (ArbiterTuneThreshold flips in rule.Thresholds)
             {
-                AnsiConsole.MarkupLine(
+                console.MarkupLine(
                     $"  threshold {flips.Threshold.ToString("0.00", CultureInfo.InvariantCulture)}: {flips.Changed} flip(s)");
             }
 
@@ -142,7 +142,7 @@ public sealed class ArbiterTuneCommand(IArbiterTuneService tune) : Command<Arbit
                 string modelText = sample.Model is null
                     ? string.Empty
                     : $" profile {Markup.Escape(sample.Model.Profile)} token {Markup.Escape(sample.Model.Token ?? "none")} delivered {(sample.Model.Delivered ? "true" : "false")}";
-                AnsiConsole.MarkupLine(
+                console.MarkupLine(
                     $"  decision {Markup.Escape(sample.DecisionId)} score {sample.Confidence.ToString("0.00", CultureInfo.InvariantCulture)}{modelText} RESULT: {Markup.Escape(result)}");
             }
         }
@@ -151,7 +151,7 @@ public sealed class ArbiterTuneCommand(IArbiterTuneService tune) : Command<Arbit
     private static string UnreadableSuffix(ArbiterTuneRule rule) =>
         rule.Unreadable == 0 ? string.Empty : $"  unreadable {rule.Unreadable}";
 
-    private static void WriteJson(ArbiterTuneReport report)
+    private void WriteJson(ArbiterTuneReport report)
     {
         List<JsonRuleReport> rules = [];
         foreach (ArbiterTuneRule rule in report.Rules)
@@ -185,7 +185,7 @@ public sealed class ArbiterTuneCommand(IArbiterTuneService tune) : Command<Arbit
         }
 
         string json = JsonSerializer.Serialize(new JsonTuneReport(rules, report.TruncationNote), JsonOptions);
-        AnsiConsole.WriteLine(json);
+        console.WriteLine(json);
     }
 
     /// <summary>One <c>delegate.model</c> answer's model row in the JSON report: what it targeted and whether it was delivered.</summary>
