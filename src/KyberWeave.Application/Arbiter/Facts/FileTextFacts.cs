@@ -144,6 +144,10 @@ public sealed class FileTextFacts(
     /// Resolves <paramref name="path"/> against <paramref name="repoRoot"/> and returns the full path only when it stays
     /// under the root.
     /// </summary>
+    /// <remarks>
+    /// The containment decision is the one both entry points make before they read anything, so it checks links as
+    /// well as spelling: every component below the root is probed, and a component that is a link refuses the path.
+    /// </remarks>
     /// <returns>The full path, or null when the path would leave the root.</returns>
     public string? ResolveWithinRoot(string repoRoot, string path)
     {
@@ -159,6 +163,16 @@ public sealed class FileTextFacts(
             || relative.StartsWith("../", StringComparison.Ordinal))
         {
             return null;
+        }
+
+        string current = root;
+        foreach (string segment in relative.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, segment);
+            if (store.GetLinkTarget(current) is not null)
+            {
+                return null;
+            }
         }
 
         return candidate;

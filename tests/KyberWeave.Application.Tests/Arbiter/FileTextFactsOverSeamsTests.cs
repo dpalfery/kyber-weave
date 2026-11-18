@@ -113,6 +113,26 @@ public sealed class FileTextFactsOverSeamsTests
     }
 
     [Fact]
+    public void TheContainmentGateRefusesAPathReachedThroughALink()
+    {
+        _files.CreateDirectory("/elsewhere");
+        _files.WriteAllText("/elsewhere/leak.txt", "secret");
+        _files.CreateDirectory(Root);
+        _files.CreateDirectoryLink("/repo/docs", "/elsewhere");
+
+        Assert.Null(Facts().ResolveWithinRoot(Root, "docs/leak.txt"));
+        Assert.Null(Facts().ResolveContainedFile(Root, "docs/leak.txt"));
+    }
+
+    [Fact]
+    public void TheContainmentGateStillAnswersAPlainPathUnderTheRoot()
+    {
+        Write("src/Widget.cs", "one");
+
+        Assert.Equal("/repo/src/Widget.cs", Facts().ResolveWithinRoot(Root, "src/Widget.cs"));
+    }
+
+    [Fact]
     public void AMissingFileAndALinePastTheEndReadAsAbsent()
     {
         Write("short.txt", "one\ntwo");
