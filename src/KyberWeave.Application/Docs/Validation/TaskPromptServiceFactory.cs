@@ -36,6 +36,6 @@ public sealed class TaskPromptServiceFactory(
         DocumentIndex index = DocumentIndex.Build(
             documents.Create(root, config.Ontology).Load(),
             codeGraph.ForRepository(root).Resolver);
-        return new TaskPromptService(tasks, hostFacts, files, index.StandardsFor);
+        return new TaskPromptService(tasks, hostFacts, files, index.StandardsFor, environment);
     }
 }

@@ -145,7 +145,7 @@ public sealed class DocsPacketCommand(
         DocumentIndex index = DocumentIndex.Build(
             documents.Create(root, config.Ontology).Load(),
             codeGraph.ForRepository(root).Resolver);
-        TaskPromptService prompts = new(tasks, hostFacts, files, index.StandardsFor);
+        TaskPromptService prompts = new(tasks, hostFacts, files, index.StandardsFor, environment);
         TaskPromptResult prompt = prompts.Build(
             new TaskPromptRequest(root, settings.Task, plan, settings.Agent, settings.PriorResults),
             config);

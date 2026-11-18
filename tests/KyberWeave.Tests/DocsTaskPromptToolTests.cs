@@ -108,7 +108,8 @@ public sealed class DocsTaskPromptToolTests
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
             provider.GetRequiredService<IFileSystem>(),
-            Host(fixture, config).Current().StandardsFor);
+            Host(fixture, config).Current().StandardsFor,
+            provider.GetRequiredService<IProcessEnvironment>());
     }
 
     private static string Packet(DocFixture fixture, string task)
