@@ -311,7 +311,7 @@ public sealed class ArbiterRunStore : IArbiterRunStore
     {
         if (entry.IsLink
             || !entry.IsDirectory
-            || _paths.AreSame(entry.Path, keep))
+            || IsSameDirectory(entry.Path, keep))
         {
             return;
         }
@@ -328,6 +328,16 @@ public sealed class ArbiterRunStore : IArbiterRunStore
             // One unreadable or undeletable sibling is left for a later append; see the type remarks.
         }
     }
+
+    /// <summary>
+    /// Whether a swept entry is the directory being appended to. A spelling the path seam cannot compare is answered
+    /// lexically instead of raising: the sweep's caller catches every file failure, so a refused comparison would
+    /// silently stop retention for every append.
+    /// </summary>
+    private bool IsSameDirectory(string entryPath, string keep) =>
+        Path.IsPathFullyQualified(entryPath) && Path.IsPathFullyQualified(keep)
+            ? _paths.AreSame(entryPath, keep)
+            : string.Equals(entryPath, keep, StringComparison.Ordinal);
 
     /// <summary>
     /// The time a store directory was last written to, read from its newest file. A directory's own time moves only

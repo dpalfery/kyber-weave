@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Data.Arbiter;
@@ -16,6 +18,7 @@ namespace KyberWeave.Application.Tests.Arbiter;
 public sealed class ArbiterRunStoreOverSeamsTests
 {
     private const string ArbiterDirectory = "/repo/artifacts/arbiter";
+    private const string RelativeArbiterDirectory = "artifacts/arbiter";
 
     private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 11, 18, 9, 0, 0, TimeSpan.Zero));
     private readonly InMemoryFileSystem _files;
@@ -27,6 +30,26 @@ public sealed class ArbiterRunStoreOverSeamsTests
         _files = new InMemoryFileSystem(_clock);
         _files.CreateDirectory(ArbiterDirectory);
         _paths = new FakePathResolver(_files);
+    }
+
+    /// <summary>
+    /// A relative Arbiter directory still sweeps: the identity check answers for the spellings the store was given
+    /// instead of refusing them, because a refused check would abort the whole sweep and let the stores grow without
+    /// bound.
+    /// </summary>
+    [Fact]
+    public async Task AnAppendSweepsWhenTheArbiterDirectoryIsRelative()
+    {
+        string expired = RelativeStores + "/review-" + DigestOf("RUN-OLD");
+        _files.CreateDirectory(RelativeStores);
+        _files.CreateDirectory(expired);
+        _files.WriteAllText(expired + "/findings.jsonl", "{}");
+        _clock.Advance(TimeSpan.FromDays(15));
+
+        ArbiterRunStore store = new(RelativeArbiterDirectory, _log, _files, _files, _paths, clock: _clock);
+        await store.AppendFindingAsync("RUN-NEW", "written today");
+
+        Assert.False(_files.DirectoryExists(expired), $"'{expired}' is past the window and was kept.");
     }
 
     /// <summary>
@@ -42,4 +65,9 @@ public sealed class ArbiterRunStoreOverSeamsTests
         Assert.Equal(ArbiterStoreStatus.Stored, await store.AppendFindingAsync("RUN-FACTORY", "finding one"));
         Assert.Equal(["finding one"], store.ReadFindings("RUN-FACTORY"));
     }
+
+    private const string RelativeStores = RelativeArbiterDirectory + "/stores";
+
+    private static string DigestOf(string value) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 }
