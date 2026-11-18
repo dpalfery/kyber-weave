@@ -259,7 +259,9 @@ Task 4.4 leaves these in `Data` outside `Squad/`, each for a named reason:
   `PhysicalFileSystem` by the file-system contract suite.
 - Task 3.4 moved `SquadTransaction` and `TransactionLease` onto the seams. The file-system seam gained
   `DeleteEmptyDirectory` (removes a directory only when nothing is in it) and `OpenGuarded` (a read-only open
-  that keeps others from changing or deleting a file), both proven by the same contract suite.
+  that keeps others from changing or deleting a file), both proven by the same contract suite, and later
+  `FlushDirectory` (flushes a directory's entries, so a rename survives a power loss; a no-op on Windows and in
+  memory).
 - `SelfUpdateSystem` replaces the running binary and extracts archives, so requirement 10.2 applies: it
   moves with crash-safety contract tests and a second reviewer, with task 4.1's `SelfUpdater`.
 - `AnalysisCacheSafety`, `SqliteAnalysisPersistence` and `CodeGraphResolverAdapter` are built with `new` or

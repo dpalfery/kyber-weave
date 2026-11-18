@@ -270,6 +270,20 @@ public sealed class SquadTransactionWeaknessTests
         fixture.Files.CreateFileLink(conductor, real);
     }
 
+    [Fact]
+    public void ARealDiskFaultWrapperRefusesEveryOperationAfterTheKill()
+    {
+        FaultInjectingFileSystem files = new(new InMemoryFileSystem());
+        files.KillAt(2);
+        _ = files.FileExists("/a");
+
+        _ = Assert.Throws<SquadCrashInjectedException>(() => files.FileExists("/a"));
+        _ = Assert.Throws<SquadCrashInjectedException>(() => files.FileExists("/a"));
+
+        files.Restart();
+        Assert.False(files.FileExists("/a"));
+    }
+
     private static bool IsTransactionDelete(FileSystemOperation operation) =>
         operation.Name.StartsWith("Delete", StringComparison.Ordinal)
         && operation.Path!.Contains(".kyber-weave", StringComparison.Ordinal);
