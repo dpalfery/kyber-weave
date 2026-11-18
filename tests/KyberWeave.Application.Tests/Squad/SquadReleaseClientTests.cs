@@ -7,7 +7,9 @@ using System.Text;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Release;
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 using Xunit.Sdk;
 
@@ -18,14 +20,21 @@ namespace KyberWeave.Tests;
 /// and every archive path have been verified. Prerequisite probes execute only the named
 /// PATH tools and expose parsed versions without reflecting process secrets.
 /// </summary>
-public sealed class SquadReleaseClientTests : IDisposable
+public sealed class SquadReleaseClientTests
 {
     private const string Version = "1.2.3";
     private const string AssetName = "kyber-squad-1.2.3.zip";
     private const string Repository = "dpalfery/kyber-weave";
     private const string Secret = "squad-secret-must-not-be-disclosed";
     private static readonly Uri ApiRoot = new("https://api.github.test/");
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryFileSystem _files = new(caseSensitive: true);
+    private readonly string _work;
+
+    public SquadReleaseClientTests()
+    {
+        _work = Path.Combine(_files.Root, "work");
+        _files.CreateDirectory(_work);
+    }
 
     [Fact]
     public async Task DownloadAndExtractAsyncWithExactPublishedChecksumUsesTheReleasePortAndReturnsArchiveIdentity()
@@ -33,8 +42,8 @@ public sealed class SquadReleaseClientTests : IDisposable
         byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
         string checksum = Sha256(archiveBytes);
         using RoutingHandler handler = ReleaseHandler(archiveBytes, $"{checksum}  {AssetName}\n");
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
-        string destination = Path.Combine(_temp.Path, "squad");
+        using ISquadReleaseSource source = CreateSource(handler, ApiRoot);
+        string destination = Path.Combine(_work, "squad");
         SquadReleaseRequest request = new SquadReleaseRequest(Repository, Version, destination);
 
         SquadReleaseResult result = await source.DownloadAndExtractAsync(request, CancellationToken.None);
@@ -48,9 +57,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         Assert.Equal(["payload/manifest.json"], result.ExtractedFiles);
         Assert.Equal(
             "canonical",
-            await File.ReadAllTextAsync(
-                Path.Combine(destination, "payload", "manifest.json"),
-                CancellationToken.None));
+            _files.ReadAllText(Path.Combine(destination, "payload", "manifest.json")));
     }
 
     [Fact]
@@ -58,8 +65,8 @@ public sealed class SquadReleaseClientTests : IDisposable
     {
         using RoutingHandler handler = new RoutingHandler();
         SeedDestinationAndState();
-        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
+        IReadOnlyDictionary<string, SquadTreeEntry> before = Snapshot();
+        using ISquadReleaseSource source = CreateSource(
             handler,
             new Uri("http://api.github.test/"));
 
@@ -68,7 +75,7 @@ public sealed class SquadReleaseClientTests : IDisposable
 
         Assert.Contains("HTTPS", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(handler.Requests);
-        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
+        AssertTreeUnchanged(before);
     }
 
     [Fact]
@@ -78,7 +85,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         handler.AllowAutoRedirect = true;
 
         ArgumentException exception = Assert.Throws<ArgumentException>(() =>
-            RealSquadReleaseSource.Create(handler, ApiRoot));
+            CreateSource(handler, ApiRoot));
 
         Assert.Contains("redirect", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -90,7 +97,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         Assert.True(handler.AllowAutoRedirect);
 
         ArgumentException exception = Assert.Throws<ArgumentException>(() =>
-            RealSquadReleaseSource.Create(handler, ApiRoot));
+            CreateSource(handler, ApiRoot));
 
         Assert.Contains("redirect", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -107,19 +114,19 @@ public sealed class SquadReleaseClientTests : IDisposable
     {
         using RoutingHandler handler = new RoutingHandler();
         SeedDestinationAndState();
-        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
+        IReadOnlyDictionary<string, SquadTreeEntry> before = Snapshot();
+        using ISquadReleaseSource source = CreateSource(handler, ApiRoot);
         SquadReleaseRequest request = new SquadReleaseRequest(
             Repository,
             version,
-            Path.Combine(_temp.Path, "destination"));
+            Path.Combine(_work, "destination"));
 
         ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(() =>
             source.DownloadAndExtractAsync(request, CancellationToken.None));
 
         Assert.Contains("release version", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(handler.Requests);
-        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
+        AssertTreeUnchanged(before);
     }
 
     [Theory]
@@ -137,8 +144,8 @@ public sealed class SquadReleaseClientTests : IDisposable
             $"{checksum}  {assetName}\n",
             version: version,
             assetName: assetName);
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
-        string destination = Path.Combine(_temp.Path, "squad-" + version.Replace('.', '-'));
+        using ISquadReleaseSource source = CreateSource(handler, ApiRoot);
+        string destination = Path.Combine(_work, "squad-" + version.Replace('.', '-'));
         SquadReleaseRequest request = new SquadReleaseRequest(Repository, version, destination);
 
         SquadReleaseResult result = await source.DownloadAndExtractAsync(request, CancellationToken.None);
@@ -157,7 +164,7 @@ public sealed class SquadReleaseClientTests : IDisposable
             archiveBytes,
             $"{checksum}  {AssetName}\n",
             redirectArchiveTo: new Uri("https://objects.github.test/squad.zip"));
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
+        using ISquadReleaseSource source = CreateSource(handler, ApiRoot);
 
         SquadReleaseResult result = await source.DownloadAndExtractAsync(Request(), CancellationToken.None);
 
@@ -176,15 +183,15 @@ public sealed class SquadReleaseClientTests : IDisposable
             $"{checksum}  {AssetName}\n",
             redirectArchiveTo: insecureLocation);
         SeedDestinationAndState();
-        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
+        IReadOnlyDictionary<string, SquadTreeEntry> before = Snapshot();
+        using ISquadReleaseSource source = CreateSource(handler, ApiRoot);
 
         InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             source.DownloadAndExtractAsync(Request(), CancellationToken.None));
 
         Assert.Contains("HTTPS", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(insecureLocation, handler.Requests);
-        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
+        AssertTreeUnchanged(before);
     }
 
     [Fact]
@@ -206,15 +213,15 @@ public sealed class SquadReleaseClientTests : IDisposable
             }
             """));
         SeedDestinationAndState();
-        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
+        IReadOnlyDictionary<string, SquadTreeEntry> before = Snapshot();
+        using ISquadReleaseSource source = CreateSource(handler, ApiRoot);
 
         InvalidDataException exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
             source.DownloadAndExtractAsync(Request(), CancellationToken.None));
 
         Assert.Contains("SHA256SUMS.txt", exception.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(archiveUri, handler.Requests);
-        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
+        AssertTreeUnchanged(before);
     }
 
     [Fact]
@@ -228,12 +235,12 @@ public sealed class SquadReleaseClientTests : IDisposable
         Uri releaseUri = new Uri(ApiRoot, $"repos/{Repository}/releases/tags/v9.9.9");
         handler.Enqueue(releaseUri, () => new HttpResponseMessage(HttpStatusCode.NotFound));
         SeedDestinationAndState();
-        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
+        IReadOnlyDictionary<string, SquadTreeEntry> before = Snapshot();
+        using ISquadReleaseSource source = CreateSource(handler, ApiRoot);
         SquadReleaseRequest request = new SquadReleaseRequest(
             Repository,
             "9.9.9",
-            Path.Combine(_temp.Path, "destination"));
+            Path.Combine(_work, "destination"));
 
         InvalidDataException exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
             source.DownloadAndExtractAsync(request, CancellationToken.None));
@@ -242,7 +249,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         Assert.Contains(Repository, exception.Message, StringComparison.Ordinal);
         Assert.Contains("releases", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Equal([releaseUri], handler.Requests);
-        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
+        AssertTreeUnchanged(before);
     }
 
     [Fact]
@@ -254,15 +261,15 @@ public sealed class SquadReleaseClientTests : IDisposable
         Uri releaseUri = new Uri(ApiRoot, $"repos/{Repository}/releases/tags/v{Version}");
         handler.Enqueue(releaseUri, () => new HttpResponseMessage(HttpStatusCode.InternalServerError));
         SeedDestinationAndState();
-        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
+        IReadOnlyDictionary<string, SquadTreeEntry> before = Snapshot();
+        using ISquadReleaseSource source = CreateSource(handler, ApiRoot);
 
         HttpRequestException exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
             source.DownloadAndExtractAsync(Request(), CancellationToken.None));
 
         Assert.DoesNotContain(Repository, exception.Message, StringComparison.Ordinal);
         Assert.Equal([releaseUri], handler.Requests);
-        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
+        AssertTreeUnchanged(before);
     }
 
     [Fact]
@@ -379,37 +386,22 @@ public sealed class SquadReleaseClientTests : IDisposable
     [Fact]
     public async Task DownloadAndExtractAsyncWhenExistingDestinationDirectoryIsSymlinkRejectsEscapeWithoutFollowingIt()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            throw SkipException.ForSkip(
-                "Symbolic links require elevated privileges on Windows.");
-        }
-
-        string destination = Path.Combine(_temp.Path, "destination");
-        string outside = Path.Combine(_temp.Path, "outside");
-        string state = Path.Combine(_temp.Path, "home", ".kyber-weave", "squad", "global");
-        Directory.CreateDirectory(destination);
-        Directory.CreateDirectory(outside);
-        Directory.CreateDirectory(state);
+        string destination = Path.Combine(_work, "destination");
+        string outside = Path.Combine(_work, "outside");
+        string state = Path.Combine(_work, "home", ".kyber-weave", "squad", "global");
+        _files.CreateDirectory(destination);
+        _files.CreateDirectory(outside);
+        _files.CreateDirectory(state);
         string outsideFile = Path.Combine(outside, "manifest.json");
-        await File.WriteAllTextAsync(
-            outsideFile,
-            "outside must stay unchanged",
-            CancellationToken.None);
+        _files.WriteAllText(outsideFile, "outside must stay unchanged");
         string linkedDirectory = Path.Combine(destination, "payload");
-        Directory.CreateSymbolicLink(linkedDirectory, outside);
-        await File.WriteAllTextAsync(
-            Path.Combine(state, "squad.lock.yml"),
-            "preserve lock",
-            CancellationToken.None);
-        await File.WriteAllTextAsync(
-            Path.Combine(state, "squad.receipt.json"),
-            "preserve receipt",
-            CancellationToken.None);
-        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
+        _files.CreateDirectoryLink(linkedDirectory, outside);
+        _files.WriteAllText(Path.Combine(state, "squad.lock.yml"), "preserve lock");
+        _files.WriteAllText(Path.Combine(state, "squad.receipt.json"), "preserve receipt");
+        IReadOnlyDictionary<string, SquadTreeEntry> before = Snapshot();
         byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
         using RoutingHandler handler = ReleaseHandler(archiveBytes, $"{Sha256(archiveBytes)}  {AssetName}\n");
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
+        using ISquadReleaseSource source = CreateSource(handler, ApiRoot);
 
         Exception exception = await Assert.ThrowsAnyAsync<Exception>(() =>
             source.DownloadAndExtractAsync(Request(), CancellationToken.None));
@@ -417,9 +409,9 @@ public sealed class SquadReleaseClientTests : IDisposable
         Assert.Contains("symbolic link", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(
             "outside must stay unchanged",
-            await File.ReadAllTextAsync(outsideFile, CancellationToken.None));
-        Assert.Equal(outside, new DirectoryInfo(linkedDirectory).LinkTarget);
-        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
+            _files.ReadAllText(outsideFile));
+        Assert.Equal(outside, _files.GetLinkTarget(linkedDirectory));
+        AssertTreeUnchanged(before);
     }
 
     [Fact]
@@ -444,13 +436,13 @@ public sealed class SquadReleaseClientTests : IDisposable
             $"{Sha256(archiveBytes)}  {AssetName}\n",
             cancelAfterArchiveRead: cancellation);
         SeedStateOnly();
-        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
+        IReadOnlyDictionary<string, SquadTreeEntry> before = Snapshot();
+        using ISquadReleaseSource source = CreateSource(handler, ApiRoot);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             source.DownloadAndExtractAsync(Request(), cancellation.Token));
 
-        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
+        AssertTreeUnchanged(before);
     }
 
     [Fact]
@@ -463,9 +455,9 @@ public sealed class SquadReleaseClientTests : IDisposable
             archiveBytes,
             $"{Sha256(archiveBytes)}  {AssetName}\n");
         SeedStateOnly();
-        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
+        IReadOnlyDictionary<string, SquadTreeEntry> before = Snapshot();
         // ReSharper disable once AccessToDisposedClosure
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
+        using ISquadReleaseSource source = CreateSource(
             handler,
             ApiRoot,
             onStagingCreated: () =>
@@ -479,11 +471,10 @@ public sealed class SquadReleaseClientTests : IDisposable
             source.DownloadAndExtractAsync(Request(), cancellation.Token));
 
         Assert.True(stagingCreated);
-        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
-        Assert.Empty(Directory.EnumerateDirectories(
-            _temp.Path,
-            ".destination.kyber-squad-*",
-            SearchOption.TopDirectoryOnly));
+        AssertTreeUnchanged(before);
+        Assert.DoesNotContain(
+            _files.EnumerateDirectories(_work),
+            path => Path.GetFileName(path).StartsWith(".destination.kyber-squad-", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -554,39 +545,49 @@ public sealed class SquadReleaseClientTests : IDisposable
         AssertPathOnlyVersionInvocation(executor, "kyber-weave-mcp");
     }
 
-    public void Dispose() => _temp.Dispose();
+    private ISquadReleaseSource CreateSource(
+        HttpMessageHandler handler,
+        Uri apiRoot,
+        Action? onStagingCreated = null) =>
+        InMemorySquadReleaseSource.Create(_files, handler, apiRoot, _work, onStagingCreated);
+
+    private IReadOnlyDictionary<string, SquadTreeEntry> Snapshot() =>
+        SquadStateTreeCapture.Capture(_files, _files.Root);
+
+    private void AssertTreeUnchanged(IReadOnlyDictionary<string, SquadTreeEntry> before) =>
+        Assert.Null(SquadTreeComparison.Difference(before, Snapshot()));
 
     private SquadReleaseRequest Request() =>
-        new(Repository, Version, Path.Combine(_temp.Path, "destination"));
+        new(Repository, Version, Path.Combine(_work, "destination"));
 
     private async Task<Exception> DownloadFailure(byte[] archiveBytes, string checksumManifest)
     {
         SeedDestinationAndState();
-        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
+        IReadOnlyDictionary<string, SquadTreeEntry> before = Snapshot();
         using RoutingHandler handler = ReleaseHandler(archiveBytes, checksumManifest);
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(handler, ApiRoot);
+        using ISquadReleaseSource source = CreateSource(handler, ApiRoot);
 
         Exception exception = await Assert.ThrowsAnyAsync<Exception>(() =>
             source.DownloadAndExtractAsync(Request(), CancellationToken.None));
 
-        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
+        AssertTreeUnchanged(before);
         return exception;
     }
 
     private void SeedDestinationAndState()
     {
-        string destination = Path.Combine(_temp.Path, "destination");
-        Directory.CreateDirectory(destination);
+        string destination = Path.Combine(_work, "destination");
+        _files.CreateDirectory(destination);
         SeedStateOnly();
-        File.WriteAllText(Path.Combine(destination, "unmanaged.txt"), "preserve destination");
+        _files.WriteAllText(Path.Combine(destination, "unmanaged.txt"), "preserve destination");
     }
 
     private void SeedStateOnly()
     {
-        string state = Path.Combine(_temp.Path, "home", ".kyber-weave", "squad", "global");
-        Directory.CreateDirectory(state);
-        File.WriteAllText(Path.Combine(state, "squad.lock.yml"), "preserve lock");
-        File.WriteAllText(Path.Combine(state, "squad.receipt.json"), "preserve receipt");
+        string state = Path.Combine(_work, "home", ".kyber-weave", "squad", "global");
+        _files.CreateDirectory(state);
+        _files.WriteAllText(Path.Combine(state, "squad.lock.yml"), "preserve lock");
+        _files.WriteAllText(Path.Combine(state, "squad.receipt.json"), "preserve receipt");
     }
 
     private static void AssertPathOnlyVersionInvocation(
