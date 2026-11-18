@@ -248,8 +248,8 @@ jobs:
           --results-directory TestResults
 
       # The remaining projects: repository policy (scripts, workflows, gate configuration, docs and
-      # source scans), prompt content (the wording of skills, agents and instructions), and the
-      # layer projects with the architecture test that pins the layering. They are independent of
+      # source scans), shipped content (the agents, skills and documents we ship, read through the
+      # corpus seam), and the layer projects with the architecture test that pins the layering. They are independent of
       # each other and of the product suite, so they run at the same time rather than one after the
       # next; each writes its own TRX, and one failure still fails the step.
       - name: Test (policy, prose and layers)
@@ -264,7 +264,7 @@ jobs:
               --report-trx --report-trx-filename "$2" --results-directory TestResults
           }
           run tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj repo-policy.trx & pids+=($!)
-          run tests/KyberWeave.PromptContent.Tests/KyberWeave.PromptContent.Tests.csproj prompt-content.trx & pids+=($!)
+          run tests/KyberWeave.Content.Tests/KyberWeave.Content.Tests.csproj content.trx & pids+=($!)
           run tests/KyberWeave.Application.Tests/KyberWeave.Application.Tests.csproj layers-Application.trx & pids+=($!)
           run tests/KyberWeave.Hooks.Tests/KyberWeave.Hooks.Tests.csproj layers-Hooks.trx & pids+=($!)
           run tests/KyberWeave.Kernel.Tests/KyberWeave.Kernel.Tests.csproj layers-Kernel.trx & pids+=($!)

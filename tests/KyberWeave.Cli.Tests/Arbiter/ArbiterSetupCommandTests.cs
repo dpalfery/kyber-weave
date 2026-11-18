@@ -352,7 +352,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     public void Doctor_SecretToolMissing_ReportsKey001WithActionableText()
     {
         WriteOverride("provider:\n  kind: systemone\n  endpoint: https://api.typesafe.ai/v1\n  model: jev-1.13.0\n");
-        _storeOverride = new SecretServiceCredentialStore(new MissingSecretToolRunner());
+        _storeOverride = new SecretServiceCredentialStore(new MissingExecutableCredentialProcessRunner());
         string host = NewDir("doctor-no-secret-tool");
 
         ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
@@ -370,7 +370,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     public void Setup_SecretToolMissing_ExitsOneWithActionableText()
     {
         _keyStdinValue = "TS-NOTOOL-KEY-0c1d2e3f";
-        _storeOverride = new SecretServiceCredentialStore(new MissingSecretToolRunner());
+        _storeOverride = new SecretServiceCredentialStore(new MissingExecutableCredentialProcessRunner());
         string host = NewDir("setup-no-secret-tool");
 
         ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterSetupCommand>().Execute(

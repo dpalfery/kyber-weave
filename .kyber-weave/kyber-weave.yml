@@ -104,12 +104,13 @@ review:
       include: *net-test-paths
       run: [dotnet, test, tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj, -c, Release, --no-build]
       blocking: true
-    # The prompt-content tests (tests/KyberWeave.PromptContent.Tests): assertions on the wording of
-    # skills, agents and instructions, moved out of `test` so that gate measures behaviour. Same
-    # paths as `test-policy`, so it takes the same `--no-build` coupling to `build`.
-    - id: test-prompt
+    # The content tests (tests/KyberWeave.Content.Tests): checks of the shipped agents, skills,
+    # standards and documents, read through the corpus seam, moved out of `test` so that gate
+    # measures behaviour. Same paths as `test-policy`, so it takes the same `--no-build` coupling
+    # to `build`.
+    - id: test-content
       include: *net-test-paths
-      run: [dotnet, test, tests/KyberWeave.PromptContent.Tests/KyberWeave.PromptContent.Tests.csproj, -c, Release, --no-build]
+      run: [dotnet, test, tests/KyberWeave.Content.Tests/KyberWeave.Content.Tests.csproj, -c, Release, --no-build]
       blocking: true
     # `-c Release --no-build` on every `dotnet run` below. Omitting them built the CLI a
     # sixth time, in Debug, once per gate — the single largest avoidable cost in the suite

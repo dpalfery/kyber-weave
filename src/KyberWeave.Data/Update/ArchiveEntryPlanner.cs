@@ -15,6 +15,20 @@ internal sealed class ArchiveEntryPlanner(IPathResolver paths)
     public string Resolve(string destinationRoot, string entryName)
     {
         ArgumentException.ThrowIfNullOrEmpty(destinationRoot);
+        string name = ValidateName(entryName);
+        string target = paths.GetFullPath(name, destinationRoot);
+        if (!paths.AreSame(destinationRoot, target) && !paths.IsWithin(destinationRoot, target))
+            throw Refused(entryName, "it resolves outside the extraction directory");
+
+        return target;
+    }
+
+    /// <summary>Refuses an entry name that is empty, absolute or climbs out, by its spelling alone.</summary>
+    /// <param name="entryName">The entry's name as the archive spells it.</param>
+    /// <returns>The name with forward slashes.</returns>
+    /// <exception cref="SelfUpdateException">The name is empty, absolute or has a parent-directory segment.</exception>
+    public static string ValidateName(string entryName)
+    {
         if (string.IsNullOrEmpty(entryName) || entryName.Contains('\0', StringComparison.Ordinal))
             throw Refused(entryName, "its name is empty or holds a null character");
 
@@ -25,11 +39,7 @@ internal sealed class ArchiveEntryPlanner(IPathResolver paths)
         if (name.Split('/').Contains(".."))
             throw Refused(entryName, "its name climbs out of the extraction directory");
 
-        string target = paths.GetFullPath(name, destinationRoot);
-        if (!paths.AreSame(destinationRoot, target) && !paths.IsWithin(destinationRoot, target))
-            throw Refused(entryName, "it resolves outside the extraction directory");
-
-        return target;
+        return name;
     }
 
     private static SelfUpdateException Refused(string entryName, string reason) =>

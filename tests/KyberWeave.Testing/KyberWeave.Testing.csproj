@@ -30,7 +30,7 @@
     <InternalsVisibleTo Include="KyberWeave.Data.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Integration.Tests" />
     <InternalsVisibleTo Include="KyberWeave.RepoPolicy.Tests" />
-    <InternalsVisibleTo Include="KyberWeave.PromptContent.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Content.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Architecture.Tests" />
   </ItemGroup>
 
