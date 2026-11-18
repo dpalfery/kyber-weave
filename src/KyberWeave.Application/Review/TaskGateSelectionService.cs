@@ -21,18 +21,20 @@ namespace KyberWeave.Application.Review;
 /// </remarks>
 /// <param name="tree">Probes the repository root and the links under it.</param>
 /// <param name="tests">Reads the source files the test classes are looked up in.</param>
-/// <param name="paths">Resolves a changed path the way the repository's file system does.</param>
+/// <param name="paths">Resolves and contains a changed path through the path seam.</param>
+/// <param name="environment">Names the working directory a relative root resolves against.</param>
 public sealed class TaskGateSelectionService(
     IRepositoryTreeProbe tree,
     ITestClassSources tests,
-    IPathResolver paths) : ITaskGateSelectionService
+    IPathResolver paths,
+    IProcessEnvironment environment) : ITaskGateSelectionService
 {
     /// <inheritdoc />
     public string? ValidateTask(string? task) => TaskGatePlanning.ValidateTask(task);
 
     /// <inheritdoc />
     public string? ValidatePath(string root, string path) =>
-        TaskGatePlanning.ValidatePath(paths, root, path, tree.LeadsOutsideThroughSymlink);
+        TaskGatePlanning.ValidatePath(paths, environment, root, path, tree.LeadsOutsideThroughSymlink);
 
     /// <inheritdoc />
     public TaskGatePlan Plan(

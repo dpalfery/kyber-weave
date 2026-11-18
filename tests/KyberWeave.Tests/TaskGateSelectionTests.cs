@@ -38,9 +38,12 @@ public sealed class TaskGateSelectionTests
                     ["SuppressionScanTests"] = "/repo/tests/KyberWeave.Tests/SuppressionScanTests.cs",
                 },
             },
-            Paths());
+            Paths(),
+            Environment());
 
     private static FakePathResolver Paths() => FakePathResolver.OverEmptyFileSystem();
+
+    private static FakeProcessEnvironment Environment() => new(currentDirectory: "/work");
 
     [Theory]
     [InlineData("macos")]
@@ -302,7 +305,7 @@ public sealed class TaskGateSelectionTests
         // The same repository-relative path escapes one root and not another. A probe that answers by path alone
         // would refuse it under both, hiding a root-confusion regression that lets an escaping path reach argv.
         FakeRepositoryTreeProbe probe = new() { EscapingPaths = [("/repo/a", "link/outside.cs")] };
-        ITaskGateSelectionService selection = new TaskGateSelectionService(probe, new FakeTestClassSources(), Paths());
+        ITaskGateSelectionService selection = new TaskGateSelectionService(probe, new FakeTestClassSources(), Paths(), Environment());
 
         Assert.NotNull(selection.ValidatePath("/repo/a", "link/outside.cs"));
         Assert.Null(selection.ValidatePath("/repo/b", "link/outside.cs"));
@@ -318,7 +321,7 @@ public sealed class TaskGateSelectionTests
                 ["/repo"] = new RepositoryRootAccess(true, "permission denied"),
             },
         };
-        ITaskGateSelectionService selection = new TaskGateSelectionService(probe, new FakeTestClassSources(), Paths());
+        ITaskGateSelectionService selection = new TaskGateSelectionService(probe, new FakeTestClassSources(), Paths(), Environment());
 
         TaskGatePlan plan = selection.Plan([FormatGate()], Changed, null, "unix", "/repo");
 
@@ -334,7 +337,7 @@ public sealed class TaskGateSelectionTests
         const string Message = "The repository root '/repo' is not accessible: permission denied";
         FakeRepositoryTreeProbe probe = new() { Roots = { ["/repo"] = RepositoryRootAccess.Accessible } };
         FakeTestClassSources sources = new() { OpenFault = Message };
-        ITaskGateSelectionService selection = new TaskGateSelectionService(probe, sources, Paths());
+        ITaskGateSelectionService selection = new TaskGateSelectionService(probe, sources, Paths(), Environment());
 
         TaskGatePlan plan = selection.Plan([TestsGate()], Changed, null, "unix", "/repo");
 
