@@ -1,8 +1,8 @@
-using KyberWeave.Tests.Configuration;
 using System.Diagnostics.CodeAnalysis;
 
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Embeddings;
@@ -11,11 +11,12 @@ using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Analysis.Review;
 using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Domain.CodeGraph;
-using Spectre.Console;
+using KyberWeave.Tests;
+using KyberWeave.Tests.Fakes;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
-using KyberWeave.Tests.Fakes;
-namespace KyberWeave.Tests;
+namespace KyberWeave.Cli.Tests.Commands.Docs;
 
 /// <summary>
 /// Specifies the CLI's adapter lifetime and cost boundary. Unsafe persistence must prevent
@@ -26,11 +27,12 @@ namespace KyberWeave.Tests;
     "Reliability",
     "CA2000:Dispose objects before losing scope",
     Justification = "Tests intentionally transfer fake adapter ownership to the runtime and assert disposal.")]
-public sealed class DocsAnalysisCompositionTests : IDisposable
+public sealed class DocsAnalysisCompositionTests
 {
-    private readonly TempDirectory _temp = new();
+    private readonly MemoryDocsHost _host = new();
 
-    public void Dispose() => _temp.Dispose();
+    private IKyberWeaveConfigRepository Configs =>
+        _host.Services().GetRequiredService<IKyberWeaveConfigRepository>();
 
     /// <summary>The resolver a docs command gets is the one the injected ports factory answers.</summary>
     [Fact]
@@ -68,8 +70,8 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
         DiagnosticReport report = new DiagnosticReport();
 
         bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
-            ConfigFileReader.Repository,
-            new DocsIntegrityCheckSettings { Path = _temp.Path },
+            Configs,
+            new DocsIntegrityCheckSettings { Path = _host.Repo },
             report,
             factories.Factories,
             out DocsAnalysisRuntime? runtime);
@@ -115,8 +117,8 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
         DiagnosticReport report = new DiagnosticReport();
 
         bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
-            ConfigFileReader.Repository,
-            new DocsIntegrityCheckSettings { Path = _temp.Path },
+            Configs,
+            new DocsIntegrityCheckSettings { Path = _host.Repo },
             report,
             factories.Factories,
             out DocsAnalysisRuntime? runtime);
@@ -148,8 +150,8 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
         FactoryProbe factories = Factories(cacheSafe: true, persistence, embedding, new AvailableResolver());
 
         bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
-            ConfigFileReader.Repository,
-            new DocsIntegrityCheckSettings { Path = _temp.Path },
+            Configs,
+            new DocsIntegrityCheckSettings { Path = _host.Repo },
             new DiagnosticReport(),
             factories.Factories,
             out DocsAnalysisRuntime? runtime);
@@ -174,8 +176,8 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             new UnavailableResolver());
 
         bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
-            ConfigFileReader.Repository,
-            new DocsIntegrityCheckSettings { Path = _temp.Path },
+            Configs,
+            new DocsIntegrityCheckSettings { Path = _host.Repo },
             report,
             factories.Factories,
             out DocsAnalysisRuntime? runtime);
@@ -199,8 +201,8 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             new AvailableResolver());
 
         bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
-            ConfigFileReader.Repository,
-            new DocsIntegrityCheckSettings { Path = _temp.Path },
+            Configs,
+            new DocsIntegrityCheckSettings { Path = _host.Repo },
             new DiagnosticReport(),
             factories.Factories,
             out DocsAnalysisRuntime? runtime);
@@ -209,7 +211,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
         runtime!.Dispose();
 
         Assert.Equal(before, Files());
-        Assert.False(Directory.Exists(Path.Combine(_temp.Path, ".kyber-weave", "cache")));
+        Assert.False(_host.Files.DirectoryExists(Path.Combine(_host.Repo, ".kyber-weave", "cache")));
         Assert.Equal(0, factories.PersistenceConstructions);
         Assert.Equal(0, factories.EmbeddingConstructions);
     }
@@ -227,28 +229,28 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             persistence,
             new DisposableEmbeddingGenerator(),
             new AvailableResolver());
-        RepositoryDocsAnalysisCommandService service = DocsTestCommands.AnalysisService(factories.Factories);
-        string output = Path.Combine(_temp.Path, "candidates.json");
-        string input = Path.Combine(_temp.Path, "verdicts.json");
-        File.WriteAllText(input, "{}");
+        RepositoryDocsAnalysisCommandService service = AnalysisService(factories.Factories);
+        string output = Path.Combine(_host.Repo, "candidates.json");
+        string input = Path.Combine(_host.Repo, "verdicts.json");
+        _host.Files.WriteAllText(input, "{}");
 
-        int exitCode = ProcessConsoleCapture.Run(() => operation switch
+        int exitCode = (operation switch
         {
-            "export" => DocsTestCommands.ReviewExport(service).Execute(
+            "export" => new DocsReviewExportCommand(service, _host.Files, _host.Console).Execute(
                 null!,
-                new DocsReviewExportSettings { Path = _temp.Path, OutputPath = output, Format = "json" }),
-            "import" => DocsTestCommands.ReviewImport(service).Execute(
+                new DocsReviewExportSettings { Path = _host.Repo, OutputPath = output, Format = "json" }),
+            "import" => new DocsReviewImportCommand(service, _host.Files, _host.Console).Execute(
                 null!,
-                new DocsReviewImportSettings { Path = _temp.Path, InputPath = input, Format = "json" }),
-            "glossary" => new DocsGlossaryCommand(service, AnsiConsole.Console).Execute(
+                new DocsReviewImportSettings { Path = _host.Repo, InputPath = input, Format = "json" }),
+            "glossary" => new DocsGlossaryCommand(service, _host.Console).Execute(
                 null!,
-                new DocsGlossarySettings { Path = _temp.Path, Write = true, Format = "json" }),
+                new DocsGlossarySettings { Path = _host.Repo, Write = true, Format = "json" }),
             _ => throw new InvalidOperationException("Unknown operation.")
-        }).Result;
+        });
 
         Assert.Equal(1, exitCode);
-        Assert.False(File.Exists(output));
-        Assert.False(File.Exists(Path.Combine(_temp.Path, "docs", "glossary.md")));
+        Assert.False(_host.Files.FileExists(output));
+        Assert.False(_host.Files.FileExists(Path.Combine(_host.Repo, "docs", "glossary.md")));
         Assert.Equal(0, persistence.SavedVerdictCount);
     }
 
@@ -262,11 +264,11 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             persistence,
             new DisposableEmbeddingGenerator(),
             new UnavailableResolver());
-        RepositoryDocsAnalysisCommandService service = DocsTestCommands.AnalysisService(factories.Factories);
+        RepositoryDocsAnalysisCommandService service = AnalysisService(factories.Factories);
 
-        ReviewExportResult exported = service.ExportReview(new DocsReviewExportSettings { Path = _temp.Path });
-        ReviewImportResult imported = service.ImportReview(new DocsReviewImportSettings { Path = _temp.Path }, "{}");
-        GlossaryUpdateResult glossary = service.UpdateGlossary(new DocsGlossarySettings { Path = _temp.Path });
+        ReviewExportResult exported = service.ExportReview(new DocsReviewExportSettings { Path = _host.Repo });
+        ReviewImportResult imported = service.ImportReview(new DocsReviewImportSettings { Path = _host.Repo }, "{}");
+        GlossaryUpdateResult glossary = service.UpdateGlossary(new DocsGlossarySettings { Path = _host.Repo });
 
         AssertWarningsOnce(exported.Diagnostics);
         AssertWarningsOnce(imported.Diagnostics);
@@ -281,7 +283,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             DisposableEmbeddingGenerator embedding,
             ICodeGraphResolver resolver)
         {
-            Factories = new DocsAnalysisCompositionFactories(new FakeCodeGraphPortsFactory(resolver), DocsPorts.AnalysisPersistence, DocsPorts.Embeddings)
+            Factories = new DocsAnalysisCompositionFactories(new FakeCodeGraphPortsFactory(resolver), new UnreachedAnalysisPersistenceFactory(), new UnreachedEmbeddingGeneratorFactory())
             {
                 IsCacheSafe = _ => cacheSafe,
                 CreatePersistence = _ =>
@@ -310,9 +312,9 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             + "uppercased value would not round-trip through the config loader.")]
     private void WriteConfig(DocsAnalysisEmbeddingMode mode)
     {
-        string state = Path.Combine(_temp.Path, ".kyber-weave");
-        Directory.CreateDirectory(state);
-        File.WriteAllText(
+        string state = Path.Combine(_host.Repo, ".kyber-weave");
+        _host.Files.CreateDirectory(state);
+        _host.Files.WriteAllText(
             Path.Combine(state, "kyber-weave.yml"),
             $$"""
             ontology:
@@ -335,9 +337,9 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
 
     private void WriteDocument(string id, string claim, string component)
     {
-        string docs = Path.Combine(_temp.Path, "docs");
-        Directory.CreateDirectory(docs);
-        File.WriteAllText(
+        string docs = Path.Combine(_host.Repo, "docs");
+        _host.Files.CreateDirectory(docs);
+        _host.Files.WriteAllText(
             Path.Combine(docs, $"{id}.md"),
             $$"""
             ---
@@ -372,9 +374,19 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
         DisposableEmbeddingGenerator embedding,
         ICodeGraphResolver resolver) => new(cacheSafe, persistence, embedding, resolver);
 
-    private string[] Files() => Directory
-        .GetFiles(_temp.Path, "*", SearchOption.AllDirectories)
-        .Select(path => Path.GetRelativePath(_temp.Path, path).Replace('\\', '/'))
+    private RepositoryDocsAnalysisCommandService AnalysisService(DocsAnalysisCompositionFactories factories)
+    {
+        IServiceProvider provider = _host.Services();
+        return new RepositoryDocsAnalysisCommandService(
+            factories,
+            provider.GetRequiredService<IManagedGlossaryFactory>(),
+            provider.GetRequiredService<IDocumentSourceFactory>(),
+            provider.GetRequiredService<IKyberWeaveConfigRepository>());
+    }
+
+    private string[] Files() => _host.Files
+        .EnumerateFiles(_host.Repo, "*", recursive: true)
+        .Select(path => Path.GetRelativePath(_host.Repo, path).Replace('\\', '/'))
         .Order(StringComparer.Ordinal)
         .ToArray();
 

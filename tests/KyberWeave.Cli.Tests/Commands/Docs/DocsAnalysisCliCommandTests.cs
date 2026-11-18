@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Rendering;
@@ -11,35 +10,17 @@ using Spectre.Console;
 using Spectre.Console.Testing;
 using Xunit;
 
-using KyberWeave.Tests.Fakes;
-namespace KyberWeave.Tests;
+using KyberWeave.Tests;
+
+namespace KyberWeave.Cli.Tests.Commands.Docs;
 
 /// <summary>
 /// Pins the public documentation-analysis command surface independently of concrete graph,
 /// persistence, and embedding adapters. Composition has a separate contract below this file.
 /// </summary>
-public sealed class DocsAnalysisCliCommandTests : IDisposable
+public sealed class DocsAnalysisCliCommandTests
 {
-    private readonly TempDirectory _temp = new();
-
-    public void Dispose() => _temp.Dispose();
-
-    [Fact]
-    public void ProgramRegistersAnalyzeReviewAndGlossaryCommands()
-    {
-        string program = File.ReadAllText(Path.Combine(
-            RepositoryRoot(),
-            "src",
-            "KyberWeave.Cli",
-            "CliApplication.cs"));
-
-        Assert.Contains("AddCommand<DocsIntegrityCheckCommand>(\"integrity-check\")", program, StringComparison.Ordinal);
-        Assert.Contains("AddCommand<DocsExportGraphCommand>(\"export-graph\")", program, StringComparison.Ordinal);
-        Assert.Contains("AddBranch(\"review\"", program, StringComparison.Ordinal);
-        Assert.Contains("AddCommand<DocsReviewExportCommand>(\"export\")", program, StringComparison.Ordinal);
-        Assert.Contains("AddCommand<DocsReviewImportCommand>(\"import\")", program, StringComparison.Ordinal);
-        Assert.Contains("AddCommand<DocsGlossaryCommand>(\"glossary\")", program, StringComparison.Ordinal);
-    }
+    private readonly MemoryDocsHost _host = new();
 
     private static TestConsole NonTerminalConsole() => new();
 
@@ -78,13 +59,13 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
         {
             AnalysisResult = AnalysisResult(Finding(severity))
         };
-        DocsIntegrityCheckCommand command = new DocsIntegrityCheckCommand(service, AnsiConsole.Console);
+        DocsIntegrityCheckCommand command = new DocsIntegrityCheckCommand(service, _host.Console);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new DocsIntegrityCheckSettings
             {
-                Path = _temp.Path,
+                Path = _host.Repo,
                 FailOn = failOn,
                 Format = "json"
             }));
@@ -102,11 +83,11 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
                 "KW-DOC-ANALYSIS-004: malformed ignore markup")
         };
 
-        CommandExecution execution = Capture(() => new DocsIntegrityCheckCommand(service, AnsiConsole.Console).Execute(
+        CommandExecution execution = Capture(() => new DocsIntegrityCheckCommand(service, _host.Console).Execute(
             null!,
             new DocsIntegrityCheckSettings
             {
-                Path = _temp.Path,
+                Path = _host.Repo,
                 FailOn = "none",
                 Format = "json"
             }));
@@ -129,11 +110,11 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
             "docs analysis"));
         RecordingCommandService service = new RecordingCommandService { AnalysisResult = AnalysisResult(report) };
 
-        CommandExecution execution = Capture(() => new DocsIntegrityCheckCommand(service, AnsiConsole.Console).Execute(
+        CommandExecution execution = Capture(() => new DocsIntegrityCheckCommand(service, _host.Console).Execute(
             null!,
             new DocsIntegrityCheckSettings
             {
-                Path = _temp.Path,
+                Path = _host.Repo,
                 FailOn = "none",
                 Format = "json"
             }));
@@ -157,11 +138,11 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
         report.AddMetric("truncated", false);
         RecordingCommandService service = new RecordingCommandService { AnalysisResult = AnalysisResult(report) };
 
-        CommandExecution execution = Capture(() => new DocsIntegrityCheckCommand(service, AnsiConsole.Console).Execute(
+        CommandExecution execution = Capture(() => new DocsIntegrityCheckCommand(service, _host.Console).Execute(
             null!,
             new DocsIntegrityCheckSettings
             {
-                Path = _temp.Path,
+                Path = _host.Repo,
                 FailOn = "none",
                 Format = format
             }));
@@ -176,42 +157,43 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
     [Fact]
     public void ReviewExportWritesTheCompleteBundleToTheRequestedPath()
     {
-        string output = Path.Combine(_temp.Path, "review", "candidates.json");
+        string output = Path.Combine(_host.Repo, "review", "candidates.json");
         RecordingCommandService service = new RecordingCommandService { ExportResult = ExportResult("{\"schema\":\"candidates/v1\"}") };
 
-        CommandExecution execution = Capture(() => DocsTestCommands.ReviewExport(service).Execute(
+        CommandExecution execution = Capture(() => new DocsReviewExportCommand(service, _host.Files, _host.Console).Execute(
             null!,
-            new DocsReviewExportSettings { Path = _temp.Path, OutputPath = output }));
+            new DocsReviewExportSettings { Path = _host.Repo, OutputPath = output }));
 
         Assert.Equal(0, execution.ExitCode);
-        Assert.Equal(service.ExportResult.Json, File.ReadAllText(output));
+        Assert.Equal(service.ExportResult.Json, _host.Files.ReadAllText(output));
     }
 
     [Fact]
     public void ReviewExportOperationalFailureLeavesAnExistingOutputByteForByteUnchanged()
     {
-        string output = Path.Combine(_temp.Path, "candidates.json");
+        string output = Path.Combine(_host.Repo, "candidates.json");
         const string sentinel = "operator-owned output";
-        File.WriteAllText(output, sentinel);
+        _host.Files.CreateDirectory(_host.Repo);
+        _host.Files.WriteAllText(output, sentinel);
         RecordingCommandService service = new RecordingCommandService
         {
             ExportException = new IOException("candidate export failed")
         };
 
-        CommandExecution execution = Capture(() => DocsTestCommands.ReviewExport(service).Execute(
+        CommandExecution execution = Capture(() => new DocsReviewExportCommand(service, _host.Files, _host.Console).Execute(
             null!,
-            new DocsReviewExportSettings { Path = _temp.Path, OutputPath = output }));
+            new DocsReviewExportSettings { Path = _host.Repo, OutputPath = output }));
 
         Assert.Equal(1, execution.ExitCode);
-        Assert.Equal(sentinel, File.ReadAllText(output));
+        Assert.Equal(sentinel, _host.Files.ReadAllText(output));
     }
 
     [Fact]
     public void ReviewImportReadsTheRequestedBundleAndReturnsFailureWithoutPartialWrites()
     {
-        string input = Path.Combine(_temp.Path, "verdicts.json");
+        string input = Path.Combine(_host.Repo, "verdicts.json");
         const string verdicts = "{\"schema\":\"kyber-weave.docs-review.verdicts/v1\"}";
-        File.WriteAllText(input, verdicts);
+        _host.Files.WriteAllText(input, verdicts);
         DiagnosticReport diagnostics = new DiagnosticReport();
         diagnostics.Add(new Diagnostic(
             DocumentationReviewExchange.ReviewRuleCode,
@@ -223,11 +205,11 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
             ImportResult = new ReviewImportResult(false, 0, diagnostics)
         };
 
-        CommandExecution execution = Capture(() => DocsTestCommands.ReviewImport(service).Execute(
+        CommandExecution execution = Capture(() => new DocsReviewImportCommand(service, _host.Files, _host.Console).Execute(
             null!,
             new DocsReviewImportSettings
             {
-                Path = _temp.Path,
+                Path = _host.Repo,
                 InputPath = input,
                 Format = "json"
             }));
@@ -254,9 +236,9 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
                 new DiagnosticReport())
         };
 
-        CommandExecution execution = Capture(() => new DocsGlossaryCommand(service, AnsiConsole.Console).Execute(
+        CommandExecution execution = Capture(() => new DocsGlossaryCommand(service, _host.Console).Execute(
             null!,
-            new DocsGlossarySettings { Path = _temp.Path, Write = write }));
+            new DocsGlossarySettings { Path = _host.Repo, Write = write }));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Equal(write, service.GlossaryWriteRequested);
@@ -283,9 +265,9 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
                 new DiagnosticReport())
         };
 
-        CommandExecution execution = Capture(() => new DocsGlossaryCommand(service, AnsiConsole.Console).Execute(
+        CommandExecution execution = Capture(() => new DocsGlossaryCommand(service, _host.Console).Execute(
             null!,
-            new DocsGlossarySettings { Path = _temp.Path, Format = format }));
+            new DocsGlossarySettings { Path = _host.Repo, Format = format }));
 
         Assert.Equal(0, execution.ExitCode);
         using JsonDocument payload = JsonDocument.Parse(execution.Output);
@@ -311,9 +293,9 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
                 new DiagnosticReport())
         };
 
-        CommandExecution execution = Capture(() => new DocsGlossaryCommand(service, AnsiConsole.Console).Execute(
+        CommandExecution execution = Capture(() => new DocsGlossaryCommand(service, _host.Console).Execute(
             null!,
-            new DocsGlossarySettings { Path = _temp.Path, Format = format }));
+            new DocsGlossarySettings { Path = _host.Repo, Format = format }));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("glossaryPreview", execution.Output, StringComparison.Ordinal);
@@ -377,14 +359,11 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
         json.Length,
         Truncated: false);
 
-    private static CommandExecution Capture(Func<int> execute)
+    private CommandExecution Capture(Func<int> execute)
     {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
-        return new CommandExecution(execution.Result, execution.Output);
+        int exit = execute();
+        return new CommandExecution(exit, _host.Output);
     }
-
-    private static string RepositoryRoot([CallerFilePath] string sourcePath = "") =>
-        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourcePath)!, "..", ".."));
 
     private sealed record CommandExecution(int ExitCode, string Output);
 

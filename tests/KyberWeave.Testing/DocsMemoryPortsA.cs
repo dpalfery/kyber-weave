@@ -139,3 +139,23 @@ internal sealed class MemoryDocsHost
             configure?.Invoke(services);
         });
 }
+
+/// <summary>An analysis-cache factory a case never reaches: a case that overrides every delegate built from it fails if one is called.</summary>
+internal sealed class UnreachedAnalysisPersistenceFactory : KyberWeave.Contracts.Repositories.IAnalysisPersistenceFactory
+{
+    /// <inheritdoc />
+    public bool IsCacheSafe(string repositoryRoot) => throw Unreached();
+
+    /// <inheritdoc />
+    public KyberWeave.Core.Docs.Analysis.IAnalysisPersistence Open(string repositoryRoot) => throw Unreached();
+
+    private static InvalidOperationException Unreached() => new("The case replaced the cache factory, so it must not be reached.");
+}
+
+/// <summary>An embedding-client factory a case never reaches.</summary>
+internal sealed class UnreachedEmbeddingGeneratorFactory : KyberWeave.Contracts.Repositories.IEmbeddingGeneratorFactory
+{
+    /// <inheritdoc />
+    public KyberWeave.Core.Docs.Analysis.IEmbeddingGenerator Create() =>
+        throw new InvalidOperationException("The case replaced the embedding factory, so it must not be reached.");
+}
