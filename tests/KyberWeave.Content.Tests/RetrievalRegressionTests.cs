@@ -5,7 +5,6 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
-using KyberWeave.Domain.CodeGraph;
 using KyberWeave.Mcp;
 using KyberWeave.Tests.Corpus;
 using KyberWeave.Tests.Fakes;
@@ -197,7 +196,7 @@ public sealed class RetrievalRegressionTests
         KyberWeaveConfig config = services.GetRequiredService<IKyberWeaveConfigRepository>().Load(host.Repo);
         DocumentIndexHost index = new(
             host.Repo,
-            () => new UnavailableCodeGraph(),
+            () => new UnavailableCodeGraphResolver(),
             () => new DocumentLoader(host.Store, host.Repo, host.Paths, host.Environment, config.Ontology).Load(),
             host.Store,
             host.Paths,
@@ -221,24 +220,4 @@ public sealed class RetrievalRegressionTests
 
     private static string Truncate(string value, int maxLength) =>
         value.Length <= maxLength ? value : value[..maxLength] + "…";
-
-    /// <summary>A CodeGraph port that reports no readable index.</summary>
-    private sealed class UnavailableCodeGraph : ICodeGraphResolver
-    {
-        public bool IsAvailable => false;
-
-        public string? UnavailableReason => "No CodeGraph index.";
-
-        public string DatabasePath => ".codegraph/codegraph.db";
-
-        public IReadOnlyList<CodeGraphNode> ResolveSymbol(string name) => [];
-
-        public IReadOnlyList<CodeGraphNode> ResolveRoute(string route) => [];
-
-        public bool HasFilesUnder(string relativePathPrefix) => false;
-
-        public IReadOnlyList<string> CandidateNames(string likePattern) => [];
-
-        public IReadOnlyList<string> AllRoutes() => [];
-    }
 }

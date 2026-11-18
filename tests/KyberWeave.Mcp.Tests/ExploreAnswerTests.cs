@@ -1,27 +1,27 @@
-using KyberWeave.Tests.Configuration;
-
 using System.Globalization;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Text;
 
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Text;
-using KyberWeave.Data.CodeGraph;
 using KyberWeave.Mcp;
+using KyberWeave.Tests;
+using KyberWeave.Tests.Fakes;
+using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using Xunit;
 
-using KyberWeave.Tests.Fakes;
-namespace KyberWeave.Tests;
+namespace KyberWeave.Mcp.Tests;
 
 /// <summary>
 /// <c>docs_answer_question_from_repo_documentation</c> returns the whole winning leaf up to a 24,000-character ceiling,
 /// with <c>tanh</c> topic confidence and optional cursor continuation on the same leaf.
 /// </summary>
-public sealed class ExploreAnswerTests : IDisposable
+public sealed class ExploreAnswerTests
 {
     private const int SectionAnswerCeiling = 24000;
 
@@ -41,12 +41,7 @@ public sealed class ExploreAnswerTests : IDisposable
         @"cursor ""(?<token>[^""]+)""",
         RegexOptions.CultureInvariant);
 
-    private readonly DocFixture _fixture = new();
-
-    public void Dispose()
-    {
-        _fixture.Dispose();
-    }
+    private readonly DocFixture _fixture = DocFixture.CreateInMemory();
 
     [Fact]
     public void AMatchPastCharacter2000IsReturnedAndTheIntroIsNot()
@@ -112,7 +107,7 @@ public sealed class ExploreAnswerTests : IDisposable
         DocsTools tools = BuildTools(
             ("windowconf/fixture", "Window confidence", "6-Docs/windowconf/fixture.md", ["windowconf"],
                 [("Detail", body.ToString().TrimEnd())]));
-        DocumentIndex index = CreateHost(_fixture.Root).Current();
+        DocumentIndex index = CreateHost().Current();
 
         ExploreAnswer answer = index.Explore("windowconf");
 
@@ -356,7 +351,7 @@ public sealed class ExploreAnswerTests : IDisposable
             ("cursor/fixture", "Cursor fixture", "6-Docs/cursor/fixture.md", ["cursorneg"],
                 [("Detail", "cursorneg definitive answer phrase")]));
 
-        DocumentIndex index = CreateHost(_fixture.Root).Current();
+        DocumentIndex index = CreateHost().Current();
         ExploreAnswer answer = index.Explore("cursorneg", "docs/a.md|id#sec|-1");
 
         Assert.True(answer.IsInvalidCursor);
@@ -373,7 +368,7 @@ public sealed class ExploreAnswerTests : IDisposable
                 ("Topic", "dupheading second section ignored")
             ]));
 
-        DocumentIndex index = CreateHost(_fixture.Root).Current();
+        DocumentIndex index = CreateHost().Current();
         Exception? failure = Record.Exception(() => index.Explore("dupheading"));
         Assert.Null(failure);
     }
@@ -394,7 +389,7 @@ public sealed class ExploreAnswerTests : IDisposable
             ("slack/para", "Slack para", "6-Docs/slack/para.md", ["slackpara"],
                 [("Detail", body)]));
 
-        DocumentIndex index = CreateHost(_fixture.Root).Current();
+        DocumentIndex index = CreateHost().Current();
         ExploreAnswer first = index.Explore("slackpara");
         Assert.NotNull(first.CursorToken);
 
@@ -459,7 +454,7 @@ public sealed class ExploreAnswerTests : IDisposable
             "6-Docs/indexing/two-clocks.md",
             "The corpus is rebuilt when documentation changes, and the joins when the graph does.");
 
-        return DocsToolsComposition.Create(CreateHost(_fixture.Root), McpTestServices.AnalysisReader(_fixture.Root));
+        return DocsToolsComposition.Create(CreateHost(), AnalysisReader());
     }
 
     private void WriteUnrelatedDocument(string id, string title, string relativePath, string prose)
@@ -502,8 +497,8 @@ public sealed class ExploreAnswerTests : IDisposable
             WriteDocument(id, title, path, keywords, sections);
         }
 
-        DocumentIndexHost host = CreateHost(_fixture.Root);
-        return (DocsToolsComposition.Create(host, McpTestServices.AnalysisReader(_fixture.Root)), host);
+        DocumentIndexHost host = CreateHost();
+        return (DocsToolsComposition.Create(host, AnalysisReader()), host);
     }
 
     private void WriteDocument(
@@ -707,16 +702,22 @@ public sealed class ExploreAnswerTests : IDisposable
         return builder.ToString(0, length);
     }
 
-    private static DocumentIndexHost CreateHost(string root)
+    private RepositoryDocsAnalysisReader AnalysisReader() =>
+        DocsToolsComposition.AnalysisReader(DocsMemoryServicesD.Services(_fixture), _fixture.Root);
+
+    private DocumentIndexHost CreateHost()
     {
-        KyberWeaveConfig config = ConfigFileReader.Load(root);
+        string root = _fixture.Root;
+        KyberWeaveConfig config = DocsMemoryServicesD.Services(_fixture)
+            .GetRequiredService<IKyberWeaveConfigRepository>()
+            .Load(root);
         return new DocumentIndexHost(
             root,
-            () => DocsPorts.CodeGraph(root),
-            () => RealDocumentLoader.Create(root, config.Ontology).Load(),
-            DocsPorts.Files,
-            DocsPorts.Paths,
-            DocsPorts.Environment,
+            () => new UnavailableCodeGraphResolver(),
+            () => _fixture.Loader(config.Ontology).Load(),
+            _fixture.Store,
+            _fixture.Paths,
+            _fixture.Environment,
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
     }

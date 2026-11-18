@@ -5,7 +5,6 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Search;
-using KyberWeave.Domain.CodeGraph;
 using KyberWeave.Mcp;
 using KyberWeave.Tests;
 using Microsoft.Extensions.DependencyInjection;
@@ -134,7 +133,7 @@ public sealed class McpToolFailureTests
         KyberWeaveConfig config = services.GetRequiredService<IKyberWeaveConfigRepository>().Load(root);
         DocumentIndexHost host = new(
             root,
-            () => new UnreadableCodeGraph(),
+            () => new UnavailableCodeGraphResolver(),
             () => new DocumentLoader(_host.Store, root, _host.Paths, _host.Environment, config.Ontology).Load(),
             _host.Store,
             _host.Paths,
@@ -157,25 +156,5 @@ public sealed class McpToolFailureTests
             null);
 
         return DocsToolsComposition.Create(host, null, freshness);
-    }
-
-    /// <summary>A CodeGraph port that reports no readable index, as a missing or unreadable database does.</summary>
-    private sealed class UnreadableCodeGraph : ICodeGraphResolver
-    {
-        public bool IsAvailable => false;
-
-        public string? UnavailableReason => "No CodeGraph index at .codegraph/codegraph.db.";
-
-        public string DatabasePath => ".codegraph/codegraph.db";
-
-        public IReadOnlyList<CodeGraphNode> ResolveSymbol(string name) => [];
-
-        public IReadOnlyList<CodeGraphNode> ResolveRoute(string route) => [];
-
-        public bool HasFilesUnder(string relativePathPrefix) => false;
-
-        public IReadOnlyList<string> CandidateNames(string likePattern) => [];
-
-        public IReadOnlyList<string> AllRoutes() => [];
     }
 }
