@@ -7,11 +7,12 @@
 
   <ItemGroup>
     <!--
-      The standards templates KyberStandardsTemplates reads. A reader resolves its resources
-      through typeof(Anchor).Assembly, so the templates travel with the type that reads them.
+      The standards templates the readers embedded in this assembly load. ArbiterConfigLoader
+      resolves its role rules through typeof(ArbiterConfigLoader).Assembly, so they stay here
+      until task 2.5.4 moves that loader. KyberStandardsTemplates moved to KyberWeave.Application
+      in task 2.5.19 and reads the copy embedded there.
 
-      The logical names are the ones KyberStandardsTemplates asks for. Core.Docs no longer
-      embeds them: the readers that needed them moved here.
+      The logical names are the ones both readers ask for.
     -->
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\azure\azure.standards.md" LogicalName="Standards.azure.standards.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\azure\azure.rules.md" LogicalName="Standards.azure.rules.md" />

@@ -173,13 +173,13 @@ public sealed partial class DocumentationAnalyzer(
     {
         if (embeddingResolver is null)
         {
-            return EmbeddingResolutionResult.Unavailable(
+            return EmbeddingResolutionResults.Unavailable(
                 config.Mode,
                 "No embedding provider is configured in this host.");
         }
         if (persistence is null)
         {
-            return EmbeddingResolutionResult.Unavailable(
+            return EmbeddingResolutionResults.Unavailable(
                 config.Mode,
                 "No safe analysis persistence provider is configured in this host.");
         }

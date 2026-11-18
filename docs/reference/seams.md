@@ -200,9 +200,12 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `McpWiringInspector` (`Docs/Mcp/McpWiringInspector.cs`) | paths | 4.2 |
 | `McpWiringRepairer` (`Docs/Mcp/McpWiringRepairer.cs`) | paths, clock | 4.2 |
 | `RepositoryDocsAnalysisReader` (`Docs/Mcp/RepositoryDocsAnalysisReader.cs`) | paths | 4.2 |
+| `McpRepositoryPath` (`Docs/Mcp/McpRepositoryPath.cs`) | paths | 4.2 |
+| `McpWiringReceipt` (`Docs/Mcp/McpWiringReceipt.cs`) | file system | 4.2 |
 | `DocsScaffolder` (`Docs/Scaffolding/DocsScaffolder.cs`) | file system, paths | 4.2 |
 | `StandardsFolderMigration` (`Docs/Scaffolding/StandardsFolderMigration.cs`) | file system, paths, identifiers | 4.2 |
 | `StandardsTemplateDiff` (`Docs/Scaffolding/StandardsTemplateDiff.cs`) | file system, paths | 4.2 |
+| `KyberStandardsTemplates` (`Docs/Scaffolding/KyberStandardsTemplates.cs`) | file system | 4.2 |
 | `DocumentIndexHost` (`Docs/Search/DocumentIndexHost.cs`) | file system, paths | 4.2 |
 | `ArchiveCloseoutValidator` (`Docs/Validation/ArchiveCloseoutValidator.cs`) | paths | 4.2 |
 | `ConfigRegValidator` (`Docs/Validation/ConfigRegValidator.cs`) | paths | 4.2 |
@@ -378,9 +381,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `DocsAnalysisConfigLoader` (`Configuration/DocsAnalysisConfigLoader.cs`) | network | 2.5 |
 | `ReviewConfigParser` (`Configuration/ReviewConfigParser.cs`) | paths | 2.5 |
 | `CopilotPromptFile` (`CopilotPrompt/CopilotPromptFile.cs`) | file system, paths | 2.5 |
-| `McpRepositoryPath` (`Docs/Mcp/McpRepositoryPath.cs`) | paths | 2.5 |
-| `McpWiringReceipt` (`Docs/Mcp/McpWiringReceipt.cs`) | file system | 2.5 |
-| `KyberStandardsTemplates` (`Docs/Scaffolding/KyberStandardsTemplates.cs`) | file system | 2.5 |
 | `DocSpecValidator` (`Docs/Validation/DocSpecValidator.cs`) | file system, paths | 2.5 |
 | `GateCatalogueRenderer` (`Review/Catalogue/GateCatalogueRenderer.cs`) | file system | 2.5 |
 | `ProjectRootDetection` (`Review/Catalogue/ProjectRootDetection.cs`) | file system | 2.5 |
