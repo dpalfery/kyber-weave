@@ -8,6 +8,7 @@ using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
 using Xunit;
 
+using KyberWeave.Tests;
 using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Integration.Tests;
 
@@ -126,7 +127,7 @@ public sealed class ArchiveCloseoutScopeTests
 
     private static IReadOnlyList<ChangedPath> ChangedSince(CloseoutGitRepo repo, string baseRef)
     {
-        return ChangedFiles.ResolveSinceMergeBase(repo.Root, baseRef);
+        return ReviewTestServices.Git.ResolveSinceMergeBase(repo.Root, baseRef);
     }
 
     private static DiagnosticReport ValidateGate(CloseoutGitRepo repo, IReadOnlyList<ChangedPath> changes)

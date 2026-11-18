@@ -1,3 +1,4 @@
+using KyberWeave.Application.Review;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
@@ -274,7 +275,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     {
         FakeProvider provider = new(_ => ("belongs", 0.95));
 
-        (List<ReviewFinding> findings, var matched) = await ReviewVerdictDecisions.MatchOverridesAsync(
+        (List<ReviewFinding> findings, var matched) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(
             Model(provider), SeverityOverrides.Parse(Table), [Finding("model-placement/wrong-folder", ReviewSeverity.Minor)]);
 
         ReviewFinding graded = Assert.Single(findings);
@@ -287,7 +288,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     [Fact]
     public async Task AnUnsureAnswerChangesNothing()
     {
-        (List<ReviewFinding> findings, var matched) = await ReviewVerdictDecisions.MatchOverridesAsync(
+        (List<ReviewFinding> findings, var matched) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(
             Model(new FakeProvider(_ => ("belongs", 0.6))), SeverityOverrides.Parse(Table), [Finding("model-placement/x", ReviewSeverity.Minor)]);
 
         Assert.Equal(ReviewSeverity.Minor, Assert.Single(findings).Severity);
@@ -298,12 +299,12 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     public async Task OverrideQuestionsAreCappedAndTheSkippedComparisonsAreReported()
     {
         FakeProvider provider = new(_ => ("no", 0.99));
-        ReviewDecisionModel model = Model(provider);
+        ReviewDecisionSession model = Model(provider);
         ReviewFinding[] many = [.. Enumerable.Range(1, 160).Select(index => Finding($"model-placement/x{index}", ReviewSeverity.Minor))];
 
-        await ReviewVerdictDecisions.MatchOverridesAsync(model, SeverityOverrides.Parse(Table), many);
+        await ReviewTestServices.DecisionSteps.MatchOverridesAsync(model, SeverityOverrides.Parse(Table), many);
 
-        Assert.Equal(ReviewVerdictDecisions.MaxQuestionsPerStep, provider.Calls);
+        Assert.Equal(ReviewVerdictRules.MaxQuestionsPerStep, provider.Calls);
         Assert.Contains("20 comparison(s) skipped", model.SummaryLine([]), StringComparison.Ordinal);
     }
 
@@ -319,9 +320,9 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
             .. Enumerable.Range(0, 10).Select(index => Finding($"model-placement/c{index}", ReviewSeverity.Critical)),
         ];
 
-        (List<ReviewFinding> graded, _) = await ReviewVerdictDecisions.MatchOverridesAsync(Model(provider), SeverityOverrides.Parse(Table), findings);
+        (List<ReviewFinding> graded, _) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(Model(provider), SeverityOverrides.Parse(Table), findings);
 
-        Assert.Equal(ReviewVerdictDecisions.MaxQuestionsPerStep, provider.Calls);
+        Assert.Equal(ReviewVerdictRules.MaxQuestionsPerStep, provider.Calls);
         Assert.All(graded.Skip(150), finding => Assert.Equal(SeverityOverrides.ModelSource, finding.OverrideSource));
         Assert.Equal(SeverityOverrides.ModelSource, graded[0].OverrideSource);
         Assert.Equal(SeverityOverrides.ModelSource, graded[139].OverrideSource);
@@ -333,12 +334,12 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     public async Task OnlyTheStepsFindingLimitIsLookedAtAndTheRestAreReportedAsLeftOut()
     {
         FakeProvider provider = new(_ => ("no", 0.99));
-        ReviewDecisionModel model = Model(provider);
-        ReviewFinding[] many = [.. Enumerable.Range(0, ReviewVerdictDecisions.MaxFindingsPerStep + 100).Select(index => Finding($"model-placement/x{index}", ReviewSeverity.Minor))];
+        ReviewDecisionSession model = Model(provider);
+        ReviewFinding[] many = [.. Enumerable.Range(0, ReviewVerdictRules.MaxFindingsPerStep + 100).Select(index => Finding($"model-placement/x{index}", ReviewSeverity.Minor))];
 
-        await ReviewVerdictDecisions.MatchOverridesAsync(model, SeverityOverrides.Parse(Table), many);
+        await ReviewTestServices.DecisionSteps.MatchOverridesAsync(model, SeverityOverrides.Parse(Table), many);
 
-        Assert.Equal(ReviewVerdictDecisions.MaxQuestionsPerStep, provider.Calls);
+        Assert.Equal(ReviewVerdictRules.MaxQuestionsPerStep, provider.Calls);
         Assert.Contains("100 finding(s) left out of the comparison", model.SummaryLine([]), StringComparison.Ordinal);
     }
 
@@ -346,10 +347,10 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     public async Task AFaultChangesNothingAndStopsFurtherCalls()
     {
         FakeProvider provider = new(_ => ("belongs", 1.0)) { Fault = true };
-        ReviewDecisionModel model = Model(provider);
+        ReviewDecisionSession model = Model(provider);
         ReviewFinding[] many = [.. Enumerable.Range(1, 6).Select(index => Finding($"model-placement/x{index}", ReviewSeverity.Minor))];
 
-        (List<ReviewFinding> findings, var matched) = await ReviewVerdictDecisions.MatchOverridesAsync(model, SeverityOverrides.Parse(Table), many);
+        (List<ReviewFinding> findings, var matched) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(model, SeverityOverrides.Parse(Table), many);
 
         Assert.All(findings, finding => Assert.Equal(ReviewSeverity.Minor, finding.Severity));
         Assert.Empty(matched);
@@ -360,9 +361,9 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     [Fact]
     public async Task ProviderNoneAsksNothing()
     {
-        ReviewDecisionModel model = new(new NoneProvider(), ArbiterConfig.ProductDefaults.Rules, LogDirectory, TimeProvider.System);
+        ReviewDecisionSession model = ReviewTestServices.DecisionModel(new NoneProvider(), ArbiterConfig.ProductDefaults.Rules, LogDirectory, TimeProvider.System);
 
-        (List<ReviewFinding> findings, var matched) = await ReviewVerdictDecisions.MatchOverridesAsync(
+        (List<ReviewFinding> findings, var matched) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(
             model, SeverityOverrides.Parse(Table), [Finding("model-placement/x", ReviewSeverity.Minor)]);
 
         Assert.Equal(ReviewSeverity.Minor, Assert.Single(findings).Severity);
@@ -375,9 +376,9 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
         SeverityOverrides overrides = SeverityOverrides.Parse(Table);
         ReviewFinding finding = Finding("model-placement/x", ReviewSeverity.Minor);
 
-        (List<ReviewFinding> confident, _) = await ReviewVerdictDecisions.MatchOverridesAsync(
+        (List<ReviewFinding> confident, _) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(
             Model(new FakeProvider(state => ("belongs", state.Contains("XML doc", StringComparison.Ordinal) ? 0.99 : 0.9))), overrides, [finding]);
-        (List<ReviewFinding> tied, _) = await ReviewVerdictDecisions.MatchOverridesAsync(
+        (List<ReviewFinding> tied, _) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(
             Model(new FakeProvider(_ => ("belongs", 0.9))), overrides, [finding]);
 
         Assert.Equal("SO-2", Assert.Single(confident).Override);
@@ -390,12 +391,12 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
         FakeProvider provider = new(_ => ("belongs", 0.99));
         ReviewFinding cited = Finding("model-placement/x", ReviewSeverity.Major) with { Override = "SO-1" };
 
-        await ReviewVerdictDecisions.MatchOverridesAsync(Model(provider), SeverityOverrides.Parse(Table), [cited]);
+        await ReviewTestServices.DecisionSteps.MatchOverridesAsync(Model(provider), SeverityOverrides.Parse(Table), [cited]);
         Assert.Equal(0, provider.Calls);
 
         ReviewFinding overridden = Finding("a/minor", ReviewSeverity.Minor) with { Override = "SO-9", OverrideSource = SeverityOverrides.SeatSource };
         FakeProvider nitpicker = new(_ => ("nitpick", 0.99));
-        (List<ReviewFinding> kept, var nitpicks) = await ReviewVerdictDecisions.DropNitpicksAsync(Model(nitpicker), [overridden]);
+        (List<ReviewFinding> kept, var nitpicks) = await ReviewTestServices.DecisionSteps.DropNitpicksAsync(Model(nitpicker), [overridden]);
         Assert.Single(kept);
         Assert.Empty(nitpicks);
         Assert.Equal(0, nitpicker.Calls);
@@ -405,8 +406,8 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
 
     private string LogDirectory => Path.Combine(_temp.Path, "artifacts", "arbiter");
 
-    private ReviewDecisionModel Model(IArbiterProvider provider) =>
-        new(provider, ArbiterConfig.ProductDefaults.Rules, LogDirectory, TimeProvider.System);
+    private ReviewDecisionSession Model(IArbiterProvider provider) =>
+        ReviewTestServices.DecisionModel(provider, ArbiterConfig.ProductDefaults.Rules, LogDirectory, TimeProvider.System);
 
     private static string Section(params string[] rows) =>
         "## Severity overrides\n\n| Id | Finding class | Severity | Applies to | Why |\n|---|---|---|---|---|\n" + string.Join('\n', rows) + "\n";

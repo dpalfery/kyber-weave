@@ -3,7 +3,10 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Tests.Fakes;
 using Xunit;
+using YamlDotNet.Core;
 
 namespace KyberWeave.Tests;
 
@@ -125,8 +128,35 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     public void ProviderNone_BuildsNoPicker_AndMakesNoCall()
     {
         using TempDirectory home = new();
+        FakeArbiterUserSettings settings = new();
+        ConfiguredArbiterProviderFactory providers = new(settings);
 
-        Assert.Null(ConfiguredProvider.TryCreate(KyberWeaveConfig.ProductDefaults, home.Path));
+        Assert.Null(providers.TryCreate(KyberWeaveConfig.ProductDefaults.Arbiter.Provider, home.Path));
+        Assert.Equal([home.Path], settings.Asked);
+    }
+
+    [Fact]
+    public void AMalformedUserOverride_FallsBackToTheRepositoryProvider()
+    {
+        // A broken override file must not break task-file generation: the repository's own provider stands, and
+        // provider none then builds no picker rather than letting the parse failure escape.
+        using TempDirectory home = new();
+        ConfiguredArbiterProviderFactory providers = new(new FakeArbiterUserSettings
+        {
+            Override = (_, _) => throw new YamlException("The user override could not be read."),
+        });
+
+        Assert.Null(providers.TryCreate(KyberWeaveConfig.ProductDefaults.Arbiter.Provider, home.Path));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void AnEmptyHomeDirectory_IsTreatedAsNoOverride(string home)
+    {
+        ConfiguredArbiterProviderFactory providers = new(new FakeArbiterUserSettings());
+
+        Assert.Null(providers.TryCreate(KyberWeaveConfig.ProductDefaults.Arbiter.Provider, home));
     }
 
     private PlanTaskFile Write(IPlanTaskAgentPicker? picker)

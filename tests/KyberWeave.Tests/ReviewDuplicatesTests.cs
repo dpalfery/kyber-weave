@@ -369,7 +369,7 @@ public class ReviewDuplicatesTests : IDisposable
         // Normalize drops the signature, so a one-line body is a single statement and would
         // match everywhere. A host that asks for one is told, not given a different number.
         YamlException ex = Assert.ThrowsAny<YamlException>(() =>
-            ReviewConfigLoader.Merge(
+            ReviewConfigParser.Merge(
                 ReviewConfig.ProductDefaults,
                 new ReviewYamlSection { Duplicates = new ReviewDuplicatesYaml { MinimumLines = 1 } }));
 
@@ -379,8 +379,8 @@ public class ReviewDuplicatesTests : IDisposable
     [Fact]
     public void AnAbsentDuplicatesThresholdKeepsTheProductDefault()
     {
-        ReviewConfig omitted = ReviewConfigLoader.Merge(ReviewConfig.ProductDefaults, new ReviewYamlSection());
-        ReviewConfig declaredWithoutValue = ReviewConfigLoader.Merge(
+        ReviewConfig omitted = ReviewConfigParser.Merge(ReviewConfig.ProductDefaults, new ReviewYamlSection());
+        ReviewConfig declaredWithoutValue = ReviewConfigParser.Merge(
             ReviewConfig.ProductDefaults,
             new ReviewYamlSection { Duplicates = new ReviewDuplicatesYaml() });
 
@@ -391,7 +391,7 @@ public class ReviewDuplicatesTests : IDisposable
     [Fact]
     public void AHostThresholdIsHonouredWhenItIsInRange()
     {
-        ReviewConfig config = ReviewConfigLoader.Merge(
+        ReviewConfig config = ReviewConfigParser.Merge(
             ReviewConfig.ProductDefaults,
             new ReviewYamlSection { Duplicates = new ReviewDuplicatesYaml { MinimumLines = 9 } });
 

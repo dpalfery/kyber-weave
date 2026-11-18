@@ -11,7 +11,7 @@ code-refs:
   - OntologyConfig
   - SquadConfig
   - ArbiterConfigLoader
-  - ReviewConfigLoader
+  - ReviewConfigParser
   - ConfigRegConfig
   - ReviewConfig
   - TaskGateResolver

@@ -17,9 +17,9 @@ code-refs:
   - CouncilSeating
   - ReviewSeatsCommand
   - WorkerGuard
-  - ReviewDecisionModel
-  - ReviewVerdictDecisions
-  - ReviewLensApplicability
+  - ReviewDecisionSession
+  - ReviewDecisionSteps
+  - ReviewLensRules
   - NotSeatedRecord
   - ReviewVerdictCommand
   - ReviewPolicy

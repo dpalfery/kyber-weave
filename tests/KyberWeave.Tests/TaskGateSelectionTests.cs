@@ -1,5 +1,9 @@
+using KyberWeave.Application.Review;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -13,6 +17,11 @@ namespace KyberWeave.Tests;
 public sealed class TaskGateSelectionTests
 {
     private static readonly string[] Changed = ["src/KyberWeave.Core/Review/PathGlob.cs"];
+
+    private static ITaskGateSelectionService GateSelection(ITestClassSources? sources = null) =>
+        new TaskGateSelectionService(
+            new FakeRepositoryTreeProbe(),
+            sources ?? new FakeTestClassSources());
 
     [Theory]
     [InlineData("macos")]
@@ -212,15 +221,34 @@ public sealed class TaskGateSelectionTests
     [Fact]
     public void TestClassMappingInvalidRootReturnsEmptyWithoutThrowing()
     {
-        IReadOnlyList<string> resolved = TestClassMapping.Resolve("non_existent_directory_xyz", Changed);
+        IReadOnlyList<string> resolved = GateSelection(new FakeTestClassSources { Missing = true })
+            .ResolveTestClasses("non_existent_directory_xyz", Changed);
         Assert.Empty(resolved);
     }
 
-    [Fact]
-    public void TestClassMappingMatchesDirectoryIgnoringCase()
+    /// <summary>
+    /// The changed path's <c>tests</c> directory is matched whatever its case, and the class's namespace comes from
+    /// the file's own directory when no declaration can be read. Both facts are needed: a miss, or a name with no
+    /// namespace, makes <c>dotnet test --filter</c> select nothing and exit zero, which reads afterwards as a suite
+    /// that ran and passed.
+    /// </summary>
+    [Theory]
+    [InlineData("Tests/KyberWeave.Tests/Coverage.cs")]
+    [InlineData("tests/KyberWeave.Tests/Coverage.cs")]
+    public void TestClassMappingMatchesTheTestsDirectoryWhateverItsCaseAndDerivesTheNamespaceFromThePath(string changed)
     {
-        IReadOnlyList<string> resolved = TestClassMapping.Resolve(null, ["Tests/KyberWeave.Tests/TaskGateSelectionTests.cs"]);
-        Assert.Contains(typeof(TaskGateSelectionTests).FullName!, resolved);
+        // The tree holds the file under the real lowercase tests directory and declares no namespace, so the
+        // adjudication of the name has to come from the path. The file is named Coverage.cs, not CoverageTests.cs,
+        // so the class it resolves is Coverage only while the tests directory is read case-insensitively.
+        const string File = "/repo/tests/KyberWeave.Tests/Coverage.cs";
+        FakeTestClassSources sources = new()
+        {
+            SourcesByName = new Dictionary<string, string>(StringComparer.Ordinal) { ["Coverage"] = File },
+        };
+
+        IReadOnlyList<string> resolved = GateSelection(sources).ResolveTestClasses("/repo", [changed]);
+
+        Assert.Equal("KyberWeave.Tests.Coverage", Assert.Single(resolved));
     }
 
     [Fact]
@@ -247,6 +275,52 @@ public sealed class TaskGateSelectionTests
         SkippedTaskGate skip = Assert.Single(plan.Skipped);
         Assert.Equal("props-tests", skip.Id);
         Assert.Contains("no test class covers", skip.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AValidatedPathIsRefusedOnlyUnderTheRootItsLinkEscapes()
+    {
+        // The same repository-relative path escapes one root and not another. A probe that answers by path alone
+        // would refuse it under both, hiding a root-confusion regression that lets an escaping path reach argv.
+        FakeRepositoryTreeProbe probe = new() { EscapingPaths = [("/repo/a", "link/outside.cs")] };
+        ITaskGateSelectionService selection = new TaskGateSelectionService(probe, new FakeTestClassSources());
+
+        Assert.NotNull(selection.ValidatePath("/repo/a", "link/outside.cs"));
+        Assert.Null(selection.ValidatePath("/repo/b", "link/outside.cs"));
+    }
+
+    [Fact]
+    public void TheServiceRefusesThePlanWhenTheRootIsNotAccessible()
+    {
+        FakeRepositoryTreeProbe probe = new()
+        {
+            Roots = new Dictionary<string, RepositoryRootAccess>(StringComparer.Ordinal)
+            {
+                ["/repo"] = new RepositoryRootAccess(true, "permission denied"),
+            },
+        };
+        ITaskGateSelectionService selection = new TaskGateSelectionService(probe, new FakeTestClassSources());
+
+        TaskGatePlan plan = selection.Plan([FormatGate()], Changed, null, "unix", "/repo");
+
+        Assert.Contains("/repo", Assert.Single(plan.Refusals), StringComparison.Ordinal);
+        Assert.Empty(plan.Gates);
+    }
+
+    [Fact]
+    public void AnInaccessibleRootIsRefusedRatherThanCrashingOrSkippingTheGate()
+    {
+        // The physical source throws when a root exists but cannot be listed. The planning step turns that into a
+        // named refusal; letting it escape crashes the run, and swallowing it into no classes skips the tests gate.
+        const string Message = "The repository root '/repo' is not accessible: permission denied";
+        FakeRepositoryTreeProbe probe = new() { Roots = { ["/repo"] = RepositoryRootAccess.Accessible } };
+        FakeTestClassSources sources = new() { OpenFault = Message };
+        ITaskGateSelectionService selection = new TaskGateSelectionService(probe, sources);
+
+        TaskGatePlan plan = selection.Plan([TestsGate()], Changed, null, "unix", "/repo");
+
+        Assert.Equal(Message, Assert.Single(plan.Refusals));
+        Assert.Empty(plan.Gates);
     }
 
     private static ReviewTaskGate TestsGate()

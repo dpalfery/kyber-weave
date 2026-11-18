@@ -22,7 +22,7 @@ code-refs:
   - GateRunService
   - PathGlob
   - ReviewConfig
-  - ReviewConfigLoader
+  - ReviewConfigParser
   - ReviewTaskGate
   - TaskGateSelection
   - GateCatalogue
