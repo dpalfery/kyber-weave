@@ -23,7 +23,6 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ClaudeHandbackTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     private sealed class ScriptedEngine : IHookDecisionEngine
     {
@@ -54,7 +53,7 @@ public sealed class ClaudeHandbackTests
         new() { Arbiter = new ArbiterConfig { Enabled = true } };
 
     private static string Fixture(string name) =>
-        Corpus.ReadText($"tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/{name}");
+        EmbeddedFixtureText.Read(typeof(ClaudeHandbackTests).Assembly, $"arbiter-hooks/claude/{name}");
 
     private static (int Exit, string Stdout) Run(
         string stdin, string? caller, ScriptedEngine engine)

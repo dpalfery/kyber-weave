@@ -27,6 +27,7 @@
   <ItemGroup>
     <!-- The staleness stamp the document index host rebuilds on is asserted directly by its tests. -->
     <InternalsVisibleTo Include="KyberWeave.Application.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Content.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Integration.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Testing" />

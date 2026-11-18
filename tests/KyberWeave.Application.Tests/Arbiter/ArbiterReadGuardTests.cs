@@ -18,7 +18,6 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ArbiterReadGuardTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     private static readonly IReadOnlyList<string> ProtectedDirs = ["docs/plans", "docs/specs", "docs/todo"];
 
@@ -285,8 +284,7 @@ public sealed class ArbiterReadGuardTests
     [Fact]
     public void Guard_AppliesOnlyToSpecialistCallers_EndToEnd()
     {
-        string stdin = Corpus.ReadText(
-                "tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/pre-read-denied.json")
+        string stdin = EmbeddedFixtureText.Read(typeof(ArbiterReadGuardTests).Assembly, "arbiter-hooks/claude/pre-read-denied.json")
             .Replace("\"agent_type\": \"dev-medium\",", string.Empty, StringComparison.Ordinal);
         int loads = 0;
         KyberWeaveConfig config = new() { Arbiter = new ArbiterConfig { Enabled = true } };

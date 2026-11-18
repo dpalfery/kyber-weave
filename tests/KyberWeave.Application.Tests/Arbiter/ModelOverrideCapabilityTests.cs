@@ -22,7 +22,6 @@ namespace KyberWeave.Tests.Arbiter;
 /// </remarks>
 public sealed class ModelOverrideCapabilityTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     private const string SubAgentsDocs = "https://code.claude.com/docs/en/sub-agents";
 
@@ -180,7 +179,7 @@ public sealed class ModelOverrideCapabilityTests
         int exit = command.Run(
             "claude",
             "conductor",
-            Corpus.ReadText("tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/pre-agent-dispatch.json"),
+            EmbeddedFixtureText.Read(typeof(ModelOverrideCapabilityTests).Assembly, "arbiter-hooks/claude/pre-agent-dispatch.json"),
             stdout,
             log);
 

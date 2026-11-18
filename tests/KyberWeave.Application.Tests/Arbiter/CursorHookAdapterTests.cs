@@ -24,7 +24,6 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class CursorHookAdapterTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     private sealed class ScriptedEngine : IHookDecisionEngine
     {
@@ -124,7 +123,7 @@ public sealed class CursorHookAdapterTests
         new() { Arbiter = new ArbiterConfig { Enabled = true } };
 
     private static string Fixture(string name) =>
-        Corpus.ReadText($"tests/KyberWeave.Tests/Fixtures/arbiter-hooks/cursor/{name}");
+        EmbeddedFixtureText.Read(typeof(CursorHookAdapterTests).Assembly, $"arbiter-hooks/cursor/{name}");
 
     private static (int Exit, string Stdout, string Log) Run(
         string stdin,
