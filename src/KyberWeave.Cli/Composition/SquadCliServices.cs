@@ -8,6 +8,7 @@ using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Spectre.Console;
 
 namespace KyberWeave.Cli.Composition;
 
@@ -19,6 +20,7 @@ internal static class SquadCliServices
     /// <returns>The same collection, for chaining.</returns>
     internal static IServiceCollection AddSquadCliServices(this IServiceCollection services)
     {
+        services.TryAddSingleton<IAnsiConsole>(_ => AnsiConsole.Console);
         services.TryAddSingleton<ISquadRenderer>(sp => new SquadRendererRegistry(
             SquadRendererSet.Create(),
             sp.GetRequiredService<ISquadRenderInputReader>()));

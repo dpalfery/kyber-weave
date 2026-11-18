@@ -15,6 +15,7 @@ using KyberWeave.Data.Host;
 using KyberWeave.Data.Paths;
 using KyberWeave.Data.Review;
 using KyberWeave.Testing.Squad;
+using Spectre.Console;
 using KyberWeave.Tests.Configuration;
 
 namespace KyberWeave.Tests.Fakes;
@@ -118,7 +119,8 @@ internal static class SquadTestCommands
             new FakeProcessEnvironment(currentDirectory: workingDirectory ?? "/kw/work"),
             new PhysicalPathResolver(new PhysicalFileSystem()),
             new FileSquadSourceLocator(),
-            new FileSquadPackager(RealSquadPacker.Create())));
+            new FileSquadPackager(RealSquadPacker.Create())),
+            CapturedConsole());
 
     public static SquadRunCommand Run(
         ISquadUserPaths? userPaths = null,
@@ -244,6 +246,16 @@ internal static class SquadTestCommands
             store,
             new SquadModelPresetStore(paths),
             RealSquadSelectionStore.Create(paths));
+    }
+
+    /// <summary>
+    /// The console a command writes to in a test: the process's router, installed before the command is built, so
+    /// output goes to whichever test is capturing when the command writes.
+    /// </summary>
+    private static IAnsiConsole CapturedConsole()
+    {
+        ProcessConsoleCapture.EnsureInstalled();
+        return AnsiConsole.Console;
     }
 
     private static ISquadCanonicalProfileResolver Profiles(
