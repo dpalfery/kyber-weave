@@ -23,6 +23,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
     private readonly ISquadGlobalRootResolver _globalRoots;
     private readonly SquadConsoleOptions _console;
     private readonly KyberDashCapturePluginStep? _capturePluginStep;
+    private readonly IKyberWeaveConfigRepository _configs;
 
     /// <summary>Creates the install command over the Squad services the host registers.</summary>
     /// <param name="lifecycle">Installs the deployment.</param>
@@ -32,6 +33,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
     /// <param name="globalRoots">Names the roots a global install writes beneath.</param>
     /// <param name="console">How the command prompts; the defaults read the console.</param>
     /// <param name="capturePluginStep">Installs the capture plugin after a global deployment, or null for none.</param>
+    /// <param name="configs">Reads the project's host config for the task-gate hint.</param>
     public SquadInstallCommand(
         ISquadLifecycleService lifecycle,
         ISquadStateStore stateStore,
@@ -39,6 +41,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         ISquadTargetResolver targets,
         ISquadGlobalRootResolver globalRoots,
         SquadConsoleOptions console,
+        IKyberWeaveConfigRepository configs,
         KyberDashCapturePluginStep? capturePluginStep = null)
     {
         ArgumentNullException.ThrowIfNull(lifecycle);
@@ -47,12 +50,14 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         ArgumentNullException.ThrowIfNull(targets);
         ArgumentNullException.ThrowIfNull(globalRoots);
         ArgumentNullException.ThrowIfNull(console);
+        ArgumentNullException.ThrowIfNull(configs);
         _lifecycle = lifecycle;
         _stateStore = stateStore;
         _migration = migration;
         _targets = targets;
         _globalRoots = globalRoots;
         _console = console;
+        _configs = configs;
         _capturePluginStep = capturePluginStep;
     }
 
@@ -243,7 +248,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
                 // configuration itself, and the hint never changes this exit code.
                 if (scope == SquadDeploymentScope.Project)
                 {
-                    SquadTaskGateHint.WriteIfNoTaskGates(targetRoot);
+                    SquadTaskGateHint.WriteIfNoTaskGates(targetRoot, _configs);
                 }
 
                 // The capture plugin is global, so only a global deployment reaches it. It runs after the

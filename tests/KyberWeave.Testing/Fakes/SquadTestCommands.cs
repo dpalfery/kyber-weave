@@ -28,7 +28,8 @@ internal static class SquadTestCommands
         Func<string, bool>? readAnswer = null,
         ISquadGlobalRootResolver? globalRoots = null,
         KyberDashCapturePluginStep? capturePluginStep = null,
-        Func<string, string?>? environmentReader = null)
+        Func<string, string?>? environmentReader = null,
+        IKyberWeaveConfigRepository? configs = null)
     {
         SquadStateStore store = stateStore ?? SquadHostDefaults.ResolveStateStore(userPaths, environmentReader);
         ISquadGlobalRootResolver roots = globalRoots ?? SquadHostDefaults.ResolveGlobalRoots(environmentReader);
@@ -39,6 +40,7 @@ internal static class SquadTestCommands
             new FileSquadTargetResolver(),
             roots,
             new SquadConsoleOptions(isInteractive, readAnswer),
+            configs ?? new FakeKyberWeaveConfigRepository(),
             capturePluginStep);
     }
 
@@ -53,7 +55,8 @@ internal static class SquadTestCommands
         ISquadProjectPicker? picker = null,
         ISquadInstanceService? instanceService = null,
         KyberDashCapturePluginStep? capturePluginStep = null,
-        Func<string, string?>? environmentReader = null)
+        Func<string, string?>? environmentReader = null,
+        IKyberWeaveConfigRepository? configs = null)
     {
         SquadStateStore store = stateStore ?? SquadHostDefaults.ResolveStateStore(userPaths, environmentReader);
         ISquadGlobalRootResolver roots = globalRoots ?? SquadHostDefaults.ResolveGlobalRoots(environmentReader);
@@ -66,6 +69,7 @@ internal static class SquadTestCommands
             roots,
             new PhysicalSquadFileAccess(),
             new SquadConsoleOptions(isInteractive, readAnswer),
+            configs ?? new FakeKyberWeaveConfigRepository(),
             picker,
             capturePluginStep);
     }

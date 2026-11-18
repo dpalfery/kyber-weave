@@ -6,7 +6,9 @@ using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Arbiter.Mcp;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Data;
+using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Hooks.Arbiter;
+using KyberWeave.Data.Review;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -91,6 +93,9 @@ public static class ArbiterApplicationServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         services.TryAddSingleton(TimeProvider.System);
         _ = services.AddWeaveRunData();
+        services.TryAddSingleton<IRepositoryTreeProbe>(_ => new FileRepositoryTreeProbe());
+        services.TryAddSingleton<IKyberWeaveConfigRepository>(sp =>
+            new FileKyberWeaveConfigRepository(sp.GetRequiredService<IRepositoryTreeProbe>()));
         services.TryAddSingleton<IWorkerBudgetStore, FileWorkerBudgetStore>();
         services.TryAddSingleton<IFileLinkProbe, FileLinkProbe>();
         services.TryAddSingleton<IGitRepositoryFacts, GitFacts>();
