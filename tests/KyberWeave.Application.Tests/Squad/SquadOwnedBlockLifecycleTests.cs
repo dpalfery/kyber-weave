@@ -1,6 +1,5 @@
 using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
-using KyberWeave.Cli.Commands.Squad;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -8,11 +7,11 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
-using KyberWeave.Tests.Fixtures;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 using KyberWeave.Tests.Corpus;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Application.Tests.Squad;
 
 /// <summary>
 /// Pins the owned-block lifecycle (task 11.2): renderers carry block fragments through the
@@ -23,6 +22,8 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 public sealed class SquadOwnedBlockLifecycleTests
 {
+    private readonly InMemorySquadState _state = new();
+
     /// <summary>
     /// The bare global hook path four of the five formats write beneath their own root; only the
     /// target tells them apart, which is the subject of the global cases below.
@@ -39,17 +40,18 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public async Task RegistryMergesBlocksAcrossTargets()
     {
-        using SharedIdentitySquadFixture fixture = SharedIdentitySquadFixture.Create();
-        SquadRendererRegistry registry = SquadTestRegistry.Create(
+        string source = CanonicalSquadTree.CopyInto(_state.Files, Path.Combine(_state.Files.Root, "release", "kyber-squad"));
+        SquadRendererRegistry registry = new(
         [
             FakeSquadRenderer.WithBlocks(SquadTarget.Cursor, CursorBlock("cursor-one")),
             FakeSquadRenderer.WithBlocks(SquadTarget.Codex, CodexBlock("codex-one")),
-        ]);
+        ],
+        new InMemorySquadServices(_state.Files).RenderInputReader());
 
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
-            fixture.Path,
+            source,
             [SquadTarget.Cursor, SquadTarget.Codex],
-            SquadDeploymentScope.Project).Prepared());
+            SquadDeploymentScope.Project).Prepared(_state.Files));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.NotNull(result.Blocks);
@@ -65,10 +67,10 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public void InstallClaimsOnlyTheBlockInAV3Receipt()
     {
-        using TempDirectory fixture = new TempDirectory();
-        SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
+        string root = ProjectRoot();
+        SquadStateStore store = _state.Store;
+        SquadDeploymentPlan plan = _state.Planner.CreateInstall(
+            root,
             SquadDeploymentScope.Project,
             Lock(),
             [],
@@ -77,9 +79,9 @@ public sealed class SquadOwnedBlockLifecycleTests
             new FixedTimeProvider(InstalledAt),
             blocks: [CursorBlock("cursor-one")]);
 
-        RealSquadDeployment.Transaction(store).Execute(plan);
+        _state.Transaction().Execute(plan);
 
-        SquadReceipt? receipt = store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project);
+        SquadReceipt? receipt = store.ReadReceipt(root, SquadDeploymentScope.Project);
         Assert.NotNull(receipt);
         Assert.Equal("kyber-squad.receipt/v3", receipt.Schema);
         Assert.Empty(receipt.Files);
@@ -89,7 +91,7 @@ public sealed class SquadOwnedBlockLifecycleTests
         Assert.True(block.CreatedFile);
         Assert.NotEmpty(block.Entries);
 
-        string content = Read(fixture.Path, ".cursor/hooks.json");
+        string content = Read(root, ".cursor/hooks.json");
         Assert.Contains("kyber-weave-arbiter hook --harness cursor", content, StringComparison.Ordinal);
 
         string json = store.SerializeReceipt(receipt);
@@ -105,8 +107,8 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public void InstallSplicesIntoExistingUserFileWithoutCollision()
     {
-        using TempDirectory fixture = new TempDirectory();
-        Write(fixture.Path, ".cursor/hooks.json", """
+        string root = ProjectRoot();
+        Write(root, ".cursor/hooks.json", """
             {
               "version": 1,
               "hooks": {
@@ -118,9 +120,9 @@ public sealed class SquadOwnedBlockLifecycleTests
             }
             """);
 
-        SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
+        SquadStateStore store = _state.Store;
+        SquadDeploymentPlan plan = _state.Planner.CreateInstall(
+            root,
             SquadDeploymentScope.Project,
             Lock(),
             [],
@@ -131,13 +133,13 @@ public sealed class SquadOwnedBlockLifecycleTests
 
         // An existing user file at a block path is owned content to splice into, never
         // an UnmanagedCollision: the plan builds where CreateInstall used to throw.
-        RealSquadDeployment.Transaction(store).Execute(plan);
+        _state.Transaction().Execute(plan);
 
-        string content = Read(fixture.Path, ".cursor/hooks.json");
+        string content = Read(root, ".cursor/hooks.json");
         Assert.Contains("user-linter --fast", content, StringComparison.Ordinal);
         Assert.Contains("kyber-weave-arbiter hook --harness cursor", content, StringComparison.Ordinal);
 
-        SquadReceipt? receipt = store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project);
+        SquadReceipt? receipt = store.ReadReceipt(root, SquadDeploymentScope.Project);
         Assert.NotNull(receipt);
         Assert.Equal("kyber-squad.receipt/v3", receipt.Schema);
         Assert.False(Assert.Single(receipt.Blocks).CreatedFile);
@@ -146,19 +148,19 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public void InstallUsesExactPreconditionOnExistingFileAndMissingWhenAbsent()
     {
-        using TempDirectory fixture = new TempDirectory();
+        string root = ProjectRoot();
         string existing = """
             {
               "version": 1,
               "hooks": { "preToolUse": [], "postToolUse": [] }
             }
             """;
-        Write(fixture.Path, ".cursor/hooks.json", existing);
-        string existingDigest = Digest(File.ReadAllBytes(
-            Path.Combine(fixture.Path, ".cursor/hooks.json")));
+        Write(root, ".cursor/hooks.json", existing);
+        string existingDigest = Digest(_state.Files.ReadAllBytes(
+            Path.Combine(root, ".cursor/hooks.json")));
 
-        SquadDeploymentPlan existingPlan = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
+        SquadDeploymentPlan existingPlan = _state.Planner.CreateInstall(
+            root,
             SquadDeploymentScope.Project,
             Lock(),
             [],
@@ -171,9 +173,9 @@ public sealed class SquadOwnedBlockLifecycleTests
         Assert.Equal(SquadFilePreconditionKind.ExactFile, precondition.Kind);
         Assert.Equal(existingDigest, precondition.Sha256);
 
-        using TempDirectory absent = new TempDirectory();
-        SquadDeploymentPlan absentPlan = RealSquadDeployment.Planner.CreateInstall(
-            absent.Path,
+        string absent = ProjectRoot("absent");
+        SquadDeploymentPlan absentPlan = _state.Planner.CreateInstall(
+            absent,
             SquadDeploymentScope.Project,
             Lock(),
             [],
@@ -193,8 +195,8 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public void ReceiptsWithoutBlocksStayByteIdenticalV1()
     {
-        using TempDirectory fixture = new TempDirectory();
-        SquadStateStore store = Store(fixture.Path);
+        string root = ProjectRoot();
+        SquadStateStore store = _state.Store;
         SquadReceipt receipt = new(
             "kyber-squad.receipt/v1",
             SquadDeploymentScope.Project,
@@ -237,10 +239,10 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public void DeserializeV3ChecksTheExactFieldSet()
     {
-        using TempDirectory fixture = new TempDirectory();
-        SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
+        string root = ProjectRoot();
+        SquadStateStore store = _state.Store;
+        SquadDeploymentPlan plan = _state.Planner.CreateInstall(
+            root,
             SquadDeploymentScope.Project,
             Lock(),
             [],
@@ -277,10 +279,10 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public void OlderReaderRefusesV3()
     {
-        using TempDirectory fixture = new TempDirectory();
-        SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
+        string root = ProjectRoot();
+        SquadStateStore store = _state.Store;
+        SquadDeploymentPlan plan = _state.Planner.CreateInstall(
+            root,
             SquadDeploymentScope.Project,
             Lock(),
             [],
@@ -304,10 +306,10 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public void UpdateRewritesTheBlock()
     {
-        using TempDirectory fixture = new TempDirectory();
-        SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan install = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
+        string root = ProjectRoot();
+        SquadStateStore store = _state.Store;
+        SquadDeploymentPlan install = _state.Planner.CreateInstall(
+            root,
             SquadDeploymentScope.Project,
             Lock(),
             [],
@@ -315,12 +317,12 @@ public sealed class SquadOwnedBlockLifecycleTests
             adopt: false,
             new FixedTimeProvider(InstalledAt),
             blocks: [CursorBlock("cursor-one")]);
-        RealSquadDeployment.Transaction(store).Execute(install);
+        _state.Transaction().Execute(install);
         SquadReceipt previous = Assert.IsType<SquadReceipt>(
-            store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
+            store.ReadReceipt(root, SquadDeploymentScope.Project));
 
-        SquadDeploymentPlan update = RealSquadDeployment.Planner.CreateUpdate(
-            fixture.Path,
+        SquadDeploymentPlan update = _state.Planner.CreateUpdate(
+            root,
             SquadDeploymentScope.Project,
             Lock(),
             [],
@@ -329,13 +331,13 @@ public sealed class SquadOwnedBlockLifecycleTests
             replaceManaged: false,
             new FixedTimeProvider(InstalledAt.AddHours(1)),
             blocks: [CursorBlock("cursor-two")]);
-        RealSquadDeployment.Transaction(store).Execute(update);
+        _state.Transaction().Execute(update);
 
-        string content = Read(fixture.Path, ".cursor/hooks.json");
+        string content = Read(root, ".cursor/hooks.json");
         Assert.Contains("cursor-two", content, StringComparison.Ordinal);
         Assert.DoesNotContain("cursor-one", content, StringComparison.Ordinal);
 
-        SquadReceipt? receipt = store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project);
+        SquadReceipt? receipt = store.ReadReceipt(root, SquadDeploymentScope.Project);
         Assert.NotNull(receipt);
         Assert.Equal("kyber-squad.receipt/v3", receipt.Schema);
         Assert.Single(receipt.Blocks);
@@ -344,10 +346,10 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public void UpdatePreservesDriftedEntryUnlessReplaceManagedIsGiven()
     {
-        using TempDirectory fixture = new TempDirectory();
-        SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan install = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
+        string root = ProjectRoot();
+        SquadStateStore store = _state.Store;
+        SquadDeploymentPlan install = _state.Planner.CreateInstall(
+            root,
             SquadDeploymentScope.Project,
             Lock(),
             [],
@@ -355,14 +357,14 @@ public sealed class SquadOwnedBlockLifecycleTests
             adopt: false,
             new FixedTimeProvider(InstalledAt),
             blocks: [CursorBlock("cursor-one")]);
-        RealSquadDeployment.Transaction(store).Execute(install);
+        _state.Transaction().Execute(install);
         SquadReceipt previous = Assert.IsType<SquadReceipt>(
-            store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
+            store.ReadReceipt(root, SquadDeploymentScope.Project));
 
-        DriftOwnedEntry(fixture.Path, ".cursor/hooks.json", "cursor-one", "cursor-one drifted by hand");
+        DriftOwnedEntry(root, ".cursor/hooks.json", "cursor-one", "cursor-one drifted by hand");
 
-        SquadDeploymentPlan preserved = RealSquadDeployment.Planner.CreateUpdate(
-            fixture.Path,
+        SquadDeploymentPlan preserved = _state.Planner.CreateUpdate(
+            root,
             SquadDeploymentScope.Project,
             Lock(),
             [],
@@ -374,22 +376,22 @@ public sealed class SquadOwnedBlockLifecycleTests
 
         SquadOwnedBlockDrift drift = Assert.Single(preserved.BlockDrifts);
         Assert.Equal(".cursor/hooks.json", drift.RelativePath);
-        RealSquadDeployment.Transaction(store).Execute(preserved);
-        Assert.Contains("cursor-one drifted by hand", Read(fixture.Path, ".cursor/hooks.json"), StringComparison.Ordinal);
+        _state.Transaction().Execute(preserved);
+        Assert.Contains("cursor-one drifted by hand", Read(root, ".cursor/hooks.json"), StringComparison.Ordinal);
 
-        SquadDeploymentPlan replaced = RealSquadDeployment.Planner.CreateUpdate(
-            fixture.Path,
+        SquadDeploymentPlan replaced = _state.Planner.CreateUpdate(
+            root,
             SquadDeploymentScope.Project,
             Lock(),
             [],
-            Assert.IsType<SquadReceipt>(store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project)),
+            Assert.IsType<SquadReceipt>(store.ReadReceipt(root, SquadDeploymentScope.Project)),
             [],
             replaceManaged: true,
             new FixedTimeProvider(InstalledAt.AddHours(2)),
             blocks: [CursorBlock("cursor-two")]);
         Assert.Empty(replaced.BlockDrifts);
-        RealSquadDeployment.Transaction(store).Execute(replaced);
-        string content = Read(fixture.Path, ".cursor/hooks.json");
+        _state.Transaction().Execute(replaced);
+        string content = Read(root, ".cursor/hooks.json");
         Assert.Contains("cursor-two", content, StringComparison.Ordinal);
         Assert.DoesNotContain("drifted by hand", content, StringComparison.Ordinal);
     }
@@ -401,8 +403,8 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public void UninstallRemovesOnlyTheOwnedEntries()
     {
-        using TempDirectory fixture = new TempDirectory();
-        Write(fixture.Path, ".cursor/hooks.json", """
+        string root = ProjectRoot();
+        Write(root, ".cursor/hooks.json", """
             {
               "version": 1,
               "hooks": {
@@ -413,9 +415,9 @@ public sealed class SquadOwnedBlockLifecycleTests
               }
             }
             """);
-        SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan install = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
+        SquadStateStore store = _state.Store;
+        SquadDeploymentPlan install = _state.Planner.CreateInstall(
+            root,
             SquadDeploymentScope.Project,
             Lock(),
             [],
@@ -423,18 +425,18 @@ public sealed class SquadOwnedBlockLifecycleTests
             adopt: false,
             new FixedTimeProvider(InstalledAt),
             blocks: [CursorBlock("cursor-one")]);
-        RealSquadDeployment.Transaction(store).Execute(install);
+        _state.Transaction().Execute(install);
         SquadReceipt receipt = Assert.IsType<SquadReceipt>(
-            store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
+            store.ReadReceipt(root, SquadDeploymentScope.Project));
 
-        SquadDeploymentPlan uninstall = RealSquadDeployment.Planner.CreateUninstall(
-            fixture.Path,
+        SquadDeploymentPlan uninstall = _state.Planner.CreateUninstall(
+            root,
             SquadDeploymentScope.Project,
             receipt);
-        RealSquadDeployment.Transaction(store).Execute(uninstall);
+        _state.Transaction().Execute(uninstall);
 
         // The user's file survives with only their entries: Squad created nothing here.
-        string content = Read(fixture.Path, ".cursor/hooks.json");
+        string content = Read(root, ".cursor/hooks.json");
         Assert.Contains("user-linter --fast", content, StringComparison.Ordinal);
         Assert.DoesNotContain("kyber-weave-arbiter", content, StringComparison.Ordinal);
     }
@@ -442,10 +444,10 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public void UninstallDeletesTheFileOnlyWhenSquadCreatedItAndNoHookRemains()
     {
-        using TempDirectory fixture = new TempDirectory();
-        SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan install = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
+        string root = ProjectRoot();
+        SquadStateStore store = _state.Store;
+        SquadDeploymentPlan install = _state.Planner.CreateInstall(
+            root,
             SquadDeploymentScope.Project,
             Lock(),
             [],
@@ -453,26 +455,26 @@ public sealed class SquadOwnedBlockLifecycleTests
             adopt: false,
             new FixedTimeProvider(InstalledAt),
             blocks: [CursorBlock("cursor-one")]);
-        RealSquadDeployment.Transaction(store).Execute(install);
+        _state.Transaction().Execute(install);
         SquadReceipt receipt = Assert.IsType<SquadReceipt>(
-            store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
+            store.ReadReceipt(root, SquadDeploymentScope.Project));
         Assert.True(Assert.Single(receipt.Blocks).CreatedFile);
 
-        SquadDeploymentPlan uninstall = RealSquadDeployment.Planner.CreateUninstall(
-            fixture.Path,
+        SquadDeploymentPlan uninstall = _state.Planner.CreateUninstall(
+            root,
             SquadDeploymentScope.Project,
             receipt);
-        RealSquadDeployment.Transaction(store).Execute(uninstall);
+        _state.Transaction().Execute(uninstall);
 
-        Assert.False(File.Exists(Path.Combine(fixture.Path, ".cursor/hooks.json")));
-        Assert.Null(store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
+        Assert.False(_state.Files.FileExists(Path.Combine(root, ".cursor/hooks.json")));
+        Assert.Null(store.ReadReceipt(root, SquadDeploymentScope.Project));
     }
 
     [Fact]
     public void UninstallOneHarnessSplicesOnlyItsEntriesAndKeepsUserEmptyArraysAndTheOtherBlock()
     {
-        using TempDirectory fixture = new TempDirectory();
-        Write(fixture.Path, "settings.json", """
+        string root = ProjectRoot();
+        Write(root, "settings.json", """
             {
               "theme": "dark",
               "hooks": {
@@ -483,22 +485,22 @@ public sealed class SquadOwnedBlockLifecycleTests
               }
             }
             """);
-        SquadStateStore store = InstallProjectClaudeAndCursor(fixture.Path);
-        string cursorBefore = Read(fixture.Path, ".cursor/hooks.json");
+        SquadStateStore store = InstallProjectClaudeAndCursor(root);
+        string cursorBefore = Read(root, ".cursor/hooks.json");
 
-        UninstallOnly(store, fixture.Path, SquadTarget.Claude);
+        UninstallOnly(store, root, SquadTarget.Claude);
 
-        JsonObject settings = Assert.IsType<JsonObject>(JsonNode.Parse(Read(fixture.Path, "settings.json")));
+        JsonObject settings = Assert.IsType<JsonObject>(JsonNode.Parse(Read(root, "settings.json")));
         JsonObject hooks = Assert.IsType<JsonObject>(settings["hooks"]);
         Assert.Equal("dark", settings["theme"]!.GetValue<string>());
         Assert.False(hooks.ContainsKey("PreToolUse"));
-        Assert.Contains("user-linter", Read(fixture.Path, "settings.json"), StringComparison.Ordinal);
-        Assert.DoesNotContain("kyber-weave-arbiter", Read(fixture.Path, "settings.json"), StringComparison.Ordinal);
+        Assert.Contains("user-linter", Read(root, "settings.json"), StringComparison.Ordinal);
+        Assert.DoesNotContain("kyber-weave-arbiter", Read(root, "settings.json"), StringComparison.Ordinal);
         Assert.Single(hooks["PostToolUse"]!.AsArray());
         Assert.Empty(hooks["Stop"]!.AsArray());
-        Assert.Equal(cursorBefore, Read(fixture.Path, ".cursor/hooks.json"));
+        Assert.Equal(cursorBefore, Read(root, ".cursor/hooks.json"));
         SquadReceipt receipt = Assert.IsType<SquadReceipt>(
-            store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
+            store.ReadReceipt(root, SquadDeploymentScope.Project));
         Assert.Equal("cursor", Assert.Single(receipt.Blocks).Target);
         Assert.Equal("kyber-squad.receipt/v3", receipt.Schema);
     }
@@ -506,38 +508,38 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public void UninstallOneHarnessPrunesAnEmptiedHooksObjectButKeepsTheUserFile()
     {
-        using TempDirectory fixture = new TempDirectory();
-        Write(fixture.Path, "settings.json", "{ \"theme\": \"dark\" }");
-        SquadStateStore store = InstallProjectClaudeAndCursor(fixture.Path);
-        Assert.Contains("kyber-weave-arbiter", Read(fixture.Path, "settings.json"), StringComparison.Ordinal);
+        string root = ProjectRoot();
+        Write(root, "settings.json", "{ \"theme\": \"dark\" }");
+        SquadStateStore store = InstallProjectClaudeAndCursor(root);
+        Assert.Contains("kyber-weave-arbiter", Read(root, "settings.json"), StringComparison.Ordinal);
 
-        UninstallOnly(store, fixture.Path, SquadTarget.Claude);
+        UninstallOnly(store, root, SquadTarget.Claude);
 
-        JsonObject settings = Assert.IsType<JsonObject>(JsonNode.Parse(Read(fixture.Path, "settings.json")));
+        JsonObject settings = Assert.IsType<JsonObject>(JsonNode.Parse(Read(root, "settings.json")));
         Assert.False(settings.ContainsKey("hooks"), settings.ToJsonString());
         Assert.Equal("dark", settings["theme"]!.GetValue<string>());
-        Assert.Contains("kyber-weave-arbiter", Read(fixture.Path, ".cursor/hooks.json"), StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-arbiter", Read(root, ".cursor/hooks.json"), StringComparison.Ordinal);
     }
 
     [Fact]
     public void UninstallOneHarnessDeletesTheHookFileSquadCreatedAndTheLastHarnessRemovesTheReceipt()
     {
-        using TempDirectory fixture = new TempDirectory();
-        SquadStateStore store = InstallProjectClaudeAndCursor(fixture.Path);
+        string root = ProjectRoot();
+        SquadStateStore store = InstallProjectClaudeAndCursor(root);
 
-        UninstallOnly(store, fixture.Path, SquadTarget.Cursor);
+        UninstallOnly(store, root, SquadTarget.Cursor);
 
-        Assert.False(File.Exists(Path.Combine(fixture.Path, ".cursor/hooks.json")));
-        Assert.Contains("kyber-weave-arbiter", Read(fixture.Path, "settings.json"), StringComparison.Ordinal);
+        Assert.False(_state.Files.FileExists(Path.Combine(root, ".cursor/hooks.json")));
+        Assert.Contains("kyber-weave-arbiter", Read(root, "settings.json"), StringComparison.Ordinal);
         Assert.Equal(
             "claude",
             Assert.Single(Assert.IsType<SquadReceipt>(
-                store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project)).Blocks).Target);
+                store.ReadReceipt(root, SquadDeploymentScope.Project)).Blocks).Target);
 
-        UninstallOnly(store, fixture.Path, SquadTarget.Claude);
+        UninstallOnly(store, root, SquadTarget.Claude);
 
-        Assert.False(File.Exists(Path.Combine(fixture.Path, "settings.json")));
-        Assert.Null(store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
+        Assert.False(_state.Files.FileExists(Path.Combine(root, "settings.json")));
+        Assert.Null(store.ReadReceipt(root, SquadDeploymentScope.Project));
     }
 
     /// <summary>
@@ -550,9 +552,8 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public void UninstallGlobalRetainedSchemaFollowsTheWriterRule()
     {
-        using TempDirectory fixtureCorrupted = new TempDirectory();
         GlobalBlockDeployment installedCorrupted = InstallGlobalBlocks(
-            fixtureCorrupted, SquadTarget.Cursor, SquadTarget.Codex);
+            _state, SquadTarget.Cursor, SquadTarget.Codex);
         SquadReceipt twoBlocks = Assert.IsType<SquadReceipt>(
             installedCorrupted.Store.ReadReceipt(installedCorrupted.Home, SquadDeploymentScope.Global));
         Assert.Equal("kyber-squad.receipt/v3", twoBlocks.Schema);
@@ -560,24 +561,23 @@ public sealed class SquadOwnedBlockLifecycleTests
 
         // Corrupt both hook files so RemoveBlockContent throws SquadDeploymentConflictException,
         // exercising FormatForTarget during uninstall while retaining both blocks.
-        File.WriteAllText(GlobalHookFile(installedCorrupted.Roots, SquadTarget.Cursor), "{ unclosed json");
-        File.WriteAllText(GlobalHookFile(installedCorrupted.Roots, SquadTarget.Codex), "{ unclosed json");
+        _state.Files.WriteAllText(GlobalHookFile(installedCorrupted.Roots, SquadTarget.Cursor), "{ unclosed json");
+        _state.Files.WriteAllText(GlobalHookFile(installedCorrupted.Roots, SquadTarget.Codex), "{ unclosed json");
 
-        SquadDeploymentPlan keepBoth = RealSquadDeployment.Planner.CreateUninstall(
+        SquadDeploymentPlan keepBoth = _state.Planner.CreateUninstall(
             installedCorrupted.Home,
             SquadDeploymentScope.Global,
             twoBlocks,
             installedCorrupted.Roots);
 
-        using TempDirectory fixtureClean = new TempDirectory();
         GlobalBlockDeployment installedClean = InstallGlobalBlocks(
-            fixtureClean, SquadTarget.Cursor, SquadTarget.Codex);
+            new InMemorySquadState(), SquadTarget.Cursor, SquadTarget.Codex);
         SquadReceipt cleanReceipt = Assert.IsType<SquadReceipt>(
             installedClean.Store.ReadReceipt(installedClean.Home, SquadDeploymentScope.Global));
         Assert.Equal("kyber-squad.receipt/v3", cleanReceipt.Schema);
         Assert.Equal(2, cleanReceipt.Blocks.Count);
 
-        SquadDeploymentPlan keepNone = RealSquadDeployment.Planner.CreateUninstall(
+        SquadDeploymentPlan keepNone = installedClean.State.Planner.CreateUninstall(
             installedClean.Home,
             SquadDeploymentScope.Global,
             cleanReceipt,
@@ -602,12 +602,12 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public void UpdateGlobalRewritesEveryBlockWithoutDrift()
     {
-        using TempDirectory fixture = new TempDirectory();
-        GlobalBlockDeployment installed = InstallGlobalBlocks(fixture, SquadTarget.Cursor, SquadTarget.Codex);
+        string root = ProjectRoot();
+        GlobalBlockDeployment installed = InstallGlobalBlocks(_state, SquadTarget.Cursor, SquadTarget.Codex);
         SquadReceipt previous = Assert.IsType<SquadReceipt>(
             installed.Store.ReadReceipt(installed.Home, SquadDeploymentScope.Global));
 
-        SquadDeploymentPlan update = RealSquadDeployment.Planner.CreateUpdate(
+        SquadDeploymentPlan update = _state.Planner.CreateUpdate(
             installed.Home,
             SquadDeploymentScope.Global,
             Lock(),
@@ -624,7 +624,7 @@ public sealed class SquadOwnedBlockLifecycleTests
             ]);
 
         Assert.Empty(update.BlockDrifts);
-        RealSquadDeployment.Transaction(installed.Store).Execute(update);
+        _state.Transaction().Execute(update);
 
         SquadReceipt after = Assert.IsType<SquadReceipt>(
             installed.Store.ReadReceipt(installed.Home, SquadDeploymentScope.Global));
@@ -632,12 +632,12 @@ public sealed class SquadOwnedBlockLifecycleTests
         Assert.All(after.Blocks, block => Assert.Equal(GlobalHooksPath, block.RelativePath));
         AssertNoDrift(after, installed.Roots);
 
-        string cursorHookFile = File.ReadAllText(GlobalHookFile(installed.Roots, SquadTarget.Cursor));
+        string cursorHookFile = _state.Files.ReadAllText(GlobalHookFile(installed.Roots, SquadTarget.Cursor));
         Assert.Contains("probe-cursor-two", cursorHookFile, StringComparison.Ordinal);
         Assert.DoesNotContain("probe-cursor-one", cursorHookFile, StringComparison.Ordinal);
         Assert.Contains(
             "probe-codex-two",
-            File.ReadAllText(GlobalHookFile(installed.Roots, SquadTarget.Codex)),
+            _state.Files.ReadAllText(GlobalHookFile(installed.Roots, SquadTarget.Codex)),
             StringComparison.Ordinal);
     }
 
@@ -650,21 +650,20 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public void UpdateFromAnRc20GlobalReceiptKeepsBothBlocks()
     {
-        using TempDirectory fixture = new TempDirectory();
-        FakeSquadUserPaths userPaths = new(fixture.Path);
-        string home = userPaths.HomeDirectory;
-        Directory.CreateDirectory(home);
+        string root = ProjectRoot();
+        string home = _state.UserPaths.HomeDirectory;
+        _state.Files.CreateDirectory(home);
         SquadGlobalRoots globalRoots = new(_ => null, home);
-        SquadStateStore store = RealSquadState.Store(userPaths);
+        SquadStateStore store = _state.Store;
         string receiptPath = store.ResolveReceiptPath(home, SquadDeploymentScope.Global);
-        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
-        File.WriteAllText(receiptPath, Rc20GlobalReceiptJson());
+        _state.Files.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        _state.Files.WriteAllText(receiptPath, Rc20GlobalReceiptJson());
 
         SquadReceipt previous = Assert.IsType<SquadReceipt>(
             store.ReadReceipt(home, SquadDeploymentScope.Global));
         Assert.Equal(["cursor", "codex"], previous.Blocks.Select(block => block.Target).ToArray());
 
-        SquadDeploymentPlan update = RealSquadDeployment.Planner.CreateUpdate(
+        SquadDeploymentPlan update = _state.Planner.CreateUpdate(
             home,
             SquadDeploymentScope.Global,
             Lock(),
@@ -676,7 +675,7 @@ public sealed class SquadOwnedBlockLifecycleTests
             globalRoots: globalRoots,
             blocks: [GlobalHooksBlock(SquadTarget.Cursor), GlobalHooksBlock(SquadTarget.Codex)]);
 
-        RealSquadDeployment.Transaction(store).Execute(update);
+        _state.Transaction().Execute(update);
 
         SquadReceipt after = Assert.IsType<SquadReceipt>(store.ReadReceipt(home, SquadDeploymentScope.Global));
         Assert.Equal("kyber-squad.receipt/v3", after.Schema);
@@ -698,8 +697,8 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public void ReceiptRefusesOneTargetClaimingOnePathTwiceAtGlobalScope()
     {
-        using TempDirectory fixture = new TempDirectory();
-        SquadStateStore store = Store(fixture.Path);
+        string root = ProjectRoot();
+        SquadStateStore store = _state.Store;
         string valid = store.SerializeReceipt(GlobalTwoBlockReceipt());
 
         InvalidDataException refused = Assert.Throws<InvalidDataException>(
@@ -718,8 +717,8 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public void ReceiptRefusesOneTargetClaimingOnePathTwiceAtProjectScope()
     {
-        using TempDirectory fixture = new TempDirectory();
-        SquadStateStore store = Store(fixture.Path);
+        string root = ProjectRoot();
+        SquadStateStore store = _state.Store;
         string valid = store.SerializeReceipt(ProjectCursorBlockReceipt());
 
         InvalidDataException refused = Assert.Throws<InvalidDataException>(
@@ -739,8 +738,8 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public void ReceiptRefusesTwoTargetsClaimingOnePathAtProjectScope()
     {
-        using TempDirectory fixture = new TempDirectory();
-        SquadStateStore store = Store(fixture.Path);
+        string root = ProjectRoot();
+        SquadStateStore store = _state.Store;
         string valid = store.SerializeReceipt(ProjectCursorBlockReceipt());
 
         InvalidDataException refused = Assert.Throws<InvalidDataException>(
@@ -760,8 +759,8 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public void ReceiptRefusesOneBlockClaimingTheSameContainerTwice()
     {
-        using TempDirectory fixture = new TempDirectory();
-        SquadStateStore store = Store(fixture.Path);
+        string root = ProjectRoot();
+        SquadStateStore store = _state.Store;
         string valid = store.SerializeReceipt(ProjectCursorBlockReceipt());
 
         InvalidDataException refused = Assert.Throws<InvalidDataException>(
@@ -780,16 +779,15 @@ public sealed class SquadOwnedBlockLifecycleTests
     [Fact]
     public async Task InstallServiceCarriesRenderBlocksIntoTheReceipt()
     {
-        using TempDirectory fixture = new TempDirectory();
-        string targetRoot = Path.Combine(fixture.Path, "project");
-        Directory.CreateDirectory(targetRoot);
-        using FakeSquadReleaseSource releases = new();
-        SquadStateStore store = Store(fixture.Path);
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
+        string root = ProjectRoot();
+        string targetRoot = Path.Combine(root, "project");
+        _state.Files.CreateDirectory(targetRoot);
+        string source = CanonicalSquadTree.CopyInto(_state.Files, Path.Combine(_state.Files.Root, "release", "kyber-squad"));
+        using FakeSquadReleaseSource releases = FakeSquadReleaseSource.FromDirectory(source, _state.Files);
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(
+            _state,
             releases,
-            FakeSquadRenderer.WithBlocks(SquadTarget.Cursor, CursorBlock("cursor-one")),
-            store,
-            new FixedTimeProvider(InstalledAt));
+            FakeSquadRenderer.WithBlocks(SquadTarget.Cursor, CursorBlock("cursor-one")));
 
         SquadLifecycleResult result = await service.InstallAsync(new SquadInstallRequest(
             targetRoot,
@@ -821,10 +819,10 @@ public sealed class SquadOwnedBlockLifecycleTests
                 new SquadRenderedBlockEntry("PostToolUse", MatcherGroup("kyber-weave-arbiter hook --harness claude", $"probe-{marker}")),
             ]);
 
-    private static SquadStateStore InstallProjectClaudeAndCursor(string root)
+    private SquadStateStore InstallProjectClaudeAndCursor(string root)
     {
-        SquadStateStore store = Store(root);
-        RealSquadDeployment.Transaction(store).Execute(RealSquadDeployment.Planner.CreateInstall(
+        SquadStateStore store = _state.Store;
+        _state.Transaction().Execute(_state.Planner.CreateInstall(
             root,
             SquadDeploymentScope.Project,
             Lock(),
@@ -836,10 +834,10 @@ public sealed class SquadOwnedBlockLifecycleTests
         return store;
     }
 
-    private static void UninstallOnly(SquadStateStore store, string root, SquadTarget target)
+    private void UninstallOnly(SquadStateStore store, string root, SquadTarget target)
     {
         SquadReceipt receipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(root, SquadDeploymentScope.Project));
-        RealSquadDeployment.Transaction(store).Execute(RealSquadDeployment.Planner.CreateUninstall(
+        _state.Transaction().Execute(_state.Planner.CreateUninstall(
             root,
             SquadDeploymentScope.Project,
             receipt,
@@ -923,15 +921,13 @@ public sealed class SquadOwnedBlockLifecycleTests
     /// which is why both record the bare path <c>hooks.json</c>.
     /// </summary>
     private static GlobalBlockDeployment InstallGlobalBlocks(
-        TempDirectory fixture,
+        InMemorySquadState state,
         params SquadTarget[] targets)
     {
-        FakeSquadUserPaths userPaths = new(fixture.Path);
-        string home = userPaths.HomeDirectory;
-        Directory.CreateDirectory(home);
+        string home = state.UserPaths.HomeDirectory;
+        state.Files.CreateDirectory(home);
         SquadGlobalRoots roots = new(_ => null, home);
-        SquadStateStore store = RealSquadState.Store(userPaths);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
+        SquadDeploymentPlan plan = state.Planner.CreateInstall(
             home,
             SquadDeploymentScope.Global,
             Lock(),
@@ -941,8 +937,8 @@ public sealed class SquadOwnedBlockLifecycleTests
             new FixedTimeProvider(InstalledAt),
             globalRoots: roots,
             blocks: [.. targets.Select(target => GlobalHooksBlock(target))]);
-        RealSquadDeployment.Transaction(store).Execute(plan);
-        return new GlobalBlockDeployment(store, roots, home);
+        state.Transaction().Execute(plan);
+        return new GlobalBlockDeployment(state, state.Store, roots, home);
     }
 
     private static string GlobalHookFile(SquadGlobalRoots roots, SquadTarget target) =>
@@ -953,7 +949,7 @@ public sealed class SquadOwnedBlockLifecycleTests
     /// at its container, in every block's own file. This is the same rule status and doctor apply,
     /// so "no drift" here means the same thing it means to the operator.
     /// </summary>
-    private static void AssertNoDrift(SquadReceipt receipt, SquadGlobalRoots roots)
+    private void AssertNoDrift(SquadReceipt receipt, SquadGlobalRoots roots)
     {
         Assert.NotEmpty(receipt.Blocks);
         foreach (SquadOwnedBlock block in receipt.Blocks)
@@ -976,7 +972,7 @@ public sealed class SquadOwnedBlockLifecycleTests
                 .ToDictionary(entry => entry.Container, entry => entry.Sha256, StringComparer.Ordinal);
             IReadOnlyList<SquadHookDrift> drifts = SquadHookJsonBlock.FindDrift(
                 format,
-                File.ReadAllText(GlobalHookFile(roots, target)),
+                _state.Files.ReadAllText(GlobalHookFile(roots, target)),
                 expected);
 
             Assert.True(
@@ -1060,10 +1056,10 @@ public sealed class SquadOwnedBlockLifecycleTests
     private static string Rc20GlobalReceiptJson() =>
         SquadRc20Fixtures.TwoBlocksReceipt();
 
-    private static void DriftOwnedEntry(string root, string relativePath, string marker, string replacement)
+    private void DriftOwnedEntry(string root, string relativePath, string marker, string replacement)
     {
         string path = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        JsonNode root2 = JsonNode.Parse(File.ReadAllText(path))!;
+        JsonNode root2 = JsonNode.Parse(_state.Files.ReadAllText(path))!;
         JsonArray pre = Assert.IsType<JsonObject>(root2)["hooks"]!.AsObject()["preToolUse"]!.AsArray();
         JsonObject owned = Assert.IsType<JsonObject>(pre.Single(
             node => node!.AsObject()["matcher"]!.GetValue<string>().Contains(marker, StringComparison.Ordinal)));
@@ -1071,7 +1067,7 @@ public sealed class SquadOwnedBlockLifecycleTests
             marker,
             replacement,
             StringComparison.Ordinal);
-        File.WriteAllText(path, root2.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
+        _state.Files.WriteAllText(path, root2.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
     }
 
     private static string RemoveJsonProperty(string json, string property)
@@ -1120,8 +1116,12 @@ public sealed class SquadOwnedBlockLifecycleTests
         }
     }
 
-    private static SquadStateStore Store(string applicationData) =>
-        RealSquadState.Store(new FakeSquadUserPaths(applicationData));
+    private string ProjectRoot(string name = "project")
+    {
+        string path = Path.Combine(_state.Files.Root, "work", name);
+        _state.Files.CreateDirectory(path);
+        return path;
+    }
 
     private static SquadLock Lock(string version = "1.2.3") =>
         new(
@@ -1143,21 +1143,22 @@ public sealed class SquadOwnedBlockLifecycleTests
     private static string Digest(byte[] content) =>
         Convert.ToHexStringLower(SHA256.HashData(content));
 
-    private static void Write(string root, string relativePath, string content)
+    private void Write(string root, string relativePath, string content)
     {
         string path = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, content, new UTF8Encoding(false));
+        _state.Files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _state.Files.WriteAllText(path, content);
     }
 
-    private static string Read(string root, string relativePath) =>
-        File.ReadAllText(Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+    private string Read(string root, string relativePath) =>
+        _state.Files.ReadAllText(Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
 
     /// <summary>
     /// An isolated home with a global deployment in it: the store that holds its receipt, the
     /// resolver that finds each target's root, and the home that anchors its state.
     /// </summary>
     private sealed record GlobalBlockDeployment(
+        InMemorySquadState State,
         SquadStateStore Store,
         SquadGlobalRoots Roots,
         string Home);
