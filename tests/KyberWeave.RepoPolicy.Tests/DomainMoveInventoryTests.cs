@@ -138,6 +138,43 @@ public sealed class DomainMoveInventoryTests
     }
 
     [Fact]
+    public void EveryContractsFindingCarriesOneOfTheThreeDecisions()
+    {
+        string[] decisions = ["split", "move the interface", "narrow"];
+        string text = Corpus.ReadText(InventoryPath);
+        List<string> violations = [];
+        bool inFinding = false;
+        bool sawRow = false;
+
+        foreach (string line in Lines())
+        {
+            if (line.StartsWith("### Finding: ", StringComparison.Ordinal))
+                inFinding = true;
+            else if (inFinding && line.StartsWith("## ", StringComparison.Ordinal))
+                break;
+
+            if (!inFinding || !line.StartsWith("| `", StringComparison.Ordinal))
+                continue;
+
+            string[] cells = line.Trim('|').Split('|');
+            if (cells.Length != 5 || !cells[1].Trim().All(char.IsDigit))
+                continue;
+
+            sawRow = true;
+            string decision = cells[3].Trim();
+            if (!decisions.Contains(decision, StringComparer.Ordinal))
+                violations.Add($"{cells[0].Trim()} has decision '{decision}'");
+        }
+
+        Assert.True(sawRow, "The Contracts finding table was not found in " + InventoryPath);
+        Assert.True(
+            violations.Count == 0,
+            "Task 2.1 requires a route per caller, so each Contracts finding names one of: "
+            + string.Join(", ", decisions) + ".\n" + string.Join("\n", violations));
+        Assert.DoesNotContain("lift that shape out", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TheInventoryCountsAddUp()
     {
         List<string> lines = [.. Lines()];

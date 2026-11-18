@@ -485,51 +485,52 @@ of a moved class moves to that class's project under task 5.2. The list is not r
 same 406 files the scan found, and task 5.2 groups them by seam.
 
 
-### Finding: `Contracts` names Domain logic
+### Finding: `Contracts` names Domain logic, with a decision per type
 
-`Contracts` references `Domain` for the records in its service interfaces. A logic type that moves to
-`Application` would make `Contracts` reference `Application`, which is a cycle, so each of these is a
-finding to resolve in the task that moves the type. The list is the types, the `Contracts` files that
-name them, and the resolution.
+`Contracts` references `Domain` for the records in its service interfaces, so a logic type that moves
+to `Application` would make `Contracts` reference `Application`, which is a cycle. Each type below has
+one decision, taken now so a move task does not have to guess:
+
+- **split** — the record stays in `Domain` and the named helper methods move to an `Application`
+  service. The `Contracts` signature does not change, because it already names the record.
+- **move the interface** — the type is a service, not a record, and the interface exists only for it,
+  so the interface moves to `Application` with the implementation and is registered in its composition
+  root.
+- **narrow** — the interface returns a `Domain` record instead of a type that carries factory methods;
+  the factories move to an `Application` factory.
+
+| logic type | files | Contracts files | decision | what moves |
+|---|---|---|---|---|
+| `ArbiterFactSet` | 3 | `IArbiterFactSources.cs`, `IGateReportFacts.cs`, `IPlanFacts.cs` | split | the record stays; `Contains`, `IsPresent`, `TryGet` and the `With` lookups move to an Application service |
+| `ArbiterModelTargets` | 1 | `IArbiterModelTargetsReader.cs` | split | the record stays; `IsCompleteFor` moves |
+| `ArbiterRule` | 3 | `IArbiterEvaluator.cs`, `IReviewDecisionModel.cs`, `IReviewDecisionModelFactory.cs` | split | the record stays; `ShouldAsk` moves |
+| `ArbiterRunScope` | 2 | `IArbiterFactSources.cs`, `IArbiterLedger.cs` | split | the record stays; `Includes` and `Normalize` move |
+| `BriefFacts` | 1 | `ISquadBriefService.cs` | move the interface | a resolver over prompt text, not a record; `ISquadBriefService` moves to Application |
+| `BriefMap` | 1 | `ISquadBriefService.cs` | move the interface | loads and indexes files; `ISquadBriefService` moves with it |
+| `ConfigRegConfig` | 1 | `ISeverityOverrideSource.cs` | split | the declared map stays; `Resolve` and `ModeWord` move |
+| `DocGraphProjection` | 1 | `CandidateContracts.cs` | move the interface | computes document relationships; `CandidateContracts.cs` moves to Application |
+| `DocumentModel` | 1 | `IDocumentSource.cs` | split | the record stays; `AppendSectionKeywords` and `AppendSectionCodeRefs` move |
+| `DocumentSet` | 4 | `IDocGraphContributor.cs`, `IDocsGateRunner.cs`, `IDocumentSource.cs`, `IDocsSchemaGate.cs` | split | the record stays; `ByComponent` moves |
+| `DuplicateReport` | 1 | `IDuplicateDetectionService.cs` | split | the record stays; `Merge` and `ClusterId` move |
+| `HarnessProfileConfig` | 1 | `IAgentGovernanceService.cs` | split | the record stays; `CloneWithProfiles` and `CreateProductDefaultProfiles` move |
+| `KyberWeaveConfigLoadResult` | 2 | `IKyberWeaveConfigRepository.cs`, `IArbiterConfigResolver.cs` | narrow | the record stays in Domain; `Ok` and `Fail` move to an Application factory and the interface returns the record |
+| `OntologyConfig` | 2 | `IDocumentSourceFactory.cs`, `IConfigLoadService.cs` | split | the record stays; `IsRequired*` and the `With*` helpers that do work move |
+| `PlanDocument` | 1 | `IArbiterPlanService.cs` | split | the record stays; `RedEvidenceRequirement` moves |
+| `ReviewCommandResult` | 6 | `IReviewCatalogueService.cs`, `IReviewCycleService.cs`, `IReviewDuplicatesService.cs`, `IReviewGatesService.cs`, `IReviewSeatsService.cs`, `IReviewSuppressionsService.cs` | narrow | the record stays in Domain; `Refused` and `Reported` move to an Application factory |
+| `ReviewPolicy` | 1 | `IReviewCycleSelector.cs` | split | the record stays; `FixRoundTakes` moves |
+| `SeverityOverrides` | 2 | `ISeverityOverrideSource.cs`, `IReviewDecisionSteps.cs` | split | the record stays; `Find`, `Apply` and `RowsFor` move |
+| `SquadDeploymentPlan` | 2 | `ISquadDeploymentPlanner.cs`, `ISquadTransaction.cs` | move the interface | `ISquadDeploymentPlanner` and `ISquadTransaction` move to Application with the plan |
+| `SquadModelPreset` | 2 | `ISquadModelPresetStore.cs`, `ISquadModelPresetValidator.cs` | split | the record stays; `ApplyTo` moves |
+| `SquadRenderRequest` | 1 | `ISquadRenderInputReader.cs` | split | the record stays; the `Require*` guards and `Unprepared` move |
+| `StatusLineTargetRoots` | 1 | `IStatusLineDeploymentService.cs` | split | the record stays; the `Resolve*` helpers move |
 
 
-| logic type | files | Contracts files | resolution |
-|---|---|---|---|
-| `ArbiterFactSet` | 3 | `IArbiterFactSources.cs`, `IGateReportFacts.cs`, `IPlanFacts.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `ArbiterModelTargets` | 1 | `IArbiterModelTargetsReader.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `ArbiterRule` | 3 | `IArbiterEvaluator.cs`, `IReviewDecisionModel.cs`, `IReviewDecisionModelFactory.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `ArbiterRunScope` | 2 | `IArbiterFactSources.cs`, `IArbiterLedger.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `BriefFacts` | 1 | `ISquadBriefService.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `BriefMap` | 1 | `ISquadBriefService.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `ConfigRegConfig` | 1 | `ISeverityOverrideSource.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `DocGraphProjection` | 1 | `CandidateContracts.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `DocumentModel` | 1 | `IDocumentSource.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `DocumentSet` | 4 | `IDocGraphContributor.cs`, `IDocsGateRunner.cs`, `IDocumentSource.cs`, `IDocsSchemaGate.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `DuplicateReport` | 1 | `IDuplicateDetectionService.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `HarnessProfileConfig` | 1 | `IAgentGovernanceService.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `KyberWeaveConfigLoadResult` | 2 | `IKyberWeaveConfigRepository.cs`, `IArbiterConfigResolver.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `OntologyConfig` | 2 | `IDocumentSourceFactory.cs`, `IConfigLoadService.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `PlanDocument` | 1 | `IArbiterPlanService.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `ReviewCommandResult` | 6 | `IReviewCatalogueService.cs`, `IReviewCycleService.cs`, `IReviewDuplicatesService.cs`, `IReviewGatesService.cs`, `IReviewSeatsService.cs`, `IReviewSuppressionsService.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `ReviewPolicy` | 1 | `IReviewCycleSelector.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `SeverityOverrides` | 2 | `ISeverityOverrideSource.cs`, `IReviewDecisionSteps.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `SquadDeploymentPlan` | 2 | `ISquadDeploymentPlanner.cs`, `ISquadTransaction.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `SquadModelPreset` | 2 | `ISquadModelPresetStore.cs`, `ISquadModelPresetValidator.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `SquadRenderRequest` | 1 | `ISquadRenderInputReader.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-| `StatusLineTargetRoots` | 1 | `IStatusLineDeploymentService.cs` | the member uses a Domain record, so lift that shape out; else move the interface |
-
-Resolution in practice, in order of preference:
-
-1. **Narrow the signature to a record that stays.** Most of these types are a record plus a few
-   helpers over it (`ArbiterFactSet`, `OntologyConfig`, `SquadModelPreset`, `SeverityOverrides`). Split
-   the record, which stays in `Domain`, from the helpers, which move to `Application`; the `Contracts`
-   interface then names the record and does not change shape.
-2. **Move the interface.** When the interface exists only for the logic (`ISquadDeploymentPlanner` and
-   `SquadDeploymentPlan`, `ISquadModelPresetValidator` and `SquadModelPreset`), the interface moves to
-   `Application` with its implementation, and is registered in the composition root there.
-3. **Return a Domain record from the interface.** `ReviewCommandResult` and `KyberWeaveConfigLoadResult`
-   are the two that fit badly in any case: they carry the factory methods that made them logic
-   (`Refused`, `Reported`, `Ok`, `Fail`). Their record half stays and the factories move.
+Twenty of the twenty-two types are a record with a handful of helper methods, which is why split is the
+common decision: the record is what `Contracts` needs and it stays exactly where it is.
+`SquadDeploymentPlan` is the only type whose interface moves whole, because `ISquadDeploymentPlanner`
+and `ISquadTransaction` exist for the deployment logic that phase 3 moves anyway. `ReviewCommandResult`
+and `KyberWeaveConfigLoadResult` are the two where neither fits: their factory methods are the logic,
+and they belong to six and two `Contracts` files, so the record stays and the factories go.
 
 ## Part 3: the move, in dependency order
 
