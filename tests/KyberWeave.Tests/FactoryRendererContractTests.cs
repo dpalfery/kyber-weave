@@ -6,6 +6,7 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Core.Squad.Validation;
+using KyberWeave.Tests.Corpus;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using YamlDotNet.RepresentationModel;
@@ -39,8 +40,10 @@ public sealed class FactoryRendererContractTests : IDisposable
     // Mirrors FactoryRenderer's allow-list (Factory accepts only these); update both together.
     private static readonly string[] AllowedReasoningEfforts = ["low", "medium", "high"];
 
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     /// <summary>
     ///     Documented Factory custom-droid tool IDs (docs.factory.ai/harness/subagents,
@@ -1348,7 +1351,7 @@ internal sealed class McpDeclarationCorpusFixture : IDisposable
     {
         McpDeclarationCorpusFixture fixture = new();
         PiCorpusFixtureHelpers.CopyDirectory(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad"),
+            Path.Combine(CheckoutCorpusSource.Checkout.Root, "products", "kyber-squad"),
             fixture.ProductRoot);
         return fixture;
     }

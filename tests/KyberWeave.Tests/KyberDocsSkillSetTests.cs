@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -13,6 +14,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class KyberDocsSkillSetTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string[] RetiredApmSkillDirs =
     [
         "kyber-weave-docs",
@@ -22,11 +25,9 @@ public sealed class KyberDocsSkillSetTests
     private static readonly Regex LiteralDocsPathRegex =
         new(@"(?<![\w<.-])docs/", RegexOptions.Compiled);
 
-    private static string ToolRoot => KyberWeaveTestPaths.ToolRoot;
+    private static string ApmSkillsRoot => ".apm/skills";
 
-    private static string ApmSkillsRoot => Path.Combine(ToolRoot, ".apm", "skills");
-
-    private static string ProductRoot => Path.Combine(ToolRoot, "products", "kyber-squad");
+    private static string ProductRoot => "products/kyber-squad";
 
     /// <summary>
     /// Each Kyber-Docs skill ships a <c>SKILL.md</c> whose frontmatter name matches its
@@ -38,10 +39,10 @@ public sealed class KyberDocsSkillSetTests
     [InlineData("kyber-docs-onboarding-and-assessment")]
     public void KyberDocsSkillShipsSkillMdWithMatchingName(string skillName)
     {
-        string skillFile = Path.Combine(ApmSkillsRoot, skillName, "SKILL.md");
+        string skillFile = $"{ApmSkillsRoot}/{skillName}/SKILL.md";
 
-        Assert.True(File.Exists(skillFile), $"Kyber-Docs skill '{skillName}' is missing: {skillFile}.");
-        Assert.Contains($"name: {skillName}", File.ReadAllText(skillFile), StringComparison.Ordinal);
+        Assert.True(Corpus.Exists(skillFile), $"Kyber-Docs skill '{skillName}' is missing: {skillFile}.");
+        Assert.Contains($"name: {skillName}", Corpus.ReadText(skillFile), StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -55,12 +56,12 @@ public sealed class KyberDocsSkillSetTests
         foreach (string retired in RetiredApmSkillDirs)
         {
             Assert.False(
-                Directory.Exists(Path.Combine(ApmSkillsRoot, retired)),
+                Corpus.DirectoryExists($"{ApmSkillsRoot}/{retired}"),
                 $"Retired Kyber-Docs skill directory '{retired}' must be removed from .apm/skills.");
         }
 
         Assert.False(
-            Directory.Exists(Path.Combine(ApmSkillsRoot, "second-brain")),
+            Corpus.DirectoryExists($"{ApmSkillsRoot}/second-brain"),
             "A 'second-brain' directory must not survive under .apm/skills.");
     }
 
@@ -71,10 +72,10 @@ public sealed class KyberDocsSkillSetTests
     [Fact]
     public void SecondBrainIsGoneFromSquadSource()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = SquadSourceLoader.Load(Path.Combine(Corpus.Root, ProductRoot));
 
         Assert.False(
-            Directory.Exists(Path.Combine(ProductRoot, "skills", "second-brain")),
+            Corpus.DirectoryExists($"{ProductRoot}/skills/second-brain"),
             "products/kyber-squad/skills/second-brain must be removed.");
         Assert.DoesNotContain(source.Skills, skill => skill.Name == "second-brain");
         Assert.DoesNotContain("second-brain", source.Bundle.SkillNames);
@@ -89,9 +90,10 @@ public sealed class KyberDocsSkillSetTests
     [Fact]
     public void NoKyberDocsSkillLivesInSquad()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        string[] kyberDocsDirs = Directory.EnumerateDirectories(
-            Path.Combine(ProductRoot, "skills"), "kyber-docs-*", SearchOption.TopDirectoryOnly).ToArray();
+        SquadSource source = SquadSourceLoader.Load(Path.Combine(Corpus.Root, ProductRoot));
+        string[] kyberDocsDirs = Corpus.EnumerateDirectories($"{ProductRoot}/skills")
+            .Where(directory => Path.GetFileName(directory).StartsWith("kyber-docs-", StringComparison.Ordinal))
+            .ToArray();
 
         Assert.DoesNotContain(
             source.Skills,
@@ -107,8 +109,7 @@ public sealed class KyberDocsSkillSetTests
     [Fact]
     public void OnboardingSkillNamesTheRemediator()
     {
-        string skill = File.ReadAllText(
-            Path.Combine(ApmSkillsRoot, "kyber-docs-onboarding-and-assessment", "SKILL.md"));
+        string skill = Corpus.ReadText($"{ApmSkillsRoot}/kyber-docs-onboarding-and-assessment/SKILL.md");
 
         Assert.Contains("docs-dev", skill, StringComparison.Ordinal);
     }
@@ -125,19 +126,19 @@ public sealed class KyberDocsSkillSetTests
     [InlineData("kyber-docs-onboarding-and-assessment")]
     public void NoLiteralDocsPathsInKyberDocsSkills(string skillName)
     {
-        string skillRoot = Path.Combine(ApmSkillsRoot, skillName);
-        string[] files = Directory.EnumerateFiles(skillRoot, "*.md", SearchOption.AllDirectories)
+        string skillRoot = $"{ApmSkillsRoot}/{skillName}";
+        string[] files = Corpus.EnumerateFiles(skillRoot, "*.md")
             .Order(StringComparer.Ordinal)
             .ToArray();
 
         Assert.NotEmpty(files);
         foreach (string file in files)
         {
-            string text = File.ReadAllText(file);
+            string text = Corpus.ReadText(file);
             Assert.False(
                 LiteralDocsPathRegex.IsMatch(text),
                 $"Kyber-Docs skill '{skillName}' embeds a literal docs/ path in " +
-                $"'{Path.GetRelativePath(skillRoot, file)}'; resolve it through the Config Reg instead.");
+                $"'{file[(skillRoot.Length + 1)..]}'; resolve it through the Config Reg instead.");
         }
     }
 }

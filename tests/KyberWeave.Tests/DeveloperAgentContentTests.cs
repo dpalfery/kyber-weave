@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -12,8 +13,10 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class DeveloperAgentContentTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     private static readonly Lazy<SquadSource> Source = new(() => SquadSourceLoader.Load(ProductRoot));
 
