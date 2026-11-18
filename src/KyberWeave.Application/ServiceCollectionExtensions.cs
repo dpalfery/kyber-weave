@@ -23,6 +23,9 @@ using KyberWeave.Core.Squad.Briefs;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Data;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Configuration;
+using KyberWeave.Data.Review;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -45,6 +48,12 @@ public static class ServiceCollectionExtensions
 
         _ = services.AddWeaveDataServices();
         services.TryAddSingleton(TimeProvider.System);
+        _ = services.AddWeaveRunStartState();
+        services.TryAddSingleton<IUserHostConfigStore>(sp => new FileUserHostConfigStore(sp.GetRequiredService<IWritableFileSystem>()));
+        services.TryAddSingleton<IHooksConfigSource>(sp => new YamlHooksConfigSource(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton<ITestClassResolver>(sp => new ConventionTestClassResolver(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IEditHookService, EditHookService>();
         services.TryAddSingleton<IRunStartRunnerFactory, RunStartRunnerFactory>();
         services.TryAddSingleton<IRunStartEvidence, RunStartEvidenceService>();
@@ -129,6 +138,7 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<ISquadBriefService>(sp => new SquadBriefService(sp.GetRequiredService<IFileSystem>()));
         _ = services.AddWeaveSquadApplication();
+        services.TryAddSingleton<IGitChangeReader>(sp => new GitChangeReader(sp.GetRequiredService<IProgramRunner>()));
         services.TryAddSingleton<IReviewEvidenceService, ReviewEvidenceService>();
         services.TryAddSingleton<IReviewWorkTreeService, ReviewWorkTreeService>();
         services.TryAddSingleton<ISuppressionScanService, SuppressionScanService>();

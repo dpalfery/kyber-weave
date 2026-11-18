@@ -43,23 +43,17 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IDocumentSourceFactory>(_ => new DocumentLoaderFactory());
         services.TryAddSingleton<IGitWorktreeIdentity>(_ => new GitWorktreeIdentity());
         services.TryAddSingleton<IDoctorFileSystem>(_ => new PhysicalDoctorFileSystem());
-        services.TryAddSingleton<IHooksConfigSource>(sp => new YamlHooksConfigSource(
-            sp.GetRequiredService<IFileSystem>(),
-            sp.GetRequiredService<IProcessEnvironment>()));
-        services.TryAddSingleton<ITestClassResolver>(sp => new ConventionTestClassResolver(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ICodeGraphPortsFactory, CodeGraphPortsFactory>();
         services.TryAddSingleton<ICodeGraphIndexWorkspace, FileCodeGraphIndexWorkspace>();
         services.TryAddSingleton<IGitHookFiles, FileGitHookFiles>();
         services.TryAddSingleton<IMcpStdioSessionFactory, StdioMcpSessionFactory>();
         services.TryAddSingleton<IStatusLineFiles, FileStatusLineFiles>();
         services.TryAddSingleton(_ => StatusLineVersionProbeRunner.Create());
-        services.TryAddSingleton<IUserHostConfigStore, FileUserHostConfigStore>();
         services.TryAddSingleton<IGitCheckoutProbe>(_ => new GitCheckoutProbe());
         services.TryAddSingleton<IMcpConfigFiles>(_ => new PhysicalMcpConfigFiles());
         services.TryAddSingleton<ILaunchCommandResolverFactory>(_ => new KyberWeave.Core.Docs.Mcp.EnvironmentLaunchCommandResolverFactory());
         _ = services.AddWeaveSquadData();
         services.TryAddSingleton<IProgramRunner>(_ => new ProcessProgramRunner());
-        services.TryAddSingleton<IGitChangeReader>(sp => new GitChangeReader(sp.GetRequiredService<IProgramRunner>()));
         services.TryAddSingleton<IReviewCycleStore>(_ => new FileReviewCycleStore());
         services.TryAddSingleton<ISeatFolder, FileSeatFolder>();
         services.TryAddSingleton<ISkillArchiveWriter, ZipSkillArchiveWriter>();
@@ -97,8 +91,6 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IIdGenerator>(_ => new SystemIdGenerator());
         services.TryAddSingleton<IGitCommandRunner>(_ => new ProcessGitCommandRunner(ProcessGitCommandRunner.DefaultTimeout));
         services.TryAddSingleton<ICheckedOutBranchReader>(sp => new GitCheckedOutBranchReader(sp.GetRequiredService<IGitCommandRunner>()));
-        services.TryAddSingleton<IRunStateStore>(sp => new FileRunStateStore(sp.GetRequiredService<IWritableFileSystem>(), sp.GetRequiredService<ICheckedOutBranchReader>()));
-        services.TryAddSingleton<IRunCheckout>(sp => new RunCheckoutGuard(sp.GetRequiredService<IWritableFileSystem>(), sp.GetRequiredService<IRunStateStore>()));
         return services;
     }
 }
