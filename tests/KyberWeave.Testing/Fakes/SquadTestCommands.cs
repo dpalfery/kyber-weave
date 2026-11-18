@@ -311,7 +311,7 @@ internal static class SquadTestCommands
     /// The console a command writes to in a test: the process's router, installed before the command is built, so
     /// output goes to whichever test is capturing when the command writes.
     /// </summary>
-    private static SquadConsole CapturedSquadConsole() => new(CapturedConsole(), new SystemConsole());
+    internal static SquadConsole CapturedSquadConsole() => new(CapturedConsole(), new SystemConsole());
 
     private static IAnsiConsole CapturedConsole()
     {

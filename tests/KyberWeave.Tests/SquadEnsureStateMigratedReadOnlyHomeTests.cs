@@ -1,6 +1,7 @@
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Tests.FileSystem;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Testing.Squad;
 using Xunit;
 
@@ -22,7 +23,7 @@ public sealed class SquadEnsureStateMigratedReadOnlyHomeTests
             operation => operation.Name == nameof(InMemoryFileSystem.WriteAllBytesAtomic),
             new UnauthorizedAccessException("read-only home"));
 
-        SquadMigrationReport report = SquadCommandComposition.EnsureStateMigrated(
+        SquadMigrationReport report = SquadTestCommands.InMemoryRoots(SquadTestCommands.CapturedSquadConsole(), files: state.Files).EnsureStateMigrated(
             state.Migration,
             invokingCwd: null,
             projectRoot: null,
