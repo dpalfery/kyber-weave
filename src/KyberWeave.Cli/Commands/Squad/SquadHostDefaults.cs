@@ -8,6 +8,9 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Host;
+using KyberWeave.Data.Paths;
+using KyberWeave.Data.Squad.Release;
 
 namespace KyberWeave.Cli.Commands.Squad;
 
@@ -95,9 +98,7 @@ internal static class SquadHostDefaults
     {
         SquadStateStore store = stateStore ?? ResolveStateStore(userPaths, environmentReader);
         ISquadReleaseSource source = releaseSource
-                                     ?? SquadReleaseSources.GitHub(ReleaseOrigin
-                                         .Resolve(environmentReader ?? Environment.GetEnvironmentVariable)
-                                         .ApiRoot);
+                                     ?? CreateGitHubReleaseSource(environmentReader ?? Environment.GetEnvironmentVariable);
         return CreateLifecycleService(
             source,
             renderer ?? ResolveRenderer(),
@@ -154,7 +155,7 @@ internal static class SquadHostDefaults
         string? local = new PhysicalSquadFileAccess().FindCheckoutSquadSourceRoot();
         ISquadReleaseSource releaseSource = local is not null
             ? SquadReleaseSources.LocalCheckout(local)
-            : SquadReleaseSources.GitHub(ReleaseOrigin.Resolve(Environment.GetEnvironmentVariable).ApiRoot);
+            : CreateGitHubReleaseSource(Environment.GetEnvironmentVariable);
         SquadLifecycleService lifecycleService = CreateLifecycleService(resolvedPaths, stateStore, releaseSource);
         return new SquadInstanceService(
             lifecycleService,
@@ -164,6 +165,22 @@ internal static class SquadHostDefaults
             new FileSquadInstanceLinkSync(),
             new PhysicalSquadFileAccess(),
             stateStore);
+    }
+
+    [SuppressMessage(
+        "Reliability",
+        "CA2000:Dispose objects before losing scope",
+        Justification = "The caller owns the release source and disposes it with the run.")]
+    private static ISquadReleaseSource CreateGitHubReleaseSource(Func<string, string?> readEnvironment)
+    {
+        PhysicalFileSystem files = new();
+        return new GitHubSquadReleaseSource(
+            new SocketSquadReleaseHttpHandlers().Create(),
+            ReleaseOrigin.Resolve(readEnvironment).ApiRoot,
+            files,
+            new PhysicalPathResolver(files),
+            new ProcessEnvironment(),
+            new SystemIdGenerator());
     }
 
     private static string? ReadFileTextOrNull(string path)

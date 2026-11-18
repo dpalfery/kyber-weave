@@ -389,6 +389,61 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
     }
 
     /// <inheritdoc />
+    public Stream OpenWriteNew(string path)
+    {
+        Enter(nameof(OpenWriteNew), path);
+        Node parent = ResolveParent(path, out string name);
+        if (Child(parent, name) is not null)
+        {
+            throw new IOException($"The file '{path}' already exists.");
+        }
+
+        Node file = NewFile(name, parent, []);
+        parent.Children[name] = file;
+        return new NewFileStream(file, _time);
+    }
+
+    /// <inheritdoc />
+    public void MoveDirectory(string sourcePath, string destinationPath)
+    {
+        Enter(nameof(MoveDirectory), sourcePath, destinationPath);
+        Node source = Resolve(sourcePath, followFinal: false)
+            ?? throw new DirectoryNotFoundException($"Could not find a part of the path '{sourcePath}'.");
+        if (!source.IsDirectory || source.LinkTarget is not null)
+        {
+            throw new IOException($"The source '{sourcePath}' is not a directory.");
+        }
+
+        string destination = Full(destinationPath);
+        string? parentPath = Path.GetDirectoryName(destination);
+        Node parent = (parentPath is null ? null : ResolveFull(parentPath, followFinal: true))
+            ?? throw new DirectoryNotFoundException($"Could not find a part of the path '{destinationPath}'.");
+        if (!parent.IsDirectory)
+        {
+            throw new DirectoryNotFoundException($"Could not find a part of the path '{destinationPath}'.");
+        }
+
+        string name = Path.GetFileName(destination);
+        if (Child(parent, name) is not null)
+        {
+            throw new IOException($"The path '{destinationPath}' already exists.");
+        }
+
+        for (Node? ancestor = parent; ancestor is not null; ancestor = ancestor.Parent)
+        {
+            if (ReferenceEquals(ancestor, source))
+            {
+                throw new IOException($"The directory '{sourcePath}' cannot move into itself.");
+            }
+        }
+
+        Remove(source);
+        source.Parent = parent;
+        source.Name = name;
+        parent.Children[name] = source;
+    }
+
+    /// <inheritdoc />
     public void DeleteFile(string path)
     {
         Enter(nameof(DeleteFile), path);
@@ -980,6 +1035,24 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
 
     private bool Matches(string searchPattern, string name) =>
         FileSystemName.MatchesSimpleExpression(searchPattern, name, ignoreCase: !CaseSensitive);
+
+    /// <summary>A write stream over a file created by <see cref="OpenWriteNew"/>; its bytes land in the file when the stream is disposed.</summary>
+    private sealed class NewFileStream(Node file, TimeProvider time) : MemoryStream
+    {
+        private bool _committed;
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && !_committed)
+            {
+                _committed = true;
+                file.Content = ToArray();
+                file.LastWriteTimeUtc = time.GetUtcNow().UtcDateTime;
+            }
+
+            base.Dispose(disposing);
+        }
+    }
 
     private sealed class Node
     {

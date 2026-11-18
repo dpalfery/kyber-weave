@@ -137,6 +137,12 @@ public sealed class InMemoryRepositoryFileStore(InMemoryFileSystem files) : IRep
     public bool TryCreateNewFile(string path) => _fs.TryCreateNewFile(path);
 
     /// <inheritdoc />
+    public Stream OpenWriteNew(string path) => _fs.OpenWriteNew(path);
+
+    /// <inheritdoc />
+    public void MoveDirectory(string sourcePath, string destinationPath) => _fs.MoveDirectory(sourcePath, destinationPath);
+
+    /// <inheritdoc />
     public void DeleteFile(string path) => _fs.DeleteFile(path);
 
     /// <inheritdoc />

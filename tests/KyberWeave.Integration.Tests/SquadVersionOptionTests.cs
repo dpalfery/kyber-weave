@@ -264,7 +264,7 @@ public sealed class SquadVersionOptionTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "install-missing-release");
         Directory.CreateDirectory(targetDir);
         using StatusCodeHandler handler = new StatusCodeHandler(HttpStatusCode.NotFound);
-        using GitHubSquadReleaseSource releaseSource = new(handler, ApiRoot);
+        using GitHubSquadReleaseSource releaseSource = RealSquadReleaseSource.Create(handler, ApiRoot);
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new(userPaths);

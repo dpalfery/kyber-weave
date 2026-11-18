@@ -98,6 +98,22 @@ public interface IWritableFileSystem : IFileSystem
     /// <exception cref="IOException">The file could not be created for a reason other than the path being taken.</exception>
     bool TryCreateNewFile(string path);
 
+    /// <summary>Creates a file that must not exist yet and opens it for writing, so only one caller can win a race for the path.</summary>
+    /// <param name="path">The file.</param>
+    /// <returns>A write-only stream over the new file; disposing it completes the write. The caller owns the stream.</returns>
+    /// <exception cref="DirectoryNotFoundException">A directory on the path does not exist.</exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not create the file, or a directory is in its place.</exception>
+    /// <exception cref="IOException">The file or a directory already exists at the path, or the file could not be created.</exception>
+    Stream OpenWriteNew(string path);
+
+    /// <summary>Moves a directory and everything under it to a path that must be free, as one rename.</summary>
+    /// <param name="sourcePath">The directory to move.</param>
+    /// <param name="destinationPath">Where it goes; nothing may be there, and its parent directory must exist.</param>
+    /// <exception cref="DirectoryNotFoundException">The source directory or the destination's parent does not exist.</exception>
+    /// <exception cref="IOException">The destination exists, or the move crosses a volume boundary and cannot be one rename.</exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not move the directory.</exception>
+    void MoveDirectory(string sourcePath, string destinationPath);
+
     /// <summary>Deletes a file. A missing file is not an error.</summary>
     /// <param name="path">The file.</param>
     /// <exception cref="UnauthorizedAccessException">The process may not delete the file, or a directory is in its place.</exception>

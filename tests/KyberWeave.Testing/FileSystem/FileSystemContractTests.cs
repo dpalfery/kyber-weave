@@ -480,6 +480,79 @@ public abstract class FileSystemContractTests : IDisposable
     }
 
     [Fact]
+    public void OpenWriteNewCreatesTheFileWithTheBytesWrittenOnDispose()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string path = At(root, "streamed.bin");
+
+        using (Stream stream = files.OpenWriteNew(path))
+        {
+            stream.Write([1, 2, 3]);
+        }
+
+        Assert.Equal([1, 2, 3], files.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void OpenWriteNewRefusesAnOccupiedPathAndLeavesItIntact()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string path = WriteFile(files, root, "taken.txt", "taken");
+
+        _ = Assert.Throws<IOException>(() => files.OpenWriteNew(path));
+
+        Assert.Equal("taken", files.ReadAllText(path));
+    }
+
+    [Fact]
+    public void OpenWriteNewIntoAMissingDirectoryFailsAsDocumented()
+    {
+        IWritableFileSystem files = Starting(out string root);
+
+        _ = Assert.Throws<DirectoryNotFoundException>(() => files.OpenWriteNew(At(root, "missing/out.bin")));
+    }
+
+    [Fact]
+    public void MoveDirectoryMovesTheWholeTree()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string source = At(root, "staging");
+        files.CreateDirectory(At(source, "nested"));
+        _ = WriteFile(files, source, "nested/leaf.txt", "leaf");
+        string destination = At(root, "final");
+
+        files.MoveDirectory(source, destination);
+
+        Assert.False(files.DirectoryExists(source));
+        Assert.Equal("leaf", files.ReadAllText(At(destination, "nested/leaf.txt")));
+    }
+
+    [Fact]
+    public void MoveDirectoryRefusesAnOccupiedDestination()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string source = At(root, "staging");
+        files.CreateDirectory(source);
+        string destination = At(root, "final");
+        files.CreateDirectory(destination);
+
+        _ = Assert.Throws<IOException>(() => files.MoveDirectory(source, destination));
+
+        Assert.True(files.DirectoryExists(source));
+    }
+
+    [Fact]
+    public void MoveDirectoryFailsForAMissingSourceOrDestinationParent()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string source = At(root, "staging");
+        files.CreateDirectory(source);
+
+        _ = Assert.Throws<DirectoryNotFoundException>(() => files.MoveDirectory(At(root, "absent"), At(root, "final")));
+        _ = Assert.Throws<DirectoryNotFoundException>(() => files.MoveDirectory(source, At(root, "missing/final")));
+    }
+
+    [Fact]
     public void TryCreateNewFileReportsALostRaceToADirectoryWithoutThrowing()
     {
         IWritableFileSystem files = Starting(out string root);
