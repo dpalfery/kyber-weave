@@ -1,6 +1,7 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.RunStart;
 using KyberWeave.Data.RunStart;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
 
@@ -14,11 +15,15 @@ public sealed class RunStateAndCheckoutTests
     private const string Linked = "/work/repo-run";
 
     private readonly InMemoryFileSystem _files = new();
+    private readonly FakeProcessEnvironment _environment = new(operatingSystem: OperatingSystemKind.Linux);
+    private readonly FakePathResolver _paths;
     private readonly Dictionary<string, string?> _branches = [];
 
-    private FileRunStateStore Store() => new(_files, new ScriptedBranchReader(_branches));
+    public RunStateAndCheckoutTests() => _paths = new FakePathResolver(_files);
 
-    private RunCheckoutGuard Guard() => new(_files, Store());
+    private FileRunStateStore Store() => new(_files, new ScriptedBranchReader(_branches), _paths, _environment);
+
+    private RunCheckoutGuard Guard() => new(_files, Store(), _environment);
 
     private void Record(string worktree, string branch, string repository) =>
         Store().Write(Home, branch, "origin/main", new RunStartPlace(repository + "/.git", worktree, DateTimeOffset.UnixEpoch));

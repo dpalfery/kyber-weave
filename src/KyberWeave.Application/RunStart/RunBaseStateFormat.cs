@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Core.RunStart;
 
@@ -39,13 +41,27 @@ public static class RunBaseStateFormat
     }
 
     /// <summary>How two paths are compared: exactly on Linux, ignoring case elsewhere.</summary>
-    public static StringComparison PathComparison =>
-        OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+    /// <param name="environment">The platform the comparison is made on.</param>
+    public static StringComparison PathComparison(IProcessEnvironment environment)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+
+        return environment.OperatingSystem == OperatingSystemKind.Linux
+            ? StringComparison.Ordinal
+            : StringComparison.OrdinalIgnoreCase;
+    }
 
     /// <summary>A directory path in the form two records of one repository compare equal in.</summary>
-    /// <param name="directory">The directory.</param>
-    public static string NormalizeDirectory(string directory) =>
-        Path.GetFullPath(directory).Replace('\\', '/').TrimEnd('/');
+    /// <param name="directory">The directory; a relative one is taken against the environment's current directory.</param>
+    /// <param name="paths">Resolves the full path.</param>
+    /// <param name="environment">Supplies the current directory a relative path is resolved against.</param>
+    public static string NormalizeDirectory(string directory, IPathResolver paths, IProcessEnvironment environment)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
+
+        return paths.GetFullPath(directory, environment.CurrentDirectory).Replace('\\', '/').TrimEnd('/');
+    }
 
     /// <summary>Renders the record for a branch.</summary>
     /// <param name="baseRef">The base the branch was created from.</param>

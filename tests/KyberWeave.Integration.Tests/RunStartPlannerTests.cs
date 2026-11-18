@@ -41,7 +41,9 @@ public sealed class RunStartPlannerTests : IDisposable
                 new KyberWeave.Data.Hooks.PhysicalFileSystem(),
                 new KyberWeave.Data.RunStart.GitCheckedOutBranchReader(
                     new KyberWeave.Data.RunStart.ProcessGitCommandRunner(
-                        KyberWeave.Data.RunStart.ProcessGitCommandRunner.DefaultTimeout))));
+                        KyberWeave.Data.RunStart.ProcessGitCommandRunner.DefaultTimeout)),
+                new KyberWeave.Data.Paths.PhysicalPathResolver(new KyberWeave.Data.Hooks.PhysicalFileSystem()),
+                new KyberWeave.Data.Host.ProcessEnvironment()));
 
     private readonly RunStartProbe _probe = RunStartProbe.Create();
 
