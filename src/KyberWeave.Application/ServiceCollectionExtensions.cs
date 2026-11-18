@@ -150,6 +150,8 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<INotSeatedStore>(sp => new FileNotSeatedStore(sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<IRepositoryFileLister>(sp => new FileRepositoryFileLister(
             sp.GetRequiredService<IProgramRunner>(), sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<ITestClassSources>(sp => new FileTestClassSources(
+            sp.GetRequiredService<IFileSystem>(), sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IGitChangeReader>(sp => new GitChangeReader(sp.GetRequiredService<IProgramRunner>()));
         services.TryAddSingleton<ICoverageReportSource>(sp => new FileCoverageReportSource(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IContainedFileReader>(sp => new FileContainedFileReader(sp.GetRequiredService<IFileSystem>()));

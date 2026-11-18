@@ -25,6 +25,9 @@ public sealed class ProcessEnvironment : IProcessEnvironment
     public string CurrentDirectory => Environment.CurrentDirectory;
 
     /// <inheritdoc />
+    public string ApplicationBaseDirectory => AppContext.BaseDirectory;
+
+    /// <inheritdoc />
     public string HomeDirectory => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
     /// <inheritdoc />

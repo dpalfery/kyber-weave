@@ -27,6 +27,7 @@ public abstract class ProcessEnvironmentContractTests
         IProcessEnvironment environment = CreateEnvironment();
 
         Assert.Equal(Facts.CurrentDirectory, environment.CurrentDirectory);
+        Assert.Equal(Facts.ApplicationBaseDirectory, environment.ApplicationBaseDirectory);
         Assert.Equal(Facts.HomeDirectory, environment.HomeDirectory);
         Assert.Equal(Facts.TempDirectory, environment.TempDirectory);
     }
@@ -80,6 +81,7 @@ public abstract class ProcessEnvironmentContractTests
 
 /// <summary>The answers a <see cref="IProcessEnvironment" /> is expected to give in a contract run.</summary>
 /// <param name="CurrentDirectory">The expected current directory.</param>
+/// <param name="ApplicationBaseDirectory">The expected directory of the application's own files.</param>
 /// <param name="HomeDirectory">The expected home directory.</param>
 /// <param name="TempDirectory">The expected temporary directory.</param>
 /// <param name="UserName">The expected user name.</param>
@@ -92,6 +94,7 @@ public abstract class ProcessEnvironmentContractTests
 /// <param name="AbsentVariableName">A variable the environment does not have.</param>
 public sealed record ProcessEnvironmentFacts(
     string CurrentDirectory,
+    string ApplicationBaseDirectory,
     string HomeDirectory,
     string TempDirectory,
     string UserName,

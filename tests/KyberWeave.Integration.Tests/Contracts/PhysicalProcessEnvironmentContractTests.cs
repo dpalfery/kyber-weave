@@ -19,6 +19,7 @@ public sealed class PhysicalProcessEnvironmentContractTests : ProcessEnvironment
     /// <inheritdoc />
     protected override ProcessEnvironmentFacts Facts => new(
         CurrentDirectory: Environment.CurrentDirectory,
+        ApplicationBaseDirectory: AppContext.BaseDirectory,
         HomeDirectory: Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         TempDirectory: Path.GetTempPath(),
         UserName: Environment.UserName,
