@@ -1,5 +1,6 @@
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Data.Paths;
 using System.Runtime.InteropServices;
 
 namespace KyberWeave.Core.Arbiter.Plans;
@@ -53,8 +54,8 @@ public sealed class PlanPathResolver(IPathResolver paths, IProcessEnvironment en
         string candidate;
         try
         {
-            root = paths.GetFullPath(repositoryRoot, environment.CurrentDirectory);
-            candidate = paths.GetFullPath(planFile, root);
+            root = TrailingSeparator.Keep(repositoryRoot, paths.GetFullPath(repositoryRoot, environment.CurrentDirectory));
+            candidate = TrailingSeparator.Keep(planFile, paths.GetFullPath(planFile, root));
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
         {

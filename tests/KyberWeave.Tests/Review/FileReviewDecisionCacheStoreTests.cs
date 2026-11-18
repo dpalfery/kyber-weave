@@ -43,6 +43,24 @@ public sealed class FileReviewDecisionCacheStoreTests
     }
 
     [Fact]
+    public void ASavePathSpelledWithATrailingSeparatorCreatesThatDirectoryAndFails()
+    {
+        string asDirectory = Path.Combine(Root, "folder") + Path.DirectorySeparatorChar;
+
+        Assert.False(_store.Save(asDirectory, new Dictionary<string, ReviewCachedAnswer>()));
+        Assert.True(_files.DirectoryExists(Path.Combine(Root, "folder")));
+    }
+
+    [Fact]
+    public void ASavePathSpelledWithoutATrailingSeparatorCreatesOnlyItsParent()
+    {
+        string asFile = Path.Combine(Root, "folder");
+
+        Assert.True(_store.Save(asFile, new Dictionary<string, ReviewCachedAnswer>()));
+        Assert.True(_files.FileExists(asFile));
+    }
+
+    [Fact]
     public void ASaveThatFailsReportsFalse()
     {
         _files.FailWhen(operation => operation.Name == nameof(InMemoryFileSystem.WriteAllText));

@@ -60,6 +60,24 @@ public sealed class FileProjectFileLocatorTests
     public void ABlankRepositoryRootFindsNothing() =>
         Assert.Null(_locator.NearestProjectFile(" ", "src/App/Program.cs"));
 
+    [Fact]
+    public void ARootSpelledWithATrailingSeparatorDoesNotSearchTheRootItself()
+    {
+        Add("package.json");
+        Add("a.cs");
+
+        Assert.Null(_locator.NearestProjectFile(Root + Path.DirectorySeparatorChar, "a.cs"));
+    }
+
+    [Fact]
+    public void ARootSpelledWithoutATrailingSeparatorSearchesTheRootItself()
+    {
+        Add("package.json");
+        Add("a.cs");
+
+        Assert.Equal("package.json", _locator.NearestProjectFile(Root, "a.cs"));
+    }
+
     private void Add(string relativePath)
     {
         string path = Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar));
