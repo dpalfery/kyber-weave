@@ -140,7 +140,7 @@ internal static class SquadHostDefaults
             RealSquadDeployment.Planner,
             new SquadTransactionFactory(stateStore),
             new FileSquadResponseGuidanceStore(),
-            new FileFactoryHooksShadowing(),
+            new FactoryHooksShadowing(new PhysicalFileSystem()),
             new SquadCanonicalProfileStore(stateStore.UserPaths),
             new PhysicalSquadFileAccess(),
             pathSemantics ?? SquadFileSystemPathSemantics.Instance,

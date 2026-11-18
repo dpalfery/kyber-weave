@@ -28,19 +28,6 @@ public sealed class FileSquadResponseGuidanceStore : ISquadResponseGuidanceStore
     public bool IsDegradableFailure(Exception exception) => SquadResponseGuidanceDeployer.IsDegradableFailure(exception);
 }
 
-/// <summary>Resolves Factory hook shadowing from the target's files.</summary>
-public sealed class FileFactoryHooksShadowing : ISquadFactoryHooksShadowing
-{
-    /// <inheritdoc />
-    public FactoryHooksShadowingOutcome Resolve(
-        string targetRoot,
-        IReadOnlyList<SquadTarget> targets,
-        SquadArbiterWiring? arbiter,
-        SquadDeploymentScope scope,
-        IReadOnlyList<SquadRenderedBlock>? blocks) =>
-        FactoryHooksShadowing.Resolve(targetRoot, targets, arbiter, scope, blocks);
-}
-
 /// <summary>Probes the files of a release's extraction tree and of the checkout the binary runs from.</summary>
 public sealed class PhysicalSquadFileAccess : ISquadFileAccess
 {
@@ -155,11 +142,4 @@ public sealed class CheckoutOrSnapshotCanonicalProfileResolver(
             return null;
         }
     }
-}
-
-/// <summary>Resolves targets, probing the root for each harness's marker files.</summary>
-public sealed class FileSquadTargetResolver : ISquadTargetResolver
-{
-    /// <inheritdoc />
-    public SquadTargetResolutionDecision Resolve(SquadTargetResolutionRequest request) => SquadTargetResolver.Resolve(request);
 }

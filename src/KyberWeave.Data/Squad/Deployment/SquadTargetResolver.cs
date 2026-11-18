@@ -1,7 +1,16 @@
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
+
 namespace KyberWeave.Core.Squad.Deployment;
 
 /// <summary>Resolves Squad targets without prompting or writing global console state.</summary>
-public static class SquadTargetResolver
+/// <param name="files">Probes the root for each harness's marker files.</param>
+/// <param name="paths">Turns the caller's root spelling into a full path.</param>
+/// <param name="environment">Supplies the base directory a relative root resolves against.</param>
+public sealed class SquadTargetResolver(
+    IFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : ISquadTargetResolver
 {
     private static readonly IReadOnlyDictionary<SquadTarget, IReadOnlyList<StrongMarker>> Markers =
         new Dictionary<SquadTarget, IReadOnlyList<StrongMarker>>
@@ -27,7 +36,7 @@ public static class SquadTargetResolver
         };
 
     /// <summary>Resolves targets according to the operation-specific precedence contract.</summary>
-    public static SquadTargetResolutionDecision Resolve(SquadTargetResolutionRequest request)
+    public SquadTargetResolutionDecision Resolve(SquadTargetResolutionRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.RootPath);
@@ -67,7 +76,7 @@ public static class SquadTargetResolver
         _ => InstallRecoveryCommand
     };
 
-    private static (IReadOnlyList<SquadTarget> Targets, SquadTargetResolutionSource Source)
+    private (IReadOnlyList<SquadTarget> Targets, SquadTargetResolutionSource Source)
         SelectTargets(SquadTargetResolutionRequest request)
     {
         if (request.Operation == SquadTargetOperation.Update && request.ExplicitTargets.Count > 0)
@@ -101,16 +110,16 @@ public static class SquadTargetResolver
         return targets.Where(target => !excluded.Contains(target)).ToArray();
     }
 
-    private static IReadOnlyList<SquadTarget> DetectMarkers(string rootPath)
+    private IReadOnlyList<SquadTarget> DetectMarkers(string rootPath)
     {
-        string root = Path.GetFullPath(rootPath);
+        string root = paths.GetFullPath(rootPath, environment.CurrentDirectory);
         List<SquadTarget> detected = new List<SquadTarget>();
         foreach (SquadTarget target in SquadTargetCatalog.All)
         {
             if (!Markers.TryGetValue(target, out IReadOnlyList<StrongMarker>? markers))
                 continue;
 
-            if (markers.Any(marker => marker.ExistsUnder(root)))
+            if (markers.Any(marker => marker.ExistsUnder(root, files)))
                 detected.Add(target);
         }
 
@@ -135,12 +144,12 @@ public static class SquadTargetResolver
 
     private sealed record StrongMarker(string RelativePath, bool IsDirectory)
     {
-        public bool ExistsUnder(string rootPath)
+        public bool ExistsUnder(string rootPath, IFileSystem files)
         {
             string path = Path.Combine(
                 rootPath,
                 RelativePath.Replace('/', Path.DirectorySeparatorChar));
-            return IsDirectory ? Directory.Exists(path) : File.Exists(path);
+            return IsDirectory ? files.DirectoryExists(path) : files.FileExists(path);
         }
     }
 }

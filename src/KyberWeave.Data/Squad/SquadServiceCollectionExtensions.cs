@@ -59,7 +59,7 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<ISquadTransactionFactory>(sp => new SquadTransactionFactory(sp.GetRequiredService<ISquadStateStore>()));
         services.TryAddSingleton<ISquadResponseGuidanceStore, FileSquadResponseGuidanceStore>();
-        services.TryAddSingleton<ISquadFactoryHooksShadowing, FileFactoryHooksShadowing>();
+        services.TryAddSingleton<ISquadFactoryHooksShadowing>(sp => new FactoryHooksShadowing(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ISquadInstanceLinkSync>(sp => new SquadInstanceLinkSync(
             sp.GetRequiredService<IWritableFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
@@ -71,7 +71,10 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<ISquadArchiveWriter>(),
             sp.GetRequiredService<ISquadSourceLoader>(),
             sp.GetRequiredService<ISquadCompanionSkills>()));
-        services.TryAddSingleton<ISquadSkillShadowing, FileSquadSkillShadowing>();
+        services.TryAddSingleton<ISquadSkillShadowing>(sp => new SquadSkillShadowing(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IDevinImportOverlapInspector, FileDevinImportOverlapInspector>();
         services.TryAddSingleton<IZCodeMcpInspector, FileZCodeMcpInspector>();
         services.TryAddSingleton<ISquadHookJsonFile, FileSquadHookJsonFile>();
@@ -84,7 +87,10 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
-        services.TryAddSingleton<ISquadTargetResolver, FileSquadTargetResolver>();
+        services.TryAddSingleton<ISquadTargetResolver>(sp => new SquadTargetResolver(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<ILease, MutexLease>();
         services.TryAddSingleton<ISquadCanonicalProfileResolver, CheckoutOrSnapshotCanonicalProfileResolver>();
         services.TryAddSingleton<ISquadLinkFileSystem>(_ => OperatingSystem.IsWindows()

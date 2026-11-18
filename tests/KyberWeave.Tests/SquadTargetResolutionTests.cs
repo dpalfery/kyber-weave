@@ -1,4 +1,7 @@
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Host;
+using KyberWeave.Data.Paths;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -300,7 +303,7 @@ public sealed class SquadTargetResolutionTests : IDisposable
             IsInteractive = true
         };
 
-        SquadTargetResolutionDecision decision = SquadTargetResolver.Resolve(request);
+        SquadTargetResolutionDecision decision = Resolve(request);
 
         AssertResolved(
             decision,
@@ -329,7 +332,7 @@ public sealed class SquadTargetResolutionTests : IDisposable
             IsInteractive = true
         };
 
-        SquadTargetResolutionDecision decision = SquadTargetResolver.Resolve(request);
+        SquadTargetResolutionDecision decision = Resolve(request);
 
         Assert.Multiple(
             () => Assert.Equal(SquadTargetResolutionKind.Resolved, decision.Kind),
@@ -378,7 +381,7 @@ public sealed class SquadTargetResolutionTests : IDisposable
             IsInteractive = false
         };
 
-        SquadTargetResolutionDecision decision = SquadTargetResolver.Resolve(request);
+        SquadTargetResolutionDecision decision = Resolve(request);
 
         Assert.Equal(SquadTargetResolutionKind.Failure, decision.Kind);
         Assert.Empty(decision.Targets);
@@ -388,6 +391,13 @@ public sealed class SquadTargetResolutionTests : IDisposable
     }
 
     public void Dispose() => _temp.Dispose();
+
+    private static SquadTargetResolutionDecision Resolve(SquadTargetResolutionRequest request)
+    {
+        PhysicalFileSystem files = new();
+        return new SquadTargetResolver(files, new PhysicalPathResolver(files), new ProcessEnvironment())
+            .Resolve(request);
+    }
 
     private SquadTargetResolutionDecision ResolveInstall(
         IReadOnlyList<string>? explicitTargets = null,
@@ -407,7 +417,7 @@ public sealed class SquadTargetResolutionTests : IDisposable
             IsInteractive = isInteractive
         };
 
-        return SquadTargetResolver.Resolve(request);
+        return Resolve(request);
     }
 
     private void CreateFixture(string relativePath, bool isDirectory)
