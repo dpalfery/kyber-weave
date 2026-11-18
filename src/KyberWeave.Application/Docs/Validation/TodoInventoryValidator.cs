@@ -32,9 +32,9 @@ public sealed class TodoInventoryValidator
     /// <summary>A todo document in the active todo folder that the todo index does not reach.</summary>
     public const string UnlistedTodo = "KW-DOC-LIFECYCLE-002";
 
-    private readonly IDocsEngineConfig _config;
+    private readonly KyberWeaveConfig _config;
 
-    public TodoInventoryValidator(IDocsEngineConfig config)
+    public TodoInventoryValidator(KyberWeaveConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
         _config = config;

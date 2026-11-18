@@ -38,7 +38,7 @@ public class ManagedGlossary : IManagedGlossary
 
     private readonly IPathResolver _paths;
     private readonly string _repositoryRoot;
-    private readonly IDocsEngineConfig _config;
+    private readonly KyberWeaveConfig _config;
     private readonly IRepositoryFileStore _files;
     private readonly TimeProvider _timeProvider;
     private readonly string _relativePath;
@@ -53,7 +53,7 @@ public class ManagedGlossary : IManagedGlossary
     /// <param name="environment">Names the directory a relative repository root is resolved against.</param>
     public ManagedGlossary(
         string repositoryRoot,
-        IDocsEngineConfig config,
+        KyberWeaveConfig config,
         TimeProvider timeProvider,
         IRepositoryFileStore files,
         IPathResolver paths,

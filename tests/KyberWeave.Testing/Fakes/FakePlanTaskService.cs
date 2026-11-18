@@ -24,7 +24,7 @@ internal sealed class FakePlanTaskService : IPlanTaskService
     /// <inheritdoc />
     public PlanTaskFileOutcome Run(
         string repoRoot,
-        IDocsEngineConfig config,
+        KyberWeaveConfig config,
         string artifactPath,
         PlanTaskFileMode mode,
         IPlanTaskAgentPicker? picker = null)
@@ -37,7 +37,7 @@ internal sealed class FakePlanTaskService : IPlanTaskService
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<string> ActivePlans(string repoRoot, IDocsEngineConfig config)
+    public IReadOnlyList<string> ActivePlans(string repoRoot, KyberWeaveConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
         return PlansByRoot.TryGetValue(repoRoot, out IReadOnlyList<string>? plans) ? plans : [];

@@ -46,5 +46,5 @@ public interface IManagedGlossaryFactory
     /// <returns>The glossary.</returns>
     /// <exception cref="ArgumentException">The configured path is rooted or leaves the repository.</exception>
     /// <exception cref="InvalidOperationException">The path passes through a symbolic link.</exception>
-    IManagedGlossary Open(string repositoryRoot, IDocsEngineConfig config);
+    IManagedGlossary Open(string repositoryRoot, KyberWeaveConfig config);
 }

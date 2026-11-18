@@ -13,11 +13,11 @@ public interface IPlanTaskService
     /// <param name="mode">What to do with the derived file.</param>
     /// <param name="picker">Chooses each unassigned task's agent on a write; null when no decision model is configured.</param>
     /// <returns>The findings and the derived file.</returns>
-    PlanTaskFileOutcome Run(string repoRoot, IDocsEngineConfig config, string artifactPath, PlanTaskFileMode mode, IPlanTaskAgentPicker? picker = null);
+    PlanTaskFileOutcome Run(string repoRoot, KyberWeaveConfig config, string artifactPath, PlanTaskFileMode mode, IPlanTaskAgentPicker? picker = null);
 
     /// <summary>Lists the plans and specifications that are Ready or In progress.</summary>
     /// <param name="repoRoot">The absolute repository root.</param>
     /// <param name="config">The effective configuration, which says where plans live.</param>
     /// <returns>Repository-relative paths, sorted.</returns>
-    IReadOnlyList<string> ActivePlans(string repoRoot, IDocsEngineConfig config);
+    IReadOnlyList<string> ActivePlans(string repoRoot, KyberWeaveConfig config);
 }

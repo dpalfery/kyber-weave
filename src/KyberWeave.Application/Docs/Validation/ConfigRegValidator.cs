@@ -47,12 +47,12 @@ public sealed partial class ConfigRegValidator
     private static partial Regex PropertyLine();
 
     private readonly string _repoRoot;
-    private readonly IDocsEngineConfig _config;
+    private readonly KyberWeaveConfig _config;
     private readonly IRepositoryFileStore _files;
 
     public ConfigRegValidator(
         string repoRoot,
-        IDocsEngineConfig config,
+        KyberWeaveConfig config,
         IRepositoryFileStore files,
         IPathResolver paths,
         IProcessEnvironment environment)

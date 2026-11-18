@@ -17,12 +17,6 @@ public sealed record SquadTransactionStep(
     SquadTransactionStepKind Kind,
     string? RelativePath = null);
 
-/// <summary>Receives transaction checkpoints after their corresponding filesystem mutation.</summary>
-public interface ISquadTransactionObserver
-{
-    void AfterStep(SquadTransactionStep transactionStep);
-}
-
 public enum SquadTransactionCheckpointKind
 {
     Prepared,
@@ -35,8 +29,3 @@ public sealed record SquadTransactionCheckpoint(
     int Sequence,
     SquadTransactionCheckpointKind Kind,
     string? RelativePath = null);
-
-public interface ISquadTransactionCheckpointObserver : ISquadTransactionObserver
-{
-    void AfterCheckpoint(SquadTransactionCheckpoint checkpoint);
-}

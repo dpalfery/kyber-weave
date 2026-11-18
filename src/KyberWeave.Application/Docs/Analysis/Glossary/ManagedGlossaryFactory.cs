@@ -17,6 +17,6 @@ public sealed class ManagedGlossaryFactory(
     IProcessEnvironment environment) : IManagedGlossaryFactory
 {
     /// <inheritdoc />
-    public IManagedGlossary Open(string repositoryRoot, IDocsEngineConfig config) =>
+    public IManagedGlossary Open(string repositoryRoot, KyberWeaveConfig config) =>
         new ManagedGlossary(repositoryRoot, config, timeProvider, files, paths, environment);
 }

@@ -20,12 +20,12 @@ public sealed partial class PlanTaskService(
     private const string TaskList = "tasks.md";
 
     /// <inheritdoc />
-    public PlanTaskFileOutcome Run(string repoRoot, IDocsEngineConfig config, string artifactPath, PlanTaskFileMode mode, IPlanTaskAgentPicker? picker = null) =>
+    public PlanTaskFileOutcome Run(string repoRoot, KyberWeaveConfig config, string artifactPath, PlanTaskFileMode mode, IPlanTaskAgentPicker? picker = null) =>
         new PlanTaskFileGenerator(paths.GetFullPath(repoRoot, environment.CurrentDirectory), config, files, picker)
             .Run(artifactPath, mode);
 
     /// <inheritdoc />
-    public IReadOnlyList<string> ActivePlans(string repoRoot, IDocsEngineConfig config)
+    public IReadOnlyList<string> ActivePlans(string repoRoot, KyberWeaveConfig config)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);

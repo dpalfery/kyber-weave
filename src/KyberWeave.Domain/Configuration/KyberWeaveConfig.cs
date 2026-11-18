@@ -3,7 +3,7 @@ using KyberWeave.Core.Arbiter;
 namespace KyberWeave.Core.Configuration;
 
 /// <summary>Combined Kyber-Weave host configuration.</summary>
-public sealed class KyberWeaveConfig : IDocsEngineConfig
+public sealed class KyberWeaveConfig
 {
     public OntologyConfig Ontology { get; init; } = OntologyConfig.ProductDefaults;
 
