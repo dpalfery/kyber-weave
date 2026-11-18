@@ -172,6 +172,34 @@ public sealed class DocsMcpCommandSeamTests
     }
 
     /// <summary>
+    /// A named harness whose file the seam reports present is still not satisfied while it holds a proven retired
+    /// key: the repair is reached so the migration happens, rather than the file being reported as already right
+    /// and left with one server under two names.
+    /// </summary>
+    [Fact]
+    public void ANamedTargetHoldingAProvenRetiredKeyIsHandedToTheRepairRatherThanReportedAsSatisfied()
+    {
+        _files.CreateDirectory(Root);
+        _files.WriteAllText(
+            $"{Root}/.mcp.json",
+            """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp"}}}""");
+        _wiring.Changes =
+        [
+            new McpRenameChange(
+                "claude-code",
+                ".mcp.json",
+                McpRenameOutcome.Reported,
+                Code: McpServerRenamer.RenameCode)
+        ];
+
+        int exit = Wire("repo", targets: "claude-code");
+
+        Assert.Equal(0, exit);
+        Assert.Equal([Root], _wiring.RepairedRoots);
+        Assert.DoesNotContain("nothing to write", _console.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The removal verb without a target lists the receipt it reads through its seams, and says there is none when
     /// the in-memory tree holds no receipt — nothing is written and no disk is touched.
     /// </summary>
