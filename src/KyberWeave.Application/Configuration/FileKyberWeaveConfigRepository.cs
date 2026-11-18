@@ -1,18 +1,26 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using YamlDotNet.Core;
 
 namespace KyberWeave.Data.Configuration;
 
-/// <summary>Reads the combined Kyber-Weave configuration from the real file system.</summary>
+/// <summary>Reads the combined Kyber-Weave configuration through the file-system, path and environment seams.</summary>
 /// <param name="tree">Answers what the file system says about a gate's <c>working-directory</c>.</param>
-public sealed class FileKyberWeaveConfigRepository(IRepositoryTreeProbe tree) : IKyberWeaveConfigRepository
+/// <param name="files">Reads the configuration files.</param>
+/// <param name="paths">Turns the caller's root spelling into a full path.</param>
+/// <param name="environment">Supplies the current directory a relative root is resolved against.</param>
+public sealed class FileKyberWeaveConfigRepository(
+    IRepositoryTreeProbe tree,
+    IFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IKyberWeaveConfigRepository
 {
     /// <inheritdoc />
     public KyberWeaveConfig Load(string repoRoot, string? configPath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
-        string root = Path.GetFullPath(repoRoot);
+        string root = FullPath(repoRoot);
 
         string? path = ResolveConfigPath(root, configPath);
         if (path is null)
@@ -25,7 +33,7 @@ public sealed class FileKyberWeaveConfigRepository(IRepositoryTreeProbe tree) : 
     public KyberWeaveConfigLoadResult TryLoad(string repoRoot, string? configPath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
-        string root = Path.GetFullPath(repoRoot);
+        string root = FullPath(repoRoot);
         string? path = null;
 
         try
@@ -58,34 +66,34 @@ public sealed class FileKyberWeaveConfigRepository(IRepositoryTreeProbe tree) : 
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
 
         string defaultPath = Path.Combine(
-            Path.GetFullPath(repoRoot),
+            FullPath(repoRoot),
             KyberWeaveYamlParser.DefaultDirectoryName,
             KyberWeaveYamlParser.DefaultFileName);
-        if (File.Exists(defaultPath))
+        if (files.FileExists(defaultPath))
             return defaultPath;
 
         // Legacy location: repo-root kyber-weave.yml, kept working for existing hosts.
-        string legacyPath = Path.Combine(Path.GetFullPath(repoRoot), KyberWeaveYamlParser.DefaultFileName);
-        return File.Exists(legacyPath) ? legacyPath : null;
+        string legacyPath = Path.Combine(FullPath(repoRoot), KyberWeaveYamlParser.DefaultFileName);
+        return files.FileExists(legacyPath) ? legacyPath : null;
     }
 
     /// <inheritdoc />
     public KyberWeaveConfig LoadUserConfig(string homeDirectory, string? configPath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
-        string root = Path.GetFullPath(homeDirectory);
+        string root = FullPath(homeDirectory);
         string? path = ResolveUserConfigPath(root, configPath);
-        if (!string.IsNullOrWhiteSpace(configPath) && (path is null || !File.Exists(path)))
+        if (!string.IsNullOrWhiteSpace(configPath) && (path is null || !files.FileExists(path)))
         {
             throw new FileNotFoundException(
                 $"Kyber-Weave config file not found: {path}",
                 path);
         }
 
-        if (path is null || !File.Exists(path))
+        if (path is null || !files.FileExists(path))
             return KyberWeaveConfig.ProductDefaults;
 
-        string yaml = File.ReadAllText(path);
+        string yaml = files.ReadAllText(path);
         return KyberWeaveConfigAssembler.FromUserYaml(yaml);
     }
 
@@ -93,7 +101,7 @@ public sealed class FileKyberWeaveConfigRepository(IRepositoryTreeProbe tree) : 
     public KyberWeaveConfigLoadResult TryLoadUserConfig(string homeDirectory, string? configPath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
-        string root = Path.GetFullPath(homeDirectory);
+        string root = FullPath(homeDirectory);
         string? path = ResolveUserConfigPath(root, configPath);
         if (path is null)
             return new KyberWeaveConfigLoadResult(
@@ -101,23 +109,25 @@ public sealed class FileKyberWeaveConfigRepository(IRepositoryTreeProbe tree) : 
                 config: KyberWeaveConfig.ProductDefaults,
                 configPath: path);
 
-        if (!string.IsNullOrWhiteSpace(configPath) && !File.Exists(path))
-        {
-            return new KyberWeaveConfigLoadResult(
-                success: false,
-                error: $"Kyber-Weave config file not found: {path}",
-                configPath: path);
-        }
-
-        if (!File.Exists(path))
-            return new KyberWeaveConfigLoadResult(
-                success: true,
-                config: KyberWeaveConfig.ProductDefaults,
-                configPath: path);
-
         try
         {
-            string yaml = File.ReadAllText(path);
+            // The probes are inside the try because the file-system seam may throw where the static
+            // File.Exists answered false: a failure must come back as a result, as it does for TryLoad.
+            if (!string.IsNullOrWhiteSpace(configPath) && !files.FileExists(path))
+            {
+                return new KyberWeaveConfigLoadResult(
+                    success: false,
+                    error: $"Kyber-Weave config file not found: {path}",
+                    configPath: path);
+            }
+
+            if (!files.FileExists(path))
+                return new KyberWeaveConfigLoadResult(
+                    success: true,
+                    config: KyberWeaveConfig.ProductDefaults,
+                    configPath: path);
+
+            string yaml = files.ReadAllText(path);
             return new KyberWeaveConfigLoadResult(
                 success: true,
                 config: KyberWeaveConfigAssembler.FromUserYaml(yaml),
@@ -138,7 +148,7 @@ public sealed class FileKyberWeaveConfigRepository(IRepositoryTreeProbe tree) : 
     internal KyberWeaveYamlDocument ReadDocument(string yamlPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(yamlPath);
-        string yaml = File.ReadAllText(yamlPath);
+        string yaml = files.ReadAllText(yamlPath);
         return KyberWeaveYamlParser.Parse(yaml);
     }
 
@@ -177,7 +187,7 @@ public sealed class FileKyberWeaveConfigRepository(IRepositoryTreeProbe tree) : 
         string explicitPath = Path.IsPathRooted(configPath)
             ? configPath
             : Path.Combine(repoRoot, configPath);
-        if (!File.Exists(explicitPath))
+        if (!files.FileExists(explicitPath))
         {
             throw new FileNotFoundException(
                 $"Kyber-Weave config file not found: {explicitPath}",
@@ -205,8 +215,9 @@ public sealed class FileKyberWeaveConfigRepository(IRepositoryTreeProbe tree) : 
     /// </summary>
     private KyberWeaveConfig FromFile(string path)
     {
-        string yaml = File.ReadAllText(path);
-        string directory = Path.GetDirectoryName(Path.GetFullPath(path)) ?? Path.GetFullPath(path);
+        string yaml = files.ReadAllText(path);
+        string fullPath = FullPath(path);
+        string directory = Path.GetDirectoryName(fullPath) ?? fullPath;
         string root = Path.GetFileName(directory) == KyberWeaveYamlParser.DefaultDirectoryName
             ? Path.GetDirectoryName(directory) ?? directory
             : directory;
@@ -219,9 +230,12 @@ public sealed class FileKyberWeaveConfigRepository(IRepositoryTreeProbe tree) : 
     }
 
     /// <summary>
-    /// Reads a repository file for the assembler, or returns null when it does not exist. The domain layer parses the
-    /// text; this data layer owns the disk access, so <c>DomainPurityTests</c> keeps holding.
+    /// Reads a repository file for the assembler, or returns null when it does not exist. The assembler parses the
+    /// text; this class owns the file-system access, so <c>DomainPurityTests</c> keeps holding.
     /// </summary>
-    private static string? ReadRepositoryText(string path) =>
-        File.Exists(path) ? File.ReadAllText(path) : null;
+    private string? ReadRepositoryText(string path) =>
+        files.FileExists(path) ? files.ReadAllText(path) : null;
+
+    /// <summary>Turns any spelling of a root into the full path the seam's answers use.</summary>
+    private string FullPath(string path) => paths.GetFullPath(path, environment.CurrentDirectory);
 }

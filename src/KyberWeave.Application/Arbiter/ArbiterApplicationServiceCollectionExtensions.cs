@@ -115,7 +115,11 @@ public static class ArbiterApplicationServiceCollectionExtensions
         _ = services.AddWeaveRunStartState();
         services.TryAddSingleton<IRepositoryTreeProbe>(sp => new FileRepositoryTreeProbe(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IKyberWeaveConfigRepository>(sp =>
-            new FileKyberWeaveConfigRepository(sp.GetRequiredService<IRepositoryTreeProbe>()));
+            new FileKyberWeaveConfigRepository(
+                sp.GetRequiredService<IRepositoryTreeProbe>(),
+                sp.GetRequiredService<IFileSystem>(),
+                sp.GetRequiredService<IPathResolver>(),
+                sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IWorkerBudgetStore, FileWorkerBudgetStore>();
         services.TryAddSingleton<IFileLinkProbe, FileLinkProbe>();
         services.TryAddSingleton<IGitRepositoryFacts, GitFacts>();

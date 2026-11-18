@@ -13,7 +13,7 @@ public sealed class FileKyberWeaveConfigRepositoryContractTests : KyberWeaveConf
 
     /// <inheritdoc />
     protected override IKyberWeaveConfigRepository CreateRepository() =>
-        new FileKyberWeaveConfigRepository(RealRepositoryTreeProbe.Create());
+        RealFileKyberWeaveConfigRepository.Create();
 
     /// <inheritdoc />
     protected override string NewRoot() => NewDirectory("kw-config-contract-");
@@ -34,6 +34,9 @@ public sealed class FileKyberWeaveConfigRepositoryContractTests : KyberWeaveConf
     /// <inheritdoc />
     protected override void WriteConfigFile(string root, string fileName, string yaml) =>
         WriteFile(Path.Combine(Path.GetFullPath(root), fileName), yaml);
+
+    /// <inheritdoc />
+    protected override void CreateDirectory(string path) => Directory.CreateDirectory(path);
 
     /// <inheritdoc />
     protected override IDisposable MakeUnreadable(string path) =>

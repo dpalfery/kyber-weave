@@ -6,7 +6,6 @@ using KyberWeave.Data.Docs.Closeout;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Data.CodeGraph;
 using KyberWeave.Core.Doctor;
-using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Docs.Mcp;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Doctor;
@@ -57,7 +56,6 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IProjectFileLocator>(_ => new FileProjectFileLocator());
         services.TryAddSingleton<IBoundedFileReader>(_ => new FileBoundedFileReader());
         services.TryAddSingleton<IReviewDecisionCacheStore>(_ => new FileReviewDecisionCacheStore());
-        services.TryAddSingleton<IKyberWeaveConfigRepository>(sp => new FileKyberWeaveConfigRepository(sp.GetRequiredService<IRepositoryTreeProbe>()));
         services.TryAddSingleton<IRepositoryToolSettings>(sp => new ConfigFileToolSettings(sp.GetRequiredService<IKyberWeaveConfigRepository>()));
         _ = services.AddWeaveArbiterData();
         return services;
