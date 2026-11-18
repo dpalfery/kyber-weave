@@ -1,14 +1,13 @@
-using KyberWeave.Tests.Configuration;
-
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Tests;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Docs.Scaffolding;
 
 /// <summary>
 /// A host shaped like the one that stopped a conductor run: seven technologies, every standard
@@ -21,21 +20,14 @@ namespace KyberWeave.Tests;
 /// standards were renamed, the missing folder files were written, and each standard's own
 /// sections were kept under the heading each fits. A second run changes nothing.
 /// </remarks>
-public class LegacyHostMigrationTests : IDisposable
+public class LegacyHostMigrationTests
 {
     private static readonly string[] Technologies =
         ["azure", "csharp", "data-access-layer", "github-actions", "react", "sql", "test"];
 
-    private readonly TempDirectory _repo = new();
+    private readonly MemoryDocsHost _repo = new();
 
-    public void Dispose()
-    {
-        _repo.Dispose();
-        GC.SuppressFinalize(this);
-    }
-
-    private string PathOf(string relative) =>
-        Path.Combine(_repo.Path, relative.Replace('/', Path.DirectorySeparatorChar));
+    private string PathOf(string relative) => _repo.FullPath(relative);
 
     private static string LegacyStandard(string scope) => $"""
         ---
@@ -72,19 +64,19 @@ public class LegacyHostMigrationTests : IDisposable
     /// </summary>
     private KyberWeaveConfig DeclareTechnologies()
     {
-        DocsTestCommands.Scaffolding.Scaffold(_repo.Path, "6-Docs");
+        _repo.Scaffold("6-Docs");
 
         string configPath = PathOf(".kyber-weave/kyber-weave.yml");
-        File.WriteAllText(
+        _repo.Memory.WriteAllText(
             configPath,
-            HostConfigYaml.WithTechnologies(File.ReadAllText(configPath), Technologies));
+            HostConfigYaml.WithTechnologies(_repo.Memory.ReadAllText(configPath), Technologies));
 
-        KyberWeaveConfig config = ConfigFileReader.Load(_repo.Path);
+        KyberWeaveConfig config = _repo.LoadConfig();
         string agents = PathOf("AGENTS.md");
-        File.WriteAllText(
+        _repo.Memory.WriteAllText(
             agents,
             ConfigRegMarkdown.Splice(
-                File.ReadAllText(agents),
+                _repo.Memory.ReadAllText(agents),
                 ConfigRegMarkdown.Render(config.ConfigReg.Resolve(config.Ontology))));
 
         return config;
@@ -95,8 +87,8 @@ public class LegacyHostMigrationTests : IDisposable
         foreach (string technology in Technologies)
         {
             string folder = PathOf($"6-Docs/standards/{technology}");
-            Directory.CreateDirectory(folder);
-            File.WriteAllText(Path.Combine(folder, "README.md"), LegacyStandard(technology));
+            _repo.Memory.CreateDirectory(folder);
+            _repo.Memory.WriteAllText(Path.Combine(folder, "README.md"), LegacyStandard(technology));
         }
     }
 
@@ -123,15 +115,14 @@ public class LegacyHostMigrationTests : IDisposable
             StringComparison.Ordinal);
 
         string agents = PathOf("AGENTS.md");
-        File.WriteAllText(agents, ConfigRegMarkdown.Splice(File.ReadAllText(agents), block));
+        _repo.Memory.WriteAllText(agents, ConfigRegMarkdown.Splice(_repo.Memory.ReadAllText(agents), block));
     }
 
     private DiagnosticReport ValidateDocuments(KyberWeaveConfig config) =>
-        RealDocSpecValidator.Create(_repo.Path, config.Ontology)
-            .Validate(RealDocumentLoader.Create(_repo.Path, config.Ontology).Load());
+        _repo.Validator(config.Ontology).Validate(_repo.Loader(config.Ontology).Load());
 
     private DiagnosticReport ValidateRegistry(KyberWeaveConfig config) =>
-        new ConfigRegValidator(_repo.Path, config, DocsPorts.Files, DocsPorts.Paths, DocsPorts.Environment).Validate();
+        _repo.RegistryValidator(config).Validate();
 
     [Fact]
     public void AnUnmigratedHostValidatesWithoutErrors()
@@ -198,9 +189,9 @@ public class LegacyHostMigrationTests : IDisposable
         WriteOlderBuildRegistryBlock(config);
 
         string agents = PathOf("AGENTS.md");
-        File.WriteAllText(
+        _repo.Memory.WriteAllText(
             agents,
-            File.ReadAllText(agents).Replace(
+            _repo.Memory.ReadAllText(agents).Replace(
                 "- **<plan-index>**: `6-Docs/plans/README.md`",
                 "- **<plan-index>**: `6-Docs/plans/gone.md`",
                 StringComparison.Ordinal));
@@ -211,9 +202,9 @@ public class LegacyHostMigrationTests : IDisposable
             movedIndex.Items,
             i => i.Code == ConfigRegValidator.StaleRendering && i.Severity == Severity.Error);
 
-        File.WriteAllText(
+        _repo.Memory.WriteAllText(
             agents,
-            File.ReadAllText(agents).Replace(
+            _repo.Memory.ReadAllText(agents).Replace(
                 "- **<csharp-coding-standard>**: `6-Docs/standards/csharp/README.md`",
                 "- **<csharp-coding-standard>**: `6-Docs/standards/csharp/old.md`",
                 StringComparison.Ordinal));
@@ -237,9 +228,9 @@ public class LegacyHostMigrationTests : IDisposable
         WriteLegacyStandards();
 
         string agents = PathOf("AGENTS.md");
-        File.WriteAllText(
+        _repo.Memory.WriteAllText(
             agents,
-            File.ReadAllText(agents).Replace(
+            _repo.Memory.ReadAllText(agents).Replace(
                 "run. The configuration is the authority when the two disagree: follow it, and have\n" +
                 "`docs init` regenerate this block, rather than stopping a run over the difference.",
                 "run.",
@@ -257,11 +248,11 @@ public class LegacyHostMigrationTests : IDisposable
         WriteLegacyStandards();
 
         StandardsFolderMigrationResult result =
-            DocsPorts.StandardsMigration(_repo.Path, config.Ontology).Run();
+            _repo.Migration(config.Ontology).Run();
 
         foreach (string technology in Technologies)
         {
-            string standard = File.ReadAllText(
+            string standard = _repo.Memory.ReadAllText(
                 PathOf($"6-Docs/standards/{technology}/{technology}.standards.md"));
             Assert.Equal(DocsLayout.StandardHeadings, LevelTwoHeadings(standard));
             Assert.Contains("### Stack", standard, StringComparison.Ordinal);
@@ -270,7 +261,7 @@ public class LegacyHostMigrationTests : IDisposable
                 $"- **{technology}:** the toolchain this host uses.",
                 standard,
                 StringComparison.Ordinal);
-            Assert.False(File.Exists(PathOf($"6-Docs/standards/{technology}/README.md")));
+            Assert.False(_repo.Memory.FileExists(PathOf($"6-Docs/standards/{technology}/README.md")));
         }
 
         Assert.Equal(Technologies.Length * 2, result.Moves.Count);
@@ -286,15 +277,15 @@ public class LegacyHostMigrationTests : IDisposable
     {
         KyberWeaveConfig config = DeclareTechnologies();
         WriteLegacyStandards();
-        DocsPorts.StandardsMigration(_repo.Path, config.Ontology).Run();
+        _repo.Migration(config.Ontology).Run();
 
-        string once = File.ReadAllText(PathOf("6-Docs/standards/csharp/csharp.standards.md"));
+        string once = _repo.Memory.ReadAllText(PathOf("6-Docs/standards/csharp/csharp.standards.md"));
         StandardsFolderMigrationResult second =
-            DocsPorts.StandardsMigration(_repo.Path, config.Ontology).Run();
+            _repo.Migration(config.Ontology).Run();
 
         Assert.Empty(second.Changes);
         Assert.Empty(second.Moves);
-        Assert.Equal(once, File.ReadAllText(PathOf("6-Docs/standards/csharp/csharp.standards.md")));
+        Assert.Equal(once, _repo.Memory.ReadAllText(PathOf("6-Docs/standards/csharp/csharp.standards.md")));
     }
 
     private static IReadOnlyList<string> LevelTwoHeadings(string text) =>
