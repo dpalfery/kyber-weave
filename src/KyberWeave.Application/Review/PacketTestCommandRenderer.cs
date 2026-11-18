@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
@@ -34,6 +35,7 @@ public static class PacketTestCommandRenderer
     /// <param name="windows">Whether to quote for a Windows shell rather than a POSIX one.</param>
     /// <param name="targets">Reads the task's files and declared test classes.</param>
     /// <param name="taskGates">Resolves the test gates against the task's files.</param>
+    /// <param name="fileSystem">The file system the task's technology standards are read through.</param>
     public static string? Render(
         string repoRoot,
         KyberWeaveConfig config,
@@ -42,7 +44,8 @@ public static class PacketTestCommandRenderer
         PlanContractRow? row,
         bool windows,
         IPlanTaskTargetService targets,
-        ITaskGateSelectionService taskGates)
+        ITaskGateSelectionService taskGates,
+        IFileSystem fileSystem)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
@@ -51,7 +54,7 @@ public static class PacketTestCommandRenderer
         ArgumentNullException.ThrowIfNull(taskGates);
 
         string? contract = PlanTaskFileGenerator.CommandFromContract(row);
-        IReadOnlyList<string> gated = FromTaskGates(repoRoot, config, agent, entry, row, windows, targets, taskGates);
+        IReadOnlyList<string> gated = FromTaskGates(repoRoot, config, agent, entry, row, windows, targets, taskGates, fileSystem);
         if (contract is null && gated.Count == 0)
             return null;
 
@@ -104,7 +107,8 @@ public static class PacketTestCommandRenderer
         PlanContractRow? row,
         bool windows,
         IPlanTaskTargetService targets,
-        ITaskGateSelectionService taskGates)
+        ITaskGateSelectionService taskGates,
+        IFileSystem fileSystem)
     {
         if (agent is null)
             return [];
@@ -113,7 +117,7 @@ public static class PacketTestCommandRenderer
             config.Review,
             agent,
             entry.Technology,
-            TaskGateResolver.ParentTechnologyOrNone(repoRoot, config, entry.Technology));
+            TaskGateResolver.ParentTechnologyOrNone(fileSystem, repoRoot, config, entry.Technology));
 
         ReviewTaskGate[] testGates = [.. resolved.Gates.Where(gate => gate.Run.Any(element => element.Contains(TestsToken, StringComparison.Ordinal)))];
         string slug = TaskSlug.Normalise(entry.Id);

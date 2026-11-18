@@ -200,11 +200,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `CodeGraphIndexRules` (`Doctor/CodeGraphIndexRules.cs`) | paths | 2.5 |
 | `GateCatalogueRenderer` (`Review/Catalogue/GateCatalogueRenderer.cs`) | file system | 2.5 |
 | `ProjectRootDetection` (`Review/Catalogue/ProjectRootDetection.cs`) | file system | 2.5 |
-| `PlanTaskTargetService` (`Review/PlanTaskTargetService.cs`) | file system, paths | 4.3 |
-| `ReviewCycleService` (`Review/ReviewCycleService.cs`) | paths | 4.3 |
-| `ReviewSeatsService` (`Review/ReviewSeatsService.cs`) | paths | 4.3 |
-| `ReviewWorkTreeService` (`Review/ReviewWorkTreeService.cs`) | file system, paths | 4.3 |
-| `TaskGateResolver` (`Review/TaskGateResolver.cs`) | file system | 4.3 |
 | `RunBaseStateFormat` (`RunStart/RunBaseStateFormat.cs`) | paths | 2.5 |
 | `GitHubReleaseClient` (`Update/GitHubReleaseClient.cs`) | network | 4.4 |
 | `ArbiterConfigLoader` (`Arbiter/ArbiterConfigLoader.cs`) | file system | 2.5 |
@@ -238,7 +233,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `SqliteAnalysisPersistence` (`Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs`) | file system, paths | 4.4 |
 | `PresentFile` (`Docs/Closeout/PresentFile.cs`) | file system | 4.4 |
 | `DocsRootWalk` (`FileSystem/DocsRootWalk.cs`) | file system | 4.4 |
-| `FileCoverageReportSource` (`Review/FileCoverageReportSource.cs`) | file system | 4.4 |
 | `ZipSkillArchiveWriter` (`Skills/ZipSkillArchiveWriter.cs`) | file system | 4.4 |
 | `DevinImportOverlap` (`Squad/Deployment/DevinImportOverlap.cs`) | file system, paths | 3.5 |
 | `FactoryHooksShadowing` (`Squad/Deployment/FactoryHooksShadowing.cs`) | file system | 3.5 |
@@ -287,7 +281,6 @@ Task 4.4 leaves these in `Data` outside `Squad/`, each for a named reason:
   (the bounded one-step read and the link-refusing walk). `DocsRootWalk` is also called as a static by
   `Application/Docs/Delivery/PullRequestDescription.cs` and `Application/Docs/Search/DocumentIndexHost.cs`,
   so converting it edits `Application/Docs`, which another task owns.
-- `FileCoverageReportSource` lives in `Application/Review`, which another task owns.
 - `ZipSkillArchiveWriter` is the adapter of `ISkillArchiveWriter`. `ZipFile.CreateEntryFromFile` records the
   source file's Unix permission bits in the archive; the file-system seam has no member that reads them, so
   reading entries through `OpenRead` would change the archive's contents.

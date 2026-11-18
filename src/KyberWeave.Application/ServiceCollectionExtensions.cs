@@ -263,6 +263,7 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IReviewCycleStore>(),
             sp.GetRequiredService<IReviewCycleSelector>(),
             sp.GetRequiredService<IConfigLoadService>(),
+            sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IReviewSeatsService>(sp => new ReviewSeatsService(
             sp.GetRequiredService<IReviewWorkTreeService>(),
@@ -276,7 +277,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IProcessEnvironment>(),
             sp.GetRequiredService<IReviewCycleSelector>(),
             sp.GetRequiredService<IConfigLoadService>(),
-            sp.GetRequiredService<IReviewDecisionSteps>()));
+            sp.GetRequiredService<IReviewDecisionSteps>(),
+            sp.GetRequiredService<IPathResolver>()));
         services.TryAddSingleton<IReviewGatesService>(sp => new ReviewGatesService(
             sp.GetRequiredService<IReviewWorkTreeService>(),
             sp.GetRequiredService<IReviewCycleStore>(),
@@ -298,7 +300,10 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IPlanTaskTargetService>(sp => new PlanTaskTargetService(
             sp.GetRequiredService<IPlanTaskService>(),
             sp.GetRequiredService<ITaskGateSelectionService>(),
-            sp.GetRequiredService<IGitRepositoryFacts>()));
+            sp.GetRequiredService<IGitRepositoryFacts>(),
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IReviewDecisionModelFactory, ReviewDecisionModelFactory>();
         services.TryAddSingleton<IReviewVerdictService, ReviewVerdictService>();
         _ = services.AddWeaveArbiterApplication();

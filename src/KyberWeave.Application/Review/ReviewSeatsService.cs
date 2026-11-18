@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -29,6 +30,7 @@ namespace KyberWeave.Application.Review;
 /// <param name="environment">Names the temporary directory the index lock lives in.</param>
 /// <param name="selector">Finds the review folder and the prior cycle's findings.</param>
 /// <param name="configs">Loads the host's configuration.</param>
+/// <param name="paths">Resolves the path the command was run against.</param>
 /// <param name="decisionSteps">Asks the decision model whether each judgement lens applies.</param>
 public sealed class ReviewSeatsService(
     IReviewWorkTreeService trees,
@@ -42,7 +44,8 @@ public sealed class ReviewSeatsService(
     IProcessEnvironment environment,
     IReviewCycleSelector selector,
     IConfigLoadService configs,
-    IReviewDecisionSteps decisionSteps) : IReviewSeatsService
+    IReviewDecisionSteps decisionSteps,
+    IPathResolver paths) : IReviewSeatsService
 {
     private const string UnreadableInput = "KW-REVIEW-023";
     private const string ReportWriteFailed = "KW-REVIEW-025";
@@ -62,7 +65,7 @@ public sealed class ReviewSeatsService(
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(decisionModel);
 
-        string root = Path.GetFullPath(request.Path);
+        string root = paths.GetFullPath(request.Path, environment.CurrentDirectory);
         DiagnosticReport report = new();
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
             return ReviewCommandResultFactory.Reported(1, report);
