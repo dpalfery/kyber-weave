@@ -38,7 +38,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
         string projectRoot = Path.Combine(_temp.Path, "empty-project");
         Directory.CreateDirectory(projectRoot);
-        SquadModelPresetSelectionStore store = new(userPaths);
+        SquadModelPresetSelectionStore store = RealSquadSelectionStore.Create(userPaths);
 
         // Act
         SquadModelPresetSelection? selection = store.Read(projectRoot);
@@ -54,7 +54,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
         string projectRoot = Path.Combine(_temp.Path, "test-project");
         Directory.CreateDirectory(projectRoot);
-        SquadModelPresetSelectionStore store = new(userPaths);
+        SquadModelPresetSelectionStore store = RealSquadSelectionStore.Create(userPaths);
 
         // Act
         store.Set(projectRoot, SquadTarget.Claude, "zai");
@@ -81,7 +81,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
         string projectRoot = Path.Combine(_temp.Path, "read-project");
         Directory.CreateDirectory(projectRoot);
-        SquadModelPresetSelectionStore store = new(userPaths);
+        SquadModelPresetSelectionStore store = RealSquadSelectionStore.Create(userPaths);
         store.Set(projectRoot, SquadTarget.Claude, "zai");
 
         // Act
@@ -103,7 +103,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
         string projectRoot = Path.Combine(_temp.Path, "multi-target-project");
         Directory.CreateDirectory(projectRoot);
-        SquadModelPresetSelectionStore store = new(userPaths);
+        SquadModelPresetSelectionStore store = RealSquadSelectionStore.Create(userPaths);
 
         // Act
         store.Set(projectRoot, SquadTarget.Claude, "zai");
@@ -124,7 +124,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
         string projectRoot = Path.Combine(_temp.Path, "overwrite-project");
         Directory.CreateDirectory(projectRoot);
-        SquadModelPresetSelectionStore store = new(userPaths);
+        SquadModelPresetSelectionStore store = RealSquadSelectionStore.Create(userPaths);
         store.Set(projectRoot, SquadTarget.Claude, "zai");
         store.Set(projectRoot, SquadTarget.Copilot, "fast");
 
@@ -146,7 +146,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
         string projectRoot = Path.Combine(_temp.Path, "clear-target-project");
         Directory.CreateDirectory(projectRoot);
-        SquadModelPresetSelectionStore store = new(userPaths);
+        SquadModelPresetSelectionStore store = RealSquadSelectionStore.Create(userPaths);
         store.Set(projectRoot, SquadTarget.Claude, "zai");
         store.Set(projectRoot, SquadTarget.Copilot, "fast");
 
@@ -168,7 +168,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
         string projectRoot = Path.Combine(_temp.Path, "clear-all-project");
         Directory.CreateDirectory(projectRoot);
-        SquadModelPresetSelectionStore store = new(userPaths);
+        SquadModelPresetSelectionStore store = RealSquadSelectionStore.Create(userPaths);
         store.Set(projectRoot, SquadTarget.Claude, "zai");
 
         string canonicalPath = SquadPhysicalRootIdentity.Resolve(projectRoot, SquadFileSystemPathSemantics.Instance).PhysicalPath;
@@ -192,7 +192,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
         string projectRoot = Path.Combine(_temp.Path, "atomic-project");
         Directory.CreateDirectory(projectRoot);
-        SquadModelPresetSelectionStore store = new(userPaths);
+        SquadModelPresetSelectionStore store = RealSquadSelectionStore.Create(userPaths);
 
         // Act
         store.Set(projectRoot, SquadTarget.Claude, "zai");
@@ -219,7 +219,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         string symlinkProjectRoot = Path.Combine(_temp.Path, "symlinked-project");
         Directory.CreateSymbolicLink(symlinkProjectRoot, canonicalProjectRoot);
 
-        SquadModelPresetSelectionStore store = new(userPaths);
+        SquadModelPresetSelectionStore store = RealSquadSelectionStore.Create(userPaths);
 
         // Act
         store.Set(canonicalProjectRoot, SquadTarget.Claude, "zai");
@@ -241,7 +241,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
         string projectRoot = Path.Combine(_temp.Path, "isolated-project");
         Directory.CreateDirectory(projectRoot);
-        SquadModelPresetSelectionStore store = new(userPaths);
+        SquadModelPresetSelectionStore store = RealSquadSelectionStore.Create(userPaths);
 
         // Act
         store.Set(projectRoot, SquadTarget.Claude, "zai");
@@ -261,7 +261,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         Directory.CreateDirectory(projectRoot);
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
 
-        SquadModelPresetSelectionStore selectionStore = new(userPaths);
+        SquadModelPresetSelectionStore selectionStore = RealSquadSelectionStore.Create(userPaths);
         selectionStore.Set(projectRoot, SquadTarget.Copilot, "fast");
 
         string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
@@ -297,7 +297,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         Directory.CreateDirectory(projectRoot);
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
 
-        SquadModelPresetSelectionStore selectionStore = new(userPaths);
+        SquadModelPresetSelectionStore selectionStore = RealSquadSelectionStore.Create(userPaths);
         selectionStore.Set(projectRoot, SquadTarget.Copilot, "fast");
 
         string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
@@ -337,7 +337,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
         string projectRoot = Path.Combine(_temp.Path, "test-invalid-preset");
         Directory.CreateDirectory(projectRoot);
-        SquadModelPresetSelectionStore store = new(userPaths);
+        SquadModelPresetSelectionStore store = RealSquadSelectionStore.Create(userPaths);
 
         Assert.Throws<ArgumentException>(() => store.Set(projectRoot, SquadTarget.Claude, invalidPresetName));
     }
@@ -348,7 +348,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
         string projectRoot = Path.Combine(_temp.Path, "project # with special characters");
         Directory.CreateDirectory(projectRoot);
-        SquadModelPresetSelectionStore store = new(userPaths);
+        SquadModelPresetSelectionStore store = RealSquadSelectionStore.Create(userPaths);
 
         store.Set(projectRoot, SquadTarget.Claude, "fast");
         SquadModelPresetSelection? selection = store.Read(projectRoot);

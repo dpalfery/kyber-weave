@@ -7,6 +7,7 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Data.Hooks;
 
 namespace KyberWeave.Cli.Commands.Squad;
 
@@ -126,7 +127,7 @@ internal static class SquadHostDefaults
             renderer,
             stateStore,
             presetStore ?? new SquadModelPresetStore(stateStore.UserPaths),
-            selectionStore ?? new SquadModelPresetSelectionStore(stateStore.UserPaths),
+            selectionStore ?? new SquadModelPresetSelectionStore(stateStore.UserPaths, new PhysicalFileSystem(), SquadFileSystemPathSemantics.Instance),
             new FileSquadSourceLoader(),
             new FileSquadModelPresetValidator(),
             new FileSquadDeploymentPlanner(),

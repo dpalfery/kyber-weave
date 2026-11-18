@@ -61,7 +61,7 @@ public sealed class SquadPresetCliTests : IDisposable
         Directory.CreateDirectory(_projectDir);
         _userPaths = new FakeSquadUserPaths(_home);
         Directory.CreateDirectory(_userPaths.HomeDirectory);
-        _selectionStore = new SquadModelPresetSelectionStore(_userPaths);
+        _selectionStore = RealSquadSelectionStore.Create(_userPaths);
         _stateStore = new SquadStateStore(_userPaths);
     }
 
