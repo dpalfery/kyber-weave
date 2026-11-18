@@ -389,9 +389,28 @@ public sealed class SquadTransaction : ISquadTransaction
         try
         {
             string intentPath = Path.Combine(journalDirectory, IntentFileName);
-            if (!_files.FileExists(intentPath))
-                throw new InvalidDataException(
-                    "Squad transaction has preparation artifacts but no authoritative intent journal.");
+
+            // A journal generation is written to a temporary file and renamed over the intent, so a temporary
+            // file left by a kill was never published and the intent beside it is complete.
+            // With no intent the temporary file may be the only copy of the journal, so it is left for the refusal.
+            if (_files.FileExists(intentPath))
+                DiscardUnpublishedIntentTemporaries(journalDirectory);
+            else
+            {
+                if (HasAnyFile(journalDirectory) ||
+                    (!_semantics.AreSame(journalDirectory, workDirectory) && HasAnyFile(workDirectory)))
+                    throw new InvalidDataException(
+                        "Squad transaction has preparation artifacts but no authoritative intent journal.");
+
+                // The intent is written before anything else, so a transaction with no intent and no file has
+                // changed nothing: only the folders it made are left, and they are empty.
+                CleanupOwnedArtifacts(journalDirectory, workDirectory);
+                RemoveEmptyDirectoriesUpTo(
+                    journalDirectory,
+                    Physical(_stateStore.ResolveStateAuthorityRoot(root, scope)));
+                recoveryCompleted = true;
+                return;
+            }
 
             IntentDocument intent = ReadIntent(
                 intentPath,
@@ -2252,6 +2271,45 @@ public sealed class SquadTransaction : ISquadTransaction
             ArtifactLifecycleState.PreOperation));
     }
 
+    private void DiscardUnpublishedIntentTemporaries(string journalDirectory)
+    {
+        foreach (FileSystemEntry entry in _files.EnumerateEntries(journalDirectory))
+        {
+            string name = Path.GetFileName(entry.Path);
+            if (!entry.IsDirectory &&
+                !entry.IsLink &&
+                name.StartsWith(IntentFileName + ".", StringComparison.Ordinal) &&
+                name.EndsWith(".tmp", StringComparison.Ordinal))
+                _files.DeleteFile(entry.Path);
+        }
+    }
+
+    private bool HasAnyFile(string directory)
+    {
+        if (!_files.DirectoryExists(directory))
+            return false;
+
+        foreach (FileSystemEntry entry in _files.EnumerateEntries(directory))
+            if (entry.IsLink || !entry.IsDirectory || HasAnyFile(entry.Path))
+                return true;
+
+        return false;
+    }
+
+    private void RemoveEmptyDirectoriesUpTo(string directory, string boundary)
+    {
+        string? current = directory;
+        while (current is not null &&
+               !_semantics.AreSame(current, boundary) &&
+               _semantics.IsWithin(boundary, current))
+        {
+            DeleteEmptyDirectory(current);
+            if (_files.DirectoryExists(current))
+                break;
+            current = Path.GetDirectoryName(current);
+        }
+    }
+
     private void WriteNewFile(string path, ReadOnlySpan<byte> content)
     {
         using Stream stream = _files.OpenWriteNew(path);
@@ -3007,6 +3065,13 @@ public sealed class SquadTransaction : ISquadTransaction
             }
         }
 
+        // A kill between moving a staged file out and removing its now-empty folders leaves folders no artifact
+        // describes. They hold nothing, so they are not evidence of anything and recovery removes them.
+        actualDirectories.RemoveWhere(directory =>
+            !expectedDirectories.Contains(directory) &&
+            !actualFiles.Any(file => file.StartsWith(directory + "/", StringComparison.Ordinal)) &&
+            !actualDirectories.Any(other => other.StartsWith(directory + "/", StringComparison.Ordinal) &&
+                                            expectedDirectories.Contains(other)));
         if (!actualFiles.SetEquals(expectedFiles) ||
             !actualDirectories.SetEquals(expectedDirectories))
             throw new InvalidDataException(

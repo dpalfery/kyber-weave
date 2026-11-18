@@ -17,9 +17,8 @@ public sealed class InMemorySquadCrashSafetyTests : SquadCrashSafetyContractTest
     [
         .. new[] { SquadCrashFlow.Install, SquadCrashFlow.Update, SquadCrashFlow.Uninstall }.SelectMany(flow => new[]
         {
-            Weakness(flow, "no authoritative intent journal", "a kill before the first journal write leaves an empty transaction folder that recovery refuses"),
-            Weakness(flow, "unpublished temporary artifact", "a kill inside an atomic write leaves a temporary file that recovery refuses"),
-            Weakness(flow, "authority does not exactly describe its transaction tree", "a kill leaves a transaction folder the journal does not describe, so recovery refuses"),
+            Weakness(flow, "no authoritative intent journal", "a kill during cleanup deletes the journal before the backups, so recovery refuses what is left"),
+            Weakness(flow, "a file the flow must not touch is missing", "a kill during cleanup is recovered as a rollback that removes an adopted file"),
             Weakness(flow, "is missing or has the wrong node kind", "a kill during cleanup removes backups before the journal, so recovery refuses the journal"),
             Weakness(flow, "is neither the whole old tree", "a kill leaves a tree that is neither the old nor the new one")
         })

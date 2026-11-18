@@ -951,7 +951,11 @@ public abstract class SquadDeploymentStateTestBase
                     "missing-link-target");
                 break;
             case "undeclared-directory":
+                // An empty undescribed folder is what a kill leaves and recovery removes; one holding a file is not.
                 Directory.CreateDirectory(Path.Combine(transactionDirectory, "undeclared-directory"));
+                File.WriteAllText(
+                    Path.Combine(transactionDirectory, "undeclared-directory", "stray.txt"),
+                    "stray");
                 break;
             case "duplicate-identity":
                 artifacts.Add(first.DeepClone());
