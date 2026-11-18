@@ -3,6 +3,7 @@ using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.Fixtures;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
