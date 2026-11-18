@@ -175,7 +175,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `MarkdownAgentParser` (`Agents/Parsing/MarkdownAgentParser.cs`) | paths | 2.5 |
 | `TomlAgentParser` (`Agents/Parsing/TomlAgentParser.cs`) | paths | 2.5 |
 | `AgentSpecValidator` (`Agents/Validation/AgentSpecValidator.cs`) | paths | 2.5 |
-| `ArbiterEvaluator` (`Arbiter/ArbiterEvaluator.cs`) | clock | 4.3 |
 | `ArbiterRunStore` (`Arbiter/Stores/ArbiterRunStore.cs`) | paths | 4.3 |
 | `ArbiterHarnessGating` (`Arbiter/ArbiterHarnessGating.cs`) | paths | 4.3 |
 | `ArbiterInstallService` (`Arbiter/ArbiterInstallService.cs`) | paths | 4.3 |
@@ -229,7 +228,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ReviewCatalogueService` (`Review/ReviewCatalogueService.cs`) | paths | 4.3 |
 | `ReviewCycleService` (`Review/ReviewCycleService.cs`) | paths | 4.3 |
 | `ReviewCycleView` (`Review/ReviewCycleView.cs`) | paths | 4.3 |
-| `ReviewDecisionSession` (`Review/ReviewDecisionSession.cs`) | clock | 4.3 |
 | `ReviewDuplicatesService` (`Review/ReviewDuplicatesService.cs`) | paths | 4.3 |
 | `ReviewEvidenceService` (`Review/ReviewEvidenceService.cs`) | paths | 4.3 |
 | `ReviewGatesService` (`Review/ReviewGatesService.cs`) | file system, paths | 4.3 |
