@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Rendering;
-using static KyberWeave.Core.Squad.Deployment.SquadDeploymentPlan;
+using static KyberWeave.Core.Squad.Deployment.SquadDeploymentPlanRules;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
@@ -50,7 +50,7 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
         // The preflight reads the tree and writes nothing, so its repeated walks over the same
         // parent directories share one listing for the length of this call.
         using IDisposable listingScope = SquadFileSystemPathSemantics.BeginListingScope();
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentities.Resolve(targetRoot, _semantics);
         string root = identity.PhysicalPath;
         IReadOnlyList<NormalizedDeploymentFile> normalizedFiles = NormalizeRenderedFiles(
             root,
@@ -161,7 +161,7 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
         if (globalRoots is not null && IsLegacySingleRootReceipt(previousReceipt))
             throw LegacySingleRootLayoutConflict();
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentities.Resolve(targetRoot, _semantics);
         string root = identity.PhysicalPath;
         IReadOnlyList<NormalizedDeploymentFile> normalizedFiles = NormalizeRenderedFiles(
             root,
@@ -410,7 +410,7 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
         // root regardless of what a per-target resolver would answer.
         bool isSingleRootLayout = IsLegacySingleRootReceipt(receipt);
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentities.Resolve(targetRoot, _semantics);
         string root = identity.PhysicalPath;
         _ = ReceiptFilesByPath(root, receipt);
         RequireProjectScopeForBlocks(scope, receipt.Blocks.Count > 0, "uninstall");
@@ -541,7 +541,7 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
         ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
         ArgumentNullException.ThrowIfNull(renderedFiles);
 
-        string root = SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics).PhysicalPath;
+        string root = SquadPhysicalRootIdentities.Resolve(targetRoot, _semantics).PhysicalPath;
         IReadOnlyList<NormalizedDeploymentFile> normalizedFiles = NormalizeRenderedFiles(
             root,
             scope,

@@ -387,6 +387,6 @@ public static class SquadInstallCopy
     public static string Canonical(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        return SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(path, Semantics);
+        return SquadPhysicalRootIdentities.CanonicalizeAllowingMissing(path, Semantics);
     }
 }

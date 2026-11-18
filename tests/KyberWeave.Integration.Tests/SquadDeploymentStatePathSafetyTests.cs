@@ -332,7 +332,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
                 directory.Name,
                 "ActualSpelling",
                 StringComparison.Ordinal));
-        SquadPhysicalRootIdentity actualIdentity = SquadPhysicalRootIdentity.Resolve(actualRoot, SquadFileSystemPathSemantics.Instance);
+        SquadPhysicalRootIdentity actualIdentity = SquadPhysicalRootIdentities.Resolve(actualRoot, SquadFileSystemPathSemantics.Instance);
 
         Assert.Equal(
             actualEntry.Name,
@@ -341,12 +341,12 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
         {
             Assert.Equal(
                 actualIdentity,
-                SquadPhysicalRootIdentity.Resolve(caseVariant, SquadFileSystemPathSemantics.Instance));
+                SquadPhysicalRootIdentities.Resolve(caseVariant, SquadFileSystemPathSemantics.Instance));
             return;
         }
 
         Directory.CreateDirectory(caseVariant);
-        SquadPhysicalRootIdentity distinctIdentity = SquadPhysicalRootIdentity.Resolve(caseVariant, SquadFileSystemPathSemantics.Instance);
+        SquadPhysicalRootIdentity distinctIdentity = SquadPhysicalRootIdentities.Resolve(caseVariant, SquadFileSystemPathSemantics.Instance);
         Assert.NotEqual(actualIdentity.PhysicalPath, distinctIdentity.PhysicalPath);
         Assert.NotEqual(actualIdentity.Key, distinctIdentity.Key);
     }
@@ -355,9 +355,9 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
     public void ResolvePhysicalRootComparisonPolicyIsNotOperatingSystemWideCaseFolding()
     {
         string identitySource = Corpus.ReadText(
-            "src/KyberWeave.Domain/Squad/Deployment/SquadPhysicalRootIdentity.cs");
+            "src/KyberWeave.Application/Squad/Deployment/SquadPhysicalRootIdentities.cs");
         string transactionSource = Corpus.ReadText(
-            "src/KyberWeave.Data/Squad/Deployment/SquadTransaction.cs");
+            "src/KyberWeave.Application/Squad/Deployment/SquadTransaction.cs");
 
         Assert.DoesNotContain("physicalPath.ToUpperInvariant()", identitySource, StringComparison.Ordinal);
         Assert.DoesNotContain(
@@ -392,8 +392,8 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
         string lowerRoot = Path.Combine(caseSensitiveParent, "root");
         Directory.CreateDirectory(upperRoot);
         Directory.CreateDirectory(lowerRoot);
-        SquadPhysicalRootIdentity upperIdentity = SquadPhysicalRootIdentity.Resolve(upperRoot, SquadFileSystemPathSemantics.Instance);
-        SquadPhysicalRootIdentity lowerIdentity = SquadPhysicalRootIdentity.Resolve(lowerRoot, SquadFileSystemPathSemantics.Instance);
+        SquadPhysicalRootIdentity upperIdentity = SquadPhysicalRootIdentities.Resolve(upperRoot, SquadFileSystemPathSemantics.Instance);
+        SquadPhysicalRootIdentity lowerIdentity = SquadPhysicalRootIdentities.Resolve(lowerRoot, SquadFileSystemPathSemantics.Instance);
         SquadStateStore store = Store(Path.Combine(fixturePath, "application-data"));
 
         Assert.NotEqual(upperIdentity.PhysicalPath, lowerIdentity.PhysicalPath);

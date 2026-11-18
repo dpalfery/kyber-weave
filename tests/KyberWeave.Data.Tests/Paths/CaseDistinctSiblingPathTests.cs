@@ -87,9 +87,9 @@ public sealed class CaseDistinctSiblingPathTests
         _files.CreateDirectoryLink(alias, _upperRoot);
         SquadFileSystemPathSemantics semantics = new(new FileSystemPathResolver(_files, caseSensitiveFileSystem: false));
 
-        string upperKey = SquadPhysicalRootIdentity.Resolve(_upperRoot, semantics).Key;
-        string lowerKey = SquadPhysicalRootIdentity.Resolve(_lowerSibling, semantics).Key;
-        string aliasKey = SquadPhysicalRootIdentity.Resolve(alias, semantics).Key;
+        string upperKey = SquadPhysicalRootIdentities.Resolve(_upperRoot, semantics).Key;
+        string lowerKey = SquadPhysicalRootIdentities.Resolve(_lowerSibling, semantics).Key;
+        string aliasKey = SquadPhysicalRootIdentities.Resolve(alias, semantics).Key;
 
         Assert.NotEqual(upperKey, lowerKey);
         Assert.Equal(upperKey, aliasKey);

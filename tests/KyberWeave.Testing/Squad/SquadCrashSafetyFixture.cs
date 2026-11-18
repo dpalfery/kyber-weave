@@ -493,7 +493,7 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
         ];
         string rootSpelling = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Root));
         string canonicalRoot = Path.TrimEndingDirectorySeparator(
-            SquadPhysicalRootIdentity.Resolve(Root, SquadFileSystemPathSemantics.Instance).PhysicalPath);
+            SquadPhysicalRootIdentities.Resolve(Root, SquadFileSystemPathSemantics.Instance).PhysicalPath);
         foreach (string statePath in statePaths)
         {
             string full = Path.GetFullPath(statePath);

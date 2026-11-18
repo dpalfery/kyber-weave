@@ -367,7 +367,7 @@ public sealed class SquadStateMigrationTests
         Assert.Equal(inRepoFiles, ReadFilesJson(Path.Combine(projectDirectory, "squad.receipt.json")));
         SquadProjectRegistryEntry entry = Assert.Single(scenario.Store.ListProjects());
         Assert.Equal(PhysicalPathOf(repo), entry.Path);
-        Assert.Equal(SquadPhysicalRootIdentity.Resolve(repo, SquadFileSystemPathSemantics.Instance).Key, entry.RootKey);
+        Assert.Equal(SquadPhysicalRootIdentities.Resolve(repo, SquadFileSystemPathSemantics.Instance).Key, entry.RootKey);
         DirectoryTreeSnapshot.AssertTreeUnchanged(repo, repoBefore);
     }
 
@@ -664,7 +664,7 @@ public sealed class SquadStateMigrationTests
 
         JsonNode ledger = ReadLedger(scenario);
         Assert.Equal("kyber-squad.migration-ledger/v1", ledger["schema"]!.GetValue<string>());
-        Assert.Equal(new[] { SquadPhysicalRootIdentity.Resolve(root, SquadFileSystemPathSemantics.Instance).Key }, ReadStrings(ledger, "globalMigratedFrom"));
+        Assert.Equal(new[] { SquadPhysicalRootIdentities.Resolve(root, SquadFileSystemPathSemantics.Instance).Key }, ReadStrings(ledger, "globalMigratedFrom"));
         Assert.Empty(ReadStrings(ledger, "projectsImported"));
         Assert.Empty(TemporaryFilesBeside(LedgerPath(scenario)));
     }
@@ -685,7 +685,7 @@ public sealed class SquadStateMigrationTests
         scenario.Migration.ImportProject(repo);
 
         JsonNode ledger = ReadLedger(scenario);
-        Assert.Equal(new[] { SquadPhysicalRootIdentity.Resolve(repo, SquadFileSystemPathSemantics.Instance).Key }, ReadStrings(ledger, "projectsImported"));
+        Assert.Equal(new[] { SquadPhysicalRootIdentities.Resolve(repo, SquadFileSystemPathSemantics.Instance).Key }, ReadStrings(ledger, "projectsImported"));
         Assert.Empty(ReadStrings(ledger, "globalMigratedFrom"));
     }
 
@@ -795,8 +795,8 @@ public sealed class SquadStateMigrationTests
             globalReport.Warnings.Concat(projectReport.Warnings),
             warning => warning.Contains("migration ledger", StringComparison.OrdinalIgnoreCase));
         JsonNode ledger = ReadLedger(scenario);
-        Assert.Equal(new[] { SquadPhysicalRootIdentity.Resolve(root, SquadFileSystemPathSemantics.Instance).Key }, ReadStrings(ledger, "globalMigratedFrom"));
-        Assert.Equal(new[] { SquadPhysicalRootIdentity.Resolve(repo, SquadFileSystemPathSemantics.Instance).Key }, ReadStrings(ledger, "projectsImported"));
+        Assert.Equal(new[] { SquadPhysicalRootIdentities.Resolve(root, SquadFileSystemPathSemantics.Instance).Key }, ReadStrings(ledger, "globalMigratedFrom"));
+        Assert.Equal(new[] { SquadPhysicalRootIdentities.Resolve(repo, SquadFileSystemPathSemantics.Instance).Key }, ReadStrings(ledger, "projectsImported"));
     }
 
     /// <summary>
@@ -852,7 +852,7 @@ public sealed class SquadStateMigrationTests
             "KyberWeave",
             "squad",
             "roots",
-            SquadPhysicalRootIdentity.Resolve(root, SquadFileSystemPathSemantics.Instance).Key);
+            SquadPhysicalRootIdentities.Resolve(root, SquadFileSystemPathSemantics.Instance).Key);
 
     private static string HomeGlobalDirectory(MigrationScenario scenario) =>
         Path.Combine(PhysicalPathOf(scenario.Home), ".kyber-weave", "squad", "global");
@@ -863,7 +863,7 @@ public sealed class SquadStateMigrationTests
             ".kyber-weave",
             "squad",
             "projects",
-            SquadPhysicalRootIdentity.Resolve(root, SquadFileSystemPathSemantics.Instance).Key);
+            SquadPhysicalRootIdentities.Resolve(root, SquadFileSystemPathSemantics.Instance).Key);
 
     private static void WriteLegacyGlobal(
         MigrationScenario scenario,
@@ -971,7 +971,7 @@ public sealed class SquadStateMigrationTests
         JsonNode.Parse(File.ReadAllText(receiptPath, Encoding.UTF8))!.AsObject()["files"]!.ToJsonString();
 
     private static string PhysicalPathOf(string path) =>
-        SquadPhysicalRootIdentity.Resolve(path, SquadFileSystemPathSemantics.Instance).PhysicalPath;
+        SquadPhysicalRootIdentities.Resolve(path, SquadFileSystemPathSemantics.Instance).PhysicalPath;
 
     /// <summary>
     /// Compares two locations by where they physically are. A temp path can be spelled through a symlinked

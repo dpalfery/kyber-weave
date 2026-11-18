@@ -41,7 +41,7 @@ public sealed class ReviewScopeExclusionTests
     {
         ReviewScope scope = ScopeWithExcludedCounts(lockfile);
 
-        Assert.Equal(SourceOnlyLines, scope.EffectiveChangedLines);
+        Assert.Equal(SourceOnlyLines, scope.EffectiveChangedLines());
         Assert.Contains(lockfile, scope.ChangedPaths);
     }
 
@@ -52,7 +52,7 @@ public sealed class ReviewScopeExclusionTests
     {
         ReviewScope scope = ScopeWithExcludedCounts(scratchPath);
 
-        Assert.Equal(SourceOnlyLines, scope.EffectiveChangedLines);
+        Assert.Equal(SourceOnlyLines, scope.EffectiveChangedLines());
         Assert.Contains(scratchPath, scope.ChangedPaths);
     }
 
@@ -79,7 +79,7 @@ public sealed class ReviewScopeExclusionTests
         Assert.Contains("package-lock.json", scope.ChangedPaths);
         Assert.Contains(".agent_scratchpad/notes.md", scope.ChangedPaths);
         Assert.Contains("src/Foo.cs", scope.ChangedPaths);
-        Assert.Equal(SourceOnlyLines, scope.EffectiveChangedLines);
+        Assert.Equal(SourceOnlyLines, scope.EffectiveChangedLines());
     }
 
     /// <summary>
@@ -97,7 +97,7 @@ public sealed class ReviewScopeExclusionTests
         };
         ReviewScope scope = new(["src/Foo.cs", "package-lock.json"], ExcludedLines + SourceOnlyLines, pathLineCounts);
 
-        Assert.Equal(SourceOnlyLines, scope.EffectiveChangedLines);
+        Assert.Equal(SourceOnlyLines, scope.EffectiveChangedLines());
     }
 
     /// <summary>
@@ -107,7 +107,7 @@ public sealed class ReviewScopeExclusionTests
     [Fact]
     public void BunLockdownJsonIsNotABunLockfile()
     {
-        Assert.False(ReviewScope.IsExcludedPath("bun.lockdown.json"));
+        Assert.False(ReviewScopeRules.IsExcludedPath("bun.lockdown.json"));
     }
 
     /// <summary>
@@ -120,7 +120,7 @@ public sealed class ReviewScopeExclusionTests
     {
         ReviewScope scope = new(["package-lock.json", "src/A.cs", "src/B.cs"], 100);
 
-        Assert.Equal(67, scope.EffectiveChangedLines);
+        Assert.Equal(67, scope.EffectiveChangedLines());
     }
 
     /// <summary>
@@ -137,6 +137,6 @@ public sealed class ReviewScopeExclusionTests
         };
         ReviewScope scope = new(["src/A.cs", "src/B.cs"], 21_000, pathLineCounts);
 
-        Assert.Equal(21_000, scope.EffectiveChangedLines);
+        Assert.Equal(21_000, scope.EffectiveChangedLines());
     }
 }

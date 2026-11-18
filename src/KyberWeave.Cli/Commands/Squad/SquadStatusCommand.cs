@@ -135,7 +135,7 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
         _output.Ansi.MarkupLine(
             $"Kyber-Squad deployment at [bold]{Markup.Escape(targetRoot)}[/] ([grey]{(scope == SquadDeploymentScope.Global ? "global" : "project")}[/]):");
 
-        if (SquadDeploymentPlan.IsLegacySingleRootReceipt(receipt))
+        if (SquadDeploymentPlanRules.IsLegacySingleRootReceipt(receipt))
             _output.Ansi.MarkupLine(
                 $"[yellow]legacy layout:[/] this receipt predates issue #91 and every entry " +
                 $"resolves beneath the recorded root [bold]{Markup.Escape(targetRoot)}[/] rather " +
@@ -154,7 +154,7 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
                 // beneath the recorded root for a legacy single-root receipt — see
                 // ResolveOwnedFilePath). Joining targetRoot directly would check a global
                 // deployment against the project directory and report every file missing.
-                fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(receipt, targetRoot, globalRoots, file, _pathSemantics);
+                fullPath = SquadDeploymentPlanRules.ResolveOwnedFilePath(receipt, targetRoot, globalRoots, file, _pathSemantics);
             }
             catch (Exception)
             {
@@ -251,7 +251,7 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
         {
             // Blocks resolve through the same receipt-aware helper as owned files, so a
             // global block lands beneath its target's own root.
-            fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(
+            fullPath = SquadDeploymentPlanRules.ResolveOwnedFilePath(
                 receipt,
                 targetRoot,
                 globalRoots,

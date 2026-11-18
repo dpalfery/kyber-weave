@@ -323,7 +323,7 @@ public static class SquadSourceValidator
     /// </summary>
     private static void ValidateWorkerRoster(SquadAgent agent)
     {
-        if (string.IsNullOrWhiteSpace(agent.WorkerRoster) || WorkerRosters.IsKnown(agent.WorkerRoster))
+        if (string.IsNullOrWhiteSpace(agent.WorkerRoster) || WorkerRosterRules.IsKnown(agent.WorkerRoster))
         {
             return;
         }

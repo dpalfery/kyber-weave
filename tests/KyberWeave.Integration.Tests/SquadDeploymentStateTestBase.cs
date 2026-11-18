@@ -1664,7 +1664,7 @@ public abstract class SquadDeploymentStateTestBase
     /// </summary>
     internal static string StateRelativePath(string root, string statePath)
     {
-        return Path.GetRelativePath(SquadPhysicalRootIdentity.Resolve(root, SquadFileSystemPathSemantics.Instance).PhysicalPath, statePath)
+        return Path.GetRelativePath(SquadPhysicalRootIdentities.Resolve(root, SquadFileSystemPathSemantics.Instance).PhysicalPath, statePath)
             .Replace(Path.DirectorySeparatorChar, '/');
     }
 
@@ -1689,7 +1689,7 @@ public abstract class SquadDeploymentStateTestBase
         }
 
         return unresolved.Aggregate(
-            SquadPhysicalRootIdentity.Resolve(existing, SquadFileSystemPathSemantics.Instance).PhysicalPath,
+            SquadPhysicalRootIdentities.Resolve(existing, SquadFileSystemPathSemantics.Instance).PhysicalPath,
             (accumulated, part) => Path.Combine(accumulated, part));
     }
 

@@ -756,7 +756,7 @@ public sealed class SquadDeploymentStateTests : SquadDeploymentStateTestBase
             // with that path's own classification (#91's read-side cross-check) — otherwise this
             // round-trip would hand the v2 writer a self-contradicting receipt of the test's own
             // making, not the serializer's.
-            SquadReceiptLayout globalLayout = SquadDeploymentPlan.ClassifyGlobalLayout(fixture.Receipt.Files);
+            SquadReceiptLayout globalLayout = SquadDeploymentPlanRules.ClassifyGlobalLayout(fixture.Receipt.Files);
             SquadReceipt[] receipts =
             [
                 fixture.Receipt with

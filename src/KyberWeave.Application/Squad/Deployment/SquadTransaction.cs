@@ -123,7 +123,7 @@ public sealed class SquadTransaction : ISquadTransaction
     {
         ArgumentNullException.ThrowIfNull(plan);
 
-        SquadPhysicalRootIdentity currentIdentity = SquadPhysicalRootIdentity.Resolve(plan.TargetRoot, _semantics);
+        SquadPhysicalRootIdentity currentIdentity = SquadPhysicalRootIdentities.Resolve(plan.TargetRoot, _semantics);
         if (!string.Equals(currentIdentity.Key, plan.PhysicalRootKey, StringComparison.Ordinal))
             throw new SquadDeploymentConflictException(
                 "Squad target root changed physical identity after preflight. Recreate the plan before writing.");
@@ -392,7 +392,7 @@ public sealed class SquadTransaction : ISquadTransaction
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentities.Resolve(targetRoot, _semantics);
         using TransactionLease lease = AcquireLease(_stateStore.ResolveLeaseIdentity(identity.PhysicalPath, scope));
         string root = identity.PhysicalPath;
         string journalDirectory = Physical(_stateStore.ResolveTransactionDirectory(root, scope));
@@ -3303,7 +3303,7 @@ public sealed class SquadTransaction : ISquadTransaction
 
     private string FileKey(string target, string relativePath)
     {
-        return SquadDeploymentPlan.DeployedFileIdentity(target, relativePath);
+        return SquadDeploymentPlanRules.DeployedFileIdentity(target, relativePath);
     }
 
     private string Digest(ReadOnlySpan<byte> content)

@@ -2088,7 +2088,7 @@ public sealed class SquadCliCommandTests : IDisposable
             ".kyber-weave",
             "squad",
             "projects",
-            SquadPhysicalRootIdentity.Resolve(projectRoot, SquadFileSystemPathSemantics.Instance).Key);
+            SquadPhysicalRootIdentities.Resolve(projectRoot, SquadFileSystemPathSemantics.Instance).Key);
 
     private static void SeedDeployment(
         string targetRoot,

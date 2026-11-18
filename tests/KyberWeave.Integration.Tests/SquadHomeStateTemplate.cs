@@ -96,7 +96,7 @@ public sealed class SquadHomeStateTemplate : IDisposable
 
         harness.Store.RegisterProject(root, _projectTargets, _projectInstalledAt);
 
-        string physical = SquadPhysicalRootIdentity.Resolve(root, Semantics).PhysicalPath;
+        string physical = SquadPhysicalRootIdentities.Resolve(root, Semantics).PhysicalPath;
         return new Project(root, physical, stateDirectory);
     }
 
@@ -145,9 +145,9 @@ public sealed class SquadHomeStateTemplate : IDisposable
             ".kyber-weave",
             "squad",
             "projects",
-            SquadPhysicalRootIdentity.KeyOf(canonicalRoot));
+            SquadPhysicalRootIdentities.KeyOf(canonicalRoot));
 
-    private static string Canonical(string path) => SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(path, Semantics);
+    private static string Canonical(string path) => SquadPhysicalRootIdentities.CanonicalizeAllowingMissing(path, Semantics);
 
     private static void CopyTree(string source, string destination)
     {

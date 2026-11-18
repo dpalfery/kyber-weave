@@ -887,8 +887,8 @@ public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, I
             Assert.Equal(["claude", "opencode"], targets);
             SquadOwnedFile openCodeFile = receipt.Files.First(file => file.Target == "opencode");
             Assert.True(File.Exists(added.Plan!.ResolvePhysicalPath(openCodeFile, SquadFileSystemPathSemantics.Instance)));
-            Assert.True(File.Exists(added.Plan.ResolvePhysicalPath(receipt.Files.First(file => file.Target == "claude"), SquadFileSystemPathSemantics.Instance)));
-            Assert.True(SquadFileSystemPathSemantics.Instance.IsWithin(roots.ResolveGlobalRoot(SquadTarget.OpenCode), added.Plan.ResolvePhysicalPath(openCodeFile, SquadFileSystemPathSemantics.Instance)));
+            Assert.True(File.Exists(added.Plan!.ResolvePhysicalPath(receipt.Files.First(file => file.Target == "claude"), SquadFileSystemPathSemantics.Instance)));
+            Assert.True(SquadFileSystemPathSemantics.Instance.IsWithin(roots.ResolveGlobalRoot(SquadTarget.OpenCode), added.Plan!.ResolvePhysicalPath(openCodeFile, SquadFileSystemPathSemantics.Instance)));
         }
     }
 

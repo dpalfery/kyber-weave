@@ -141,7 +141,7 @@ public sealed class SquadDeploymentStateRestoreTests : SquadDeploymentStateTestB
     [Fact]
     public void RestoreIntentRestoreSourcesAreReverifiedAtAdjacentUseBoundary()
     {
-        string transactionSource = Corpus.ReadText("src/KyberWeave.Data/Squad/Deployment/SquadTransaction.cs");
+        string transactionSource = Corpus.ReadText("src/KyberWeave.Application/Squad/Deployment/SquadTransaction.cs");
         string restoreIntent = ExtractMethod(transactionSource, "RestoreIntent");
         string restoreEntry = ExtractMethod(transactionSource, "RestoreEntry");
 
@@ -200,7 +200,7 @@ public sealed class SquadDeploymentStateRestoreTests : SquadDeploymentStateTestB
     [Fact]
     public void RestoreIntentUsesSingleVerifiedImmutablePayload()
     {
-        string source = Corpus.ReadText("src/KyberWeave.Data/Squad/Deployment/SquadTransaction.cs");
+        string source = Corpus.ReadText("src/KyberWeave.Application/Squad/Deployment/SquadTransaction.cs");
         string capture = ExtractMethod(source, "CaptureVerifiedRestorePayload");
         string compare = ExtractMethod(source, "CompareAndRestoreEntry");
         string restore = ExtractMethod(source, "RestoreEntry");

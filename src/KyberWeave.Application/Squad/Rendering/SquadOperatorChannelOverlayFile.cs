@@ -45,5 +45,5 @@ public sealed class SquadOperatorChannelOverlayFile(IFileSystem files) : ISquadO
     /// <param name="serverName">The validated server name.</param>
     /// <returns>The overlay, ready to render.</returns>
     public SquadOperatorChannelOverlay LoadOverlay(string sourceDirectory, string serverName) =>
-        SquadOperatorChannelOverlay.FromFileText(ReadText(sourceDirectory), serverName);
+        SquadOperatorChannelOverlays.FromFileText(ReadText(sourceDirectory), serverName);
 }

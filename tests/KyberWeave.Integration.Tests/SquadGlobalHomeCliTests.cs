@@ -358,7 +358,7 @@ public sealed class SquadGlobalHomeCliTests : IClassFixture<SquadHomeStateTempla
             ".kyber-weave",
             "squad",
             "projects",
-            SquadPhysicalRootIdentity.Resolve(importable, SquadFileSystemPathSemantics.Instance).Key);
+            SquadPhysicalRootIdentities.Resolve(importable, SquadFileSystemPathSemantics.Instance).Key);
         byte[]? receiptBefore = Snapshot(inRepoReceipt);
         byte[]? lockBefore = Snapshot(inRepoLock);
         byte[]? globalLockBefore = Snapshot(GlobalLockPath(h));
@@ -1545,7 +1545,7 @@ public sealed class SquadGlobalHomeCliTests : IClassFixture<SquadHomeStateTempla
         List<SquadDeploymentFile> deployed = active.Files
             .Select(file => new SquadDeploymentFile(
                 file.RelativePath,
-                File.ReadAllBytes(SquadDeploymentPlan.ResolveOwnedFilePath(active, h.Home, h.GlobalRoots, file, SquadFileSystemPathSemantics.Instance)),
+                File.ReadAllBytes(SquadDeploymentPlanRules.ResolveOwnedFilePath(active, h.Home, h.GlobalRoots, file, SquadFileSystemPathSemantics.Instance)),
                 file.Target))
             .ToList();
 
@@ -1751,7 +1751,7 @@ public sealed class SquadGlobalHomeCliTests : IClassFixture<SquadHomeStateTempla
             "KyberWeave",
             "squad",
             "roots",
-            SquadPhysicalRootIdentity.Resolve(anchor, SquadFileSystemPathSemantics.Instance).Key);
+            SquadPhysicalRootIdentities.Resolve(anchor, SquadFileSystemPathSemantics.Instance).Key);
         Directory.CreateDirectory(legacyDirectory);
         File.Move(GlobalReceiptPath(h), Path.Combine(legacyDirectory, "squad.receipt.json"));
         File.Move(GlobalLockPath(h), Path.Combine(legacyDirectory, "squad.lock.yml"));

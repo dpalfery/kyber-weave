@@ -243,7 +243,7 @@ internal sealed class SquadCommandRoots
         try
         {
             SquadReceipt? receipt = stateStore.ReadReceipt(home, SquadDeploymentScope.Global);
-            return receipt is not null && SquadDeploymentPlan.IsLegacySingleRootReceipt(receipt) ? receipt : null;
+            return receipt is not null && SquadDeploymentPlanRules.IsLegacySingleRootReceipt(receipt) ? receipt : null;
         }
         catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
         {

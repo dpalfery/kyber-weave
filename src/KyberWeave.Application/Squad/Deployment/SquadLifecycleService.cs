@@ -131,7 +131,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         if (request.Scope == SquadDeploymentScope.Instance && request.Targets.Count != 1)
             throw new ArgumentException("SquadDeploymentScope.Instance requires exactly one target.", nameof(request));
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(request.TargetRoot, _pathSemantics);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentities.Resolve(request.TargetRoot, _pathSemantics);
         string targetRoot = identity.PhysicalPath;
 
         SquadReceipt? existingReceipt = _stateStore.ReadReceipt(targetRoot, request.Scope);
@@ -162,8 +162,8 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             // CreateUpdate's own refusal fire only after the release has already downloaded.
             // Only meaningful once a per-target resolver is in play (see CreateUpdate's own
             // guard): with none, legacy and modern resolution already agree.
-            if (_globalRoots is not null && SquadDeploymentPlan.IsLegacySingleRootReceipt(existingReceipt))
-                throw SquadDeploymentPlan.LegacySingleRootLayoutConflict();
+            if (_globalRoots is not null && SquadDeploymentPlanRules.IsLegacySingleRootReceipt(existingReceipt))
+                throw SquadDeploymentPlanRules.LegacySingleRootLayoutConflict();
         }
 
         SquadLock? previousLock = _stateStore.ReadLock(targetRoot, request.Scope);
@@ -372,7 +372,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
     public IReadOnlyList<SquadTarget> EffectiveInstallTargets(SquadInstallRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        string root = SquadPhysicalRootIdentity.Resolve(request.TargetRoot, _pathSemantics).PhysicalPath;
+        string root = SquadPhysicalRootIdentities.Resolve(request.TargetRoot, _pathSemantics).PhysicalPath;
         return MergeAddedTargets(request, _stateStore.ReadReceipt(root, request.Scope));
     }
 
@@ -420,7 +420,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         if (request.Scope == SquadDeploymentScope.Instance && (request.Targets is null || request.Targets.Count != 1))
             throw new ArgumentException("SquadDeploymentScope.Instance requires exactly one target.", nameof(request));
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(request.TargetRoot, _pathSemantics);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentities.Resolve(request.TargetRoot, _pathSemantics);
         string targetRoot = identity.PhysicalPath;
 
         SquadReceipt previousReceipt = _stateStore.ReadReceipt(targetRoot, request.Scope)
@@ -432,8 +432,8 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         // only after the release has already downloaded. Only meaningful once a per-target
         // resolver is in play (see CreateUpdate's own guard): with none, legacy and modern
         // resolution already agree.
-        if (_globalRoots is not null && SquadDeploymentPlan.IsLegacySingleRootReceipt(previousReceipt))
-            throw SquadDeploymentPlan.LegacySingleRootLayoutConflict();
+        if (_globalRoots is not null && SquadDeploymentPlanRules.IsLegacySingleRootReceipt(previousReceipt))
+            throw SquadDeploymentPlanRules.LegacySingleRootLayoutConflict();
 
         IReadOnlyList<SquadTarget> targets;
         if (request.Targets is { Count: > 0 })
@@ -662,7 +662,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TargetRoot);
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(request.TargetRoot, _pathSemantics);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentities.Resolve(request.TargetRoot, _pathSemantics);
         string targetRoot = identity.PhysicalPath;
 
         SquadReceipt? receipt = _stateStore.ReadReceipt(targetRoot, request.Scope);

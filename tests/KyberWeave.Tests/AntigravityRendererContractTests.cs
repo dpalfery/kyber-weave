@@ -904,14 +904,14 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        // SquadDeploymentPlan.IdentityFromRelativePath must resolve a bare agent.md
+        // SquadDeploymentPlanRules.IdentityFromRelativePath must resolve a bare agent.md
         // to its parent directory name (e.g., ".agents/agents/conductor/agent.md" → "conductor")
         foreach (SquadAgent agent in source.Agents)
         {
             SquadDeploymentFile agentFile =
                 result.Files.First(f => f.RelativePath == $".agents/agents/{agent.Name}/agent.md");
 
-            string identity = SquadDeploymentPlan.IdentityFromRelativePath(agentFile.RelativePath);
+            string identity = SquadDeploymentPlanRules.IdentityFromRelativePath(agentFile.RelativePath);
             Assert.Equal(agent.Name, identity);
         }
     }

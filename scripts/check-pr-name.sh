@@ -39,7 +39,7 @@ set -euo pipefail
 readonly usage='usage: check-pr-name.sh --title <title> --branch <branch> [--author <login>]'
 
 # The harness tokens, in the order SquadTargetCatalog.All holds them: one line per
-# SquadTargetCatalog.GetToken in src/KyberWeave.Domain/Squad/Deployment/SquadTarget.cs, then
+# SquadTargetCatalog.GetToken in src/KyberWeave.Application/Squad/Deployment/SquadTargetCatalog.cs, then
 # `manual` for a pull request named after no harness. A shell script cannot read the C#
 # catalogue, so the thirteen are copied here, and the naming check's own tests build their
 # accept rows from SquadTargetCatalog and so fail until this line follows a catalogue change.

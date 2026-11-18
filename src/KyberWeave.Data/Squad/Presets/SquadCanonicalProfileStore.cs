@@ -2,7 +2,6 @@ using KyberWeave.Contracts.Repositories;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Core.Squad.Parsing;
 using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
 
@@ -11,7 +10,7 @@ namespace KyberWeave.Core.Squad.Model;
 /// <summary>Persists one canonical profile snapshot per Squad release version under the home Squad state.</summary>
 /// <remarks>
 /// Snapshots live at <c>&lt;home&gt;/.kyber-weave/squad/profiles/&lt;version&gt;.yml</c>, derived from
-/// <see cref="ISquadUserPaths.HomeDirectory"/> the same way <see cref="SquadModelPresetStore"/>
+/// <see cref="ISquadUserPaths.HomeDirectory"/> the same way <c>SquadModelPresetStore</c>
 /// derives its presets directory, so both stay colocated under the home Squad root the state store owns.
 /// Writes go through a temporary file beside the target and rename it into place, the
 /// SquadStateMigration.WriteAtomically pattern, so a crash never leaves a half-written snapshot behind.
@@ -266,7 +265,7 @@ public sealed class SquadCanonicalProfileStore : ISquadCanonicalProfileStore
         foreach (KeyValuePair<YamlNode, YamlNode> pair in mapping.Children)
         {
             string key = RequireKey(pair.Key, $"profiles.{category}", path);
-            if (!SquadSourceLoader.ModelProfileFields.Contains(key))
+            if (!SquadModelProfileFields.Names.Contains(key))
                 throw new InvalidDataException(
                     $"Squad snapshot '{path}' profile category '{category}' uses unknown harness '{key}'. " +
                     "Align the snapshot with the models.yml harness vocabulary.");

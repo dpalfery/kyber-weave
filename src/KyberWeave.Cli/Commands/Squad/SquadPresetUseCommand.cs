@@ -320,7 +320,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
             file =>
             {
                 string physicalPath = scope == SquadDeploymentScope.Global
-                    ? SquadDeploymentPlan.ResolveOwnedFilePath(activeReceipt, anchorRoot, effectiveGlobalRoots, file, _pathSemantics)
+                    ? SquadDeploymentPlanRules.ResolveOwnedFilePath(activeReceipt, anchorRoot, effectiveGlobalRoots, file, _pathSemantics)
                     : Path.Combine(anchorRoot, file.RelativePath);
                 return _files.FileExists(physicalPath) ? _files.ReadAllBytes(physicalPath) : null;
             },

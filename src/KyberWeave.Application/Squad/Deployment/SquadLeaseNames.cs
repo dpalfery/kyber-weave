@@ -12,5 +12,5 @@ public static class SquadLeaseNames
     /// <param name="homeStateDirectory">The directory the registry lives in.</param>
     /// <returns>The name every writer of that registry takes before it reads and rewrites it.</returns>
     public static string ForRegistry(string homeStateDirectory) =>
-        $"kyber-weave-squad-registry-{SquadPhysicalRootIdentity.KeyOf(homeStateDirectory)}";
+        $"kyber-weave-squad-registry-{SquadPhysicalRootIdentities.KeyOf(homeStateDirectory)}";
 }
