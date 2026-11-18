@@ -144,6 +144,9 @@ internal sealed class FakeRepositoryFileStore(IRepositoryFileStore? inner = null
     public void DeleteTreeNoFollow(string directoryPath) => _inner.DeleteTreeNoFollow(directoryPath);
 
     /// <inheritdoc />
+    public void DeleteEmptyDirectory(string directoryPath) => _inner.DeleteEmptyDirectory(directoryPath);
+
+    /// <inheritdoc />
     public void CreateFileLink(string linkPath, string targetPath) => _inner.CreateFileLink(linkPath, targetPath);
 
     /// <inheritdoc />

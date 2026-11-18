@@ -510,6 +510,27 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
     }
 
     /// <inheritdoc />
+    public void DeleteEmptyDirectory(string directoryPath)
+    {
+        Enter(nameof(DeleteEmptyDirectory), directoryPath);
+        Node node = Resolve(directoryPath, followFinal: false) ?? throw Missing(directoryPath);
+        if (node.LinkTarget is null)
+        {
+            if (!node.IsDirectory)
+            {
+                throw new IOException($"The path '{directoryPath}' is not a directory.");
+            }
+
+            if (node.Children.Count > 0)
+            {
+                throw new IOException($"The directory '{directoryPath}' is not empty.");
+            }
+        }
+
+        Remove(node);
+    }
+
+    /// <inheritdoc />
     public void CreateFileLink(string linkPath, string targetPath) => CreateLink(linkPath, targetPath, namesDirectory: false);
 
     /// <inheritdoc />

@@ -165,6 +165,15 @@ public interface IWritableFileSystem : IFileSystem
     /// <exception cref="IOException">Part of the tree could not be deleted, for example because a file is open.</exception>
     void DeleteTreeNoFollow(string directoryPath);
 
+    /// <summary>Deletes a directory only when nothing is in it.</summary>
+    /// <param name="directoryPath">The directory to delete.</param>
+    /// <remarks>
+    /// Unlike <see cref="DeleteTreeNoFollow" /> this never removes content: a caller that has just decided a directory
+    /// is empty does not lose a file that appeared since. A directory link is removed as a link.
+    /// </remarks>
+    /// <exception cref="IOException">The directory is not empty, or does not exist.</exception>
+    void DeleteEmptyDirectory(string directoryPath);
+
     /// <summary>Creates a symbolic link to an existing file.</summary>
     /// <param name="linkPath">The link to create; its parent directory is created when missing.</param>
     /// <param name="targetPath">The file the link names.</param>

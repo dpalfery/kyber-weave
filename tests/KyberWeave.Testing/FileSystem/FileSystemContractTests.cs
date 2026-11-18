@@ -139,6 +139,23 @@ public abstract class FileSystemContractTests : IDisposable
     }
 
     [Fact]
+    public void DeleteEmptyDirectoryRemovesAnEmptyDirectoryAndRefusesOneWithContent()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string empty = At(root, "empty");
+        files.CreateDirectory(empty);
+        string full = At(root, "full");
+        files.CreateDirectory(full);
+        string kept = WriteFile(files, full, "kept.txt", "x");
+
+        files.DeleteEmptyDirectory(empty);
+        _ = Assert.ThrowsAny<IOException>(() => files.DeleteEmptyDirectory(full));
+
+        Assert.False(files.DirectoryExists(empty));
+        Assert.True(files.FileExists(kept));
+    }
+
+    [Fact]
     public void DeleteTreeNoFollowRemovesADanglingLinkItself()
     {
         IWritableFileSystem files = Starting(out string root);

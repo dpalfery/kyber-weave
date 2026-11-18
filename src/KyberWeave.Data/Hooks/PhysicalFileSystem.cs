@@ -133,6 +133,9 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
     }
 
     /// <inheritdoc />
+    public void DeleteEmptyDirectory(string directoryPath) => Directory.Delete(directoryPath, false);
+
+    /// <inheritdoc />
     public void CreateFileLink(string linkPath, string targetPath)
     {
         CreateLinkParent(linkPath);
