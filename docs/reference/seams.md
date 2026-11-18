@@ -190,7 +190,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ConductorGuard` (`Arbiter/Hooks/ConductorGuard.cs`) | paths | 4.3 |
 | `ConductorGuardRules` (`Arbiter/Hooks/ConductorGuardRules.cs`) | paths | 2.5 |
 | `HookCommand` (`Arbiter/Hooks/HookCommand.cs`) | identifiers | 4.3 |
-| `HookGitFacts` (`Arbiter/Hooks/HookGitFacts.cs`) | clock | 4.3 |
 | `WorkerGuard` (`Arbiter/Hooks/WorkerGuard.cs`) | file system, paths | 4.3 |
 | `ArbiterRootResolver` (`Arbiter/Mcp/ArbiterRootResolver.cs`) | paths | 4.3 |
 | `OllamaProbe` (`Arbiter/OllamaProbe.cs`) | network | 4.3 |
