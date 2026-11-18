@@ -1,3 +1,4 @@
+using KyberWeave.Application.Review;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Cli.Commands.Arbiter;
@@ -19,7 +20,13 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// Prints one task's packet for the worker that was dispatched for it, so a conductor passes a task id and nothing
 /// else, and a worker, which may not open a plan, still gets the whole brief.
 /// </summary>
-public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts hostFacts, IFileSystem files, IProcessEnvironment environment) : Command<DocsPacketSettings>
+public sealed class DocsPacketCommand(
+    IPlanTaskService tasks,
+    IPacketHostFacts hostFacts,
+    IFileSystem files,
+    IProcessEnvironment environment,
+    IPlanTaskTargetService targets,
+    ITaskGateSelectionService taskGates) : Command<DocsPacketSettings>
 {
     /// <summary>The plan could not be chosen: none is Ready or In progress, or several are.</summary>
     public const string PlanNotChosen = "KW-DOC-TASKS-CLI-002";
@@ -35,7 +42,7 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
 
     /// <summary>
     /// Prints the packet of the named task: the built prompt, then the task's resolved test command
-    /// (<see cref="PacketTestCommand" />). The prompt has <c>{worktree}</c> filled in and the prior-results slot
+    /// (<see cref="PacketTestCommandRenderer" />). The prompt has <c>{worktree}</c> filled in and the prior-results slot
     /// filled from <c>--prior-results</c>, or labelled as empty. The plan comes from <c>--plan</c>, else from the one Ready or In progress plan under the planning
     /// folders. When this checkout has none, the repository's other git worktrees are searched for the one active
     /// plan that has the task, so a worker whose shell is not in its worktree still gets its packet. The task file is checked against the plan first, so a stale file is refused with the fix.
@@ -151,13 +158,15 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
         }
 
         // The test command is a packet extra, not part of the prompt the hook inserts, so it is printed here.
-        if (PacketTestCommand.Render(
+        if (PacketTestCommandRenderer.Render(
                 root,
                 config,
                 prompt.Agent,
                 entry,
-                PlanTaskTarget.ContractRow(root, plan, entry.Id),
-                OperatingSystem.IsWindows()) is { } tests)
+                targets.ContractRow(root, plan, entry.Id),
+                OperatingSystem.IsWindows(),
+                targets,
+                taskGates) is { } tests)
         {
             Console.Out.WriteLine();
             Console.Out.WriteLine(tests);

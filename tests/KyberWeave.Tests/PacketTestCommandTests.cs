@@ -1,6 +1,10 @@
+using KyberWeave.Application.Review;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Tests.Fakes;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using KyberWeave.Tests.Corpus;
 
@@ -15,7 +19,28 @@ public sealed class PacketTestCommandTests
 {
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
+    private static readonly IServiceProvider Services = DocsTestCommands.Services();
+
     private const string Source = "src/KyberWeave.Core/Review/TaskGateSelection.cs";
+
+    /// <summary>The section <c>docs packet</c> prints, over the same services the command takes from the container.</summary>
+    private static string? Render(
+        string repoRoot,
+        KyberWeaveConfig config,
+        string? agent,
+        PlanTaskFileEntry entry,
+        PlanContractRow? row,
+        bool windows) =>
+        PacketTestCommandRenderer.Render(
+            repoRoot,
+            config,
+            agent,
+            entry,
+            row,
+            windows,
+            Services.GetRequiredService<IPlanTaskTargetService>(),
+            Services.GetRequiredService<ITaskGateSelectionService>());
+
 
     private static KyberWeaveConfig Config() => KyberWeaveConfigLoader.LoadFromYaml("""
         review:
@@ -33,7 +58,7 @@ public sealed class PacketTestCommandTests
     {
         PlanContractRow row = new("T1", "tests/X.cs", "`dotnet test --filter FullyQualifiedName~XTests`", null, null, null);
 
-        string? text = PacketTestCommand.Render(Corpus.Root, Config(), "csharp-dev", Task, row, windows: false);
+        string? text = Render(Corpus.Root, Config(), "csharp-dev", Task, row, windows: false);
 
         Assert.NotNull(text);
         Assert.Contains("kyber-weave review gates . --agent csharp-dev --task t1", text, StringComparison.Ordinal);
@@ -46,7 +71,7 @@ public sealed class PacketTestCommandTests
     {
         PlanContractRow row = new("T1", "tests/X.cs", "`dotnet test --filter FullyQualifiedName~XTests`", null, null, null);
 
-        string? text = PacketTestCommand.Render(Corpus.Root, Config(), "react-dev", Task, row, windows: false);
+        string? text = Render(Corpus.Root, Config(), "react-dev", Task, row, windows: false);
 
         Assert.NotNull(text);
         Assert.StartsWith("## Test command\n", text, StringComparison.Ordinal);
@@ -59,7 +84,7 @@ public sealed class PacketTestCommandTests
     [Fact]
     public void TheSectionNamesTheOneGateCommandForTheFailingAndThePassingRunWithNothingLeftToFillIn()
     {
-        string? text = PacketTestCommand.Render(Corpus.Root, Config(), "csharp-dev", Task, null, windows: false);
+        string? text = Render(Corpus.Root, Config(), "csharp-dev", Task, null, windows: false);
 
         Assert.NotNull(text);
         Assert.Contains("    kyber-weave review gates . --agent csharp-dev --task t1 --red ", text, StringComparison.Ordinal);
@@ -70,7 +95,7 @@ public sealed class PacketTestCommandTests
     [Fact]
     public void TheTestsGateIsExpandedForTheTaskExactlyAsTheGateRunnerExpandsItAndQuotedToPaste()
     {
-        string? text = PacketTestCommand.Render(Corpus.Root, Config(), "csharp-dev", Task, null, windows: false);
+        string? text = Render(Corpus.Root, Config(), "csharp-dev", Task, null, windows: false);
 
         Assert.NotNull(text);
         Assert.EndsWith(
@@ -86,7 +111,7 @@ public sealed class PacketTestCommandTests
             "T1", "tests/Acme.Tests/OrdersTests.cs", "FullyQualifiedName~Acme.Tests.OrdersTests|FullyQualifiedName~Acme.Tests.CartTests", null, null, null);
         PlanTaskFileEntry task = Task with { Files = ["src/Acme/Orders.cs", "tests/Acme.Tests/OrdersTests.cs"] };
 
-        string? text = PacketTestCommand.Render(Corpus.Root, Config(), "csharp-dev", task, row, windows: false);
+        string? text = Render(Corpus.Root, Config(), "csharp-dev", task, row, windows: false);
 
         Assert.NotNull(text);
         Assert.EndsWith(
@@ -98,15 +123,15 @@ public sealed class PacketTestCommandTests
     [Fact]
     public void AFilterOfSeveralClassesIsQuotedSoTheShellKeepsThePipe()
     {
-        Assert.Equal("'FullyQualifiedName~A|FullyQualifiedName~B'", PacketTestCommand.Quote("FullyQualifiedName~A|FullyQualifiedName~B", windows: false));
+        Assert.Equal("'FullyQualifiedName~A|FullyQualifiedName~B'", PacketTestCommandRenderer.Quote("FullyQualifiedName~A|FullyQualifiedName~B", windows: false));
     }
 
     [Fact]
     public void NothingIsPrintedWhenNoCommandResolves()
     {
-        Assert.Null(PacketTestCommand.Render(Corpus.Root, Config(), null, Task, null, windows: false));
-        Assert.Null(PacketTestCommand.Render(Corpus.Root, Config(), "go-dev", Task, null, windows: false));
-        Assert.Null(PacketTestCommand.Render(
+        Assert.Null(Render(Corpus.Root, Config(), null, Task, null, windows: false));
+        Assert.Null(Render(Corpus.Root, Config(), "go-dev", Task, null, windows: false));
+        Assert.Null(Render(
             Corpus.Root, Config(), "csharp-dev", Task with { Files = ["docs/README.md"] }, null, windows: false));
     }
 }
