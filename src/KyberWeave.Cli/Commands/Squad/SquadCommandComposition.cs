@@ -531,19 +531,26 @@ internal static class SquadCommandComposition
     ///     writes nothing and only reports what the next non-dry-run invocation will move. The project root is
     ///     optional because global verbs have no project to import.
     /// </remarks>
+    /// <param name="migration">The migration that moves the legacy state.</param>
+    /// <param name="invokingCwd">The directory the command was started from, or null.</param>
+    /// <param name="projectRoot">The project root to import, or null for a global verb.</param>
+    /// <param name="dryRun">Whether the run only plans, so nothing is written.</param>
+    /// <param name="files">The file system the project root is probed through; null uses the process's own.</param>
     public static SquadMigrationReport EnsureStateMigrated(
         ISquadStateMigration migration,
         string? invokingCwd,
         string? projectRoot,
-        bool dryRun)
+        bool dryRun,
+        IFileSystem? files = null)
     {
         ArgumentNullException.ThrowIfNull(migration);
 
+        IFileSystem fileSystem = files ?? SquadCliServices.ProcessFileSystem();
         SquadMigrationReport global = migration.MigrateGlobal(invokingCwd, dryRun);
 
         List<string> imported = [];
         List<string> warnings = [.. global.Warnings];
-        if (projectRoot is not null && Directory.Exists(projectRoot))
+        if (projectRoot is not null && fileSystem.DirectoryExists(projectRoot))
         {
             SquadMigrationReport project = migration.ImportProject(projectRoot, dryRun);
             imported.AddRange(project.ImportedProjects);

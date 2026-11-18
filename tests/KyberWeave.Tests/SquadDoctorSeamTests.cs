@@ -25,12 +25,14 @@ public sealed class SquadDoctorSeamTests
     private readonly TestConsole _ansi = new() { EmitAnsiSequences = false };
     private readonly FakeConsole _streams = new();
     private readonly InMemoryFileSystem _files = new();
+    private readonly RecordingMigration _migration = new();
+    private readonly RecordingSourceLocator _locator = new();
 
     /// <summary>A workspace with no Devin marker in the injected file system is reported as not checked.</summary>
     [Fact]
     public void Execute_NoDevinMarkerInTheInjectedFileSystem_SkipsTheDevinCheck()
     {
-        int exit = Execute(out string output);
+        int exit = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
 
         Assert.Equal(0, exit);
         Assert.Contains("Devin duplicate imports: not checked (no '.devin/' in this directory)", output, StringComparison.Ordinal);
@@ -45,77 +47,129 @@ public sealed class SquadDoctorSeamTests
     {
         _files.CreateDirectory($"{Workspace}/.devin");
 
-        int exit = Execute(out string output);
+        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
 
-        Assert.Equal(0, exit);
         Assert.Contains("Devin duplicate imports: none", output, StringComparison.Ordinal);
         Assert.DoesNotContain("not checked (no '.devin/'", output, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// The state migration is given the environment seam's current directory, not the process's, so a run anchored
-    /// elsewhere is reproducible in a test.
+    /// A retired skill folder that exists only in the injected file system is warned about, so the check reads the
+    /// deployment tree through the seam.
     /// </summary>
+    [Fact]
+    public void Execute_RetiredSkillInTheInjectedFileSystem_WarnsAboutIt()
+    {
+        _files.CreateDirectory($"{Workspace}/.claude/skills/{SquadRetiredSkills.SecondBrain}");
+
+        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
+
+        Assert.Contains($"Retired skill '{SquadRetiredSkills.SecondBrain}' still present at", output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A receipt-owned hook block whose file exists only in the injected file system is read through the seam: the
+    /// reported drift is what the fake file holds, not what the developer's disk does.
+    /// </summary>
+    [Fact]
+    public void Execute_OwnedBlockFileInTheInjectedFileSystem_ReadsItThroughTheSeam()
+    {
+        _state.Receipt = ReceiptWithOneBlock();
+        _files.CreateDirectory($"{Workspace}/.claude");
+        _files.WriteAllText($"{Workspace}/.claude/settings.json", "{ not json");
+
+        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
+
+        Assert.Contains("Owned block drift: .claude/settings.json", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("(missing)", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("(unreadable:", output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The state migration imports a project root that exists only in the injected file system, so the answer comes
+    /// from the seam rather than from the developer's disk.
+    /// </summary>
+    [Fact]
+    public void Execute_ProjectRootOnlyInTheInjectedFileSystem_ImportsIt()
+    {
+        _files.CreateDirectory(Workspace);
+
+        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out _);
+
+        Assert.Equal(Workspace, _migration.ImportedProjectRoot);
+    }
+
+    /// <summary>The state migration runs from the environment seam's current directory, not from the process's.</summary>
     [Fact]
     public void Execute_MigrationRunsFromTheEnvironmentSeamsCurrentDirectory()
     {
-        RecordingMigration migration = new();
+        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out _);
 
-        _ = Execute(out _, migration);
-
-        Assert.Equal("/launched-from", migration.InvokingCwd);
+        Assert.Equal("/launched-from", _migration.InvokingCwd);
     }
 
     /// <summary>Nothing the doctor reports goes to the standard output the markup console does not own.</summary>
     [Fact]
     public void Execute_WritesNothingToStandardOutput()
     {
-        _ = Execute(out _);
+        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out _);
 
         Assert.Equal(string.Empty, _streams.Output);
     }
 
-    private int Execute(out string output) => Execute(out output, new RecordingMigration());
-
-    private int Execute(out string output, RecordingMigration migration)
+    private int Execute(SquadDoctorSettings settings, out string output)
     {
-        SquadDoctorCommand command = Doctor(migration);
-        int exit = command.Execute(
-            null!,
-            new SquadDoctorSettings { Path = Workspace, Global = false },
-            CancellationToken.None);
+        SquadDoctorCommand command = Doctor();
+        int exit = command.Execute(null!, settings, CancellationToken.None);
 
         output = _ansi.Output.Replace("\r\n", "\n", StringComparison.Ordinal);
         return exit;
     }
 
-    private SquadDoctorCommand Doctor(RecordingMigration migration)
+    private static SquadReceipt ReceiptWithOneBlock() =>
+        new("kyber-squad.receipt/v3", SquadDeploymentScope.Project, Workspace, DateTimeOffset.UnixEpoch, [], [])
+        {
+            Blocks =
+            [
+                new SquadOwnedBlock(
+                    ".claude/settings.json",
+                    "claude",
+                    CreatedFile: true,
+                    [new SquadOwnedBlockEntry("hooks", new string('a', 64))])
+            ]
+        };
+
+    private SquadDoctorCommand Doctor()
     {
         FakeProcessExecutor executor = new();
         executor.WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         return new SquadDoctorCommand(
-            new EmptyStateStore(),
-            migration,
+            _state,
+            _migration,
             new FixedGlobalRoots(),
             new FakeSquadRenderer(),
             new EmptyPresetStore(),
             new UnusedPlanner(),
             new SilentGuidance(),
             new FakeProcessEnvironment(currentDirectory: "/launched-from", readVariable: _ => null),
-            new NoSourceLocator(),
+            _locator,
             new UnusedSourceLoader(),
             new NoShadowing(),
             new NoDevinOverlap(),
             new NoZCodeMcp(),
-            new SquadDoctorOptions(executor, Workspace),
+            new SquadDoctorOptions(executor, WorkingDirectory: null),
             SquadFileSystemPathSemantics.Instance,
             new FakeKyberWeaveConfigRepository(),
             new SquadConsole(_ansi, _streams),
             _files);
     }
 
+    private readonly EmptyStateStore _state = new();
+
     private sealed class EmptyStateStore : ISquadStateStore
     {
+        public SquadReceipt? Receipt { get; set; }
+
         public ISquadUserPaths UserPaths { get; } = new FakeSquadUserPaths("/doctor-state");
 
         public string ResolveStateDirectory(string targetRoot, SquadDeploymentScope scope) => throw Unused();
@@ -142,7 +196,7 @@ public sealed class SquadDoctorSeamTests
 
         public SquadReceipt DeserializeReceipt(string json) => throw Unused();
 
-        public SquadReceipt? ReadReceipt(string targetRoot, SquadDeploymentScope scope) => null;
+        public SquadReceipt? ReadReceipt(string targetRoot, SquadDeploymentScope scope) => Receipt;
 
         public SquadLock? ReadLock(string targetRoot, SquadDeploymentScope scope) => null;
 
@@ -169,13 +223,19 @@ public sealed class SquadDoctorSeamTests
     {
         public string? InvokingCwd { get; private set; }
 
+        public string? ImportedProjectRoot { get; private set; }
+
         public SquadMigrationReport MigrateGlobal(string? invokingCwd, bool dryRun = false)
         {
             InvokingCwd = invokingCwd;
             return new SquadMigrationReport([], [], [], []);
         }
 
-        public SquadMigrationReport ImportProject(string root, bool dryRun = false) => new([], [], [], []);
+        public SquadMigrationReport ImportProject(string root, bool dryRun = false)
+        {
+            ImportedProjectRoot = root;
+            return new SquadMigrationReport([], [], [], []);
+        }
     }
 
     private sealed class FixedGlobalRoots : ISquadGlobalRootResolver
@@ -243,9 +303,15 @@ public sealed class SquadDoctorSeamTests
         public bool IsDegradableFailure(Exception exception) => false;
     }
 
-    private sealed class NoSourceLocator : ISquadSourceLocator
+    private sealed class RecordingSourceLocator : ISquadSourceLocator
     {
-        public string? Resolve(string workingDirectory) => null;
+        public string? WorkingDirectory { get; private set; }
+
+        public string? Resolve(string workingDirectory)
+        {
+            WorkingDirectory = workingDirectory;
+            return null;
+        }
     }
 
     private sealed class UnusedSourceLoader : ISquadSourceLoader

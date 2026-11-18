@@ -252,7 +252,8 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             _migration,
             _environment.CurrentDirectory,
             settings.Global ? null : workingDirectory,
-            false);
+            false,
+            _files);
         _console.WriteMigrationNotes(migration, true);
         try
         {
