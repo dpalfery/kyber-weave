@@ -307,6 +307,22 @@ public sealed class TaskGateSelectionTests
         Assert.Empty(plan.Gates);
     }
 
+    [Fact]
+    public void AnInaccessibleRootIsRefusedRatherThanCrashingOrSkippingTheGate()
+    {
+        // The physical source throws when a root exists but cannot be listed. The planning step turns that into a
+        // named refusal; letting it escape crashes the run, and swallowing it into no classes skips the tests gate.
+        const string Message = "The repository root '/repo' is not accessible: permission denied";
+        FakeRepositoryTreeProbe probe = new() { Roots = { ["/repo"] = RepositoryRootAccess.Accessible } };
+        FakeTestClassSources sources = new() { OpenFault = Message };
+        ITaskGateSelectionService selection = new TaskGateSelectionService(probe, sources);
+
+        TaskGatePlan plan = selection.Plan([TestsGate()], Changed, null, "unix", "/repo");
+
+        Assert.Equal(Message, Assert.Single(plan.Refusals));
+        Assert.Empty(plan.Gates);
+    }
+
     private static ReviewTaskGate TestsGate()
     {
         return new ReviewTaskGate(

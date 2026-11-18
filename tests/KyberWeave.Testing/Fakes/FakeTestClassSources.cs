@@ -20,8 +20,17 @@ internal sealed class FakeTestClassSources : ITestClassSources
     /// <summary>Whether no tree can be opened, as for a root that does not exist.</summary>
     public bool Missing { get; init; }
 
+    /// <summary>
+    /// The message <see cref="Open"/> throws as an <see cref="InvalidOperationException"/>, as the physical source does
+    /// for a root that exists but cannot be listed; null opens the tree.
+    /// </summary>
+    public string? OpenFault { get; init; }
+
     /// <inheritdoc />
-    public TestSourceTree? Open(string? root) => Missing ? null : new TestSourceTree(Root, SourcesByName);
+    public TestSourceTree? Open(string? root) =>
+        OpenFault is not null
+            ? throw new InvalidOperationException(OpenFault)
+            : Missing ? null : new TestSourceTree(Root, SourcesByName);
 
     /// <inheritdoc />
     public string? ReadDeclaredNamespace(string filePath) => NamespacesByPath.GetValueOrDefault(filePath);
