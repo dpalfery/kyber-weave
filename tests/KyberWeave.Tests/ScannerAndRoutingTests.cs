@@ -1,8 +1,11 @@
+using KyberWeave.Application.Skills;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Parsing;
 using KyberWeave.Core.Skills.Routing;
 using KyberWeave.Core.Skills.Security;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -212,5 +215,35 @@ public class RoutingTests
         public string Name => "fires-without-selection";
 
         public RoutingResult Route(string prompt, SkillSet skills) => new(null, true, []);
+    }
+}
+
+public class SkillEvalGovernanceTests
+{
+    private static SkillSet SampleSet() => new(
+    [
+        GovernanceTestFiles.Skills.Read(
+            "---\nname: password-reset\ndescription: Use to reset a corporate password.\n---\n\nbody",
+            "/tmp/pr/SKILL.md",
+            "/tmp/pr")
+    ]);
+
+    [Fact]
+    public void AMalformedEvalFileIsReportedAsAParseFailure()
+    {
+        InMemoryFileSystem files = new();
+        files.WriteAllText("/eval.yaml", "cases: [unclosed");
+
+        SkillGovernanceService service = new(files, new UnusedArchiveWriter());
+
+        RoutingEvalParseException error = Assert.Throws<RoutingEvalParseException>(
+            () => service.Evaluate("/eval.yaml", new LexicalRoutingStrategy(), SampleSet()));
+        Assert.Contains("eval", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class UnusedArchiveWriter : ISkillArchiveWriter
+    {
+        public void Write(string output, IReadOnlyList<SkillArchiveEntry> entries) =>
+            throw new NotSupportedException("Evaluate writes no archive.");
     }
 }

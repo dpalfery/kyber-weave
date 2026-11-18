@@ -117,7 +117,17 @@ public sealed class RouteCommand(ISkillGovernanceService skills) : Command<Route
 
     private int RunEval(RouteSettings settings, SkillSet set, IRoutingStrategy strategy)
     {
-        RoutingEvalSummary? evaluated = skills.Evaluate(settings.EvalFile!, strategy, set);
+        RoutingEvalSummary? evaluated;
+        try
+        {
+            evaluated = skills.Evaluate(settings.EvalFile!, strategy, set);
+        }
+        catch (RoutingEvalParseException error)
+        {
+            AnsiConsole.MarkupLine($"[red]{Markup.Escape(error.Message)}[/]");
+            return 2;
+        }
+
         if (evaluated is null)
         {
             AnsiConsole.MarkupLine($"[red]Eval file not found: {Markup.Escape(settings.EvalFile!)}[/]");
