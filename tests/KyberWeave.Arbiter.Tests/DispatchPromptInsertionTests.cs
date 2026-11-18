@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Arbiter.Hooks.Adapters;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
@@ -16,6 +17,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Arbiter;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.Fixtures;
+using KyberWeave.Tests.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -30,17 +32,13 @@ namespace KyberWeave.Tests;
 /// The adapters are driven with the recorded payload shapes the per-harness tests use, against a prompt service the
 /// test answers, so the assertions are about the field each harness documents and about what the hook asks for.
 /// </remarks>
-public sealed class DispatchPromptInsertionTests : IDisposable
+public sealed class DispatchPromptInsertionTests
 {
     private const string TaskPrompt =
         "<task>\nImplement the parser.\n</task>\n\n<left-out>\nNothing was left out.\n</left-out>";
 
     private const string TaskDispatch =
         "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement the plan parser.";
-
-    private readonly TempDirectory _temp = new();
-
-    public void Dispose() => _temp.Dispose();
 
     /// <summary>The prompt service a test answers, and the requests it was asked for.</summary>
     private sealed class ScriptedPrompts : ITaskPromptServiceFactory, ITaskPromptService
@@ -644,7 +642,8 @@ public sealed class DispatchPromptInsertionTests : IDisposable
     [Fact]
     public void AFreshHostWithTheArbiterOffInstallsTheDispatchHookOnTheDispatchersOnly()
     {
-        SquadSource source = RealSquadServices.Load(ArbiterSquadFixturePath());
+        using ArbiterSquadFixture fixture = ArbiterSquadFixture.CreateInMemory(new InMemoryFileSystem());
+        SquadSource source = fixture.Load();
         IReadOnlyList<SquadArbiterHook> hooks = ArbiterHookWiring.BuildHooks(
             source, new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: 5), SquadDeploymentScope.Project);
 
@@ -657,12 +656,12 @@ public sealed class DispatchPromptInsertionTests : IDisposable
     [Fact]
     public async Task ARenderWithTheArbiterOffWritesTheDispatchHookToTheDispatchersAgentFile()
     {
-        string source = ArbiterSquadFixturePath();
-        SquadRenderResult result = await new ClaudeRenderer().RenderAsync(new SquadRenderRequest(
-            SourceDirectory: source,
+        using ArbiterSquadFixture fixture = ArbiterSquadFixture.CreateInMemory(new InMemoryFileSystem());
+        SquadRenderResult result = await new ClaudeRenderer().RenderAsync(fixture.Prepare(new SquadRenderRequest(
+            SourceDirectory: fixture.Path,
             Targets: [SquadTarget.Claude],
             Scope: SquadDeploymentScope.Project,
-            Arbiter: new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: 5)).Prepared());
+            Arbiter: new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: 5))));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         string conductor = FileText(result, $".claude/agents/{ArbiterSquadFixture.Conductor}.md");
@@ -683,9 +682,8 @@ public sealed class DispatchPromptInsertionTests : IDisposable
     [Fact]
     public void ACancelledPromptBuildPropagatesTheCancellationRatherThanDenyingTheDispatch()
     {
-        using TempDirectory repo = new();
         HookContext context = new(
-            RepoRoot: repo.Path,
+            RepoRoot: Path.Combine(new InMemoryFileSystem().Root, "repo"),
             NewDecisionId: () => "decision-1",
             Log: TextWriter.Null,
             BuildDispatchPrompt: _ => throw new OperationCanceledException());
@@ -693,37 +691,34 @@ public sealed class DispatchPromptInsertionTests : IDisposable
         Assert.Throws<OperationCanceledException>(() => DispatchPromptInsertion.Expand(TaskDispatch, context));
     }
 
-    private static string ArbiterSquadFixturePath() => SharedFixture.Path;
-
-    private static readonly ArbiterSquadFixture SharedFixture = ArbiterSquadFixture.Create();
-
     [Fact]
     public void TheDoctorReportsAHarnessWhoseDeploymentLacksTheDispatchHook()
     {
-        using TempDirectory home = new();
-        string repo = Path.Combine(_temp.Path, "repo");
-        Directory.CreateDirectory(Path.Combine(repo, ".kyber-weave"));
-        Directory.CreateDirectory(Path.Combine(repo, ".github", "hooks"));
-        File.WriteAllText(
+        using InMemoryArbiterHost host = InMemoryArbiterHost.Create(services =>
+            services.AddSingleton<IFileSystemPathSemantics>(provider =>
+                new SquadFileSystemPathSemantics(provider.GetRequiredService<IPathResolver>())));
+        InMemoryFileSystem files = host.Files;
+        string repo = Path.Combine(host.WorkingDirectory, "repo");
+        files.CreateDirectory(Path.Combine(repo, ".kyber-weave"));
+        files.CreateDirectory(Path.Combine(repo, ".github", "hooks"));
+        files.WriteAllText(
             Path.Combine(repo, ".kyber-weave", "kyber-weave.yml"),
             "arbiter:\n  enabled: false\n");
-        File.WriteAllText(
+        files.WriteAllText(
             Path.Combine(repo, ".github", "hooks", "kyber-arbiter.json"),
             "{ \"hooks\": {} }");
 
-        using ArbiterTestHost host = ArbiterTestHost.Create(services => services.AddSingleton<IProcessEnvironment>(
-            new FakeProcessEnvironment(() => home.Path)));
         ISquadStateStore store = host.Get<ISquadStateStore>();
         SquadReceipt receipt = new(
             SquadStateSchemas.ReceiptSchemaV1,
             SquadDeploymentScope.Project,
             repo,
-            DateTimeOffset.UtcNow,
+            host.Clock.GetUtcNow(),
             [],
             [new SquadOwnedFile(".github/hooks/kyber-arbiter.json", new string('a', 64), "copilot", Adopted: false)]);
         string receiptPath = store.ResolveReceiptPath(repo, SquadDeploymentScope.Project);
-        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
-        File.WriteAllText(receiptPath, store.SerializeReceipt(receipt));
+        files.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        files.WriteAllText(receiptPath, store.SerializeReceipt(receipt));
 
         ArbiterDoctorReport report = host.Get<IArbiterDoctorService>().Inspect(repo, null, new KyberWeave.Core.Diagnostics.DiagnosticReport());
 
