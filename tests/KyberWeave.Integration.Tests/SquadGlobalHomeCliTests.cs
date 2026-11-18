@@ -420,7 +420,8 @@ public sealed class SquadGlobalHomeCliTests : IClassFixture<SquadHomeStateTempla
     {
         using Fleet fleet = ArrangeFleet("global-fails");
         RecordingProjectPicker picker = new(AllNonStale);
-        using FailingReleaseSource failing = new();
+        using FakeSquadReleaseSource failing =
+            FakeSquadReleaseSource.Failing(new InvalidOperationException("The Squad release is unavailable."));
 
         CommandExecution execution = Capture(() =>
             fleet.Command(picker, true, new PromptRecorder().Answer, failing)
@@ -1959,21 +1960,6 @@ public sealed class SquadGlobalHomeCliTests : IClassFixture<SquadHomeStateTempla
         {
             Questions.Add(question);
             return true;
-        }
-    }
-
-    private sealed class FailingReleaseSource : ISquadReleaseSource
-    {
-        public Task<SquadReleaseResult> DownloadAndExtractAsync(
-            SquadReleaseRequest request,
-            CancellationToken cancellationToken)
-        {
-            return Task.FromException<SquadReleaseResult>(
-                new InvalidOperationException("The Squad release is unavailable."));
-        }
-
-        public void Dispose()
-        {
         }
     }
 
