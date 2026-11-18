@@ -27,6 +27,7 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
     private const int MaxResponseBytes = 1 << 20;
 
     private readonly HttpClient _client;
+    private readonly TimeProvider _clock;
     private readonly Uri _endpoint;
     private readonly string _model;
     private readonly int _timeoutMs;
@@ -38,6 +39,7 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
     /// <param name="endpoint">The provider base URL; <c>/systemone</c> is appended.</param>
     /// <param name="model">The answering model, which also selects the budget.</param>
     /// <param name="timeoutMs">The per-call budget covering retries.</param>
+    /// <param name="clock">Dates the retry deadline and the <c>Retry-After</c> wait.</param>
     /// <param name="keyResolver">Returns the key for the endpoint's origin, or null.</param>
     /// <param name="instructionsResolver">Resolves a rule's instructions from the facts of the trigger being asked.</param>
     public SystemOneClient(
@@ -45,11 +47,13 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
         Uri endpoint,
         string model,
         int timeoutMs,
+        TimeProvider clock,
         Func<Uri, string?>? keyResolver = null,
         Func<ArbiterRule, ArbiterFactSet, string?>? instructionsResolver = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(endpoint);
+        ArgumentNullException.ThrowIfNull(clock);
         ArgumentException.ThrowIfNullOrWhiteSpace(model);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeoutMs, 0);
         // HttpClient's default 100s timeout would silently clamp timeoutMs.
@@ -60,6 +64,7 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
         _endpoint = endpoint;
         _model = model;
         _timeoutMs = timeoutMs;
+        _clock = clock;
         _keyResolver = keyResolver;
         _instructionsResolver = instructionsResolver;
     }
@@ -69,14 +74,16 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
     /// <param name="endpoint">The provider base URL; <c>/systemone</c> is appended.</param>
     /// <param name="model">The answering model, which also selects the budget.</param>
     /// <param name="timeoutMs">The per-call budget covering retries.</param>
+    /// <param name="clock">Dates the retry deadline and the <c>Retry-After</c> wait.</param>
     /// <param name="keyResolver">Returns the key for the endpoint's origin, or null.</param>
     public static SystemOneClient CreateForProduct(
         HttpMessageHandler handler,
         Uri endpoint,
         string model,
         int timeoutMs,
+        TimeProvider clock,
         Func<Uri, string?>? keyResolver) =>
-        new(handler, endpoint, model, timeoutMs, keyResolver, LensInstructions.Resolve);
+        new(handler, endpoint, model, timeoutMs, clock, keyResolver, LensInstructions.Resolve);
 
     /// <inheritdoc />
     public async Task<ArbiterStep1BatchResult> AskStep1Async(
@@ -113,7 +120,7 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
 
         using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(_timeoutMs);
-        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddMilliseconds(_timeoutMs);
+        DateTimeOffset deadline = _clock.GetUtcNow().AddMilliseconds(_timeoutMs);
         Uri requestUri = SystemOneContracts.RequestUri(_endpoint);
 
         int attempt = 0;
@@ -152,14 +159,14 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
                 {
                     TimeSpan delay = RetryDelay(response, attempt);
                     attempt++;
-                    if (attempt >= MaxAttempts || DateTimeOffset.UtcNow + delay > deadline)
+                    if (attempt >= MaxAttempts || _clock.GetUtcNow() + delay > deadline)
                     {
                         return UndecidableAll(askRules, null, null, true);
                     }
 
                     try
                     {
-                        await Task.Delay(delay, timeout.Token).ConfigureAwait(false);
+                        await Task.Delay(delay, _clock, timeout.Token).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                     {
@@ -359,13 +366,13 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
         return new ArbiterStep1BatchResult(answers, model, usage, requestSent);
     }
 
-    private static TimeSpan RetryDelay(HttpResponseMessage response, int attempt)
+    private TimeSpan RetryDelay(HttpResponseMessage response, int attempt)
     {
         TimeSpan backoff = TimeSpan.FromMilliseconds(Math.Min(100 * (1 << attempt), 2000));
         TimeSpan? retryAfter = response.Headers.RetryAfter?.Delta;
         if (retryAfter is null && response.Headers.RetryAfter?.Date is DateTimeOffset date)
         {
-            retryAfter = date - DateTimeOffset.UtcNow;
+            retryAfter = date - _clock.GetUtcNow();
         }
 
         // Retry-After wins when present; otherwise exponential backoff.

@@ -3,6 +3,8 @@ using System.Reflection;
 using KyberWeave.Application;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Host;
+using KyberWeave.Data.Paths;
 using KyberWeave.Data.Review;
 using KyberWeave.Mcp;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -45,7 +47,7 @@ string repoRoot;
 try
 {
     repoRoot = RepositoryRootResolver.Resolve(
-        new FileKyberWeaveConfigRepository(new FileRepositoryTreeProbe(new PhysicalFileSystem())),
+        RealConfigRepository(),
         args,
         workingDirectory,
         Environment.GetEnvironmentVariable(RepositoryRootResolver.EnvironmentVariable));
@@ -118,6 +120,16 @@ builder.Services.Replace(ServiceDescriptor.Singleton<ITransport>(services =>
 
 await builder.Build().RunAsync().ConfigureAwait(false);
 return 0;
+
+static FileKyberWeaveConfigRepository RealConfigRepository()
+{
+    PhysicalFileSystem files = new();
+    return new FileKyberWeaveConfigRepository(
+        new FileRepositoryTreeProbe(files),
+        files,
+        new PhysicalPathResolver(files),
+        new ProcessEnvironment());
+}
 
 static string GetVersion()
 {

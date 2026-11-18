@@ -20,10 +20,8 @@ internal static class ArbiterDataServiceCollectionExtensions
     internal static IServiceCollection AddWeaveArbiterData(this IServiceCollection services)
     {
         services.TryAddSingleton<ICredentialStore>(_ => OperatingSystemCredentialStore.Create());
-        services.TryAddSingleton(sp => new ConfiguredArbiterProviderFactory(sp.GetRequiredService<IArbiterUserSettings>()));
         services.TryAddSingleton<IArbiterStateFactory, FileArbiterStateFactory>();
         services.TryAddSingleton<IPlanFileResolver, PlanPathResolver>();
-        services.TryAddSingleton<IArbiterProviderFactory, SystemOneProviderFactory>();
         services.TryAddSingleton<IArbiterHttpHandlers, SocketArbiterHttpHandlers>();
         services.TryAddSingleton<IFileStatReader, FileStatReader>();
         services.TryAddSingleton<IDispatchClaimStore, FileDispatchClaimStore>();

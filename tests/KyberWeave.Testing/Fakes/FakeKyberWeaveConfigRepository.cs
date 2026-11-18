@@ -18,10 +18,17 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
 {
     private readonly Dictionary<string, string> _files = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Exception> _readFailures = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _directories = new(StringComparer.Ordinal);
     private readonly List<string> _roots = [];
 
-    /// <summary>Answers what the file system says about a gate's <c>working-directory</c>; empty means no directory exists.</summary>
-    public IRepositoryTreeProbe Tree { get; init; } = new FakeRepositoryTreeProbe();
+    /// <summary>Creates the fake, with its tree probe answering from the files and directories it is given.</summary>
+    public FakeKyberWeaveConfigRepository() => Tree = new ArrangedTreeProbe(this);
+
+    /// <summary>
+    /// Answers what the file system says about a gate's <c>working-directory</c>. It reads this fake's own arrangement, so a
+    /// directory a test created exists here exactly as it would on disk.
+    /// </summary>
+    public IRepositoryTreeProbe Tree { get; }
 
     /// <summary>The repository roots <see cref="Load"/> and <see cref="TryLoad"/> were asked for, in call order.</summary>
     public IReadOnlyList<string> LoadedRoots => _roots;
@@ -33,6 +40,10 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
     /// <param name="fullPath">The full path of the file.</param>
     /// <param name="yaml">The text the file holds.</param>
     public void WriteFile(string fullPath, string yaml) => _files[Path.GetFullPath(fullPath)] = yaml;
+
+    /// <summary>Creates a directory, so a gate's <c>working-directory</c> can name one that exists.</summary>
+    /// <param name="fullPath">The full path of the directory.</param>
+    public void CreateDirectory(string fullPath) => _directories.Add(FullDirectory(fullPath));
 
     /// <summary>Writes a repository's <c>.kyber-weave/kyber-weave.yml</c>.</summary>
     /// <param name="repoRoot">The repository root.</param>
@@ -244,6 +255,19 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
         return _files[full];
     }
 
+    private bool DirectoryExists(string path)
+    {
+        string directory = FullDirectory(path);
+        return _directories.Contains(directory)
+            || _files.Keys.Any(file => Path.GetDirectoryName(file) is string parent && IsUnder(directory, parent));
+    }
+
+    private static bool IsUnder(string directory, string parent) =>
+        string.Equals(parent, directory, StringComparison.Ordinal)
+        || parent.StartsWith(directory + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+
+    private static string FullDirectory(string path) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+
     private void ThrowIfUnreadable(string fullPath)
     {
         if (_readFailures.TryGetValue(fullPath, out Exception? error))
@@ -253,5 +277,15 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
     private sealed class ReadFailureScope(FakeKyberWeaveConfigRepository owner, string path) : IDisposable
     {
         public void Dispose() => owner._readFailures.Remove(path);
+    }
+
+    /// <summary>The tree probe over this fake's own files and directories, so it answers as the real adapter would.</summary>
+    private sealed class ArrangedTreeProbe(FakeKyberWeaveConfigRepository owner) : IRepositoryTreeProbe
+    {
+        public RepositoryRootAccess ProbeRoot(string root) => new(owner.DirectoryExists(root));
+
+        public bool DirectoryExists(string path) => owner.DirectoryExists(path);
+
+        public bool LeadsOutsideThroughSymlink(string root, string path) => false;
     }
 }

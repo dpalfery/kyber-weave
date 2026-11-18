@@ -4,6 +4,7 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Data.Arbiter;
+using KyberWeave.Tests.Arbiter;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using YamlDotNet.Core;
@@ -129,7 +130,7 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     {
         using TempDirectory home = new();
         FakeArbiterUserSettings settings = new();
-        ConfiguredArbiterProviderFactory providers = new(settings);
+        ConfiguredArbiterProviderFactory providers = Configured(settings);
 
         Assert.Null(providers.TryCreate(KyberWeaveConfig.ProductDefaults.Arbiter.Provider, home.Path));
         Assert.Equal([home.Path], settings.Asked);
@@ -141,7 +142,7 @@ public sealed class PlanTaskAgentPickTests : IDisposable
         // A broken override file must not break task-file generation: the repository's own provider stands, and
         // provider none then builds no picker rather than letting the parse failure escape.
         using TempDirectory home = new();
-        ConfiguredArbiterProviderFactory providers = new(new FakeArbiterUserSettings
+        ConfiguredArbiterProviderFactory providers = Configured(new FakeArbiterUserSettings
         {
             Override = (_, _) => throw new YamlException("The user override could not be read."),
         });
@@ -154,10 +155,18 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     [InlineData("   ")]
     public void AnEmptyHomeDirectory_IsTreatedAsNoOverride(string home)
     {
-        ConfiguredArbiterProviderFactory providers = new(new FakeArbiterUserSettings());
+        ConfiguredArbiterProviderFactory providers = Configured(new FakeArbiterUserSettings());
 
         Assert.Null(providers.TryCreate(KyberWeaveConfig.ProductDefaults.Arbiter.Provider, home));
     }
+
+    private static ConfiguredArbiterProviderFactory Configured(FakeArbiterUserSettings settings) =>
+        new(
+            settings,
+            new FakeProcessEnvironment(),
+            new FakeArbiterHttpHandlers(() => throw new InvalidOperationException("No test here creates a transport.")),
+            TimeProvider.System,
+            () => throw new InvalidOperationException("No test here reads a credential."));
 
     private PlanTaskFile Write(IPlanTaskAgentPicker? picker)
     {

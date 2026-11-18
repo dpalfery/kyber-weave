@@ -37,5 +37,8 @@ public sealed class FakeKyberWeaveConfigRepositoryContractTests : KyberWeaveConf
         _repository.WriteFile(Path.Combine(Path.GetFullPath(root), fileName), yaml);
 
     /// <inheritdoc />
+    protected override void CreateDirectory(string path) => _repository.CreateDirectory(path);
+
+    /// <inheritdoc />
     protected override IDisposable MakeUnreadable(string path) => _repository.FailReads(path);
 }
