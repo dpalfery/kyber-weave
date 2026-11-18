@@ -694,7 +694,7 @@ third token. `{tests}` expands in the same step `{changed}` and `{task}` do, and
 ```yaml
 review:
   test-map:
-    "src/KyberWeave.Core/Review/TaskGateSelection.cs":
+    "src/KyberWeave.Application/Review/TaskGateSelectionService.cs":
       - KyberWeave.Tests.TaskGateSelectionTests
   task-gates:
     csharp-dev:
