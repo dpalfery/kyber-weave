@@ -39,13 +39,13 @@ public sealed class SquadCompanionSkills(IFileSystem files, IPathResolver paths,
         }
 
         string apmRoot = Path.Combine(repository, ".apm");
-        if (files.GetLinkTarget(apmRoot) is not null)
+        if (IsLink(apmRoot))
         {
             throw SymbolicLink(".apm");
         }
 
         string skillsRoot = Path.Combine(apmRoot, "skills");
-        if (files.GetLinkTarget(skillsRoot) is not null)
+        if (IsLink(skillsRoot))
         {
             throw SymbolicLink(".apm/skills");
         }
@@ -142,18 +142,31 @@ public sealed class SquadCompanionSkills(IFileSystem files, IPathResolver paths,
     private bool IsSkillDirectory(string directory)
     {
         string name = Path.GetFileName(directory);
-        if (files.GetLinkTarget(directory) is not null)
+        if (IsLink(directory))
         {
             throw SymbolicLink($".apm/skills/{name}");
         }
 
         string skillFile = Path.Combine(directory, "SKILL.md");
-        if (files.GetLinkTarget(skillFile) is not null)
+        if (IsLink(skillFile))
         {
             throw SymbolicLink($".apm/skills/{name}/SKILL.md");
         }
 
         return files.FileExists(skillFile);
+    }
+
+    /// <summary>
+    /// Whether the path is a symbolic link, found by listing its parent: a link whose target is gone is still a link, and a
+    /// probe that follows the link would report it as absent and let the skill be skipped.
+    /// </summary>
+    private bool IsLink(string path)
+    {
+        string name = Path.GetFileName(path);
+        string? parent = Path.GetDirectoryName(path);
+        return parent is not null &&
+               files.EnumerateEntries(parent).Any(entry =>
+                   entry.IsLink && string.Equals(Path.GetFileName(entry.Path), name, StringComparison.Ordinal));
     }
 
     private void RejectClash(string squadSourceRoot, string name)
