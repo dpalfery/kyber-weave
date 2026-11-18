@@ -1,12 +1,14 @@
-using KyberWeave.Tests.Configuration;
-
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Data.Configuration;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// Task 4.2: the Arbiter reads a host's role folders over the shipped ones, adds the rules of the
@@ -14,7 +16,7 @@ namespace KyberWeave.Tests;
 /// folder file that cannot be read or holds an invalid rule is reported by <c>arbiter validate</c>
 /// and the shipped rules are used for that folder.
 /// </summary>
-public sealed class ArbiterRuleFolderLoadingTests : IDisposable
+public sealed class ArbiterRuleFolderLoadingTests
 {
     private const string HostScopeRule = """
         rules:
@@ -70,11 +72,21 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
             effects: { yes: allow, no: allow }
         """;
 
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly IKyberWeaveConfigRepository _configs;
 
-    public void Dispose() => _temp.Dispose();
+    public ArbiterRuleFolderLoadingTests()
+    {
+        Root = Path.Combine(_files.Root, "repo");
+        _files.CreateDirectory(Root);
+        _configs = new FileKyberWeaveConfigRepository(
+            new FakeRepositoryTreeProbe(),
+            _files,
+            new FakePathResolver(_files),
+            new FakeProcessEnvironment(currentDirectory: Root));
+    }
 
-    private string Root => _temp.Path;
+    private string Root { get; }
 
     [Fact]
     public void TheShippedRuleSetLoadsUnchangedWhenTheHostHasNoFolderOfItsOwn()
@@ -137,7 +149,7 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
               enabled: true
             """);
 
-        KyberWeaveConfig config = ConfigFileReader.Load(Root);
+        KyberWeaveConfig config = _configs.Load(Root);
 
         Assert.Equal("typescript", config.Arbiter.RuleFolderParents["react"]);
         Assert.False(config.Arbiter.RuleFolderParents.ContainsKey("typescript"));
@@ -514,7 +526,7 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
     public void AnUnreadableFolderFileIsReportedAndTheShippedRulesAreUsed()
     {
         string path = Path.Combine(Root, "docs", "standards", "conductor", "conductor.arbiter-rules.yml");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        _files.CreateDirectory(Path.GetDirectoryName(path)!);
 
         (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) = Load(
             "arbiter:\n  enabled: true\n",
@@ -536,7 +548,7 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
         string path = WriteFolder("conductor", "rules:\n  -\n");
         WriteConfig("ontology:\n  docs-root: docs\narbiter:\n  enabled: true\n");
 
-        KyberWeaveConfig config = ConfigFileReader.Load(Root);
+        KyberWeaveConfig config = _configs.Load(Root);
 
         Diagnostic finding = Assert.Single(
             config.Arbiter.RuleFolderFindings,
@@ -672,8 +684,8 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
             """);
         WriteConfig("ontology:\n  docs-root: docs\narbiter:\n  enabled: true\n");
 
-        KyberWeaveConfig config = ConfigFileReader.Load(Root);
-        IReadOnlyList<Diagnostic> diagnostics = RuleValidator.Validate(config.Arbiter, ConfigFileReader.FindConfigPath(Root));
+        KyberWeaveConfig config = _configs.Load(Root);
+        IReadOnlyList<Diagnostic> diagnostics = RuleValidator.Validate(config.Arbiter, _configs.FindConfigPath(Root));
 
         Diagnostic finding = Assert.Single(diagnostics, item => item.Subject == "KW-ARB-SCOPE-001");
         Assert.Equal(Severity.Error, finding.Severity);
@@ -689,7 +701,7 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
         WriteFolder("conductor", HostScopeRule);
         WriteConfig("ontology:\n  docs-root: docs\narbiter:\n  enabled: true\n");
 
-        KyberWeaveConfig config = ConfigFileReader.Load(Root);
+        KyberWeaveConfig config = _configs.Load(Root);
 
         Assert.Equal(
             "Does the host's own scope question hold?",
@@ -709,7 +721,7 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
               enabled: true
             """);
 
-        KyberWeaveConfig config = ConfigFileReader.Load(Root);
+        KyberWeaveConfig config = _configs.Load(Root);
 
         Assert.Contains(config.Arbiter.Rules, rule => rule.Id == "react-read-001");
     }
@@ -755,9 +767,9 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
     private string WriteFolder(string name, string body)
     {
         string directory = Path.Combine(Root, "docs", "standards", name);
-        Directory.CreateDirectory(directory);
+        _files.CreateDirectory(directory);
         string path = Path.Combine(directory, $"{name}.arbiter-rules.yml");
-        File.WriteAllText(path, body);
+        _files.WriteAllText(path, body);
         return path;
     }
 
@@ -765,18 +777,18 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
     private string WriteStandard(string name, string? buildsOn)
     {
         string directory = Path.Combine(Root, "docs", "standards", name);
-        Directory.CreateDirectory(directory);
+        _files.CreateDirectory(directory);
         string parent = buildsOn is null ? string.Empty : $"builds-on: {buildsOn}\n";
         string path = Path.Combine(directory, $"{name}.standards.md");
-        File.WriteAllText(path, $"---\nid: standards/{name}\n{parent}---\n\n# {name}\n");
+        _files.WriteAllText(path, $"---\nid: standards/{name}\n{parent}---\n\n# {name}\n");
         return path;
     }
 
     private void WriteConfig(string yaml)
     {
         string directory = Path.Combine(Root, ".kyber-weave");
-        Directory.CreateDirectory(directory);
-        File.WriteAllText(Path.Combine(directory, "kyber-weave.yml"), yaml);
+        _files.CreateDirectory(directory);
+        _files.WriteAllText(Path.Combine(directory, "kyber-weave.yml"), yaml);
     }
 
     private (IReadOnlyList<ArbiterRule> Rules, IReadOnlyList<Diagnostic> Findings) Load(
@@ -800,9 +812,9 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
             new ArbiterConfigLoader.RuleFolderRequest(Root, ["docs"], technologies, readFile ?? ReadTestFile));
     }
 
-    /// <summary>Reads a file for the loader; the domain layer takes this as a delegate so it touches no disk.</summary>
-    private static string? ReadTestFile(string path) =>
-        File.Exists(path) ? File.ReadAllText(path) : null;
+    /// <summary>Reads a file for the loader; the domain layer takes this as a delegate, here over the in-memory file system.</summary>
+    private string? ReadTestFile(string path) =>
+        _files.FileExists(path) ? _files.ReadAllText(path) : null;
 
     private static string RoleOf(string id) => id switch
     {
