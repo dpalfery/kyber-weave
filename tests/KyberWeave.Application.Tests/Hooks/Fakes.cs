@@ -39,6 +39,41 @@ internal sealed class FakeFileSystem : IFileSystem
 
     public string ReadAllText(string path) => unreadable.Contains(path) ? throw new UnauthorizedAccessException(path) : files[path];
 
+    public byte[] ReadAllBytes(string path) => System.Text.Encoding.UTF8.GetBytes(ReadAllText(path));
+
+    public IEnumerable<string> ReadLines(string path)
+    {
+        string[] lines = ReadAllText(path).Split('\n');
+        for (int index = 0; index < lines.Length; index++)
+        {
+            lines[index] = lines[index].TrimEnd('\r');
+        }
+
+        return lines.Length > 0 && lines[^1].Length == 0 ? lines[..^1] : lines;
+    }
+
+    public Stream OpenRead(string path) => new MemoryStream(ReadAllBytes(path));
+
+    public long GetLength(string path) => System.Text.Encoding.UTF8.GetByteCount(ReadAllText(path));
+
+    public DateTime GetLastWriteTimeUtc(string path) => files.ContainsKey(path) ? DateTime.UtcNow : default;
+
+    public FileAttributes GetAttributes(string path) =>
+        directories.Contains(path) ? FileAttributes.Directory
+        : files.ContainsKey(path) ? FileAttributes.Normal
+        : throw new FileNotFoundException(path);
+
+    public IEnumerable<FileSystemEntry> EnumerateEntries(string directory) =>
+        files.Keys.Where(f => Path.GetDirectoryName(f) == directory).Select(f => new FileSystemEntry(f, false, false))
+            .Concat(directories.Where(d => Path.GetDirectoryName(d) == directory).Select(d => new FileSystemEntry(d, true, false)));
+
+    public string? GetLinkTarget(string path) => null;
+
+    public string? GetFinalLinkTarget(string path) => null;
+
+    public IEnumerable<string> EnumerateFiles(string directory, string searchPattern, bool recursive, bool followLinks) =>
+        EnumerateFiles(directory, searchPattern, recursive);
+
     public IEnumerable<string> EnumerateFiles(string directory, string searchPattern, bool recursive) =>
         files.Keys.Where(f =>
             (recursive ? f.StartsWith(directory, StringComparison.Ordinal) : Path.GetDirectoryName(f) == directory)

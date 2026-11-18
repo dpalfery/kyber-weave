@@ -34,10 +34,55 @@ public sealed class PhysicalRepositoryFileStore : IRepositoryFileStore
     public void WriteAllText(string path, string contents) => _inner.WriteAllText(path, contents);
 
     /// <inheritdoc />
+    public void WriteAllBytes(string path, byte[] bytes) => _inner.WriteAllBytes(path, bytes);
+
+    /// <inheritdoc />
+    public void WriteAllBytesAtomic(string path, byte[] bytes) => _inner.WriteAllBytesAtomic(path, bytes);
+
+    /// <inheritdoc />
+    public void MoveFile(string sourcePath, string destinationPath) => _inner.MoveFile(sourcePath, destinationPath);
+
+    /// <inheritdoc />
+    public void MoveFile(string sourcePath, string destinationPath, bool overwrite) =>
+        _inner.MoveFile(sourcePath, destinationPath, overwrite);
+
+    /// <inheritdoc />
     public void CreateNewFile(string path) => _inner.CreateNewFile(path);
 
     /// <inheritdoc />
+    public bool TryCreateNewFile(string path) => _inner.TryCreateNewFile(path);
+
+    /// <inheritdoc />
     public void DeleteFile(string path) => _inner.DeleteFile(path);
+
+    /// <inheritdoc />
+    public void DeleteTreeNoFollow(string directoryPath) => _inner.DeleteTreeNoFollow(directoryPath);
+
+    /// <inheritdoc />
+    public void CreateFileLink(string linkPath, string targetPath) => _inner.CreateFileLink(linkPath, targetPath);
+
+    /// <inheritdoc />
+    public void CreateDirectoryLink(string linkPath, string targetPath) =>
+        _inner.CreateDirectoryLink(linkPath, targetPath);
+
+    /// <inheritdoc />
+    public string CreateTemporaryDirectory(string prefix) => _inner.CreateTemporaryDirectory(prefix);
+
+    /// <inheritdoc />
+    public long GetLength(string path) => _inner.GetLength(path);
+
+    /// <inheritdoc />
+    public FileAttributes GetAttributes(string path) => _inner.GetAttributes(path);
+
+    /// <inheritdoc />
+    public string? GetFinalLinkTarget(string path) => _inner.GetFinalLinkTarget(path);
+
+    /// <inheritdoc />
+    IEnumerable<FileSystemEntry> IFileSystem.EnumerateEntries(string directory) => _inner.EnumerateEntries(directory);
+
+    /// <inheritdoc />
+    public IEnumerable<string> EnumerateFiles(string directory, string searchPattern, bool recursive, bool followLinks) =>
+        _inner.EnumerateFiles(directory, searchPattern, recursive, followLinks);
 
     /// <inheritdoc />
     public string? GetLinkTarget(string path) => _inner.GetLinkTarget(path);
