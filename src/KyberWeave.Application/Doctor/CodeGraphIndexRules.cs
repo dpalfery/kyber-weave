@@ -20,7 +20,7 @@ public static class CodeGraphIndexRules
     public static IReadOnlyList<string> InitConfigFiles { get; } = [];
 
     /// <summary>Returns the lock path for a root: a file in <paramref name="lockDirectory"/> named by a hash of the root.</summary>
-    /// <param name="root">The repository root.</param>
+    /// <param name="root">The repository root as a full path; the caller resolves a relative one first.</param>
     /// <param name="lockDirectory">The directory that holds lock files, normally the OS temp directory.</param>
     public static string LockPathFor(string root, string lockDirectory)
     {
@@ -82,5 +82,5 @@ public static class CodeGraphIndexRules
         path.Length == 0 || path.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '/' && c != '\\' && c != '.' && c != '-' && c != '_');
 
     private static string Normalise(string root) =>
-        Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 }
