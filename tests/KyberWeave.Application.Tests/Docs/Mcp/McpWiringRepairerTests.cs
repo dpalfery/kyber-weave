@@ -3,9 +3,10 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Mcp;
+using KyberWeave.Tests;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Docs.Mcp;
 
 /// <summary>
 /// The bounded writer (5.4–5.11, 6.2, 6.3): which files a repair creates or extends, which it
@@ -28,7 +29,7 @@ namespace KyberWeave.Tests;
 /// <c>KW-MCP-WIRE-002</c> is a defect even if the file parses.
 /// </para>
 /// </remarks>
-public sealed class McpWiringRepairerTests : IDisposable
+public sealed class McpWiringRepairerTests
 {
     // The key the fixture declares, which is the one this repository ships. A fixture name, not an
     // assertion: the harness catalog's canonical documents declare `kw-docs`, and
@@ -53,37 +54,35 @@ public sealed class McpWiringRepairerTests : IDisposable
 
     private const string ZCode = "zcode";
 
-    private readonly TempDirectory _root = new();
+    private readonly InMemoryMcpWiring _wiring = McpWiringTestServices.InMemory();
 
     public McpWiringRepairerTests()
     {
-        Directory.CreateDirectory(Repo);
-        Directory.CreateDirectory(Bin);
-        Directory.CreateDirectory(EmptyBin);
+        _wiring.Files.CreateDirectory(Repo);
+        _wiring.Files.CreateDirectory(Bin);
+        _wiring.Files.CreateDirectory(EmptyBin);
 
         // The first-party binary is present on the default search path, because R6.2 and R6.3 make
         // an unresolvable binary a refusal: without it every case about a write would be asserting
         // a write against a tree the requirements say must be refused. The refusal cases below opt
         // into EmptyBin instead — both halves of that contract are exercised, one per fixture.
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
     }
 
-    private string Repo => Path.Combine(_root.Path, "repo");
+    private string Repo => _wiring.Root;
 
     /// <summary>Where a case puts the fake launch binaries it wants the resolver to find.</summary>
-    private string Bin => Path.Combine(_root.Path, "bin");
+    private string Bin => Path.Combine(_wiring.Files.Root, "bin");
 
     /// <summary>
     /// An empty search path, for every case about an absent binary. A real directory rather than a
     /// missing one, so the resolver searches and finds nothing — the situation R6 describes.
     /// </summary>
-    private string EmptyBin => Path.Combine(_root.Path, "empty-bin");
+    private string EmptyBin => Path.Combine(_wiring.Files.Root, "empty-bin");
 
     /// <summary>The receipt the design fixes at this path; asserted as a literal, not via its owner.</summary>
     private string ReceiptPath =>
         Path.Combine(Repo, ".kyber-weave", "receipts", "mcp-wiring.json");
-
-    public void Dispose() => _root.Dispose();
 
     /// <summary>
     /// The five writable harnesses: the canonical file, the key path its servers live under, and
@@ -161,7 +160,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         string key,
         string recipeEntry)
     {
-        McpWiringFixture.WriteText(Repo, configFile, $$$"""{"{{{key}}}": {}}""");
+        McpWiringFixture.WriteText(_wiring.Files, Repo, configFile, $$$"""{"{{{key}}}": {}}""");
 
         McpWiringRepairReport report = Repair(McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), harness);
 
@@ -169,7 +168,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         Assert.Equal(McpWiringChangeOutcome.Inserted, change.Outcome);
         Assert.Equal(configFile, change.Path);
 
-        using JsonDocument parsed = JsonDocument.Parse(File.ReadAllText(Path.Combine(Repo, configFile)));
+        using JsonDocument parsed = JsonDocument.Parse(_wiring.Files.ReadAllText(Path.Combine(Repo, configFile)));
         JsonElement entry = parsed.RootElement.GetProperty(key).GetProperty(ServerName);
 
         Assert.True(
@@ -204,9 +203,9 @@ public sealed class McpWiringRepairerTests : IDisposable
         Assert.False(string.IsNullOrWhiteSpace(canonical), $"{harness} must carry a canonical document");
 
         // Trailing whitespace only: a final newline is a file-writing convention, not content.
-        Assert.Equal(canonical.TrimEnd('\n'), File.ReadAllText(path).TrimEnd('\n'));
+        Assert.Equal(canonical.TrimEnd('\n'), _wiring.Files.ReadAllText(path).TrimEnd('\n'));
 
-        using JsonDocument parsed = JsonDocument.Parse(File.ReadAllText(path));
+        using JsonDocument parsed = JsonDocument.Parse(_wiring.Files.ReadAllText(path));
         JsonElement entry = parsed.RootElement.GetProperty(key).GetProperty(ServerName);
         Assert.True(
             JsonNode.DeepEquals(JsonNode.Parse(entry.GetRawText()), JsonNode.Parse(recipeEntry)),
@@ -239,13 +238,13 @@ public sealed class McpWiringRepairerTests : IDisposable
                 }
                 """)
         ];
-        McpWiringFixture.WriteBytes(Repo, ".vscode/mcp.json", original);
+        McpWiringFixture.WriteBytes(_wiring.Files, Repo, ".vscode/mcp.json", original);
 
         McpWiringRepairReport report = Repair(McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), VsCode);
 
         Assert.Equal(McpWiringChangeOutcome.Inserted, SingleChange(report, VsCode).Outcome);
 
-        byte[] after = File.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json"));
+        byte[] after = _wiring.Files.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json"));
         int shared = CommonPrefixLength(original, after);
 
         Assert.True(after.Length > original.Length, "the repaired file must hold the new entry");
@@ -294,8 +293,8 @@ public sealed class McpWiringRepairerTests : IDisposable
     [Fact]
     public void TheEntryUsesTheDeclaredNameAndCommand()
     {
-        McpWiringFixture.WriteText(Repo, ".mcp.json", """{"mcpServers": {}}""");
-        McpWiringFixture.WriteExecutable(Bin, "codegraph");
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".mcp.json", """{"mcpServers": {}}""");
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, "codegraph");
 
         McpWiringRepairReport report = Repair(
             McpWiringFixture.Declare(ThirdPartyServer()),
@@ -304,7 +303,7 @@ public sealed class McpWiringRepairerTests : IDisposable
 
         Assert.Equal(McpWiringChangeOutcome.Inserted, SingleChange(report, ClaudeCode).Outcome);
 
-        using JsonDocument parsed = JsonDocument.Parse(File.ReadAllText(Path.Combine(Repo, ".mcp.json")));
+        using JsonDocument parsed = JsonDocument.Parse(_wiring.Files.ReadAllText(Path.Combine(Repo, ".mcp.json")));
         JsonElement entry = parsed.RootElement.GetProperty("mcpServers").GetProperty("codegraph");
 
         Assert.True(
@@ -326,8 +325,8 @@ public sealed class McpWiringRepairerTests : IDisposable
             "kw-docs",
             [Path.Combine(Bin, BinaryName), "--repo-root", "."],
             McpProvenance.FirstParty));
-        Directory.CreateDirectory(Path.Combine(Repo, ".factory"));
-        McpWiringFixture.WriteText(
+        _wiring.Files.CreateDirectory(Path.Combine(Repo, ".factory"));
+        McpWiringFixture.WriteText(_wiring.Files,
             Repo,
             ".factory/mcp.json",
             new JsonObject
@@ -344,19 +343,19 @@ public sealed class McpWiringRepairerTests : IDisposable
                     }
                 }
             }.ToJsonString());
-        byte[] before = File.ReadAllBytes(Path.Combine(Repo, ".factory", "mcp.json"));
+        byte[] before = _wiring.Files.ReadAllBytes(Path.Combine(Repo, ".factory", "mcp.json"));
 
-        McpWiringRepairReport report = McpWiringTestServices.Wiring.Repair(
+        McpWiringRepairReport report = _wiring.Wiring.Repair(
             Repo,
             config,
-            PhysicalLaunchCommands.Over(Repo, []),
+            ResolverOver(),
             [Factory]);
 
         McpWiringFileChange change = Assert.Single(report.Files);
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
         Assert.Equal(RefusalCode, change.Code);
         Assert.Contains("docs mcp-migrate", change.Hint ?? string.Empty, StringComparison.Ordinal);
-        Assert.Equal(before, File.ReadAllBytes(Path.Combine(Repo, ".factory", "mcp.json")));
+        Assert.Equal(before, _wiring.Files.ReadAllBytes(Path.Combine(Repo, ".factory", "mcp.json")));
     }
 
     /// <summary>
@@ -368,10 +367,10 @@ public sealed class McpWiringRepairerTests : IDisposable
     {
         // The entry already carries the declared server's name — `ServerName` — because this case is
         // 5.5: the repair never modifies, merges or overwrites an entry that exists.
-        McpWiringFixture.WriteText(Repo,
+        McpWiringFixture.WriteText(_wiring.Files, Repo,
             ".vscode/mcp.json",
             """{"servers": {"kw-docs": {"command": "kyber-weave-mcp"}}}""");
-        byte[] before = File.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json"));
+        byte[] before = _wiring.Files.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json"));
 
         McpWiringRepairReport report = Repair(McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), VsCode);
 
@@ -382,8 +381,8 @@ public sealed class McpWiringRepairerTests : IDisposable
         Assert.False(change.Written);
         Assert.False(string.IsNullOrWhiteSpace(change.Message), "a refusal must say why");
 
-        Assert.Equal(before, File.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json")));
-        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(".vscode/mcp.json"));
+        Assert.Equal(before, _wiring.Files.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json")));
+        Assert.Null(_wiring.Receipts.Load(Repo).Find(".vscode/mcp.json"));
     }
 
     /// <summary>
@@ -393,9 +392,9 @@ public sealed class McpWiringRepairerTests : IDisposable
     [Fact]
     public void OneAlreadyWiredServerRefusesTheWholeFile()
     {
-        McpWiringFixture.WriteText(Repo, ".mcp.json", """{"mcpServers": {"codegraph": {"command": "codegraph"}}}""");
-        byte[] before = File.ReadAllBytes(Path.Combine(Repo, ".mcp.json"));
-        McpWiringFixture.WriteExecutable(Bin, "codegraph");
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".mcp.json", """{"mcpServers": {"codegraph": {"command": "codegraph"}}}""");
+        byte[] before = _wiring.Files.ReadAllBytes(Path.Combine(Repo, ".mcp.json"));
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, "codegraph");
 
         McpWiringRepairReport report = Repair(
             McpWiringFixture.Declare(FirstPartyServer(), ThirdPartyServer()),
@@ -405,7 +404,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         McpWiringFileChange change = SingleChange(report, ClaudeCode);
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
         Assert.Equal(RefusalCode, change.Code);
-        Assert.Equal(before, File.ReadAllBytes(Path.Combine(Repo, ".mcp.json")));
+        Assert.Equal(before, _wiring.Files.ReadAllBytes(Path.Combine(Repo, ".mcp.json")));
     }
 
     /// <summary>
@@ -420,8 +419,8 @@ public sealed class McpWiringRepairerTests : IDisposable
     [InlineData("[]")]
     public void AMalformedOrForeignFileIsRefusedAndLeftByteIdentical(string content)
     {
-        McpWiringFixture.WriteText(Repo, ".vscode/mcp.json", content);
-        byte[] before = File.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json"));
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".vscode/mcp.json", content);
+        byte[] before = _wiring.Files.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json"));
 
         McpWiringRepairReport report = Repair(McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), VsCode);
 
@@ -429,7 +428,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
         Assert.Equal(RefusalCode, change.Code);
         Assert.Contains(".vscode/mcp.json", DiagnosticText(change), StringComparison.Ordinal);
-        Assert.Equal(before, File.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json")));
+        Assert.Equal(before, _wiring.Files.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json")));
     }
 
     /// <summary>
@@ -441,8 +440,8 @@ public sealed class McpWiringRepairerTests : IDisposable
     {
         // The entry already carries the declared server's name — `ServerName` — so 5.5 refuses the
         // vscode file and the run still writes the target beside it.
-        McpWiringFixture.WriteText(Repo, ".vscode/mcp.json", """{"servers": {"kw-docs": {}}}""");
-        byte[] refusedBefore = File.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json"));
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".vscode/mcp.json", """{"servers": {"kw-docs": {}}}""");
+        byte[] refusedBefore = _wiring.Files.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json"));
 
         McpWiringRepairReport report = Repair(
             McpWiringFixture.Declare(FirstPartyServer()),
@@ -453,9 +452,9 @@ public sealed class McpWiringRepairerTests : IDisposable
         Assert.Equal(McpWiringChangeOutcome.Refused, SingleChange(report, VsCode).Outcome);
         Assert.Equal(McpWiringChangeOutcome.Created, SingleChange(report, ClaudeCode).Outcome);
 
-        Assert.Equal(refusedBefore, File.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json")));
+        Assert.Equal(refusedBefore, _wiring.Files.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json")));
         Assert.True(
-            File.Exists(Path.Combine(Repo, ".mcp.json")),
+            _wiring.Files.FileExists(Path.Combine(Repo, ".mcp.json")),
             "the target that could be written must still be written");
     }
 
@@ -477,8 +476,8 @@ public sealed class McpWiringRepairerTests : IDisposable
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
         Assert.False(change.Written);
         Assert.False(string.IsNullOrWhiteSpace(change.Message), "a refusal must say why, and point at the snippet");
-        Assert.False(File.Exists(Path.Combine(Repo, configFile)));
-        Assert.False(File.Exists(ReceiptPath));
+        Assert.False(_wiring.Files.FileExists(Path.Combine(Repo, configFile)));
+        Assert.False(_wiring.Files.FileExists(ReceiptPath));
     }
 
     /// <summary>
@@ -530,7 +529,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         McpWiringFileChange change = SingleChange(report, harness);
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
         Assert.False(change.Written);
-        Assert.False(File.Exists(Path.Combine(Repo, configFile)));
+        Assert.False(_wiring.Files.FileExists(Path.Combine(Repo, configFile)));
         Assert.Contains("kyber-weave update", DiagnosticText(change), StringComparison.Ordinal);
     }
 
@@ -548,7 +547,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
         Assert.False(change.Written);
         Assert.Contains("codegraph", DiagnosticText(change), StringComparison.Ordinal);
-        Assert.False(File.Exists(Path.Combine(Repo, ".mcp.json")));
+        Assert.False(_wiring.Files.FileExists(Path.Combine(Repo, ".mcp.json")));
     }
 
     /// <summary>
@@ -567,7 +566,7 @@ public sealed class McpWiringRepairerTests : IDisposable
     [Fact]
     public void ADeclarationWithOneUnresolvableServerWritesTheRestAndNamesWhatItOmitted()
     {
-        McpWiringFixture.WriteText(Repo, ".mcp.json", """{"mcpServers": {}}""");
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".mcp.json", """{"mcpServers": {}}""");
 
         // Bin holds the first-party binary and nothing else, so 'kyber-weave-mcp' resolves and
         // 'codegraph' does not: the mixed declaration 6.2 is written for, from one search path.
@@ -583,7 +582,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         Assert.True(change.Written, "the resolvable server's entry was written, so bytes reached the file");
         Assert.Equal(ServerName, Assert.Single(change.Servers));
 
-        using JsonDocument parsed = JsonDocument.Parse(File.ReadAllText(Path.Combine(Repo, ".mcp.json")));
+        using JsonDocument parsed = JsonDocument.Parse(_wiring.Files.ReadAllText(Path.Combine(Repo, ".mcp.json")));
         JsonElement servers = parsed.RootElement.GetProperty("mcpServers");
 
         Assert.True(
@@ -601,7 +600,7 @@ public sealed class McpWiringRepairerTests : IDisposable
 
         // The undo record names only what was written, so a removal never claims to take out an entry
         // the repair declined to insert.
-        McpWiringReceiptRecord? record = McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json");
+        McpWiringReceiptRecord? record = _wiring.Receipts.Load(Repo).Find(".mcp.json");
         Assert.NotNull(record);
         Assert.Equal(ServerName, Assert.Single(record.Servers));
     }
@@ -624,8 +623,8 @@ public sealed class McpWiringRepairerTests : IDisposable
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
         Assert.Equal(RefusalCode, change.Code);
         Assert.False(change.Written);
-        Assert.False(File.Exists(Path.Combine(Repo, ".mcp.json")), "a refusal creates nothing");
-        Assert.False(File.Exists(ReceiptPath), "a refusal writes no receipt either");
+        Assert.False(_wiring.Files.FileExists(Path.Combine(Repo, ".mcp.json")), "a refusal creates nothing");
+        Assert.False(_wiring.Files.FileExists(ReceiptPath), "a refusal writes no receipt either");
 
         // With a first-party binary missing the refusal names the broken installation (6.3), which is
         // the root cause an operator can act on; the harness file is not what is wrong.
@@ -642,13 +641,13 @@ public sealed class McpWiringRepairerTests : IDisposable
     {
         // The entry already carries the declared server's name — `ServerName` — so a dry run and the
         // real run report the same refusal for it.
-        McpWiringFixture.WriteText(Repo, ".vscode/mcp.json", """{"servers": {"kw-docs": {}}}""");
-        byte[] refusedBefore = File.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json"));
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".vscode/mcp.json", """{"servers": {"kw-docs": {}}}""");
+        byte[] refusedBefore = _wiring.Files.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json"));
 
         McpConfig config = McpWiringFixture.Declare(FirstPartyServer());
         LaunchCommandResolver resolver = ResolverOver(Bin);
 
-        McpWiringRepairReport dryRun = McpWiringTestServices.Wiring.Repair(
+        McpWiringRepairReport dryRun = _wiring.Wiring.Repair(
             Repo,
             config,
             resolver,
@@ -657,11 +656,11 @@ public sealed class McpWiringRepairerTests : IDisposable
 
         Assert.True(dryRun.DryRun);
         Assert.All(dryRun.Files, change => Assert.False(change.Written, $"{change.Harness} wrote during a dry run"));
-        Assert.Equal(refusedBefore, File.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json")));
-        Assert.False(File.Exists(Path.Combine(Repo, ".mcp.json")), "a dry run creates nothing");
-        Assert.False(File.Exists(ReceiptPath), "a dry run writes no receipt");
+        Assert.Equal(refusedBefore, _wiring.Files.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json")));
+        Assert.False(_wiring.Files.FileExists(Path.Combine(Repo, ".mcp.json")), "a dry run creates nothing");
+        Assert.False(_wiring.Files.FileExists(ReceiptPath), "a dry run writes no receipt");
 
-        McpWiringRepairReport real = McpWiringTestServices.Wiring.Repair(
+        McpWiringRepairReport real = _wiring.Wiring.Repair(
             Repo,
             config,
             resolver,
@@ -690,7 +689,7 @@ public sealed class McpWiringRepairerTests : IDisposable
     [Fact]
     public void AnUnwritableTargetIsReportedWithItsPathInsteadOfThrown()
     {
-        Directory.CreateDirectory(Path.Combine(Repo, ".mcp.json"));
+        _wiring.Files.CreateDirectory(Path.Combine(Repo, ".mcp.json"));
 
         McpWiringRepairReport report = Repair(McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), ClaudeCode);
 
@@ -698,7 +697,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
         Assert.False(change.Written);
         Assert.Contains(".mcp.json", DiagnosticText(change), StringComparison.Ordinal);
-        Assert.False(File.Exists(ReceiptPath));
+        Assert.False(_wiring.Files.FileExists(ReceiptPath));
     }
 
     /// <summary>
@@ -732,9 +731,9 @@ public sealed class McpWiringRepairerTests : IDisposable
         McpWiringRepairReport repair = Repair(config, resolver, harness);
         McpWiringFileChange change = SingleChange(repair, harness);
         Assert.Equal(McpWiringChangeOutcome.Created, change.Outcome);
-        Assert.True(File.Exists(Path.Combine(Repo, configFile)), $"{harness}: nothing was written");
+        Assert.True(_wiring.Files.FileExists(Path.Combine(Repo, configFile)), $"{harness}: nothing was written");
 
-        McpWiringReport inspection = McpWiringTestServices.Wiring.Inspect(Repo, config, resolver);
+        McpWiringReport inspection = _wiring.Wiring.Inspect(Repo, config, resolver);
 
         string[] found =
         [
@@ -771,12 +770,12 @@ public sealed class McpWiringRepairerTests : IDisposable
     public void AnInsertRoundTripIsAcceptedByTheCheck()
     {
         const string ConfigFile = ".vscode/mcp.json";
-        McpWiringFixture.WriteText(
+        McpWiringFixture.WriteText(_wiring.Files,
             Repo,
             ConfigFile,
             """{"servers": {"other": {"command": "other-mcp"}}}""");
 
-        byte[] original = File.ReadAllBytes(Path.Combine(Repo, ConfigFile));
+        byte[] original = _wiring.Files.ReadAllBytes(Path.Combine(Repo, ConfigFile));
         McpConfig config = McpWiringFixture.Declare(FirstPartyServer());
         LaunchCommandResolver resolver = ResolverOver(Bin);
 
@@ -784,7 +783,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         Assert.Equal(McpWiringChangeOutcome.Inserted, change.Outcome);
         Assert.True(change.Written, "the splice must report the write that produced it");
 
-        byte[] after = File.ReadAllBytes(Path.Combine(Repo, ConfigFile));
+        byte[] after = _wiring.Files.ReadAllBytes(Path.Combine(Repo, ConfigFile));
 
         // The operator's document survives as one contiguous run with a single insertion in it: drop
         // the bytes the repair added and the file comes back byte for byte (5.6).
@@ -807,7 +806,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         JsonElement entry = servers.GetProperty(ServerName);
         Assert.Equal("${workspaceFolder}", entry.GetProperty("args")[1].GetString());
 
-        McpWiringReport inspection = McpWiringTestServices.Wiring.Inspect(Repo, config, resolver);
+        McpWiringReport inspection = _wiring.Wiring.Inspect(Repo, config, resolver);
 
         string[] found =
         [
@@ -827,7 +826,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         Assert.False(
             second.Written,
             $"the second repair reported {second.Outcome} over a file that already held the entry");
-        Assert.Equal(after, File.ReadAllBytes(Path.Combine(Repo, ConfigFile)));
+        Assert.Equal(after, _wiring.Files.ReadAllBytes(Path.Combine(Repo, ConfigFile)));
     }
 
     /// <summary>
@@ -860,7 +859,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         // An empty document is enough to take the insert path: a missing server key is writable and
         // the splice inserts the map, so the entry's own shape is not this case's subject.
         if (fileExists)
-            McpWiringFixture.WriteText(Repo, configFile, "{}");
+            McpWiringFixture.WriteText(_wiring.Files, Repo, configFile, "{}");
 
         string fullPath = Path.Combine(Repo, configFile);
         string directory = Path.GetDirectoryName(fullPath)!;
@@ -895,7 +894,7 @@ public sealed class McpWiringRepairerTests : IDisposable
     [Fact]
     public void ARefusedWriteLeavesNoTemporaryFileInTheTargetsDirectory()
     {
-        Directory.CreateDirectory(Path.Combine(Repo, ".mcp.json"));
+        _wiring.Files.CreateDirectory(Path.Combine(Repo, ".mcp.json"));
         string[] before = FileNamesIn(Repo);
 
         McpWiringFileChange change = SingleChange(
@@ -929,19 +928,19 @@ public sealed class McpWiringRepairerTests : IDisposable
     {
         // The entry is under the declared server's name — `ServerName` — with a launch that differs
         // from the declared one, which is the `CommandDiffers` finding 5.5 refuses to repair.
-        McpWiringFixture.WriteText(
+        McpWiringFixture.WriteText(_wiring.Files,
             Repo,
             ".mcp.json",
             """{"mcpServers": {"kw-docs": {"command": "kyber-weave-mcp", "args": ["--repo-root", "/somewhere/else"]}}}""");
 
         McpConfig config = McpWiringFixture.Declare(FirstPartyServer());
         LaunchCommandResolver resolver = ResolverOver(Bin);
-        McpWiringReport inspection = McpWiringTestServices.Wiring.Inspect(Repo, config, resolver);
+        McpWiringReport inspection = _wiring.Wiring.Inspect(Repo, config, resolver);
 
         McpWiringFinding finding = Assert.Single(inspection.Findings, candidate => candidate.Harness == ClaudeCode);
         Assert.Equal(McpWiringKind.CommandDiffers, finding.Kind);
 
-        IReadOnlyList<McpWiringFix> offered = McpWiringTestServices.Wiring.Derive(inspection, Repo);
+        IReadOnlyList<McpWiringFix> offered = _wiring.Wiring.Derive(inspection, Repo);
         Assert.True(
             offered.Count == 0,
             "the prompt was offered a write the repair refuses: "
@@ -949,7 +948,7 @@ public sealed class McpWiringRepairerTests : IDisposable
 
         McpWiringFileChange refusal = SingleChange(Repair(config, resolver, ClaudeCode), ClaudeCode);
         Assert.Equal(McpWiringChangeOutcome.Refused, refusal.Outcome);
-        Assert.False(File.Exists(ReceiptPath));
+        Assert.False(_wiring.Files.FileExists(ReceiptPath));
     }
 
     /// <summary>
@@ -970,9 +969,9 @@ public sealed class McpWiringRepairerTests : IDisposable
         string outside = WriteOutsideRepository(
             "user-scope/mcp.json",
             """{"mcpServers": {"other": {"command": "other-mcp"}}}""");
-        byte[] before = File.ReadAllBytes(outside);
+        byte[] before = _wiring.Files.ReadAllBytes(outside);
         string link = Path.Combine(Repo, ".mcp.json");
-        McpWiringFixture.CreateSymlink(link, outside);
+        CreateLink(link, outside);
 
         McpWiringRepairReport report = Repair(
             McpWiringFixture.Declare(FirstPartyServer()),
@@ -984,9 +983,9 @@ public sealed class McpWiringRepairerTests : IDisposable
         Assert.False(change.Written);
         AssertRefusalNamesTheLink(change, ".mcp.json");
         Assert.Equal(RefusalCode, change.Code);
-        Assert.Equal(before, File.ReadAllBytes(outside));
-        Assert.NotNull(new FileInfo(link).LinkTarget);
-        Assert.False(File.Exists(ReceiptPath), "a refusal writes no receipt");
+        Assert.Equal(before, _wiring.Files.ReadAllBytes(outside));
+        Assert.NotNull(_wiring.Files.GetLinkTarget(link));
+        Assert.False(_wiring.Files.FileExists(ReceiptPath), "a refusal writes no receipt");
     }
 
     /// <summary>
@@ -1002,7 +1001,7 @@ public sealed class McpWiringRepairerTests : IDisposable
     [Fact]
     public void RemovalRefusesALinkedTargetAndLeavesTheLinkedFileByteIdentical()
     {
-        McpWiringFixture.WriteText(Repo, ".mcp.json", """{"mcpServers": {}}""");
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".mcp.json", """{"mcpServers": {}}""");
         Assert.Equal(
             McpWiringChangeOutcome.Inserted,
             SingleChange(
@@ -1010,28 +1009,31 @@ public sealed class McpWiringRepairerTests : IDisposable
                 ClaudeCode).Outcome);
 
         string link = Path.Combine(Repo, ".mcp.json");
-        string outside = Path.Combine(_root.Path, "user-scope", "mcp.json");
-        Directory.CreateDirectory(Path.GetDirectoryName(outside)!);
-        File.Move(link, outside);
-        McpWiringFixture.CreateSymlink(link, outside);
-        byte[] written = File.ReadAllBytes(outside);
+        string outside = Path.Combine(_wiring.Files.Root, "user-scope", "mcp.json");
+        _wiring.Files.CreateDirectory(Path.GetDirectoryName(outside)!);
+        _wiring.Files.MoveFile(link, outside);
+        CreateLink(link, outside);
+        byte[] written = _wiring.Files.ReadAllBytes(outside);
 
-        McpWiringFileChange change = Assert.Single(McpWiringTestServices.Wiring.Unwire(Repo, [ClaudeCode]).Files);
+        McpWiringFileChange change = Assert.Single(_wiring.Wiring.Unwire(Repo, [ClaudeCode]).Files);
 
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
         Assert.False(change.Written);
         AssertRefusalNamesTheLink(change, ".mcp.json");
-        Assert.Equal(written, File.ReadAllBytes(outside));
-        Assert.NotNull(new FileInfo(link).LinkTarget);
+        Assert.Equal(written, _wiring.Files.ReadAllBytes(outside));
+        Assert.NotNull(_wiring.Files.GetLinkTarget(link));
     }
 
     private McpWiringRepairReport Repair(
         McpConfig config,
         LaunchCommandResolver resolver,
         params string[] targets) =>
-        McpWiringTestServices.Wiring.Repair(Repo, config, resolver, targets, dryRun: false);
+        _wiring.Wiring.Repair(Repo, config, resolver, targets, dryRun: false);
 
-    private LaunchCommandResolver ResolverOver(params string[] searchPaths) => PhysicalLaunchCommands.Over(searchPaths);
+    private LaunchCommandResolver ResolverOver(params string[] searchPaths) =>
+        new(Repo, searchPaths, _wiring.Files, _wiring.Paths, _wiring.Environment);
+
+    private void CreateLink(string linkPath, string targetPath) => _wiring.Files.CreateFileLink(linkPath, targetPath);
 
     private static RequiredMcpServer FirstPartyServer() =>
         new(ServerName, [BinaryName, "--repo-root", "."], McpProvenance.FirstParty);
@@ -1086,9 +1088,9 @@ public sealed class McpWiringRepairerTests : IDisposable
     /// as the platform stored it and no walk can leave the fixture's own temp tree. An absent
     /// directory holds nothing, which is the state a created target starts from.
     /// </summary>
-    private static string[] FileNamesIn(string directory) =>
-        Directory.Exists(directory)
-            ? [.. new DirectoryInfo(directory).EnumerateFiles().Select(file => file.Name)]
+    private string[] FileNamesIn(string directory) =>
+        _wiring.Files.DirectoryExists(directory)
+            ? [.. _wiring.Files.EnumerateFiles(directory, "*", false).Select(Path.GetFileName)!]
             : [];
 
     /// <summary>
@@ -1103,7 +1105,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         Assert.NotNull(entry);
 
         foreach (string marker in entry.MarkerDirectories)
-            Directory.CreateDirectory(Path.Combine(Repo, marker));
+            _wiring.Files.CreateDirectory(Path.Combine(Repo, marker));
     }
 
     /// <summary>
@@ -1112,9 +1114,9 @@ public sealed class McpWiringRepairerTests : IDisposable
     /// </summary>
     private string WriteOutsideRepository(string relativePath, string content)
     {
-        McpWiringFixture.WriteText(_root.Path, relativePath, content);
+        McpWiringFixture.WriteText(_wiring.Files, _wiring.Files.Root, relativePath, content);
 
-        return Path.Combine(_root.Path, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        return Path.Combine(_wiring.Files.Root, relativePath.Replace('/', Path.DirectorySeparatorChar));
     }
 
     /// <summary>

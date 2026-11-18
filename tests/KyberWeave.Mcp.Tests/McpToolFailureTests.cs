@@ -1,16 +1,16 @@
-using KyberWeave.Tests.Configuration;
-
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Search;
-using KyberWeave.Domain.CodeGraph;
 using KyberWeave.Mcp;
+using KyberWeave.Tests;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
-using KyberWeave.Tests.Fakes;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Mcp.Tests;
 
 /// <summary>
 /// Pins the stop rule at the docs server (D11, D23): when CodeGraph cannot be read, the docs tools
@@ -36,7 +36,7 @@ namespace KyberWeave.Tests;
 /// <see cref="McpDeclarationFixture"/> adds the entry the scaffold leaves commented out.
 /// </para>
 /// </remarks>
-public sealed class McpToolFailureTests : IDisposable
+public sealed class McpToolFailureTests
 {
     /// <summary>The token the orchestrator routes on. A whole line, so a passing mention cannot satisfy it.</summary>
     private const string ToolFailure = "STATUS: TOOL_FAILURE";
@@ -44,11 +44,7 @@ public sealed class McpToolFailureTests : IDisposable
     /// <summary>How the response must name the tool that failed, so the reader learns which one it was.</summary>
     private const string FailingToolName = "codegraph";
 
-    private readonly TempDirectory _root = new();
-
-    public void Dispose() => _root.Dispose();
-
-    private string Root => _root.Path;
+    private readonly MemoryDocsHost _host = new();
 
     /// <summary>
     /// With the repository default (stop), a docs tool answers <c>STATUS: TOOL_FAILURE</c> with the
@@ -62,10 +58,10 @@ public sealed class McpToolFailureTests : IDisposable
     [Fact]
     public void DocsToolsReportToolFailureWithReasonAndFixUnderTheDefaultStopRule()
     {
-        DocsTestCommands.Scaffolding.Scaffold(Root);
-        McpDeclarationFixture.RequireCodeGraph(Root);
+        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+        MemoryMcpDeclaration.RequireCodeGraph(_host.Files, _host.Repo);
 
-        string response = Tools(Root).Explore("anything");
+        string response = Tools().Explore("anything");
 
         Assert.Contains(ToolFailure, response, StringComparison.Ordinal);
         Assert.Contains(FailingToolName, response, StringComparison.OrdinalIgnoreCase);
@@ -84,13 +80,14 @@ public sealed class McpToolFailureTests : IDisposable
     [Fact]
     public void DocsToolsWarnInsteadOfFailingWhenTheRepositoryOptsOutOfTheStopRule()
     {
-        DocsTestCommands.Scaffolding.Scaffold(Root);
-        McpDeclarationFixture.RequireCodeGraph(Root);
-        File.AppendAllText(
-            Path.Combine(Root, ".kyber-weave", "kyber-weave.yml"),
-            Environment.NewLine + "stop-on-tool-failure: false" + Environment.NewLine);
+        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+        MemoryMcpDeclaration.RequireCodeGraph(_host.Files, _host.Repo);
+        string configPath = _host.InRepo(".kyber-weave/kyber-weave.yml");
+        _host.Files.WriteAllText(
+            configPath,
+            _host.Files.ReadAllText(configPath) + "\nstop-on-tool-failure: false\n");
 
-        string response = Tools(Root).Explore("anything");
+        string response = Tools().Explore("anything");
 
         Assert.DoesNotContain(ToolFailure, response, StringComparison.Ordinal);
         Assert.Contains(FailingToolName, response, StringComparison.OrdinalIgnoreCase);
@@ -109,9 +106,9 @@ public sealed class McpToolFailureTests : IDisposable
     [Fact]
     public void TheRevisionToolStillAnswersWhileTheOtherDocsToolsReportToolFailure()
     {
-        DocsTestCommands.Scaffolding.Scaffold(Root);
-        McpDeclarationFixture.RequireCodeGraph(Root);
-        DocsTools tools = Tools(Root);
+        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+        MemoryMcpDeclaration.RequireCodeGraph(_host.Files, _host.Repo);
+        DocsTools tools = Tools();
 
         string explore = tools.Explore("anything");
         string status = tools.DocsStatus();
@@ -129,39 +126,35 @@ public sealed class McpToolFailureTests : IDisposable
     /// The refresh schedule is asked for explicitly. It is opt-in: tools built without one answer
     /// from the documents on disk, so a test that pins the gate has to be the caller that requests it.
     /// </remarks>
-    private static DocsTools Tools(string root)
+    private DocsTools Tools()
     {
-        KyberWeaveConfig config = ConfigFileReader.Load(root);
+        IServiceProvider services = _host.Services();
+        string root = _host.Repo;
+        KyberWeaveConfig config = services.GetRequiredService<IKyberWeaveConfigRepository>().Load(root);
         DocumentIndexHost host = new(
             root,
-            () => new UnreadableCodeGraph(),
-            () => RealDocumentLoader.Create(root, config.Ontology).Load(),
-            DocsPorts.Files,
-            DocsPorts.Paths,
-            DocsPorts.Environment,
+            () => new UnavailableCodeGraphResolver(),
+            () => new DocumentLoader(_host.Store, root, _host.Paths, _host.Environment, config.Ontology).Load(),
+            _host.Store,
+            _host.Paths,
+            _host.Environment,
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
-        return DocsToolsComposition.Create(host, null, DocsTestCommands.Freshness(root));
-    }
+        CodeGraphFreshness freshness = new(
+            root,
+            true,
+            services.GetRequiredService<ICodeGraphProvisioner>(),
+            services.GetRequiredService<IKyberWeaveConfigRepository>(),
+            services.GetRequiredService<TimeProvider>(),
+            services.GetRequiredService<IFileSystem>(),
+            services.GetRequiredService<IPathResolver>(),
+            services.GetRequiredService<IProcessEnvironment>(),
+            services.GetRequiredService<IProcessRunner>(),
+            services.GetRequiredService<IBoundedProcessExecutor>(),
+            null,
+            null);
 
-    /// <summary>A CodeGraph port that reports no readable index, as a missing or unreadable database does.</summary>
-    private sealed class UnreadableCodeGraph : ICodeGraphResolver
-    {
-        public bool IsAvailable => false;
-
-        public string? UnavailableReason => "No CodeGraph index at .codegraph/codegraph.db.";
-
-        public string DatabasePath => ".codegraph/codegraph.db";
-
-        public IReadOnlyList<CodeGraphNode> ResolveSymbol(string name) => [];
-
-        public IReadOnlyList<CodeGraphNode> ResolveRoute(string route) => [];
-
-        public bool HasFilesUnder(string relativePathPrefix) => false;
-
-        public IReadOnlyList<string> CandidateNames(string likePattern) => [];
-
-        public IReadOnlyList<string> AllRoutes() => [];
+        return DocsToolsComposition.Create(host, null, freshness);
     }
 }

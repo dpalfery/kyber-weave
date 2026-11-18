@@ -1,15 +1,14 @@
-using KyberWeave.Tests.Configuration;
-
-using KyberWeave.Cli.Commands;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Tests;
+using KyberWeave.Tests.Configuration;
 using Xunit;
 using YamlDotNet.Core;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Configuration;
 
 /// <summary>
 /// T1 — ontology config model + loader contract. Product defaults must mirror today's
@@ -17,6 +16,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public class OntologyConfigTests
 {
+    private readonly InMemoryConfigFileReader _config = new();
+
     private static readonly string[] ExpectedDocTypes =
     [
         "architecture", "onboarding", "requirements", "adr", "plan", "spec", "todo",
@@ -68,7 +69,7 @@ public class OntologyConfigTests
     [Fact]
     public void OverrideYamlCanAddRequiredKeyAndRemovePerTypeRequirement()
     {
-        string yamlPath = WriteTempYaml("""
+        string yamlPath = _config.WriteYaml("""
             ontology:
               required-keys:
                 reference:
@@ -76,7 +77,7 @@ public class OntologyConfigTests
                 onboarding: []
             """);
 
-        OntologyConfig merged = ConfigFileReader.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath);
+        OntologyConfig merged = _config.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath);
 
         Assert.True(merged.IsRequired(DocType.Reference, "audience"));
         Assert.False(merged.IsRequired(DocType.Onboarding, "component"));
@@ -86,7 +87,7 @@ public class OntologyConfigTests
     [Fact]
     public void OverrideYamlCanDeclareRolesBesideTechnologies()
     {
-        string yamlPath = WriteTempYaml("""
+        string yamlPath = _config.WriteYaml("""
             ontology:
               technologies:
                 - csharp
@@ -95,7 +96,7 @@ public class OntologyConfigTests
                 - reviewer
             """);
 
-        OntologyConfig merged = ConfigFileReader.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath);
+        OntologyConfig merged = _config.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath);
 
         Assert.Equal(["csharp"], merged.Technologies);
         Assert.Equal(["conductor", "reviewer"], merged.Roles);
@@ -104,20 +105,20 @@ public class OntologyConfigTests
     [Fact]
     public void AnUndeclaredRoleYamlEntryIsRejected()
     {
-        string yamlPath = WriteTempYaml("""
+        string yamlPath = _config.WriteYaml("""
             ontology:
               roles:
                 - Reviewer Role
             """);
 
         Assert.Throws<YamlException>(() =>
-            ConfigFileReader.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath));
+            _config.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath));
     }
 
     [Fact]
     public void OverrideYamlCanChangeExclusionsDocsRootAndCatalogColumns()
     {
-        string yamlPath = WriteTempYaml("""
+        string yamlPath = _config.WriteYaml("""
             ontology:
               docs-root: custom-docs
               excluded-segments:
@@ -130,7 +131,7 @@ public class OntologyConfigTests
                 owner-column: 7
             """);
 
-        OntologyConfig merged = ConfigFileReader.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath);
+        OntologyConfig merged = _config.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath);
 
         Assert.Equal("custom-docs", merged.DocsRoot);
         Assert.Equal(["archive", "vendor-cache"], merged.ExcludedPathSegments);
@@ -142,7 +143,7 @@ public class OntologyConfigTests
     [Fact]
     public void OverrideYamlWiresDocumentLoaderAndDocSpecValidator()
     {
-        string yamlPath = WriteTempYaml("""
+        string yamlPath = _config.WriteYaml("""
             ontology:
               docs-root: docs
               excluded-segments:
@@ -151,8 +152,8 @@ public class OntologyConfigTests
                 - vendored/skill.md
             """);
 
-        OntologyConfig config = ConfigFileReader.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath);
-        using OntologyConfigDocFixture fixture = new OntologyConfigDocFixture(config);
+        OntologyConfig config = _config.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath);
+        OntologyConfigDocFixture fixture = new OntologyConfigDocFixture(config);
 
         fixture.WithCatalog()
             .Write("docs/archive/old.md", "# archived\n")
@@ -169,9 +170,9 @@ public class OntologyConfigTests
     [Fact]
     public void InvalidYamlReportsParseDiagnosticNotSilentFallback()
     {
-        string yamlPath = WriteTempYaml("ontology: [unclosed");
+        string yamlPath = _config.WriteYaml("ontology: [unclosed");
 
-        OntologyConfigLoadResult result = ConfigFileReader.TryLoadOntology(yamlPath);
+        OntologyConfigLoadResult result = _config.TryLoadOntology(yamlPath);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ParseError);
@@ -181,30 +182,28 @@ public class OntologyConfigTests
     [Fact]
     public void UnknownRequiredKeysDocTypeIsRejected()
     {
-        string yamlPath = WriteTempYaml("""
+        string yamlPath = _config.WriteYaml("""
             ontology:
               required-keys:
                 not-a-real-type:
                   - audience
             """);
 
-        OntologyConfigLoadResult result = ConfigFileReader.TryLoadOntology(yamlPath);
+        OntologyConfigLoadResult result = _config.TryLoadOntology(yamlPath);
 
         Assert.False(result.Success);
         Assert.Contains("not-a-real-type", result.ParseError, StringComparison.Ordinal);
         Assert.Null(result.Config);
 
         YamlException ex = Assert.ThrowsAny<YamlException>(
-            () => ConfigFileReader.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath));
+            () => _config.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath));
         Assert.Contains("not-a-real-type", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
     public void ANullTechnologyEntryIsRejected()
     {
-        using TempDirectory temp = new();
-        string yamlPath = Path.Combine(temp.Path, "kyber-weave.yml");
-        File.WriteAllText(yamlPath, """
+        string yamlPath = _config.WriteYaml("""
             ontology:
               technologies:
                 - csharp
@@ -212,10 +211,10 @@ public class OntologyConfigTests
             """);
 
         YamlException thrown = Assert.ThrowsAny<YamlException>(
-            () => ConfigFileReader.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath));
+            () => _config.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath));
         Assert.Contains("null entry", thrown.Message, StringComparison.Ordinal);
 
-        OntologyConfigLoadResult result = ConfigFileReader.TryLoadOntology(yamlPath);
+        OntologyConfigLoadResult result = _config.TryLoadOntology(yamlPath);
         Assert.False(result.Success);
         Assert.Contains("null entry", result.ParseError, StringComparison.Ordinal);
         Assert.Null(result.Config);
@@ -224,16 +223,14 @@ public class OntologyConfigTests
     [Fact]
     public void ANullRequiredKeysMappingKeyFailsTheLoadRatherThanThrowing()
     {
-        using TempDirectory temp = new();
-        string yamlPath = Path.Combine(temp.Path, "kyber-weave.yml");
-        File.WriteAllText(yamlPath, """
+        string yamlPath = _config.WriteYaml("""
             ontology:
               required-keys:
                 ~:
                   - audience
             """);
 
-        OntologyConfigLoadResult result = ConfigFileReader.TryLoadOntology(yamlPath);
+        OntologyConfigLoadResult result = _config.TryLoadOntology(yamlPath);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ParseError);
@@ -243,58 +240,18 @@ public class OntologyConfigTests
     [Fact]
     public void AnEmptyRequiredKeysDocTypeIsRejected()
     {
-        using TempDirectory temp = new();
-        string yamlPath = Path.Combine(temp.Path, "kyber-weave.yml");
-        File.WriteAllText(yamlPath, """
+        string yamlPath = _config.WriteYaml("""
             ontology:
               required-keys:
                 "":
                   - audience
             """);
 
-        OntologyConfigLoadResult result = ConfigFileReader.TryLoadOntology(yamlPath);
+        OntologyConfigLoadResult result = _config.TryLoadOntology(yamlPath);
 
         Assert.False(result.Success);
         Assert.Contains("required-keys", result.ParseError, StringComparison.Ordinal);
         Assert.Null(result.Config);
-    }
-
-    [Fact]
-    public void CombinedConfigTryLoadSurfacesInvalidYamlAsKWCONFIG001Payload()
-    {
-        string root = Path.Combine(Path.GetTempPath(), "kw-config-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        try
-        {
-            DirectoryInfo configDir = Directory.CreateDirectory(Path.Combine(root, ".kyber-weave"));
-            File.WriteAllText(Path.Combine(configDir.FullName, "kyber-weave.yml"), "ontology: [unclosed");
-
-            KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(root);
-
-            Assert.False(result.Success);
-            Assert.NotNull(result.Error);
-            Assert.NotNull(result.ConfigPath);
-            Assert.Null(result.Config);
-
-            // A failed result names no rule code; the code belongs to the diagnostic the CLI's load helper emits, so
-            // that is what proves the KW-CONFIG-001 payload reaches the operator.
-            DiagnosticReport report = new();
-            bool loaded = CommandHelpers.TryLoadConfig(
-                ConfigFileReader.Repository, root, null, report, out KyberWeaveConfig config);
-
-            Assert.False(loaded);
-            Assert.Same(KyberWeaveConfigDefaults.Product, config);
-            Diagnostic diagnostic = Assert.Single(report.Items);
-            Assert.Equal("KW-CONFIG-001", diagnostic.Code);
-            Assert.Equal(Severity.Error, diagnostic.Severity);
-            Assert.Equal(result.Error, diagnostic.Message);
-            Assert.Equal(result.ConfigPath, diagnostic.FilePath);
-        }
-        finally
-        {
-            if (Directory.Exists(root))
-                Directory.Delete(root, recursive: true);
-        }
     }
 
     private const string ValidReference = """
@@ -310,23 +267,14 @@ public class OntologyConfigTests
         # A Thing
         """;
 
-    private static string WriteTempYaml(string content)
+    private sealed class OntologyConfigDocFixture
     {
-        string path = Path.Combine(Path.GetTempPath(), "kw-ontology-" + Guid.NewGuid().ToString("N") + ".yml");
-        File.WriteAllText(path, content);
-        return path;
-    }
-
-    private sealed class OntologyConfigDocFixture : IDisposable
-    {
-        private string Root { get; }
         private readonly OntologyConfig _config;
+        private readonly DocFixture _docs = DocFixture.CreateInMemory();
 
         public OntologyConfigDocFixture(OntologyConfig config)
         {
             _config = config;
-            Root = Path.Combine(Path.GetTempPath(), "kw-docs-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(Path.Combine(Root, config.DocsRoot));
         }
 
         public OntologyConfigDocFixture WithCatalog()
@@ -350,24 +298,15 @@ public class OntologyConfigTests
 
         public OntologyConfigDocFixture Write(string relativePath, string content)
         {
-            string full = Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar));
-            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-            File.WriteAllText(full, content);
+            _ = _docs.Write(relativePath, content);
             return this;
         }
 
         public IReadOnlyList<DocumentModel> LoadSubjects() =>
-            RealDocumentLoader.Create(Root, _config).Load().Documents
+            _docs.Loader(_config).Load().Documents
                 .Where(d => d.RelativePath != $"{_config.DocsRoot}/catalog.md")
                 .ToList();
 
-        public DiagnosticReport Validate() =>
-            RealDocSpecValidator.Create(Root, _config).Validate(RealDocumentLoader.Create(Root, _config).Load());
-
-        public void Dispose()
-        {
-            if (Directory.Exists(Root))
-                Directory.Delete(Root, recursive: true);
-        }
+        public DiagnosticReport Validate() => _docs.Validate(_config);
     }
 }

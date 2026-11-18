@@ -1,18 +1,17 @@
-using KyberWeave.Data.Docs.Mcp;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Mcp;
-using Spectre.Console.Testing;
+using KyberWeave.Tests;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Docs.Mcp;
 
 /// <summary>
 /// The boundary half of the wiring feature: what the repair and the removal may touch, and what they
@@ -35,7 +34,7 @@ namespace KyberWeave.Tests;
 /// the code under test is wrong rather than that the fixture never ran.
 /// </para>
 /// </remarks>
-public sealed class McpWiringHardeningTests : IDisposable
+public sealed class McpWiringHardeningTests
 {
     private const string ServerName = "kyber-weave";
 
@@ -50,17 +49,17 @@ public sealed class McpWiringHardeningTests : IDisposable
     /// <summary>The wiring check's "not wired" id, on the findings the fix list is derived from.</summary>
     private const string NotWiredCode = "KW-MCP-WIRE-001";
 
-    private readonly TempDirectory _root = new();
+    private readonly InMemoryMcpWiring _wiring = McpWiringTestServices.InMemory();
 
     public McpWiringHardeningTests()
     {
-        Directory.CreateDirectory(Repo);
-        Directory.CreateDirectory(Bin);
+        _wiring.Files.CreateDirectory(Repo);
+        _wiring.Files.CreateDirectory(Bin);
 
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
     }
 
-    private string Repo => Path.Combine(_root.Path, "repo");
+    private string Repo => _wiring.Root;
 
     /// <summary>A record for a write that has not landed yet, in the shape the repair builds one.</summary>
     /// <param name="path">The repository-relative file the record describes.</param>
@@ -77,12 +76,10 @@ public sealed class McpWiringHardeningTests : IDisposable
             pre.Length == 0 ? null : Convert.ToBase64String(pre));
 
     /// <summary>Where a case puts the fake launch binaries it wants the resolver to find.</summary>
-    private string Bin => Path.Combine(_root.Path, "bin");
+    private string Bin => Path.Combine(_wiring.Files.Root, "bin");
 
     /// <summary>The receipt the design fixes at this path; asserted as a literal, not via its owner.</summary>
     private string ReceiptPath => Path.Combine(Repo, ".kyber-weave", "receipts", "mcp-wiring.json");
-
-    public void Dispose() => _root.Dispose();
 
     // ---- A receipt is local state on disk, so nothing it names may reach outside the repository.
 
@@ -103,15 +100,15 @@ public sealed class McpWiringHardeningTests : IDisposable
     [InlineData(".kyber-weave/../../outside/mcp.json")]
     public void AReceiptRecordWhosePathEscapesTheRepositoryIsNotLoaded(string escaping)
     {
-        string outside = Path.Combine(_root.Path, "outside", "mcp.json");
-        Directory.CreateDirectory(Path.GetDirectoryName(outside)!);
-        File.WriteAllText(outside, """{"mcpServers": {}}""");
+        string outside = Path.Combine(_wiring.Files.Root, "outside", "mcp.json");
+        _wiring.Files.CreateDirectory(Path.GetDirectoryName(outside)!);
+        _wiring.Files.WriteAllText(outside, """{"mcpServers": {}}""");
 
         WriteReceipt(Record(escaping));
 
-        Assert.Empty(McpWiringTestServices.Receipts.Load(Repo).Files);
-        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(escaping));
-        Assert.Equal("""{"mcpServers": {}}""", File.ReadAllText(outside));
+        Assert.Empty(_wiring.Receipts.Load(Repo).Files);
+        Assert.Null(_wiring.Receipts.Load(Repo).Find(escaping));
+        Assert.Equal("""{"mcpServers": {}}""", _wiring.Files.ReadAllText(outside));
     }
 
     /// <summary>
@@ -121,11 +118,11 @@ public sealed class McpWiringHardeningTests : IDisposable
     [Fact]
     public void AReceiptRecordWithAnAbsolutePathIsNotLoaded()
     {
-        string absolute = Path.Combine(_root.Path, "outside", "mcp.json");
+        string absolute = Path.Combine(_wiring.Files.Root, "outside", "mcp.json");
 
         WriteReceipt(Record(absolute));
 
-        Assert.Empty(McpWiringTestServices.Receipts.Load(Repo).Files);
+        Assert.Empty(_wiring.Receipts.Load(Repo).Files);
     }
 
     /// <summary>
@@ -138,11 +135,11 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         Assert.Equal(
             Path.Combine(Repo, ".vscode", "mcp.json"),
-            McpWiringTestServices.Repairer.ContainedPath(Repo, ".vscode/mcp.json"));
+            _wiring.Repairer.ContainedPath(Repo, ".vscode/mcp.json"));
 
-        Assert.Null(McpWiringTestServices.Repairer.ContainedPath(Repo, "../outside/mcp.json"));
-        Assert.Null(McpWiringTestServices.Repairer.ContainedPath(Repo, ".vscode/../../outside/mcp.json"));
-        Assert.Null(McpWiringTestServices.Repairer.ContainedPath(Repo, Path.Combine(_root.Path, "outside", "mcp.json")));
+        Assert.Null(_wiring.Repairer.ContainedPath(Repo, "../outside/mcp.json"));
+        Assert.Null(_wiring.Repairer.ContainedPath(Repo, ".vscode/../../outside/mcp.json"));
+        Assert.Null(_wiring.Repairer.ContainedPath(Repo, Path.Combine(_wiring.Files.Root, "outside", "mcp.json")));
     }
 
     // ---- One answer to "is this path inside the repository", asked by every caller.
@@ -176,10 +173,10 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         string expected = Path.Combine(Repo, name.Replace('/', Path.DirectorySeparatorChar));
 
-        Assert.Equal(expected, McpWiringTestServices.RepositoryPath.Contained(Repo, name));
-        Assert.Equal(expected, McpWiringTestServices.Repairer.ContainedPath(Repo, name));
+        Assert.Equal(expected, _wiring.RepositoryPath.Contained(Repo, name));
+        Assert.Equal(expected, _wiring.Repairer.ContainedPath(Repo, name));
 
-        McpWiringFix fix = Assert.Single(McpWiringTestServices.Wiring.Derive(ReportOffering(name), Repo));
+        McpWiringFix fix = Assert.Single(_wiring.Wiring.Derive(ReportOffering(name), Repo));
         Assert.Equal(name, fix.Path);
         Assert.True(fix.Create);
     }
@@ -201,9 +198,9 @@ public sealed class McpWiringHardeningTests : IDisposable
     [InlineData(".vscode/../../x")]
     public void ANameOutsideTheRepositoryIsRefusedByEveryCaller(string name)
     {
-        Assert.Null(McpWiringTestServices.RepositoryPath.Contained(Repo, name));
-        Assert.Null(McpWiringTestServices.Repairer.ContainedPath(Repo, name));
-        Assert.Empty(McpWiringTestServices.Wiring.Derive(ReportOffering(name), Repo));
+        Assert.Null(_wiring.RepositoryPath.Contained(Repo, name));
+        Assert.Null(_wiring.Repairer.ContainedPath(Repo, name));
+        Assert.Empty(_wiring.Wiring.Derive(ReportOffering(name), Repo));
     }
 
     /// <summary>
@@ -213,11 +210,11 @@ public sealed class McpWiringHardeningTests : IDisposable
     [Fact]
     public void AnAbsoluteNameIsRefusedByEveryCaller()
     {
-        string absolute = Path.Combine(_root.Path, "outside", "mcp.json");
+        string absolute = Path.Combine(_wiring.Files.Root, "outside", "mcp.json");
 
-        Assert.Null(McpWiringTestServices.RepositoryPath.Contained(Repo, absolute));
-        Assert.Null(McpWiringTestServices.Repairer.ContainedPath(Repo, absolute));
-        Assert.Empty(McpWiringTestServices.Wiring.Derive(ReportOffering(absolute), Repo));
+        Assert.Null(_wiring.RepositoryPath.Contained(Repo, absolute));
+        Assert.Null(_wiring.Repairer.ContainedPath(Repo, absolute));
+        Assert.Empty(_wiring.Wiring.Derive(ReportOffering(absolute), Repo));
     }
 
     /// <summary>
@@ -233,13 +230,13 @@ public sealed class McpWiringHardeningTests : IDisposable
     [Fact]
     public void ASiblingDirectorySharingTheRepositorysNamePrefixIsRefused()
     {
-        string sibling = Path.Combine(_root.Path, "repo-other", "mcp.json");
-        Directory.CreateDirectory(Path.GetDirectoryName(sibling)!);
-        File.WriteAllText(sibling, """{"mcpServers": {}}""");
+        string sibling = Path.Combine(_wiring.Files.Root, "repo-other", "mcp.json");
+        _wiring.Files.CreateDirectory(Path.GetDirectoryName(sibling)!);
+        _wiring.Files.WriteAllText(sibling, """{"mcpServers": {}}""");
 
-        Assert.Null(McpWiringTestServices.RepositoryPath.Contained(Repo, sibling));
-        Assert.Null(McpWiringTestServices.Repairer.ContainedPath(Repo, sibling));
-        Assert.Empty(McpWiringTestServices.Wiring.Derive(ReportOffering(sibling), Repo));
+        Assert.Null(_wiring.RepositoryPath.Contained(Repo, sibling));
+        Assert.Null(_wiring.Repairer.ContainedPath(Repo, sibling));
+        Assert.Empty(_wiring.Wiring.Derive(ReportOffering(sibling), Repo));
     }
 
     /// <summary>
@@ -264,9 +261,9 @@ public sealed class McpWiringHardeningTests : IDisposable
     [Fact]
     public void ANameSpellingAParentReferenceIsRefusedBeforeItIsResolvedAndTheFixListAgrees()
     {
-        Assert.Null(McpWiringTestServices.RepositoryPath.Contained(Repo, ".vscode/../.mcp.json"));
-        Assert.Null(McpWiringTestServices.Repairer.ContainedPath(Repo, ".vscode/../.mcp.json"));
-        Assert.Empty(McpWiringTestServices.Wiring.Derive(ReportOffering(".vscode/../.mcp.json"), Repo));
+        Assert.Null(_wiring.RepositoryPath.Contained(Repo, ".vscode/../.mcp.json"));
+        Assert.Null(_wiring.Repairer.ContainedPath(Repo, ".vscode/../.mcp.json"));
+        Assert.Empty(_wiring.Wiring.Derive(ReportOffering(".vscode/../.mcp.json"), Repo));
     }
 
     /// <summary>
@@ -295,8 +292,8 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         const string UnusableRoot = "\0";
 
-        Assert.Null(McpWiringTestServices.RepositoryPath.Contained(UnusableRoot, ".mcp.json"));
-        Assert.Null(McpWiringTestServices.Repairer.ContainedPath(UnusableRoot, ".mcp.json"));
+        Assert.Null(_wiring.RepositoryPath.Contained(UnusableRoot, ".mcp.json"));
+        Assert.Null(_wiring.Repairer.ContainedPath(UnusableRoot, ".mcp.json"));
     }
 
     // ---- The link guard must test for a parent-reference segment, not for the two characters.
@@ -313,23 +310,23 @@ public sealed class McpWiringHardeningTests : IDisposable
     [Fact]
     public void ASymlinkNamedLikeAParentReferenceIsFoundByTheLinkGuard()
     {
-        string outside = Path.Combine(_root.Path, "outside-mcp.json");
-        File.WriteAllText(outside, """{"mcpServers": {}}""");
+        string outside = Path.Combine(_wiring.Files.Root, "outside-mcp.json");
+        _wiring.Files.WriteAllText(outside, """{"mcpServers": {}}""");
         string link = Path.Combine(Repo, "..foo");
-        McpWiringFixture.CreateSymlink(link, outside);
+        CreateLink(link, outside);
 
-        Assert.Equal("..foo", McpConfigurationLink.LinkedSegment(Repo, link, new PhysicalMcpConfigFiles().InspectLink));
+        Assert.Equal("..foo", McpConfigurationLink.LinkedSegment(Repo, link, _wiring.ConfigFiles.InspectLink));
     }
 
     /// <summary>A path that really does leave the root is not this guard's question.</summary>
     [Fact]
     public void APathOutsideTheRepositoryIsNotReportedAsALink()
     {
-        string outside = Path.Combine(_root.Path, "elsewhere", "mcp.json");
-        Directory.CreateDirectory(Path.GetDirectoryName(outside)!);
-        File.WriteAllText(outside, """{"mcpServers": {}}""");
+        string outside = Path.Combine(_wiring.Files.Root, "elsewhere", "mcp.json");
+        _wiring.Files.CreateDirectory(Path.GetDirectoryName(outside)!);
+        _wiring.Files.WriteAllText(outside, """{"mcpServers": {}}""");
 
-        Assert.Null(McpConfigurationLink.LinkedSegment(Repo, outside, new PhysicalMcpConfigFiles().InspectLink));
+        Assert.Null(McpConfigurationLink.LinkedSegment(Repo, outside, _wiring.ConfigFiles.InspectLink));
     }
 
     // ---- Paths are compared by value, and on a case-sensitive filesystem case is part of the value.
@@ -362,11 +359,11 @@ public sealed class McpWiringHardeningTests : IDisposable
     [Fact]
     public void ARecordForAPathThatDiffersOnlyInCaseDoesNotMatchTheFile()
     {
-        McpWiringFixture.WriteText(Repo, ".mcp.json", """{"mcpServers": {}}""");
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".mcp.json", """{"mcpServers": {}}""");
 
         WriteReceipt(Record(".MCP.json"));
 
-        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json"));
+        Assert.Null(_wiring.Receipts.Load(Repo).Find(".mcp.json"));
     }
 
     // ---- A refusal for want of permission is not the same fact as a missing file.
@@ -384,15 +381,15 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         string directory = Path.Combine(Repo, ".vscode");
         string target = Path.Combine(directory, "mcp.json");
-        Directory.CreateDirectory(directory);
-        File.WriteAllText(target, """{"servers": {}}""");
+        _wiring.Files.CreateDirectory(directory);
+        _wiring.Files.WriteAllText(target, """{"servers": {}}""");
 
         try
         {
             DenyTraversal(directory, target);
 
-            Assert.Equal(McpLinkObstruction.Denied, McpConfigurationLink.Probe(Repo, target, new PhysicalMcpConfigFiles().InspectLink).Obstruction);
-            Assert.Equal(".vscode/mcp.json", McpConfigurationLink.Probe(Repo, target, new PhysicalMcpConfigFiles().InspectLink).Segment);
+            Assert.Equal(McpLinkObstruction.Denied, McpConfigurationLink.Probe(Repo, target, _wiring.ConfigFiles.InspectLink).Obstruction);
+            Assert.Equal(".vscode/mcp.json", McpConfigurationLink.Probe(Repo, target, _wiring.ConfigFiles.InspectLink).Segment);
         }
         finally
         {
@@ -409,9 +406,9 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         string directory = Path.Combine(Repo, ".vscode");
         string target = Path.Combine(directory, "mcp.json");
-        Directory.CreateDirectory(directory);
-        File.WriteAllText(target, """{"servers": {}}""");
-        byte[] before = File.ReadAllBytes(target);
+        _wiring.Files.CreateDirectory(directory);
+        _wiring.Files.WriteAllText(target, """{"servers": {}}""");
+        byte[] before = _wiring.Files.ReadAllBytes(target);
 
         try
         {
@@ -429,48 +426,7 @@ public sealed class McpWiringHardeningTests : IDisposable
             AllowTraversal(directory);
         }
 
-        Assert.Equal(before, File.ReadAllBytes(target));
-    }
-
-    /// <summary>
-    /// A migrate over a configuration this process may not inspect is a refusal, not a silent skip: it exits 1
-    /// with KW-MCP-WIRE-009 and, once traversal is restored, the file is byte-identical. The file holds a proven
-    /// old key, so the only reason the rename does not happen is the denial.
-    /// </summary>
-    [Fact]
-    public void AMigrateRefusesAConfigurationItMayNotInspectAndLeavesItByteIdentical()
-    {
-        string directory = Path.Combine(Repo, ".vscode");
-        string target = Path.Combine(directory, "mcp.json");
-        Directory.CreateDirectory(directory);
-        File.WriteAllText(
-            target,
-            """{"servers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": ["--repo-root", "."]}}}""");
-        byte[] before = File.ReadAllBytes(target);
-
-        try
-        {
-            DenyTraversal(directory, target);
-
-            TestConsole console = new() { EmitAnsiSequences = false };
-            int exit = new DocsMcpMigrateCommand(
-                McpWiringTestServices.Wiring,
-                FakePathResolver.OverEmptyFileSystem(),
-                new FakeProcessEnvironment(),
-                console).Execute(
-                null!,
-                new DocsMcpMigrateSettings { Path = Repo, Target = VsCode });
-            CapturedConsoleExecution<int> execution = new(exit, console.Output);
-
-            Assert.Equal(1, execution.Result);
-            Assert.Contains("KW-MCP-WIRE-009", execution.Output, StringComparison.Ordinal);
-        }
-        finally
-        {
-            AllowTraversal(directory);
-        }
-
-        Assert.Equal(before, File.ReadAllBytes(target));
+        Assert.Equal(before, _wiring.Files.ReadAllBytes(target));
     }
 
     /// <summary>
@@ -495,17 +451,17 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         string directory = Path.Combine(Repo, ".vscode");
         string target = Path.Combine(directory, "mcp.json");
-        Directory.CreateDirectory(directory);
-        File.WriteAllText(target, """{"servers": {}}""");
+        _wiring.Files.CreateDirectory(directory);
+        _wiring.Files.WriteAllText(target, """{"servers": {}}""");
 
         try
         {
             DenyTraversal(directory, target);
 
-            McpWiringReport report = McpWiringTestServices.Wiring.Inspect(
+            McpWiringReport report = _wiring.Wiring.Inspect(
                 Repo,
                 McpWiringFixture.Declare(FirstPartyServer()),
-                PhysicalLaunchCommands.Over([Bin]));
+                ResolverOver(Bin));
 
             McpWiringFinding finding = Assert.Single(report.Findings, candidate => candidate.Harness == VsCode);
 
@@ -521,7 +477,7 @@ public sealed class McpWiringHardeningTests : IDisposable
 
             // The fix list is derived from the findings, and this finding is never offered as a
             // write: the repair would refuse it, so the operator is never asked to consent to it.
-            Assert.Empty(McpWiringTestServices.Wiring.Derive(report, Repo));
+            Assert.Empty(_wiring.Wiring.Derive(report, Repo));
         }
         finally
         {
@@ -542,7 +498,7 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         WriteReceiptText(text);
 
-        Assert.Empty(McpWiringTestServices.Receipts.Load(Repo).Files);
+        Assert.Empty(_wiring.Receipts.Load(Repo).Files);
     }
 
     /// <summary>
@@ -562,7 +518,7 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         WriteReceiptText(text);
 
-        Assert.Empty(McpWiringTestServices.Receipts.Load(Repo).Files);
+        Assert.Empty(_wiring.Receipts.Load(Repo).Files);
     }
 
     /// <summary>
@@ -583,7 +539,7 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         WriteReceiptText(text);
 
-        Assert.Empty(McpWiringTestServices.Receipts.Load(Repo).Files);
+        Assert.Empty(_wiring.Receipts.Load(Repo).Files);
     }
 
     /// <summary>
@@ -608,7 +564,7 @@ public sealed class McpWiringHardeningTests : IDisposable
                 ["writtenAtUtc"] = "2026-10-31T00:00:00+00:00"
             });
 
-        Assert.Empty(McpWiringTestServices.Receipts.Load(Repo).Files);
+        Assert.Empty(_wiring.Receipts.Load(Repo).Files);
     }
 
     /// <summary>
@@ -628,7 +584,7 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         WriteReceiptText(text);
 
-        Assert.Empty(McpWiringTestServices.Receipts.Load(Repo).Files);
+        Assert.Empty(_wiring.Receipts.Load(Repo).Files);
     }
 
     /// <summary>
@@ -652,7 +608,7 @@ public sealed class McpWiringHardeningTests : IDisposable
                 ["postSha256"] = "AA"
             });
 
-        Assert.Empty(McpWiringTestServices.Receipts.Load(Repo).Files);
+        Assert.Empty(_wiring.Receipts.Load(Repo).Files);
     }
 
     /// <summary>
@@ -671,7 +627,7 @@ public sealed class McpWiringHardeningTests : IDisposable
             Convert.ToBase64String(pre),
             Digest(Encoding.UTF8.GetBytes("""{"mcpServers": {"kyber-weave": {}}}"""))));
 
-        McpWiringReceiptRecord record = McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json")
+        McpWiringReceiptRecord record = _wiring.Receipts.Load(Repo).Find(".mcp.json")
             ?? throw new InvalidOperationException("the record this code writes must load");
 
         Assert.Equal(".mcp.json", record.Path);
@@ -700,7 +656,7 @@ public sealed class McpWiringHardeningTests : IDisposable
     public void ARepairWhoseUndoRecordCannotBeWrittenWritesNothingToTheHarness()
     {
         // A directory where the receipt file belongs, so the receipt cannot be written at all.
-        Directory.CreateDirectory(ReceiptPath);
+        _wiring.Files.CreateDirectory(ReceiptPath);
 
         McpWiringFileChange change = SingleChange(Repair(ClaudeCode), ClaudeCode);
 
@@ -708,7 +664,7 @@ public sealed class McpWiringHardeningTests : IDisposable
         Assert.Equal(RefusalCode, change.Code);
         Assert.False(change.Written);
         Assert.False(
-            File.Exists(Path.Combine(Repo, ".mcp.json")),
+            _wiring.Files.FileExists(Path.Combine(Repo, ".mcp.json")),
             "the harness file must not be written when the undo record that would have recorded it is absent");
     }
 
@@ -725,19 +681,19 @@ public sealed class McpWiringHardeningTests : IDisposable
     public void AnInterruptedInsertIsUndoneByDroppingItsRecordRatherThanRefusedAsDrift()
     {
         byte[] pre = Encoding.UTF8.GetBytes("""{"mcpServers": {}}""");
-        McpWiringFixture.WriteBytes(Repo, ".mcp.json", pre);
+        McpWiringFixture.WriteBytes(_wiring.Files, Repo, ".mcp.json", pre);
 
         // The write that was planned, and never landed: the recorded post-write digest is of bytes
         // that are nowhere on disk, while the file still matches the recorded pre-write state.
         string planned = Digest(Encoding.UTF8.GetBytes("""{"mcpServers": {"kyber-weave": {}}}"""));
         WriteReceipt(Record(".mcp.json", McpWiringWriteMode.Inserted, Digest(pre), Convert.ToBase64String(pre), planned));
 
-        McpWiringFileChange change = Assert.Single(McpWiringTestServices.Wiring.Unwire(Repo, [ClaudeCode]).Files);
+        McpWiringFileChange change = Assert.Single(_wiring.Wiring.Unwire(Repo, [ClaudeCode]).Files);
 
         Assert.NotEqual(McpWiringChangeOutcome.Refused, change.Outcome);
         Assert.False(change.Written, "the pre-write bytes were already on disk, so nothing needed writing");
-        Assert.Equal(pre, File.ReadAllBytes(Path.Combine(Repo, ".mcp.json")));
-        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json"));
+        Assert.Equal(pre, _wiring.Files.ReadAllBytes(Path.Combine(Repo, ".mcp.json")));
+        Assert.Null(_wiring.Receipts.Load(Repo).Find(".mcp.json"));
     }
 
     /// <summary>
@@ -749,12 +705,12 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         WriteReceipt(Record(".mcp.json", McpWiringWriteMode.Created, postSha256: Digest(Encoding.UTF8.GetBytes("{}"))));
 
-        McpWiringFileChange change = Assert.Single(McpWiringTestServices.Wiring.Unwire(Repo, [ClaudeCode]).Files);
+        McpWiringFileChange change = Assert.Single(_wiring.Wiring.Unwire(Repo, [ClaudeCode]).Files);
 
         Assert.NotEqual(McpWiringChangeOutcome.Refused, change.Outcome);
         Assert.False(change.Written);
-        Assert.False(File.Exists(Path.Combine(Repo, ".mcp.json")));
-        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json"));
+        Assert.False(_wiring.Files.FileExists(Path.Combine(Repo, ".mcp.json")));
+        Assert.Null(_wiring.Receipts.Load(Repo).Find(".mcp.json"));
     }
 
     // ---- The journal never trades one file's undo for another's.
@@ -791,7 +747,7 @@ public sealed class McpWiringHardeningTests : IDisposable
             Digest(landed),
             ["other-server"]));
 
-        McpWiringRepairer.ReceiptJournal journal = new(McpWiringTestServices.Receipts, Repo, [.. McpWiringTestServices.Receipts.Load(Repo).Files]);
+        McpWiringRepairer.ReceiptJournal journal = new(_wiring.Receipts, Repo, [.. _wiring.Receipts.Load(Repo).Files]);
 
         DenyWritesToFile(ReceiptPath);
 
@@ -799,7 +755,7 @@ public sealed class McpWiringHardeningTests : IDisposable
             journal.Record(Pending(".mcp.json", pre, landed)) is not null,
             "the save was expected to fail, so the case proves nothing if it was recorded");
 
-        string? afterFailure = McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json")?.PostSha256;
+        string? afterFailure = _wiring.Receipts.Load(Repo).Find(".mcp.json")?.PostSha256;
         Assert.True(
             afterFailure == Digest(landed),
             $".mcp.json no longer holds the record of the write that landed (it holds {(afterFailure is null ? "no record" : "another record")}), so that file's undo is unreachable from mcp-unwire");
@@ -813,11 +769,11 @@ public sealed class McpWiringHardeningTests : IDisposable
                 Encoding.UTF8.GetBytes("""{"mcpServers": {}}"""))) is null,
             "the second record was expected to save, so the clobber this case is about never happened");
 
-        string? afterNextRecord = McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json")?.PostSha256;
+        string? afterNextRecord = _wiring.Receipts.Load(Repo).Find(".mcp.json")?.PostSha256;
         Assert.True(
             afterNextRecord == Digest(landed),
             $"the next record that saved dropped the undo of the write that landed (it holds {(afterNextRecord is null ? "no record" : "another record")}), because the failed save had cleared it from the journal");
-        Assert.NotNull(McpWiringTestServices.Receipts.Load(Repo).Find(".vscode/mcp.json"));
+        Assert.NotNull(_wiring.Receipts.Load(Repo).Find(".vscode/mcp.json"));
     }
 
     /// <summary>
@@ -843,7 +799,7 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         byte[] pre = Encoding.UTF8.GetBytes("""{"mcpServers": {}}""");
         byte[] landed = Encoding.UTF8.GetBytes("""{"mcpServers": {"other-server": {}}}""");
-        McpWiringFixture.WriteBytes(Repo, ".mcp.json", landed);
+        McpWiringFixture.WriteBytes(_wiring.Files, Repo, ".mcp.json", landed);
         WriteReceipt(Record(
             ".mcp.json",
             McpWiringWriteMode.Inserted,
@@ -864,14 +820,14 @@ public sealed class McpWiringHardeningTests : IDisposable
             // The refusal this case is about is the write, not a refusal reached before a record was
             // ever taken: the write failure is what runs the discard.
             Assert.Contains("could not be written", DiagnosticText(change), StringComparison.Ordinal);
-            Assert.Equal(landed, File.ReadAllBytes(Path.Combine(Repo, ".mcp.json")));
+            Assert.Equal(landed, _wiring.Files.ReadAllBytes(Path.Combine(Repo, ".mcp.json")));
         }
         finally
         {
             AllowTraversal(Repo);
         }
 
-        McpWiringReceiptRecord? kept = McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json");
+        McpWiringReceiptRecord? kept = _wiring.Receipts.Load(Repo).Find(".mcp.json");
         string? keptPost = kept?.PostSha256;
 
         Assert.True(
@@ -1030,7 +986,7 @@ public sealed class McpWiringHardeningTests : IDisposable
     }
 
     private McpWiringRepairReport Repair(params string[] targets) =>
-        McpWiringTestServices.Wiring.Repair(Repo, McpWiringFixture.Declare(FirstPartyServer()), PhysicalLaunchCommands.Over([Bin]), targets);
+        _wiring.Wiring.Repair(Repo, McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), targets);
 
     private static RequiredMcpServer FirstPartyServer() =>
         new(ServerName, [BinaryName, "--repo-root", "."], McpProvenance.FirstParty);
@@ -1116,125 +1072,52 @@ public sealed class McpWiringHardeningTests : IDisposable
             ["files"] = new JsonArray([.. records.Select(record => (JsonNode)record)])
         }.ToJsonString());
 
-    private void WriteReceiptText(string text) => McpWiringFixture.WriteText(Repo, ".kyber-weave/receipts/mcp-wiring.json", text);
+    private void WriteReceiptText(string text) => McpWiringFixture.WriteText(_wiring.Files, Repo, ".kyber-weave/receipts/mcp-wiring.json", text);
 
     private static string Digest(byte[] content) => Convert.ToHexString(SHA256.HashData(content));
 
     /// <summary>
-    /// Removes this process's permission to traverse <paramref name="directory"/>, or skips the calling
-    /// test where that cannot be arranged: Windows has no permission bits, and an account that bypasses
-    /// them — root, or one holding a capability — reads the directory anyway.
+    /// Makes this process unable to inspect anything below <paramref name="directory"/>, as a directory it may not
+    /// traverse does on disk: looking at a link below it raises an access failure instead of answering.
     /// </summary>
-    /// <remarks>
-    /// The check is the denial itself rather than the account's name, because "am I root" is a guess
-    /// about a machine this suite has never seen. <paramref name="probe"/> is a file inside the denied
-    /// directory: if it is still visible, this process was not denied and the case would prove nothing.
-    /// </remarks>
-    private static void DenyTraversal(string directory, string probe)
+    /// <param name="directory">The directory whose contents cannot be inspected.</param>
+    /// <param name="probe">A path inside it, kept so a call site names the file the denial is about.</param>
+    private void DenyTraversal(string directory, string probe)
     {
-        if (OperatingSystem.IsWindows())
-        {
-            Assert.Skip("This platform has no Unix permission bits, so a directory this process may not traverse cannot be arranged here.");
-        }
-        else
-        {
-            File.SetUnixFileMode(directory, UnixFileMode.None);
-        }
-
-        if (File.Exists(probe) || Directory.Exists(probe))
-        {
-            AllowTraversal(directory);
-            Assert.Skip("This account can traverse a directory whose permission bits deny it, so the denial cannot be arranged here.");
-        }
+        Assert.StartsWith(directory, probe, StringComparison.Ordinal);
+        _wiring.Files.FailWhen(
+            operation => operation.Name == nameof(InMemoryFileSystem.GetLinkTarget) && IsBelow(directory, operation.Path),
+            new UnauthorizedAccessException($"Access to the path '{probe}' is denied."));
     }
 
-    private static void AllowTraversal(string directory)
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(
-                directory,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
-    }
+    private void AllowTraversal(string directory) => _wiring.Files.ClearFaults();
+
+    /// <summary>Makes every write to <paramref name="path"/> fail with an access error until the denial is lifted.</summary>
+    /// <param name="path">The file that can no longer be written.</param>
+    private void DenyWritesToFile(string path) =>
+        _wiring.Files.FailWhen(
+            operation => operation.Name.StartsWith("Write", StringComparison.Ordinal) && operation.Path == path,
+            new UnauthorizedAccessException($"Access to the path '{path}' is denied."));
+
+    private void AllowWritesToFile(string path) => _wiring.Files.ClearFaults();
 
     /// <summary>
-    /// Removes this process's permission to write <paramref name="path"/>, or skips the calling test
-    /// where that cannot be arranged.
+    /// Makes every write directly into <paramref name="directory"/> fail with an access error, which covers the file a
+    /// case targets there and the temporary sibling an atomic write puts beside it; folders below it stay writable.
     /// </summary>
-    /// <remarks>
-    /// The check is the denial itself rather than the account's name, for the reason
-    /// <see cref="DenyTraversal"/> gives. The probe rewrites the file with the bytes it already holds,
-    /// which changes nothing where the denial holds and proves the account bypassed the bits where it
-    /// does not.
-    /// </remarks>
-    private static void DenyWritesToFile(string path)
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            Assert.Skip("This platform has no Unix permission bits, so a file this process may not write cannot be arranged here.");
-        }
-        else
-        {
-            File.SetUnixFileMode(path, UnixFileMode.UserRead);
-        }
+    /// <param name="directory">The directory that can no longer be written to.</param>
+    private void DenyWritesToDirectory(string directory) =>
+        _wiring.Files.FailWhen(
+            operation => operation.Name.StartsWith("Write", StringComparison.Ordinal)
+                && operation.Path is not null
+                && string.Equals(Path.GetDirectoryName(operation.Path), directory, StringComparison.Ordinal),
+            new UnauthorizedAccessException($"Access to the path '{directory}' is denied."));
 
-        string content = File.ReadAllText(path);
+    private static bool IsBelow(string directory, string? path) =>
+        path is not null && path.StartsWith(directory + Path.DirectorySeparatorChar, StringComparison.Ordinal);
 
-        try
-        {
-            File.WriteAllText(path, content);
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return;
-        }
+    private LaunchCommandResolver ResolverOver(params string[] searchPaths) =>
+        new(Repo, searchPaths, _wiring.Files, _wiring.Paths, _wiring.Environment);
 
-        AllowWritesToFile(path);
-        Assert.Skip("This account can write a file whose permission bits deny it, so the denial cannot be arranged here.");
-    }
-
-    private static void AllowWritesToFile(string path)
-    {
-        if (!OperatingSystem.IsWindows())
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-    }
-
-    /// <summary>
-    /// Removes this process's permission to create files in <paramref name="directory"/>, or skips the
-    /// calling test where that cannot be arranged.
-    /// </summary>
-    /// <remarks>
-    /// The check is the write itself rather than the account's name, for the reason
-    /// <see cref="DenyTraversal"/> gives: a probe file that can still be created proves the account
-    /// bypassed the bits, and the probe is deleted again so the directory left behind is the one the
-    /// case arranged. Restoring is the caller's job, because the case needs the denial in place while
-    /// it drives the code and the skip paths restore before they leave.
-    /// </remarks>
-    private static void DenyWritesToDirectory(string directory)
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            Assert.Skip("This platform has no Unix permission bits, so a directory this process may not write cannot be arranged here.");
-        }
-        else
-        {
-            File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
-        }
-
-        string probe = Path.Combine(directory, ".write-probe");
-
-        try
-        {
-            File.WriteAllText(probe, string.Empty);
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return;
-        }
-
-        File.Delete(probe);
-        AllowTraversal(directory);
-        Assert.Skip("This account can write inside a directory whose permission bits deny it, so the denial cannot be arranged here.");
-    }
+    private void CreateLink(string linkPath, string targetPath) => _wiring.Files.CreateFileLink(linkPath, targetPath);
 }
