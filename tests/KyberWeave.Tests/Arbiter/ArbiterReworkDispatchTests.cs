@@ -104,6 +104,18 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
             Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
         };
 
+    /// <summary>The provider these tests use: it answers the named rules at 0.95, as a confident model does.</summary>
+    private static FakeArbiterProvider Confident(params (string RuleId, string Answer)[] answers)
+    {
+        FakeArbiterProvider provider = new() { Confidence = 0.95 };
+        foreach ((string ruleId, string answer) in answers)
+        {
+            provider.Answers[ruleId] = answer;
+        }
+
+        return provider;
+    }
+
     private ArbiterEvaluator Evaluator(IArbiterProvider provider) =>
         new(
             provider,
@@ -131,6 +143,25 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
     };
 
     /// <summary>
+    /// The second failure's answer records the confidence the model reported, so the rule's 0.85 floor has something
+    /// to compare against. A provider that answered without a score would let any answer stand, confident or not.
+    /// </summary>
+    [Fact]
+    public async Task TheSecondFailureAnswerRecordsTheConfidenceTheProviderReported()
+    {
+        FakeArbiterProvider provider = Confident((FailureRule, Same));
+        ArbiterEvaluator evaluator = Evaluator(provider);
+
+        await evaluator.EvaluateAsync(Rework(FirstFailure), ReworkConfig());
+        await evaluator.EvaluateAsync(Rework(SecondFailure), ReworkConfig());
+
+        ArbiterDecisionRule failure = new DecisionLog(ArbiterDirectory).ReadAll()
+            .SelectMany(record => record.Rules)
+            .Single(rule => rule.Id == FailureRule && rule.Step == 1);
+        Assert.Equal(0.95, failure.Confidence);
+    }
+
+    /// <summary>
     /// A rework dispatch to an implementation target gets the model-targeting retarget decision (the
     /// <c>delegate.model</c> secondary) AND the failure question (the <c>delegate.failure</c> secondary) in the same
     /// evaluation, so the retarget is not silently dropped on the rework path.
@@ -138,9 +169,9 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
     [Fact]
     public async Task AReworkDispatchGetsTheRetargetDecisionAndTheFailureQuestion()
     {
-        await Evaluator(FakeArbiterProvider.AnsweringByRule((FailureRule, Different))).EvaluateAsync(Rework(FirstFailure), ReworkConfig());
+        await Evaluator(Confident((FailureRule, Different))).EvaluateAsync(Rework(FirstFailure), ReworkConfig());
 
-        FakeArbiterProvider provider = FakeArbiterProvider.AnsweringByRule((FailureRule, Same));
+        FakeArbiterProvider provider = Confident((FailureRule, Same));
         ArbiterEvaluationResult result = await Evaluator(provider).EvaluateAsync(Rework(SecondFailure), ReworkConfig());
 
         IReadOnlyList<string> asked = Assert.Single(provider.Calls).Rules.Select(rule => rule.Id).ToArray();
@@ -159,7 +190,7 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
     [Fact]
     public async Task AnExistingPrimaryDelegateRuleStillFiresOnAReworkDispatch()
     {
-        ArbiterEvaluationResult result = await Evaluator(FakeArbiterProvider.AnsweringByRule((ModelRule, Hard))).EvaluateAsync(Rework(FirstFailure), ReworkConfig());
+        ArbiterEvaluationResult result = await Evaluator(Confident((ModelRule, Hard))).EvaluateAsync(Rework(FirstFailure), ReworkConfig());
 
         ArbiterDecisionRecord primary = Assert.Single(
             new DecisionLog(ArbiterDirectory).ReadAll(),
