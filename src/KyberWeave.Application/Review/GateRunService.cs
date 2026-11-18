@@ -175,7 +175,7 @@ public sealed class GateRunService(
     /// requested, runs before its verify command; a fix that does not succeed is reported beside the
     /// run and never decides the gate on its own, because the verify command is what the change must pass.
     /// </summary>
-    /// <param name="gates">The gates that will start, already expanded by <c>TaskGateSelection.Plan</c>.</param>
+    /// <param name="gates">The gates that will start, already expanded by <c>TaskGateSelectionService.Plan</c>.</param>
     /// <param name="workingDirectory">The repository root the gates run against.</param>
     /// <param name="fix">Whether to run each gate's fix command before its verify command.</param>
     /// <param name="stopOnBlockingFailure">Whether to skip the remaining gates once a blocking one fails.</param>

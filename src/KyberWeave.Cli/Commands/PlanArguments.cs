@@ -10,7 +10,7 @@ namespace KyberWeave.Cli.Commands;
 
 /// <summary>
 /// How a command that takes a plan or specification argument turns it into a file: find the repository, then let the
-/// shared <see cref="PlanPathResolver"/> accept whichever spelling the caller typed.
+/// shared <see cref="PlanFileResolver"/> accept whichever spelling the caller typed.
 /// </summary>
 internal static class PlanArguments
 {
