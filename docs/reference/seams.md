@@ -96,9 +96,9 @@ task's list.
 | `ProcessRunnerCredentialProcessRunner` | Process | `KyberWeave.Data` | `Arbiter/Credentials/ProcessRunnerCredentialProcessRunner.cs` | The credential process runner over `IProcessRunner` |
 | `ProcessSquadHarnessLauncher` | Process | `KyberWeave.Data` | `Squad/Instances/ProcessSquadHarnessLauncher.cs` | Starts the interactive harness; builds its start information through the static `SquadHarnessLauncher` |
 | `ProcessExecutor` | Process | `KyberWeave.Cli` | `Commands/Squad/Infrastructure/IProcessExecutor.cs` | The CLI's `IProcessExecutor` role view |
-| `MacKeychainCredentialStore` | Credentials (`ICredentialStore`, process-backed) | `KyberWeave.Data` | `Arbiter/Credentials/MacKeychainCredentialStore.cs` | Invokes `security`, through `ICredentialProcessRunner` |
-| `SecretServiceCredentialStore` | Credentials (`ICredentialStore`, process-backed) | `KyberWeave.Data` | `Arbiter/Credentials/SecretServiceCredentialStore.cs` | Invokes `secret-tool`, through `ICredentialProcessRunner` |
-| `WindowsCredentialStore` | Credentials (`ICredentialStore`, native) | `KyberWeave.Data` | `Arbiter/Credentials/WindowsCredentialStore.cs` | P/Invoke `advapi32`, gated on Windows |
+| `MacKeychainCredentialStore` | Process (`ICredentialStore` role view) | `KyberWeave.Data` | `Arbiter/Credentials/MacKeychainCredentialStore.cs` | Invokes `security`, through `ICredentialProcessRunner` |
+| `SecretServiceCredentialStore` | Process (`ICredentialStore` role view) | `KyberWeave.Data` | `Arbiter/Credentials/SecretServiceCredentialStore.cs` | Invokes `secret-tool`, through `ICredentialProcessRunner` |
+| `WindowsCredentialStore` | Native OS (`ICredentialStore`; not a seam) | `KyberWeave.Data` | `Arbiter/Credentials/WindowsCredentialStore.cs` | P/Invoke `advapi32`, gated on Windows; see the gap below |
 | `ProcessEnvironment` | Environment and platform | `KyberWeave.Data` | `Host/ProcessEnvironment.cs` | The environment and platform adapter |
 | `SystemIdGenerator` | Identifiers | `KyberWeave.Data` | `Host/SystemIdGenerator.cs` | GUIDs, random tokens and temp names |
 | `SystemConsole` | Console | `KyberWeave.Data` | `Host/SystemConsole.cs` | Console output, error and input |
@@ -108,6 +108,11 @@ task's list.
 | `AssemblyEmbeddedResources` | Embedded resource | `KyberWeave.Data` | `Host/AssemblyEmbeddedResources.cs` | Manifest resource reads |
 | `FileKyberWeaveConfigRepository` | Configuration | `KyberWeave.Data` | `Configuration/FileKyberWeaveConfigRepository.cs` | Configuration load and save over the tree probe |
 | `CheckoutCorpusSource` | Shipped content (tests) | `KyberWeave.Testing` | `Corpus/CheckoutCorpusSource.cs` | The test-side adapter over this checkout |
+
+`ICredentialStore` is a product interface, not one of the eleven seams. Two of its adapters are
+process-backed and reach the process seam through `ICredentialProcessRunner`; the Windows adapter
+calls the native credential API through P/Invoke and no seam covers it. It is listed here so that
+the gap is visible, not to claim a Credentials seam that the design does not define.
 
 The process seam has one sanctioned escape that is not an adapter: a class may build a
 `ProcessStartInfo` and hand it to `IProcessRunner`, `IProcessExecutor`, `IProgramRunner` or a
@@ -437,6 +442,7 @@ amending the task list, not by inventing a task number in this page.
 | `Application` folders with no phase 4 task | 12 classes: `Agents/AgentFileReader`, `Doctor/CodeGraphIndexProvisioner`, `Doctor/McpServerLiveProbe`, `Doctor/PostCheckoutHookInstaller`, `Hooks/EditHookService`, `RunStart/RunStartRunner`, `Skills/SkillFileReader`, `Squad/Briefs/SquadBriefBuilder`, `Squad/Deployment/FactoryMcpConfiguration`, `Squad/Instances/SquadInstanceService`, `Squad/Packaging/SquadPackService`, `Utilities/StatusLineProductArtifactSource` | Task 4.1 names `Update`, 4.2 names `Docs`, and 4.3 names `Review` and `Arbiter`. No task names these folders, so nobody owns the conversion |
 | `Kernel` classes with no phase 2 or phase 4 task | `Parsing/FileReferenceExtractor`, `VersionControl/CodeGraphIndexStaleness` | Task 2.2 names `Core` and `Core.Docs`; 4.6 names `Mcp`. Kernel still calls the file system and path directly |
 | Clock inside a process or lease adapter | `Data/Doctor/FileCodeGraphIndexWorkspace`, `Kernel/Processes/StdioSession` | Each adapter calls a second resource, the clock. A test through either still reads real time and `Thread.Sleep`; no task owns the fix |
+| Native credential store | `Data/Arbiter/Credentials/WindowsCredentialStore` | P/Invoke `advapi32`; the design's seam set has no credential seam and no exception covers it |
 | Configuration fake and contract suite | `IKyberWeaveConfigRepository` | Task 2.3 owns this; until then a caller is tested with a private fake, not a shared one |
 
 ## The exceptions register
