@@ -710,7 +710,7 @@
       "bound": "ProcessRunner.Run with VersionProbeTimeout = 5 s (StatusLineVersionProbeRunner.cs:11); the process tree is killed on expiry."
     },
     {
-      "file": "src/KyberWeave.Domain/StatusLine/UtilitiesStatusLineHarnessProbe.cs",
+      "file": "src/KyberWeave.Application/StatusLine/UtilitiesStatusLineHarnessProbe.cs",
       "text": "ProcessStartInfo startInfo = new(executable)",
       "count": 1,
       "bound": "Builds only; nothing starts on this line. It is started only through the injected UtilitiesStatusLineProcessRunner, which production binds to StatusLineVersionProbeRunner.Create (5 s, StatusLineVersionProbeRunner.cs:11)."

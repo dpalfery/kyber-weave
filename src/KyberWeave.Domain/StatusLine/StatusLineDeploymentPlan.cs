@@ -20,13 +20,13 @@ public sealed class StatusLineDeploymentPlan
     internal StatusLineDeploymentPlan(
         StatusLineTarget target,
         string stagingRoot,
-        StatusLineReceiptFormat receiptFormat,
+        string receiptPath,
         StatusLineReceipt receipt,
         IReadOnlyList<StatusLinePendingChange> pendingChanges)
     {
         Target = target;
         StagingRoot = stagingRoot;
-        ReceiptFormat = receiptFormat;
+        ReceiptPath = receiptPath;
         Receipt = receipt;
         PendingChanges = pendingChanges;
         PlannedFileChanges =
@@ -58,8 +58,8 @@ public sealed class StatusLineDeploymentPlan
     /// </summary>
     public IReadOnlyList<string> PlannedPhysicalPaths { get; }
 
-    /// <summary>Where and how the receipt this plan persists is stored.</summary>
-    internal StatusLineReceiptFormat ReceiptFormat { get; }
+    /// <summary>The absolute path of the receipt file this plan persists, whether or not it exists.</summary>
+    internal string ReceiptPath { get; }
 
     /// <summary>The pending changes with their payloads, in apply order.</summary>
     internal IReadOnlyList<StatusLinePendingChange> PendingChanges { get; }

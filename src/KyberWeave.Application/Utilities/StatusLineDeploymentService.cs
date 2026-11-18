@@ -93,7 +93,7 @@ public sealed class StatusLineDeploymentService(
         return new StatusLineDeploymentPlan(
             target,
             stagingRoot,
-            format,
+            format.ReceiptPath,
             new StatusLineReceipt(owned),
             changes);
     }
@@ -142,7 +142,7 @@ public sealed class StatusLineDeploymentService(
         return new StatusLineDeploymentPlan(
             target,
             stagingRoot,
-            format,
+            format.ReceiptPath,
             new StatusLineReceipt(retained),
             changes);
     }
@@ -183,9 +183,10 @@ public sealed class StatusLineDeploymentService(
         RemoveEmptyDirectoriesLeftByDeletions(plan);
 
         if (plan.Receipt.Files.Count == 0)
-            files.DeleteFile(plan.ReceiptFormat.ReceiptPath);
+            files.DeleteFile(plan.ReceiptPath);
         else
-            files.WriteTextAtomically(plan.ReceiptFormat.ReceiptPath, plan.ReceiptFormat.Serialize(plan.Receipt));
+            files.WriteTextAtomically(plan.ReceiptPath,
+                StatusLineReceiptFormat.Serialize(plan.Receipt, plan.Target, plan.StagingRoot));
     }
 
     /// <summary>

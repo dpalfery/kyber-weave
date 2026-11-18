@@ -63,24 +63,26 @@ public sealed class StatusLineReceiptFormat
 
     /// <summary>Renders a receipt as the JSON the receipt file holds.</summary>
     /// <param name="receipt">The receipt to record.</param>
+    /// <param name="target">The harness the receipt belongs to.</param>
+    /// <param name="stagingRoot">The resolved staging root the receipt records.</param>
     /// <returns>The JSON text.</returns>
-    public string Serialize(StatusLineReceipt receipt)
+    public static string Serialize(StatusLineReceipt receipt, StatusLineTarget target, string stagingRoot)
     {
         using MemoryStream stream = new();
         using (Utf8JsonWriter writer = new(stream, WriterOptions))
         {
             writer.WriteStartObject();
             writer.WriteString("schema", Schema);
-            writer.WriteString("target", TargetToken(_target));
-            writer.WriteString("stagingRoot", _roots.ResolveStagingRoot(_target));
+            writer.WriteString("target", TargetToken(target));
+            writer.WriteString("stagingRoot", stagingRoot);
             writer.WriteStartArray("files");
             foreach (StatusLineOwnedFile file in receipt.Files)
             {
                 ArgumentNullException.ThrowIfNull(file);
-                if (file.Target != _target)
+                if (file.Target != target)
                 {
                     throw new StatusLineDeploymentConflictException(
-                        $"The receipt for '{TargetToken(_target)}' cannot record '{file.RelativePath}' " +
+                        $"The receipt for '{TargetToken(target)}' cannot record '{file.RelativePath}' " +
                         $"as owned by '{TargetToken(file.Target)}'. One receipt covers one harness.");
                 }
 
