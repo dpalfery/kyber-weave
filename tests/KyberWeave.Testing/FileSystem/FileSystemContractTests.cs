@@ -156,6 +156,15 @@ public abstract class FileSystemContractTests : IDisposable
     }
 
     [Fact]
+    public void ReadLinesDefersTheFailureUntilTheCallerEnumerates()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        IEnumerable<string> lines = files.ReadLines(At(root, "absent.txt"));
+
+        _ = Assert.Throws<FileNotFoundException>(() => lines.ToList());
+    }
+
+    [Fact]
     public void ReadAllTextReturnsWhatWasWritten()
     {
         IWritableFileSystem files = Starting(out string root);

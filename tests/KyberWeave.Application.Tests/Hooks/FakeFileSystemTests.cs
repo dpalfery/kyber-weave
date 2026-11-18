@@ -16,4 +16,13 @@ public sealed class FakeFileSystemTests
         _ = Assert.Throws<FileNotFoundException>(() => files.GetLength(missing));
         _ = Assert.Throws<FileNotFoundException>(() => files.GetAttributes(missing));
     }
+
+    [Fact]
+    public void ReadLinesDefersTheFailureUntilEnumeration()
+    {
+        FakeFileSystem files = new();
+        IEnumerable<string> lines = files.ReadLines(FakeFileSystem.Abs("absent.txt"));
+
+        _ = Assert.Throws<FileNotFoundException>(() => lines.ToList());
+    }
 }

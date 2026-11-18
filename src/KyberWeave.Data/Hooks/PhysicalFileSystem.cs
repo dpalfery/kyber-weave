@@ -183,7 +183,13 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
     public byte[] ReadAllBytes(string path) => File.ReadAllBytes(path);
 
     /// <inheritdoc />
-    public IEnumerable<string> ReadLines(string path) => File.ReadLines(path);
+    public IEnumerable<string> ReadLines(string path)
+    {
+        foreach (string line in File.ReadLines(path))
+        {
+            yield return line;
+        }
+    }
 
     /// <inheritdoc />
     public Stream OpenRead(string path) => new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);

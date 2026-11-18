@@ -47,12 +47,11 @@ internal sealed class FakeFileSystem : IFileSystem
     public IEnumerable<string> ReadLines(string path)
     {
         string[] lines = ReadAllText(path).Split('\n');
-        for (int index = 0; index < lines.Length; index++)
+        int count = lines.Length > 0 && lines[^1].Length == 0 ? lines.Length - 1 : lines.Length;
+        for (int index = 0; index < count; index++)
         {
-            lines[index] = lines[index].TrimEnd('\r');
+            yield return lines[index].TrimEnd('\r');
         }
-
-        return lines.Length > 0 && lines[^1].Length == 0 ? lines[..^1] : lines;
     }
 
     public Stream OpenRead(string path) => new MemoryStream(ReadAllBytes(path));
