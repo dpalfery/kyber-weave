@@ -63,6 +63,7 @@ public sealed class FakeSquadStateStore(ISquadUserPaths userPaths) : ISquadState
     private readonly Dictionary<(string Root, SquadDeploymentScope Scope), SquadLock> _locks = [];
     private readonly Dictionary<string, SquadLock> _lockTexts = [];
     private readonly List<SquadProjectRegistryEntry> _projects = [];
+    private readonly Dictionary<(string Root, SquadDeploymentScope Scope), string> _stateDirectories = [];
 
     /// <inheritdoc />
     public ISquadUserPaths UserPaths { get; } = userPaths;
@@ -94,8 +95,18 @@ public sealed class FakeSquadStateStore(ISquadUserPaths userPaths) : ISquadState
     public SquadReceipt? ReadReceipt(string targetRoot, SquadDeploymentScope scope) =>
         _receipts.GetValueOrDefault((targetRoot, scope));
 
+    /// <summary>Arranges the state directory <see cref="ResolveStateDirectory"/> answers for a root and scope.</summary>
+    /// <param name="root">The target root.</param>
+    /// <param name="scope">The scope.</param>
+    /// <param name="directory">The state directory the store reports.</param>
+    public void AddStateDirectory(string root, SquadDeploymentScope scope, string directory) =>
+        _stateDirectories[(root, scope)] = directory;
+
     /// <inheritdoc />
-    public string ResolveStateDirectory(string targetRoot, SquadDeploymentScope scope) => throw new NotSupportedException();
+    public string ResolveStateDirectory(string targetRoot, SquadDeploymentScope scope) =>
+        _stateDirectories.TryGetValue((targetRoot, scope), out string? directory)
+            ? directory
+            : throw new NotSupportedException($"No state directory is arranged for '{targetRoot}' ({scope}).");
 
     /// <inheritdoc />
     public string ResolveHomeStateDirectory() => throw new NotSupportedException();
@@ -144,7 +155,8 @@ public sealed class FakeSquadStateStore(ISquadUserPaths userPaths) : ISquadState
     public string ResolveLockPath(string targetRoot, SquadDeploymentScope scope) => throw new NotSupportedException();
 
     /// <inheritdoc />
-    public string ResolveReceiptPath(string targetRoot, SquadDeploymentScope scope) => throw new NotSupportedException();
+    public string ResolveReceiptPath(string targetRoot, SquadDeploymentScope scope) =>
+        Path.Combine(ResolveStateDirectory(targetRoot, scope), "receipt.json");
 
     /// <inheritdoc />
     public string ResolveTransactionDirectory(string targetRoot, SquadDeploymentScope scope) => throw new NotSupportedException();
