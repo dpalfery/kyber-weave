@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Corpus;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 
@@ -22,6 +23,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class PrNamingWorkflowTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string CiWorkflowPath = ".github/workflows/ci.yml";
 
     private const string RecheckWorkflowPath = ".github/workflows/pr-naming-recheck.yml";
@@ -74,10 +77,9 @@ public sealed class PrNamingWorkflowTests
     {
         Assert.DoesNotContain("edited", PullRequestTypes(CiWorkflowPath));
 
-        string recheckPath = Path.Combine(KyberWeaveTestPaths.ToolRoot, RecheckWorkflowPath);
-        Assert.True(File.Exists(recheckPath), $"The recheck workflow is missing at '{recheckPath}'.");
+        Assert.True(Corpus.Exists(RecheckWorkflowPath), $"The recheck workflow is missing at '{RecheckWorkflowPath}'.");
 
-        string recheck = File.ReadAllText(recheckPath);
+        string recheck = Corpus.ReadText(RecheckWorkflowPath);
         Assert.Contains("edited", recheck, StringComparison.Ordinal);
         Assert.Contains("pull_request", recheck, StringComparison.Ordinal);
         Assert.Contains(CheckScriptPath, recheck, StringComparison.Ordinal);
@@ -135,11 +137,9 @@ public sealed class PrNamingWorkflowTests
 
     private static YamlMappingNode Root(string relativePath)
     {
-        string path = Path.Combine(KyberWeaveTestPaths.ToolRoot,
-            relativePath.Replace('/', Path.DirectorySeparatorChar));
-        Assert.True(File.Exists(path), $"The workflow is missing at '{path}'.");
+        Assert.True(Corpus.Exists(relativePath), $"The workflow is missing at '{relativePath}'.");
 
-        using StreamReader reader = new(path);
+        using StringReader reader = new(Corpus.ReadText(relativePath));
         YamlStream stream = new();
         stream.Load(reader);
 

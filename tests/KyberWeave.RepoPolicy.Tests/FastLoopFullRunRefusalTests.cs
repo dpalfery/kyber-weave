@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using KyberWeave.Core.Processes;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 using Xunit.Sdk;
 
@@ -24,6 +25,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class FastLoopFullRunRefusalTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const int RefusedExitCode = 89;
 
     private static readonly TimeSpan LoopTimeout = TimeSpan.FromSeconds(30);
@@ -208,7 +211,7 @@ public sealed class FastLoopFullRunRefusalTests
         private void CopyScript(string name)
         {
             string destination = Path.Combine(_root, "scripts", name);
-            File.Copy(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", name), destination, overwrite: true);
+            File.WriteAllText(destination, Corpus.ReadText($"scripts/{name}").ReplaceLineEndings("\n"));
             MakeExecutable(destination);
         }
 
