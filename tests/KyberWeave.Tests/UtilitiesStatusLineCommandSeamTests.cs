@@ -85,6 +85,25 @@ public sealed class UtilitiesStatusLineCommandSeamTests
         Assert.Contains("receipt is malformed", _console.Output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// An unreadable receipt is the same operator-facing outcome as a malformed one. The read path is a file seam that
+    /// throws <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/>, and neither may escape the
+    /// command as a crash.
+    /// </summary>
+    [Theory]
+    [InlineData("io")]
+    [InlineData("denied")]
+    public void StatusReportsAnUnreadableReceiptAsInvalid(string failureKind)
+    {
+        _plans.WithReadFailure(StatusLineTarget.Claude, ReadFailure(failureKind));
+
+        int result = Status().Execute(null!, new UtilitiesStatusLineSettings());
+
+        Assert.Equal(1, result);
+        Assert.Contains("invalid", _console.Output, StringComparison.Ordinal);
+        Assert.Contains(ReadFailure(failureKind).Message, _console.Output, StringComparison.Ordinal);
+    }
+
     // -----------------------------------------------------------------------------------------
     // remove
     // -----------------------------------------------------------------------------------------
@@ -258,6 +277,23 @@ public sealed class UtilitiesStatusLineCommandSeamTests
         Assert.Contains("is not executable", _console.Output, StringComparison.Ordinal);
     }
 
+    /// <summary>An unreadable receipt is reported as a failure for that harness, not thrown out of doctor.</summary>
+    [Theory]
+    [InlineData("io")]
+    [InlineData("denied")]
+    public void DoctorReportsAnUnreadableReceiptAsAFailure(string failureKind)
+    {
+        InstallClaude();
+        _plans.WithReadFailure(StatusLineTarget.Claude, ReadFailure(failureKind));
+
+        int result = Doctor((_, _) => new ProcessResult(0, "1.2.3\n", string.Empty))
+            .Execute(null!, new UtilitiesStatusLineSettings());
+
+        Assert.Equal(1, result);
+        Assert.Contains("fail", _console.Output, StringComparison.Ordinal);
+        Assert.Contains(ReadFailure(failureKind).Message, _console.Output, StringComparison.Ordinal);
+    }
+
     // -----------------------------------------------------------------------------------------
     // shared rendering
     // -----------------------------------------------------------------------------------------
@@ -300,4 +336,12 @@ public sealed class UtilitiesStatusLineCommandSeamTests
 
     private static StatusLineDeploymentFile Artifact(string relativePath) =>
         new(relativePath, "#!/bin/sh\necho synthetic\n"u8.ToArray());
+
+    /// <summary>A receipt read failure of the kind a file seam throws, named so a theory can state both.</summary>
+    private static Exception ReadFailure(string kind) => kind switch
+    {
+        "io" => new IOException("the receipt is on a broken disk"),
+        "denied" => new UnauthorizedAccessException("permission denied"),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "No receipt read failure is defined.")
+    };
 }

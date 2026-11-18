@@ -70,7 +70,9 @@ public sealed class UtilitiesStatusLineStatusCommand : Command<UtilitiesStatusLi
             {
                 receipt = _plans.ReadReceipt(target, roots);
             }
-            catch (Exception ex) when (ex is InvalidDataException or StatusLineDeploymentConflictException)
+            catch (Exception ex) when (
+                ex is InvalidDataException or StatusLineDeploymentConflictException or
+                    IOException or UnauthorizedAccessException)
             {
                 _console.MarkupLine(
                     $"  [red]invalid[/] {Markup.Escape(UtilitiesStatusLineTargetCatalog.GetToken(target))}: " +
