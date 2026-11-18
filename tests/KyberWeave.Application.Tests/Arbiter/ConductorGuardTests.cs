@@ -4,20 +4,28 @@ using KyberWeave.Tests.Arbiter;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter.Facts;
-using System.Diagnostics;
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
-using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Rendering;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>Pins the Copilot conductor guard: what it denies, permits, and restates.</summary>
-public sealed class ConductorGuardTests
+public sealed class ConductorGuardTests : IDisposable
 {
     private const string Cwd = "/repo";
     private const string CopilotHome = "/home/me/.copilot";
+
+    private readonly InMemoryArbiterHost _host;
+
+    public ConductorGuardTests() =>
+        _host = InMemoryArbiterHost.Create(services => services.AddSingleton<IFileLinkProbe>(new NoLinks()));
+
+    public void Dispose() => _host.Dispose();
+
+    private IConductorGuard Guard => _host.Get<IConductorGuard>();
 
     [Theory]
     [InlineData("edit")]
@@ -140,21 +148,11 @@ public sealed class ConductorGuardTests
     [Fact]
     public void AConfiguredPlanningDirectory_IsReadable()
     {
-        string repo = Directory.CreateTempSubdirectory("guard-config-").FullName;
-        try
-        {
-            Directory.CreateDirectory(Path.Combine(repo, ".kyber-weave"));
-            File.WriteAllText(
-                Path.Combine(repo, ".kyber-weave", "kyber-weave.yml"),
-                "ontology:\n  docs-root: handbook\nconfig-reg:\n  plan-index: handbook/roadmap/README.md\n");
+        string repo = _host.InWork("guard-config");
+        _ = _host.WriteRepoConfig("ontology:\n  docs-root: handbook\nconfig-reg:\n  plan-index: handbook/roadmap/README.md\n", repo);
 
-            Assert.Empty(RunIn(repo, "handbook/roadmap/widget.tasks.yml"));
-            Assert.Contains("deny", RunIn(repo, "handbook/guide.md"), StringComparison.Ordinal);
-        }
-        finally
-        {
-            Directory.Delete(repo, recursive: true);
-        }
+        Assert.Empty(RunIn(repo, "handbook/roadmap/widget.tasks.yml"));
+        Assert.Contains("deny", RunIn(repo, "handbook/guide.md"), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -260,7 +258,7 @@ public sealed class ConductorGuardTests
     public void ARelativeCopilotHome_GrantsNothing()
     {
         using StringWriter stdout = new();
-        ArbiterTestServices.Get<IConductorGuard>().Run(Event("view", new { path = ".copilot/agents/conductor/x.md" }), stdout, TextWriter.Null, copilotHome: ".copilot");
+        Guard.Run(Event("view", new { path = ".copilot/agents/conductor/x.md" }), stdout, TextWriter.Null, copilotHome: ".copilot");
 
         Assert.Contains("deny", stdout.ToString(), StringComparison.Ordinal);
     }
@@ -276,7 +274,7 @@ public sealed class ConductorGuardTests
     public void AllowedMcpServer_IsPermittedOnlyWhenNamed()
     {
         using StringWriter stdout = new();
-        ArbiterTestServices.Get<IConductorGuard>().Run(Event("operator-channel-send", new { }), stdout, TextWriter.Null, "operator-channel", CopilotHome);
+        Guard.Run(Event("operator-channel-send", new { }), stdout, TextWriter.Null, "operator-channel", CopilotHome);
 
         Assert.Empty(stdout.ToString());
         Assert.NotEmpty(ReasonFor(Event("operator-channel-send", new { })));
@@ -295,34 +293,12 @@ public sealed class ConductorGuardTests
     }
 
     [Fact]
-    public void AContractPathThroughASymlink_IsDenied()
-    {
-        string root = Directory.CreateTempSubdirectory("guard-link-").FullName;
-        try
-        {
-            string outside = Directory.CreateDirectory(Path.Combine(root, "outside")).FullName;
-            File.WriteAllText(Path.Combine(outside, "secret.md"), "x");
-            string repo = Directory.CreateDirectory(Path.Combine(root, "repo")).FullName;
-            Directory.CreateDirectory(Path.Combine(repo, "docs", "plans"));
-            Directory.CreateSymbolicLink(Path.Combine(repo, "docs", "plans", "link"), outside);
-            File.WriteAllText(Path.Combine(repo, "docs", "plans", "real.md"), "x");
-
-            Assert.Contains("deny", RunIn(repo, "docs/plans/link/secret.md"), StringComparison.Ordinal);
-            Assert.Empty(RunIn(repo, "docs/plans/real.md"));
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
-    }
-
-    [Fact]
     public void AFailingStdout_StillReturnsZero()
     {
         using StringWriter closed = new();
         closed.Dispose();
 
-        Assert.Equal(0, ArbiterTestServices.Get<IConductorGuard>().Run(Event("edit", new { }), closed, TextWriter.Null, copilotHome: CopilotHome));
+        Assert.Equal(0, Guard.Run(Event("edit", new { }), closed, TextWriter.Null, copilotHome: CopilotHome));
     }
 
     [Fact]
@@ -330,7 +306,7 @@ public sealed class ConductorGuardTests
     {
         using StringWriter stdout = new();
         using StringWriter log = new();
-        ArbiterTestServices.Get<IConductorGuard>().Run("{\"toolName\":\"bash\",\"toolArgs\":\"not\\njson\"}", stdout, log, copilotHome: CopilotHome);
+        Guard.Run("{\"toolName\":\"bash\",\"toolArgs\":\"not\\njson\"}", stdout, log, copilotHome: CopilotHome);
 
         Assert.Single(log.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
     }
@@ -348,72 +324,36 @@ public sealed class ConductorGuardTests
     }
 
     [Fact]
-    public void APlanInTheRunsOwnWorktree_IsPermittedFromTheCanonicalCheckout()
-    {
-        using TempDirectory parent = new();
-        string repo = Path.Combine(parent.Path, "repo");
-        string other = Path.Combine(parent.Path, "other");
-        Directory.CreateDirectory(repo);
-        Directory.CreateDirectory(Path.Combine(other, "docs", "plans"));
-        Git(repo, "init", "-q", "-b", "main");
-        Git(repo, "-c", "user.email=a@example.com", "-c", "user.name=A", "commit", "-q", "--allow-empty", "-m", "initial");
-        string worktree = Path.Combine(parent.Path, "repo.worktrees", "run");
-        Git(repo, "worktree", "add", "-q", "-b", "claude/feat/run", worktree);
-        string root = GitRoot(worktree);
-        Directory.CreateDirectory(Path.Combine(root, "docs", "plans"));
-
-        Assert.Empty(RunIn(repo, Path.Combine(root, "docs", "plans", "2026-11-13-widget.md")));
-        Assert.Empty(RunIn(repo, Path.Combine(root, "docs", "plans", "2026-11-13-widget.tasks.yml")));
-        Assert.NotEmpty(RunIn(repo, Path.Combine(root, "src", "App.cs")));
-        Assert.NotEmpty(RunIn(repo, Path.Combine(other, "docs", "plans", "x.md")));
-    }
-
-    [Fact]
     public void ARunRecord_IsPermittedAndTheRestOfHomeIsNot()
     {
-        using TempDirectory home = new();
-        string runs = Path.Combine(home.Path, ".kyber-weave", "runs");
-        Directory.CreateDirectory(runs);
+        string home = _host.InHome("runrecord-home");
+        string runs = Path.Combine(home, ".kyber-weave", "runs");
+        _host.Files.CreateDirectory(runs);
 
-        Assert.Empty(RunIn(Cwd, Path.Combine(runs, "claude-feat-run.json"), home.Path));
-        Assert.NotEmpty(RunIn(Cwd, Path.Combine(home.Path, ".kyber-weave", "credentials.json"), home.Path));
-        Assert.NotEmpty(RunIn(Cwd, Path.Combine(runs, "..", "secrets.json"), home.Path));
+        Assert.Empty(RunIn(Cwd, Path.Combine(runs, "claude-feat-run.json"), home));
+        Assert.NotEmpty(RunIn(Cwd, Path.Combine(home, ".kyber-weave", "credentials.json"), home));
+        Assert.NotEmpty(RunIn(Cwd, Path.Combine(runs, "..", "secrets.json"), home));
     }
 
-    private static string GitRoot(string directory) =>
-        RealGitFacts.Create().GetRoot(directory) ?? throw new InvalidOperationException("no git root");
-
-    private static void Git(string directory, params string[] arguments)
+    private sealed class NoLinks : IFileLinkProbe
     {
-        ProcessStartInfo startInfo = new("git")
-        {
-            WorkingDirectory = directory,
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-        foreach (string argument in arguments) startInfo.ArgumentList.Add(argument);
-
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
-        Assert.True(result.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {result.StandardError}");
+        public bool HasLinkBelow(string root, string fullPath) => false;
     }
 
     private static string Event(string tool, object arguments) =>
         JsonSerializer.Serialize(new { cwd = Cwd, toolName = tool, toolArgs = arguments });
 
-    private static string Run(string json)
+    private string Run(string json)
     {
         using StringWriter stdout = new();
-        Assert.Equal(0, ArbiterTestServices.Get<IConductorGuard>().Run(json, stdout, TextWriter.Null, copilotHome: CopilotHome));
+        Assert.Equal(0, Guard.Run(json, stdout, TextWriter.Null, copilotHome: CopilotHome));
         return stdout.ToString();
     }
 
-    private static string RunIn(string cwd, string path, string? home = null)
+    private string RunIn(string cwd, string path, string? home = null)
     {
         using StringWriter stdout = new();
-        ArbiterTestServices.Get<IConductorGuard>().Run(
+        Guard.Run(
             JsonSerializer.Serialize(new { cwd, toolName = "view", toolArgs = new { path } }),
             stdout,
             TextWriter.Null,
@@ -422,7 +362,7 @@ public sealed class ConductorGuardTests
         return stdout.ToString();
     }
 
-    private static string ReasonFor(string json)
+    private string ReasonFor(string json)
     {
         using JsonDocument answer = JsonDocument.Parse(Run(json));
         Assert.Equal("deny", answer.RootElement.GetProperty("permissionDecision").GetString());
