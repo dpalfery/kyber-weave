@@ -104,6 +104,41 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
     }
 
     [Fact]
+    public async Task AFileContentPathThatEscapesTheDestinationIsRefused()
+    {
+        FakeSquadReleaseSource source = new()
+        {
+            FileContents = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["../escaped.txt"] = "escaped content",
+            },
+        };
+        SquadReleaseRequest request = Request("escaping-content");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => source.DownloadAndExtractAsync(request));
+
+        Assert.False(File.Exists(Path.Combine(_temp.Path, "escaped.txt")));
+    }
+
+    [Fact]
+    public async Task ARootedFileContentPathIsRefused()
+    {
+        string rootedPath = Path.Combine(_temp.Path, "rooted.txt");
+        FakeSquadReleaseSource source = new()
+        {
+            FileContents = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [rootedPath] = "rooted content",
+            },
+        };
+
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => source.DownloadAndExtractAsync(Request("rooted-content")));
+
+        Assert.False(File.Exists(rootedPath));
+    }
+
+    [Fact]
     public async Task TheAfterExtractHookSeesTheExtractedRootAndItsEditLands()
     {
         string sourceRoot = Path.Combine(_temp.Path, "padded-corpus");

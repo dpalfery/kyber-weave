@@ -183,7 +183,14 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
     {
         foreach ((string relativePath, string content) in FileContents)
         {
-            string path = Path.Combine(destinationPath, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            (string validatedPath, bool isDirectory) = ValidateRelativePath(relativePath, destinationPath);
+            if (isDirectory)
+            {
+                throw new InvalidDataException(
+                    $"The Squad release content names a directory, not a file: '{relativePath}'.");
+            }
+
+            string path = Path.Combine(destinationPath, validatedPath.Replace('/', Path.DirectorySeparatorChar));
             string? directory = Path.GetDirectoryName(path);
             if (directory is not null)
             {
@@ -192,6 +199,55 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
 
             await File.WriteAllTextAsync(path, content, cancellationToken);
         }
+    }
+
+    /// <summary>
+    /// The same portable-path rule the product's release adapter applies to an archive entry: a relative
+    /// path that cannot be rooted, cannot climb out with <c>..</c>, and resolves inside the extraction root,
+    /// so a fake cannot write where a real release could not.
+    /// </summary>
+    private static (string RelativePath, bool IsDirectory) ValidateRelativePath(
+        string entryName,
+        string destinationPath)
+    {
+        if (string.IsNullOrEmpty(entryName) ||
+            entryName.Contains('\0', StringComparison.Ordinal) ||
+            entryName.StartsWith('/') ||
+            entryName.StartsWith('\\') ||
+            (entryName.Length >= 2 && char.IsAsciiLetter(entryName[0]) && entryName[1] == ':'))
+        {
+            throw new InvalidDataException(
+                $"The Squad release contains an invalid rooted path: '{entryName}'.");
+        }
+
+        string portablePath = entryName.Replace('\\', '/');
+        bool isDirectory = portablePath.EndsWith('/');
+        string[] segments = portablePath.Split('/');
+        int segmentCount = isDirectory ? segments.Length - 1 : segments.Length;
+        if (segmentCount == 0 ||
+            segments.Take(segmentCount).Any(segment => segment.Length == 0 || segment is "." or ".."))
+        {
+            throw new InvalidDataException(
+                $"The Squad release contains an unsafe path: '{entryName}'.");
+        }
+
+        string relativePath = string.Join('/', segments.Take(segmentCount));
+        string fullDestination = Path.GetFullPath(destinationPath);
+        string containmentPrefix = fullDestination.EndsWith(Path.DirectorySeparatorChar)
+            ? fullDestination
+            : fullDestination + Path.DirectorySeparatorChar;
+        string candidate = Path.GetFullPath(
+            Path.Combine(fullDestination, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        StringComparison comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        if (!candidate.StartsWith(containmentPrefix, comparison))
+        {
+            throw new InvalidDataException(
+                $"The Squad release path escapes its extraction root: '{entryName}'.");
+        }
+
+        return (relativePath, isDirectory);
     }
 
     private static void CopyDirectory(string sourceDirectory, string destinationDirectory)
