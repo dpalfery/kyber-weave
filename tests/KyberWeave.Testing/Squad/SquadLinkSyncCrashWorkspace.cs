@@ -121,11 +121,15 @@ public sealed class PhysicalSquadLinkSyncCrashWorkspace : SquadLinkSyncCrashWork
     private readonly PhysicalFileSystem _disk = new();
     private readonly FaultInjectingFileSystem _faulting;
     private readonly SquadInstanceLinkSync _sync;
-    private readonly FileSystemSquadLinkFileSystem _links;
+    private readonly ISquadLinkFileSystem _links;
 
     /// <summary>Creates a workspace in an emptied directory.</summary>
     /// <param name="directory">The directory every case of one run shares; it is emptied.</param>
-    public PhysicalSquadLinkSyncCrashWorkspace(string directory)
+    /// <param name="shippedLinks">
+    /// True to give the sync the product's own link file system (symbolic links on Unix and macOS, junctions and links on
+    /// Windows) instead of the test adapter; its link operations are then not counted as stop points.
+    /// </param>
+    public PhysicalSquadLinkSyncCrashWorkspace(string directory, bool shippedLinks = false)
     {
         Root = directory;
         Directory.CreateDirectory(directory);
@@ -140,7 +144,9 @@ public sealed class PhysicalSquadLinkSyncCrashWorkspace : SquadLinkSyncCrashWork
             new PhysicalPathResolver(_disk),
             new MutexLease(),
             new ProcessEnvironment());
-        _links = new FileSystemSquadLinkFileSystem(_faulting);
+        _links = shippedLinks
+            ? OperatingSystem.IsWindows() ? new WindowsSquadLinkFileSystem() : new UnixSquadLinkFileSystem()
+            : new FileSystemSquadLinkFileSystem(_faulting);
     }
 
     /// <inheritdoc />
