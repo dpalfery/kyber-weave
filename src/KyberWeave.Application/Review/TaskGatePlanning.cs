@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Core.Review;
@@ -41,12 +42,14 @@ public static class TaskGatePlanning
     /// <summary>
     /// Checks one changed path, whether given by <c>--paths</c> or listed by git, before it can reach argv.
     /// </summary>
+    /// <param name="paths">Resolves the path the way the repository's file system does.</param>
     /// <param name="root">The repository root the path must stay inside.</param>
     /// <param name="path">The repository-relative path to check.</param>
     /// <returns>The reason it is refused, or <see langword="null"/> when the path is safe to pass on.</returns>
     /// <param name="leadsOutsideThroughSymlink">Whether the path, or a directory above it, is a symbolic link leading outside the root.</param>
-    public static string? ValidatePath(string root, string path, Func<string, string, bool> leadsOutsideThroughSymlink)
+    public static string? ValidatePath(IPathResolver paths, string root, string path, Func<string, string, bool> leadsOutsideThroughSymlink)
     {
+        ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(leadsOutsideThroughSymlink);
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
 
@@ -63,9 +66,9 @@ public static class TaskGatePlanning
         if (normalized.Split('/').Contains(".."))
             return $"Changed path '{path}' leaves the repository root.";
 
-        // The segment check above catches the spelling; GetRelativePath catches what remains,
+        // The segment check above catches the spelling; resolving against the root catches what remains,
         // such as a path that resolves outside the root through a platform-specific form.
-        string full = Path.GetFullPath(Path.Combine(root, normalized));
+        string full = paths.GetFullPath(normalized, root);
         string relative = Path.GetRelativePath(root, full);
         if (relative == ".")
             return $"Changed path '{path}' names the repository root, not a file.";
