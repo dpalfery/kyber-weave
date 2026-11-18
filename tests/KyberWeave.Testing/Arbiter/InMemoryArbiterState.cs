@@ -33,8 +33,13 @@ internal sealed class InMemoryArbiterState(InMemoryFileSystem files)
     /// <param name="arbiterDirectory">The arbiter state directory.</param>
     /// <param name="options">The size and retention limits; the shipped defaults when null.</param>
     /// <param name="clock">The clock retention is measured against; the system clock when null.</param>
-    internal ArbiterRunStore RunStore(string arbiterDirectory, ArbiterStoreOptions? options = null, TimeProvider? clock = null) =>
-        new(arbiterDirectory, Log, files, files, Paths, options, clock);
+    /// <param name="newestItemTime">Reads when a sibling directory was last written; the file system when null.</param>
+    internal ArbiterRunStore RunStore(
+        string arbiterDirectory,
+        ArbiterStoreOptions? options = null,
+        TimeProvider? clock = null,
+        Func<string, DateTime>? newestItemTime = null) =>
+        new(arbiterDirectory, Log, files, files, Paths, options, clock, newestItemTime);
 
     /// <summary>The state factory.</summary>
     internal FileArbiterStateFactory Factory() => new(Log, files, files, Paths);
