@@ -7,6 +7,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Delivery;
+using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Mcp;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
@@ -235,4 +236,11 @@ internal static class McpTestServices
     /// <summary>The analysis reader over <paramref name="repositoryRoot"/>.</summary>
     public static RepositoryDocsAnalysisReader AnalysisReader(string repositoryRoot) =>
         DocsToolsComposition.AnalysisReader(DocsTestCommands.Services(), repositoryRoot);
+
+    /// <summary>The docs tools over <paramref name="host"/>, with the analysis reader <paramref name="services"/> builds for its root.</summary>
+    /// <param name="host">The document index the tools answer from.</param>
+    /// <param name="services">The container whose ports the analysis reader reads through.</param>
+    /// <param name="repositoryRoot">The repository root the analysis reader is bound to.</param>
+    public static DocsTools Tools(DocumentIndexHost host, IServiceProvider services, string repositoryRoot) =>
+        DocsToolsComposition.Create(host, DocsToolsComposition.AnalysisReader(services, repositoryRoot));
 }

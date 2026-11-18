@@ -1,21 +1,21 @@
-using KyberWeave.Tests.Configuration;
-
 using System.Globalization;
 using System.Text.RegularExpressions;
 
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
-using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
-using KyberWeave.Data.CodeGraph;
+using KyberWeave.Domain.CodeGraph;
 using KyberWeave.Mcp;
+using KyberWeave.Tests.Corpus;
+using KyberWeave.Tests.Fakes;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
-using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Retrieval quality, asserted against the real documentation corpus.
+/// Retrieval quality, asserted against the shipped documentation corpus.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -32,12 +32,16 @@ namespace KyberWeave.Tests;
 /// suite is that such a change can no longer pass silently.
 /// </para>
 /// <para>
-/// The suite skips rather than fails when it cannot find the repository, so the tool tree
-/// stays movable and a partial checkout does not produce noise.
+/// The shipped documents are read through the corpus seam and loaded into an in-memory file
+/// system, so the engine runs over the real content without the disk, a code index or a process.
 /// </para>
 /// </remarks>
 public sealed class RetrievalRegressionTests
 {
+    private const string HostConfig = ".kyber-weave/kyber-weave.yml";
+
+    private const string DocsRoot = "docs";
+
     private const string IncompletePrefix =
         "This answer is incomplete. Call docs_answer_question_from_repo_documentation again with the same question and cursor";
 
@@ -46,18 +50,11 @@ public sealed class RetrievalRegressionTests
         RegexOptions.Multiline | RegexOptions.CultureInvariant);
 
     /// <summary>
-    /// The answer engine over this checkout's documentation, built once per test run.
-    /// Loading the corpus and reading the code index cost seconds each, so paying that per
-    /// theory row made this suite look slow for no gain: the corpus is read-only and does not
-    /// change while the run executes. Null when the repository is not found, which is how the
-    /// suite skips.
+    /// The answer engine over the shipped documentation, built once per test run. Loading the corpus
+    /// costs more than a query, and the corpus is read-only while the run executes, so every theory
+    /// row shares one engine.
     /// </summary>
-    private static readonly Lazy<DocsTools?> Tools = new(
-        () =>
-        {
-            string? root = RepositoryRoot();
-            return root is null ? null : DocsToolsComposition.Create(CreateHost(root), McpTestServices.AnalysisReader(root));
-        });
+    private static readonly Lazy<DocsTools> Tools = new(CreateTools);
 
     /// <summary>Question, expected document id, phrase from the answering section, confidence floor.</summary>
     public static TheoryData<string, string, string, double, string?> AnswerableCases() => new()
@@ -133,8 +130,7 @@ public sealed class RetrievalRegressionTests
         double floor,
         string? sourceHeading)
     {
-        DocsTools? tools = Tools.Value;
-        if (tools is null) return;
+        DocsTools tools = Tools.Value;
 
         string response = Explore(tools, query);
 
@@ -174,8 +170,7 @@ public sealed class RetrievalRegressionTests
     [InlineData("tell me a joke")]
     public void AnUnanswerableQuestionReturnsNothing(string query)
     {
-        DocsTools? tools = Tools.Value;
-        if (tools is null) return;
+        DocsTools tools = Tools.Value;
 
         string response = Explore(tools, query);
 
@@ -184,18 +179,32 @@ public sealed class RetrievalRegressionTests
         Assert.Empty(SourceLines(response).ToList());
     }
 
-    private static DocumentIndexHost CreateHost(string root)
+    /// <summary>
+    /// Copies the shipped documents and host configuration into an in-memory repository and builds the
+    /// engine over it, with the code index reported unreadable as it is on a runner without one.
+    /// </summary>
+    private static DocsTools CreateTools()
     {
-        KyberWeaveConfig config = ConfigFileReader.Load(root);
-        return new DocumentIndexHost(
-            root,
-            () => DocsPorts.CodeGraph(root),
-            () => RealDocumentLoader.Create(root, config.Ontology).Load(),
-            DocsPorts.Files,
-            DocsPorts.Paths,
-            DocsPorts.Environment,
+        ICorpusSource corpus = CheckoutCorpusSource.Checkout;
+        MemoryDocsHost host = new();
+        host.WriteBytesInRepo(HostConfig, corpus.ReadBytes(HostConfig));
+        foreach (string path in corpus.EnumerateFiles(DocsRoot))
+        {
+            host.WriteBytesInRepo(path, corpus.ReadBytes(path));
+        }
+
+        IServiceProvider services = host.Services();
+        KyberWeaveConfig config = services.GetRequiredService<IKyberWeaveConfigRepository>().Load(host.Repo);
+        DocumentIndexHost index = new(
+            host.Repo,
+            () => new UnavailableCodeGraph(),
+            () => new DocumentLoader(host.Store, host.Repo, host.Paths, host.Environment, config.Ontology).Load(),
+            host.Store,
+            host.Paths,
+            host.Environment,
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
+        return McpTestServices.Tools(index, services, host.Repo);
     }
 
     private static string Explore(DocsTools tools, string query) => tools.Explore(query);
@@ -213,25 +222,23 @@ public sealed class RetrievalRegressionTests
     private static string Truncate(string value, int maxLength) =>
         value.Length <= maxLength ? value : value[..maxLength] + "…";
 
-    /// <summary>
-    /// Walks up from the test assembly looking for the repository. Returns null when it
-    /// is not there, so the suite skips instead of failing.
-    /// </summary>
-    private static string? RepositoryRoot()
+    /// <summary>A CodeGraph port that reports no readable index.</summary>
+    private sealed class UnavailableCodeGraph : ICodeGraphResolver
     {
-        DirectoryInfo? directory = new DirectoryInfo(AppContext.BaseDirectory);
+        public bool IsAvailable => false;
 
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "KyberWeave.sln")) &&
-                File.Exists(Path.Combine(directory.FullName, "AGENTS.md")))
-            {
-                return directory.FullName;
-            }
+        public string? UnavailableReason => "No CodeGraph index.";
 
-            directory = directory.Parent;
-        }
+        public string DatabasePath => ".codegraph/codegraph.db";
 
-        return null;
+        public IReadOnlyList<CodeGraphNode> ResolveSymbol(string name) => [];
+
+        public IReadOnlyList<CodeGraphNode> ResolveRoute(string route) => [];
+
+        public bool HasFilesUnder(string relativePathPrefix) => false;
+
+        public IReadOnlyList<string> CandidateNames(string likePattern) => [];
+
+        public IReadOnlyList<string> AllRoutes() => [];
     }
 }
