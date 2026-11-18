@@ -60,13 +60,35 @@ public sealed class FakeSquadLifecycleService(ISquadStateStore stateStore) : ISq
 public sealed class FakeSquadStateStore(ISquadUserPaths userPaths) : ISquadStateStore
 {
     private readonly Dictionary<(string Root, SquadDeploymentScope Scope), SquadReceipt> _receipts = [];
+    private readonly Dictionary<(string Root, SquadDeploymentScope Scope), SquadLock> _locks = [];
+    private readonly Dictionary<string, SquadLock> _lockTexts = [];
+    private readonly List<SquadProjectRegistryEntry> _projects = [];
 
     /// <inheritdoc />
     public ISquadUserPaths UserPaths { get; } = userPaths;
 
+    /// <summary>Registers a project <see cref="ListProjects"/> and <see cref="FindProject"/> answer from.</summary>
+    /// <param name="project">The registry entry.</param>
+    public void AddProject(SquadProjectRegistryEntry project) => _projects.Add(project);
+
+    /// <summary>Gets or sets a failure <see cref="ListProjects"/> raises instead of answering, or null for none.</summary>
+    public Exception? ListProjectsFailure { get; set; }
+
+    /// <summary>Arranges the lock <see cref="ReadLock"/> answers for a root and scope.</summary>
+    /// <param name="root">The target root.</param>
+    /// <param name="scope">The scope.</param>
+    /// <param name="squadLock">The lock to answer.</param>
+    public void AddLock(string root, SquadDeploymentScope scope, SquadLock squadLock) => _locks[(root, scope)] = squadLock;
+
+    /// <summary>Arranges the lock <see cref="DeserializeLock"/> answers for a lock file's exact text.</summary>
+    /// <param name="yaml">The text of the lock file.</param>
+    /// <param name="squadLock">The lock the text parses to.</param>
+    public void AddLockText(string yaml, SquadLock squadLock) => _lockTexts[yaml] = squadLock;
+
     /// <summary>Arranges the receipt <see cref="ReadReceipt"/> answers for a root and scope.</summary>
     /// <param name="receipt">The receipt, answered for its own target root and scope.</param>
-    public void Add(SquadReceipt receipt) => _receipts[(receipt.TargetRoot, receipt.Scope)] = receipt;
+    /// <param name="readAt">The root the receipt is read at when that differs from its recorded target root, as a migrated legacy receipt does; null for the recorded root.</param>
+    public void Add(SquadReceipt receipt, string? readAt = null) => _receipts[(readAt ?? receipt.TargetRoot, receipt.Scope)] = receipt;
 
     /// <inheritdoc />
     public SquadReceipt? ReadReceipt(string targetRoot, SquadDeploymentScope scope) =>
@@ -82,10 +104,12 @@ public sealed class FakeSquadStateStore(ISquadUserPaths userPaths) : ISquadState
     public string ResolveHomeOwnedFilesRoot() => throw new NotSupportedException();
 
     /// <inheritdoc />
-    public IReadOnlyList<SquadProjectRegistryEntry> ListProjects() => throw new NotSupportedException();
+    public IReadOnlyList<SquadProjectRegistryEntry> ListProjects() =>
+        ListProjectsFailure is null ? _projects : throw ListProjectsFailure;
 
     /// <inheritdoc />
-    public SquadProjectRegistryEntry? FindProject(string root) => throw new NotSupportedException();
+    public SquadProjectRegistryEntry? FindProject(string root) =>
+        _projects.Find(project => string.Equals(project.Path, root, StringComparison.Ordinal));
 
     /// <inheritdoc />
     public IReadOnlyList<SquadProjectRegistryEntry> ListProjectsWithoutRebuild() => throw new NotSupportedException();
@@ -100,7 +124,8 @@ public sealed class FakeSquadStateStore(ISquadUserPaths userPaths) : ISquadState
     public string SerializeLock(SquadLock squadLock) => throw new NotSupportedException();
 
     /// <inheritdoc />
-    public SquadLock DeserializeLock(string yaml) => throw new NotSupportedException();
+    public SquadLock DeserializeLock(string yaml) =>
+        _lockTexts.TryGetValue(yaml, out SquadLock? squadLock) ? squadLock : throw new InvalidDataException("unreadable lock");
 
     /// <inheritdoc />
     public string SerializeReceipt(SquadReceipt receipt) => throw new NotSupportedException();
@@ -109,7 +134,8 @@ public sealed class FakeSquadStateStore(ISquadUserPaths userPaths) : ISquadState
     public SquadReceipt DeserializeReceipt(string json) => throw new NotSupportedException();
 
     /// <inheritdoc />
-    public SquadLock? ReadLock(string targetRoot, SquadDeploymentScope scope) => throw new NotSupportedException();
+    public SquadLock? ReadLock(string targetRoot, SquadDeploymentScope scope) =>
+        _locks.GetValueOrDefault((targetRoot, scope));
 
     /// <inheritdoc />
     public string ResolveLockPath(string targetRoot, SquadDeploymentScope scope) => throw new NotSupportedException();
