@@ -26,6 +26,13 @@ internal static class DocsPorts
 
     internal static IPlanTaskService Tasks => new PlanTaskService(Files, Paths, Environment);
 
+    /// <summary>The standards-template diff over the physical seams, for a test that runs it on a temporary checkout.</summary>
+    internal static StandardsTemplateDiff StandardsDiff(string repoRoot, OntologyConfig ontology)
+    {
+        IFileSystem files = new PhysicalFileSystem();
+        return new StandardsTemplateDiff(files, repoRoot, ontology, new PhysicalPathResolver(files), Environment);
+    }
+
     /// <summary>The standards migration over the physical seams, for a test that runs it on a temporary checkout.</summary>
     internal static StandardsFolderMigration StandardsMigration(string repoRoot, OntologyConfig ontology)
     {

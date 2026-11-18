@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -20,7 +21,12 @@ public sealed class DocsStandardsDiffSettings : DocsSettings
 /// Prints how each installed standards folder differs from the current template, and writes
 /// nothing.
 /// </summary>
-public sealed class DocsStandardsDiffCommand(IKyberWeaveConfigRepository configs, IAnsiConsole console) : Command<DocsStandardsDiffSettings>
+public sealed class DocsStandardsDiffCommand(
+    IKyberWeaveConfigRepository configs,
+    IFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment,
+    IAnsiConsole console) : Command<DocsStandardsDiffSettings>
 {
     /// <inheritdoc />
     public override int Execute(
@@ -38,7 +44,7 @@ public sealed class DocsStandardsDiffCommand(IKyberWeaveConfigRepository configs
         StandardsDiffResult result;
         try
         {
-            result = new StandardsTemplateDiff(settings.Path, ontology).Run(settings.Name);
+            result = new StandardsTemplateDiff(files, settings.Path, ontology, paths, environment).Run(settings.Name);
         }
         catch (ArgumentException ex)
         {
