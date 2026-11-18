@@ -172,6 +172,9 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | Class (file) | Calls directly | Task |
 |---|---|---|
 | `AgentFileReader` (`Agents/AgentFileReader.cs`) | paths | 4.8 |
+| `MarkdownAgentParser` (`Agents/Parsing/MarkdownAgentParser.cs`) | paths | 2.5 |
+| `TomlAgentParser` (`Agents/Parsing/TomlAgentParser.cs`) | paths | 2.5 |
+| `AgentSpecValidator` (`Agents/Validation/AgentSpecValidator.cs`) | paths | 2.5 |
 | `ArbiterEvaluator` (`Arbiter/ArbiterEvaluator.cs`) | clock | 4.3 |
 | `ArbiterHarnessGating` (`Arbiter/ArbiterHarnessGating.cs`) | paths | 4.3 |
 | `ArbiterInstallService` (`Arbiter/ArbiterInstallService.cs`) | paths | 4.3 |
@@ -239,6 +242,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `RunCheckoutGuard` (`RunStart/RunCheckoutGuard.cs`) | paths | 4.4 |
 | `RunStartRunner` (`RunStart/RunStartRunner.cs`) | paths | 4.8 |
 | `SkillFileReader` (`Skills/SkillFileReader.cs`) | paths | 4.8 |
+| `SkillParser` (`Skills/Parsing/SkillParser.cs`) | paths | 2.5 |
 | `SquadBriefBuilder` (`Squad/Briefs/SquadBriefBuilder.cs`) | file system, paths | 4.8 |
 | `FactoryMcpConfiguration` (`Squad/Deployment/FactoryMcpConfiguration.cs`) | file system | 4.8 |
 | `SquadInstanceService` (`Squad/Instances/SquadInstanceService.cs`) | paths | 4.8 |
@@ -373,9 +377,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `MarkdownAgentParser` (`Agents/Parsing/MarkdownAgentParser.cs`) | paths | 2.5 |
-| `TomlAgentParser` (`Agents/Parsing/TomlAgentParser.cs`) | paths | 2.5 |
-| `AgentSpecValidator` (`Agents/Validation/AgentSpecValidator.cs`) | paths | 2.5 |
 | `ArbiterConfigLoader` (`Arbiter/ArbiterConfigLoader.cs`) | file system | 2.5 |
 | `ArbiterLedgerEvent` (`Arbiter/Facts/ArbiterLedgerEvent.cs`) | identifiers | 2.5 |
 | `ArbiterSquadCatalog` (`Arbiter/Squad/ArbiterSquadCatalog.cs`) | file system | 2.5 |
@@ -385,7 +386,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `GateCatalogueRenderer` (`Review/Catalogue/GateCatalogueRenderer.cs`) | file system | 2.5 |
 | `ProjectRootDetection` (`Review/Catalogue/ProjectRootDetection.cs`) | file system | 2.5 |
 | `TaskGatePlanning` (`Review/TaskGatePlanning.cs`) | paths | 2.5 |
-| `SkillParser` (`Skills/Parsing/SkillParser.cs`) | paths | 2.5 |
 | `BriefMap` (`Squad/Briefs/BriefMap.cs`) | file system | 2.5 |
 | `SquadGlobalRoots` (`Squad/Deployment/SquadGlobalRoots.cs`) | paths | 2.5 |
 | `SquadPathPolicy` (`Squad/Deployment/SquadPathPolicy.cs`) | paths | 2.5 |

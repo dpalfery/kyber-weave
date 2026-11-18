@@ -1,8 +1,11 @@
+using KyberWeave.Application.Skills;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Parsing;
 using KyberWeave.Core.Skills.Routing;
 using KyberWeave.Core.Skills.Security;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -160,5 +163,87 @@ public class RoutingTests
         RoutingEvalSummary summary = new RoutingEvaluator(new LexicalRoutingStrategy()).Evaluate(evalFile, SampleSet());
         Assert.Equal(3, summary.Total);
         Assert.True(summary.Accuracy >= 0.66, $"accuracy was {summary.Accuracy:P0}");
+    }
+
+    [Fact]
+    public void AnEvalThatDeclaresNoCasesIsNotAPerfectScore()
+    {
+        RoutingEvalFile evalFile = RoutingEvalFileParser.Parse(string.Empty);
+
+        RoutingEvalSummary summary = new RoutingEvaluator(new LexicalRoutingStrategy()).Evaluate(evalFile, SampleSet());
+
+        Assert.Equal(0, summary.Total);
+        Assert.Equal(0.0, summary.Accuracy);
+    }
+
+    [Fact]
+    public void AnEvalWhoseCasesAreNullEvaluatesToNoCases()
+    {
+        RoutingEvalFile evalFile = RoutingEvalFileParser.Parse("cases: null");
+
+        Assert.Empty(evalFile.Cases);
+    }
+
+    [Fact]
+    public void ACaseWhosePromptIsNullDoesNotAbortTheEval()
+    {
+        RoutingEvalFile evalFile = RoutingEvalFileParser.Parse("cases:\n  - prompt: null\n    expected: null\n");
+
+        RoutingEvalSummary summary = new RoutingEvaluator(new LexicalRoutingStrategy()).Evaluate(evalFile, SampleSet());
+
+        Assert.Equal(1, summary.Total);
+        Assert.Equal(string.Empty, summary.Results[0].Case.Prompt);
+    }
+
+    [Fact]
+    public void ACaseThatFiresWithoutASelectionCarriesALabel()
+    {
+        RoutingEvalFile evalFile = new()
+        {
+            Cases = [new RoutingEvalCase { Prompt = "reset my password", Expected = "password-reset" }]
+        };
+
+        RoutingEvalSummary summary = new RoutingEvaluator(new FiredWithoutSelection()).Evaluate(evalFile, SampleSet());
+
+        Assert.False(summary.Results[0].Passed);
+        Assert.NotNull(summary.Results[0].ActualLabel);
+    }
+
+    /// <summary>A strategy that reports a fire without naming the skill it selected.</summary>
+    private sealed class FiredWithoutSelection : IRoutingStrategy
+    {
+        public string Name => "fires-without-selection";
+
+        public RoutingResult Route(string prompt, SkillSet skills) => new(null, true, []);
+    }
+}
+
+public class SkillEvalGovernanceTests
+{
+    private static SkillSet SampleSet() => new(
+    [
+        GovernanceTestFiles.Skills.Read(
+            "---\nname: password-reset\ndescription: Use to reset a corporate password.\n---\n\nbody",
+            "/tmp/pr/SKILL.md",
+            "/tmp/pr")
+    ]);
+
+    [Fact]
+    public void AMalformedEvalFileIsReportedAsAParseFailure()
+    {
+        InMemoryFileSystem files = new();
+        files.WriteAllText("/eval.yaml", "cases: [unclosed");
+
+        SkillGovernanceService service = new(files, new UnusedArchiveWriter());
+
+        RoutingEvalParseException error = Assert.Throws<RoutingEvalParseException>(
+            () => service.Evaluate("/eval.yaml", new LexicalRoutingStrategy(), SampleSet()));
+        Assert.Contains("eval", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class UnusedArchiveWriter : ISkillArchiveWriter
+    {
+        public void Write(string output, IReadOnlyList<SkillArchiveEntry> entries) =>
+            throw new NotSupportedException("Evaluate writes no archive.");
     }
 }

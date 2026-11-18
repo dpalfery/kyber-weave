@@ -69,7 +69,7 @@ public sealed class SkillGovernanceService(IWritableFileSystem files, ISkillArch
         if (!files.FileExists(evalFile))
             return null;
 
-        RoutingEvalFile loaded = RoutingEvalFile.Parse(files.ReadAllText(evalFile));
+        RoutingEvalFile loaded = RoutingEvalFileParser.Parse(files.ReadAllText(evalFile));
         return new RoutingEvaluator(strategy).Evaluate(loaded, skills);
     }
 
