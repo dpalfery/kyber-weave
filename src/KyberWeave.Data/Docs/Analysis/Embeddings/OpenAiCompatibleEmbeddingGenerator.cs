@@ -86,7 +86,8 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
             : _readEnvironment(config.ApiKeyEnv);
 
         List<StoredEmbedding> result = new List<StoredEmbedding>(orderedKeys.Length);
-        EmbeddingUsage usage = EmbeddingUsage.None;
+        int promptTokens = 0;
+        int totalTokens = 0;
         for (int offset = 0; offset < orderedInputs.Length; offset += config.BatchSize)
         {
             int count = Math.Min(config.BatchSize, orderedInputs.Length - offset);
@@ -102,10 +103,11 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
                 .GetResult();
             for (int index = 0; index < parsed.Vectors.Count; index++)
                 result.Add(new StoredEmbedding(orderedKeys[offset + index], parsed.Vectors[index]));
-            usage = usage.Add(parsed.Usage);
+            promptTokens = checked(promptTokens + parsed.Usage.PromptTokens);
+            totalTokens = checked(totalTokens + parsed.Usage.TotalTokens);
         }
 
-        return new EmbeddingGenerationResult(result, usage);
+        return new EmbeddingGenerationResult(result, new EmbeddingUsage(promptTokens, totalTokens));
     }
 
     private async Task<ParsedBatch> SendBatchAsync(
