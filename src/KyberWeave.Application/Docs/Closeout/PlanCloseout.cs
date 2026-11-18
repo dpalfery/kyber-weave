@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -48,6 +49,8 @@ public sealed partial class PlanCloseout
     private const string InventoryColumns = "| Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |";
 
     private readonly string _repoRoot;
+    private readonly IPathResolver _paths;
+    private readonly IProcessEnvironment _environment;
     private readonly KyberWeaveConfig _config;
     private readonly Func<IDocumentSource> _loaderFactory;
     private readonly ActivePlanFiles _files;
@@ -73,15 +76,21 @@ public sealed partial class PlanCloseout
         Func<IDocumentSource> loaderFactory,
         IRepositoryFileStore files,
         IBoundedProcessExecutor process,
-        IExclusiveFileWriter exclusive)
+        IExclusiveFileWriter exclusive,
+        IPathResolver paths,
+        IProcessEnvironment environment)
     {
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(process);
         ArgumentNullException.ThrowIfNull(exclusive);
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(loaderFactory);
-        _repoRoot = Path.GetFullPath(repoRoot);
+        _repoRoot = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
+        _paths = paths;
+        _environment = environment;
         _config = config;
         _loaderFactory = loaderFactory;
         _store = files;
@@ -204,7 +213,7 @@ public sealed partial class PlanCloseout
 
             wroteTarget = true;
             DocumentSet live = _loaderFactory().Load();
-            report.AddRange(new ArchiveCloseoutValidator(_repoRoot, _config, _loaderFactory, _store)
+            report.AddRange(new ArchiveCloseoutValidator(_repoRoot, _config, _loaderFactory, _store, _paths, _environment)
                 .Itemise(live, [new ChangedPath(target, ChangeKind.Added)]).Items);
             if (report.HasErrors)
             {

@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 
@@ -29,18 +30,24 @@ public partial class PlanFileResolver
     private readonly string _repoRoot;
     private readonly IDocsEngineConfig _config;
     private readonly IRepositoryFileStore _files;
+    private readonly IPathResolver _paths;
 
     /// <summary>Creates a resolver over a repository and its effective configuration.</summary>
     /// <param name="repoRoot">The repository root.</param>
     /// <param name="config">The effective configuration.</param>
     /// <param name="files">Probes the planning folders.</param>
-    public PlanFileResolver(string repoRoot, IDocsEngineConfig config, IRepositoryFileStore files)
+    /// <param name="paths">Resolves the repository root and a typed path to full paths.</param>
+    /// <param name="environment">Names the directory a relative repository root is resolved against.</param>
+    public PlanFileResolver(string repoRoot, IDocsEngineConfig config, IRepositoryFileStore files, IPathResolver paths, IProcessEnvironment environment)
     {
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
         _files = files;
+        _paths = paths;
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
-        _repoRoot = System.IO.Path.GetFullPath(repoRoot);
+        _repoRoot = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
         _config = config;
     }
 
@@ -87,7 +94,7 @@ public partial class PlanFileResolver
         string[] bases = System.IO.Path.IsPathRooted(typed) ? [string.Empty] : [workingDirectory, _repoRoot];
         foreach (string basePath in bases)
         {
-            string candidate = basePath.Length == 0 ? typed : System.IO.Path.GetFullPath(typed, basePath);
+            string candidate = basePath.Length == 0 ? typed : _paths.GetFullPath(typed, basePath);
             if (FileFor(candidate) is { } file)
             {
                 return Found(file);

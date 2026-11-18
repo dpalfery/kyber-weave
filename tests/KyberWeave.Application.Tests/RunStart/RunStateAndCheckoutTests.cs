@@ -23,7 +23,7 @@ public sealed class RunStateAndCheckoutTests
 
     private FileRunStateStore Store() => new(_files, new ScriptedBranchReader(_branches), _paths, _environment);
 
-    private RunCheckoutGuard Guard() => new(_files, Store(), _environment);
+    private RunCheckoutGuard Guard() => new(_files, Store(), _environment, _paths);
 
     private void Record(string worktree, string branch, string repository) =>
         Store().Write(Home, branch, "origin/main", new RunStartPlace(repository + "/.git", worktree, DateTimeOffset.UnixEpoch));
@@ -75,6 +75,35 @@ public sealed class RunStateAndCheckoutTests
     {
         Assert.Equal(Canonical, Guard().CanonicalCheckoutOf(Canonical + "/.git"));
         Assert.Null(Guard().CanonicalCheckoutOf(Canonical + "/elsewhere"));
+    }
+
+    [Fact]
+    public void ARelativeGitDirectoryNamedByAWorktreeIsFoundBesideTheWorktree()
+    {
+        _files.CreateDirectory(Linked);
+        _files.CreateDirectory("/work/gitdirs/run");
+        _files.WriteAllText(Linked + "/.git", "gitdir: ../gitdirs/run");
+        _files.WriteAllText("/work/gitdirs/run/HEAD", "ref: refs/heads/claude/fix/a\n");
+        _files.CreateDirectory("/kw/work/gitdirs/run");
+        _files.WriteAllText("/kw/work/gitdirs/run/HEAD", "ref: refs/heads/elsewhere\n");
+
+        Assert.Equal("claude/fix/a", Guard().ReadCheckedOutBranch(Linked));
+    }
+
+    [Fact]
+    public void ARelativePathIsResolvedAgainstTheInjectedWorkingDirectory()
+    {
+        _files.CreateDirectory(Canonical + "/.git");
+        _files.CreateDirectory(Linked);
+        _files.WriteAllText(Linked + "/.git", $"gitdir: {Canonical}/.git/worktrees/run");
+        _files.CreateDirectory(Canonical + "/.git/worktrees/run");
+        _files.WriteAllText(Canonical + "/.git/worktrees/run/HEAD", "ref: refs/heads/claude/fix/a\n");
+        Record(Linked, "claude/fix/a", Canonical);
+        RunCheckoutGuard inCanonical = new(_files, Store(), new FakeProcessEnvironment(currentDirectory: Canonical, operatingSystem: OperatingSystemKind.Linux), _paths);
+        RunCheckoutGuard inLinked = new(_files, Store(), new FakeProcessEnvironment(currentDirectory: Linked, operatingSystem: OperatingSystemKind.Linux), _paths);
+
+        Assert.Equal(Canonical + "/src", inCanonical.RealPath("src"));
+        Assert.Equal(Linked + "/src", inLinked.RealPath("src"));
     }
 
     private sealed class ScriptedBranchReader(Dictionary<string, string?> branches) : ICheckedOutBranchReader

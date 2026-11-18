@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Parsing;
 
@@ -13,7 +15,7 @@ namespace KyberWeave.Core.Agents.Parsing;
 /// skills, agent definitions and documentation all resolve a frontmatter block the same
 /// way. A second pipeline here would drift from the shared one silently.
 /// </remarks>
-public sealed partial class MarkdownAgentParser : IAgentParser
+public sealed partial class MarkdownAgentParser(IPathResolver paths, IProcessEnvironment environment) : IAgentParser
 {
     // Top-level scalar keys used for identity, routing, and provenance. Applied as a
     // line-based overlay so an otherwise-invalid YAML block (unquoted colon in description,
@@ -27,7 +29,7 @@ public sealed partial class MarkdownAgentParser : IAgentParser
     public AgentModel Parse(string content, string filePath, HarnessKind harness)
     {
         string raw = content;
-        string dirName = Path.GetDirectoryName(Path.GetFullPath(filePath))!;
+        string dirName = Path.GetDirectoryName(paths.GetFullPath(filePath, environment.CurrentDirectory))!;
         string fileName = Path.GetFileName(filePath);
 
         // Standardize role name from file name (e.g. architect.agent.md -> architect, dev-medium.md -> dev-medium)
@@ -76,7 +78,7 @@ public sealed partial class MarkdownAgentParser : IAgentParser
         {
             RoleName = roleName,
             Harness = harness,
-            FilePath = Path.GetFullPath(filePath),
+            FilePath = paths.GetFullPath(filePath, environment.CurrentDirectory),
             DirectoryPath = dirName,
             Description = description,
             InstructionsBody = body,

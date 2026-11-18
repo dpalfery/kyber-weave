@@ -29,7 +29,8 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton<IArbiterStateFactory>(sp => new FileArbiterStateFactory(
             sp.GetRequiredService<IArbiterLogStore>(),
             sp.GetRequiredService<IFileSystem>(),
-            sp.GetRequiredService<IWritableFileSystem>()));
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>()));
         services.TryAddSingleton<IArbiterEvaluatorFactory, Core.Arbiter.ArbiterEvaluatorFactory>();
         services.TryAddSingleton<ICommentTriageFactory, Core.Arbiter.CommentTriageFactory>();
         services.TryAddSingleton<IArbiterKeyService, Core.Arbiter.ArbiterKeyService>();
@@ -147,7 +148,8 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton<IArbiterStateFactory>(sp => new FileArbiterStateFactory(
             sp.GetRequiredService<IArbiterLogStore>(),
             sp.GetRequiredService<IFileSystem>(),
-            sp.GetRequiredService<IWritableFileSystem>()));
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>()));
         services.TryAddSingleton<IConductorGuard, ConductorGuard>();
         services.TryAddSingleton<IWorkerGuard, WorkerGuard>();
         return services;

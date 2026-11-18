@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -35,6 +36,7 @@ public class ManagedGlossary : IManagedGlossary
         .UsePreciseSourceLocation()
         .Build();
 
+    private readonly IPathResolver _paths;
     private readonly string _repositoryRoot;
     private readonly IDocsEngineConfig _config;
     private readonly IRepositoryFileStore _files;
@@ -47,23 +49,30 @@ public class ManagedGlossary : IManagedGlossary
     /// <param name="config">The effective configuration.</param>
     /// <param name="timeProvider">The clock that dates new rows.</param>
     /// <param name="files">Reads the glossary and the catalog and writes the glossary.</param>
+    /// <param name="paths">Resolves the repository root and the glossary path to full paths.</param>
+    /// <param name="environment">Names the directory a relative repository root is resolved against.</param>
     public ManagedGlossary(
         string repositoryRoot,
         IDocsEngineConfig config,
         TimeProvider timeProvider,
-        IRepositoryFileStore files)
+        IRepositoryFileStore files,
+        IPathResolver paths,
+        IProcessEnvironment environment)
     {
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
         _files = files;
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(timeProvider);
 
-        _repositoryRoot = Path.GetFullPath(repositoryRoot);
+        _paths = paths;
+        _repositoryRoot = paths.GetFullPath(repositoryRoot, environment.CurrentDirectory);
         _config = config;
         _timeProvider = timeProvider;
         _relativePath = config.DocsAnalysis.ResolveGlossaryPath(config.Ontology);
-        _filePath = ResolveContainedPath(_repositoryRoot, _relativePath);
+        _filePath = ResolveContainedPath(paths, _repositoryRoot, _relativePath);
         RejectLinkedPath(_repositoryRoot, _filePath);
     }
 
@@ -394,7 +403,7 @@ public class ManagedGlossary : IManagedGlossary
 
     private CatalogData ReadCatalog()
     {
-        string catalogPath = ResolveContainedPath(_repositoryRoot, _config.Ontology.ResolvedCatalogPath);
+        string catalogPath = ResolveContainedPath(_paths, _repositoryRoot, _config.Ontology.ResolvedCatalogPath);
         if (!_files.FileExists(catalogPath))
         {
             return new CatalogData(null, new HashSet<string>(StringComparer.Ordinal));
@@ -977,14 +986,14 @@ public class ManagedGlossary : IManagedGlossary
         left.Count == right.Count
         && left.Order(StringComparer.Ordinal).SequenceEqual(right.Order(StringComparer.Ordinal), StringComparer.Ordinal);
 
-    private static string ResolveContainedPath(string repositoryRoot, string relativePath)
+    private static string ResolveContainedPath(IPathResolver paths, string repositoryRoot, string relativePath)
     {
         if (Path.IsPathRooted(relativePath))
         {
             throw new ArgumentException("The glossary path must be repository-relative.", nameof(relativePath));
         }
 
-        string resolved = Path.GetFullPath(
+        string resolved = paths.GetFullPath(
             relativePath.Replace('/', Path.DirectorySeparatorChar),
             repositoryRoot);
         string prefix = repositoryRoot.EndsWith(Path.DirectorySeparatorChar)

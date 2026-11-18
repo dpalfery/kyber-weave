@@ -1,6 +1,7 @@
 using KyberWeave.Core.Configuration;
-using KyberWeave.Data.Docs.FileSystem;
 using KyberWeave.Core.Docs.Closeout;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -9,11 +10,15 @@ namespace KyberWeave.Tests;
 /// The shared plan argument resolver. The host's docs root is <c>handbook</c>, not <c>docs</c>, so a spelling that
 /// only works against the product default fails here.
 /// </summary>
-public sealed class PlanFileResolverTests : IDisposable
+public sealed class PlanFileResolverTests
 {
     private const string Plan = "handbook/plans/2026-11-13-job-status-cards.md";
     private const string TasksFile = "handbook/specs/search/tasks.md";
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "kw-planref-" + Guid.NewGuid().ToString("N"));
+    private const string WorkingDirectory = "/kw/work";
+    private readonly string _root = "/kw/repo";
+    private readonly InMemoryFileSystem _files = new();
+    private readonly FakePathResolver _paths;
+    private readonly KyberWeaveConfig _config = KyberWeaveConfigAssembler.FromYaml("ontology:\n  docs-root: handbook\n");
     private readonly PlanFileResolver _resolver;
 
     public PlanFileResolverTests()
@@ -25,23 +30,18 @@ public sealed class PlanFileResolverTests : IDisposable
         Write("handbook/plans/2026-11-12-job-board.md", "# plan\n");
         Write("handbook/archive/plans/2026-10-01-job-status-cards.md", "# archived\n");
         Write(TasksFile, "# tasks\n");
-        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("ontology:\n  docs-root: handbook\n");
-        _resolver = new PlanFileResolver(_root, config, new PhysicalRepositoryFileStore());
+        _paths = new FakePathResolver(_files);
+        _resolver = ResolverFor(_root);
     }
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-        {
-            Directory.Delete(_root, recursive: true);
-        }
-    }
+    private PlanFileResolver ResolverFor(string root, string workingDirectory = WorkingDirectory) =>
+        new(root, _config, new InMemoryRepositoryFileStore(_files), _paths, new FakeProcessEnvironment(currentDirectory: workingDirectory));
 
     private void Write(string relative, string content)
     {
         string full = Path.Combine(_root, relative.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, content);
+        _files.CreateDirectory(Path.GetDirectoryName(full)!);
+        _files.WriteAllText(full, content);
     }
 
     private string Absolute(string relative) => Path.Combine(_root, relative.Replace('/', Path.DirectorySeparatorChar));
@@ -88,7 +88,7 @@ public sealed class PlanFileResolverTests : IDisposable
     [Fact]
     public void AFullPathIsFoundFromAnyDirectory()
     {
-        PlanPathResolution resolution = _resolver.Resolve(Absolute(Plan), Path.GetTempPath());
+        PlanPathResolution resolution = _resolver.Resolve(Absolute(Plan), "/kw/elsewhere");
 
         Assert.Equal(Plan, resolution.Path);
     }
@@ -131,5 +131,15 @@ public sealed class PlanFileResolverTests : IDisposable
         Assert.False(resolution.Found);
         Assert.False(resolution.Ambiguous);
         Assert.NotEmpty(resolution.SearchedFolders);
+    }
+
+    [Fact]
+    public void ARelativeRepositoryRootIsResolvedAgainstTheInjectedWorkingDirectory()
+    {
+        PlanFileResolver fromParent = ResolverFor("repo", "/kw");
+        PlanFileResolver fromElsewhere = ResolverFor("repo", "/kw/elsewhere");
+
+        Assert.Equal(Plan, fromParent.Resolve("job-status-cards", "/kw").Path);
+        Assert.False(fromElsewhere.Resolve("job-status-cards", "/kw/elsewhere").Found);
     }
 }

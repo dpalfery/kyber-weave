@@ -198,6 +198,9 @@ public sealed class CorpusProvenanceTests : IDisposable
             root,
             () => FakeCodeGraphResolver.WithSymbols(),
             () => RealDocumentLoader.Create(root, config.Ontology).Load(),
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment,
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 

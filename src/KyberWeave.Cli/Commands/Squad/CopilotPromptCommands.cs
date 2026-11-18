@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Host;
 using KyberWeave.Core.Docs.Mcp;
@@ -42,6 +43,8 @@ internal sealed record CopilotPromptEnvironment(
     OSPlatform Platform,
     bool IsInteractive,
     Func<string, bool> ReadAnswer,
+    IPathResolver Paths,
+    string CurrentDirectory,
     string? XdgConfigHome = null);
 
 /// <summary>
@@ -53,6 +56,7 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
     private readonly IDoctorFileSystem _files;
     private readonly IEmbeddedResources _resources;
     private readonly IProcessEnvironment? _processEnvironment;
+    private readonly IPathResolver? _paths;
     private readonly SquadConsole _console;
 
     /// <summary>Creates the command over the file-system, embedded-resource, environment and console seams the container resolves.</summary>
@@ -60,15 +64,18 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
         IDoctorFileSystem files,
         IEmbeddedResources resources,
         IProcessEnvironment processEnvironment,
+        IPathResolver paths,
         SquadConsole console)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(resources);
         ArgumentNullException.ThrowIfNull(processEnvironment);
+        ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(console);
         _files = files;
         _resources = resources;
         _processEnvironment = processEnvironment;
+        _paths = paths;
         _console = console;
     }
 
@@ -96,7 +103,7 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
     public override int Execute(CommandContext context, CopilotPromptSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.EnvironmentOf(_processEnvironment!, _console);
+        CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.EnvironmentOf(_processEnvironment!, _paths!, _console);
         if (!CopilotPromptCommandSupport.HasHome(environment, _console))
             return 2;
 
@@ -146,7 +153,7 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
             else if (plan.Outcome == JsonSpliceOutcome.ServerAlreadyPresent)
             {
                 CopilotOverrideState? state = CopilotOverrideSettings.Read(document);
-                if (CopilotPromptCommandSupport.PointsAtPrompt(state, promptPath))
+                if (CopilotPromptCommandSupport.PointsAtPrompt(state, promptPath, environment))
                     alreadySet.Add(file);
                 else
                     refusals.Add($"{file} already has a '{CopilotOverrideSettings.StarEntry}' entry that is not Kyber-Weave's. Remove it by hand, then run this again.");
@@ -221,6 +228,7 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
 
     private readonly IWritableFileSystem _writer;
     private readonly IProcessEnvironment? _processEnvironment;
+    private readonly IPathResolver? _paths;
     private readonly SquadConsole _console;
 
     /// <summary>Creates the command over the file-system, environment and console seams the container resolves.</summary>
@@ -228,15 +236,18 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
         IDoctorFileSystem files,
         IWritableFileSystem writer,
         IProcessEnvironment processEnvironment,
+        IPathResolver paths,
         SquadConsole console)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(processEnvironment);
+        ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(console);
         _files = files;
         _writer = writer;
         _processEnvironment = processEnvironment;
+        _paths = paths;
         _console = console;
     }
 
@@ -264,7 +275,7 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
     public override int Execute(CommandContext context, CopilotPromptSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.EnvironmentOf(_processEnvironment!, _console);
+        CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.EnvironmentOf(_processEnvironment!, _paths!, _console);
         if (!CopilotPromptCommandSupport.HasHome(environment, _console))
             return 2;
 
@@ -307,7 +318,7 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
             if (!state.StarEntryPresent)
                 continue;
 
-            if (!CopilotPromptCommandSupport.PointsAtPrompt(state, promptPath))
+            if (!CopilotPromptCommandSupport.PointsAtPrompt(state, promptPath, environment))
             {
                 refusals.Add($"{file} has a '{CopilotOverrideSettings.StarEntry}' entry that is not Kyber-Weave's, so it was left unchanged.");
                 continue;
@@ -386,16 +397,19 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
     private readonly IDoctorFileSystem _files;
 
     private readonly IProcessEnvironment? _processEnvironment;
+    private readonly IPathResolver? _paths;
     private readonly SquadConsole _console;
 
     /// <summary>Creates the command over the file-system, environment and console seams the container resolves.</summary>
-    public CopilotPromptStatusCommand(IDoctorFileSystem files, IProcessEnvironment processEnvironment, SquadConsole console)
+    public CopilotPromptStatusCommand(IDoctorFileSystem files, IProcessEnvironment processEnvironment, IPathResolver paths, SquadConsole console)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(processEnvironment);
+        ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(console);
         _files = files;
         _processEnvironment = processEnvironment;
+        _paths = paths;
         _console = console;
     }
 
@@ -413,7 +427,7 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
     public override int Execute(CommandContext context, CopilotPromptSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.EnvironmentOf(_processEnvironment!, _console);
+        CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.EnvironmentOf(_processEnvironment!, _paths!, _console);
         if (!CopilotPromptCommandSupport.HasHome(environment, _console))
             return 2;
 
@@ -462,7 +476,7 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
             }
 
             CopilotPromptCommandSupport.Say(_console, $"{label}: {Markup.Escape(file)}");
-            CopilotPromptCommandSupport.Say(_console, DescribeStarEntry(state, promptPath));
+            CopilotPromptCommandSupport.Say(_console, DescribeStarEntry(state, promptPath, environment));
             if (state.ModelSpecificIds.Count > 0)
             {
                 string models = string.Join(", ", state.ModelSpecificIds);
@@ -475,11 +489,11 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
         return unreadable ? 1 : 0;
     }
 
-    private static string DescribeStarEntry(CopilotOverrideState state, string promptPath)
+    private static string DescribeStarEntry(CopilotOverrideState state, string promptPath, CopilotPromptEnvironment environment)
     {
         if (!state.StarEntryPresent)
             return "  override entry: not present";
-        if (CopilotPromptCommandSupport.PointsAtPrompt(state, promptPath))
+        if (CopilotPromptCommandSupport.PointsAtPrompt(state, promptPath, environment))
             return "  override entry: present and Kyber-Weave's";
         return state.StarPromptFile is null
             ? "  override entry: present, not Kyber-Weave's (no promptOverrideFile)"
@@ -495,13 +509,15 @@ internal static class CopilotPromptCommandSupport
     private const string Prefix = "kyber-weave squad copilot-prompt";
 
     /// <summary>The environment a person's terminal runs in: their home, their roaming app data, and whether they can answer a prompt.</summary>
-    internal static CopilotPromptEnvironment EnvironmentOf(IProcessEnvironment environment, SquadConsole console) => EnvironmentFrom(
+    internal static CopilotPromptEnvironment EnvironmentOf(IProcessEnvironment environment, IPathResolver paths, SquadConsole console) => EnvironmentFrom(
         environment.GetVariable,
         environment.OperatingSystem == OperatingSystemKind.Windows ? OSPlatform.Windows
             : environment.OperatingSystem == OperatingSystemKind.MacOS ? OSPlatform.OSX
             : OSPlatform.Linux,
         !environment.IsInputRedirected,
-        question => console.Ansi.Confirm(question, false));
+        question => console.Ansi.Confirm(question, false),
+        paths,
+        environment.CurrentDirectory);
 
     /// <summary>
     /// Builds the environment from environment variables. Home resolves as doctor resolves it, so doctor finds
@@ -511,12 +527,16 @@ internal static class CopilotPromptCommandSupport
         Func<string, string?> read,
         OSPlatform platform,
         bool isInteractive,
-        Func<string, bool> readAnswer) => new(
+        Func<string, bool> readAnswer,
+        IPathResolver paths,
+        string currentDirectory) => new(
         CopilotPromptHome.FromEnvironment(read),
         read("APPDATA"),
         platform,
         isInteractive,
         readAnswer,
+        paths,
+        currentDirectory,
         read("XDG_CONFIG_HOME"));
 
     /// <summary>The home directory. Throws when it is unknown, so a path is never built under the working directory.</summary>
@@ -574,9 +594,9 @@ internal static class CopilotPromptCommandSupport
         flavour == VsCodeFlavour.Insiders ? "insiders" : "stable";
 
     /// <summary>True when the state's <c>*</c> entry names this install's prompt file. Only such an entry is ours.</summary>
-    internal static bool PointsAtPrompt(CopilotOverrideState? state, string promptPath) =>
+    internal static bool PointsAtPrompt(CopilotOverrideState? state, string promptPath, CopilotPromptEnvironment environment) =>
         state?.StarPromptFile is not null
-        && CopilotPromptFile.SamePath(state.StarPromptFile, promptPath);
+        && CopilotPromptFile.SamePath(environment.Paths, environment.CurrentDirectory, state.StarPromptFile, promptPath);
 
     /// <summary>Reads one VS Code settings file through the file-system seam, as doctor does.</summary>
     internal static SettingsFileRead ReadSettingsFile(IDoctorFileSystem files, string settingsFile) =>

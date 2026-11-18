@@ -6,6 +6,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 using KyberWeave.Tests.Corpus;
 
@@ -203,10 +204,10 @@ public sealed class ArbiterGateReportRuleTests
     [Fact]
     public void TheDeclaredTaskGateFactUsesTheParentsTechnology()
     {
-        using TempDirectory repository = new();
-        string standard = Path.Combine(repository.Path, "docs", "standards", "react", "react.standards.md");
-        Directory.CreateDirectory(Path.GetDirectoryName(standard)!);
-        File.WriteAllText(
+        InMemoryFileSystem files = new();
+        string standard = Path.Combine("/repo", "docs", "standards", "react", "react.standards.md");
+        files.CreateDirectory(Path.GetDirectoryName(standard)!);
+        files.WriteAllText(
             standard,
             """
             ---
@@ -236,7 +237,7 @@ public sealed class ArbiterGateReportRuleTests
         ArbiterFactSet facts = TriggerFactBuilder.Build(
             "delegate.returned", "developer",
             "KYBER-ARBITER: true\nTECHNOLOGY: react\n\nDo the work.", "conductor",
-            ArbiterCallerSources.Harness, config, repoRoot: repository.Path);
+            ArbiterCallerSources.Harness, config, repoRoot: "/repo", files: files);
 
         Assert.True(facts.TryGet("config.task-gates-declared", out ArbiterFact? fact));
         Assert.Equal(true, fact.Value);
@@ -250,10 +251,10 @@ public sealed class ArbiterGateReportRuleTests
     [Fact]
     public void TheDeclaredTaskGateFactSurvivesAStandardTheProcessMayNotRead()
     {
-        using TempDirectory repository = new();
-        string standard = Path.Combine(repository.Path, "docs", "standards", "react", "react.standards.md");
-        Directory.CreateDirectory(Path.GetDirectoryName(standard)!);
-        File.WriteAllText(
+        InMemoryFileSystem files = new();
+        string standard = Path.Combine("/repo", "docs", "standards", "react", "react.standards.md");
+        files.CreateDirectory(Path.GetDirectoryName(standard)!);
+        files.WriteAllText(
             standard,
             """
             ---
@@ -280,23 +281,17 @@ public sealed class ArbiterGateReportRuleTests
             }
         };
 
-        if (!UnixFileModes.TryRemoveReadPermission(standard, out UnixFileMode originalMode))
-            Assert.Skip("A Unix file mode denies a read only off Windows and to an unprivileged process.");
+        files.FailWhen(
+            operation => operation.Name == nameof(InMemoryFileSystem.ReadAllText) && operation.Path == standard,
+            new UnauthorizedAccessException());
 
-        try
-        {
-            ArbiterFactSet facts = TriggerFactBuilder.Build(
-                "delegate.returned", "developer",
-                "KYBER-ARBITER: true\nTECHNOLOGY: react\n\nDo the work.", "conductor",
-                ArbiterCallerSources.Harness, config, repoRoot: repository.Path);
+        ArbiterFactSet facts = TriggerFactBuilder.Build(
+            "delegate.returned", "developer",
+            "KYBER-ARBITER: true\nTECHNOLOGY: react\n\nDo the work.", "conductor",
+            ArbiterCallerSources.Harness, config, repoRoot: "/repo", files: files);
 
-            Assert.True(facts.TryGet("config.task-gates-declared", out ArbiterFact? fact));
-            Assert.Equal(false, fact.Value);
-        }
-        finally
-        {
-            UnixFileModes.Restore(standard, originalMode);
-        }
+        Assert.True(facts.TryGet("config.task-gates-declared", out ArbiterFact? fact));
+        Assert.Equal(false, fact.Value);
     }
 
     [Fact]

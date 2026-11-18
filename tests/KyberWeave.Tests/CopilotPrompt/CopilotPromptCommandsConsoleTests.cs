@@ -124,11 +124,11 @@ public sealed class CopilotPromptCommandsConsoleTests
 
     private SquadConsole Console() => new(_ansi, new FakeConsole(_redirected));
 
-    private CopilotPromptStatusCommand Status() => new(_reads, Environment(), Console());
+    private CopilotPromptStatusCommand Status() => new(_reads, Environment(), FakePathResolver.OverEmptyFileSystem(), Console());
 
-    private CopilotPromptInstallCommand Install() => new(_reads, ShippedCopilotPrompt.Resources, Environment(), Console());
+    private CopilotPromptInstallCommand Install() => new(_reads, ShippedCopilotPrompt.Resources, Environment(), FakePathResolver.OverEmptyFileSystem(), Console());
 
-    private CopilotPromptUninstallCommand Uninstall() => new(_reads, _writes, Environment(), Console());
+    private CopilotPromptUninstallCommand Uninstall() => new(_reads, _writes, Environment(), FakePathResolver.OverEmptyFileSystem(), Console());
 
     private string Output() => _ansi.Output.Replace("\r\n", "\n", StringComparison.Ordinal);
 }

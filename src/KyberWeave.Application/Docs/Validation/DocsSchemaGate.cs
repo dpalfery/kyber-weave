@@ -66,7 +66,9 @@ public sealed class DocsSchemaGate(
                 root,
                 config,
                 timeProvider,
-                files).Validate().Items);
+                files,
+                paths,
+                environment).Validate().Items);
         }
         catch (Exception exception) when (IsOperationalGlossaryFailure(exception))
         {
@@ -140,7 +142,9 @@ public sealed class DocsSchemaGate(
             repoRoot,
             config,
             closeoutLoaderFactory,
-            files).Validate(set, changed).Items);
+            files,
+            paths,
+            environment).Validate(set, changed).Items);
         return report;
     }
 }

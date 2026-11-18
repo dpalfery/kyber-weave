@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Agents.Model;
 
 namespace KyberWeave.Core.Agents.Parsing;
@@ -7,13 +9,13 @@ namespace KyberWeave.Core.Agents.Parsing;
 /// <summary>
 /// Parser for TOML-based agent definition files (e.g. Codex .toml files).
 /// </summary>
-public sealed partial class TomlAgentParser : IAgentParser
+public sealed partial class TomlAgentParser(IPathResolver paths, IProcessEnvironment environment) : IAgentParser
 {
     public bool CanParse(string filePath) => filePath.EndsWith(".toml", StringComparison.OrdinalIgnoreCase);
 
     public AgentModel Parse(string content, string filePath, HarnessKind harness)
     {
-        string dirName = Path.GetDirectoryName(Path.GetFullPath(filePath))!;
+        string dirName = Path.GetDirectoryName(paths.GetFullPath(filePath, environment.CurrentDirectory))!;
         string fileName = Path.GetFileNameWithoutExtension(filePath);
 
         string name = fileName;
@@ -85,7 +87,7 @@ public sealed partial class TomlAgentParser : IAgentParser
         {
             RoleName = name,
             Harness = harness,
-            FilePath = Path.GetFullPath(filePath),
+            FilePath = paths.GetFullPath(filePath, environment.CurrentDirectory),
             DirectoryPath = dirName,
             Description = description,
             InstructionsBody = instructions,

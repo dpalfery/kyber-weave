@@ -480,6 +480,9 @@ public sealed class McpDocsGateToolsTests : IDisposable
             root,
             resolverFactory,
             () => RealDocumentLoader.Create(root, config.Ontology).Load(),
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment,
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
         return DocsToolsComposition.Create(host);

@@ -237,7 +237,7 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
         return KyberWeaveConfigAssembler.FromRepositoryYaml(
             yaml,
             root,
-            new ReviewWorkingDirectoryFacts(Tree.DirectoryExists, Tree.LeadsOutsideThroughSymlink),
+            new ReviewWorkingDirectoryFacts(Tree.DirectoryExists, Tree.LeadsOutsideThroughSymlink, Path.GetFullPath),
             ReadText);
     }
 

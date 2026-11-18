@@ -16,7 +16,8 @@ public sealed class AgentFileReader(IFileSystem files, IPathResolver paths, IPro
     // file matches the Markdown parser and nothing else, while the TOML parser is the
     // narrower predicate. Dispatching through IAgentParser is what stops that interface
     // from being an abstraction with two implementations and no consumer.
-    private static readonly IAgentParser[] Parsers = [new TomlAgentParser(), new MarkdownAgentParser()];
+    private readonly IAgentParser[] _parsers =
+        [new TomlAgentParser(paths, environment), new MarkdownAgentParser(paths, environment)];
 
     /// <summary>Loads every agent definition under a project root.</summary>
     /// <param name="projectRoot">The project root.</param>
@@ -89,7 +90,7 @@ public sealed class AgentFileReader(IFileSystem files, IPathResolver paths, IPro
         {
             try
             {
-                IAgentParser? parser = Array.Find(Parsers, p => p.CanParse(file));
+                IAgentParser? parser = Array.Find(_parsers, p => p.CanParse(file));
                 if (parser is null)
                     continue;
 

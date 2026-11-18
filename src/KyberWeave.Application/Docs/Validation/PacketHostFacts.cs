@@ -87,7 +87,7 @@ public sealed partial class PacketHostFacts(IFileSystem files) : IPacketHostFact
         return text.ToString().TrimEnd();
     }
 
-    private static void AppendGates(
+    private void AppendGates(
         StringBuilder text,
         string repoRoot,
         KyberWeaveConfig config,
@@ -105,7 +105,7 @@ public sealed partial class PacketHostFacts(IFileSystem files) : IPacketHostFact
             config.Review,
             role,
             technology,
-            TaskGateResolver.ParentTechnologyOrNone(repoRoot, config, technology, diagnostics));
+            TaskGateResolver.ParentTechnologyOrNone(files, repoRoot, config, technology, diagnostics));
 
         string forWhom = role is null
             ? $"technology {technology}"

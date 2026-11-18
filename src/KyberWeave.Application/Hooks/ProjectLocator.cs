@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Domain.Hooks;
 
@@ -28,16 +29,16 @@ internal static class ProjectLocator
         return fallback;
     }
 
-    public static string? FindMarker(IFileSystem fileSystem, string root, string fileDirectory) =>
-        FindUp(fileSystem, root, fileDirectory, SolutionPatterns);
+    public static string? FindMarker(IFileSystem fileSystem, IPathResolver paths, string root, string fileDirectory) =>
+        FindUp(fileSystem, paths, root, fileDirectory, SolutionPatterns);
 
-    public static string? FindProject(IFileSystem fileSystem, string root, string fileDirectory) =>
-        FindUp(fileSystem, root, fileDirectory, ProjectPatterns);
+    public static string? FindProject(IFileSystem fileSystem, IPathResolver paths, string root, string fileDirectory) =>
+        FindUp(fileSystem, paths, root, fileDirectory, ProjectPatterns);
 
-    private static string? FindUp(IFileSystem fileSystem, string root, string startDirectory, string[] patterns)
+    private static string? FindUp(IFileSystem fileSystem, IPathResolver paths, string root, string startDirectory, string[] patterns)
     {
         string? directory = startDirectory;
-        while (directory is not null && PathContainment.IsWithin(root, directory))
+        while (directory is not null && PathContainment.IsWithin(paths, root, directory))
         {
             foreach (string pattern in patterns)
             {

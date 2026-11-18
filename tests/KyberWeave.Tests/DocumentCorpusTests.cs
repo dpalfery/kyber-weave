@@ -196,7 +196,10 @@ public sealed class DocumentIndexHostTests : IDisposable
         return new DocumentIndexHost(
             _fixture.Root,
             () => CodeGraphResolverAdapter.ForRepository(_fixture.Root),
-            () => RealDocumentLoader.Create(_fixture.Root).Load());
+            () => RealDocumentLoader.Create(_fixture.Root).Load(),
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment);
     }
 
     [Fact]
@@ -272,7 +275,10 @@ public sealed class DocumentIndexHostTests : IDisposable
         DocumentIndexHost host = new(
             _fixture.Root,
             () => CodeGraphResolverAdapter.ForRepository(_fixture.Root),
-            () => throw new IOException("disk error / unreadable docs"));
+            () => throw new IOException("disk error / unreadable docs"),
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment);
 
         int? count = host.DocumentCount;
         Assert.Null(count);
@@ -284,7 +290,10 @@ public sealed class DocumentIndexHostTests : IDisposable
         DocumentIndexHost host = new(
             _fixture.Root,
             () => CodeGraphResolverAdapter.ForRepository(_fixture.Root),
-            () => throw new InvalidOperationException("unexpected non-IO failure"));
+            () => throw new InvalidOperationException("unexpected non-IO failure"),
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment);
 
         Assert.Throws<InvalidOperationException>(() => host.DocumentCount);
     }
@@ -301,7 +310,10 @@ public sealed class DocumentIndexHostTests : IDisposable
             {
                 loadCalls++;
                 return RealDocumentLoader.Create(_fixture.Root).Load();
-            });
+            },
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment);
 
         _ = host.Current();
         Assert.Equal(1, loadCalls);
@@ -336,6 +348,9 @@ public sealed class DocumentIndexHostTests : IDisposable
             _fixture.Root,
             () => CodeGraphResolverAdapter.ForRepository(_fixture.Root),
             () => RealDocumentLoader.Create(_fixture.Root).Load(),
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment,
             roots,
             "6-Docs/catalog.md");
 

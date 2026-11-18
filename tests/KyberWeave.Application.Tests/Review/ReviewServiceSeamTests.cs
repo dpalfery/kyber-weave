@@ -1,0 +1,227 @@
+using KyberWeave.Application.Review;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Plans;
+using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Core.Review;
+using KyberWeave.Tests;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
+using Xunit;
+
+namespace KyberWeave.Application.Tests.Review;
+
+/// <summary>
+/// The work tree, cycle and seats services and the plan-task target service resolve a path a caller spelled
+/// through the path seam, and read plans and directories through the file seam: a relative spelling names a place
+/// under the injected working directory, and a plan larger than the read bound is not loaded.
+/// </summary>
+public sealed class ReviewServiceSeamTests
+{
+    private const int PlanReadBound = 8 * 1024 * 1024;
+
+    private readonly InMemoryFileSystem _files = new();
+
+    private readonly FakeProcessEnvironment _environment = new(currentDirectory: "/work");
+
+    private FakePathResolver Paths => new(_files);
+
+    private static KyberWeaveConfig Config() => new() { Arbiter = ArbiterConfigDefaults.Product };
+
+    [Fact]
+    public void TheWorkTreeOfARelativePathIsTheNearestAncestorWithAGitEntryUnderTheWorkingDirectory()
+    {
+        _files.CreateDirectory("/work/repo/.git");
+        _files.CreateDirectory("/work/repo/src");
+
+        string tree = WorkTrees().Containing("repo/src");
+
+        Assert.Equal("/work/repo", tree);
+    }
+
+    [Fact]
+    public void ALinkedWorktreeMarkedByAGitFileIsItsOwnWorkTree()
+    {
+        _files.CreateDirectory("/work/repo/.git");
+        _files.CreateDirectory("/work/repo/wt/src");
+        _files.WriteAllText("/work/repo/wt/.git", "gitdir: ../.git/worktrees/wt");
+
+        Assert.Equal("/work/repo/wt", WorkTrees().Containing("repo/wt/src"));
+    }
+
+    [Fact]
+    public void APathInNoWorkTreeIsItsOwnFullPath()
+    {
+        _files.CreateDirectory("/work/plain");
+
+        Assert.Equal("/work/plain", WorkTrees().Containing("plain"));
+    }
+
+    [Fact]
+    public void TheCycleCommandLoadsTheConfigurationForTheRootARelativePathResolvesTo()
+    {
+        RecordingConfigs configs = new();
+
+        ReviewCommandResult result = Cycle(configs).Run(new ReviewCycleRequest("repo", null, null, null, false), TextWriter.Null);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal("/work/repo", configs.Root);
+    }
+
+    [Fact]
+    public void TheCycleCommandKeepsAnAbsolutePathWhateverTheWorkingDirectoryIs()
+    {
+        RecordingConfigs configs = new();
+
+        _ = Cycle(configs).Run(new ReviewCycleRequest("/elsewhere/repo", null, null, null, false), TextWriter.Null);
+
+        Assert.Equal("/elsewhere/repo", configs.Root);
+    }
+
+    [Fact]
+    public void TheSeatsCommandLoadsTheConfigurationForTheRootARelativePathResolvesTo()
+    {
+        RecordingConfigs configs = new();
+
+        ReviewCommandResult result = Seats(configs).Prepare(
+            new ReviewSeatsRequest("repo", null, null, null, false, false, false),
+            (_, _) => throw new InvalidOperationException("unexpected call"),
+            new FakeProcessExecutor(),
+            TextWriter.Null);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal("/work/repo", configs.Root);
+    }
+
+    [Fact]
+    public void ATaskInAnotherWorktreeIsFoundWhenTheWorktreeIsSpelledRelativeToTheWorkingDirectory()
+    {
+        _files.CreateDirectory("/work/wt");
+        PlanTaskTargetService service = Targets(worktrees: ["wt"], activeIn: "/work/wt");
+
+        PlanTaskTargetMatch? match = service.Find("repo", Config(), "T1", out string? reason);
+
+        Assert.NotNull(match);
+        Assert.Null(reason);
+        Assert.Equal("docs/plan.md", match.Plan);
+    }
+
+    [Fact]
+    public void AWorktreeThatIsNotADirectoryIsNotSearched()
+    {
+        PlanTaskTargetService service = Targets(worktrees: ["wt"], activeIn: "/work/wt");
+
+        PlanTaskTargetMatch? match = service.Find("repo", Config(), "T1", out string? reason);
+
+        Assert.Null(match);
+        Assert.NotNull(reason);
+    }
+
+    [Fact]
+    public void TheCheckoutsOwnWorktreeEntryIsNotSearchedAgainWhateverItsSpelling()
+    {
+        _files.CreateDirectory("/work/repo");
+        PlanTaskTargetService service = Targets(worktrees: ["repo/"], activeIn: "/work/repo");
+
+        PlanTaskTargetMatch? match = service.Find("repo", Config(), "T1", out _);
+
+        Assert.Null(match);
+    }
+
+    [Fact]
+    public void ThePlansContractRowIsReadThroughTheFileSeam()
+    {
+        _files.CreateDirectory("/work/repo/docs");
+        _files.WriteAllText("/work/repo/docs/plan.md", PlanTaskFileProbe.PlanMarkdown());
+
+        PlanContractRow? row = Targets([], null).ContractRow("/work/repo", "docs/plan.md", "T1");
+
+        Assert.NotNull(row);
+        Assert.Equal("T1", row.TaskId);
+    }
+
+    [Fact]
+    public void APlanLargerThanTheReadBoundYieldsNoContractRow()
+    {
+        _files.CreateDirectory("/work/repo/docs");
+        _files.WriteAllBytes("/work/repo/docs/plan.md", new byte[PlanReadBound + 1]);
+
+        Assert.Null(Targets([], null).ContractRow("/work/repo", "docs/plan.md", "T1"));
+    }
+
+    [Fact]
+    public void APlanAtTheReadBoundIsStillRead()
+    {
+        byte[] plan = new byte[PlanReadBound];
+        byte[] markdown = System.Text.Encoding.UTF8.GetBytes(PlanTaskFileProbe.PlanMarkdown());
+        Array.Fill(plan, (byte)' ');
+        markdown.CopyTo(plan, 0);
+        _files.CreateDirectory("/work/repo/docs");
+        _files.WriteAllBytes("/work/repo/docs/plan.md", plan);
+
+        Assert.NotNull(Targets([], null).ContractRow("/work/repo", "docs/plan.md", "T1"));
+    }
+
+    private ReviewWorkTreeService WorkTrees() =>
+        new(null!, null!, _files, null!, null!, Paths, _environment);
+
+    private ReviewCycleService Cycle(IConfigLoadService configs) =>
+        new(null!, null!, null!, configs, Paths, _environment);
+
+    private ReviewSeatsService Seats(IConfigLoadService configs) =>
+        new(null!, null!, null!, null!, null!, null!, null!, _files, _environment, null!, configs, null!, Paths);
+
+    /// <summary>
+    /// A target service over the shared fakes. The fake worktree list answers for the checkout named
+    /// <c>repo</c>; the plan it finds is active only in <paramref name="activeIn"/>.
+    /// </summary>
+    private PlanTaskTargetService Targets(string[] worktrees, string? activeIn)
+    {
+        PlanTaskFile file = new(1, Tasks: [new PlanTaskFileEntry(Id: "T1")]);
+        FakePlanTaskService plans = new()
+        {
+            PlansByRoot = activeIn is null ? [] : new(StringComparer.Ordinal) { [activeIn] = ["docs/plan.md"] },
+            Outcomes = new(StringComparer.Ordinal)
+            {
+                ["docs/plan.md"] = new PlanTaskFileOutcome(new DiagnosticReport(), "docs/plan.tasks.json", null, null, 1, false, file)
+            }
+        };
+        FakeGitRepositoryFacts git = new()
+        {
+            Worktrees = new(StringComparer.Ordinal) { ["repo"] = worktrees }
+        };
+
+        return new PlanTaskTargetService(plans, null!, git, _files, Paths, _environment);
+    }
+
+    /// <summary>Records the root it was asked to load and refuses, so the command stops before any other seam is used.</summary>
+    private sealed class RecordingConfigs : IConfigLoadService
+    {
+        public string? Root { get; private set; }
+
+        public bool TryLoad(
+            string repoRoot,
+            string? configPath,
+            DiagnosticReport report,
+            out KyberWeaveConfig config,
+            out string? resolvedConfigPath)
+        {
+            Root = repoRoot;
+            config = new KyberWeaveConfig { Arbiter = ArbiterConfigDefaults.Product };
+            resolvedConfigPath = null;
+            report.Add(new Diagnostic("KW-TEST-002", Severity.Error, "refused by the test", "review"));
+            return false;
+        }
+
+        public bool TryLoadWithDocsRoots(
+            string repoRoot,
+            string? configPath,
+            IReadOnlyList<string> docsRoots,
+            DiagnosticReport report,
+            out KyberWeaveConfig config,
+            out OntologyConfig ontology) =>
+            throw new InvalidOperationException("unexpected call");
+    }
+}

@@ -83,6 +83,9 @@ public sealed class McpDocsToolsRefreshOptInTests : IDisposable
             root,
             () => new UnreadableCodeGraph(),
             () => RealDocumentLoader.Create(root, config.Ontology).Load(),
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment,
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
