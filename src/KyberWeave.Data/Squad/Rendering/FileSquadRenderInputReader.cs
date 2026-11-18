@@ -8,12 +8,14 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <param name="loader">Loads the Squad source when the request carries none.</param>
 /// <param name="copilotProbe">Tells whether the Copilot config declares the operator channel server.</param>
 /// <param name="overlay">Reads the operator channel overlay.</param>
+/// <param name="baseline">Reads the shared worker baseline block from the source tree.</param>
 /// <param name="files">Checks whether the request's source directory exists.</param>
 /// <param name="processEnvironment">Reads the environment when the request carries no reader.</param>
 public sealed class FileSquadRenderInputReader(
     ISquadSourceLoader loader,
     ICopilotMcpServerProbe copilotProbe,
     ISquadOperatorChannelOverlayFile overlay,
+    ISquadWorkerBaselineFile baseline,
     IFileSystem files,
     IProcessEnvironment processEnvironment) : ISquadRenderInputReader
 {
@@ -44,7 +46,7 @@ public sealed class FileSquadRenderInputReader(
         Exception? baselineFailure = null;
         try
         {
-            baselineBlock = SquadWorkerBaselineFile.ReadBlock(request.SourceDirectory);
+            baselineBlock = baseline.ReadBlock(request.SourceDirectory);
         }
         catch (Exception exception)
         {

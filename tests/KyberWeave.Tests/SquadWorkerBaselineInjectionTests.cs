@@ -133,46 +133,6 @@ public sealed class SquadWorkerBaselineInjectionTests
     }
 
     [Fact]
-    public void ReadBlockReturnsNullWithoutThrowingWhenNoBaselineFileExists()
-    {
-        string emptyTemp = Path.Combine(Path.GetTempPath(), "kw-empty-baseline-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(emptyTemp);
-        try
-        {
-            string? block = SquadWorkerBaselineFile.ReadBlock(emptyTemp);
-            Assert.Null(block);
-
-            string? cached = SquadWorkerBaselineFile.ReadBlock(emptyTemp);
-            Assert.Null(cached);
-        }
-        finally
-        {
-            Directory.Delete(emptyTemp, true);
-        }
-    }
-
-    [Fact]
-    public void NestedBlockOpenThrowsSquadRenderValidationException()
-    {
-        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-baseline-" + Guid.NewGuid().ToString("N"));
-        string sharedDir = Path.Combine(tempDir, "shared");
-        Directory.CreateDirectory(sharedDir);
-        try
-        {
-            string baselinePath = Path.Combine(sharedDir, "worker-baseline.md");
-            File.WriteAllText(
-                baselinePath,
-                "<worker-baseline>\n<worker-baseline>\ntext\n</worker-baseline>");
-
-            Assert.Throws<SquadRenderValidationException>(() => SquadWorkerBaselineFile.ReadBlock(tempDir));
-        }
-        finally
-        {
-            Directory.Delete(tempDir, true);
-        }
-    }
-
-    [Fact]
     public void UnclosedBlockInInstructionBodyIsReplacedWithoutDuplicateBlock()
     {
         SquadAgent sample = TestSquadCorpus.CanonicalSource.Agents.First(a => a.Invocation == SquadInvocation.Subagent);

@@ -45,10 +45,15 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<ICopilotMcpServerProbe>(sp => new CopilotMcpServerProbe(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ISquadOperatorChannelOverlayFile>(sp => new SquadOperatorChannelOverlayFile(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<ISquadWorkerBaselineFile>(sp => new SquadWorkerBaselineFile(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<ISquadRenderInputReader>(sp => new FileSquadRenderInputReader(
             sp.GetRequiredService<ISquadSourceLoader>(),
             sp.GetRequiredService<ICopilotMcpServerProbe>(),
             sp.GetRequiredService<ISquadOperatorChannelOverlayFile>(),
+            sp.GetRequiredService<ISquadWorkerBaselineFile>(),
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<ISquadModelPresetValidator>(sp => new SquadModelPresetValidator(sp.GetRequiredService<IFileSystem>()));
