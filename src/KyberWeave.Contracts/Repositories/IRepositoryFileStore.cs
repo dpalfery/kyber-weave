@@ -6,12 +6,12 @@ public interface IRepositoryFileStore : IWritableFileSystem
     /// <summary>Reads a whole file as bytes.</summary>
     /// <param name="path">The file.</param>
     /// <returns>The file's bytes.</returns>
-    byte[] ReadAllBytes(string path);
+    new byte[] ReadAllBytes(string path);
 
     /// <summary>Reads a file line by line.</summary>
     /// <param name="path">The file.</param>
     /// <returns>The lines, read lazily.</returns>
-    IEnumerable<string> ReadLines(string path);
+    new IEnumerable<string> ReadLines(string path);
 
     /// <summary>Reads a text file through the one bounded reader.</summary>
     /// <param name="path">The file.</param>
@@ -28,12 +28,12 @@ public interface IRepositoryFileStore : IWritableFileSystem
     /// <summary>Writes a whole text file so a reader never sees it half written.</summary>
     /// <param name="path">The file.</param>
     /// <param name="contents">The text.</param>
-    void WriteAllTextAtomic(string path, string contents);
+    new void WriteAllTextAtomic(string path, string contents);
 
     /// <summary>Opens a file for reading.</summary>
     /// <param name="path">The file.</param>
     /// <returns>A read stream the caller disposes.</returns>
-    Stream OpenRead(string path);
+    new Stream OpenRead(string path);
 
     /// <summary>Opens a file for appending with no sharing.</summary>
     /// <param name="path">The file.</param>
@@ -53,7 +53,7 @@ public interface IRepositoryFileStore : IWritableFileSystem
     /// <summary>Lists the files and directories directly in a directory, lazily and in the platform's order.</summary>
     /// <param name="directory">The directory.</param>
     /// <returns>The entries, each with its name and whether it is a directory or a link.</returns>
-    IEnumerable<RepositoryEntry> EnumerateEntries(string directory);
+    new IEnumerable<RepositoryEntry> EnumerateEntries(string directory);
 
     /// <summary>Deletes a directory.</summary>
     /// <param name="path">The directory.</param>
@@ -63,7 +63,7 @@ public interface IRepositoryFileStore : IWritableFileSystem
     /// <summary>Gets when a file was last written.</summary>
     /// <param name="path">The file.</param>
     /// <returns>The UTC time.</returns>
-    DateTime GetLastWriteTimeUtc(string path);
+    new DateTime GetLastWriteTimeUtc(string path);
 
     /// <summary>Lists the files under a documentation root, refusing any symbolic link on the way.</summary>
     /// <param name="root">The absolute documentation root.</param>

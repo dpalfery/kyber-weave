@@ -37,7 +37,44 @@ internal sealed class FakeFileSystem : IFileSystem
 
     public bool DirectoryExists(string path) => directories.Contains(path);
 
-    public string ReadAllText(string path) => unreadable.Contains(path) ? throw new UnauthorizedAccessException(path) : files[path];
+    public string ReadAllText(string path) =>
+        unreadable.Contains(path) ? throw new UnauthorizedAccessException(path)
+        : files.TryGetValue(path, out string? content) ? content
+        : throw new FileNotFoundException($"The fake has no file at '{path}'.", path);
+
+    public byte[] ReadAllBytes(string path) => System.Text.Encoding.UTF8.GetBytes(ReadAllText(path));
+
+    public IEnumerable<string> ReadLines(string path)
+    {
+        string[] lines = ReadAllText(path).Split('\n');
+        int count = lines.Length > 0 && lines[^1].Length == 0 ? lines.Length - 1 : lines.Length;
+        for (int index = 0; index < count; index++)
+        {
+            yield return lines[index].TrimEnd('\r');
+        }
+    }
+
+    public Stream OpenRead(string path) => new MemoryStream(ReadAllBytes(path));
+
+    public long GetLength(string path) => System.Text.Encoding.UTF8.GetByteCount(ReadAllText(path));
+
+    public DateTime GetLastWriteTimeUtc(string path) => files.ContainsKey(path) ? DateTime.UtcNow : default;
+
+    public FileAttributes GetAttributes(string path) =>
+        directories.Contains(path) ? FileAttributes.Directory
+        : files.ContainsKey(path) ? FileAttributes.Normal
+        : throw new FileNotFoundException(path);
+
+    public IEnumerable<FileSystemEntry> EnumerateEntries(string directory) =>
+        files.Keys.Where(f => Path.GetDirectoryName(f) == directory).Select(f => new FileSystemEntry(f, false, false))
+            .Concat(directories.Where(d => Path.GetDirectoryName(d) == directory).Select(d => new FileSystemEntry(d, true, false)));
+
+    public string? GetLinkTarget(string path) => null;
+
+    public string? GetFinalLinkTarget(string path) => null;
+
+    public IEnumerable<string> EnumerateFiles(string directory, string searchPattern, bool recursive, bool followLinks) =>
+        EnumerateFiles(directory, searchPattern, recursive);
 
     public IEnumerable<string> EnumerateFiles(string directory, string searchPattern, bool recursive) =>
         files.Keys.Where(f =>
