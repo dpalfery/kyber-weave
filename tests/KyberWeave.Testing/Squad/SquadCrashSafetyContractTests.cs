@@ -14,6 +14,11 @@ namespace KyberWeave.Testing.Squad;
 /// the workspace.
 /// </para>
 /// <para>
+/// "Every fault point" means every distinct crash state the workspace can be stopped at, as the
+/// fixture defines it: the real disk can stop only at the durable steps and checkpoints the
+/// transaction reports, while the in-memory run will stop at every file-system operation.
+/// </para>
+/// <para>
 /// A case that fails today is a known crash-safety weakness, recorded in
 /// <see cref="KnownWeaknesses"/> and reported with <see cref="Assert.Skip"/>, so the run stays green
 /// and the weakness stays visible instead of being forgotten.

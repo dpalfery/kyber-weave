@@ -51,10 +51,18 @@ public sealed record SquadTreeEntry(
 /// point.
 /// </summary>
 /// <remarks>
-/// One implementation runs against the real disk, so the suite is evidence today. A second one will
-/// run against <c>InMemoryFileSystem</c> once the deployment classes take the file-system seam (tasks
-/// 3.2 to 3.4): that implementation enumerates one fault point per file-system operation and kills
-/// the fake at that ordinal, leaving this suite unchanged.
+/// <para>
+/// A <em>fault point</em> is one distinct crash state the file system can be stopped at. The
+/// real-disk implementation can only stop where the transaction already reports a durable step or
+/// checkpoint, so the windows inside a bulk staging or backup wave are not separately reachable
+/// there; it records one point per distinct tree those callbacks expose.
+/// </para>
+/// <para>
+/// A second implementation will run against <c>InMemoryFileSystem</c> once the deployment classes
+/// take the file-system seam (tasks 3.2 to 3.4): it enumerates one fault point per file-system
+/// operation and kills the fake at that ordinal, which is the only way to stop inside a write or a
+/// wave, leaving this suite unchanged.
+/// </para>
 /// </remarks>
 public abstract class SquadCrashSafetyFixture : IDisposable
 {
@@ -86,8 +94,9 @@ public abstract class SquadCrashSafetyFixture : IDisposable
     /// <summary>Runs the flow with no fault and returns every fault point it passed.</summary>
     /// <param name="flow">The flow to run.</param>
     /// <returns>
-    /// The fault points, each a name this fixture understands in
-    /// <see cref="ExecuteUnderFault"/>, in the order the flow reached them.
+    /// One name per distinct crash state the flow reached, each understood by
+    /// <see cref="ExecuteUnderFault"/>, in the order the flow reached them. A callback whose tree an
+    /// earlier callback already left is not repeated.
     /// </returns>
     public abstract IReadOnlyList<string> ExecuteClean(SquadCrashFlow flow);
 
