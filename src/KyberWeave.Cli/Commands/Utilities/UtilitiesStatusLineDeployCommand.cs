@@ -41,6 +41,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(plans);
+        ArgumentNullException.ThrowIfNull(semantics);
         ArgumentNullException.ThrowIfNull(console);
 
         _environment = environment;

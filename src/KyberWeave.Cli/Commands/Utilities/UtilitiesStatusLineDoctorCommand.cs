@@ -46,6 +46,7 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(processRunner);
+        ArgumentNullException.ThrowIfNull(semantics);
         ArgumentNullException.ThrowIfNull(console);
 
         _environment = environment;

@@ -440,6 +440,34 @@ public sealed class UtilitiesStatusLineCommandSeamTests
     }
 
     // -----------------------------------------------------------------------------------------
+    // constructor boundaries
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A command resolves every owned path through the path semantics, so a missing one is a programming error at the
+    /// constructor boundary rather than a null dereference deep inside the resolution.
+    /// </summary>
+    [Theory]
+    [InlineData("status")]
+    [InlineData("deploy")]
+    [InlineData("doctor")]
+    public void ACommandRefusesANullPathSemantics(string verb)
+    {
+        FakeProcessEnvironment environment = new(currentDirectory: Work, homeDirectory: Home);
+
+        Action construct = verb switch
+        {
+            "status" => () => _ = new UtilitiesStatusLineStatusCommand(environment, _plans, _host, null!, _console),
+            "deploy" => () => _ = new UtilitiesStatusLineDeployCommand(environment, _host, _plans, null!, _console),
+            "doctor" => () => _ = new UtilitiesStatusLineDoctorCommand(
+                environment, _plans, _host, UnreachableProbe, null!, _console),
+            _ => throw new ArgumentOutOfRangeException(nameof(verb), verb, "No status-line command is defined.")
+        };
+
+        Assert.Throws<ArgumentNullException>(construct);
+    }
+
+    // -----------------------------------------------------------------------------------------
     // shared rendering
     // -----------------------------------------------------------------------------------------
 

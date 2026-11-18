@@ -39,6 +39,7 @@ public sealed class UtilitiesStatusLineStatusCommand : Command<UtilitiesStatusLi
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(host);
+        ArgumentNullException.ThrowIfNull(semantics);
         ArgumentNullException.ThrowIfNull(console);
 
         _environment = environment;
