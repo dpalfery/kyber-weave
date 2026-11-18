@@ -50,13 +50,11 @@ public sealed class FastLoopScriptTests
     }
 
     /// <summary>
-    /// The touched ceiling counts test classes, not the argv words that name them. Each integration
-    /// class is named by a <c>-class</c> pair, so counting the pairs doubled that half of the total and
-    /// crossed the 40-class ceiling on a change well inside it; the run then dropped the integration
-    /// filter and took the fast tier, so the touched integration classes never ran.
+    /// A developer loop never runs the integration project (requirement 7.3): <c>--touched</c> runs the touched
+    /// unit classes, says that CI runs the touched integration classes, and does not start them.
     /// </summary>
     [Fact]
-    public void TouchedCountsIntegrationClassesOnceSoTheirFilterSurvivesTheCeiling()
+    public void TouchedNeverRunsIntegrationClassesAndSaysCiRunsThem()
     {
         SkipIfBashUnavailable();
         using FastLoopFixture fixture = new();
@@ -68,10 +66,11 @@ public sealed class FastLoopScriptTests
         ProcessResult result = fixture.RunFastLoop("--touched");
         string log = fixture.GetCallLog();
 
-        Assert.DoesNotContain("running the fast tier instead", result.StandardOutput, StringComparison.Ordinal);
-        Assert.Contains("integration tests (touched)", result.StandardOutput, StringComparison.Ordinal);
+        Assert.DoesNotContain("running the fast tier instead", result.StandardOutput + result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("integration classes touched", result.StandardError, StringComparison.Ordinal);
+        Assert.DoesNotContain("integration tests (touched)", result.StandardOutput, StringComparison.Ordinal);
         Assert.Contains("KyberWeave.Tests.TouchedUnitTests", log, StringComparison.Ordinal);
-        Assert.Contains("KyberWeave.Integration.Tests.TouchedCase01Tests", log, StringComparison.Ordinal);
+        Assert.DoesNotContain("KyberWeave.Integration.Tests.TouchedCase", log, StringComparison.Ordinal);
     }
 
     /// <summary>

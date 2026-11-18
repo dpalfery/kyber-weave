@@ -1288,6 +1288,7 @@ jobs:
       - pr-naming
       - build-test
       - integration-test
+      - squad-filesystem-contract
       - trivy
       - semgrep
       - gitleaks
@@ -1312,6 +1313,7 @@ jobs:
           echo "| Pull request name | ${{ needs.pr-naming.result }} |" >> results.md
           echo "| Build and test | ${{ needs.build-test.result }} |" >> results.md
           echo "| Integration tests | ${{ needs.integration-test.result }} |" >> results.md
+          echo "| Squad filesystem contract (macOS, Windows) | ${{ needs.squad-filesystem-contract.result }} |" >> results.md
           echo "| SBOM (CycloneDX 1.6) | ${{ needs.sbom.result }} |" >> results.md
           echo "| Publish smoke | ${{ needs.publish-smoke.result }} |" >> results.md
           echo "| Update loop | ${{ needs.update-loop.result }} |" >> results.md
@@ -1332,6 +1334,7 @@ jobs:
             "${{ needs.pr-naming.result }}" \
             "${{ needs.build-test.result }}" \
             "${{ needs.integration-test.result }}" \
+            "${{ needs.squad-filesystem-contract.result }}" \
             "${{ needs.sbom.result }}" \
             "${{ needs.publish-smoke.result }}" \
             "${{ needs.update-loop.result }}" \
