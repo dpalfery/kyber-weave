@@ -1,9 +1,10 @@
 using System.Text.Json.Nodes;
 using KyberWeave.Cli.Update;
+using KyberWeave.Tests;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Application.Tests.Update;
 
 /// <summary>
 /// The arbiter hook refresh, run after an update, reports a leftover old MCP server key once per
@@ -15,13 +16,25 @@ namespace KyberWeave.Integration.Tests;
 /// leftover, and the operator would have to search every tree for it. The notice never changes a file:
 /// the refresh rewrites hooks, and a rename belongs to <c>docs mcp-migrate</c>, which the operator runs.
 /// </remarks>
-public sealed class ArbiterHookRefresherRenameNoticeTests : IDisposable
+public sealed class ArbiterHookRefresherRenameNoticeTests
 {
     private const string WarningCode = "KW-MCP-WIRE-007";
 
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryMcpWiring _wiring = McpWiringTestServices.InMemory();
+    private readonly FakeKyberWeaveConfigRepository _configs = new();
+    private readonly FakeSquadStateStore _state = new(new FakeSquadUserPaths("/kw/home/state"));
 
-    public void Dispose() => _temp.Dispose();
+    private ArbiterHookRefresher Refresher(List<string> log) => new(
+        new FakeProcessEnvironment(homeDirectory: "/kw/home", readVariable: _ => null),
+        new ArbiterHookRefresherTests.NoUserConfig(),
+        _configs,
+        new FakeSquadLifecycleService(_state),
+        _state,
+        _wiring.Files,
+        _wiring.Wiring,
+        log.Add);
+
+    private string ProjectRoot(string name) => Path.Combine(_wiring.Root, name);
 
     /// <summary>
     /// Each enabled project that holds a proven old key gets its own log line naming the rule id and that
@@ -30,14 +43,14 @@ public sealed class ArbiterHookRefresherRenameNoticeTests : IDisposable
     [Fact]
     public void TheRefresherLogsTheLeftoverOncePerProjectThatHoldsIt()
     {
-        string withLeftover = Path.Combine(_temp.Path, "project-with-leftover");
-        string clean = Path.Combine(_temp.Path, "project-clean");
+        string withLeftover = ProjectRoot("project-with-leftover");
+        string clean = ProjectRoot("project-clean");
         ArrangeEnabledProject(withLeftover);
         ArrangeEnabledProject(clean);
         WriteProvenOldKey(withLeftover);
         List<string> log = [];
 
-        ArbiterHookRefresher refresher = PhysicalArbiterRefresher.Create(EnvironmentWithHome(), log.Add);
+        ArbiterHookRefresher refresher = Refresher(log);
         refresher.Refresh([withLeftover, clean]);
 
         string[] notices = [.. log.Where(line => line.Contains(WarningCode, StringComparison.Ordinal))];
@@ -52,40 +65,29 @@ public sealed class ArbiterHookRefresherRenameNoticeTests : IDisposable
     [Fact]
     public void TheRefresherNeverRewritesTheLeftoverFile()
     {
-        string project = Path.Combine(_temp.Path, "project-read-only");
+        string project = ProjectRoot("project-read-only");
         ArrangeEnabledProject(project);
         WriteProvenOldKey(project);
-        byte[] before = File.ReadAllBytes(Path.Combine(project, ".mcp.json"));
+        byte[] before = _wiring.Files.ReadAllBytes(Path.Combine(project, ".mcp.json"));
         List<string> log = [];
 
-        ArbiterHookRefresher refresher = PhysicalArbiterRefresher.Create(EnvironmentWithHome(), log.Add);
+        ArbiterHookRefresher refresher = Refresher(log);
         refresher.Refresh([project]);
 
         Assert.Contains(log, line => line.Contains(WarningCode, StringComparison.Ordinal));
-        Assert.Equal(before, File.ReadAllBytes(Path.Combine(project, ".mcp.json")));
+        Assert.Equal(before, _wiring.Files.ReadAllBytes(Path.Combine(project, ".mcp.json")));
     }
 
-    private Func<string, string?> EnvironmentWithHome()
+    private void ArrangeEnabledProject(string project)
     {
-        string home = Path.Combine(_temp.Path, "home");
-        Directory.CreateDirectory(home);
-        return key => key == "HOME" ? home : null;
-    }
-
-    private static void ArrangeEnabledProject(string project)
-    {
-        Directory.CreateDirectory(Path.Combine(project, ".kyber-weave"));
-        File.WriteAllText(
-            Path.Combine(project, ".kyber-weave", "kyber-weave.yml"),
-            "arbiter:\n  enabled: true\n  provider:\n    kind: none\n");
+        _wiring.Files.CreateDirectory(project);
+        _configs.WriteRepositoryConfig(project, "arbiter:\n  enabled: true\n  provider:\n    kind: none\n");
     }
 
     private void WriteProvenOldKey(string project)
     {
-        string bin = Path.Combine(_temp.Path, "bin");
-        Directory.CreateDirectory(bin);
-        string binary = McpWiringFixture.WriteExecutable(bin, "kyber-weave-mcp");
-        File.WriteAllText(
+        string binary = McpWiringFixture.WriteExecutable(_wiring.Files, Path.Combine(_wiring.Root, "bin"), "kyber-weave-mcp");
+        _wiring.Files.WriteAllText(
             Path.Combine(project, ".mcp.json"),
             new JsonObject
             {
