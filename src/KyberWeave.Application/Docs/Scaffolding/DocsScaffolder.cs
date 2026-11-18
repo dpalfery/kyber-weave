@@ -111,7 +111,8 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         // for every shipped technology and one role folder in the same run. Only the technology
         // folders this run was asked for are remembered: naming one folder is not a request to
         // restyle a technology the host already declared, and that folder keeps the stub it would
-        // have been given without either flag.
+        // have been given without either flag. A delivery platform ships a template and is stored
+        // as a technology, so "every folder except a role" is the set --kyber-standards names.
         HashSet<string> templatedTechnologies = new(StringComparer.Ordinal);
         if (kyberStandards)
         {
@@ -119,7 +120,8 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
                 .Union(KyberStandardsTemplates.All, StringComparer.Ordinal)
                 .ToList();
             ontology = ontology.Clone(technologies: mergedTechnologies);
-            templatedTechnologies.UnionWith(KyberStandardsTemplates.All);
+            templatedTechnologies.UnionWith(KyberStandardsTemplates.AllFolders.Where(
+                name => !KyberStandardsTemplates.Roles.Contains(name, StringComparer.Ordinal)));
         }
 
         bool writesShippedTemplates = kyberStandards;

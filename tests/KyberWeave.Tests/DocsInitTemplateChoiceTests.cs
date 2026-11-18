@@ -139,6 +139,32 @@ public class DocsInitTemplateChoiceTests : IDisposable
     }
 
     /// <summary>
+    /// A delivery-platform folder ships a template too, and <c>--kyber-standards</c> covers every
+    /// folder it installs: a host that declares <c>github</c> gets github's own four files, not the
+    /// generic stubs.
+    /// </summary>
+    [Fact]
+    public void KyberStandardsRendersAPlatformTemplateForADeclaredPlatform()
+    {
+        string configPath = PathOf(".kyber-weave/kyber-weave.yml");
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        File.WriteAllText(configPath, """
+            ontology:
+              docs-root: docs
+              technologies:
+                - github
+            """);
+
+        Scaffolding.Scaffold(_temp.Path, kyberStandards: true);
+
+        string today = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal(
+            KyberStandardsTemplates.RenderPart(
+                "github", KyberStandardsTemplates.Part.Standard, "unassigned", today),
+            File.ReadAllText(PathOf("docs/standards/github/github.standards.md")));
+    }
+
+    /// <summary>
     /// <c>--standards</c> names folders, and only the folders it names get a shipped template. A
     /// technology the host already declared keeps the stub its folder would have been given without
     /// the flag, so asking for one folder does not restyle every other one.
