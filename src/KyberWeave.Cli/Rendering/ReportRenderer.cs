@@ -32,22 +32,28 @@ public static class ReportRenderer
     /// <param name="format">The requested format.</param>
     /// <param name="command">The command name a document format records.</param>
     /// <param name="subjectLabel">Names what the findings are about.</param>
+    /// <param name="displayRoot">
+    /// The directory a rooted finding path is shown relative to for this render, or null to use <see cref="DisplayRoot"/>.
+    /// A caller that renders on another thread, or a test, passes its own root instead of changing the process-wide one.
+    /// </param>
     public static void Render(
         IAnsiConsole console,
         DiagnosticReport report,
         OutputFormat format,
         string command,
-        string subjectLabel)
+        string subjectLabel,
+        string? displayRoot = null)
     {
         ArgumentNullException.ThrowIfNull(console);
+        string root = displayRoot ?? DisplayRoot;
 
         switch (format)
         {
             case OutputFormat.Json: WriteLine(console, ToJson(report)); break;
             case OutputFormat.Sarif: WriteLine(console, ToSarif(report)); break;
-            case OutputFormat.Markdown: WriteLine(console, ToMarkdown(report, command, subjectLabel)); break;
-            case OutputFormat.Lines: RenderLines(console, report); break;
-            default: RenderTable(console, report, subjectLabel); break;
+            case OutputFormat.Markdown: WriteLine(console, ToMarkdown(report, command, subjectLabel, root)); break;
+            case OutputFormat.Lines: RenderLines(console, report, root); break;
+            default: RenderTable(console, report, subjectLabel, root); break;
         }
     }
 
@@ -77,7 +83,7 @@ public static class ReportRenderer
     /// folding so each line can be grepped whole. Informational findings are listed only when nothing actionable exists,
     /// as in the table.
     /// </summary>
-    private static void RenderLines(IAnsiConsole console, DiagnosticReport report)
+    private static void RenderLines(IAnsiConsole console, DiagnosticReport report, string displayRoot)
     {
         if (report.Items.Count == 0)
         {
@@ -98,16 +104,16 @@ public static class ReportRenderer
 
         foreach (Diagnostic d in rows.OrderByDescending(item => item.Severity))
         {
-            WriteLine(console, FormatLine(d));
+            WriteLine(console, FormatLine(d, displayRoot));
         }
 
         WriteMetricLines(console, report);
     }
 
     /// <summary>One finding as a single line.</summary>
-    internal static string FormatLine(Diagnostic d)
+    internal static string FormatLine(Diagnostic d, string? displayRoot = null)
     {
-        string where = FormatLocation(d);
+        string where = FormatLocation(d, displayRoot: displayRoot);
         if (where.Length == 0)
         {
             where = d.Subject;
@@ -160,7 +166,7 @@ public static class ReportRenderer
         _ => "ℹ"
     };
 
-    private static void RenderTable(IAnsiConsole console, DiagnosticReport report, string subjectLabel)
+    private static void RenderTable(IAnsiConsole console, DiagnosticReport report, string subjectLabel, string displayRoot)
     {
         if (report.Items.Count == 0)
         {
@@ -200,7 +206,7 @@ public static class ReportRenderer
                 new Markup($"[{color.ToMarkup()}]{Glyph(d.Severity)} {d.Severity}[/]"),
                 new Markup(Markup.Escape(d.Code)),
                 new Markup(Markup.Escape(d.Subject)),
-                new Markup(Markup.Escape(FormatLocation(d))),
+                new Markup(Markup.Escape(FormatLocation(d, displayRoot: displayRoot))),
                 new Markup(Markup.Escape(d.Message) + (d.Hint is null ? "" : $"\n[grey]→ {Markup.Escape(d.Hint)}[/]")));
         }
 
@@ -272,7 +278,7 @@ public static class ReportRenderer
         return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
     }
 
-    private static string ToMarkdown(DiagnosticReport report, string command, string subjectLabel)
+    private static string ToMarkdown(DiagnosticReport report, string command, string subjectLabel, string displayRoot)
     {
         StringBuilder sb = new StringBuilder();
         sb.AppendLine(CultureInfo.InvariantCulture, $"### Kyber-Weave `{command}` results");
@@ -289,7 +295,7 @@ public static class ReportRenderer
             sb.AppendLine("|---|---|---|---|---|");
             foreach (Diagnostic d in report.Items.OrderByDescending(i => i.Severity))
             {
-                sb.AppendLine(CultureInfo.InvariantCulture, $"| {d.Severity} | {EscapeMarkdown(d.Code)} | {EscapeMarkdown(d.Subject)} | {EscapeMarkdown(FormatLocation(d, includeRelatedCount: false))} | {EscapeMarkdown(d.Message)} |");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"| {d.Severity} | {EscapeMarkdown(d.Code)} | {EscapeMarkdown(d.Subject)} | {EscapeMarkdown(FormatLocation(d, includeRelatedCount: false, displayRoot: displayRoot))} | {EscapeMarkdown(d.Message)} |");
                 if (d.RelatedLocations is not { Count: > 0 })
                 {
                     continue;
@@ -298,7 +304,7 @@ public static class ReportRenderer
                 foreach (DiagnosticLocation related in d.RelatedLocations)
                 {
                     string message = related.Message ?? "Related location";
-                    sb.AppendLine(CultureInfo.InvariantCulture, $"|  |  |  | {EscapeMarkdown(FormatLocation(related))} | {EscapeMarkdown(message)} |");
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"|  |  |  | {EscapeMarkdown(FormatLocation(related, displayRoot: displayRoot))} | {EscapeMarkdown(message)} |");
                 }
             }
         }
@@ -506,9 +512,9 @@ public static class ReportRenderer
         return physicalLocation;
     }
 
-    private static string FormatLocation(Diagnostic diagnostic, bool includeRelatedCount = true)
+    private static string FormatLocation(Diagnostic diagnostic, bool includeRelatedCount = true, string? displayRoot = null)
     {
-        string formatted = FormatLocation(diagnostic.FilePath, diagnostic.StartLine, diagnostic.EndLine);
+        string formatted = FormatLocation(diagnostic.FilePath, diagnostic.StartLine, diagnostic.EndLine, displayRoot);
         if (includeRelatedCount && diagnostic.RelatedLocations is { Count: > 0 })
         {
             formatted += $" (+{diagnostic.RelatedLocations.Count.ToString(CultureInfo.InvariantCulture)} related)";
@@ -517,17 +523,17 @@ public static class ReportRenderer
         return formatted;
     }
 
-    private static string FormatLocation(DiagnosticLocation location) =>
-        FormatLocation(location.FilePath, location.StartLine, location.EndLine);
+    private static string FormatLocation(DiagnosticLocation location, string? displayRoot = null) =>
+        FormatLocation(location.FilePath, location.StartLine, location.EndLine, displayRoot);
 
-    private static string FormatLocation(string? filePath, int? startLine, int? endLine)
+    private static string FormatLocation(string? filePath, int? startLine, int? endLine, string? displayRoot = null)
     {
         if (string.IsNullOrEmpty(filePath))
         {
             return string.Empty;
         }
 
-        string displayPath = DisplayPath(filePath);
+        string displayPath = DisplayPath(filePath, displayRoot);
         if (startLine is null)
         {
             return displayPath;
@@ -543,16 +549,17 @@ public static class ReportRenderer
     /// Absolute paths under the display root become relative so the Location column does not consume the row.
     /// JSON and SARIF keep the original path.
     /// </summary>
-    private static string DisplayPath(string filePath)
+    private static string DisplayPath(string filePath, string? displayRoot = null)
     {
-        if (DisplayRoot.Length == 0 || !Path.IsPathRooted(filePath))
+        string root = displayRoot ?? DisplayRoot;
+        if (root.Length == 0 || !Path.IsPathRooted(filePath))
         {
             return filePath;
         }
 
         try
         {
-            string relative = Path.GetRelativePath(DisplayRoot, filePath);
+            string relative = Path.GetRelativePath(root, filePath);
             if (string.IsNullOrEmpty(relative)
                 || relative.StartsWith("..", StringComparison.Ordinal))
             {

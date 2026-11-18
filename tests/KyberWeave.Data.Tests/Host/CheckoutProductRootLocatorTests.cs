@@ -27,8 +27,8 @@ public sealed class CheckoutProductRootLocatorTests
 
         string? located = _locator.Locate(_root, "src/Product");
 
+        Assert.Equal(Path.Combine(_root, "src", "Product"), located);
         Assert.True(_files.DirectoryExists(located!));
-        Assert.Equal("Product", Path.GetFileName(located));
     }
 
     [Fact]

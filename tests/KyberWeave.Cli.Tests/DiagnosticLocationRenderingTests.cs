@@ -168,20 +168,12 @@ public sealed class DiagnosticLocationRenderingTests
             StartLine: 10,
             EndLine: 12));
 
-        // The composition root sets this from the process's current directory; a test host has none,
-        // so the test supplies it rather than inheriting whatever the previous test left behind.
-        string priorRoot = ReportRenderer.DisplayRoot;
-        string output;
-        try
-        {
-            ReportRenderer.DisplayRoot = displayRoot;
-            output = Render(OutputFormat.Table, report);
-        }
-        finally
-        {
-            ReportRenderer.DisplayRoot = priorRoot;
-        }
+        // The root is passed per render rather than set on the process-wide static: two test classes run in
+        // parallel, and a static one leaves the other's findings relativized against this test's root.
+        TestConsole console = new() { EmitAnsiSequences = false };
+        ReportRenderer.Render(console, report, OutputFormat.Table, "docs integrity-check", "Claim", displayRoot);
 
+        string output = console.Output;
         Assert.Contains("docs/primary.md:10-12", output, StringComparison.Ordinal);
         Assert.DoesNotContain(absolute, output, StringComparison.Ordinal);
     }
