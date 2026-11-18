@@ -1,6 +1,8 @@
+using KyberWeave.Application.RunStart;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Hooks;
+using KyberWeave.Data.RunStart;
 using KyberWeave.Core.Arbiter.Plans;
 using System.Diagnostics;
 using System.Text.Json;
@@ -23,6 +25,12 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
 {
     private const string RuleId = "KW-ARB-RUN-001";
     private const string Branch = "copilot/feat/add-widget";
+
+    private static readonly IRunStartEvidence Evidence = new RunStartEvidenceService(
+        new GitFacts(),
+        new FileRunStateStore(
+            new PhysicalFileSystem(),
+            new GitCheckedOutBranchReader(new ProcessGitCommandRunner(ProcessGitCommandRunner.DefaultTimeout))));
 
     private readonly TempDirectory _home = new();
     private readonly TempDirectory _repoParent = new();
@@ -49,7 +57,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     [Fact]
     public void NoRunRecord_IsNotStarted()
     {
-        Assert.False(RunStartEvidence.Started(_repo, _home.Path));
+        Assert.False(Evidence.Started(_repo, _home.Path));
     }
 
     [Fact]
@@ -57,7 +65,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     {
         StartInPlace();
 
-        Assert.True(RunStartEvidence.Started(_repo, _home.Path));
+        Assert.True(Evidence.Started(_repo, _home.Path));
     }
 
     [Fact]
@@ -67,8 +75,8 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
         Git(_repo, "worktree", "add", "-q", "-b", Branch, worktree);
         Record(worktree);
 
-        Assert.True(RunStartEvidence.Started(_repo, _home.Path));
-        Assert.True(RunStartEvidence.Started(worktree, _home.Path));
+        Assert.True(Evidence.Started(_repo, _home.Path));
+        Assert.True(Evidence.Started(worktree, _home.Path));
     }
 
     [Fact]
@@ -77,7 +85,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
         StartInPlace();
         Git(_repo, "switch", "-q", "main");
 
-        Assert.False(RunStartEvidence.Started(_repo, _home.Path));
+        Assert.False(Evidence.Started(_repo, _home.Path));
     }
 
     [Fact]
@@ -87,7 +95,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
             _home.Path, Branch, "origin/main",
             new RunStartPlace(CommonDir(), Path.Combine(_repoParent.Path, "gone"), DateTimeOffset.UtcNow));
 
-        Assert.False(RunStartEvidence.Started(_repo, _home.Path));
+        Assert.False(Evidence.Started(_repo, _home.Path));
     }
 
     [Fact]
@@ -98,7 +106,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
             _home.Path, Branch, "origin/main",
             new RunStartPlace(Path.Combine(_repoParent.Path, "other", ".git"), _repo, DateTimeOffset.UtcNow));
 
-        Assert.False(RunStartEvidence.Started(_repo, _home.Path));
+        Assert.False(Evidence.Started(_repo, _home.Path));
     }
 
     [Fact]
@@ -107,13 +115,13 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
         Git(_repo, "switch", "-q", "-c", Branch);
         RunBaseState.Write(_home.Path, Branch, "origin/main");
 
-        Assert.False(RunStartEvidence.Started(_repo, _home.Path));
+        Assert.False(Evidence.Started(_repo, _home.Path));
     }
 
     [Fact]
     public void ADirectoryOutsideAnyRepository_IsUnknown()
     {
-        Assert.Null(RunStartEvidence.Started(_home.Path, _home.Path));
+        Assert.Null(Evidence.Started(_home.Path, _home.Path));
     }
 
     [Fact]
@@ -261,7 +269,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
             1,
             [new ArbiterEnvelopeEntry(RuleId, "q", new ArbiterAnswerText("not-started (step 0)"), "e")]);
 
-        Assert.Equal(RunStartEvidence.Remedy, next);
+        Assert.Equal(RunStartEvidenceRules.Remedy, next);
     }
 
     private static ArbiterRule Rule() =>
