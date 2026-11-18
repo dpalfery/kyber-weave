@@ -2,10 +2,10 @@ using KyberWeave.Testing.Squad;
 using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
-using Xunit;
 using KyberWeave.Tests.Fakes;
+using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Application.Tests.Squad.Deployment;
 
 /// <summary>
 /// Pins the home-level project registry: which projects a machine has deployed Squad into, how a
@@ -15,7 +15,7 @@ namespace KyberWeave.Integration.Tests;
 /// <remarks>
 /// The registry is an index over state that already exists under the home store. It is never the
 /// authority for ownership, so a missing or stale entry is a finding to report, not a reason to
-/// refuse a deployment. Each fake points the home directory at a temp fixture.
+/// refuse a deployment. The tests run over the in-memory state, which points the home directory at an in-memory home.
 /// </remarks>
 public sealed class SquadProjectRegistryTests
 {
@@ -26,38 +26,40 @@ public sealed class SquadProjectRegistryTests
 
     private static readonly string[] ExpectedSquadEntries = ["projects", "registry.json"];
 
+    private readonly InMemorySquadState _state = new();
+
+    private string Work => Path.Combine(_state.Files.Root, "work");
+
     [Fact]
     public void ProjectInstallRegistersPathLastUpdatedUtcAndTargets()
     {
-        using TempDirectory fixture = new TempDirectory();
-        string home = CreateHome(fixture);
-        string root = Path.Combine(fixture.Path, "project");
-        Directory.CreateDirectory(root);
-        SquadStateStore store = StoreFor(home);
+        string home = _state.UserPaths.HomeDirectory;
+        string root = Path.Combine(Work, "project");
+        _state.Files.CreateDirectory(root);
+        SquadStateStore store = _state.Store;
 
-        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
+        _state.Transaction().Execute(Install(root, SquadDeploymentScope.Project));
 
         SquadProjectRegistryEntry entry = Assert.Single(store.ListProjects());
-        Assert.Equal(SquadPhysicalRootIdentities.Resolve(root, SquadFileSystemPathSemantics.Instance).PhysicalPath, entry.Path);
-        Assert.Equal(SquadPhysicalRootIdentities.Resolve(root, SquadFileSystemPathSemantics.Instance).Key, entry.RootKey);
+        Assert.Equal(SquadPhysicalRootIdentities.Resolve(root, _state.Semantics).PhysicalPath, entry.Path);
+        Assert.Equal(SquadPhysicalRootIdentities.Resolve(root, _state.Semantics).Key, entry.RootKey);
         Assert.Equal(InstalledAt, entry.LastUpdatedUtc);
         Assert.Equal(ExpectedTargets, entry.Targets.Order(StringComparer.Ordinal));
         Assert.False(entry.Stale);
-        Assert.True(File.Exists(RegistryPath(home)), "The registry must be written beneath the home store.");
+        Assert.True(_state.Files.FileExists(RegistryPath(home)), "The registry must be written beneath the home store.");
     }
 
     [Fact]
     public void ProjectUpdateRefreshesLastUpdatedUtc()
     {
-        using TempDirectory fixture = new TempDirectory();
-        string home = CreateHome(fixture);
-        string root = Path.Combine(fixture.Path, "project");
-        Directory.CreateDirectory(root);
-        SquadStateStore store = StoreFor(home);
-        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
+        string home = _state.UserPaths.HomeDirectory;
+        string root = Path.Combine(Work, "project");
+        _state.Files.CreateDirectory(root);
+        SquadStateStore store = _state.Store;
+        _state.Transaction().Execute(Install(root, SquadDeploymentScope.Project));
         DateTimeOffset updatedAt = InstalledAt.AddDays(1);
 
-        RealSquadDeployment.Transaction(store).Execute(RealSquadDeployment.Planner.CreateUpdate(
+        _state.Transaction().Execute(_state.Planner.CreateUpdate(
             root,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -78,14 +80,13 @@ public sealed class SquadProjectRegistryTests
     [Fact]
     public void ProjectUninstallRemovesItsRegistryEntry()
     {
-        using TempDirectory fixture = new TempDirectory();
-        string home = CreateHome(fixture);
-        string root = Path.Combine(fixture.Path, "project");
-        Directory.CreateDirectory(root);
-        SquadStateStore store = StoreFor(home);
-        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
+        string home = _state.UserPaths.HomeDirectory;
+        string root = Path.Combine(Work, "project");
+        _state.Files.CreateDirectory(root);
+        SquadStateStore store = _state.Store;
+        _state.Transaction().Execute(Install(root, SquadDeploymentScope.Project));
 
-        RealSquadDeployment.Transaction(store).Execute(RealSquadDeployment.Planner.CreateUninstall(
+        _state.Transaction().Execute(_state.Planner.CreateUninstall(
             root,
             SquadDeploymentScope.Project,
             Assert.IsType<SquadReceipt>(store.ReadReceipt(root, SquadDeploymentScope.Project))));
@@ -103,13 +104,12 @@ public sealed class SquadProjectRegistryTests
     [Fact]
     public void RegisteredProjectWhosePathIsMissingIsFlaggedStale()
     {
-        using TempDirectory fixture = new TempDirectory();
-        string home = CreateHome(fixture);
-        string root = Path.Combine(fixture.Path, "project");
-        Directory.CreateDirectory(root);
-        SquadStateStore store = StoreFor(home);
-        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
-        Directory.Delete(root, recursive: true);
+        string home = _state.UserPaths.HomeDirectory;
+        string root = Path.Combine(Work, "project");
+        _state.Files.CreateDirectory(root);
+        SquadStateStore store = _state.Store;
+        _state.Transaction().Execute(Install(root, SquadDeploymentScope.Project));
+        _state.Files.DeleteTreeNoFollow(root);
 
         SquadProjectRegistryEntry entry = Assert.Single(store.ListProjects());
 
@@ -125,18 +125,16 @@ public sealed class SquadProjectRegistryTests
     [Fact]
     public void RegisteredProjectWhoseKeyNoLongerMatchesItsPathIsFlaggedStale()
     {
-        using TempDirectory fixture = new TempDirectory();
-        string home = CreateHome(fixture);
-        string root = Path.Combine(fixture.Path, "project");
-        Directory.CreateDirectory(root);
-        SquadStateStore store = StoreFor(home);
-        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
-        string key = SquadPhysicalRootIdentities.Resolve(root, SquadFileSystemPathSemantics.Instance).Key;
-        string registry = File.ReadAllText(RegistryPath(home), Encoding.UTF8);
-        File.WriteAllText(
+        string home = _state.UserPaths.HomeDirectory;
+        string root = Path.Combine(Work, "project");
+        _state.Files.CreateDirectory(root);
+        SquadStateStore store = _state.Store;
+        _state.Transaction().Execute(Install(root, SquadDeploymentScope.Project));
+        string key = SquadPhysicalRootIdentities.Resolve(root, _state.Semantics).Key;
+        string registry = _state.Files.ReadAllText(RegistryPath(home));
+        _state.Files.WriteAllText(
             RegistryPath(home),
-            registry.Replace(key, new string('0', key.Length), StringComparison.Ordinal),
-            new UTF8Encoding(false));
+            registry.Replace(key, new string('0', key.Length), StringComparison.Ordinal));
 
         IReadOnlyList<SquadProjectRegistryEntry> entries = store.ListProjects();
 
@@ -149,13 +147,12 @@ public sealed class SquadProjectRegistryTests
     [Fact]
     public void RegisteredProjectWhoseReceiptIsMissingIsFlaggedStale()
     {
-        using TempDirectory fixture = new TempDirectory();
-        string home = CreateHome(fixture);
-        string root = Path.Combine(fixture.Path, "project");
-        Directory.CreateDirectory(root);
-        SquadStateStore store = StoreFor(home);
-        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
-        File.Delete(store.ResolveReceiptPath(root, SquadDeploymentScope.Project));
+        string home = _state.UserPaths.HomeDirectory;
+        string root = Path.Combine(Work, "project");
+        _state.Files.CreateDirectory(root);
+        SquadStateStore store = _state.Store;
+        _state.Transaction().Execute(Install(root, SquadDeploymentScope.Project));
+        _state.Files.DeleteFile(store.ResolveReceiptPath(root, SquadDeploymentScope.Project));
 
         SquadProjectRegistryEntry entry = Assert.Single(store.ListProjects());
 
@@ -170,16 +167,15 @@ public sealed class SquadProjectRegistryTests
     [Fact]
     public void RegistryMissingEntriesIsRebuiltFromProjectState()
     {
-        using TempDirectory fixture = new TempDirectory();
-        string home = CreateHome(fixture);
-        string firstRoot = Path.Combine(fixture.Path, "project-alpha");
-        string secondRoot = Path.Combine(fixture.Path, "project-beta");
-        Directory.CreateDirectory(firstRoot);
-        Directory.CreateDirectory(secondRoot);
-        SquadStateStore store = StoreFor(home);
-        RealSquadDeployment.Transaction(store).Execute(Install(firstRoot, SquadDeploymentScope.Project));
-        RealSquadDeployment.Transaction(store).Execute(Install(secondRoot, SquadDeploymentScope.Project));
-        File.Delete(RegistryPath(home));
+        string home = _state.UserPaths.HomeDirectory;
+        string firstRoot = Path.Combine(Work, "project-alpha");
+        string secondRoot = Path.Combine(Work, "project-beta");
+        _state.Files.CreateDirectory(firstRoot);
+        _state.Files.CreateDirectory(secondRoot);
+        SquadStateStore store = _state.Store;
+        _state.Transaction().Execute(Install(firstRoot, SquadDeploymentScope.Project));
+        _state.Transaction().Execute(Install(secondRoot, SquadDeploymentScope.Project));
+        _state.Files.DeleteFile(RegistryPath(home));
 
         IReadOnlyList<SquadProjectRegistryEntry> entries = store.ListProjects();
 
@@ -188,8 +184,8 @@ public sealed class SquadProjectRegistryTests
         Assert.Equal(
             new[]
             {
-                SquadPhysicalRootIdentities.Resolve(firstRoot, SquadFileSystemPathSemantics.Instance).PhysicalPath,
-                SquadPhysicalRootIdentities.Resolve(secondRoot, SquadFileSystemPathSemantics.Instance).PhysicalPath
+                SquadPhysicalRootIdentities.Resolve(firstRoot, _state.Semantics).PhysicalPath,
+                SquadPhysicalRootIdentities.Resolve(secondRoot, _state.Semantics).PhysicalPath
             }.Order(StringComparer.Ordinal),
             entries.Select(entry => entry.Path).Order(StringComparer.Ordinal));
     }
@@ -201,13 +197,12 @@ public sealed class SquadProjectRegistryTests
     [Fact]
     public void RegistryWriteLeavesNoTemporaryFileBesideTheRegistry()
     {
-        using TempDirectory fixture = new TempDirectory();
-        string home = CreateHome(fixture);
-        string root = Path.Combine(fixture.Path, "project");
-        Directory.CreateDirectory(root);
-        SquadStateStore store = StoreFor(home);
+        string home = _state.UserPaths.HomeDirectory;
+        string root = Path.Combine(Work, "project");
+        _state.Files.CreateDirectory(root);
+        SquadStateStore store = _state.Store;
 
-        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
+        _state.Transaction().Execute(Install(root, SquadDeploymentScope.Project));
 
         Assert.Equal(
             ExpectedSquadEntries,
@@ -222,25 +217,24 @@ public sealed class SquadProjectRegistryTests
     [Fact]
     public void FailedRegistryWriteLeavesNoPartialFile()
     {
-        using TempDirectory fixture = new TempDirectory();
-        string home = CreateHome(fixture);
-        string root = Path.Combine(fixture.Path, "project");
-        string otherRoot = Path.Combine(fixture.Path, "project-beta");
-        Directory.CreateDirectory(root);
-        Directory.CreateDirectory(otherRoot);
-        SquadStateStore store = StoreFor(home);
-        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
-        Assert.True(File.Exists(RegistryPath(home)), "A committed install must leave a registry file to fail against.");
-        File.Delete(RegistryPath(home));
-        Directory.CreateDirectory(RegistryPath(home));
-        File.WriteAllText(Path.Combine(RegistryPath(home), "sentinel.txt"), "sentinel", new UTF8Encoding(false));
+        string home = _state.UserPaths.HomeDirectory;
+        string root = Path.Combine(Work, "project");
+        string otherRoot = Path.Combine(Work, "project-beta");
+        _state.Files.CreateDirectory(root);
+        _state.Files.CreateDirectory(otherRoot);
+        SquadStateStore store = _state.Store;
+        _state.Transaction().Execute(Install(root, SquadDeploymentScope.Project));
+        Assert.True(_state.Files.FileExists(RegistryPath(home)), "A committed install must leave a registry file to fail against.");
+        _state.Files.DeleteFile(RegistryPath(home));
+        _state.Files.CreateDirectory(RegistryPath(home));
+        _state.Files.WriteAllText(Path.Combine(RegistryPath(home), "sentinel.txt"), "sentinel");
 
         Exception? failure = Record.Exception(() =>
             store.RegisterProject(otherRoot, ["codex"], InstalledAt.AddDays(1)));
 
         Assert.NotNull(failure);
-        Assert.True(Directory.Exists(RegistryPath(home)));
-        Assert.Equal("sentinel", File.ReadAllText(Path.Combine(RegistryPath(home), "sentinel.txt")));
+        Assert.True(_state.Files.DirectoryExists(RegistryPath(home)));
+        Assert.Equal("sentinel", _state.Files.ReadAllText(Path.Combine(RegistryPath(home), "sentinel.txt")));
         Assert.Equal(
             ExpectedSquadEntries,
             EntriesOf(SquadDirectoryOf(home)));
@@ -253,16 +247,15 @@ public sealed class SquadProjectRegistryTests
     [Fact]
     public void GlobalInstallDoesNotRegisterAProject()
     {
-        using TempDirectory fixture = new TempDirectory();
-        string home = CreateHome(fixture);
-        string root = Path.Combine(fixture.Path, "global-target");
-        Directory.CreateDirectory(root);
-        SquadStateStore store = StoreFor(home);
+        string home = _state.UserPaths.HomeDirectory;
+        string root = Path.Combine(Work, "global-target");
+        _state.Files.CreateDirectory(root);
+        SquadStateStore store = _state.Store;
 
-        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Global));
+        _state.Transaction().Execute(Install(root, SquadDeploymentScope.Global));
 
         Assert.Empty(store.ListProjects());
-        Assert.False(File.Exists(RegistryPath(home)));
+        Assert.False(_state.Files.FileExists(RegistryPath(home)));
     }
 
     /// <summary>
@@ -273,18 +266,17 @@ public sealed class SquadProjectRegistryTests
     [Fact]
     public void ProjectInstallSucceedsWhenRegistryWriteFailsAfterCommit()
     {
-        using TempDirectory fixture = new TempDirectory();
-        string home = CreateHome(fixture);
-        string root = Path.Combine(fixture.Path, "project");
-        Directory.CreateDirectory(root);
-        Directory.CreateDirectory(RegistryPath(home));
-        SquadStateStore store = StoreFor(home);
+        string home = _state.UserPaths.HomeDirectory;
+        string root = Path.Combine(Work, "project");
+        _state.Files.CreateDirectory(root);
+        _state.Files.CreateDirectory(RegistryPath(home));
+        SquadStateStore store = _state.Store;
 
         Exception? failure = Record.Exception(() =>
-            RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project)));
+            _state.Transaction().Execute(Install(root, SquadDeploymentScope.Project)));
 
         Assert.Null(failure);
-        Assert.Equal("alpha", File.ReadAllText(Path.Combine(root, ".codex", "agents", "alpha.toml")));
+        Assert.Equal("alpha", _state.Files.ReadAllText(Path.Combine(root, ".codex", "agents", "alpha.toml")));
         Assert.NotNull(store.ReadReceipt(root, SquadDeploymentScope.Project));
     }
 
@@ -296,19 +288,18 @@ public sealed class SquadProjectRegistryTests
     [Fact]
     public void FindProjectAnswersFromProjectStateWithoutWritingTheRegistry()
     {
-        using TempDirectory fixture = new TempDirectory();
-        string home = CreateHome(fixture);
-        string root = Path.Combine(fixture.Path, "project");
-        Directory.CreateDirectory(root);
-        SquadStateStore store = StoreFor(home);
-        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
-        File.Delete(RegistryPath(home));
+        string home = _state.UserPaths.HomeDirectory;
+        string root = Path.Combine(Work, "project");
+        _state.Files.CreateDirectory(root);
+        SquadStateStore store = _state.Store;
+        _state.Transaction().Execute(Install(root, SquadDeploymentScope.Project));
+        _state.Files.DeleteFile(RegistryPath(home));
 
         SquadProjectRegistryEntry? entry = store.FindProject(root);
 
         Assert.NotNull(entry);
-        Assert.Equal(SquadPhysicalRootIdentities.Resolve(root, SquadFileSystemPathSemantics.Instance).Key, entry.RootKey);
-        Assert.False(File.Exists(RegistryPath(home)), "A lookup must not recreate the registry it read from.");
+        Assert.Equal(SquadPhysicalRootIdentities.Resolve(root, _state.Semantics).Key, entry.RootKey);
+        Assert.False(_state.Files.FileExists(RegistryPath(home)), "A lookup must not recreate the registry it read from.");
     }
 
     /// <summary>
@@ -318,21 +309,20 @@ public sealed class SquadProjectRegistryTests
     [Fact]
     public void CorruptReceiptDuringRegistryRebuildDoesNotAbortTheListing()
     {
-        using TempDirectory fixture = new TempDirectory();
-        string home = CreateHome(fixture);
-        string corruptRoot = Path.Combine(fixture.Path, "project-alpha");
-        string healthyRoot = Path.Combine(fixture.Path, "project-beta");
-        Directory.CreateDirectory(corruptRoot);
-        Directory.CreateDirectory(healthyRoot);
-        SquadStateStore store = StoreFor(home);
-        RealSquadDeployment.Transaction(store).Execute(Install(corruptRoot, SquadDeploymentScope.Project));
-        RealSquadDeployment.Transaction(store).Execute(Install(healthyRoot, SquadDeploymentScope.Project));
-        File.Delete(RegistryPath(home));
-        File.WriteAllText(store.ResolveReceiptPath(corruptRoot, SquadDeploymentScope.Project), "{ corrupt receipt \n");
+        string home = _state.UserPaths.HomeDirectory;
+        string corruptRoot = Path.Combine(Work, "project-alpha");
+        string healthyRoot = Path.Combine(Work, "project-beta");
+        _state.Files.CreateDirectory(corruptRoot);
+        _state.Files.CreateDirectory(healthyRoot);
+        SquadStateStore store = _state.Store;
+        _state.Transaction().Execute(Install(corruptRoot, SquadDeploymentScope.Project));
+        _state.Transaction().Execute(Install(healthyRoot, SquadDeploymentScope.Project));
+        _state.Files.DeleteFile(RegistryPath(home));
+        _state.Files.WriteAllText(store.ResolveReceiptPath(corruptRoot, SquadDeploymentScope.Project), "{ corrupt receipt \n");
 
         SquadProjectRegistryEntry entry = Assert.Single(store.ListProjects());
 
-        Assert.Equal(SquadPhysicalRootIdentities.Resolve(healthyRoot, SquadFileSystemPathSemantics.Instance).PhysicalPath, entry.Path);
+        Assert.Equal(SquadPhysicalRootIdentities.Resolve(healthyRoot, _state.Semantics).PhysicalPath, entry.Path);
         Assert.Null(store.FindProject(corruptRoot));
     }
 
@@ -343,53 +333,41 @@ public sealed class SquadProjectRegistryTests
     [Fact]
     public void RegistryEntryWithAMalformedTimestampIsRejectedAsUnreadable()
     {
-        using TempDirectory fixture = new TempDirectory();
-        string home = CreateHome(fixture);
-        string root = Path.Combine(fixture.Path, "project");
-        Directory.CreateDirectory(root);
-        SquadStateStore store = StoreFor(home);
-        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
-        string registry = File.ReadAllText(RegistryPath(home), Encoding.UTF8);
-        File.WriteAllText(
+        string home = _state.UserPaths.HomeDirectory;
+        string root = Path.Combine(Work, "project");
+        _state.Files.CreateDirectory(root);
+        SquadStateStore store = _state.Store;
+        _state.Transaction().Execute(Install(root, SquadDeploymentScope.Project));
+        string registry = _state.Files.ReadAllText(RegistryPath(home));
+        _state.Files.WriteAllText(
             RegistryPath(home),
-            Regex.Replace(registry, "\"lastUpdatedUtc\"\\s*:\\s*\"[^\"]*\"", "\"lastUpdatedUtc\": \"not-a-timestamp\""),
-            new UTF8Encoding(false));
+            Regex.Replace(registry, "\"lastUpdatedUtc\"\\s*:\\s*\"[^\"]*\"", "\"lastUpdatedUtc\": \"not-a-timestamp\""));
 
         InvalidDataException failure = Assert.Throws<InvalidDataException>(() => store.ListProjects());
 
         Assert.Contains("lastUpdatedUtc", failure.Message, StringComparison.Ordinal);
-        Assert.Contains(SquadPhysicalRootIdentities.Resolve(root, SquadFileSystemPathSemantics.Instance).Key, failure.Message, StringComparison.Ordinal);
+        Assert.Contains(SquadPhysicalRootIdentities.Resolve(root, _state.Semantics).Key, failure.Message, StringComparison.Ordinal);
     }
 
-    private static string CreateHome(TempDirectory fixture, string name = "home")
-    {
-        string home = Path.Combine(fixture.Path, name);
-        Directory.CreateDirectory(home);
-        return home;
-    }
-
-    private static string RegistryPath(string home) =>
+    private string RegistryPath(string home) =>
         Path.Combine(SquadDirectoryOf(home), "registry.json");
 
-    private static string SquadDirectoryOf(string home) =>
-        Path.Combine(SquadPhysicalRootIdentities.Resolve(home, SquadFileSystemPathSemantics.Instance).PhysicalPath, ".kyber-weave", "squad");
+    private string SquadDirectoryOf(string home) =>
+        Path.Combine(SquadPhysicalRootIdentities.Resolve(home, _state.Semantics).PhysicalPath, ".kyber-weave", "squad");
 
-    private static string[] EntriesOf(string directory) =>
-        Directory.EnumerateFileSystemEntries(directory)
-            .Select(path => Path.GetFileName(path))
+    private string[] EntriesOf(string directory) =>
+        _state.Files.EnumerateEntries(directory)
+            .Select(entry => Path.GetFileName(entry.Path))
             .Order(StringComparer.Ordinal)
             .ToArray();
-
-    private static SquadStateStore StoreFor(string home) =>
-        RealSquadState.Store(FakeSquadUserPaths.FromHome(home));
 
     /// <summary>
     /// A project install renders a codex agent and a warp reviewer. A global install renders relative
     /// to its target's global root, so it takes a bare path only; a dot-prefixed path would be read
     /// back as the legacy single-root layout (#91).
     /// </summary>
-    private static SquadDeploymentPlan Install(string root, SquadDeploymentScope scope) =>
-        RealSquadDeployment.Planner.CreateInstall(
+    private SquadDeploymentPlan Install(string root, SquadDeploymentScope scope) =>
+        _state.Planner.CreateInstall(
             root,
             scope,
             Lock(),
