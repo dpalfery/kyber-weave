@@ -12,9 +12,10 @@ last-reviewed: 2026-11-17
 
 ## The finding
 
-`SquadDeploymentStateTransactionTests.ExecuteActiveTransactionHoldsAtomicExclusiveLease`
+`SquadDeploymentStateTransactionTests.ExecuteActiveTransactionHoldsAtomicExclusiveLease`,
+`SquadDeploymentStateTransactionTests.RecoverWhileExecuteOwnsLeaseRefusesToInterleaveWithActiveTransaction`,
 and
-`SquadDeploymentStateTransactionTests.RecoverWhileExecuteOwnsLeaseRefusesToInterleaveWithActiveTransaction`
+`SquadDeploymentStateTransactionTests.ExecuteActiveLeaseOnOnePhysicalRootContendsOnlyWithItsOwnScope`
 wait on a fixed 5-second timeout for the active transaction to reach `IntentWritten`:
 
 ```csharp
