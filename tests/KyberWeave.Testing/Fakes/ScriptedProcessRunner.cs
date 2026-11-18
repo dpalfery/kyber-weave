@@ -123,6 +123,7 @@ public sealed class ScriptedProcessRunner : IProcessRunner
     {
         ArgumentNullException.ThrowIfNull(request);
         _calls.Add(request);
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (request.WorkingDirectory is { } directory && _missingDirectories.Contains(directory))
         {

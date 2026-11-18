@@ -125,6 +125,18 @@ public abstract class ProcessRunnerContractTests : IDisposable
     }
 
     [Fact]
+    public async Task ReportsACancelledRun()
+    {
+        using CancellationTokenSource source = new();
+        await source.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            CreateRunner().RunAsync(
+                Probe([ProcessProbeProgram.Sleep, "10000"], timeout: TimeSpan.FromSeconds(30)),
+                source.Token));
+    }
+
+    [Fact]
     public async Task StartsInTheRequestedWorkingDirectory()
     {
         PrepareWorkingDirectoryFile("marker.txt", "from-working-directory");
