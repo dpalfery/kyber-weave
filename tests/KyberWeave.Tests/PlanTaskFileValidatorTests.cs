@@ -252,6 +252,30 @@ public sealed class PlanTaskFileValidatorTests
         Assert.Equal(1, run.Exit);
     }
 
+    /// <summary>
+    /// An explicit <c>!!float</c> tag makes the reader hand back a double rather than text, so the check
+    /// on the text form never runs. The value still has no JSON literal, so it must become a validation
+    /// finding that names the field rather than an exception escaping the reader.
+    /// </summary>
+    [Fact]
+    public void ATaggedNonFiniteAgentConfidenceIsKWDOCTASKS001NamingTheField()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        string file = PlanTaskFileProbe.TaskFile();
+        string tagged = file.Replace(
+            $"- id: {PlanTaskFileProbe.FirstTask}\n",
+            $"- id: {PlanTaskFileProbe.FirstTask}\n    agent-confidence: !!float .nan\n",
+            StringComparison.Ordinal);
+        Assert.NotEqual(file, tagged);
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, tagged);
+
+        ReportedFindings run = Validate(fixture);
+
+        AssertReports(run, Malformed);
+        Assert.Equal(1, run.Exit);
+        Assert.Contains("agent-confidence", run.Output, StringComparison.Ordinal);
+    }
+
     /// <summary>A task file larger than the validator reads is reported as one that could not be read, never loaded whole.</summary>
     [Fact]
     public void ATaskFileLargerThanTheValidatorReadsIsKWDOCTASKS001AndNamesWhy()

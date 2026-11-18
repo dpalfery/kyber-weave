@@ -59,11 +59,22 @@ internal static partial class PlanTaskFileFormat
     /// so a YAML file with the same field names as the JSON form reads through the same strict
     /// reader.
     /// </summary>
+    /// <remarks>
+    /// An explicit tag such as <c>!!float</c> makes the reader hand back a double instead of text, so it
+    /// skips the checks on the text form below and reaches the JSON writer, which refuses a value with no
+    /// JSON literal. The format's own exception is thrown here instead, so the file is reported as
+    /// malformed rather than an <see cref="ArgumentException"/> escaping the reader.
+    /// </remarks>
     private static object? NormalizeNumbers(object? graph)
     {
         if (graph is List<object> list)
         {
             return list.Select(NormalizeNumbers).ToList();
+        }
+
+        if (graph is double scalar && !double.IsFinite(scalar))
+        {
+            throw NonFinite(null, scalar);
         }
 
         if (graph is not Dictionary<object, object> map)
@@ -75,6 +86,11 @@ internal static partial class PlanTaskFileFormat
         foreach ((object key, object value) in map)
         {
             string name = key.ToString() ?? string.Empty;
+            if (value is double nonFinite && !double.IsFinite(nonFinite))
+            {
+                throw NonFinite(name, nonFinite);
+            }
+
             normalized[name] = name switch
             {
                 "schema-version" when value is string version
@@ -88,6 +104,11 @@ internal static partial class PlanTaskFileFormat
 
         return normalized;
     }
+
+    private static JsonException NonFinite(string? name, double number) =>
+        new(name is null
+            ? $"the document holds '{number}', which is not a finite number."
+            : $"'{name}' is '{number}', which is not a finite number.");
 
     /// <summary>Reads the JSON form directly, for a caller that holds text with no path.</summary>
     public static PlanTaskFile? DeserializeJson(string text) =>
