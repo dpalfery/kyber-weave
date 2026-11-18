@@ -393,9 +393,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 #### KyberWeave.Kernel (3 classes)
 
-| Class (file) | Calls directly | Task |
-|---|---|---|
-| `CodeGraphIndexStaleness` (`VersionControl/CodeGraphIndexStaleness.cs`) | file system | 4.9 |
+None left. `FileReferenceExtractor` moved to `KyberWeave.Application` (`Parsing/FileReferenceExtractor.cs`) and `CodeGraphIndexStaleness` to `KyberWeave.Data` (`CodeGraph/CodeGraphIndexStaleness.cs`), both over the file-system seam (and the path and process seams); `StdioSession` is the interactive process adapter and runs on `TimeProvider`.
 
 #### KyberWeave.Mcp (4 classes)
 

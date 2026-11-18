@@ -1,4 +1,4 @@
-using System.Diagnostics;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Core.CodeGraph;
@@ -20,7 +20,9 @@ namespace KyberWeave.Core.CodeGraph;
 /// change constantly and say nothing about whether a symbol still resolves.
 /// </para>
 /// </remarks>
-public static class CodeGraphIndexStaleness
+/// <param name="disk">The file system the changed files' modification times are read from.</param>
+/// <param name="git">Runs <c>git</c> in the checkout.</param>
+public sealed class CodeGraphIndexStaleness(IFileSystem disk, IProgramRunner git)
 {
     private const int ExampleCap = 3;
 
@@ -33,7 +35,7 @@ public static class CodeGraphIndexStaleness
     /// <param name="repositoryRoot">The checkout the index belongs to.</param>
     /// <param name="indexedCommit">The commit the index recorded, or null when it recorded none.</param>
     /// <param name="files">Each indexed path with its recorded modification time (ms) and symbol count.</param>
-    public static string? Describe(
+    public string? Describe(
         string repositoryRoot,
         string? indexedCommit,
         IReadOnlyDictionary<string, (long ModifiedMilliseconds, int NodeCount)> files)
@@ -86,7 +88,7 @@ public static class CodeGraphIndexStaleness
         return $"{built}, and {changed.Distinct(StringComparer.Ordinal).Count()} source file(s) changed since (for example {examples})";
     }
 
-    private static bool IsChangedSinceIndex(
+    private bool IsChangedSinceIndex(
         string root,
         string relativePath,
         IReadOnlyDictionary<string, (long ModifiedMilliseconds, int NodeCount)> files,
@@ -95,10 +97,10 @@ public static class CodeGraphIndexStaleness
         string full = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
         bool indexed = files.TryGetValue(relativePath, out (long ModifiedMilliseconds, int NodeCount) recorded);
 
-        if (!File.Exists(full)) return indexed;
+        if (!disk.FileExists(full)) return indexed;
         if (!indexed) return IsUnderIndexedCode(relativePath, indexedDirectories);
 
-        long onDisk = new DateTimeOffset(File.GetLastWriteTimeUtc(full)).ToUnixTimeMilliseconds();
+        long onDisk = new DateTimeOffset(disk.GetLastWriteTimeUtc(full)).ToUnixTimeMilliseconds();
         return onDisk > recorded.ModifiedMilliseconds + ClockSlackMilliseconds;
     }
 
@@ -124,22 +126,11 @@ public static class CodeGraphIndexStaleness
 
     private static string Short(string commit) => commit.Length > 8 ? commit[..8] : commit;
 
-    private static string? Git(string root, params string[] arguments)
+    private string? Git(string root, params string[] arguments)
     {
-        ProcessStartInfo startInfo = new("git")
-        {
-            WorkingDirectory = root,
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-        foreach (string argument in arguments) startInfo.ArgumentList.Add(argument);
-
         try
         {
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);
+            ProcessResult result = git.Run("git", arguments, root, GitTimeout);
             return result.ExitCode == 0 ? result.StandardOutput : null;
         }
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception
