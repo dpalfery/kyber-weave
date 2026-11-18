@@ -217,9 +217,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `KyberStandardsTemplates` (`Docs/Scaffolding/KyberStandardsTemplates.cs`) | file system | 4.2 |
 | `DocumentIndexHost` (`Docs/Search/DocumentIndexHost.cs`) | file system, paths | 4.2 |
 | `ArchiveCloseoutValidator` (`Docs/Validation/ArchiveCloseoutValidator.cs`) | paths | 4.2 |
-| `ConfigRegValidator` (`Docs/Validation/ConfigRegValidator.cs`) | paths | 4.2 |
-| `DocSpecValidator` (`Docs/Validation/DocSpecValidator.cs`) | paths | 4.2 |
-| `PlanTaskService` (`Docs/Validation/PlanTaskService.cs`) | paths | 4.2 |
 | `TaskPromptService` (`Docs/Validation/TaskPromptService.cs`) | file system, paths | 4.2 |
 | `TaskPromptServiceFactory` (`Docs/Validation/TaskPromptServiceFactory.cs`) | paths | 4.2 |
 | `CopilotPromptFile` (`CopilotPrompt/CopilotPromptFile.cs`) | paths | 2.5 |

@@ -67,12 +67,16 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IManagedGlossaryFactory>(sp => new ManagedGlossaryFactory(
             sp.GetRequiredService<IRepositoryFileStore>(), sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<IPlanTaskService>(sp => new PlanTaskService(
-            sp.GetRequiredService<IRepositoryFileStore>()));
+            sp.GetRequiredService<IRepositoryFileStore>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IDocsSchemaGate>(sp => new DocsSchemaGate(
             sp.GetRequiredService<IRepositoryFileStore>(),
             sp.GetRequiredService<IGitChangeReader>(),
             sp.GetRequiredService<ISeverityOverrideSource>(),
-            sp.GetRequiredService<TimeProvider>()));
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IPacketHostFacts>(sp => new PacketHostFacts(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ITaskPromptServiceFactory>(sp => new TaskPromptServiceFactory(
             sp.GetRequiredService<IPlanTaskService>(),
