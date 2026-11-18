@@ -29,8 +29,9 @@ public sealed class CheckoutCorpusSourceContractTests : CorpusSourceContractTest
 
 /// <summary>Runs the corpus seam's contract suite against the corpus held in memory, once per case rule.</summary>
 /// <remarks>
-/// It sits beside the checkout run while the content tests still live in this project: task 5.4 of the
-/// interface-driven unit tests specification moves both into the content test project.
+/// It sits beside the checkout run in this project: the repository-policy tests also read the corpus
+/// and start programs, so they are not content tests and stay here. The content tests that use the
+/// seam live in <c>tests/KyberWeave.Content.Tests</c>.
 /// </remarks>
 public abstract class InMemoryCorpusContractTests : CorpusSourceContractTests
 {
