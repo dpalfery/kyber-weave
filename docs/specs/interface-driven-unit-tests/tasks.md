@@ -272,7 +272,7 @@ from this file when it is marked Ready.
   - **Depends on:** 3.2
   - _Requirements: 1.4, 2.1, 10.2_
 
-- [ ] 3.4 `SquadTransaction` onto seams, fixing the seven weaknesses
+- [x] 3.4 `SquadTransaction` onto seams, fixing the seven weaknesses
   - **Files:** `src/KyberWeave.Data/Squad/Deployment/SquadTransaction.cs`
   - **Acceptance criteria:** no direct resource call; the named mutex behind `ILease`; ids and time
     through their seams; every 3.1 test passes on both file systems; second reviewer's verdict recorded.
