@@ -371,8 +371,36 @@ public class DocsStandardsMigrateCommandTests
     }
 
     /// <summary>
-    /// A standards folder kept as a symbolic link out of the repository is refused: a migration
-    /// writes stubs beside the host's standard and must not put them outside the tree it was given.
+    /// A symbolic link sitting where the migration writes is refused, not replaced by a regular
+    /// file. The migration refuses links everywhere else, and a reshape that quietly turned a
+    /// host's link into a plain file would leave the host's own copy behind, no longer the file
+    /// the corpus reads.
+    /// </summary>
+    [Fact]
+    public void AStandardKeptInsideTheRepositoryAsASymbolicLinkIsRefusedNotReplaced()
+    {
+        if (OperatingSystem.IsWindows())
+            Assert.Skip("Creating a symbolic link needs a privilege this case cannot assume.");
+
+        using TempDirectory repo = new();
+        string shared = Path.Combine(repo.Path, "6-Docs", "shared", "csharp-standard.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(shared)!);
+        File.WriteAllText(shared, LegacyCsharpWithOwnHeadings);
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        File.CreateSymbolicLink(StandardPath(repo.Path, "csharp"), shared);
+
+        IOException error = Assert.Throws<IOException>(() =>
+            new StandardsFolderMigration(repo.Path, Declared).Run());
+
+        Assert.Contains("symbolic link", error.Message, StringComparison.Ordinal);
+        Assert.NotNull(new FileInfo(StandardPath(repo.Path, "csharp")).LinkTarget);
+        Assert.Equal(LegacyCsharpWithOwnHeadings, File.ReadAllText(shared));
+    }
+
+    /// <summary>
+    /// A standards folder kept as a symbolic link is refused: a migration writes stubs beside the
+    /// host's standard and must not put them at the end of a link.
     /// </summary>
     [Fact]
     public void AFolderThatIsASymlinkOutsideTheRepositoryIsRefused()
@@ -389,7 +417,7 @@ public class DocsStandardsMigrateCommandTests
         IOException error = Assert.Throws<IOException>(() =>
             new StandardsFolderMigration(repo.Path, Declared).Run());
 
-        Assert.Contains("outside the repository root", error.Message, StringComparison.Ordinal);
+        Assert.Contains("symbolic link", error.Message, StringComparison.Ordinal);
         Assert.Empty(Directory.EnumerateFileSystemEntries(outside.Path));
     }
 

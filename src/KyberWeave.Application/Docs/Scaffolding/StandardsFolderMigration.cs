@@ -373,9 +373,13 @@ public sealed partial class StandardsFolderMigration
     /// rooted or <c>..</c> segment or through a symbolic link between here and the file.
     /// </summary>
     /// <remarks>
-    /// A standards folder is host-owned, and a host may keep one behind a link. Following it would
-    /// put this tool's stub outside the tree it was told to migrate, so the link is refused and the
-    /// folder reported instead. Links that stay inside the root are left alone.
+    /// A standards folder is host-owned, and a host may keep a file in it behind a link — a
+    /// standard shared with a sibling repository, a stub pointing at a template. Every write here
+    /// either replaces a file or creates one, and neither is what the host asked for at the end of
+    /// a link: a replace cuts the link and leaves its target behind, a create beside it hides
+    /// which copy is authoritative. So a link anywhere on the path is refused, wherever it leads,
+    /// and the folder is reported instead. Refusing every link rather than only those that leave
+    /// the root also keeps the rule one sentence long, which is what makes it predictable.
     /// </remarks>
     private string RequireWritable(string relativePath)
     {
@@ -397,13 +401,10 @@ public sealed partial class StandardsFolderMigration
                 : new FileInfo(current);
             if (entry.LinkTarget is null) continue;
 
-            string? resolved = entry.ResolveLinkTarget(returnFinalTarget: true)?.FullName;
-            if (resolved is null || !resolved.StartsWith(boundary, StringComparison.Ordinal))
-            {
-                throw new IOException(
-                    $"Refusing to write '{relativePath}': it passes through the symbolic link '{current}', " +
-                    "which leads outside the repository root, so nothing was written.");
-            }
+            throw new IOException(
+                $"Refusing to write '{relativePath}': '{current}' is the symbolic link " +
+                $"'{entry.LinkTarget}', and a migration does not write through or replace a link, " +
+                "so nothing was written.");
         }
 
         return full;
