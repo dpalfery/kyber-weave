@@ -5,9 +5,10 @@ using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Text;
 using KyberWeave.Domain.CodeGraph;
+using KyberWeave.Tests;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Docs.Search;
 
 /// <summary>
 /// Regression tests for the three retrieval defects found by using the MCP server against

@@ -138,6 +138,11 @@ internal sealed class DocFixture : IDisposable
     /// <param name="ontology">The ontology naming the roots, exclusions and catalog.</param>
     public DocumentLoader Loader(OntologyConfig ontology) => new(Store, Root, Paths, Environment, ontology);
 
+    /// <summary>Creates the fixture over a new in-memory file system that reads time from <paramref name="time"/>,
+    /// so a test that depends on a file's modification time moves it by advancing a fake clock.</summary>
+    /// <param name="time">The clock the in-memory file system stamps writes with.</param>
+    public static DocFixture CreateInMemory(TimeProvider time) => new(new InMemoryFileSystem(time));
+
     public void Dispose()
     {
         if (_memory is null && Directory.Exists(Root)) Directory.Delete(Root, recursive: true);
