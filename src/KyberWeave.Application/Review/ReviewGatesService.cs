@@ -32,7 +32,7 @@ namespace KyberWeave.Application.Review;
 /// <param name="worktreeIndex">Makes sure the tree has a CodeGraph index before any gate starts.</param>
 /// <param name="files">Reads and writes the report, the logs and the cycle folder.</param>
 /// <param name="environment">Names the temporary directory the index lock lives in, and the working directory a relative path resolves against.</param>
-/// <param name="paths">Resolves the paths the caller spelled, relative ones against the working directory.</param>
+/// <param name="pathResolver">Resolves the paths the caller spelled, relative ones against the working directory.</param>
 /// <param name="selector">Finds the review folder and the prior cycle's findings.</param>
 /// <param name="configs">Loads the host's configuration.</param>
 /// <param name="taskGates">Checks and expands one agent's task gates.</param>
@@ -50,7 +50,7 @@ public sealed class ReviewGatesService(
     IWorktreeIndexGuard worktreeIndex,
     IWritableFileSystem files,
     IProcessEnvironment environment,
-    IPathResolver paths,
+    IPathResolver pathResolver,
     IReviewCycleSelector selector,
     IConfigLoadService configs,
     ITaskGateSelectionService taskGates,
@@ -208,6 +208,8 @@ public sealed class ReviewGatesService(
         {
             ReviewReportWriter.TryWrite(
                 files,
+                pathResolver,
+                environment,
                 request.Out,
                 ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [])),
                 ReviewGateReporting.ReportWriteFailed,
@@ -256,7 +258,8 @@ public sealed class ReviewGatesService(
         if (request.Deadline)
             report.AddMetric("not-run", gates.Gates.Count(VerdictEngine.IsStoppedForTime));
 
-        ReviewReportWriter.TryWrite(files, request.Out, ReviewJson.Write(written), ReviewGateReporting.ReportWriteFailed, report);
+        ReviewReportWriter.TryWrite(
+            files, pathResolver, environment, request.Out, ReviewJson.Write(written), ReviewGateReporting.ReportWriteFailed, report);
         string? evidence = cycle is { WritesIdentity: true } && request.Out is not null
             ? WriteEvidence(cycle, root, request, written, config, report)
             : null;
@@ -339,12 +342,12 @@ public sealed class ReviewGatesService(
         string scratchpad = ReviewWorkTree.Scratchpad(tree);
         ReviewTaskChoice choice = selector.ChooseTask(tree, scratchpad, null);
         if (request.Out is not null
-            && ReviewCycleView.TryFromOutPath(paths, environment, request.Out, out string fromOut, out int number))
+            && ReviewCycleView.TryFromOutPath(pathResolver, environment, request.Out, out string fromOut, out int number))
         {
             reviewFolder = fromOut;
             thisCycle = number;
             folder = Path.GetDirectoryName(FullPath(request.Out));
-            if (!ReviewCycleView.IsUnder(paths, environment, tree, fromOut))
+            if (!ReviewCycleView.IsUnder(pathResolver, environment, tree, fromOut))
                 notes.Add($"worktree: --out is outside {tree}, so this review writes to {folder}; use {ReviewWorkTree.Scratchpad(tree)} for this worktree's review folders.");
         }
         else if (choice.Chosen)
@@ -440,7 +443,13 @@ public sealed class ReviewGatesService(
         CodeGraphPorts graph = graphs.ForRepository(root);
         DuplicateReport duplicates = duplicateDetection.Analyze(root, graph.Resolver, graph.Enumerator, config.Review.Duplicates);
         ReviewReportWriter.TryWrite(
-            files, Path.Combine(cycle.Folder!, "duplicates.json"), ReviewJson.Write(duplicates), ReviewGateReporting.ReportWriteFailed, report);
+            files,
+            pathResolver,
+            environment,
+            Path.Combine(cycle.Folder!, "duplicates.json"),
+            ReviewJson.Write(duplicates),
+            ReviewGateReporting.ReportWriteFailed,
+            report);
         (IReadOnlyList<string>? changed, _) = ResolveCouncilChangedSet(root, request);
         IReadOnlyDictionary<string, string> skips = CouncilSeating.GateProvenSkips(written, duplicates, changed);
         try
@@ -522,7 +531,7 @@ public sealed class ReviewGatesService(
         return ReviewGateReporting.MergedWithExisting(declared, ran, existing);
     }
 
-    private string FullPath(string path) => paths.GetFullPath(path, environment.CurrentDirectory);
+    private string FullPath(string path) => pathResolver.GetFullPath(path, environment.CurrentDirectory);
 
     private static string? BaseRef(string? baseRef) =>
         string.IsNullOrWhiteSpace(baseRef) ? null : baseRef.Trim();
@@ -608,6 +617,8 @@ public sealed class ReviewGatesService(
                       "review.task-gates for the agent."));
             ReviewReportWriter.TryWrite(
                 files,
+                pathResolver,
+                environment,
                 outPath,
                 ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [])),
                 ReviewGateReporting.ReportWriteFailed,
@@ -701,7 +712,8 @@ public sealed class ReviewGatesService(
         report.AddMetric("gates", finalReport.Gates.Count);
         report.AddMetric("failed", finalReport.Gates.Count(g => !g.Passed && !g.NotApplicable));
 
-        ReviewReportWriter.TryWrite(files, outPath, ReviewJson.Write(finalReport), ReviewGateReporting.ReportWriteFailed, report);
+        ReviewReportWriter.TryWrite(
+            files, pathResolver, environment, outPath, ReviewJson.Write(finalReport), ReviewGateReporting.ReportWriteFailed, report);
 
         // The run as it happened, not as --red re-judged it: an accepted compile failure is still a failed build to read.
         IReadOnlyList<string> digest = TestDigest(root, taskSlug, request.Red, plan.Gates, run.Report, outputs);

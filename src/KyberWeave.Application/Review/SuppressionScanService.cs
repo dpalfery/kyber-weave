@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Processes;
@@ -10,8 +11,14 @@ namespace KyberWeave.Application.Review;
 /// <param name="programs">Starts git.</param>
 /// <param name="fileSystem">Probes the repository root.</param>
 /// <param name="files">Reads the untracked files whose every line is added.</param>
-public sealed class SuppressionScanService(IProgramRunner programs, IFileSystem fileSystem, IBoundedFileReader files)
-    : ISuppressionScanService
+/// <param name="paths">Resolves the working directory the caller spelled.</param>
+/// <param name="environment">Names the working directory a relative one resolves against.</param>
+public sealed class SuppressionScanService(
+    IProgramRunner programs,
+    IFileSystem fileSystem,
+    IBoundedFileReader files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : ISuppressionScanService
 {
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(60);
 
@@ -24,7 +31,7 @@ public sealed class SuppressionScanService(IProgramRunner programs, IFileSystem 
         string root;
         try
         {
-            root = Path.GetFullPath(workingDirectory);
+            root = paths.GetFullPath(workingDirectory, environment.CurrentDirectory);
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException
                                        or System.Security.SecurityException)

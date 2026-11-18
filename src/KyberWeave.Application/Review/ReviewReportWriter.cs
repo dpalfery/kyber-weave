@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.FileSystem;
@@ -13,14 +14,24 @@ internal static class ReviewReportWriter
     /// the file.
     /// </summary>
     /// <param name="files">Writes the file.</param>
+    /// <param name="paths">Resolves the path the caller spelled.</param>
+    /// <param name="environment">Names the working directory a relative path resolves against.</param>
     /// <param name="path">Where to write it, or null for nowhere.</param>
     /// <param name="content">The document.</param>
     /// <param name="code">The rule id a failed write is reported under.</param>
     /// <param name="report">Receives the failure.</param>
     internal static void TryWrite(
-        IWritableFileSystem files, string? path, string content, string code, DiagnosticReport report)
+        IWritableFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        string? path,
+        string content,
+        string code,
+        DiagnosticReport report)
     {
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(report);
 
         if (path is null)
@@ -38,7 +49,7 @@ internal static class ReviewReportWriter
             return;
         }
 
-        string full = Path.GetFullPath(path);
+        string full = paths.GetFullPath(path, environment.CurrentDirectory);
         try
         {
             string? directory = Path.GetDirectoryName(full);

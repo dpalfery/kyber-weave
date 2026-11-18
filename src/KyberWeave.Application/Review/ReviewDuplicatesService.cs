@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Review;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.CodeGraph;
@@ -14,11 +15,15 @@ namespace KyberWeave.Application.Review;
 /// <param name="graphs">Reads the CodeGraph index the comparison runs over.</param>
 /// <param name="configs">Loads the host's configuration.</param>
 /// <param name="files">Writes the duplicates report.</param>
+/// <param name="paths">Resolves the path the caller spelled.</param>
+/// <param name="environment">Names the working directory a relative path resolves against.</param>
 public sealed class ReviewDuplicatesService(
     IDuplicateDetectionService detector,
     ICodeGraphPortsFactory graphs,
     IConfigLoadService configs,
-    IWritableFileSystem files) : IReviewDuplicatesService
+    IWritableFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IReviewDuplicatesService
 {
     /// <inheritdoc />
     public ReviewCommandResult Run(ReviewDuplicatesRequest request, CancellationToken cancellationToken = default)
@@ -26,7 +31,7 @@ public sealed class ReviewDuplicatesService(
         ArgumentNullException.ThrowIfNull(request);
 
         DiagnosticReport report = new();
-        string root = Path.GetFullPath(request.Path);
+        string root = paths.GetFullPath(request.Path, environment.CurrentDirectory);
 
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
             return ReviewCommandResultFactory.Reported(1, report);
@@ -76,7 +81,14 @@ public sealed class ReviewDuplicatesService(
         report.AddMetric("clusters", duplicates.Clusters.Count);
         report.AddMetric("symbols", duplicates.SymbolsConsidered);
 
-        ReviewReportWriter.TryWrite(files, request.Out, ReviewJson.Write(duplicates), ReviewGateReporting.ReportWriteFailed, report);
+        ReviewReportWriter.TryWrite(
+            files,
+            paths,
+            environment,
+            request.Out,
+            ReviewJson.Write(duplicates),
+            ReviewGateReporting.ReportWriteFailed,
+            report);
 
         // Clusters are Warning by design (the gate proves evidence was produced). A failed
         // --out write is Error and must fail the process, or CI would treat a missing report

@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Review;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Diagnostics;
@@ -9,7 +10,13 @@ namespace KyberWeave.Application.Review;
 /// <summary>Refuses a warning suppression the change adds unless it states a reason.</summary>
 /// <param name="scanner">Scans the lines the change adds.</param>
 /// <param name="files">Probes the repository path.</param>
-public sealed class ReviewSuppressionsService(ISuppressionScanService scanner, IFileSystem files) : IReviewSuppressionsService
+/// <param name="paths">Resolves the path the caller spelled.</param>
+/// <param name="environment">Names the working directory a relative path resolves against.</param>
+public sealed class ReviewSuppressionsService(
+    ISuppressionScanService scanner,
+    IFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IReviewSuppressionsService
 {
     /// <summary>An option value the command refuses before it reads anything.</summary>
     private const string InvalidInput = "KW-REVIEW-028";
@@ -23,7 +30,7 @@ public sealed class ReviewSuppressionsService(ISuppressionScanService scanner, I
         string root;
         try
         {
-            root = Path.GetFullPath(request.Path);
+            root = paths.GetFullPath(request.Path, environment.CurrentDirectory);
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException
                                        or System.Security.SecurityException)
