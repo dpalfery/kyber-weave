@@ -37,7 +37,7 @@ namespace KyberWeave.Tests;
 /// <para>
 /// A refusal's <c>Message</c> must contain <c>kyber-weave review gates . --agent &lt;name&gt;</c> and
 /// <c>scripts/fast-loop.sh --class 'KyberWeave.Tests.&lt;Area&gt;*'</c>. The loader reads <c>full-suite</c> through
-/// <c>ReviewConfigLoader.Merge</c>, which is internal and visible to this assembly.
+/// <c>ReviewConfigParser.Merge</c>, which is internal and visible to this assembly.
 /// </para>
 /// <para>
 /// RED for this file is a compile failure on the names above, which do not exist yet. That build error is the
@@ -147,7 +147,7 @@ public sealed class ReviewFullSuiteGuardTests
                   run: [dotnet, build, KyberWeave.sln]
             """;
 
-        ReviewConfig config = ReviewConfigLoader.Merge(
+        ReviewConfig config = ReviewConfigParser.Merge(
             ReviewConfig.ProductDefaults,
             KyberWeaveYamlParser.Parse(yaml).Review);
 

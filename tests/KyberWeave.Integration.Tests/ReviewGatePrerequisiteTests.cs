@@ -135,7 +135,7 @@ public sealed class ReviewGatePrerequisiteTests : IDisposable
                                   run: [npm, run, --prefix, dash, typecheck]
                             """;
 
-        IReadOnlyList<string> warnings = ReviewConfigLoader.UnknownKeyWarnings(yaml);
+        IReadOnlyList<string> warnings = ReviewConfigParser.UnknownKeyWarnings(yaml);
 
         Assert.DoesNotContain(
             warnings,
