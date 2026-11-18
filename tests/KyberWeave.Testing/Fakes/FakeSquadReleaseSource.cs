@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
+using KyberWeave.Cli.Update;
 using KyberWeave.Core.Squad.Release;
 
 namespace KyberWeave.Tests.Fakes;
@@ -98,6 +99,7 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ValidateRequest(request);
         cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
         {
@@ -153,6 +155,32 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
     public void Dispose()
     {
         // No unmanaged resources.
+    }
+
+    /// <summary>
+    /// The same request rule the product's release adapter applies before it touches the network, so a unit
+    /// test cannot hand the fake a repository, version or destination the real source would reject.
+    /// </summary>
+    private static void ValidateRequest(SquadReleaseRequest request)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Repository);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Version);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.DestinationPath);
+
+        string[] repositoryParts = request.Repository.Split('/');
+        if (repositoryParts.Length != 2 || repositoryParts.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new ArgumentException(
+                "The release repository must use exact 'owner/name' form.",
+                nameof(request));
+        }
+
+        if (!ReleaseVersion.IsStrictSemVer(request.Version))
+        {
+            throw new ArgumentException(
+                "The release version must use valid semantic version format (X.Y.Z or X.Y.Z-prerelease) with no leading zeros.",
+                nameof(request));
+        }
     }
 
     private static async Task WriteMinimalCorpusAsync(string destinationPath, CancellationToken cancellationToken)

@@ -138,6 +138,45 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
         Assert.False(File.Exists(rootedPath));
     }
 
+    [Theory]
+    [InlineData("evil", "1.2.3")]
+    [InlineData("owner/name/extra", "1.2.3")]
+    [InlineData("owner/name", "not-a-version")]
+    [InlineData("owner/name", "01.2.3")]
+    public async Task AMalformedRequestIsRefusedLikeTheRealSource(string repository, string version)
+    {
+        FakeSquadReleaseSource source = new();
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => source.DownloadAndExtractAsync(
+                new SquadReleaseRequest(repository, version, Path.Combine(_temp.Path, "malformed"))));
+
+        Assert.Empty(source.Requests);
+    }
+
+    [Fact]
+    public async Task AWhitespaceDestinationIsRefusedLikeTheRealSource()
+    {
+        FakeSquadReleaseSource source = new();
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => source.DownloadAndExtractAsync(new SquadReleaseRequest("owner/name", "1.2.3", "   ")));
+
+        Assert.Empty(source.Requests);
+    }
+
+    [Fact]
+    public async Task APrereleaseVersionIsAccepted()
+    {
+        FakeSquadReleaseSource source = new();
+        SquadReleaseRequest request = Request("prerelease", version: "1.2.3-rc.1");
+
+        SquadReleaseResult result = await source.DownloadAndExtractAsync(request);
+
+        Assert.Equal("1.2.3-rc.1", result.Version);
+        Assert.Equal("kyber-squad-1.2.3-rc.1.zip", result.Asset.Name);
+    }
+
     [Fact]
     public async Task TheAfterExtractHookSeesTheExtractedRootAndItsEditLands()
     {
@@ -232,11 +271,11 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
         Assert.Empty(source.Requests);
     }
 
-    private SquadReleaseRequest Request(string name)
+    private SquadReleaseRequest Request(string name, string version = "1.2.3")
     {
         return new SquadReleaseRequest(
             "owner/kyber-squad",
-            "1.2.3",
+            version,
             Path.Combine(_temp.Path, name));
     }
 
