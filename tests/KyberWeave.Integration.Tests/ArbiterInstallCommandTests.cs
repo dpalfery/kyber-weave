@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Configuration;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Arbiter;
@@ -111,7 +112,7 @@ public sealed class ArbiterInstallCommandTests : IClassFixture<InstallCommandTem
     public void Install_GlobalScope_ExplicitGlobal_IsAcceptedAndWritesToHomeConfigAndGlobalRoot()
     {
         string host = NewDir("install-global");
-        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude", "warp"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["claude", "warp"]);
         using ArbiterTestHost templateHost = TemplateHost(_templates.GlobalClaude);
 
         ArbiterInstallCommand command = templateHost.Command<ArbiterInstallCommand>();
@@ -410,7 +411,7 @@ public sealed class ArbiterInstallCommandTests : IClassFixture<InstallCommandTem
     public void Install_DefaultScope_GlobalWritesToHomeConfigAndGlobalRoot()
     {
         string host = NewDir("install-global-default");
-        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude", "warp"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["claude", "warp"]);
         using ArbiterTestHost templateHost = TemplateHost(_templates.GlobalClaude);
 
         ArbiterInstallCommand command = templateHost.Command<ArbiterInstallCommand>();
@@ -476,7 +477,7 @@ public sealed class ArbiterInstallCommandTests : IClassFixture<InstallCommandTem
     public void Install_D13Output_ListsTierPathReasonAndTrustStepForEachGlobalHarness()
     {
         string host = NewDir("install-d13");
-        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude", "warp", "copilot"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["claude", "warp", "copilot"]);
         using ArbiterTestHost templateHost = TemplateHost(_templates.GlobalClaude);
 
         ArbiterInstallCommand command = templateHost.Command<ArbiterInstallCommand>();
@@ -627,7 +628,7 @@ public sealed class ArbiterInstallCommandTests : IClassFixture<InstallCommandTem
     public void Install_ThreeGlobalTargetsSharingOneHookFileName_AllExitZeroAndOneReceiptHoldsThreeBlocks()
     {
         string host = NewDir("install-three-global-blocks");
-        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["cursor", "codex", "factory"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["cursor", "codex", "factory"]);
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
 
         CommandExecution cursor = Capture(() => command.Execute(

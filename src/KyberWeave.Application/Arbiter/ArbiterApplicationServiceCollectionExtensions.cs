@@ -1,3 +1,4 @@
+using KyberWeave.Application.RunStart;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Release;
@@ -93,6 +94,7 @@ public static class ArbiterApplicationServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         services.TryAddSingleton(TimeProvider.System);
         _ = services.AddWeaveRunData();
+        _ = services.AddWeaveRunStartState();
         services.TryAddSingleton<IRepositoryTreeProbe>(_ => new FileRepositoryTreeProbe());
         services.TryAddSingleton<IKyberWeaveConfigRepository>(sp =>
             new FileKyberWeaveConfigRepository(sp.GetRequiredService<IRepositoryTreeProbe>()));

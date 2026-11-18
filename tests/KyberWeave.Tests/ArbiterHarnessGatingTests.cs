@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Configuration;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Tests.Arbiter;
@@ -58,7 +59,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     [Fact]
     public void Doctor_ListsEachUngatedInstalledHarnessWithItsFixCommand_AndNeverNamesAnAbsentClaude()
     {
-        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["antigravity", "copilot"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["antigravity", "copilot"]);
         WriteProjectConfig(EnabledYaml);
 
         string output = RunDoctor().Output;
@@ -143,7 +144,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
         WriteGlobalReceipt(
             files: [],
             blocks: [ClaudeBlock()]);
-        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["copilot"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["copilot"]);
         WriteProjectConfig(EnabledYaml);
 
         string output = RunDoctor().Output;
@@ -159,7 +160,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
         WriteGlobalReceipt(
             files: [],
             blocks: [ClaudeBlock()]);
-        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["claude"]);
         WriteProjectConfig(EnabledYaml);
 
         string output = RunDoctor().Output;
@@ -196,7 +197,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
         WriteGlobalReceipt(
             files: [OwnedFile("hooks/kyber-arbiter.json", "copilot")],
             blocks: []);
-        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["claude"]);
         WriteProjectConfig(EnabledYaml);
 
         string output = RunDoctor().Output;
@@ -212,7 +213,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     [Fact]
     public void Doctor_ReportsWarpAsFallbackOnlyWithoutAFixOrADiagnostic()
     {
-        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["warp"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["warp"]);
         WriteProjectConfig(EnabledYaml);
 
         string output = RunDoctor().Output;
@@ -231,7 +232,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     [Fact]
     public void Doctor_ReportsEachInstalledHarnessOptedOut_WhenTheProjectDisablesArbiter()
     {
-        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["antigravity", "copilot"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["antigravity", "copilot"]);
         WriteProjectConfig(
             """
             arbiter:
@@ -276,7 +277,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     /// </summary>
     private void SetUpLiveClaudeHook(string eventKey)
     {
-        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["claude"]);
         WriteFile(Path.Combine(_home.Path, ".claude", "settings.json"), UserClaudeSettings(eventKey));
         WriteGlobalReceipt(files: [], blocks: [ClaudeBlock()]);
     }

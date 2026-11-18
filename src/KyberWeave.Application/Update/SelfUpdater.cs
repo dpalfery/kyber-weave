@@ -1013,7 +1013,8 @@ internal sealed class SelfUpdater : IDisposable
         string archiveName = BinaryInstaller.ArchiveName(baseName, rid);
         string archivePath = Path.Combine(workDirectory, archiveName);
         _log($"downloading {archiveName}…");
-        _releases.DownloadAsset(tag, archiveName, archivePath);
+        using (FileStream destination = File.Create(archivePath))
+            _releases.DownloadAsset(tag, archiveName, destination);
 
         string expected = ChecksumVerifier.ExpectedHex(sums, archiveName);
         byte[] hash;
