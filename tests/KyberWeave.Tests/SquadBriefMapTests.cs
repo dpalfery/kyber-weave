@@ -27,7 +27,7 @@ public sealed class SquadBriefMapTests
     [Fact]
     public void EveryFileAndHeadingTheMapNamesExistsInTheProductSource()
     {
-        BriefMap map = BriefMap.Load();
+        BriefMap map = BriefMapLoader.Load();
         List<string> problems = [];
 
         foreach (string agent in map.Agents)
@@ -63,7 +63,7 @@ public sealed class SquadBriefMapTests
     [Fact]
     public void EveryReferenceFileOfAMappedAgentIsInTheMap()
     {
-        BriefMap map = BriefMap.Load();
+        BriefMap map = BriefMapLoader.Load();
         List<string> unlisted = [];
 
         foreach (string agent in map.Agents)

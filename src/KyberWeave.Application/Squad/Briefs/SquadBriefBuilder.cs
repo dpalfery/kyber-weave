@@ -72,7 +72,7 @@ public sealed class SquadBriefBuilder(
         }
 
         string? agentsMarkdown = ReadRootAgents(request.RepositoryRoot);
-        (string autonomy, string autonomySource) = BriefFacts.ResolveAutonomy(
+        (string autonomy, string autonomySource) = BriefAutonomy.Resolve(
             request.Autonomy, agentsMarkdown, request.Config?.ConfigReg.Autonomy);
         sources["autonomy"] = request.Autonomy is null ? autonomySource : "given";
 
@@ -81,7 +81,7 @@ public sealed class SquadBriefBuilder(
         BriefMap map;
         try
         {
-            map = BriefMap.Load();
+            map = BriefMapLoader.Load();
         }
         catch (BriefMapException exception)
         {

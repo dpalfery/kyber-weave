@@ -68,7 +68,7 @@ public sealed class SquadBriefSelectionTests : IDisposable
     private BriefResult Assemble(BriefFacts facts, string? text = null)
     {
         string directory = Install("plan-path.md", text ?? Reference);
-        return new SquadBriefService(new PhysicalFileSystem()).Assemble(BriefMap.Parse(MapYaml), "conductor", facts, directory);
+        return new SquadBriefService(new PhysicalFileSystem()).Assemble(BriefMapLoader.Parse(MapYaml), "conductor", facts, directory);
     }
 
     [Fact]
@@ -142,7 +142,7 @@ public sealed class SquadBriefSelectionTests : IDisposable
     [Fact]
     public void ModeSelectsBetweenTheTwoContracts()
     {
-        BriefMap map = BriefMap.Parse("""
+        BriefMap map = BriefMapLoader.Parse("""
             schema: kyber-squad.briefs/v1
             agents:
               architect:
@@ -226,7 +226,7 @@ public sealed class SquadBriefSelectionTests : IDisposable
         Directory.CreateDirectory(directory);
 
         BriefMapException error = Assert.Throws<BriefMapException>(
-            () => new SquadBriefService(new PhysicalFileSystem()).Assemble(BriefMap.Parse(MapYaml), "conductor", new BriefFacts("plan", null, null), directory));
+            () => new SquadBriefService(new PhysicalFileSystem()).Assemble(BriefMapLoader.Parse(MapYaml), "conductor", new BriefFacts("plan", null, null), directory));
 
         Assert.Contains(Path.Combine(directory, "plan-path.md"), error.Message, StringComparison.Ordinal);
         Assert.Contains("plan-path.markdown", error.Message, StringComparison.Ordinal);
@@ -237,7 +237,7 @@ public sealed class SquadBriefSelectionTests : IDisposable
     {
         Install("plan-path.markdown", Reference);
 
-        BriefResult result = new SquadBriefService(new PhysicalFileSystem()).Assemble(BriefMap.Parse(MapYaml), "conductor", new BriefFacts("plan", "autonomous", null), _temp.Path);
+        BriefResult result = new SquadBriefService(new PhysicalFileSystem()).Assemble(BriefMapLoader.Parse(MapYaml), "conductor", new BriefFacts("plan", "autonomous", null), _temp.Path);
 
         Assert.EndsWith("plan-path.markdown", result.Parts[0].ReadFrom, StringComparison.Ordinal);
     }
@@ -248,7 +248,7 @@ public sealed class SquadBriefSelectionTests : IDisposable
         Install("plan-path.md", Reference);
         Install("brand-new-reference.md", "# New\n");
 
-        BriefResult result = new SquadBriefService(new PhysicalFileSystem()).Assemble(BriefMap.Parse(MapYaml), "conductor", new BriefFacts("plan", null, null), _temp.Path);
+        BriefResult result = new SquadBriefService(new PhysicalFileSystem()).Assemble(BriefMapLoader.Parse(MapYaml), "conductor", new BriefFacts("plan", null, null), _temp.Path);
 
         Assert.Equal(["brand-new-reference.md"], result.UnlistedFiles);
         Assert.Contains("read whole: brand-new-reference.md", BriefFormatter.ToText(result), StringComparison.Ordinal);
@@ -262,7 +262,7 @@ public sealed class SquadBriefSelectionTests : IDisposable
     {
         string yaml = $"schema: kyber-squad.briefs/v1\nagents:\n  a:\n    - file: x.md\n      when: {condition}\n";
 
-        Assert.Throws<BriefMapException>(() => BriefMap.Parse(yaml));
+        Assert.Throws<BriefMapException>(() => BriefMapLoader.Parse(yaml));
     }
 
     [Theory]
@@ -274,7 +274,7 @@ public sealed class SquadBriefSelectionTests : IDisposable
     public void AutonomyResolvesPromptThenRegistryThenConfigurationThenSupervised(
         string? prompt, string? agents, string? configured, string expected, string source)
     {
-        (string value, string from) = BriefFacts.ResolveAutonomy(prompt, agents, configured);
+        (string value, string from) = BriefAutonomy.Resolve(prompt, agents, configured);
 
         Assert.Equal((expected, source), (value, from));
     }
@@ -282,7 +282,7 @@ public sealed class SquadBriefSelectionTests : IDisposable
     [Fact]
     public void TheShippedMapLoadsAndDescribesBothAgents()
     {
-        BriefMap map = BriefMap.Load();
+        BriefMap map = BriefMapLoader.Load();
 
         Assert.Contains("conductor", map.Agents);
         Assert.Contains("architect", map.Agents);
