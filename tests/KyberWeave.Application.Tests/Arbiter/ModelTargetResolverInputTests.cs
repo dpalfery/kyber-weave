@@ -10,6 +10,8 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -19,7 +21,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// delivers, anything else is shadow with its own reason), and a blank caller model or a blank table token
 /// counts as absent. Observed end to end through <see cref="ArbiterEvaluator"/>, as the resolver's own tests are.
 /// </summary>
-public sealed class ModelTargetResolverInputTests : IDisposable
+public sealed class ModelTargetResolverInputTests
 {
     private const string DifficultyRule = "KW-ARB-DIFFICULTY-001";
     private const string ScopeRule = "KW-ARB-SCOPE-002";
@@ -27,11 +29,16 @@ public sealed class ModelTargetResolverInputTests : IDisposable
     private const string Harness = "claude";
     private const string Model = "claude-sonnet-5-5";
 
-    private readonly TempDirectory _repo = new();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly InMemoryArbiterState _state;
+    private readonly string _repoPath = ArbiterTestRoots.Under("repo");
 
-    public void Dispose() => _repo.Dispose();
+    public ModelTargetResolverInputTests()
+    {
+        _state = new InMemoryArbiterState(_files);
+    }
 
-    private string ArbiterDirectory => Path.Combine(_repo.Path, "artifacts", "arbiter");
+    private string ArbiterDirectory => Path.Combine(_repoPath, "artifacts", "arbiter");
 
     /// <summary>
     /// The plan facts the evaluator reads. Under the one remaining roster the difficulty rule takes the recorded
@@ -78,14 +85,14 @@ public sealed class ModelTargetResolverInputTests : IDisposable
     private ArbiterEvaluator Evaluator(IArbiterProvider provider) => new(
         provider,
         _ => null,
-        RealArbiterState.Ledger(ArbiterDirectory),
-        RealArbiterState.Decisions(ArbiterDirectory),
+        _state.Ledger(ArbiterDirectory),
+        _state.Decisions(ArbiterDirectory),
         new NoGitFacts(),
         new PlanFacts(),
-        new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
-        TimeProvider.System, new FakeIdGenerator(),
+        new FileArbiterModelTargetsReader(_files),
+            _state.GateReports(),
+            _state.Factory(),
+        new FakeTimeProvider(), new FakeIdGenerator(),
         secondaryTriggers: (primary, ev) => string.Equals(primary, "delegate", StringComparison.Ordinal)
             ? ["delegate.model"]
             : []);
@@ -98,7 +105,7 @@ public sealed class ModelTargetResolverInputTests : IDisposable
         Prompt = Prompt,
         HarnessCaller = "conductor",
         Session = "s1",
-        Cwd = _repo.Path,
+        Cwd = _repoPath,
         ModelOverrideField = "model",
         Model = model,
         RenderedModelToken = Model,
@@ -113,7 +120,7 @@ public sealed class ModelTargetResolverInputTests : IDisposable
                 Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
                 Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
             }).EvaluateAsync(ev, config, null, TestContext.Current.CancellationToken);
-        return Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), decision => decision.Trigger == "delegate.model");
+        return Assert.Single(_state.Decisions(ArbiterDirectory).ReadAll(), decision => decision.Trigger == "delegate.model");
     }
 
     private static ArbiterModelBlock BlockOf(ArbiterDecisionRecord record) =>
@@ -121,7 +128,7 @@ public sealed class ModelTargetResolverInputTests : IDisposable
 
     private void WriteTable(string? deepToken = "opus")
     {
-        Directory.CreateDirectory(ArbiterDirectory);
+        _files.CreateDirectory(ArbiterDirectory);
         ArbiterModelTargets table = new(
             ArbiterModelTargets.SchemaName,
             Harness,
@@ -137,7 +144,7 @@ public sealed class ModelTargetResolverInputTests : IDisposable
             {
                 ["dev-medium"] = new("general", "sonnet"),
             });
-        File.WriteAllText(
+        _files.WriteAllText(
             Path.Combine(ArbiterDirectory, $"model-targets.{Harness}.json"),
             JsonSerializer.Serialize(table));
     }
