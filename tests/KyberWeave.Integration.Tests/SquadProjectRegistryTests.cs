@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
@@ -379,7 +380,7 @@ public sealed class SquadProjectRegistryTests
             .ToArray();
 
     private static SquadStateStore StoreFor(string home) =>
-        new(FakeSquadUserPaths.FromHome(home));
+        RealSquadState.Store(FakeSquadUserPaths.FromHome(home));
 
     /// <summary>
     /// A project install renders a codex agent and a warp reviewer. A global install renders relative

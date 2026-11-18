@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Model;
@@ -268,7 +269,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         Directory.CreateDirectory(presetsDir);
         await File.WriteAllTextAsync(Path.Combine(presetsDir, "fast.yml"), FastPresetYaml);
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore, selectionStore: selectionStore);
@@ -304,7 +305,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         Directory.CreateDirectory(presetsDir);
         await File.WriteAllTextAsync(Path.Combine(presetsDir, "fast.yml"), FastPresetYaml);
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore, selectionStore: selectionStore);

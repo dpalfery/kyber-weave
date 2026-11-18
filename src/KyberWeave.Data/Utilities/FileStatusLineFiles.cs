@@ -58,8 +58,20 @@ public sealed class FileStatusLineFiles : IStatusLineFiles
     }
 
     /// <inheritdoc />
-    public bool HasUserExecuteBit(string path) =>
-        OperatingSystem.IsWindows() || (File.GetUnixFileMode(path) & UnixFileMode.UserExecute) != 0;
+    public bool HasUserExecuteBit(string path)
+    {
+        if (OperatingSystem.IsWindows()) return true;
+
+        try
+        {
+            return (File.GetUnixFileMode(path) & UnixFileMode.UserExecute) != 0;
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            // A dangling symbolic link has no target to inspect.
+            return false;
+        }
+    }
 
     /// <inheritdoc />
     public void MarkExecutable(string path)

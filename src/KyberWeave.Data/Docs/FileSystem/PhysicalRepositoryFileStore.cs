@@ -40,6 +40,14 @@ public sealed class PhysicalRepositoryFileStore : IRepositoryFileStore
     public void WriteAllBytesAtomic(string path, byte[] bytes) => _inner.WriteAllBytesAtomic(path, bytes);
 
     /// <inheritdoc />
+    public void WriteAllTextAtomic(string path, string contents, bool flushToDisk) =>
+        _inner.WriteAllTextAtomic(path, contents, flushToDisk);
+
+    /// <inheritdoc />
+    public void WriteAllBytesAtomic(string path, byte[] bytes, bool flushToDisk) =>
+        _inner.WriteAllBytesAtomic(path, bytes, flushToDisk);
+
+    /// <inheritdoc />
     public void MoveFile(string sourcePath, string destinationPath) => _inner.MoveFile(sourcePath, destinationPath);
 
     /// <inheritdoc />

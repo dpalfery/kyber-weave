@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Repositories;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
@@ -20,8 +21,6 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// </remarks>
 public sealed class SquadStateMigration : ISquadStateMigration
 {
-    private static readonly SquadFileSystemPathSemantics Semantics = SquadFileSystemPathSemantics.Instance;
-
     private const string ReceiptFileName = "squad.receipt.json";
     private const string LockFileName = "squad.lock.yml";
     private const string TargetRootProperty = "targetRoot";
@@ -53,16 +52,40 @@ public sealed class SquadStateMigration : ISquadStateMigration
         NewLine = "\n"
     };
 
-    private readonly SquadStateStore _stateStore;
+    private readonly ISquadStateStore _stateStore;
     private readonly ISquadUserPaths _userPaths;
+    private readonly IWritableFileSystem _files;
+    private readonly IFileSystemPathSemantics _semantics;
+    private readonly ILease _lease;
+    private readonly TimeProvider _time;
 
-    /// <summary>Creates a migration over the given state store and user paths.</summary>
-    public SquadStateMigration(SquadStateStore stateStore, ISquadUserPaths userPaths)
+    /// <summary>Creates a migration over the given state store, user paths and seams.</summary>
+    /// <param name="stateStore">The store that resolves the home layout and reads and writes the registry.</param>
+    /// <param name="userPaths">The directories the legacy state is looked up under.</param>
+    /// <param name="files">The file system every read and write goes through.</param>
+    /// <param name="semantics">The canonical spelling and alias rules a root is resolved with.</param>
+    /// <param name="lease">The cross-process lease a copy holds, shared with the deployment transaction.</param>
+    /// <param name="time">The clock the registry entry of an import is stamped with.</param>
+    public SquadStateMigration(
+        ISquadStateStore stateStore,
+        ISquadUserPaths userPaths,
+        IWritableFileSystem files,
+        IFileSystemPathSemantics semantics,
+        ILease lease,
+        TimeProvider time)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(userPaths);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(semantics);
+        ArgumentNullException.ThrowIfNull(lease);
+        ArgumentNullException.ThrowIfNull(time);
         _stateStore = stateStore;
         _userPaths = userPaths;
+        _files = files;
+        _semantics = semantics;
+        _lease = lease;
+        _time = time;
     }
 
     /// <summary>Migrates legacy global state into the home-level layout.</summary>
@@ -89,7 +112,7 @@ public sealed class SquadStateMigration : ISquadStateMigration
         string homeGlobalDirectory = _stateStore.ResolveStateDirectory(
             _stateStore.ResolveHomeRoot(),
             SquadDeploymentScope.Global);
-        if (!File.Exists(Path.Combine(homeGlobalDirectory, ReceiptFileName)))
+        if (!_files.FileExists(Path.Combine(homeGlobalDirectory, ReceiptFileName)))
         {
             List<string> legacyDirectories = FindNonEmptyLegacyRootDirectories();
             if (legacyDirectories.Count > 1)
@@ -160,12 +183,18 @@ public sealed class SquadStateMigration : ISquadStateMigration
         {
             // The home receipt is the authority, so nothing is copied. Each legacy root that remains is still
             // reported: doctor must be able to say it is on disk and is no longer read.
-            foreach (string legacyDirectory in FindNonEmptyLegacyRootDirectories())
+            List<string> remaining = FindNonEmptyLegacyRootDirectories();
+            foreach (string legacyDirectory in remaining)
             {
                 unmigrated.Add(new SquadUnmigratedLegacyRoot(
                     legacyDirectory,
                     HomeAuthorityReason,
                     HomeAuthorityGuidance));
+            }
+
+            if (!dryRun)
+            {
+                ReconcileGlobalLedger(homeGlobalDirectory, remaining, warnings);
             }
         }
 
@@ -190,21 +219,21 @@ public sealed class SquadStateMigration : ISquadStateMigration
 
         List<string> imported = [];
         List<string> warnings = [];
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(root, Semantics);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(root, _semantics);
         string projectDirectory = _stateStore.ResolveStateDirectory(identity.PhysicalPath, SquadDeploymentScope.Project);
         string inRepoDirectory = Path.Combine(identity.PhysicalPath, InRepoStateDirectoryName);
         string inRepoReceiptPath = Path.Combine(inRepoDirectory, ReceiptFileName);
         string inRepoLockPath = Path.Combine(inRepoDirectory, LockFileName);
 
-        bool homeReceiptExists = File.Exists(Path.Combine(projectDirectory, ReceiptFileName));
-        if (!homeReceiptExists && File.Exists(inRepoReceiptPath) && !ReadLedger(warnings).HasProjectImport(identity.Key))
+        bool homeReceiptExists = _files.FileExists(Path.Combine(projectDirectory, ReceiptFileName));
+        if (!homeReceiptExists && _files.FileExists(inRepoReceiptPath) && !ReadLedger(warnings).HasProjectImport(identity.Key))
         {
-            if (!File.Exists(inRepoLockPath))
+            if (!_files.FileExists(inRepoLockPath))
             {
                 warnings.Add(
                     $"The in-repo receipt at '{inRepoReceiptPath}' has no lock beside it, so it was not imported.");
             }
-            else if (HomeLockBlocksCopy(Path.Combine(projectDirectory, LockFileName), File.ReadAllBytes(inRepoLockPath)))
+            else if (HomeLockBlocksCopy(Path.Combine(projectDirectory, LockFileName), _files.ReadAllBytes(inRepoLockPath)))
             {
                 warnings.Add(
                     $"A home lock already exists for '{identity.PhysicalPath}' without a receipt, so nothing was " +
@@ -223,8 +252,129 @@ public sealed class SquadStateMigration : ISquadStateMigration
             }
         }
 
+        else if (homeReceiptExists && !dryRun && _files.FileExists(inRepoReceiptPath))
+        {
+            ReconcileProjectImport(identity, projectDirectory, inRepoLockPath, warnings);
+        }
+
         return new SquadMigrationReport([], [], imported, warnings);
     }
+
+    /// <summary>
+    /// Finishes what a run stopped after the home receipt left undone. The receipt is the completion marker of a
+    /// copy, so a later run no longer copies, and the ledger entry and the registry entry that follow it in a copy
+    /// would otherwise stay missing for good. Only a copy that was actually made is finished: the home lock must be
+    /// byte-identical to the in-repo lock, which is what an interrupted copy leaves behind and a fresh install does
+    /// not. The receipt is checked again once the lease is held, so an uninstall that ran in between is not undone,
+    /// and a file failure is a warning, never an error, because this runs before read-only verbs.
+    /// </summary>
+    private void ReconcileProjectImport(
+        SquadPhysicalRootIdentity identity,
+        string projectDirectory,
+        string inRepoLockPath,
+        List<string> warnings)
+    {
+        string leaseIdentity = _stateStore.ResolveLeaseIdentity(identity.PhysicalPath, SquadDeploymentScope.Project);
+        string homeReceiptPath = Path.Combine(projectDirectory, ReceiptFileName);
+        GuardedReconcile(
+            leaseIdentity,
+            warnings,
+            () =>
+            {
+                if (!_files.FileExists(homeReceiptPath) || !LocksMatch(Path.Combine(projectDirectory, LockFileName), inRepoLockPath))
+                {
+                    return;
+                }
+
+                if (!SquadMigrationLedger.Read(_files, LedgerPath(), out _).HasProjectImport(identity.Key))
+                {
+                    RecordInLedger(ledger => ledger.WithProjectImport(identity.Key));
+                }
+
+                if (_stateStore.IsRegistered(identity.PhysicalPath))
+                {
+                    return;
+                }
+
+                SquadReceipt receipt;
+                try
+                {
+                    receipt = _stateStore.DeserializeReceipt(_files.ReadAllText(homeReceiptPath));
+                }
+                catch (InvalidDataException)
+                {
+                    // A home receipt that cannot be read describes no targets, so there is nothing to register.
+                    return;
+                }
+
+                _stateStore.RegisterProject(identity.PhysicalPath, TargetsOf(receipt), _time.GetUtcNow());
+            });
+    }
+
+    /// <summary>
+    /// Records the ledger entry of each legacy root whose copy a stop after the home receipt left unrecorded. A root
+    /// counts as copied only when the home lock is byte-identical to its lock, so a fresh home install does not mark
+    /// an untouched legacy root as migrated. The home receipt is checked again under the lease, and a file failure
+    /// is a warning.
+    /// </summary>
+    private void ReconcileGlobalLedger(string homeGlobalDirectory, List<string> legacyDirectories, List<string> warnings)
+    {
+        if (legacyDirectories.Count == 0)
+        {
+            return;
+        }
+
+        string leaseIdentity = _stateStore.ResolveLeaseIdentity(_stateStore.ResolveHomeRoot(), SquadDeploymentScope.Global);
+        string homeReceiptPath = Path.Combine(homeGlobalDirectory, ReceiptFileName);
+        GuardedReconcile(
+            leaseIdentity,
+            warnings,
+            () =>
+            {
+                if (!_files.FileExists(homeReceiptPath))
+                {
+                    return;
+                }
+
+                SquadMigrationLedger current = SquadMigrationLedger.Read(_files, LedgerPath(), out _);
+                foreach (string legacyDirectory in legacyDirectories)
+                {
+                    string key = Path.GetFileName(legacyDirectory);
+                    if (!current.HasGlobalMigration(key) &&
+                        LocksMatch(Path.Combine(homeGlobalDirectory, LockFileName), Path.Combine(legacyDirectory, LockFileName)))
+                    {
+                        RecordInLedger(ledger => ledger.WithGlobalMigration(key));
+                    }
+                }
+            });
+    }
+
+    /// <summary>Runs a reconcile under the lease. A busy lease skips it; a file failure becomes a warning and the work waits for the next run.</summary>
+    private void GuardedReconcile(string leaseIdentity, List<string> warnings, Action reconcile)
+    {
+        try
+        {
+            RunUnderLease(leaseIdentity, reconcile);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            warnings.Add(
+                $"The migration could not finish recording a copy that an earlier run left unrecorded ({exception.Message}). " +
+                "It will try again on the next run.");
+        }
+    }
+
+    private bool LocksMatch(string homeLockPath, string sourceLockPath) =>
+        _files.FileExists(homeLockPath) &&
+        _files.FileExists(sourceLockPath) &&
+        _files.ReadAllBytes(homeLockPath).AsSpan().SequenceEqual(_files.ReadAllBytes(sourceLockPath));
+
+    private static IReadOnlyList<string> TargetsOf(SquadReceipt receipt) =>
+        receipt.Files
+            .Select(file => file.Target)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
 
     private void ImportInRepoState(
         SquadPhysicalRootIdentity identity,
@@ -235,12 +385,12 @@ public sealed class SquadStateMigration : ISquadStateMigration
         List<string> imported,
         List<string> warnings)
     {
-        string receiptText = File.ReadAllText(inRepoReceiptPath, Encoding.UTF8);
+        string receiptText = _files.ReadAllText(inRepoReceiptPath);
         SquadReceipt receipt;
         try
         {
             receipt = _stateStore.DeserializeReceipt(receiptText);
-            _stateStore.DeserializeLock(File.ReadAllText(inRepoLockPath, Encoding.UTF8));
+            _stateStore.DeserializeLock(_files.ReadAllText(inRepoLockPath));
         }
         catch (InvalidDataException exception)
         {
@@ -267,7 +417,7 @@ public sealed class SquadStateMigration : ISquadStateMigration
 
         string leaseIdentity = _stateStore.ResolveLeaseIdentity(identity.PhysicalPath, SquadDeploymentScope.Project);
         string projectReceiptPath = Path.Combine(projectDirectory, ReceiptFileName);
-        byte[] inRepoLock = File.ReadAllBytes(inRepoLockPath);
+        byte[] inRepoLock = _files.ReadAllBytes(inRepoLockPath);
         CopyOutcome outcome = WriteUnderLease(
             leaseIdentity,
             projectReceiptPath,
@@ -292,12 +442,7 @@ public sealed class SquadStateMigration : ISquadStateMigration
 
         // The target roots a project deploys to come from the receipt itself, so the registry entry
         // describes the same files the receipt owns.
-        IReadOnlyList<string> targets = receipt.Files
-            .Select(file => file.Target)
-            .Distinct(StringComparer.Ordinal)
-            .Order(StringComparer.Ordinal)
-            .ToArray();
-        _stateStore.RegisterProject(identity.PhysicalPath, targets, DateTimeOffset.UtcNow);
+        _stateStore.RegisterProject(identity.PhysicalPath, TargetsOf(receipt), _time.GetUtcNow());
         imported.Add(identity.PhysicalPath);
     }
 
@@ -314,7 +459,7 @@ public sealed class SquadStateMigration : ISquadStateMigration
         plan = null;
         string receiptPath = Path.Combine(legacyDirectory, ReceiptFileName);
         string lockPath = Path.Combine(legacyDirectory, LockFileName);
-        if (!File.Exists(receiptPath) || !File.Exists(lockPath))
+        if (!_files.FileExists(receiptPath) || !_files.FileExists(lockPath))
         {
             return new SquadUnmigratedLegacyRoot(
                 legacyDirectory,
@@ -323,12 +468,12 @@ public sealed class SquadStateMigration : ISquadStateMigration
                 "then run the migration again. Nothing was moved.");
         }
 
-        string receiptText = File.ReadAllText(receiptPath, Encoding.UTF8);
+        string receiptText = _files.ReadAllText(receiptPath);
         SquadReceipt receipt;
         try
         {
             receipt = _stateStore.DeserializeReceipt(receiptText);
-            _stateStore.DeserializeLock(File.ReadAllText(lockPath, Encoding.UTF8));
+            _stateStore.DeserializeLock(_files.ReadAllText(lockPath));
         }
         catch (InvalidDataException exception)
         {
@@ -359,7 +504,7 @@ public sealed class SquadStateMigration : ISquadStateMigration
                 "matched, or register that root and run it again. Nothing was moved.");
         }
 
-        byte[] lockBytes = File.ReadAllBytes(lockPath);
+        byte[] lockBytes = _files.ReadAllBytes(lockPath);
         if (HomeLockBlocksCopy(Path.Combine(homeGlobalDirectory, LockFileName), lockBytes))
         {
             return new SquadUnmigratedLegacyRoot(
@@ -441,32 +586,55 @@ public sealed class SquadStateMigration : ISquadStateMigration
     /// transaction. The home receipt is checked again once the lease is held: a receipt that appeared since the
     /// plan was made is authoritative, and the write is skipped rather than overwriting it.
     /// </summary>
+    private CopyOutcome WriteUnderLease(string leaseIdentity, string homeReceiptPath, Action write)
+    {
+        bool present = false;
+        bool ran = RunUnderLease(
+            leaseIdentity,
+            () =>
+            {
+                if (_files.FileExists(homeReceiptPath))
+                {
+                    present = true;
+                    return;
+                }
+
+                write();
+            });
+        if (!ran)
+        {
+            return CopyOutcome.LeaseBusy;
+        }
+
+        return present ? CopyOutcome.AlreadyPresent : CopyOutcome.Copied;
+    }
+
+    /// <summary>
+    /// Runs an action while holding the lease an install takes for the root. A busy lease is not an error: the
+    /// action does not run, and a later run finds the same work waiting.
+    /// </summary>
+    /// <returns>True when the action ran; false when another transaction held the lease.</returns>
     [SuppressMessage(
         "Reliability",
         "CA2000:Dispose objects before losing scope",
         Justification = "The lease is acquired inside the try and disposed by the using statement that follows; a busy root returns before any lease exists.")]
-    private static CopyOutcome WriteUnderLease(string leaseIdentity, string homeReceiptPath, Action write)
+    private bool RunUnderLease(string leaseIdentity, Action action)
     {
-        TransactionLease lease;
+        IDisposable lease;
         try
         {
-            lease = SquadTransaction.AcquireLease(leaseIdentity);
+            lease = _lease.Acquire(SquadLeaseNames.ForRoot(leaseIdentity), TimeSpan.Zero);
         }
-        catch (InvalidOperationException)
+        catch (LeaseTimeoutException)
         {
-            // AcquireLease refuses only when a transaction is active for the root, in this process or another.
-            return CopyOutcome.LeaseBusy;
+            // The lease is refused only when a transaction holds it for the root, in this process or another.
+            return false;
         }
 
         using (lease)
         {
-            if (File.Exists(homeReceiptPath))
-            {
-                return CopyOutcome.AlreadyPresent;
-            }
-
-            write();
-            return CopyOutcome.Copied;
+            action();
+            return true;
         }
     }
 
@@ -475,8 +643,8 @@ public sealed class SquadStateMigration : ISquadStateMigration
     /// differs blocks. One byte-identical to the source is what an interrupted copy leaves behind, so the copy
     /// finishes it. A different lock may belong to another deployment, so it is never overwritten.
     /// </summary>
-    private static bool HomeLockBlocksCopy(string homeLockPath, byte[] sourceLock) =>
-        File.Exists(homeLockPath) && !File.ReadAllBytes(homeLockPath).AsSpan().SequenceEqual(sourceLock);
+    private bool HomeLockBlocksCopy(string homeLockPath, byte[] sourceLock) =>
+        _files.FileExists(homeLockPath) && !_files.ReadAllBytes(homeLockPath).AsSpan().SequenceEqual(sourceLock);
 
     /// <summary>The outcome of a state copy that ran under the lease.</summary>
     private enum CopyOutcome
@@ -500,17 +668,30 @@ public sealed class SquadStateMigration : ISquadStateMigration
         string rootsDirectory = Path.Combine(
             _userPaths.ApplicationDataDirectory,
             LegacyRootsRelativeDirectory.Replace('/', Path.DirectorySeparatorChar));
-        if (!Directory.Exists(rootsDirectory))
+        if (!_files.DirectoryExists(rootsDirectory))
             return [];
 
-        return new DirectoryInfo(rootsDirectory)
-            .EnumerateFileSystemInfos("*", new EnumerationOptions { RecurseSubdirectories = false, AttributesToSkip = 0 })
-            .OfType<DirectoryInfo>()
-            .Where(entry => entry.LinkTarget is null &&
-                entry.EnumerateFileSystemInfos("*", new EnumerationOptions { AttributesToSkip = 0 }).Any())
-            .Select(entry => entry.FullName)
+        return ListEntries(rootsDirectory)
+            .Where(entry => entry.IsDirectory && !entry.IsLink && ListEntries(entry.Path).Any())
+            .Select(entry => entry.Path)
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToList();
+    }
+
+    /// <summary>
+    /// Lists a directory's children without following links. A directory the process may not list is listed as empty,
+    /// as the walk over this user-influenced tree has always treated it.
+    /// </summary>
+    private List<FileSystemEntry> ListEntries(string directory)
+    {
+        try
+        {
+            return _files.EnumerateEntries(directory).ToList();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
     }
 
     /// <summary>
@@ -527,11 +708,11 @@ public sealed class SquadStateMigration : ISquadStateMigration
         return rewritten;
     }
 
-    private static bool TryResolveExistingRoot(string path, [NotNullWhen(true)] out string? physical)
+    private bool TryResolveExistingRoot(string path, [NotNullWhen(true)] out string? physical)
     {
         try
         {
-            physical = SquadPhysicalRootIdentity.Resolve(path, Semantics).PhysicalPath;
+            physical = SquadPhysicalRootIdentity.Resolve(path, _semantics).PhysicalPath;
             return true;
         }
         catch (Exception exception) when (
@@ -549,29 +730,8 @@ public sealed class SquadStateMigration : ISquadStateMigration
     /// Writes the bytes to a temporary file beside the target and renames it into place. The target is replaced
     /// only by a complete file, and the directory is created when the home has never held Squad state.
     /// </summary>
-    private static void WriteAtomically(string path, byte[] bytes)
-    {
-        string directory = Path.GetDirectoryName(path)
-            ?? throw new InvalidOperationException($"Squad state path '{path}' has no directory.");
-        Directory.CreateDirectory(directory);
-
-        string temporaryPath = Path.Combine(directory, $"{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
-        try
-        {
-            using (FileStream stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                stream.Write(bytes);
-                stream.Flush(flushToDisk: SquadTransaction.SyncToDisk);
-            }
-
-            File.Move(temporaryPath, path, overwrite: true);
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath))
-                File.Delete(temporaryPath);
-        }
-    }
+    private void WriteAtomically(string path, byte[] bytes) =>
+        _files.WriteAllBytesAtomic(path, bytes, SquadTransaction.SyncToDisk);
 
     /// <summary>
     /// Reads the migration ledger for a decision. A ledger that cannot be read counts as empty, and the reason is
@@ -580,7 +740,7 @@ public sealed class SquadStateMigration : ISquadStateMigration
     private SquadMigrationLedger ReadLedger(List<string> warnings)
     {
         string path = LedgerPath();
-        SquadMigrationLedger ledger = SquadMigrationLedger.Read(path, out string? unreadableReason);
+        SquadMigrationLedger ledger = SquadMigrationLedger.Read(_files, path, out string? unreadableReason);
         if (unreadableReason is not null)
         {
             warnings.Add(
@@ -601,7 +761,7 @@ public sealed class SquadStateMigration : ISquadStateMigration
     private void RecordInLedger(Func<SquadMigrationLedger, SquadMigrationLedger> record)
     {
         string path = LedgerPath();
-        SquadMigrationLedger current = SquadMigrationLedger.Read(path, out _);
+        SquadMigrationLedger current = SquadMigrationLedger.Read(_files, path, out _);
         WriteAtomically(path, new UTF8Encoding(false).GetBytes(record(current).Serialize()));
     }
 

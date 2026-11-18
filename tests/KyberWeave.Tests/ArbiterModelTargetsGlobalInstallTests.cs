@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Configuration;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad;
@@ -214,7 +215,7 @@ public sealed class ArbiterModelTargetsGlobalInstallTests : IDisposable
         SquadHostDefaults.CreateLifecycleService(
             release,
             SquadHostDefaults.ResolveRenderer(),
-            new SquadStateStore(new FakeSquadUserPaths(_applicationData)),
+            RealSquadState.Store(new FakeSquadUserPaths(_applicationData)),
             globalRoots: new SquadGlobalRoots(_ => null, _home));
 
     private string GlobalTargetsPath(SquadTarget target) =>

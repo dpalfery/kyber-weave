@@ -112,6 +112,9 @@ public sealed class FakeSquadStateStore(ISquadUserPaths userPaths) : ISquadState
         _projects.Find(project => string.Equals(project.Path, root, StringComparison.Ordinal));
 
     /// <inheritdoc />
+    public bool IsRegistered(string root) => FindProject(root) is not null;
+
+    /// <inheritdoc />
     public IReadOnlyList<SquadProjectRegistryEntry> ListProjectsWithoutRebuild() => throw new NotSupportedException();
 
     /// <inheritdoc />

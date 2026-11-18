@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Configuration;
 
 using System.Security.Cryptography;
@@ -246,7 +247,7 @@ public sealed class SquadTaskGateHintTests
             using FakeSquadReleaseSource releaseSource = new();
             FakeSquadRenderer renderer = new();
             FakeSquadUserPaths userPaths = new(homeDir);
-            SquadStateStore stateStore = new(userPaths);
+            SquadStateStore stateStore = RealSquadState.Store(userPaths);
             CommandExecution execution = Capture(() => SquadTestCommands.Install(
                 userPaths: userPaths,
                 stateStore: stateStore,
@@ -295,7 +296,7 @@ public sealed class SquadTaskGateHintTests
             using FakeSquadReleaseSource releaseSource = new();
             FakeSquadRenderer renderer = new();
             FakeSquadUserPaths userPaths = new(Path.Combine(directory.Path, "home"));
-            SquadStateStore stateStore = new(userPaths);
+            SquadStateStore stateStore = RealSquadState.Store(userPaths);
             SeedDeployment(targetDir, stateStore);
             IReadOnlyDictionary<string, byte[]?> before = SnapshotConfigurationFiles(targetDir);
 

@@ -37,11 +37,11 @@ public sealed class SquadTransaction : ISquadTransaction
 
     private readonly ISquadTransactionObserver? _observer;
 
-    private readonly SquadStateStore _stateStore;
+    private readonly ISquadStateStore _stateStore;
     private readonly List<string> _warnings = [];
 
     public SquadTransaction(
-        SquadStateStore stateStore,
+        ISquadStateStore stateStore,
         ISquadTransactionObserver? observer = null)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
@@ -2185,7 +2185,7 @@ public sealed class SquadTransaction : ISquadTransaction
         bool mutexAcquired = false;
         try
         {
-            mutex = new Mutex(false, $"kyber-weave-squad-{rootKey}");
+            mutex = new Mutex(false, SquadLeaseNames.ForRoot(rootKey));
             try
             {
                 mutexAcquired = mutex.WaitOne(0);

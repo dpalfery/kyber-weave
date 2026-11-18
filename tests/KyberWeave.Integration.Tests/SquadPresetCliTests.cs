@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
@@ -62,7 +63,7 @@ public sealed class SquadPresetCliTests : IDisposable
         _userPaths = new FakeSquadUserPaths(_home);
         Directory.CreateDirectory(_userPaths.HomeDirectory);
         _selectionStore = RealSquadSelectionStore.Create(_userPaths);
-        _stateStore = new SquadStateStore(_userPaths);
+        _stateStore = RealSquadState.Store(_userPaths);
     }
 
     public void Dispose()

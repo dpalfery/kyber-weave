@@ -159,6 +159,8 @@ public sealed class SquadInstanceServiceTests
 
         public SquadProjectRegistryEntry? FindProject(string root) => throw new NotSupportedException();
 
+        public bool IsRegistered(string root) => throw new NotSupportedException();
+
         public IReadOnlyList<SquadProjectRegistryEntry> ListProjectsWithoutRebuild() => throw new NotSupportedException();
 
         public void RegisterProject(string root, IReadOnlyList<string> targets, DateTimeOffset now) => throw new NotSupportedException();

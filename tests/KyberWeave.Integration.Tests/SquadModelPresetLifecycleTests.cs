@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
@@ -85,7 +86,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
         await WritePresetAsync(userPaths, "fast", FastPresetYaml);
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -149,7 +150,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
                 ("fast", FastPresetYaml))
             .CopyInto(userPaths, targetRoot);
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -201,7 +202,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
                 ("copilot-fast", FastPresetYaml))
             .CopyInto(userPaths, targetRoot);
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -243,7 +244,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
                 ("ephemeral", FastPresetYaml))
             .CopyInto(userPaths, targetRoot);
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -291,7 +292,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         Directory.CreateDirectory(targetRoot);
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -330,7 +331,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
         await WritePresetAsync(userPaths, "bad-category", UnknownCategoryPresetYaml);
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -363,7 +364,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
         await WritePresetAsync(userPaths, "fast", FastPresetYaml);
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -421,7 +422,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
                 ("quality", QualityPresetYaml))
             .CopyInto(userPaths, projectRoot2);
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -465,7 +466,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
                 ("fast", FastPresetYaml))
             .CopyInto(userPaths, targetRoot);
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -492,7 +493,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         string targetRoot = Path.Combine(_temp.Path, "instance-multi-target-install");
         Directory.CreateDirectory(targetRoot);
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -513,7 +514,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         string targetRoot = Path.Combine(_temp.Path, "instance-multi-target-update");
         Directory.CreateDirectory(targetRoot);
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -535,7 +536,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
         await WritePresetAsync(userPaths, "fast", FastPresetYaml);
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new()
         {
             FileContents = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -572,7 +573,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         Directory.CreateDirectory(targetRoot);
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -613,7 +614,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
                 new Dictionary<SquadTarget, string>())
             .CopyInto(userPaths, targetRoot);
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -647,7 +648,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         Directory.CreateDirectory(targetRoot);
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -706,7 +707,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
             userPaths.HomeDirectory, ".kyber-weave", "squad", "profiles", "1.0.0.yml");
         Directory.CreateDirectory(blocker);
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);

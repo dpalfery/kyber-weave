@@ -67,12 +67,16 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IManagedGlossaryFactory>(sp => new ManagedGlossaryFactory(
             sp.GetRequiredService<IRepositoryFileStore>(), sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<IPlanTaskService>(sp => new PlanTaskService(
-            sp.GetRequiredService<IRepositoryFileStore>()));
+            sp.GetRequiredService<IRepositoryFileStore>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IDocsSchemaGate>(sp => new DocsSchemaGate(
             sp.GetRequiredService<IRepositoryFileStore>(),
             sp.GetRequiredService<IGitChangeReader>(),
             sp.GetRequiredService<ISeverityOverrideSource>(),
-            sp.GetRequiredService<TimeProvider>()));
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IPacketHostFacts>(sp => new PacketHostFacts(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ITaskPromptServiceFactory>(sp => new TaskPromptServiceFactory(
             sp.GetRequiredService<IPlanTaskService>(),
@@ -147,7 +151,10 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<McpWiringFixes>(),
             sp.GetRequiredService<ILaunchCommandResolverFactory>()));
         services.TryAddSingleton<IDocsHostConfiguration, HostConfiguration>();
-        services.TryAddSingleton<IDocumentSourceFactory>(sp => new DocumentLoaderFactory(sp.GetRequiredService<IRepositoryFileStore>()));
+        services.TryAddSingleton<IDocumentSourceFactory>(sp => new DocumentLoaderFactory(
+            sp.GetRequiredService<IRepositoryFileStore>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IGitWorktreeIdentity>(sp => new GitWorktreeIdentity(
             sp.GetRequiredService<IProcessRunner>(),
             sp.GetRequiredService<IPathResolver>(),

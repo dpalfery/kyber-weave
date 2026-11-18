@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -82,12 +83,21 @@ public sealed class DocSpecValidator
     /// <param name="repoRoot">The checkout root.</param>
     /// <param name="config">The ontology the documents are checked against.</param>
     /// <param name="files">Answers which files, folders and links the checkout holds.</param>
-    public DocSpecValidator(string repoRoot, OntologyConfig config, IFileSystem files)
+    /// <param name="paths">Resolves a relative checkout root.</param>
+    /// <param name="environment">Names the directory a relative checkout root is resolved against.</param>
+    public DocSpecValidator(
+        string repoRoot,
+        OntologyConfig config,
+        IFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(files);
-        _repoRoot = Path.GetFullPath(repoRoot);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
+        _repoRoot = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
         _config = config;
         _files = files;
     }

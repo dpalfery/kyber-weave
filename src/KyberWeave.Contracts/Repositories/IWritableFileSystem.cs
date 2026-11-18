@@ -63,6 +63,15 @@ public interface IWritableFileSystem : IFileSystem
     /// <exception cref="IOException">The write or the rename could not complete.</exception>
     void WriteAllBytesAtomic(string path, byte[] bytes);
 
+    /// <summary>Writes a whole file as bytes atomically, as <see cref="WriteAllBytesAtomic(string, byte[])"/> does, and says whether the bytes must reach the device before the rename.</summary>
+    /// <param name="path">The file to create or replace.</param>
+    /// <param name="bytes">The complete bytes the file ends up holding.</param>
+    /// <param name="flushToDisk">True to flush the temporary file to the device before it replaces the target, so a crash cannot leave the target empty or partly written. An in-memory implementation has no device and ignores it.</param>
+    /// <exception cref="InvalidOperationException">The path has no parent directory.</exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not write the file or its directory.</exception>
+    /// <exception cref="IOException">The write or the rename could not complete.</exception>
+    void WriteAllBytesAtomic(string path, byte[] bytes, bool flushToDisk) => WriteAllBytesAtomic(path, bytes);
+
     /// <summary>Moves a file to a path that must be free, as one rename.</summary>
     /// <param name="sourcePath">The file to move.</param>
     /// <param name="destinationPath">Where it goes; nothing may be there.</param>

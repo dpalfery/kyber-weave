@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
@@ -127,7 +128,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         string root = globalRoots.ResolveGlobalRoot(SquadTarget.Copilot);
         prepared.CopyInto(home, root, userPaths);
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         string conductorFile = Path.Combine(root, "agents", "conductor.agent.md");
         return new GlobalInstall(
             userPaths,
@@ -152,7 +153,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
             Directory.CreateDirectory(home);
             FakeSquadUserPaths userPaths = new(Path.Combine(directory.Path, "user"));
             SquadGlobalRoots globalRoots = new(_ => null, home);
-            SquadStateStore stateStore = new(userPaths);
+            SquadStateStore stateStore = RealSquadState.Store(userPaths);
             using CorpusSquadReleaseSource releaseSource = new();
             SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
                 releaseSource,
@@ -209,7 +210,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
 
             string templateRoot = SquadInstallCopy.Canonical(home);
             string copyRoot = SquadInstallCopy.Canonical(destinationHome);
-            SquadStateStore store = new(userPaths);
+            SquadStateStore store = RealSquadState.Store(userPaths);
             SquadInstallCopy.ReRoot(
                 Path.Combine(userPaths.ApplicationDataDirectory, ".kyber-weave", "squad"),
                 templateRoot,

@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Squad;
@@ -63,7 +64,7 @@ public sealed class ArbiterGlobalWarpFallbackTests : IDisposable
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "app-data"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SquadInstallCommand command = SquadTestCommands.Install(
             userPaths: userPaths,
             stateStore: stateStore,

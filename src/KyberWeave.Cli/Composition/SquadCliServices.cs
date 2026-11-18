@@ -44,14 +44,13 @@ internal static class SquadCliServices
         services.TryAddSingleton(new SquadRunOptions());
         services.TryAddSingleton(new SquadDoctorOptions());
         services.TryAddSingleton<ISquadProjectPicker, SpectreSquadProjectPicker>();
-        services.TryAddSingleton(_ => KyberDashCapturePluginStep.CreateDefault());
+        services.TryAddSingleton(sp => new KyberDashLocator(
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IFileSystem>(),
+            () => Environment.ProcessPath));
+        services.TryAddSingleton(sp => KyberDashCapturePluginStep.Create(
+            sp.GetRequiredService<KyberDashLocator>(),
+            sp.GetRequiredService<SquadConsole>()));
         return services;
     }
-
-    /// <summary>
-    /// The Squad console over the process's own console, for the callers the container does not build yet (the Arbiter
-    /// install command and the static helpers it shares with the Squad commands).
-    /// </summary>
-    /// <returns>A console over <see cref="AnsiConsole.Console"/> and the standard streams.</returns>
-    internal static SquadConsole ProcessConsole() => new(AnsiConsole.Console, new SystemConsole());
 }

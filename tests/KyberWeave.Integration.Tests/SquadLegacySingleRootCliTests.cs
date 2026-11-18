@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
@@ -137,7 +138,7 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
 
     private static SquadReceipt LegacyReceipt() =>
         new(
-            SquadStateStore.ReceiptSchemaV1,
+            SquadStateSchemas.ReceiptSchemaV1,
             SquadDeploymentScope.Global,
             ".",
             InstalledAt,
@@ -204,7 +205,7 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
             Directory.CreateDirectory(Home);
             Directory.CreateDirectory(GlobalRootsDirectory);
             UserPaths = FakeSquadUserPaths.UnderTemp(ApplicationData, Home);
-            Store = new SquadStateStore(UserPaths);
+            Store = RealSquadState.Store(UserPaths);
             ReleaseSource = new FakeSquadReleaseSource();
             GlobalRoots = new TempGlobalRoots(GlobalRootsDirectory);
         }

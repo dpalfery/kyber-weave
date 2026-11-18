@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Configuration;
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
@@ -479,7 +480,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         InstallArbiter();
         FakeSquadUserPaths userPaths = new(Path.Combine(_install.Path, "corrupt-home"));
         Directory.CreateDirectory(userPaths.HomeDirectory);
-        SquadStateStore store = new(userPaths);
+        SquadStateStore store = RealSquadState.Store(userPaths);
         string stateDirectory = store.ResolveHomeStateDirectory();
         Directory.CreateDirectory(stateDirectory);
         File.WriteAllText(Path.Combine(stateDirectory, "registry.json"), "{ this is not a registry");
@@ -510,7 +511,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         InstallArbiter();
         FakeSquadUserPaths userPaths = new(Path.Combine(_install.Path, "corrupt-with-globals"));
         Directory.CreateDirectory(userPaths.HomeDirectory);
-        SquadStateStore store = new(userPaths);
+        SquadStateStore store = RealSquadState.Store(userPaths);
         string stateDirectory = store.ResolveHomeStateDirectory();
         Directory.CreateDirectory(stateDirectory);
         File.WriteAllText(Path.Combine(stateDirectory, "registry.json"), "{ this is not a registry");

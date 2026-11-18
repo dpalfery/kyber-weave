@@ -347,7 +347,7 @@ public sealed class ConfigRegValidatorTests : IDisposable
     }
 
     private DiagnosticReport Validate(KyberWeaveConfig config) =>
-        new ConfigRegValidator(_temp.Path, config, DocsPorts.Files).Validate();
+        new ConfigRegValidator(_temp.Path, config, DocsPorts.Files, DocsPorts.Paths, DocsPorts.Environment).Validate();
 
     [Fact]
     public void ARepositoryThatNeverAdoptedTheRegistryIsSilent()

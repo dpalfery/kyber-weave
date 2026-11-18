@@ -113,7 +113,7 @@ public sealed class DocsPacketCommand(
         {
             // Checked here so a refusal is reported under the packet's own code, before any prompt is built;
             // the service applies the same rule when it reads the file for the <task> part.
-            if (!TaskPromptService.IsScratchFile(root, settings.PriorResults))
+            if (!TaskPromptService.IsScratchFile(files, root, settings.PriorResults))
             {
                 report.Add(new Diagnostic(
                     PriorResultsUnreadable,

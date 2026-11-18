@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
@@ -364,7 +365,7 @@ public sealed class SquadHomeStateStoreTests
         SquadPhysicalRootIdentity.Resolve(path, SquadFileSystemPathSemantics.Instance).PhysicalPath;
 
     private static SquadStateStore StoreFor(string home) =>
-        new(FakeSquadUserPaths.FromHome(home));
+        RealSquadState.Store(FakeSquadUserPaths.FromHome(home));
 
     /// <summary>
     /// Compares two locations by where they physically are. A path may be spelled through a symlinked

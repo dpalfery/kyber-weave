@@ -714,7 +714,7 @@ public sealed class DispatchPromptInsertionTests : IDisposable
             new FakeProcessEnvironment(() => home.Path)));
         ISquadStateStore store = host.Get<ISquadStateStore>();
         SquadReceipt receipt = new(
-            SquadStateStore.ReceiptSchemaV1,
+            SquadStateSchemas.ReceiptSchemaV1,
             SquadDeploymentScope.Project,
             repo,
             DateTimeOffset.UtcNow,

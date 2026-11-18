@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -25,19 +26,33 @@ public sealed partial class DocumentLoader : IDocumentSource
     private readonly IReadOnlyList<string> _docsRoots;
 
     private readonly string _repoRoot;
+    private readonly IPathResolver _paths;
 
-    public DocumentLoader(IRepositoryFileStore files, string repoRoot, string docsRelativeRoot = OntologyConfig.DefaultDocsRoot)
-        : this(files, repoRoot, OntologyConfig.ProductDefaults.WithDocsRoot(docsRelativeRoot))
+    public DocumentLoader(
+        IRepositoryFileStore files,
+        string repoRoot,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        string docsRelativeRoot = OntologyConfig.DefaultDocsRoot)
+        : this(files, repoRoot, paths, environment, OntologyConfig.ProductDefaults.WithDocsRoot(docsRelativeRoot))
     {
     }
 
-    public DocumentLoader(IRepositoryFileStore files, string repoRoot, OntologyConfig config)
+    public DocumentLoader(
+        IRepositoryFileStore files,
+        string repoRoot,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        OntologyConfig config)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
         _files = files;
         ArgumentNullException.ThrowIfNull(config);
-        _repoRoot = Path.GetFullPath(repoRoot);
+        _paths = paths;
+        _repoRoot = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
         _config = config;
         _docsRoots = config.DocsRoots;
         _catalogPath = Path.Combine(
@@ -170,7 +185,7 @@ public sealed partial class DocumentLoader : IDocumentSource
         ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
         string normalized = relativePath.Replace('\\', '/');
         string absolute =
-            Path.GetFullPath(Path.Combine(_repoRoot, normalized.Replace('/', Path.DirectorySeparatorChar)));
+            _paths.GetFullPath(normalized.Replace('/', Path.DirectorySeparatorChar), _repoRoot);
         StringComparison comparison = ReferenceEquals(DocsRootPath.PathComparer, StringComparer.OrdinalIgnoreCase)
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;

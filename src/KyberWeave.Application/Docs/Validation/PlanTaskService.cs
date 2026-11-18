@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -9,13 +10,19 @@ namespace KyberWeave.Core.Docs.Validation;
 
 /// <summary>Runs the task-file generator over the checkout's file system and finds the plans in flight.</summary>
 /// <param name="files">Reads the plans and the task files.</param>
-public sealed partial class PlanTaskService(IRepositoryFileStore files) : IPlanTaskService
+/// <param name="paths">Resolves the repository root the caller names.</param>
+/// <param name="environment">Names the directory a relative repository root is resolved against.</param>
+public sealed partial class PlanTaskService(
+    IRepositoryFileStore files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IPlanTaskService
 {
     private const string TaskList = "tasks.md";
 
     /// <inheritdoc />
     public PlanTaskFileOutcome Run(string repoRoot, IDocsEngineConfig config, string artifactPath, PlanTaskFileMode mode, IPlanTaskAgentPicker? picker = null) =>
-        new PlanTaskFileGenerator(repoRoot, config, files, picker).Run(artifactPath, mode);
+        new PlanTaskFileGenerator(paths.GetFullPath(repoRoot, environment.CurrentDirectory), config, files, picker)
+            .Run(artifactPath, mode);
 
     /// <inheritdoc />
     public IReadOnlyList<string> ActivePlans(string repoRoot, IDocsEngineConfig config)
@@ -23,7 +30,7 @@ public sealed partial class PlanTaskService(IRepositoryFileStore files) : IPlanT
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
 
-        string root = Path.GetFullPath(repoRoot);
+        string root = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
         List<string> found = [];
         foreach (string folder in new PlanFileResolver(root, config, files).PlanningFolders())
         {

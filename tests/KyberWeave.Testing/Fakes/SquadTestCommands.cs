@@ -46,7 +46,7 @@ internal static class SquadTestCommands
         return new SquadInstallCommand(
             SquadHostDefaults.CreateLifecycleService(userPaths, store, releaseSource, renderer, globalRoots: roots, environmentReader: environmentReader),
             store,
-            new SquadStateMigration(store, store.UserPaths),
+            RealSquadState.Migration(store, store.UserPaths),
             new FileSquadTargetResolver(),
             roots,
             new SquadConsoleOptions(isInteractive, readAnswer),
@@ -80,7 +80,7 @@ internal static class SquadTestCommands
             SquadHostDefaults.CreateLifecycleService(userPaths, store, releaseSource, renderer, globalRoots: roots, environmentReader: environmentReader),
             instanceService ?? new LazyInstanceService(() => SquadHostDefaults.CreateInstanceService(userPaths ?? store.UserPaths)),
             store,
-            new SquadStateMigration(store, store.UserPaths),
+            RealSquadState.Migration(store, store.UserPaths),
             new FileSquadTargetResolver(),
             roots,
             new PhysicalSquadFileAccess(),
@@ -110,7 +110,7 @@ internal static class SquadTestCommands
         return new SquadUninstallCommand(
             lifecycleService ?? SquadHostDefaults.CreateLifecycleService(userPaths, store, globalRoots: roots, environmentReader: environmentReader),
             store,
-            new SquadStateMigration(store, store.UserPaths),
+            RealSquadState.Migration(store, store.UserPaths),
             roots,
             new SquadConsoleOptions(isInteractive, readAnswer),
             console,
@@ -179,7 +179,7 @@ internal static class SquadTestCommands
         SquadStateStore store = stateStore ?? SquadHostDefaults.ResolveStateStore(userPaths, environmentReader);
         return new SquadStatusCommand(
             store,
-            new SquadStateMigration(store, store.UserPaths),
+            RealSquadState.Migration(store, store.UserPaths),
             globalRoots ?? SquadHostDefaults.ResolveGlobalRoots(environmentReader),
             new SquadModelPresetStore(store.UserPaths),
             SquadFileSystemPathSemantics.Instance,
@@ -204,7 +204,7 @@ internal static class SquadTestCommands
         SquadStateStore store = stateStore ?? SquadHostDefaults.ResolveStateStore(userPaths, environmentReader);
         return new SquadDoctorCommand(
             store,
-            new SquadStateMigration(store, store.UserPaths),
+            RealSquadState.Migration(store, store.UserPaths),
             globalRoots ?? SquadHostDefaults.ResolveGlobalRoots(environmentReader),
             renderer ?? SquadHostDefaults.ResolveRenderer(),
             new SquadModelPresetStore(store.UserPaths),
@@ -240,7 +240,10 @@ internal static class SquadTestCommands
             new FileSquadDeploymentPlanner(),
             new SquadTransactionFactory(store),
             SquadFileSystemPathSemantics.Instance,
-            PhysicalRoots(CapturedSquadConsole()));
+            PhysicalRoots(CapturedSquadConsole()),
+            new PhysicalFileSystem(),
+            CapturedSquadConsole(),
+            TimeProvider.System);
     }
 
     public static SquadPresetClearCommand PresetClear(
@@ -259,7 +262,10 @@ internal static class SquadTestCommands
             new FileSquadDeploymentPlanner(),
             new SquadTransactionFactory(store),
             SquadFileSystemPathSemantics.Instance,
-            PhysicalRoots(CapturedSquadConsole()));
+            PhysicalRoots(CapturedSquadConsole()),
+            new PhysicalFileSystem(),
+            CapturedSquadConsole(),
+            TimeProvider.System);
     }
 
     public static SquadPresetShowCommand PresetShow(
@@ -270,7 +276,8 @@ internal static class SquadTestCommands
         return new SquadPresetShowCommand(
             userPaths ?? store.UserPaths,
             new SquadModelPresetStore(store.UserPaths),
-            Profiles(store, canonicalProfileResolver));
+            Profiles(store, canonicalProfileResolver),
+            CapturedSquadConsole());
     }
 
     public static SquadPresetListCommand PresetList(
@@ -284,8 +291,87 @@ internal static class SquadTestCommands
             store,
             new SquadModelPresetStore(paths),
             RealSquadSelectionStore.Create(paths),
-            PhysicalRoots(CapturedSquadConsole()));
+            PhysicalRoots(CapturedSquadConsole()),
+            new PhysicalFileSystem(),
+            CapturedSquadConsole());
     }
+
+    /// <summary>The list verb over the stores, roots, file system and console a test supplies.</summary>
+    public static SquadPresetListCommand PresetListOver(
+        ISquadUserPaths userPaths,
+        ISquadStateStore stateStore,
+        ISquadModelPresetStore presets,
+        ISquadModelPresetSelectionStore selections,
+        SquadCommandRoots roots,
+        IFileSystem files,
+        SquadConsole console) =>
+        new(userPaths, stateStore, presets, selections, roots, files, console);
+
+    /// <summary>The show verb over the stores and console a test supplies.</summary>
+    public static SquadPresetShowCommand PresetShowOver(
+        ISquadUserPaths userPaths,
+        ISquadModelPresetStore presets,
+        Func<string?, SquadCanonicalProfiles?> canonicalProfileResolver,
+        SquadConsole console) =>
+        new(userPaths, presets, new FuncProfileResolver(canonicalProfileResolver), console);
+
+    /// <summary>The use verb over the stores, roots, file system and console a test supplies; it never starts a transaction.</summary>
+    public static SquadPresetUseCommand PresetUseOver(
+        ISquadStateStore stateStore,
+        ISquadModelPresetStore presets,
+        ISquadModelPresetSelectionStore selections,
+        Func<string?, SquadCanonicalProfiles?> canonicalProfileResolver,
+        SquadCommandRoots roots,
+        IFileSystem files,
+        SquadConsole console) =>
+        new(
+            stateStore,
+            SquadHostDefaults.ResolveGlobalRoots(_ => null),
+            presets,
+            selections,
+            new FuncProfileResolver(canonicalProfileResolver),
+            new FileSquadDeploymentPlanner(),
+            new UnusedTransactions(),
+            SquadFileSystemPathSemantics.Instance,
+            roots,
+            files,
+            console,
+            TimeProvider.System);
+
+    /// <summary>The clear verb over the stores, roots, file system and console a test supplies; it never starts a transaction.</summary>
+    public static SquadPresetClearCommand PresetClearOver(
+        ISquadStateStore stateStore,
+        ISquadModelPresetStore presets,
+        ISquadModelPresetSelectionStore selections,
+        Func<string?, SquadCanonicalProfiles?> canonicalProfileResolver,
+        SquadCommandRoots roots,
+        IFileSystem files,
+        SquadConsole console) =>
+        new(
+            stateStore,
+            SquadHostDefaults.ResolveGlobalRoots(_ => null),
+            presets,
+            selections,
+            new FuncProfileResolver(canonicalProfileResolver),
+            new FileSquadDeploymentPlanner(),
+            new UnusedTransactions(),
+            SquadFileSystemPathSemantics.Instance,
+            roots,
+            files,
+            console,
+            TimeProvider.System);
+
+    private sealed class UnusedTransactions : ISquadTransactionFactory
+    {
+        public ISquadTransaction Create(ISquadTransactionObserver? observer) => throw new NotSupportedException();
+    }
+
+    /// <summary>A console whose output goes to whichever test is capturing the process console.</summary>
+    public static SquadConsole ProcessCapturedConsole() => CapturedSquadConsole();
+
+    /// <summary>A capture-plugin step whose output goes to whichever test is capturing the process console.</summary>
+    public static KyberDashCapturePluginStep CapturePluginStep(IProcessExecutor executor, Func<string?> locateKyberDash) =>
+        new(executor, locateKyberDash, CapturedSquadConsole());
 
     /// <summary>The roots over an in-memory file system and a fake environment, for a command test that touches no disk.</summary>
     public static SquadCommandRoots InMemoryRoots(
@@ -311,7 +397,7 @@ internal static class SquadTestCommands
     /// The console a command writes to in a test: the process's router, installed before the command is built, so
     /// output goes to whichever test is capturing when the command writes.
     /// </summary>
-    private static SquadConsole CapturedSquadConsole() => new(CapturedConsole(), new SystemConsole());
+    internal static SquadConsole CapturedSquadConsole() => new(CapturedConsole(), new SystemConsole());
 
     private static IAnsiConsole CapturedConsole()
     {

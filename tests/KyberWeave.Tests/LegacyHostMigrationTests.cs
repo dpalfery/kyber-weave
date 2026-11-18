@@ -131,7 +131,7 @@ public class LegacyHostMigrationTests : IDisposable
             .Validate(RealDocumentLoader.Create(_repo.Path, config.Ontology).Load());
 
     private DiagnosticReport ValidateRegistry(KyberWeaveConfig config) =>
-        new ConfigRegValidator(_repo.Path, config, DocsPorts.Files).Validate();
+        new ConfigRegValidator(_repo.Path, config, DocsPorts.Files, DocsPorts.Paths, DocsPorts.Environment).Validate();
 
     [Fact]
     public void AnUnmigratedHostValidatesWithoutErrors()

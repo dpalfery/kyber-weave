@@ -313,7 +313,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 .ToArray(),
             SquadProjectSelectionKind.Paths => namedProjects,
             SquadProjectSelectionKind.Absent when interactive && registry.Count > 0 =>
-                SquadCommandComposition.RunProjectPicker(_picker, registry),
+                SquadCommandComposition.RunProjectPicker(_picker, registry, _output.Ansi),
             _ => []
         };
 

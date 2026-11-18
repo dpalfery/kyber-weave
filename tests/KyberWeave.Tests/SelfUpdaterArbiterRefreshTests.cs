@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Configuration;
 using System.Diagnostics.CodeAnalysis;
 using System.Formats.Tar;
@@ -181,7 +182,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
 
         FakeSquadUserPaths userPaths = new(Path.Combine(_install.Path, "user-home"));
         Directory.CreateDirectory(userPaths.HomeDirectory);
-        SquadStateStore store = new(userPaths);
+        SquadStateStore store = RealSquadState.Store(userPaths);
 
         string project = Path.Combine(_install.Path, "registered-project");
         string configDirectory = Path.Combine(project, ".kyber-weave");
@@ -389,7 +390,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         string home = userPaths.HomeDirectory;
         Directory.CreateDirectory(home);
         SquadGlobalRoots roots = new(_ => null, home);
-        SquadStateStore store = new(userPaths);
+        SquadStateStore store = RealSquadState.Store(userPaths);
         SeedGlobalBlocks(store, roots, home);
         RealUserHostConfigStore.Create().WriteGlobalTargets(home, ["cursor", "codex"]);
         StaleHookTimeouts(GlobalHookFile(roots, SquadTarget.Cursor));
@@ -462,7 +463,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         File.WriteAllText(agentPath, "agent body");
         File.WriteAllText(hookPath, "{\"version\":1,\"hooks\":{\"task\":[]}}");
 
-        SquadStateStore store = new(userPaths);
+        SquadStateStore store = RealSquadState.Store(userPaths);
         SquadOwnedFile agentEntry = new(agentRelativePath, Digest("agent body"), "copilot", false);
         SquadOwnedFile hookEntry = new(
             hookRelativePath,

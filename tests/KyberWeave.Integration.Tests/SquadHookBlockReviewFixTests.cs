@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -356,7 +357,7 @@ public sealed class SquadHookBlockReviewFixTests
         };
 
     private static SquadStateStore Store(string applicationData) =>
-        new(new FakeSquadUserPaths(applicationData));
+        RealSquadState.Store(new FakeSquadUserPaths(applicationData));
 
     private static SquadLock Lock(string version = "1.2.3") =>
         new(

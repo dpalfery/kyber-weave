@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
 using KyberWeave.Tests.Fakes;
 using System.Text;
@@ -54,7 +55,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
         string applicationData = Path.Combine(_temp.Path, "app-data");
         FakeSquadUserPaths userPaths = new(applicationData);
         Directory.CreateDirectory(userPaths.HomeDirectory);
-        SquadStateStore store = new(userPaths);
+        SquadStateStore store = RealSquadState.Store(userPaths);
 
         string instanceRoot = Path.Combine(
             userPaths.HomeDirectory,
@@ -98,7 +99,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
         string applicationData = Path.Combine(_temp.Path, "app-data");
         FakeSquadUserPaths userPaths = new(applicationData);
         Directory.CreateDirectory(userPaths.HomeDirectory);
-        SquadStateStore store = new(userPaths);
+        SquadStateStore store = RealSquadState.Store(userPaths);
 
         string invalidRoot = scenario switch
         {
@@ -125,7 +126,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
         string applicationData = Path.Combine(_temp.Path, "app-data");
         FakeSquadUserPaths userPaths = new(applicationData);
         Directory.CreateDirectory(userPaths.HomeDirectory);
-        SquadStateStore store = new(userPaths);
+        SquadStateStore store = RealSquadState.Store(userPaths);
 
         string instanceRoot = Path.Combine(
             userPaths.HomeDirectory,
@@ -182,7 +183,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
         string applicationData = Path.Combine(_temp.Path, "app-data");
         FakeSquadUserPaths userPaths = new(applicationData);
         Directory.CreateDirectory(userPaths.HomeDirectory);
-        SquadStateStore store = new(userPaths);
+        SquadStateStore store = RealSquadState.Store(userPaths);
 
         string instanceRoot = Path.Combine(
             userPaths.HomeDirectory,
@@ -227,7 +228,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
         string applicationData = Path.Combine(_temp.Path, "app-data");
         FakeSquadUserPaths userPaths = new(applicationData);
         Directory.CreateDirectory(userPaths.HomeDirectory);
-        SquadStateStore store = new(userPaths);
+        SquadStateStore store = RealSquadState.Store(userPaths);
 
         string instanceStateDir = Path.Combine(
             userPaths.HomeDirectory,
@@ -248,7 +249,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
             [],
             [])));
 
-        SquadStateMigration migration = new(store, userPaths);
+        SquadStateMigration migration = RealSquadState.Migration(store, userPaths);
         SquadMigrationReport report = migration.MigrateGlobal(userPaths.HomeDirectory);
 
         Assert.True(File.Exists(lockFile));

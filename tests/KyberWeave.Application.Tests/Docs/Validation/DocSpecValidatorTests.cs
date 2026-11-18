@@ -3,6 +3,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Tests.FileSystem;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Application.Tests.Docs.Validation;
@@ -14,8 +15,14 @@ public sealed class DocSpecValidatorTests
 
     private readonly InMemoryFileSystem _disk = new();
 
+    private readonly FakePathResolver _paths;
+
+    private readonly FakeProcessEnvironment _environment = new(currentDirectory: Root);
+
+    public DocSpecValidatorTests() => _paths = new FakePathResolver(_disk);
+
     private DiagnosticReport Validate(OntologyConfig config, params DocumentModel[] documents) =>
-        new DocSpecValidator(Root, config, _disk).Validate(new DocumentSet { Documents = documents });
+        new DocSpecValidator(Root, config, _disk, _paths, _environment).Validate(new DocumentSet { Documents = documents });
 
     [Fact]
     public void ASourceRootThatDoesNotExistIsReported()

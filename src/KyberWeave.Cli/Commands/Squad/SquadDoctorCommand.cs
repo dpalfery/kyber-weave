@@ -189,7 +189,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 $"  [grey]info[/] Not yet implemented: [bold]{Markup.Escape(string.Join(", ", pending))}[/] (see docs/todo/<target>.md)");
 
         // 3. MCP Probe
-        McpProcessProbe mcpProbe = SquadCommandComposition.ResolveProbe(_options.Executor);
+        McpProcessProbe mcpProbe = SquadCommandComposition.ResolveProbe(_options.Executor, _environment);
         ToolProbeResult mcpResult = mcpProbe.Probe();
         if (mcpResult is { IsAvailable: true, Version: not null })
         {
@@ -363,7 +363,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             return false;
         }
 
-        ArbiterProcessProbe arbiterProbe = SquadCommandComposition.ResolveArbiterProbe(_options.Executor);
+        ArbiterProcessProbe arbiterProbe = SquadCommandComposition.ResolveArbiterProbe(_options.Executor, _environment);
         ToolProbeResult arbiterResult = arbiterProbe.Probe();
         string cliVersion = CliAssemblyVersion.ForProbe(typeof(SquadDoctorCommand).Assembly);
 

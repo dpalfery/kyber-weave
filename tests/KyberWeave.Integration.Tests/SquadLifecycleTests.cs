@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Rendering;
@@ -40,7 +41,7 @@ public sealed class SquadLifecycleTests : IClassFixture<SquadInstalledProjectTem
         Directory.CreateDirectory(targetRoot);
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -91,7 +92,7 @@ public sealed class SquadLifecycleTests : IClassFixture<SquadInstalledProjectTem
         Directory.CreateDirectory(targetRoot);
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -135,7 +136,7 @@ public sealed class SquadLifecycleTests : IClassFixture<SquadInstalledProjectTem
 
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -173,7 +174,7 @@ public sealed class SquadLifecycleTests : IClassFixture<SquadInstalledProjectTem
 
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -215,7 +216,7 @@ public sealed class SquadLifecycleTests : IClassFixture<SquadInstalledProjectTem
         Directory.CreateDirectory(targetRoot);
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
 
         // Throwing observer simulating unexpected crash during file application
@@ -250,7 +251,7 @@ public sealed class SquadLifecycleTests : IClassFixture<SquadInstalledProjectTem
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
         _installed.CopyInto(userPaths, targetRoot);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -277,7 +278,7 @@ public sealed class SquadLifecycleTests : IClassFixture<SquadInstalledProjectTem
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
         _installed.CopyInto(userPaths, targetRoot);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -301,7 +302,7 @@ public sealed class SquadLifecycleTests : IClassFixture<SquadInstalledProjectTem
 
         string isolatedUserData = Path.Combine(_temp.Path, "isolated-user-paths");
         FakeSquadUserPaths userPaths = new(isolatedUserData);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -344,7 +345,7 @@ public sealed class SquadLifecycleTests : IClassFixture<SquadInstalledProjectTem
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
         _installed.CopyInto(userPaths, targetRoot);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -387,7 +388,7 @@ public sealed class SquadLifecycleTests : IClassFixture<SquadInstalledProjectTem
         Directory.CreateDirectory(targetRoot);
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -409,7 +410,7 @@ public sealed class SquadLifecycleTests : IClassFixture<SquadInstalledProjectTem
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
         _installed.CopyInto(userPaths, targetRoot);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -447,7 +448,7 @@ public sealed class SquadLifecycleTests : IClassFixture<SquadInstalledProjectTem
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
         _installed.CopyInto(userPaths, targetRoot);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -486,7 +487,7 @@ public sealed class SquadLifecycleTests : IClassFixture<SquadInstalledProjectTem
         Directory.CreateDirectory(targetRoot);
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -511,7 +512,7 @@ public sealed class SquadLifecycleTests : IClassFixture<SquadInstalledProjectTem
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
         _installed.CopyInto(userPaths, targetRoot);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -553,7 +554,7 @@ public sealed class SquadLifecycleTests : IClassFixture<SquadInstalledProjectTem
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
         _installed.CopyInto(userPaths, targetRoot);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);

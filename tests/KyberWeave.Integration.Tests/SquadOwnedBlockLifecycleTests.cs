@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
 using KyberWeave.Cli.Commands.Squad;
 using System.Text;
@@ -656,7 +657,7 @@ public sealed class SquadOwnedBlockLifecycleTests
         string home = userPaths.HomeDirectory;
         Directory.CreateDirectory(home);
         SquadGlobalRoots globalRoots = new(_ => null, home);
-        SquadStateStore store = new(userPaths);
+        SquadStateStore store = RealSquadState.Store(userPaths);
         string receiptPath = store.ResolveReceiptPath(home, SquadDeploymentScope.Global);
         Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
         File.WriteAllText(receiptPath, Rc20GlobalReceiptJson());
@@ -931,7 +932,7 @@ public sealed class SquadOwnedBlockLifecycleTests
         string home = userPaths.HomeDirectory;
         Directory.CreateDirectory(home);
         SquadGlobalRoots roots = new(_ => null, home);
-        SquadStateStore store = new(userPaths);
+        SquadStateStore store = RealSquadState.Store(userPaths);
         SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             home,
             SquadDeploymentScope.Global,
@@ -1122,7 +1123,7 @@ public sealed class SquadOwnedBlockLifecycleTests
     }
 
     private static SquadStateStore Store(string applicationData) =>
-        new(new FakeSquadUserPaths(applicationData));
+        RealSquadState.Store(new FakeSquadUserPaths(applicationData));
 
     private static SquadLock Lock(string version = "1.2.3") =>
         new(

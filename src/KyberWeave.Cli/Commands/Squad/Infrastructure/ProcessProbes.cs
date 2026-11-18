@@ -11,17 +11,23 @@ namespace KyberWeave.Cli.Commands.Squad.Infrastructure;
 public sealed partial class McpProcessProbe
 {
     private readonly IProcessExecutor _executor;
+    private readonly IProcessEnvironment _environment;
 
     /// <summary>Creates an MCP probe over an injectable process boundary.</summary>
-    public McpProcessProbe(IProcessExecutor executor)
+    /// <param name="executor">Runs the probe.</param>
+    /// <param name="environment">Names the variables the probe's child needs to start.</param>
+    public McpProcessProbe(IProcessExecutor executor, IProcessEnvironment environment)
     {
         ArgumentNullException.ThrowIfNull(executor);
+        ArgumentNullException.ThrowIfNull(environment);
         _executor = executor;
+        _environment = environment;
     }
 
     /// <summary>Runs only <c>kyber-weave-mcp --version</c> and parses its exact output envelope.</summary>
     public ToolProbeResult Probe() => ProcessProbe.Probe(
         _executor,
+        _environment,
         "kyber-weave-mcp",
         McpVersionRegex());
 
@@ -39,20 +45,26 @@ public sealed partial class McpProcessProbe
 public sealed partial class ArbiterProcessProbe : IArbiterBinaryProbe
 {
     private readonly IProcessExecutor _executor;
+    private readonly IProcessEnvironment _environment;
 
     /// <inheritdoc />
     public string CliVersion => CliAssemblyVersion.ForProbe(typeof(ArbiterProcessProbe).Assembly);
 
     /// <summary>Creates an Arbiter probe over an injectable process boundary.</summary>
-    public ArbiterProcessProbe(IProcessExecutor executor)
+    /// <param name="executor">Runs the probe.</param>
+    /// <param name="environment">Names the variables the probe's child needs to start.</param>
+    public ArbiterProcessProbe(IProcessExecutor executor, IProcessEnvironment environment)
     {
         ArgumentNullException.ThrowIfNull(executor);
+        ArgumentNullException.ThrowIfNull(environment);
         _executor = executor;
+        _environment = environment;
     }
 
     /// <summary>Runs only <c>kyber-weave-arbiter --version</c> and parses its exact output envelope.</summary>
     public ToolProbeResult Probe() => ProcessProbe.Probe(
         _executor,
+        _environment,
         "kyber-weave-arbiter",
         ArbiterVersionRegex());
 
@@ -77,10 +89,11 @@ internal static class ProcessProbe
 {
     public static ToolProbeResult Probe(
         IProcessExecutor executor,
+        IProcessEnvironment environment,
         string executable,
         Regex outputPattern)
     {
-        ProcessStartInfo startInfo = CreateStartInfo(executable);
+        ProcessStartInfo startInfo = CreateStartInfo(executable, environment);
         ProcessResult result;
         try
         {
@@ -139,7 +152,7 @@ internal static class ProcessProbe
             FailureReason: null);
     }
 
-    private static ProcessStartInfo CreateStartInfo(string executable)
+    private static ProcessStartInfo CreateStartInfo(string executable, IProcessEnvironment environment)
     {
         ProcessStartInfo startInfo = new ProcessStartInfo(executable)
         {
@@ -154,20 +167,20 @@ internal static class ProcessProbe
         // Version checks do not need provider credentials. Start from an empty child
         // environment and restore only values needed to locate and start a PATH tool.
         startInfo.Environment.Clear();
-        CopyEnvironmentVariable(startInfo, "PATH");
-        if (OperatingSystem.IsWindows())
+        CopyEnvironmentVariable(startInfo, environment, "PATH");
+        if (environment.OperatingSystem == OperatingSystemKind.Windows)
         {
-            CopyEnvironmentVariable(startInfo, "PATHEXT");
-            CopyEnvironmentVariable(startInfo, "SystemRoot");
-            CopyEnvironmentVariable(startInfo, "WINDIR");
+            CopyEnvironmentVariable(startInfo, environment, "PATHEXT");
+            CopyEnvironmentVariable(startInfo, environment, "SystemRoot");
+            CopyEnvironmentVariable(startInfo, environment, "WINDIR");
         }
 
         return startInfo;
     }
 
-    private static void CopyEnvironmentVariable(ProcessStartInfo startInfo, string name)
+    private static void CopyEnvironmentVariable(ProcessStartInfo startInfo, IProcessEnvironment environment, string name)
     {
-        string? value = Environment.GetEnvironmentVariable(name);
+        string? value = environment.GetVariable(name);
         if (!string.IsNullOrEmpty(value))
             startInfo.Environment[name] = value;
     }

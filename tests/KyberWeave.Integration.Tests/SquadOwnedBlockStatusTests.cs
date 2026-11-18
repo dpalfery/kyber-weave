@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
@@ -174,7 +175,7 @@ public sealed class SquadOwnedBlockStatusTests
     {
         using TempDirectory fixture = new TempDirectory();
         FakeSquadUserPaths userPaths = new(Path.Combine(fixture.Path, "user-home"));
-        SquadStateStore store = new(userPaths);
+        SquadStateStore store = RealSquadState.Store(userPaths);
         SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
@@ -216,7 +217,7 @@ public sealed class SquadOwnedBlockStatusTests
 
         using TempDirectory fixture = new TempDirectory();
         FakeSquadUserPaths userPaths = new(Path.Combine(fixture.Path, "user-home"));
-        SquadStateStore store = new(userPaths);
+        SquadStateStore store = RealSquadState.Store(userPaths);
         SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
@@ -258,7 +259,7 @@ public sealed class SquadOwnedBlockStatusTests
     {
         using TempDirectory fixture = new TempDirectory();
         FakeSquadUserPaths userPaths = new(Path.Combine(fixture.Path, "user-home"));
-        SquadStateStore store = new(userPaths);
+        SquadStateStore store = RealSquadState.Store(userPaths);
         SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
@@ -427,7 +428,7 @@ public sealed class SquadOwnedBlockStatusTests
         string home = userPaths.HomeDirectory;
         Directory.CreateDirectory(home);
         SquadGlobalRoots globalRoots = new(_ => null, home);
-        SquadStateStore store = new(userPaths);
+        SquadStateStore store = RealSquadState.Store(userPaths);
         SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             home,
             SquadDeploymentScope.Global,
@@ -466,7 +467,7 @@ public sealed class SquadOwnedBlockStatusTests
     }
 
     private static SquadStateStore Store(string applicationData) =>
-        new(new FakeSquadUserPaths(applicationData));
+        RealSquadState.Store(new FakeSquadUserPaths(applicationData));
 
     private static SquadLock Lock(string version = "1.2.3") =>
         new(

@@ -168,7 +168,7 @@ clock and no task would track the fix.
 |---|---|---|---|
 | `KyberWeave.Application` | 68 | 208 | 4.1, 4.2, 4.3, 4.8 |
 | `KyberWeave.Cli` | 49 | 180 | 4.5 |
-| `KyberWeave.Data` | 73 | 663 | 3.2, 3.3, 3.4, 3.5, 4.4, 4.9 |
+| `KyberWeave.Data` | 73 | 663 | 3.3, 3.4, 3.5, 4.4, 4.9 |
 | `KyberWeave.Domain` | 24 | 46 | 2.5 |
 | `KyberWeave.Hooks` | 1 | 1 | 4.7 |
 | `KyberWeave.Kernel` | 3 | 22 | 4.9 |
@@ -217,9 +217,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `KyberStandardsTemplates` (`Docs/Scaffolding/KyberStandardsTemplates.cs`) | file system | 4.2 |
 | `DocumentIndexHost` (`Docs/Search/DocumentIndexHost.cs`) | file system, paths | 4.2 |
 | `ArchiveCloseoutValidator` (`Docs/Validation/ArchiveCloseoutValidator.cs`) | paths | 4.2 |
-| `ConfigRegValidator` (`Docs/Validation/ConfigRegValidator.cs`) | paths | 4.2 |
-| `DocSpecValidator` (`Docs/Validation/DocSpecValidator.cs`) | paths | 4.2 |
-| `PlanTaskService` (`Docs/Validation/PlanTaskService.cs`) | paths | 4.2 |
 | `TaskPromptService` (`Docs/Validation/TaskPromptService.cs`) | file system, paths | 4.2 |
 | `TaskPromptServiceFactory` (`Docs/Validation/TaskPromptServiceFactory.cs`) | paths | 4.2 |
 | `CopilotPromptFile` (`CopilotPrompt/CopilotPromptFile.cs`) | paths | 2.5 |
@@ -260,13 +257,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterSectionsCommand` (`Commands/Arbiter/ArbiterSectionsCommand.cs`) | file system, paths | 4.5 |
 | `CommandHelpers` (`Commands/CommandHelpers.cs`) | file system, paths | 4.5 |
 | `RunDeliverCommand` (`Commands/Run/RunDeliverCommand.cs`) | paths | 4.5 |
-| `CopilotPromptCommands` (`Commands/Squad/CopilotPromptCommands.cs`) | file system, environment, console | 4.5 |
-| `KyberDashCapturePluginStep` (`Commands/Squad/Infrastructure/KyberDashCapturePluginStep.cs`) | file system, environment | 4.5 |
-| `ProcessProbes` (`Commands/Squad/Infrastructure/ProcessProbes.cs`) | environment | 4.5 |
-| `SquadCommandComposition` (`Commands/Squad/SquadCommandComposition.cs`) | console | 4.5 |
-| `SquadPresetClearCommand` (`Commands/Squad/SquadPresetClearCommand.cs`) | file system | 4.5 |
-| `SquadPresetListCommand` (`Commands/Squad/SquadPresetListCommand.cs`) | file system | 4.5 |
-| `SquadPresetUseCommand` (`Commands/Squad/SquadPresetUseCommand.cs`) | file system | 4.5 |
+| `CopilotPromptCommands` (`Commands/Squad/CopilotPromptCommands.cs`) | file system | 4.5 |
 | `SelfUpdateHostFactory` (`Composition/SelfUpdateHostFactory.cs`) | environment | 4.5 |
 | `ReportRenderer` (`Rendering/ReportRenderer.cs`) | console | 4.5 |
 
@@ -298,8 +289,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `SquadResponseGuidanceDeployer` (`Squad/Deployment/SquadResponseGuidanceDeployer.cs`) | file system, paths, identifiers | 3.5 |
 | `SquadResponseGuidanceReader` (`Squad/Deployment/SquadResponseGuidanceReader.cs`) | file system | 3.5 |
 | `SquadSkillShadowing` (`Squad/Deployment/SquadSkillShadowing.cs`) | file system, paths | 3.5 |
-| `SquadStateMigration` (`Squad/Deployment/SquadStateMigration.cs`) | file system, clock, identifiers | 3.2 |
-| `SquadStateStore` (`Squad/Deployment/SquadStateStore.cs`) | file system, paths, identifiers | 3.2 |
 | `SquadTargetResolver` (`Squad/Deployment/SquadTargetResolver.cs`) | file system, paths | 3.5 |
 | `SquadTransaction` (`Squad/Deployment/SquadTransaction.cs`) | file system, paths, identifiers, lease | 3.4 |
 | `SquadWorkerBaselineFile` (`Squad/Deployment/SquadWorkerBaselineFile.cs`) | file system, paths | 3.5 |
@@ -383,10 +372,10 @@ the behaviour: where a test observes the value, the seam still wraps it.
 | `FileStream` | The stream type at the bottom of the file-system adapter. It is an exception only **inside** an adapter, where it is the adapter's whole job | 27 files, 37 sites. Adapter uses: `PhysicalFileSystem`, `PhysicalDoctorFileSystem`, `ExclusiveFileWriter`, `FileBoundedFileReader`, `FileCodeGraphIndexWorkspace` (lease) and Kernel `BoundedFileReader`; `TransactionLease` is adapter-shaped but task 3.4 moves it onto `ILease` | The file-system seam: `InMemoryFileSystem`, proven by the file-system contract suite |
 
 `FileStream` needs a caveat. The design allows it only inside the file-system adapter, and the code
-does not yet meet that: 17 non-adapter classes open a `FileStream` directly. They are
+does not yet meet that: 15 non-adapter classes open a `FileStream` directly. They are
 `Application/Docs/Scaffolding/StandardsFolderMigration.cs`, `Application/Update/SelfUpdater.cs`,
-`Data/Hooks/Arbiter/FileHookSnapshotStore.cs` and `FileWorkerBudgetStore.cs`, `Data/Squad/Deployment/SquadStateMigration.cs`, `SquadStateStore.cs`,
-`SquadTransaction.cs`, `Data/Squad/Instances/SquadInstanceLinkSync.cs`,
+`Data/Hooks/Arbiter/FileHookSnapshotStore.cs` and `FileWorkerBudgetStore.cs`,
+`Data/Squad/Deployment/SquadTransaction.cs`, `Data/Squad/Instances/SquadInstanceLinkSync.cs`,
 `Data/Squad/Presets/SquadCanonicalProfileStore.cs` and
 `SquadModelPresetSelectionStore.cs`,
 `Data/Squad/Rendering/CopilotMcpServerProbe.cs`, `Data/Update/SelfUpdateSystem.cs`, and `Mcp/CodeGraphFreshness.cs`. Each is on its task's list in the table

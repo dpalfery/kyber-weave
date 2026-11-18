@@ -48,10 +48,23 @@ public sealed class StatusLineHostService(
         foreach (string directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
         {
             string candidate = Path.Combine(directory, executable);
-            if (files.FileExists(candidate) && files.HasUserExecuteBit(candidate)) return true;
+            if (IsExecutableFile(candidate)) return true;
         }
 
         return false;
+    }
+
+    private bool IsExecutableFile(string candidate)
+    {
+        try
+        {
+            return files.FileExists(candidate) && files.HasUserExecuteBit(candidate);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // A dangling symbolic link reports that it exists but cannot be inspected: not found here.
+            return false;
+        }
     }
 
     /// <inheritdoc />

@@ -1,4 +1,6 @@
+using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Data.Host;
 using KyberWeave.Cli.Update;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -28,8 +30,6 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISquadGlobalRootResolver>(sp => EnvironmentSquadGlobalRoots.Create(
             sp.GetRequiredService<IProcessEnvironment>(),
             sp.GetRequiredService<ISquadFileAccess>()));
-        services.TryAddSingleton<SquadStateStore>(sp => new SquadStateStore(sp.GetRequiredService<ISquadUserPaths>()));
-        services.TryAddSingleton<ISquadStateStore>(sp => sp.GetRequiredService<SquadStateStore>());
         services.TryAddSingleton<ISquadModelPresetStore>(sp => new SquadModelPresetStore(sp.GetRequiredService<ISquadUserPaths>()));
         services.TryAddSingleton<ISquadCanonicalProfileStore>(sp => new SquadCanonicalProfileStore(sp.GetRequiredService<ISquadUserPaths>()));
         services.TryAddSingleton<ISquadSourceLoader, FileSquadSourceLoader>();
@@ -37,7 +37,7 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISquadRenderInputReader, FileSquadRenderInputReader>();
         services.TryAddSingleton<ISquadModelPresetValidator, FileSquadModelPresetValidator>();
         services.TryAddSingleton<ISquadDeploymentPlanner, FileSquadDeploymentPlanner>();
-        services.TryAddSingleton<ISquadTransactionFactory>(sp => new SquadTransactionFactory(sp.GetRequiredService<SquadStateStore>()));
+        services.TryAddSingleton<ISquadTransactionFactory>(sp => new SquadTransactionFactory(sp.GetRequiredService<ISquadStateStore>()));
         services.TryAddSingleton<ISquadResponseGuidanceStore, FileSquadResponseGuidanceStore>();
         services.TryAddSingleton<ISquadFactoryHooksShadowing, FileFactoryHooksShadowing>();
         services.TryAddSingleton<ISquadInstanceLinkSync, FileSquadInstanceLinkSync>();
@@ -51,9 +51,7 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISquadHarnessLauncher, ProcessSquadHarnessLauncher>();
         services.TryAddSingleton<ISquadSourceLocator, FileSquadSourceLocator>();
         services.TryAddSingleton<ISquadTargetResolver, FileSquadTargetResolver>();
-        services.TryAddSingleton<ISquadStateMigration>(sp => new SquadStateMigration(
-            sp.GetRequiredService<SquadStateStore>(),
-            sp.GetRequiredService<ISquadUserPaths>()));
+        services.TryAddSingleton<ILease, MutexLease>();
         services.TryAddSingleton<ISquadCanonicalProfileResolver, CheckoutOrSnapshotCanonicalProfileResolver>();
         services.TryAddSingleton<ISquadLinkFileSystem>(_ => OperatingSystem.IsWindows()
             ? new WindowsSquadLinkFileSystem()
