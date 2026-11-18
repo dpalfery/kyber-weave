@@ -12,7 +12,8 @@ namespace KyberWeave.Core.Squad.Packaging;
 /// Packages canonical Kyber-Squad source into deterministic APM and Agent Plugins archives.
 /// </summary>
 /// <param name="files">Reads the source tree and writes the archives.</param>
-public sealed class SquadPacker(IWritableFileSystem files) : ISquadArchiveWriter
+/// <param name="companionSkills">Lists the companion skills shipped beside the source tree.</param>
+public sealed class SquadPacker(IWritableFileSystem files, ISquadCompanionSkills companionSkills) : ISquadArchiveWriter
 {
     private const string PackTarget = "pack";
     private static readonly DateTimeOffset FixedTimestamp = new(1980, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -179,7 +180,7 @@ public sealed class SquadPacker(IWritableFileSystem files) : ISquadArchiveWriter
         string sourcePath,
         string? companionSkillsRoot)
     {
-        return SquadCompanionSkills.Collect(sourcePath, companionSkillsRoot)
+        return companionSkills.Collect(sourcePath, companionSkillsRoot)
             .Select(file => (file.RelativePath, ReadNormalizedFile(file.SourcePath)))
             .ToList();
     }

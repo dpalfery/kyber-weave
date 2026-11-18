@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text;
 using KyberWeave.Core.Squad.Packaging;
+using KyberWeave.Testing.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
 
@@ -17,7 +18,9 @@ public sealed class SquadPackerTests
 
     private readonly InMemoryFileSystem _files = new(caseSensitive: true);
 
-    private SquadPacker Packer() => new(_files);
+    private readonly FakeSquadCompanionSkills _companions = new();
+
+    private SquadPacker Packer() => new(_files, _companions);
 
     private void WriteSourceFile(string relativePath, string content)
     {
@@ -60,6 +63,24 @@ public sealed class SquadPackerTests
             entries.Keys.Order(StringComparer.Ordinal));
         Assert.Equal("schema: kyber-squad.squad/v1\nname: demo\n", entries["squad.yml"]);
         Assert.Equal("generated\n", entries["out/generated.txt"]);
+    }
+
+    [Fact]
+    public void PackApmReadsTheCompanionSkillsThroughTheirSeamAndPacksThemBesideTheSquadSkills()
+    {
+        WriteSourceFile("squad.yml", "name: demo\n");
+        string companionRoot = Path.GetFullPath("/repo/.apm/skills");
+        string companionFile = Path.Combine(companionRoot, "kyber-docs", "SKILL.md");
+        _files.CreateDirectory(Path.GetDirectoryName(companionFile)!);
+        _files.WriteAllText(companionFile, "---\nname: kyber-docs\n---\nbody\n");
+        FakeSquadCompanionSkills companions = new(("skills/kyber-docs/SKILL.md", companionFile));
+
+        string archivePath = new SquadPacker(_files, companions).PackApm(Source, Out, "1.2.3", companionRoot);
+
+        Assert.Equal([(Source, companionRoot)], companions.Calls);
+        Assert.Equal(
+            "---\nname: kyber-docs\n---\nbody\n",
+            ReadTextEntries(archivePath)["skills/kyber-docs/SKILL.md"]);
     }
 
     [Fact]
