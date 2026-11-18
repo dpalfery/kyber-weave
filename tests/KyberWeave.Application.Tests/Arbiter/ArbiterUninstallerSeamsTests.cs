@@ -57,7 +57,7 @@ public sealed class ArbiterUninstallerSeamsTests
     {
         _files.WriteAllText(ProjectRoot + "/" + OwnedFile, "// kyber-arbiter");
         _files.WriteAllText(StateDirectory + "/receipt.json", "{}");
-        FakeSquadStateStore store = Store();
+        FakeSquadStateStore store = new(new FakeSquadUserPaths(Home), _files);
         store.AddStateDirectory(ProjectRoot, SquadDeploymentScope.Project, StateDirectory);
         store.Add(new SquadReceipt(
             "kyber-squad.receipt/v3",
@@ -71,6 +71,7 @@ public sealed class ArbiterUninstallerSeamsTests
 
         Assert.False(_files.FileExists(ProjectRoot + "/" + OwnedFile), "The target's owned file was left behind.");
         Assert.False(_files.FileExists(StateDirectory + "/receipt.json"), "The receipt with nothing left was kept.");
+        Assert.Null(store.ReadReceipt(ProjectRoot, SquadDeploymentScope.Project));
     }
 
     /// <summary>
@@ -145,6 +146,30 @@ public sealed class ArbiterUninstallerSeamsTests
         bool another = Uninstaller(store).AnotherTargetIsDeployed("repo", SquadTarget.Kilo);
 
         Assert.True(another, "The project's own receipt names another target and was not read.");
+    }
+
+    /// <summary>
+    /// The state fake reads a receipt the way the store does: once the receipt file is gone the receipt is gone, so a
+    /// test that removes a deployment cannot be answered from memory afterwards.
+    /// </summary>
+    [Fact]
+    public void ReadReceipt_AnswersNoReceiptOnceTheReceiptFileIsGone()
+    {
+        FakeSquadStateStore store = new(new FakeSquadUserPaths(Home), _files);
+        store.AddStateDirectory(ProjectRoot, SquadDeploymentScope.Project, StateDirectory);
+        store.Add(new SquadReceipt(
+            "kyber-squad.receipt/v3",
+            SquadDeploymentScope.Project,
+            ProjectRoot,
+            DateTimeOffset.UnixEpoch,
+            [],
+            []));
+        _files.WriteAllText(StateDirectory + "/receipt.json", "{}");
+        Assert.NotNull(store.ReadReceipt(ProjectRoot, SquadDeploymentScope.Project));
+
+        _files.DeleteFile(StateDirectory + "/receipt.json");
+
+        Assert.Null(store.ReadReceipt(ProjectRoot, SquadDeploymentScope.Project));
     }
 
     private ArbiterUninstaller Uninstaller(FakeSquadStateStore store) =>

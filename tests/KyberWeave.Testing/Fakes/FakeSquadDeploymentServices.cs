@@ -57,7 +57,11 @@ public sealed class FakeSquadLifecycleService(ISquadStateStore stateStore) : ISq
 }
 
 /// <summary>The Squad state store in a command test: user paths and receipts the test arranged; everything else is refused.</summary>
-public sealed class FakeSquadStateStore(ISquadUserPaths userPaths) : ISquadStateStore
+/// <remarks>
+/// With a file system, a receipt is answered only while its receipt file exists there, as the store's own read is:
+/// a test that removes a deployment then cannot read the deployment back out of this fake's memory.
+/// </remarks>
+public sealed class FakeSquadStateStore(ISquadUserPaths userPaths, IFileSystem? files = null) : ISquadStateStore
 {
     private readonly Dictionary<(string Root, SquadDeploymentScope Scope), SquadReceipt> _receipts = [];
     private readonly Dictionary<(string Root, SquadDeploymentScope Scope), SquadLock> _locks = [];
@@ -93,7 +97,18 @@ public sealed class FakeSquadStateStore(ISquadUserPaths userPaths) : ISquadState
 
     /// <inheritdoc />
     public SquadReceipt? ReadReceipt(string targetRoot, SquadDeploymentScope scope) =>
-        _receipts.GetValueOrDefault((targetRoot, scope));
+        _receipts.TryGetValue((targetRoot, scope), out SquadReceipt? receipt) && ReceiptFileExists(targetRoot, scope)
+            ? receipt
+            : null;
+
+    /// <summary>
+    /// Whether the receipt a test arranged is still on disk. A store built without a file system, or without an
+    /// arranged state directory to locate the receipt under, answers from memory alone.
+    /// </summary>
+    private bool ReceiptFileExists(string targetRoot, SquadDeploymentScope scope) =>
+        files is null
+        || !_stateDirectories.TryGetValue((targetRoot, scope), out string? directory)
+        || files.FileExists(Path.Combine(directory, "receipt.json"));
 
     /// <summary>Arranges the state directory <see cref="ResolveStateDirectory"/> answers for a root and scope.</summary>
     /// <param name="root">The target root.</param>
