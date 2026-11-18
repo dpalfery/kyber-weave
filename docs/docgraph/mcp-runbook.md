@@ -6,12 +6,13 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-11-16
+last-reviewed: 2026-11-17
 decided-by:
   - adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session
   - adr/0052-docs-branch-writes-repository-scope-mcp-configuration
   - adr/0061-code-editing-runs-stop-on-unusable-tools
   - adr/0062-the-docs-server-refreshes-codegraph-and-fails-its-tools
+  - adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt
 code-refs:
   - CodeGraphFreshness
   - CodeGraphProvisioner
@@ -1199,7 +1200,7 @@ call is answered from the server's root, as before.
 - **The index is the worktree's own.** The CodeGraph joins and the freshness refresh use the
   `.codegraph/` of the named worktree, never the server root's.
 
-All twelve but the deliver tool are declared `OpenWorld = false`, and all but the two plan lifecycle tools,
+All thirteen but the deliver tool are declared `OpenWorld = false`, and all but the two plan lifecycle tools,
 the deliver tool and the tooling-check tool are declared `ReadOnly`; the SDK maps those to the protocol's `openWorldHint` and `readOnlyHint`. A client can act on an annotation; it cannot
 act on a sentence claiming the same thing, which is why that claim is no longer prose.
 
@@ -1222,7 +1223,7 @@ logs` puts those nouns in permanently resident text held back only by a negation
 negation is the first thing to degrade when a model scans many tools at once. Read out of
 context it becomes a prohibition on reading tests. Only
 `docs_answer_question_from_repo_documentation` carries an exclusion, because it is the broadest of
-the twelve; the narrower eleven state their territory positively so no request falls between them.
+the thirteen; the narrower twelve state their territory positively so no request falls between them.
 
 Where a constraint can live on a parameter it goes there instead — for example how
 `charBudget` caps **`docs_get_coding_standard_for_technology`** prose sits on that parameter,
@@ -1302,7 +1303,8 @@ configuration registry's property name for it (`csharp-coding-standard`,
 one surrounding `<>` pair and the literal suffix `-coding-standard`, then matches corpus
 documents whose `doc-type` is `coding-standard` by their declared `technology`. **The
 corpus decides, not the registry**: declaring a technology in `ontology.technologies`
-without a standard scaffolded at `docs/standards/<technology>/README.md` is still a miss.
+without a standard scaffolded at `docs/standards/<technology>/<technology>.standards.md`
+is still a miss.
 Only a *pair* of angle brackets is the registry's prose form — a half-typed `"<csharp"` is
 not quietly repaired into a hit.
 
@@ -1367,23 +1369,33 @@ A budget cut is normal rather than a defect — this repository's standards are 
 12,000-character default — so the expected-cut line is stated beside the marker, not deduced
 by the caller from two numbers.
 
-The response reads, in order:
+The reply is one **bundle** for the technology, stitched by
+`DocumentIndex.StandardsFor` from the files on disk at the moment it is asked for. It reads,
+in order:
 
 1. the provenance line
-2. a count line naming the technology asked for and the status that answered — `1 standard
-   for technology 'csharp' (status CURRENT).`
-3. a `###` heading with the standard's title, then the identity block — `path:`, `id:`,
-   `doc-type:`, `status:`, `component:` — and a `technology:` line echoing the corpus value
-   verbatim, not the caller's spelling. The declared value is what a later lookup is defined
-   against, so echoing the request would hide a standard that answers under a different
-   name. A standard declares no `component` by ontology design, so that field reads
-   `component: (none)`. The `doc-type:` is the ontology's own spelling rather than the enum
-   member's name, so a coding standard reads `doc-type: CODING-STANDARD` — the value a
-   reader can look up, not `CODINGSTANDARD`, which no document or rule id uses.
-4. the rule-id index
-5. the chosen sections, with the `[complete document]` marker when nothing was omitted
-6. nothing else — a coding standard declares no `code-refs` by ontology design, so the
-   response never carries code joins.
+2. `bundle: <technology>`
+3. the rule-id index: every `KW-*` id the standard states, in document order, capped with the
+   remainder counted. It comes first so that no budget can clip it.
+4. `## Shared rules`: the `shared-rules.md` file beside the folders, if the corpus has one.
+5. `## Parent rules (<technology>)` and `## Parent skills (<technology>)`: present only when
+   the standard's frontmatter names a parent with `builds-on`.
+6. `## <technology> rules` and `## <technology> skills`.
+7. `## <technology> standard`: a `###` heading with the standard's title, then the identity
+   block — `path:`, `id:`, `doc-type:`, `status:`, `component:` — and a `technology:` line
+   echoing the corpus value verbatim, not the caller's spelling. The declared value is what a
+   later lookup is defined against, so echoing the request would hide a standard that answers
+   under a different name. A standard declares no `component` by ontology design, so that
+   field reads `component: (none)`. The `doc-type:` is the ontology's own spelling rather than
+   the enum member's name, so a coding standard reads `doc-type: CODING-STANDARD` — the value a
+   reader can look up, not `CODINGSTANDARD`, which no document or rule id uses. Then the
+   chosen sections, with the `[complete document]` marker when nothing was omitted.
+8. `[left out for space: …]` when a skills part was cut, and the omission markers below when a
+   standard section was.
+
+Rules are never cut: an id or a hard rule the caller cannot see is worse than a section it
+can ask for again. Skills are cut before standard sections. A coding standard declares no
+`code-refs` by ontology design, so the response never carries code joins.
 
 **The rule-id index is emitted ahead of the prose.** It lists the `KW-*` ids the standard
 states, deduped: the ids its section headings and bodies cite, in document order — the order
@@ -1531,6 +1543,34 @@ the provenance line above — nothing else — so an empty corpus is not a failu
 still reports the root, a count of `0`, and unavailable revision markers when Git cannot be
 read. It is also the one tool that always answers: under the stop rule every other tool can
 return `STATUS: TOOL_FAILURE`, and this one cannot, so a failure can be diagnosed.
+
+### `docs_build_task_prompt_for_agent_dispatch(taskId = null, technology = null, plan = null, priorResults = null, failedAttempts = 0, harness = null, projectPath = null)`
+
+The conductor's dispatch question: for this task, which agent do I dispatch, and is its prompt
+whole? It builds the same prompt `kyber-weave docs packet <task id>` prints, through the same
+service, and answers with the facts the dispatch needs and **never the prompt text**: the agent,
+the difficulty in use and who rated it (`architect`, `default` or `decision-model`), the one
+technology the task names, what the prompt budget left out, and the prompt file's path when this
+harness gets a file. The prompt reaches the worker through the dispatch hook, which replaces the
+dispatch's header block before the worker starts, so the conductor never reads or retypes it.
+
+`taskId` is written any natural way (`T1`, `t1`, `task 1`, `1`) and is resolved in the one plan
+that is Ready or In progress, or the one `plan` names. `priorResults` is the file a retry names,
+and `failedAttempts` is how many attempts already failed, so the tool and the hook are asked the
+same question. Name `technology` instead of a task id for a dispatch that belongs to no task,
+such as a research request: the reply then describes the parts from the shared rules on.
+
+Name `harness` as well when you know it. On a harness whose dispatch hook can rewrite the call,
+no file is written and the reply says `prompt file: none`. On ZCode, CommandCode and Warp the
+hook cannot rewrite the dispatch — the rows in the
+[dispatch delivery path](../kyber-arbiter/architecture.md#dispatch-delivery-path) — so the prompt
+is written to `.agent_scratchpad/<task>/prompt.md` (untracked) and the reply carries that path.
+Name the path in the dispatch and tell the worker to read it first. Omit `harness` when it is
+unknown: no file is written then.
+
+A task file that is missing or no longer matches its plan builds no prompt: the reply is
+`prompt: none` and a `reason:` line naming `kyber-weave docs tasks <plan> --write`, so no worker
+starts with only a task id. The reply leads with the provenance line, like every other tool.
 
 ### `docs_finalize_approved_plan_and_write_task_file(projectPath, planFile, approvalMode, approval)`
 
@@ -2002,7 +2042,7 @@ makes that visible. This is the rule for each role
 
 | Role | Code questions | Docs and standards | If the check fails |
 |---|---|---|---|
-| Developers, `test-dev`, `docs-dev`, investigator (shell) | `codegraph explore` from the worktree's shell, against its own index. Never the MCP `codegraph_explore` when `branch=` differs. | `kw-docs` for standards, which rarely differ by branch. Direct read of the worktree's copy for any document being edited. | `doctor --ensure` follows `stop-on-tool-failure` |
+| Developers, `docs-dev`, investigator (shell) | `codegraph explore` from the worktree's shell, against its own index. Never the MCP `codegraph_explore` when `branch=` differs. | `kw-docs` for standards, which rarely differ by branch. Direct read of the worktree's copy for any document being edited. | `doctor --ensure` follows `stop-on-tool-failure` |
 | `code-reviewer` (shell) | Same, before any lens | CLI `docs validate` and `docs drift` in the worktree | Same |
 | `review-lens`, `review-triage` (no shell) | The packet carries `.agent_scratchpad/<task-id>/review-diff.patch` and, when the run uses one, the absolute worktree path. The lens passes that path as `codegraph_explore`'s `projectPath`, which answers from the worktree's own index; with no worktree named it uses the server's default project. Direct reads only when that call cannot answer for the packet's branch: an error, a not-indexed reply, or a provenance `branch=` that differs, naming the mode as `projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>` in the direct-read reason. They read the worktree the packet names, and the checkout itself only on a run that names no worktree. | `kw-docs` for standards | A lens that cannot read reports `SKIPPED` with the reason |
 | `architect` (shell) | The packet carries `RUN_BASE`, `RUN_BRANCH` and, when present, `WORKTREE: <absolute path>`. If provenance `rev=` and `branch=` match, normal discovery. If not, `codegraph explore "…"` from the worktree's shell against its own index (`kyber-weave doctor --ensure` creates it), counted as a CLI discovery call. | The server cannot see a plan written into a worktree, so the architect writes to `<WORKTREE>/docs/plans/…` and runs `kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .` there. Where a harness gives it no shell it returns `STATUS: BLOCKED` naming "server root differs: run the docs checks in the worktree" and is re-invoked with `DOCS_CHECKS: <results>`. | `BLOCKED` when no worktree path was given |
@@ -2029,7 +2069,7 @@ index of the root it is bound to, and nothing else.
 | Joins show `(unresolved)` | The symbol is in `code-refs` but not in the index — run [`docs drift`](governance.md) |
 | Analysis warns that the cache is unsafe | Run `docs init` to merge `.kyber-weave/.gitignore` with `cache/`; until then deterministic/lexical analysis continues and no document text is sent for embeddings |
 | `docs_look_up_glossary_term_definition` returns no senses | The configured glossary is absent, the term is not present, or its spelling differs; use `docs glossary .` to preview proposals |
-| `docs_get_coding_standard_for_technology` reports no standard for a technology | The key names no technology this corpus declares a standard for — check the Config Reg block of the repository root [`AGENTS.md`](../../AGENTS.md) and `ontology.technologies` in [`.kyber-weave/kyber-weave.yml`](../../.kyber-weave/kyber-weave.yml). Spelling alone cannot be it: the match is case-insensitive, so a miss means the technology is undeclared, or is declared with no standard scaffolded at `docs/standards/<technology>/README.md` |
+| `docs_get_coding_standard_for_technology` reports no standard for a technology | The key names no technology this corpus declares a standard for — check the Config Reg block of the repository root [`AGENTS.md`](../../AGENTS.md) and `ontology.technologies` in [`.kyber-weave/kyber-weave.yml`](../../.kyber-weave/kyber-weave.yml). Spelling alone cannot be it: the match is case-insensitive, so a miss means the technology is undeclared, or is declared with no standard scaffolded at `docs/standards/<technology>/<technology>.standards.md` |
 | Client reports a protocol error | Something wrote to stdout; check that you launched `kyber-weave-mcp`, not `kyber-weave` |
 | Answers look right but named files do not exist, or the document count is wrong | A same-named server is bound to a different checkout — compare the `provenance: repo=` line to `git rev-parse --git-common-dir`, call `docs_get_source_repository_and_revision`, and pin the server with `--expect-root`. A matching `repo=` with a different `root=` is another worktree of your own repository, not a foreign one |
 | A tool answers `STATUS: TOOL_FAILURE`, or carries a `warning: codegraph is unavailable` line | The repository declares `codegraph` under `mcp.required-servers` and the server could not read the index: the `fix:` line names the repair, usually `kyber-weave doctor --ensure .`. Under the default stop rule the tool refuses to answer with joins missing; `stop-on-tool-failure: false` turns the same detail into the warning. See [the refresh rules](#the-server-refreshes-codegraph-and-its-tools-fail-when-it-cannot) |

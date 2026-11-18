@@ -70,7 +70,7 @@ public sealed class ArchitectShellGuardTests
     [InlineData("git log --oneline | head -5")]
     [InlineData("grep -c x f | sort | uniq")]
     [InlineData("touch /w/docs/plans/2026-11-12-x.md")]
-    [InlineData("cd /w && touch docs/plans/x.tasks.json")]
+    [InlineData("cd /w && touch docs/plans/x.tasks.yml")]
     [InlineData("sort f")]
     [InlineData("sort -r f")]
     [InlineData("tail -5 f")]
@@ -519,7 +519,7 @@ public sealed class ArchitectShellGuardTests
     }
 
     [Theory]
-    [InlineData("csharp-dev")]
+    [InlineData("dev-medium")]
     [InlineData("conductor")]
     public void IsShellGuarded_OtherAgents_AreNotGuarded(string agent)
     {

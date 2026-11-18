@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Domain/Squad
 owner: dpalfery
-last-reviewed: 2026-11-12
+last-reviewed: 2026-11-17
 status: current
 decided-by:
   - adr/0076-test-first-is-one-worker-per-task
@@ -33,6 +33,9 @@ decided-by:
   - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
   - adr/0061-code-editing-runs-stop-on-unusable-tools
   - adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative
+  - adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt
+  - adr/0086-the-task-file-is-yaml
+  - adr/0088-the-old-technology-agents-are-removed-without-a-comparison
 sections:
   "#":
     keywords:
@@ -107,7 +110,7 @@ implemented and registered renderers today.
 ```mermaid
 flowchart TD
     subgraph Canonical["Canonical Product Source (products/kyber-squad/)"]
-        Agents["agents/*.md (24 Agents)"]
+        Agents["agents/*.md (15 Agents)"]
         Skills["skills/*/SKILL.md (Squad canonical skills)"]
         Profiles["profiles/*.yml (Lattice & Models)"]
         Catalog["squad.yml / toolchain.yml"]
@@ -292,8 +295,7 @@ flowchart TD
     Intersection{"Agent & Skill Name\nIntersection Check"}
 
     Intersection -->|"Two Primary Shared Identities\n(product-owner, bug-crusher)"| SharedPath["Thin Wrapper: Canonical Skill\nIs the Entry Point"]
-    Intersection -->|"Nine Distinct-Body Collisions\n(csharp-dev, dal-dev, etc.)"| CollisionPath["Distinct Workflows & Roles"]
-    Intersection -->|"No Skill Collision\n(conductor)"| UnoccupiedPath["Unoccupied Identity"]
+    Intersection -->|"No Skill Collision\n(conductor and the developer tiers)"| UnoccupiedPath["Unoccupied Identity"]
 
     SharedPath --> SharedCheck{"Target Native\nAgent Support?"}
     SharedCheck -->|"Yes"| SharedNative["Emit Native Agent + Canonical Skill\n(Entry Point; No Duplicate)"]
@@ -319,9 +321,12 @@ flowchart TD
      canonical skill and no duplicate; a target that lowers a primary onto a skill or command
      (Cursor, Pi, ZCode, Devin, Warp) reuses the canonical skill and emits no projection of its own.
    - No `role-<name>` projection is generated, and no skill projection is suppressed.
-2. **Distinct-Body Collisions (`csharp-dev`, `dal-dev`, `github-devops`, `go-dev`, `maui-dev`, `python-dev`, `rust-dev`, `test-dev`, `typescript-dev`)**:
-   - The canonical skill and agent serve distinct functions.
-   - On fallback targets, the canonical skill stays at `<name>`, and the agent instruction body is projected to `role-<name>`.
+2. **Distinct-Body Collisions**:
+   - None ships. The removal deleted every per-technology agent that shared its name with a skill, so the
+     only identities both namespaces carry are the two primary shared identities above.
+   - The rule stays in the renderer and the validator because a host may add its own agent beside a
+     skill of the same name: on fallback targets the canonical skill stays at `<name>`, and the agent
+     instruction body is projected to `role-<name>`.
    - `role-` is reserved exclusively for generated projections; no canonical source file may use the `role-` prefix.
 3. **Unoccupied Identities**:
    - Agents with no matching skill name lower directly to `<name>` as a skill on fallback targets.
@@ -388,6 +393,12 @@ versions.
 ---
 
 ## 4. Deployment Scopes and State Topology
+
+Kyber is deployed at the user level: one `kyber-weave squad install --global` per harness per
+machine serves every project on it. A project-level install is the rare exception, for a repository
+that has to pin a different version or a different target set. A user-level install cannot carry a
+per-project choice, and with one worker roster there is nothing per-project left to choose; the task
+file records the roster a run used, so a run's readers never depend on the deploy scope.
 
 Squad maintains deployment state under the user's home directory across three scopes:
 
@@ -1149,7 +1160,7 @@ and validates.
   carry their own fallback: the conductor loads the `review-council` skill, which starts
   `code-reviewer`'s council seats from the main session, as on every harness whose sub-agents
   cannot dispatch ([ADR 0079](../adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch.md)); `architect` gathers its own sweeps and returns a live
-  Azure question as `STATUS: BLOCKED`, which the conductor puts to `azure-reader` and answers.
+  platform question as `STATUS: BLOCKED`, which the conductor puts to `platform-researcher` and answers.
   Agents use Devin's directory layout so each resource closure stays inside its own agent's
   directory and authored links resolve verbatim; see the `DevinRenderer` class remarks for the
   full evidence.
@@ -1216,8 +1227,8 @@ and validates.
 - **Copilot emit today**: `CopilotRenderer` writes each agent's
   `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
   `SquadResourceProjection.Append` places every file that owner's Markdown links reach beside
-  the principal. A fresh Copilot render is 149 files — 24 agents, 28 skills, plus projected
-  closures — with authored relative links resolving in the output; every skill resource
+  the principal. A fresh Copilot render is one agent file per agent, one `SKILL.md` per skill, plus
+  every file their authored relative links reach, resolving in the output; every skill resource
   reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
   packaged-only Codex skill-UI metadata. That count is the current
   contract in [requirements](requirements.md) (KS-001 and the render requirement). The
@@ -1454,7 +1465,13 @@ agents read the new text on their next turn. An entry file that was locally edit
 preserved and reported by update, and stops receiving updates until it is deleted or re-deployed.
 
 **Preserved-file reporting.** A locally edited entry file is reported in the update warnings and
-keeps its bytes. Known gap: under `ReplaceManaged` mode, preserved stale entries are not reported.
+keeps its bytes; an entry kept inside a shared hook file gets the same warning, naming its
+container. Known gap: under `ReplaceManaged` mode, preserved stale entries are not reported.
+
+The receipt holds only the digest of the bytes Squad shipped, so `squad status` cannot tell a
+kept edit from a hand edit made after an update. It treats both the same way and never prints a
+bare drift line for them: it says `modified locally (kept at update; run squad update
+--replace-managed to take the shipped file)`. Only the flag ends the difference.
 
 **Project-scope risk (D-B).** Project-scope installs commit the operator's own text into every
 entry file on all 13 targets. That text is operator-owned, not a defect in the repository, and a
@@ -1648,7 +1665,7 @@ the approved task design, the worker halts production-code churn and trips
 
 ### JEV checkpoints (Q4)
 
-Every developer subagent (`csharp-dev`, `test-dev`, `github-devops`) runs these checks
+Every developer subagent (`dev-easy`, `dev-medium`, `dev-hard`, `devops`) runs these checks
 before and after each fix attempt:
 
 1. **Blast radius** — touched files stay inside authorized task scope. Out-of-scope work
@@ -1726,59 +1743,120 @@ A test-first task is one unit of behaviour owned by one specialist, who writes i
 task gate with `--red` (the failing run), implements, and runs the task gate again (the passing run),
 all in one dispatch ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)). The two reports
 in the task's scratch folder, failing run first, are the proof; `KW-ARB-MODE-002` records on
-each return whether they show it. `test-dev` takes only tasks whose deliverable is tests. The split this replaces —
-`test-dev` writing RED tests in one task and a developer making them pass in another — deadlocked
-compiled test projects and stopped headless runs on stub and evidence rules. What it gave up, an
-independent test author, is covered by the council's `test-adequacy` lens, which reads every added
-test as an outsider; its findings per run are how the decision is monitored.
+each return whether they show it. A task whose deliverable is only tests goes to a developer tier
+like any other. The split this replaces — one agent writing RED tests in one task and another making
+them pass in another — deadlocked compiled test projects and stopped headless runs on stub and
+evidence rules. What it gave up, an independent test author, is covered by the council's
+`test-adequacy` lens, which reads every added test as an outsider; its findings per run are how the
+decision is monitored.
 
 Both runs are one command, `kyber-weave review gates . --agent <name> --task <id>` (with `--red`
 for the failing run), which the packet prints filled in: it takes the task's files and declared
 test classes from the plan, writes each report where the Arbiter reads it, and prints failures in
 a few lines with the full log beside the report. How to write the tests — the test-first sequence,
-what to assert, unit or integration, test data and parallel safety — is one shared skill,
-`testing`, that every developer agent names instead of carrying its own copy; how tests work in a
-given repository is that repository's test standard, which the skill reads first through
-`docs_get_coding_standard_for_technology`.
+what to assert, unit or integration, test data and parallel safety — lives once in the shared rules
+file and in each technology standard's `## Testing` heading, which reach the worker in its task
+prompt. The `testing` skill the removal retired held the same rules.
 
 Operational contracts remain in
 `products/kyber-squad/agents/conductor.md`,
 `products/kyber-squad/agents/conductor/references/{plan-path,spec-path,intake-path,autonomy}.md`,
 `products/kyber-squad/skills/delivery-execution/SKILL.md` (the worker execution contract both
 `conductor` and `bug-crusher` load),
-`products/kyber-squad/agents/csharp-dev.md`,
-`products/kyber-squad/agents/test-dev.md`, and
-`products/kyber-squad/agents/github-devops.md`.
+`products/kyber-squad/agents/dev-medium.md` and
+`products/kyber-squad/agents/devops.md`.
 Regression pins live in `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` and
 `tests/KyberWeave.Tests/Squad/CopilotRendererTests.cs`.
 
-### The tracked task file and the paste-and-fill dispatch
+### The tracked task file and the inserted task prompt
 
 The conductor no longer derives its own prompts from the plan. Each prompt goes into a tracked
-task file at finalization: `kyber-weave docs tasks` derives a plan's — `docs/plans/<plan>.tasks.json` beside the plan — and a specification's — `<spec-folder>/tasks.json` inside the specification folder — from the plan or `tasks.md`, each committed with its artifact. No agent writes the file: it is a machine format, with a hash in it
-([ADR 0063](../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md)). Tracking it
+task file at finalization: `kyber-weave docs tasks` derives a plan's — `docs/plans/<plan>.tasks.yml` beside the plan — and a specification's — `<spec-folder>/tasks.yml` inside the specification folder — from the plan or `tasks.md`, each committed with its artifact. No agent writes the file: it is a machine format, written as YAML with a hash in it
+([ADR 0063](../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md),
+[ADR 0086](../adr/0086-the-task-file-is-yaml.md)). Tracking it
 rather than keeping it in `artifacts/` is what lets a push carry it to another machine, which is
-what makes resuming a run somewhere else possible at all.
+what makes resuming a run somewhere else possible at all. The JSON form an older release wrote
+(`<plan>.tasks.json`) is still read, with `KW-DOC-TASKS-014` and the conversion command, for two
+minor releases.
+
+| File | Format |
+|---|---|
+| Host configuration, model and capability profiles, gate catalogue | YAML |
+| Arbiter rules | YAML, one `<name>.arbiter-rules.yml` per role, technology or platform folder |
+| Task file | YAML (`<plan>.tasks.yml`, a specification's `tasks.yml`); the JSON form is read for two minor releases with a warning |
+| Standards, rules, skills, agents | Markdown |
+| The task prompt | Markdown parts inside named tags, inserted by the dispatch hook or written to the untracked scratch folder on a fallback harness |
+| Arbiter decision log, gate reports | machine output (JSON lines, JSON), not authored |
+
+New data files use the `.yml` extension, as every YAML file in the repository does.
 
 - **What a prompt carries.** Files as path plus symbol, full test class names, the exact commands
-  to run, the acceptance criteria, and the standards to fetch. Line numbers are hints at most,
-  because an earlier task on the same file moves them. The measured run's prompts carried none of
-  this — the authoring contract asked for "exact files or symbols" and no commands — so a worker
-  could not name the class that proved its change and reported a green suite it never ran.
+  to run, the acceptance criteria, and the technology's own rules, skills and standard. Line
+  numbers are hints at most, because an earlier task on the same file moves them. The measured
+  run's prompts carried none of this — the authoring contract asked for "exact files or symbols"
+  and no commands — so a worker could not name the class that proved its change and reported a
+  green suite it never ran. The worker no longer fetches its standard to start: the prompt carries
+  it, and a topic the budget leaves out is the one case for
+  `docs_get_coding_standard_for_technology`.
+- **A task declares a difficulty and one technology.** `Difficulty:` is `easy`, `medium` or
+  `hard`, and a task that omits it is `medium`; anything else is `KW-DOC-TASKS-015`.
+  `Technology:` names one value from `ontology.technologies`: an undeclared value is
+  `KW-DOC-TASKS-016` and a second technology is `KW-DOC-TASKS-017`, which tells the author to
+  split the task. A standard may name one parent it builds on, so React on TypeScript or Tauri on
+  Rust also receives the parent's rules and skills. A change that spans two unrelated technologies —
+  an endpoint and its database migration — is written as two tasks with a dependency between them,
+  so plans carry more, smaller tasks than they did before. The task file entry records `difficulty`,
+  `difficulty-source` (`architect`, `default` or `decision-model`) and `technology`. When the task
+  file is written with a decision model configured, the same request that picks the agent asks
+  `KW-ARB-DIFFICULTY-001`; an answer at 0.8 or more replaces the architect's rating, and its
+  `standard` answer becomes `medium`
+  ([ADR 0085](../adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md)).
+  No gate judges whether the rating is right.
 - **The conductor chooses the agent.** A plan task names the capabilities its work needs in plain
   words, never an agent or a skill, so a new agent needs no change to the architect. The finalize
-  tool's ready queue shows each task's capabilities, and the conductor dispatches the agent whose
-  description fits them; a `Role:` line in the plan is the owner's override. The worker loads the
-  skills its own agent file names
-  ([ADR 0080](../adr/0080-plan-tasks-name-capabilities-and-the-conductor-chooses-the-agent.md)).
-- **The machine delivers the packet.** The conductor dispatches by task id; the worker runs
-  `kyber-weave docs packet <task id> --agent <its name>`, which resolves the one Ready plan, checks the task file against
-  its execution digest (a stale file is refused with the fix), and prints only that task's packet with
-  `{worktree}` filled in. `--prior-results <file>` fills `{prior_results}` with earlier worker reports as
-  they were written; without it that section says none were supplied. No plan can know either slot:
-  a later prompt in that run needed a cause an earlier worker had found. A conductor that
-  could not read a 33 KB file and retyped it through helpers left its worker blocked; the machine
-  prints the packet so no one retypes it.
+  tool's ready queue shows each task's capabilities and its `agent=` pick, and the conductor
+  dispatches that agent; with no pick it chooses the agent whose description fits. A `Role:` line
+  in the plan is the owner's override. The worker loads the skills its own agent file names, and
+  its passed prompt carries the technology's skills as well
+  ([ADR 0080](../adr/0080-plan-tasks-name-capabilities-and-the-conductor-chooses-the-agent.md),
+  [ADR 0082](../adr/0082-the-decision-model-picks-task-agents-and-headerless-dispatches-are-delegations.md)).
+- **Task gates resolve by technology.** One resolver reads the agent's own `review.task-gates`
+  entry first, then `review.technology-gates.<technology>`, then the entry of the technology
+  agent the shipped map names, then the parent technology's by the same two steps. A task that
+  names a technology and resolves no gate is refused with a non-zero exit; no lists are merged
+  and no gate is added, and the council's `review.gates` is a different list.
+- **The machine delivers the prompt.** The conductor dispatches by task id with a leading header
+  block (`TASK`, `TECHNOLOGY`, `PLAN_FILE`, `PRIOR_RESULTS`, `FAILED_ATTEMPTS` as needed). On a
+  harness whose hook can rewrite the call, the dispatch hook replaces that block with the prompt
+  the task prompt service builds and keeps the text below it, so a retry's failure report still
+  reaches the worker. The prompt is built from the task file, checked against its plan, and the
+  same service prints it through `docs packet` and describes it through
+  `docs_build_task_prompt_for_agent_dispatch`. It holds the task, host facts, shared rules, the
+  parent's rules and skills, the technology's rules, skills and standard, and a last part naming
+  what the budget cut; every part sits inside its own tag. The default budget is 60,000
+  characters (`task-prompt-budget`); rules are never cut, and skills and standard sections go
+  least relevant to the task text first. The default is sized so the largest shipped template fits
+  with nothing cut:
+
+  | Part | Characters, largest case |
+  |---|---|
+  | Task's own prompt | 6,000 (the task-text cap) |
+  | Host facts | 6,000 (the host-rules cap) |
+  | Shared rules, with the cross-technology testing rules | about 5,000 |
+  | The technology's standard, with its Testing section | about 15,000 (C# was 10,215 when this was sized) |
+  | The technology's rules, taking what its agent body held | up to 12,000 (Tauri's agent body was 12,858) |
+  | The technology's skills | up to 3,000 |
+  | **One technology, total** | **about 47,000** |
+  | A parent's rules and skills, where a template names one | up to 10,000 more |
+- **A worker that gets no inserted prompt prints its own.** The hook can be absent or untrusted,
+  and some harnesses cannot rewrite the dispatch at all: ZCode, CommandCode and Warp
+  receive the prompt as `.agent_scratchpad/<task>/prompt.md`, the untracked scratch folder, and
+  the dispatch names that file. A worker that starts with only the header lines runs
+  `kyber-weave docs packet <task id> --agent <its name>` itself or stops; it never works from the
+  task id alone. `docs packet` resolves the one Ready plan, checks the task file against its
+  execution digest (a stale file is refused with the fix), and prints only that task's prompt with
+  `{worktree}` filled in. `--prior-results <file>` fills `{prior_results}` with earlier worker
+  reports as they were written; without it that section says none were supplied.
 - **The plan stays authoritative.** The owner approves the plan, it holds the `## Decisions` table,
   and the Arbiter reads task ids, files, dependencies, skills, task text, test rows and out-of-scope
   items from it. Only the conductor stops reading it — 68 KB in the measured run.
@@ -1793,7 +1871,7 @@ what makes resuming a run somewhere else possible at all.
   title, text, files, dependencies, skills), the test contract rows, the out-of-scope paths and the
   development mode. A status flip or an edit to a Decisions row is therefore not stale; any task
   edit is. Stale means the conductor refuses the file until the architect regenerates it. The
-  architect runs `kyber-weave docs tasks <plan> --write` after its last plan edit: the command derives every field, the digest (SHA-256 over the parsed document, `PlanDocumentParser.ExecutionDigest`) and each prompt from the plan, writes the file in place, and leaves it untouched when already current. Finalization runs the same generator: the conductor's `docs_finalize_approved_plan_and_write_task_file` tool (CLI twin `docs finalize`, [ADR 0078](../adr/0078-the-conductor-finalizes-and-archives-plans-through-two-docs-tools.md)) records the approval, sets the plan Ready and writes the file, and refuses, undoing every change, on any `KW-DOC-TASKS-*` error; the architect's `FINALIZE` path is the fallback. A prompt is the plan task's own text plus a `Command:` and an `Acceptance criteria:` line taken from the task or its test contract row, the `{worktree}` slot and the `{prior_results}` slot. When the plan lacks one, the command writes nothing and names the task and the line to add (`-004`). `--check` exits 1 and names each difference without writing. A shell-less architect has the conductor run the command. A specification's digest is over its `tasks.md`: the conductor runs the same command on it before finalization. The parser ends a Depends value at the next bullet at the same or a shallower indent (deeper sub-bullets stay in the value), and ends a Files bullet list at the next bold-labelled bullet, so a spec item's `_Requirements:_` line and `**Acceptance:**` bullet are not taken as dependencies or files.
+  architect runs `kyber-weave docs tasks <plan> --write` after its last plan edit: the command derives every field, the digest (SHA-256 over the parsed document, `PlanDocumentParser.ExecutionDigest`) and each prompt from the plan, writes the file in place, and leaves it untouched when already current. Finalization runs the same generator: the conductor's `docs_finalize_approved_plan_and_write_task_file` tool (CLI twin `docs finalize`, [ADR 0078](../adr/0078-the-conductor-finalizes-and-archives-plans-through-two-docs-tools.md)) records the approval, sets the plan Ready and writes the file, and refuses, undoing every change, on any `KW-DOC-TASKS-*` error; the architect's `FINALIZE` path is the fallback. The task file's `prompt` field is the plan task's own text plus a `Command:` and an `Acceptance criteria:` line taken from the task or its test contract row, the `{worktree}` slot and the `{prior_results}` slot; the dispatch adds the host facts and the technology's rules, skills and standard around it. When the plan lacks one, the command writes nothing and names the task and the line to add (`-004`). `--check` exits 1 and names each difference without writing. A shell-less architect has the conductor run the command. A specification's digest is over its `tasks.md`: the conductor runs the same command on it before finalization. The parser ends a Depends value at the next bullet at the same or a shallower indent (deeper sub-bullets stay in the value), and ends a Files bullet list at the next bold-labelled bullet, so a spec item's `_Requirements:_` line and `**Acceptance:**` bullet are not taken as dependencies or files.
 - **Each finished task commits with a `Task:` line.** The worker commits on the feature branch with
   `Task: <id>` and its report in the commit body, and the branch is pushed after each integrated
   task, so `run start --resume` can read the completed tasks and their results from the commits
@@ -1805,9 +1883,9 @@ what makes resuming a run somewhere else possible at all.
 
 ```mermaid
 flowchart TD
-    Architect["conductor finalize tool\nsets plan Ready + writes tasks.json"]
+    Architect["conductor finalize tool\nsets plan Ready + writes tasks.yml"]
     Validate["conductor validates the file\nthrough the docs tools"]
-    Paste["conductor dispatches by task id\nworker runs docs packet"]
+    Paste["conductor dispatches by task id\nhook inserts the task prompt"]
     Worker["worker dispatches, commits\nTask: id + report"]
     Resume["run start --resume\nreads the Task: lines"]
     Archive["docs-dev harvests, then the conductor's\narchive tool archives the plan\nand removes the file"]
@@ -1818,6 +1896,25 @@ flowchart TD
     Worker --> Resume
     Worker --> Archive
 ```
+
+#### Prompt delivery by harness
+
+The dispatch no longer carries the prompt text; the machine inserts it. Which path a harness uses
+is the Arbiter's
+[dispatch delivery path](../kyber-arbiter/architecture.md#dispatch-delivery-path) table, restated
+here for the Squad's own readers:
+
+| Harness | Delivery path |
+|---|---|
+| Claude, Copilot in VS Code, Copilot CLI, OpenCode, Pi, Codex, Cursor, Kilo, Antigravity, Factory, Devin | rewrite: the dispatch hook replaces the dispatch's header block with the full prompt |
+| ZCode, CommandCode | file until their live checks pass: each documents a tool-input rewrite field, but no Kyber-Weave hook or mod is rendered for it yet |
+| Warp | file: no dispatch hook exists, so the dispatch names the prompt file |
+
+On every path the conductor dispatches with the task id and the failed-attempt count, never with
+the prompt text. On a file harness the dispatch also names the prompt file, and the worker reads
+it first. A worker that starts with only the header lines, because a hook was absent or
+untrusted, runs `kyber-weave docs packet <task id>` itself or stops; it never works from the task
+id alone.
 
 The file has a shelf life of exactly one plan. `docs-dev` removes it with `git rm` in the same commit
 that archives the plan, so it never reaches `main` — this repository squash merges, and nothing
@@ -1937,7 +2034,7 @@ What follows is why it is shaped that way
   because that is the state the defect was observed in. The run record carries them, and every later
   dispatch of the run works in the location the step printed.
 - **The conductor runs it or dispatches it, never skips it.** Where the harness gives the conductor
-  a shell it runs the command itself. Where it gives none, it dispatches `github-devops` with the
+  a shell it runs the command itself. Where it gives none, it dispatches `devops` with the
   exact command and a `RUN-START: true` marker. `KW-ARB-PLAN-001` escalates a `delegate` dispatch
   that names no `PLAN_FILE`, which would refuse the very route the marker exists for, so
   `TriggerClassifier` classifies the marker as `investigate` and the roster check and
@@ -1969,7 +2066,7 @@ also exit `1`), and the `codegraph` binary must resolve on `PATH`
 
 Delivery is the same in both modes. The conductor commits to a feature branch, pushes it, and opens
 a draft pull request before the whole-change council runs, so the council reviews a pull request that
-already exists. `github-devops` then waits for required CI, for at most 60 minutes, and marks the pull
+already exists. `devops` then waits for required CI, for at most 60 minutes, and marks the pull
 request ready once every required check passes. The council verdict is written into the pull request
 description and does not gate readiness. Review that follows is ordinary post-ready pull request review,
 not a conductor gate. The conductor never merges. Unresolved circuit-breakers are listed as pending human review, not held back
@@ -1996,7 +2093,9 @@ required before archival), and the host pull-request template carries a Document
 impact section so the skill has a host heading to fill. The always-on change-scoped
 merge gate `KW-DOC-LIFECYCLE-004` (`ArchiveCloseoutValidator`, diffed against `--base`
 via `ChangedFiles.ResolveSinceMergeBase` per-path change kinds) requires that an archive
-touching governed documents names its closeout evidence; the harvest declaration binds
+touching governed documents names its closeout evidence, and that every numbered task the
+plan's `## Tasks` section lists is ticked: an unticked task is undelivered work, so the
+archived copy is refused however it was moved there; the harvest declaration binds
 off the document model (`documentation-impact`, `impact-components`). Portable contract
 files never embed a literal `docs/` path: every documentation location resolves through
 Config Reg properties such as `<docs-root>`, so a host that mounts documentation
@@ -2308,6 +2407,182 @@ are shipped in shadow until enforced (see the [Arbiter architecture](../kyber-ar
   no thread, so nothing is resolved; inline threads keep reply-and-resolve.
 - **Known gap.** The fixing-commit check for summary rows (Requirement 20.5) is not delivered. An
   `already-fixed` answer for a summary row rests on the model alone.
+
+## 12. The worker roster and developer tiers
+
+Kyber-Squad ships one worker roster: three developer agents that differ only in model strength and
+name no technology, beside `docs-dev`, `devops` and `platform-researcher` for documentation,
+delivery and live-platform work. The per-technology roster ran beside it until the removal deleted
+it. The comparison that would have decided the removal was never completed; the owner removed the
+old agents without it ([ADR 0088](../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)),
+and the procedure is retired ([the roster comparison runbook](roster-comparison-runbook.md), kept
+for history).
+
+### The agents of the roster
+
+| Role | Agent |
+|---|---|
+| Developer work | `dev-easy`, `dev-medium`, `dev-hard` |
+| Test-only work | none: the developer tier that owns the task writes its tests |
+| Documentation | `docs-dev` |
+| Delivery | `devops` |
+| Live platform state | `platform-researcher` |
+| Planning, review and diagnosis | `conductor`, `architect`, `product-owner`, `code-reviewer`, `review-lens`, `review-triage`, `bug-crusher`, `bug-crusher-investigator`, `research-agent` |
+
+Fifteen agent files ship. An agent declares the roster it serves with a `worker-roster` frontmatter
+key: the five agents the tiered roster added declare `tiered`, and an agent with no key serves the
+roster anyway. `worker-roster: technology` is no longer a selectable value.
+
+A plan or task file that still names one of the fourteen deleted agents — the ten technology
+developers, `sql-database-architect`, `test-dev`, `azure-reader` or `github-devops` — resolves to its
+replacement and reports the substitution: a removed developer becomes the tier its task's difficulty
+gives, `sql-database-architect` becomes `architect`, `azure-reader` becomes `platform-researcher` and
+`github-devops` becomes `devops`. A host's agent-keyed `review.task-gates` entries keep resolving
+through the shipped technology map, and `kyber-weave review migrate-task-gates` rewrites them as
+`review.technology-gates`.
+
+The three developer agents are one body rendered three times. They differ only in name, description
+and model profile (`fast`, `general`, `dev-hard`), use the `worker` capability profile, and name no
+technology, command or skill: the task prompt carries the technology's rules, skills and standard,
+and the agent reads them there. Three agents rather than one is the cost paid for choosing a model:
+picking an agent is the one way to pick a model that works on all thirteen harnesses
+([ADR 0085](../adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md)).
+
+`platform-researcher` uses the `platform-reader` capability profile: it reads files and live state
+and runs commands, and can neither write files, publish nor delegate. `devops` uses
+`publishing-worker`, does what the delivery work needs — run start, push, pull request, pipeline
+files — and names no platform: the task or the host configuration names the one platform, and its
+folder's rules and skills reach it through the prompt. Delivery in product code is still GitHub-only:
+the run delivery tool pushes a branch and opens a pull request on GitHub, and the Azure DevOps,
+GitLab and Jira folders give the agent rules and skills, which is instruction only until a later
+change adds product code for those platforms.
+
+### The roster switch
+
+`worker-roster` is a top-level host setting:
+
+```yaml
+worker-roster: tiered
+```
+
+`tiered` is the default and what an absent key means. `technology` is the configuration error
+`KW-CONFIG-001`, whose message names the change: the per-technology agents it selected no longer
+ship. Any other value is the same error. The setting is read when the task file is written and
+recorded in the file (`worker-roster`), and every later reader takes the run's roster from there. A
+task file written before the removal still records `technology`; it is read as `tiered` with
+`KW-DOC-TASKS-019`, and its developer tasks then owe a `Technology:` line like any other, because the
+dispatch still has to find a technology's rules, skills, standard and gates. The two forms this build
+no longer writes — the legacy JSON file and the version-1 schema — keep validating with their
+conversion warning, unless they claim the tiered roster.
+
+The setting is not published in the `AGENTS.md` Config Reg block, unlike the paths an agent looks up
+there: the task file is the record a run reads, and the CLI and the MCP server read the host setting
+for themselves.
+
+A task a developer agent will do must name the one technology it is written in. A developer task
+without a `Technology:` line is `KW-DOC-TASKS-018`; a documentation or delivery task names its role
+instead and needs none.
+
+### How a tier is chosen
+
+The task file records the developer tier the rating in use gives — `dev-easy`, `dev-medium` or
+`dev-hard` — or the documentation or delivery agent a pick named. The tier is computed again for
+every dispatch from the recorded rating, so a retry steps up from the tier the file names:
+
+```text
+tier = min(hard, rated difficulty + failed attempts)
+```
+
+`rated difficulty` is the task's difficulty — `easy` 0, `medium` 1, `hard` 2, and `medium` for a
+task without one — and `failed attempts` is how many attempts at that task already failed:
+
+| Rating | 0 attempts | 1 failed attempt | 2 or more |
+|---|---|---|---|
+| `easy` | `dev-easy` | `dev-medium` | `dev-hard` |
+| `medium`, or no rating | `dev-medium` | `dev-hard` | `dev-hard` |
+| `hard` | `dev-hard` | `dev-hard` | `dev-hard` |
+
+A failed attempt moves the next attempt exactly one tier up and never down. A failure on `dev-hard`
+stays on `dev-hard`, where the existing circuit-breaker applies unchanged: the limit of three rework
+dispatches per failure cluster, and above it architect mediation. A dispatch that belongs to no task
+has no rating, so it starts on `dev-medium` and moves to `dev-hard` on its second attempt. A task
+whose role is `docs-dev` or `devops` keeps that role and is never stepped up.
+
+One step up, never a jump to `dev-hard` on the third try, is the owner's choice of the existing
+ladder over a shortcut ([ADR 0085](../adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md)).
+The conductor's instructions state the same sentence, so a run with the Arbiter off behaves the same.
+
+```mermaid
+flowchart TD
+    C["conductor dispatches:<br/>task id + failed attempts<br/>+ technology, when the dispatch has no task"]
+    T["docs_build_task_prompt_for_agent_dispatch<br/>tier = min(hard, rated difficulty + failed attempts)"]
+    H["dispatch hook builds the prompt<br/>and replaces the task-id line before the worker starts"]
+    E["dev-easy<br/>profile fast"]
+    M["dev-medium<br/>profile general"]
+    D["dev-hard<br/>profile dev-hard"]
+    Done["completion digest<br/>READY_FOR_REVIEW"]
+
+    C --> T --> H
+    H -->|"easy, 0 failed"| E
+    H -->|"medium or unrated, 0 failed"| M
+    H -->|"hard"| D
+    E -->|"attempt failed"| M
+    M -->|"attempt failed"| D
+    D -->|"attempt failed: stays on dev-hard<br/>three-dispatch limit, then the architect"| D
+    E --> Done
+    M --> Done
+    D --> Done
+```
+
+A wrong rating therefore costs one attempt and corrects itself; nothing validates whether a rating is
+right.
+
+The conductor does not choose the tier itself. It calls
+`docs_build_task_prompt_for_agent_dispatch` with the task id and the failed-attempt count, and
+dispatches the agent the reply names. The tool and the dispatch hook build the prompt through the
+same service, so the agent, the tier and the prompt cannot disagree. Its reply gives the agent, the
+difficulty in use and its source (`architect`, `default` or `decision-model`), the technology,
+anything the prompt budget left out, and the prompt file's path on a harness whose hook cannot
+rewrite the dispatch; it never returns the prompt text.
+
+Each tier's model comes from its own agent file through its model profile — `dev-easy` is `fast`,
+`dev-medium` is `general`, `dev-hard` is the `dev-hard` profile — and nothing assigns a model at
+dispatch. `dev-hard` is its own profile, so changing a planning profile never changes the developer
+ladder, and it carries the model `architect` pinned on that harness when the tier became a real
+upgrade (`opus`, `gpt-6.1-sol`, `Gemini 4 Hydrogen (copilot)`, `zai-coding-plan/glm-5.3`, and so on).
+A failed task that moves up to `dev-hard` therefore also changes its model on every harness that
+renders one. Two harnesses have no second model to move to: Warp renders no per-agent model key at
+all, and Command Code has no bundled column, so both profiles resolve to the session's model there.
+`fast` and `general` pin the same token on five harnesses, so the first step, `dev-easy` to
+`dev-medium`, changes the tier but not the model on those; the `dev-hard` step is the one that always
+changes it. A host can point any profile at another model with a [model preset](model-profiles.md).
+Under `tiered` the Arbiter's model-targeting rules follow the same three profiles:
+`KW-ARB-DIFFICULTY-001` answers from the rating the task file records and makes no second model call,
+so the agent and the model cannot disagree, and `KW-ARB-LADDER-001`'s ladder is `fast`, `general`,
+`dev-hard`. A dispatch the conductor already put on the next tier already renders that profile, so
+the rule writes nothing.
+
+### What a tiered dispatch carries
+
+The conductor dispatches the task id, the task's technology where the dispatch belongs to no task,
+and the failed-attempt count, plus the prior-results file when earlier reports matter. The dispatch
+hook replaces the task id with the whole prompt before the worker starts, so the conductor never
+reads or retypes it, and every other line of the dispatch survives. The prompt's parts, its tags and
+the harness-by-harness delivery path are in
+[§9](#the-tracked-task-file-and-the-inserted-task-prompt).
+
+### Where the product differs from the design
+
+- The design's file-format table gives the Config Reg a `<worker-roster>` property. The constant
+  exists (`ConfigRegConfig.WorkerRosterProperty`), but the generated `AGENTS.md` block does not
+  publish a line for it and no agent instruction resolves one. Nothing depends on the line: the task
+  file is the record, and a dispatch with no task reads the host setting.
+- The design says `platform-researcher` replaces `azure-reader`, and the removal finished the
+  replacement: `azure-reader` is deleted, and the conductor's, architect's and code-reviewer's
+  `delegates-to` lists name `platform-researcher` alone, with its read-only `platform-reader`
+  profile.
+- The design kept the `worker-roster` switch until the removal. It is now `tiered` only, and the
+  value `technology` is the configuration error `KW-CONFIG-001`.
 
 ## Related
 

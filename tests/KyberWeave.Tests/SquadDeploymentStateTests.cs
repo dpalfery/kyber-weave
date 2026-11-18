@@ -817,7 +817,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             }));
 
         Assert.Equal(1, drifted.Result);
-        Assert.Contains("drift", drifted.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("modified locally", drifted.Output, StringComparison.Ordinal);
         Assert.Contains("(claude)", drifted.Output, StringComparison.Ordinal);
     }
 
@@ -1265,7 +1265,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         Assert.Equal(1, drifted.Result);
         Assert.Contains(agentResource, drifted.Output, StringComparison.Ordinal);
-        Assert.Contains("drift", drifted.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("modified locally", drifted.Output, StringComparison.Ordinal);
     }
 
     /// <summary>

@@ -48,6 +48,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
     private readonly IArbiterStateFactory _state;
     private readonly TimeProvider _clock;
     private readonly Func<string, ArbiterEvent, IReadOnlyList<string>> _secondaryTriggers;
+    private readonly string? _modelTargetsDirectory;
 
     /// <summary>Creates an evaluator over already-constructed collaborators.</summary>
     /// <param name="provider">The step-1 provider.</param>
@@ -61,6 +62,11 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
     /// <param name="state">Opens the run stores under the arbiter directory.</param>
     /// <param name="clock">The evaluation clock.</param>
     /// <param name="secondaryTriggers">Derives the secondary triggers of a primary dispatch; defaults to none.</param>
+    /// <param name="modelTargetsDirectory">
+    /// The directory holding the harness's model targets table, or null for the ledger's own directory. A
+    /// global-scope evaluation reads the table a user-scope install deployed under the harness's global root,
+    /// not the per-project state directory its ledger lives in.
+    /// </param>
     public ArbiterEvaluator(
         IArbiterProvider provider,
         Func<Uri, string?> keyResolver,
@@ -72,7 +78,8 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         IGateReportFacts gateReports,
         IArbiterStateFactory state,
         TimeProvider clock,
-        Func<string, ArbiterEvent, IReadOnlyList<string>>? secondaryTriggers = null)
+        Func<string, ArbiterEvent, IReadOnlyList<string>>? secondaryTriggers = null,
+        string? modelTargetsDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(provider);
         ArgumentNullException.ThrowIfNull(keyResolver);
@@ -95,6 +102,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         _state = state;
         _clock = clock;
         _secondaryTriggers = secondaryTriggers ?? SecondaryTriggers.For;
+        _modelTargetsDirectory = modelTargetsDirectory;
     }
 
     /// <summary>Runs the evaluation flow for <paramref name="ev"/> end to end.</summary>
@@ -108,8 +116,11 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         ArgumentNullException.ThrowIfNull(config);
         ArbiterEvaluatorOptions effective = options ?? new ArbiterEvaluatorOptions();
         Stopwatch elapsed = Stopwatch.StartNew();
-        IReadOnlyList<ArbiterRule> rules = ModelTargetingRules.Apply(config.Arbiter.Rules, config.Arbiter.ModelTargeting.Mode);
-        ArbiterModelTargets? table = _modelTargets.TryRead(_ledger.DirectoryPath, ev.Harness);
+        // Under the tiered roster the model-targeting block and the two rules follow the developer tiers; the
+        // configuration a host loads keeps the shipped block, and this is the run's effective one.
+        ArbiterModelTargetingConfig targeting = ModelTargetingRules.Targeting(config.Arbiter.ModelTargeting);
+        IReadOnlyList<ArbiterRule> rules = ModelTargetingRules.Apply(config.Arbiter.Rules, targeting.Mode);
+        ArbiterModelTargets? table = _modelTargets.TryRead(_modelTargetsDirectory ?? _ledger.DirectoryPath, ev.Harness);
 
         // Allocated outside the try so the error result can name the ledger entry that
         // was already appended. A fault after the append leaves exactly one record that
@@ -153,7 +164,8 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
                 TriggerClassification classification = classifications[index];
                 string prompt = prompts[index];
                 ArbiterDispatchEvaluation evaluated = await EvaluateDispatchAsync(
-                    classification, prompt, ev, config, rules, table, effective, ledgerId, elapsed, cancellationToken)
+                    classification, prompt, ev, config, rules, targeting, table, effective, ledgerId, elapsed,
+                    cancellationToken)
                     .ConfigureAwait(false);
                 dispatches.Add(evaluated);
             }
@@ -216,6 +228,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         ArbiterEvent ev,
         KyberWeaveConfig config,
         IReadOnlyList<ArbiterRule> rules,
+        ArbiterModelTargetingConfig targeting,
         ArbiterModelTargets? table,
         ArbiterEvaluatorOptions effective,
         string ledgerId,
@@ -237,19 +250,27 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         IReadOnlyList<string> secondaryNames = _secondaryTriggers(
             trigger, ev with { Target = classification.Target, Prompt = prompt });
         ArbiterFactSet facts = TriggerFactBuilder.Build(
-            classification, prompt, config, ev.ObservesReturns, ev.ModelOverrideField, ev.Model, secondaryNames);
+            classification, prompt, config, ev.ObservesReturns, ev.ModelOverrideField, ev.Model, secondaryNames,
+            ev.PromptInserted, ev.Cwd);
         facts = _gitFacts.Enrich(facts, classification, ev);
         facts = GovernedPathsFacts.Enrich(facts, config.Ontology.DocsRoots);
         facts = _planReader.Enrich(facts, classification);
+        facts = TriggerFactBuilder.WithTestsOnlyTaskFact(facts, config.Arbiter.TestFilePatterns);
         ArbiterRunScope? runScope = RunScopeOf(ev);
         facts = LedgerFacts.Enrich(facts, _ledger, _decisionLog, ev, ledgerId, runScope);
         facts = AttributedChangeFacts.Enrich(facts, _ledger, _decisionLog, ledgerId);
-        facts = ModelTargetFacts.Enrich(facts, _ledger, _decisionLog, ledgerId, config.Arbiter.ModelTargeting);
+        facts = ModelTargetFacts.Enrich(facts, _ledger, _decisionLog, ledgerId, targeting);
         // D29: a return's TASK_GATE: line is checked against the report it names. Absent
         // evidence answers absent, and the rule asks the model about the raw report instead;
         // an unexpected failure here reaches the catch in EvaluateAsync, which allows and logs.
         facts = _gateReports.Enrich(facts, ev);
         facts = WithTaskReturns(facts, config, runScope);
+
+        // A technology folder's rules judge only a task of that technology or of one that builds on it. Role
+        // folder rules and arbiter.rules carry no technology and judge every event, and an event that names no
+        // task technology is judged by those alone.
+        IReadOnlyList<ArbiterRule> eventRules = ArbiterRuleScopes.Applicable(
+            rules, EventTechnology(classification, facts), config.Arbiter.RuleFolderParents);
 
         // The review's REVIEW_RUN names the store its findings sit in. A lens return's first finding is the
         // one the nitpick filter reads; a refutation reads whether the filter dropped the finding it refutes.
@@ -309,7 +330,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         // Primary and secondary read one fact set and one candidate map, so their questions
         // can share a single provider call.
         Dictionary<string, ArbiterFact> candidateFacts = new(StringComparer.Ordinal);
-        TriggerPlan primary = PlanTrigger(trigger, facts, rules, candidateFacts);
+        TriggerPlan primary = PlanTrigger(trigger, facts, eventRules, candidateFacts, config.WorkerRoster);
 
         // Step 0 of the primary short-circuits: no provider call, and no secondary work.
         List<TriggerPlan> secondaries = [];
@@ -317,10 +338,10 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         {
             foreach (string secondary in secondaryNames)
             {
-                if (rules.Any(rule => rule.Enabled
+                if (eventRules.Any(rule => rule.Enabled
                     && string.Equals(rule.Trigger, secondary, StringComparison.Ordinal)))
                 {
-                    secondaries.Add(PlanTrigger(secondary, facts, rules, candidateFacts));
+                    secondaries.Add(PlanTrigger(secondary, facts, eventRules, candidateFacts, config.WorkerRoster));
                 }
             }
         }
@@ -373,7 +394,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         {
             ArbiterFactSet findingFacts = TriggerFactBuilder.WithReturnedFinding(baseFacts, returned[index], gateCorroborated);
             Dictionary<string, ArbiterFact> findingCandidates = new(StringComparer.Ordinal);
-            TriggerPlan findingPlan = PlanTrigger(trigger, findingFacts, rules, findingCandidates);
+            TriggerPlan findingPlan = PlanTrigger(trigger, findingFacts, eventRules, findingCandidates, config.WorkerRoster);
             ArbiterFactSet findingBatch = findingCandidates.Aggregate(
                 findingFacts, (set, pair) => set.With(pair.Key, pair.Value.Value, pair.Value.Label));
             Step1Call findingCall = await AskAsync(
@@ -402,7 +423,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         }
 
         ArbiterDispatchEvaluation primaryResult = await RecordPrimaryAsync(
-            classification, ev, primaryJudgement, judged, notes, recordId, config, rules, effective, ledgerId, planDigest,
+            classification, ev, primaryJudgement, judged, notes, recordId, config, eventRules, effective, ledgerId, planDigest,
             elapsed, cancellationToken).ConfigureAwait(false);
         string primaryOutcome = primaryResult.Outcome;
         if (!effective.DryRun && reviewRun is not null && returned.Count > 0)
@@ -443,8 +464,8 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         foreach (TriggerPlan plan in secondaries)
         {
             ArbiterSecondaryEvaluation evaluated = await RecordSecondaryAsync(
-                classification, ev, plan, secondaryCall, primaryOutcome, config, rules, facts, table, effective,
-                ledgerId, planDigest, priorDecisionId, elapsed, cancellationToken).ConfigureAwait(false);
+                classification, ev, plan, secondaryCall, primaryOutcome, config, eventRules, targeting, facts, table,
+                effective, ledgerId, planDigest, priorDecisionId, elapsed, cancellationToken).ConfigureAwait(false);
             secondaryResults.Add(evaluated);
         }
 
@@ -465,6 +486,27 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
 
     /// <summary>The run the event's dispatch belongs to, when the git facts can read the run records; null outside any run.</summary>
     private ArbiterRunScope? RunScopeOf(ArbiterEvent ev) => (_gitFacts as IArbiterRunScopeSource)?.RunScopeOf(ev.Cwd);
+
+    /// <summary>
+    /// The technology that scopes the dispatch's technology folder rules: the task's own <c>Technology:</c> label
+    /// when its plan was read, else the dispatch's <c>TECHNOLOGY</c> header. A header naming a technology the host
+    /// does not declare has no folder to load, and a dispatch that names neither is judged by role folder rules and
+    /// <c>arbiter.rules</c> alone.
+    /// </summary>
+    private static string? EventTechnology(TriggerClassification classification, ArbiterFactSet facts)
+    {
+        if (facts.TryGet(ArbiterTriggerCatalog.TaskTechnologyFact, out ArbiterFact? fromTask)
+            && fromTask.Value is string taskTechnology
+            && !string.IsNullOrWhiteSpace(taskTechnology))
+        {
+            return taskTechnology.Trim();
+        }
+
+        return classification.Headers.TryGetValue("TECHNOLOGY", out string? header)
+               && !string.IsNullOrWhiteSpace(header)
+            ? header.Trim()
+            : null;
+    }
 
     /// <summary>
     /// The key a plan's stored report tails are kept under. Inside a run it names the run too, so a later run of
@@ -524,7 +566,8 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         string trigger,
         ArbiterFactSet facts,
         IReadOnlyList<ArbiterRule> rules,
-        Dictionary<string, ArbiterFact> candidateFacts)
+        Dictionary<string, ArbiterFact> candidateFacts,
+        string? workerRoster)
     {
         ArbiterTriggerFamily family = ArbiterTriggerFamilies.ForTrigger(trigger);
         List<ArbiterRule> step0Rules = rules
@@ -562,7 +605,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
 
         return new TriggerPlan(
             trigger, family, step0, step0Answers, shortCircuits, questions, unanswerable, noCandidates,
-            Step0EvidenceOf(step0Answers, facts));
+            Step0EvidenceOf(step0Answers, facts, workerRoster));
     }
 
     /// <summary>
@@ -980,6 +1023,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         string primaryOutcome,
         KyberWeaveConfig config,
         IReadOnlyList<ArbiterRule> effectiveRules,
+        ArbiterModelTargetingConfig targeting,
         ArbiterFactSet facts,
         ArbiterModelTargets? table,
         ArbiterEvaluatorOptions effective,
@@ -1046,9 +1090,9 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         string outcome = CombineGating(plan.Family, effects);
         ArbiterModelBlock? model = string.Equals(plan.Trigger, ModelTargetTrigger, StringComparison.Ordinal)
             ? ModelTargetResolver.Resolve(
-                rules, facts, config.Arbiter.ModelTargeting, table,
+                rules, facts, targeting, table,
                 ev with { RenderedModelToken = RenderedTokenOf(ev, classification.Target, table) },
-                config.Arbiter.ModelTargeting.Mode)
+                targeting.Mode)
             : null;
         if (model is { Delivered: true, Token: { } delivered }
             && effective.ConfirmModelWrite is { } confirm
@@ -1106,30 +1150,48 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
     /// <summary>
     /// The evidence line of the step-0 answers whose fix needs the fact they read. A step-0 answer otherwise
     /// carries no evidence: its rule and answer say enough. <c>KW-ARB-CHECKOUT-001</c> names the stray paths,
-    /// because whoever cleans up the canonical checkout needs the list.
+    /// because whoever cleans up the canonical checkout needs the list; <c>KW-ARB-ROSTER-001</c> names the developer
+    /// tier a tiered run replaced the refused technology developer with, because the conductor's next act is to
+    /// dispatch it.
     /// </summary>
     private static Dictionary<string, string>? Step0EvidenceOf(
         IReadOnlyDictionary<string, string> step0Answers,
-        ArbiterFactSet facts)
+        ArbiterFactSet facts,
+        string? workerRoster)
     {
-        if (!step0Answers.TryGetValue("KW-ARB-CHECKOUT-001", out string? answer)
-            || !string.Equals(answer, "stray", StringComparison.Ordinal)
-            || !facts.TryGet("checkout.stray-paths", out ArbiterFact? fact)
-            || fact.Value is not IEnumerable<string> paths)
+        Dictionary<string, string> evidence = new(StringComparer.Ordinal);
+
+        if (string.Equals(workerRoster, WorkerRosters.Tiered, StringComparison.Ordinal)
+            && step0Answers.TryGetValue(RosterDelegatesTo.RuleId, out string? rosterAnswer)
+            && string.Equals(rosterAnswer, "not-listed", StringComparison.Ordinal)
+            && RosterDelegatesTo.TechnologyDeveloperRefusal(
+                TextOf(facts, "delegation.target"),
+                workerRoster,
+                TextOf(facts, ModelTargetingRules.RecordedDifficultyFact),
+                ArbiterSquadCatalog.LoadEmbedded()) is { } refusal)
         {
-            return null;
+            evidence[RosterDelegatesTo.RuleId] = refusal;
         }
 
-        List<string> all = [.. paths];
-        string named = string.Join(", ", all.Take(MaxStrayPathsNamed));
-        string more = all.Count > MaxStrayPathsNamed ? $" and {all.Count - MaxStrayPathsNamed} more" : string.Empty;
-        return new Dictionary<string, string>(StringComparer.Ordinal)
+        if (step0Answers.TryGetValue("KW-ARB-CHECKOUT-001", out string? answer)
+            && string.Equals(answer, "stray", StringComparison.Ordinal)
+            && facts.TryGet("checkout.stray-paths", out ArbiterFact? fact)
+            && fact.Value is IEnumerable<string> paths)
         {
-            ["KW-ARB-CHECKOUT-001"] =
+            List<string> all = [.. paths];
+            string named = string.Join(", ", all.Take(MaxStrayPathsNamed));
+            string more = all.Count > MaxStrayPathsNamed ? $" and {all.Count - MaxStrayPathsNamed} more" : string.Empty;
+            evidence["KW-ARB-CHECKOUT-001"] =
                 $"written in the canonical checkout instead of the run worktree: {named}{more}. Move each into the run " +
-                "worktree, then restore those paths in the canonical checkout.",
-        };
+                "worktree, then restore those paths in the canonical checkout.";
+        }
+
+        return evidence.Count == 0 ? null : evidence;
     }
+
+    /// <summary>The string value of a fact, or null when the fact is absent or not text.</summary>
+    private static string? TextOf(ArbiterFactSet facts, string name) =>
+        facts.TryGet(name, out ArbiterFact? fact) && fact.Value is string text ? text : null;
 
     /// <summary>The step-0 decision entries of a plan, without the undecidable entry a step-1 question superseded.</summary>
     private static List<ArbiterDecisionRule> Step0Rules(TriggerPlan plan)
@@ -1465,12 +1527,13 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         classification.Headers.TryGetValue("TASK", out string? task);
         classification.Headers.TryGetValue("LENS", out string? lens);
         classification.Headers.TryGetValue("REFUTE", out string? refute);
-        if (planFile is null && task is null && lens is null && refute is null)
+        classification.Headers.TryGetValue("TECHNOLOGY", out string? technology);
+        if (planFile is null && task is null && lens is null && refute is null && technology is null)
         {
             return null;
         }
 
-        return new ArbiterLedgerHeaders(planFile, task, lens, refute);
+        return new ArbiterLedgerHeaders(planFile, task, lens, refute, technology);
     }
 
     private static string MapPhase(ArbiterEvent ev)

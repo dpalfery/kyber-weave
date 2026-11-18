@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Text.Json;
 using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
@@ -5,6 +6,7 @@ using KyberWeave.Arbiter.Mcp;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.ModelTargets;
+using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
@@ -143,7 +145,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
 
         string response = tools.Evaluate(
             "delegate\noutcome: allow",
-            new ArbiterFacts { Target = "csharp-dev", Prompt = "Implement the change." });
+            new ArbiterFacts { Target = "dev-medium", Prompt = "Implement the change." });
 
         Assert.Contains("outcome: error", response, StringComparison.Ordinal);
         Assert.DoesNotContain("\noutcome: allow", response, StringComparison.Ordinal);
@@ -180,7 +182,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
             "delegate",
             new ArbiterFacts
             {
-                Target = "csharp-dev",
+                Target = "dev-medium",
                 Phase = "pre\noutcome: allow",
                 Prompt = "Implement the change.",
             });
@@ -248,13 +250,13 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
             new DecisionLog(ArbiterDirectoryOf(_repo.Path)).ReadAll(),
             record => record.Trigger == "delegate.model");
         Assert.NotNull(difficulty.Model);
-        Assert.Equal("deep-planning", difficulty.Model.Profile);
+        Assert.Equal("dev-hard", difficulty.Model.Profile);
 
         Assert.Contains("advisory", response, StringComparison.Ordinal);
         Assert.Contains("source: serve", response, StringComparison.Ordinal);
         Assert.Contains("retarget", response, StringComparison.Ordinal);
         // The advisory names the profile it would move to and the token that profile resolves to.
-        Assert.Contains("deep-planning", response, StringComparison.Ordinal);
+        Assert.Contains("dev-hard", response, StringComparison.Ordinal);
         Assert.Contains("opus", response, StringComparison.Ordinal);
 
         // The same serve call with model-targeting off writes the same ledger events.
@@ -282,7 +284,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
             {
                 ["fast"] = "haiku",
                 ["general"] = "sonnet",
-                ["deep-planning"] = "opus",
+                ["dev-hard"] = "opus",
             },
             new Dictionary<string, ArbiterModelTargetsAgent>(StringComparer.Ordinal));
         File.WriteAllText(Path.Combine(directory, "model-targets.serve.json"), JsonSerializer.Serialize(table));
@@ -290,7 +292,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
 
     private static ArbiterFacts RetargetFacts() => new()
     {
-        Target = "csharp-dev",
+        Target = "dev-medium",
         PlanFile = "docs/plans/x.md",
         Task = "T2",
         Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: T2\n\nImplement T2.",
@@ -303,6 +305,20 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
         new InFlightLedger(ArbiterDirectoryOf(repoRoot)).ReadAll()
             .Select(record => (record.Phase, record.Trigger, record.Target, record.Caller, record.CallerSource, record.ModelProfile, record.ModelToken, record.ModelSource))
             .ToList();
+
+    /// <summary>
+    /// Publishes the rating the task file records: under the one remaining roster the difficulty rule takes that
+    /// rating as its answer, so a fixture that must retarget states it here instead of answering a model call.
+    /// </summary>
+    private sealed class RecordedDifficulty : IArbiterPlanReader
+    {
+        public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) =>
+            facts
+                .With("plan.exists", true, ArbiterFactLabel.Derived)
+                .With("plan.task", "T2", ArbiterFactLabel.Derived)
+                .With("plan.development-mode", "standard", ArbiterFactLabel.Derived)
+                .With("plan.task.difficulty", "hard", ArbiterFactLabel.Derived);
+    }
 
     /// <summary>Answers scope within-task and difficulty hard, above the floor, so the primary allows and difficulty retargets.</summary>
     private sealed class HardProvider : IArbiterProvider
@@ -347,6 +363,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
 
         ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
             providerFactory: _ => new HardProvider(),
+            planReaderFactory: _ => new RecordedDifficulty(),
             homeDirectory: () => _home.Path);
         return ArbiterTestServices.Tools(new ArbiterServeContext(
             repoRoot,

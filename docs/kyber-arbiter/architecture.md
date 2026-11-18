@@ -5,13 +5,14 @@ doc-type: architecture
 component: KyberArbiter
 source-root: src/KyberWeave.Domain/Arbiter
 owner: dpalfery
-last-reviewed: 2026-11-12
+last-reviewed: 2026-11-17
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
   - adr/0054-squad-owned-blocks-in-shared-hook-files
   - adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude
   - adr/0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers
+  - adr/0087-arbiter-rules-live-in-role-and-technology-folders
 code-refs:
   - ArbiterEvaluator
   - RuleEngine
@@ -204,7 +205,9 @@ Limits on those facts:
 `InFlightLedger` and `DecisionLog` persist `artifacts/arbiter/ledger.jsonl`
 (`kyber-arbiter.ledger/v1`) and `artifacts/arbiter/decisions.jsonl`
 (`kyber-arbiter.decision/v1`) as append-only lines under one lock file. Only the hook
-appends; the CLI only reads. Prompts and code are logged as digests, never in full.
+appends; the CLI only reads. A pre event's `headers` carry the dispatch's `plan-file`, `task`,
+`lens`, `refute` and `technology` values, which the worker guard reads to scope a read-only
+dispatch's command allow-list. Prompts and code are logged as digests, never in full.
 Each step-1 rule entry records what the model scored, so thresholds can be tuned from the log:
 `probabilities` (in the rule's answer order; for `noul`, one value for the first answer),
 `confidence`, and `threshold`, the floor or ceiling the score was compared against. A score
@@ -235,9 +238,15 @@ counted as before, against the whole ledger.
 
 ## The rules
 
-Thirty-four rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,
-thresholds, `shadow` where the rule supports it, and per-answer `effects`. Host rules use the
-same shape under non-`KW-ARB-` ids and may not use an effect that only a shipped rule may use.
+Thirty-six rules ship with permanent `KW-ARB-*` ids, in three role files — the `conductor` file
+holds 21, `architect` 2 and `reviewer` 13 — and a host may replace any of them from a role or
+technology folder. A rule is tuned by id through `enabled`, thresholds, `shadow` where the rule
+supports it, and per-answer `effects`. Host rules use the same shape under non-`KW-ARB-` ids and
+may not use an effect that only a shipped rule may use. A rule that came from a technology folder
+judges only an event whose task is in that technology or in a technology that builds on it; role
+folder rules and `arbiter.rules` judge every event. Where the files are and in what order
+they load is [Where the rules come from](#where-the-rules-come-from), and the decision is
+[ADR 0087](../adr/0087-arbiter-rules-live-in-role-and-technology-folders.md).
 
 | Rule | Trigger | Step | Question |
 |---|---|---|---|
@@ -250,11 +259,11 @@ each, what stays at step 0 and which answer only the model can give.
 | `KW-ARB-PLAN-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Does this dispatch name the plan or specification file its work comes from? Step 0: `has-tasks` when the named plan was read with tasks. Model only: `no-plan` (escalates). |
 | `KW-ARB-SCOPE-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8), asked only when PLAN-001 is `has-tasks` | Is the work one of the plan's tasks? Step 0: the file-scope answers, all allow. Model only: `not-in-plan` (escalates). The model is told the target's capability profile and counts a documentation closeout or impact review sent to a documentation-profile target as `in-plan`. |
 | `KW-ARB-SCOPE-002` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Does the delegation ask for work the task does not describe? Step 0: `no-task` when no plan task was found (not asked). |
-| `KW-ARB-READY-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Has every task this one depends on finished? Step 0: `no-task`, `overlaps-in-flight` (escalates), `ready`, `returns-unobservable`, `returns-unread` (no stored reports can be found for a loosely named plan, so it is not asked). Model only: `waiting` (escalates), reading `ledger.task-returns`. |
+| `KW-ARB-READY-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Has every task this one depends on finished? Step 0: `no-task`, `overlaps-in-flight` (escalates; another task's unreturned dispatch holds files this task also names — an earlier *served* evaluation of this same plan task never counts, because a served decision is advisory and the caller may not have dispatched, so a retry is not blocked by its own previous evaluation), `ready`, `returns-unobservable`, `returns-unread` (no stored reports can be found for a loosely named plan, so it is not asked). Model only: `waiting` (escalates), reading `ledger.task-returns`. |
 | `KW-ARB-OWNER-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Does the task name the target as its specialist? Step 0: `no-task`, `owner`, `no-mapping`. Model only: `not-owner` (escalates). |
 | `KW-ARB-OWNER-002` | `delegate` | 1 (`choice`, ≥ 0.8) | Which roster specialist owns this task? Shipped disabled (a host sets `enabled: true` to log the pick); every answer allows: a plan task names capabilities, and the conductor chooses the agent ([ADR 0080](../adr/0080-plan-tasks-name-capabilities-and-the-conductor-chooses-the-agent.md)). |
-| `KW-ARB-MODE-002` | `delegate.returned` | 0 | In test-first mode, did the worker's task gate fail on its new tests before it passed? Machine fact `gate.report.failing-run-first`: in the folder of the report the `TASK_GATE:` line claims as a pass, an accepted `--red` report (a gate summary starting `RED accepted`) written earlier. Step 0: `no-task`, `not-required` (standard mode, a `test-dev` or documentation target, or a `Not applicable` contract row), `failing-run-first`, `no-failing-run`. Every answer allows and is logged, `no-failing-run` included: a worker cannot make a failing run after implementing, so the answer is monitored rather than a stop (a host may override it to `escalate`). A claim or report that cannot be read leaves the fact absent: undecidable. A return whose harness stripped its routing headers names no plan task and answers `no-task`, as every return-side plan rule does there. It replaced `KW-ARB-MODE-001`, retired with the RED/GREEN task split ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)). |
-| `KW-ARB-ROSTER-001` | `delegate`, `investigate` | 0 | Is the target in the caller's `delegates-to`? Machine fact: the embedded catalog. Only a caller the catalog names with a `delegates-to` list is judged: an unidentified caller, a helper agent outside the Squad, and an agent that delegates to no one answer `no-roster`, which allows. |
+| `KW-ARB-MODE-002` | `delegate.returned` | 0 | In test-first mode, did the worker's task gate fail on its new tests before it passed? Machine fact `gate.report.failing-run-first`: in the folder of the report the `TASK_GATE:` line claims as a pass, an accepted `--red` report (a gate summary starting `RED accepted`) written earlier. Step 0: `no-task`, `not-required` (standard mode, a task whose files are all test files — the machine fact `plan.task.files-all-tests` — a documentation target, or a `Not applicable` contract row), `failing-run-first`, `no-failing-run`. Every answer allows and is logged, `no-failing-run` included: a worker cannot make a failing run after implementing, so the answer is monitored rather than a stop (a host may override it to `escalate`). A claim or report that cannot be read leaves the fact absent: undecidable. A return whose harness stripped its routing headers names no plan task and answers `no-task`, as every return-side plan rule does there. It replaced `KW-ARB-MODE-001`, retired with the RED/GREEN task split ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)). The tests-only clause replaced naming the retired testing agent: a task whose files are all test files answers `not-required`, and one whose task names no file list is judged on the failing-run fact like any other target. |
+| `KW-ARB-ROSTER-001` | `delegate`, `investigate` | 0 | Is the target in the caller's `delegates-to`? Machine facts: the embedded catalog and the host's `worker-roster`. The list read is the catalog's, translated to the run's roster: under `tiered`, a name the removal map replaces is read as the agent it names — a technology developer as a developer tier — and the developer ladder is complete, so the tiers are dispatchable even when the catalog is older than the deployed Squad; under `technology` the list is read as written. A refusal of a technology developer carries the tier the task's rating gives. Only a caller the catalog names with a `delegates-to` list is judged: an unidentified caller, a helper agent outside the Squad, and an agent that delegates to no one answer `no-roster`, which allows. |
 | `KW-ARB-RUN-001` | `delegate`, `delegate.planner`, `investigate` | 0 | Has a run been started before an orchestrator hands a specialist that writes files any work? Machine facts: the catalog (the caller's `delegates-to` lists the target, whose profile is `worker`, `documentation`, `architect` or `product-planning`: a planner's plan belongs on the run branch), and `run.started`, a run record under `~/.kyber-weave/runs/` for this repository whose worktree still has its branch checked out. `not-started` escalates; unreadable evidence leaves the fact absent and allows. See the [runbook](runbook.md#reading-a-run-start-refusal). |
 | `KW-ARB-PLANREAD-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Does the dispatch tell the worker to open a plan, specification or todo file? Step 0: `closeout`, `no-plan`. Model only: `names-plan` (escalates); `mentions-only` allows. |
 | `KW-ARB-DIFF-001` | `delegate.returned` | 0, then 1 (`choice`, ≥ 0.8) | Are all changed files part of the task's work? It reads `git.changed-paths.attributed`: the paths changed since dispatch, less the task files of writer dispatches in flight in the same working tree during this one (`ledger.concurrent.paths`), because parallel workers share a run worktree. Step 0: `unattributed` (allows: a sibling declared no files and a path outside this task remains, or the return is not in the ledger), `out-of-scope` (escalates), `no-task`, `no-task-files`, `inside-task`. Model only: `outside-task` (escalates). |
@@ -280,6 +289,8 @@ each, what stays at step 0 and which answer only the model can give.
 | `KW-ARB-FAILURE-001` | `delegate.failure` | 0, then 1 | Is the current rework failure the same failure as the previous attempt of its cluster? Shadow. |
 | `KW-ARB-TRIM-001` | `sections.select` | 1 | Does this section of a document bear on the task? Shadow. |
 | `KW-ARB-COMMENT-001` | `comment.triage` | 1 | Is this bot review comment a real defect, a nitpick, or already fixed? Shadow. |
+| `KW-ARB-SEVERITY-001` | `review.verdict` | 1 (`choice`, ≥ 0.8) | Does a finding's stated severity match its stated impact: `too-high`, `about-right` or `too-low`? Advisory only; the verdict keeps the seat's severity. |
+| `KW-ARB-OVERRIDE-001` | `review.verdict` | 1 (`choice`, ≥ 0.85) | Does a finding that cites no host severity override belong to the class a `REVIEW.md` severity-override row describes? Asked once per applicable row; a confident `belongs` grades the finding at that row's severity. |
 | `KW-ARB-CHECKOUT-001` | `delegate.returned`, `delegate.planner.returned`, `investigate.returned` | 0 | Did the dispatch leave files in the repository's canonical checkout while its run works in its own worktree? Machine fact: `checkout.stray-paths`, git's diff of the canonical checkout against a snapshot `HookGitFacts` takes at dispatch, only for a target that writes files while a live run works in a separate worktree. No snapshot leaves the fact absent, which allows. The step-0 evidence lists the paths. See the [runbook](runbook.md#reading-a-canonical-checkout-refusal). |
 
 **The plan-read ban is enforced at dispatch (`KW-ARB-PLANREAD-001`).** Workers treat their dispatch
@@ -331,9 +342,10 @@ Two answers are return-dependent: on a harness whose adapter declares returns un
 there, because a dispatch that never reports back would otherwise hold its files for the
 whole session.
 
-Diagnostics are permanent too: `KW-ARB-CONFIG-001`…`-015` and `KW-ARB-INSTALL-001`
+Diagnostics are permanent too: `KW-ARB-CONFIG-001`…`-022` and `KW-ARB-INSTALL-001`
 for configuration and scope validation (`-012` to `-015` cover model targeting, the store
-limits, the bot logins and the savings-only keys), `KW-ARB-MODEL-001` for a missing or stale
+limits, the bot logins and the savings-only keys, and `-017` to `-022` cover a role or
+technology rule file), `KW-ARB-MODEL-001` for a missing or stale
 model targets file, `KW-ARB-KEY-001` for a missing key,
 `KW-ARB-LOG-001` for an un-ignored log directory,
 `KW-ARB-BIN-001` for a missing binary, `KW-ARB-GUARD-001` for undeclared planning indexes,
@@ -345,8 +357,8 @@ and `KW-ARB-HOOK-001` for a hook or evaluator error, which allows and is logged.
 **Hook guards sit beside the read guard, outside the rules.** `ReadGuard` (the worker plan-read guard) and
 `ConductorGuard` are stateless checks that run in a harness hook and write no ledger event. On Claude,
 `ArchitectShellGuard` (`KW-ARB-SHELL-001`) joins them: it denies an architect `Bash` or `PowerShell` call
-outside the command set `architect.md` documents, before the call runs. It is not a shipped rule, because the
-rule engine evaluates dispatch triggers only, every decision becomes a ledger event, and a shell call has no
+outside the command set `architect.md` documents, before the call runs. It is not a shipped rule, because
+every dispatch decision becomes a ledger event, and a shell call has no
 claim key, so a global and a project hook could both record one call. Hosts cannot tune or disable a guard by id; the only off switch is `arbiter.enabled: false`, which turns the whole
 Arbiter off, and with it the guard. Each `ArchitectShellGuard` decision writes a hook-log line rather than a ledger event. The rule-engine count above is unchanged. See the [runbook](runbook.md#the-architect-shell-guard) and
 [ADR 0071](../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md).
@@ -359,8 +371,110 @@ a Squad subagent. It denies a write into the canonical checkout while a live run
 whose current turn is past `arbiter.dispatch-budget` (`KW-ARB-BUDGET-001`), and denies once the call after one that ran past
 `dispatch-budget.call-minutes`, measured as the gap between the dispatch's consecutive calls. It reads the run records, the checkout's git files and
 one append-only counter file per subagent under `~/.kyber-weave/arbiter/budgets/`, starts no process, calls no
-model, and allows anything it cannot read. A shell command that writes a file is not seen by it; the return
-rule catches that. See the [runbook](runbook.md#reading-a-canonical-checkout-refusal).
+model, and allows anything it cannot read on the write and budget paths. A developer's shell command that writes
+a file is not seen by it; the return rule catches that.
+
+A command from a `platform-reader` dispatch (the `platform-researcher` agent) is seen. The guard raises
+`worker.command` with the command's text, its *form* — the program and leading words, with a leading
+`sudo` or `env` and every option and its value removed, so `az vm list -o table` and `az vm list` are one
+form — a fact saying whether it is one command at all, the form's *head* (its words before the first
+option), and every word the command names, and evaluates step 0 over the `worker.command` rules the
+technology folders declare. The head is where a technology's rule refuses a mutating verb, and that
+refusal wins over a read pattern that also matches: `az group delete list` ends in `list` but its head
+holds `delete`, so it is refused. The words are what a rule reads to
+find the tool however it was reached: a quoted program, an absolute path such as `/usr/bin/az`, a wrapper
+such as `timeout 10 az …`, a subshell, or a second command on the same line all still name it, so the
+technology's list refuses them. A redirect, a pipeline or a compound command is not one command, so it has
+no form a listed read may match and its whole text is the form: that is how `az vm list > resources.txt`
+is refused. A technology folder that declares no such rule refuses nothing. The tool-call event names no
+dispatch technology, so the guard reads the ledger for the unreturned dispatch of the calling agent in
+the same session and takes the `technology` header that dispatch recorded. It then applies only that
+technology's `worker.command` rules and those of every technology it builds on. A dispatch that names
+no technology, names one the host does not
+declare, has already returned, or cannot be told apart from a parallel dispatch of the same agent
+falls back to every declared technology's list, so a refusal is never lost; that is the fail-closed
+reading for a read-only agent.
+A judged command whose event
+names no working directory is refused too, because the technology's list lives under that directory and
+cannot be read; the missing directory is itself a machine fact. Where no worker guard runs, nothing is
+refused: on those eleven harnesses the same verbs are stated in the technology's `rules.md`, which reaches
+the prompt's `<technology-rules>` part, and are an instruction only. See Requirement 8.6 and the
+[runbook](runbook.md#reading-a-canonical-checkout-refusal).
+
+## Where the rules come from
+
+`ArbiterConfigLoader` assembles one rule set for a configuration read, from four sources in a
+fixed order. This is [ADR 0087](../adr/0087-arbiter-rules-live-in-role-and-technology-folders.md).
+
+1. **The shipped role files.** `conductor`, `architect` and `reviewer`, embedded in the binary and
+   copied to `products/kyber-squad/standards/<role>/<role>.arbiter-rules.yml`. The split is by
+   role: 21, 2 and 13 rules, unchanged from the single file they replaced.
+2. **The host's role folders.** `<docs-root>/standards/<role>/<role>.arbiter-rules.yml` for the
+   same three roles. A folder rule with a shipped id replaces that rule whole, keeping its
+   position in the set. A folder may also add rules of its own, under ids without the `KW-ARB-`
+   prefix. `arbiter.rules` is the shorter route to tune a rule in place, because a folder
+   declaration must restate the rule in full.
+3. **The technology folders.** The file of every technology in `ontology.technologies`, and of
+   each technology's `builds-on` ancestors from its `<name>.standards.md` frontmatter, root parent
+   first so a child wins on a shared id. Each rule keeps the name of the folder it came from, so the
+   evaluator applies it only to an event whose task is in that technology or in a technology that
+   builds on it. An id that a role folder or another technology folder already loaded stays in force
+   for the other technologies: the scoped declaration shadows it only where its technology matches,
+   and a child's declaration shadows its parent's for the child. The technology templates that ship
+   rules are `azure` and
+   `aws`, one allow-list rule each; every other shipped technology file is empty.
+4. **The host's `arbiter.rules`.** Applied last, over everything above, so it wins over a folder.
+
+```mermaid
+flowchart LR
+    A["1. Shipped role files<br/>conductor 21, architect 2, reviewer 13<br/>embedded in the binary"]
+    B["2. Host role folders<br/>&lt;docs-root&gt;/standards/&lt;role&gt;/<br/>&lt;role&gt;.arbiter-rules.yml"]
+    C["3. Technology folders<br/>the task's technology,<br/>then its builds-on ancestors<br/>root parent first"]
+    D["4. Host arbiter.rules<br/>and model-targeting.mode"]
+    E["One rule set for the event"]
+    A --> B --> C --> D --> E
+    B -.->|"same id: replaces the rule whole"| A
+    C -.->|"scoped: judges only an event<br/>whose task is that technology<br/>or builds on it"| D
+```
+
+A folder file is YAML with no frontmatter and may hold `rules`, `test-file-patterns` and
+`lens-paths`; a rule keeps the shape it had in the shipped file. A file that cannot be read,
+does not parse, or names a trigger the Arbiter does not know is reported by
+`kyber-weave arbiter validate` as `KW-ARB-CONFIG-017` naming the file and the rule, and the
+shipped rules for that folder stay in force. A rule that reads a fact its trigger does not
+supply is `KW-ARB-CONFIG-002`, and a folder entry with a reserved id, a rule-level `for-each` or
+an effect only a shipped rule may use is `-005` or `-015`; each is an error and skips the file
+too, so the shipped rules for that folder still stay in force. `-018` reports a `builds-on`
+parent with no standard, `-019` a `builds-on` cycle, `-020` (informational) a folder declaring
+one of the 36 shipped ids, `-021` one file declaring an id twice, and `-022` a key the file shape
+does not have. The shipped rules for the technology folders are not embedded, so a broken
+technology file adds nothing rather than restoring a shipped set.
+
+**No rule is locked.** A folder declaration, `arbiter.rules`, `shadow` on a rule that supports it,
+and `model-targeting.mode` for the two model rules are each honoured, so a host can turn any rule
+down to log only — the six that guard the tree and the run order included. A rule that is off
+widens nothing: an answer the Arbiter cannot reach allows and is logged. The templates keep the
+six guard rules enabled as they ship.
+
+**A technology's rules judge only that technology's tasks.** Every declared technology's rule file
+is loaded, because one configuration read has no task in hand, but each rule keeps the folder it came
+from and `ArbiterRuleScopes` applies it only when the event's task names that technology or a
+technology that builds on it. A scoped rule shadows an earlier rule of the same id only while its
+technology matches, so a technology folder's override never removes a global rule for the other
+technologies. The task's own `Technology:` label is used when its plan was read, and
+the `TECHNOLOGY` header of a task-less dispatch otherwise. An event that names neither — a
+`bug-crusher` fix with no task, the conductor's own action — is judged by role folder rules and
+`arbiter.rules` alone. The worker guard applies the same scope to a read-only dispatch's command
+allow-list: it reads the dispatch's `technology` header from the ledger's pre event for the calling
+agent in the same session. A dispatch that names none, has returned, or cannot be told apart from a
+parallel dispatch of the same agent falls back to every declared technology's list, so the fail-closed
+reading holds for `platform-researcher`.
+
+One limit holds today and is recorded rather than claimed away: **only the `conductor`, `architect`
+and `reviewer` role folders are read** — `ArbiterConfigLoader` holds that list and `ontology.roles`
+does not feed it, so a `devops` role file has no effect. A host that installs a role folder verbatim
+also sees one informational `KW-ARB-CONFIG-020` per rule in it, because the copied template declares
+every shipped id.
 
 ## Secondary triggers, families and effects
 
@@ -380,6 +494,11 @@ cannot change any of it.
 | Shortcut | `intake.shortcut`, `triage.shortcut`, `docs-impact.shortcut` | `spawn`, `answer` | `spawn` | `answer` only when every rule answers `answer`, else `spawn` |
 | FailureCluster | `delegate.failure` | `allow`, `same-failure` | `allow` | `same-failure` when any rule answers it, else `allow` |
 | Advice | `sections.select`, `comment.triage` | `keep`, `advise` | `keep` | `advise` only when every rule advises, else `keep` |
+| WorkerCommand | `worker.command` | `allow`, `escalate` | `allow` | `escalate` when any rule escalates |
+
+`worker.command` is the one trigger no dispatch raises: the worker guard raises it on a read-only dispatch's
+own command call, as described above, and its `escalate` is the refusal. The other triggers all arrive on a
+dispatch or a return.
 
 The catalogue also accepts the family names `model.target`, `shortcut`, `failure.cluster` and
 `advice` as trigger names. Phase 1 emits none of them.
@@ -540,9 +659,11 @@ Phase 1 shipped no rule in shadow. Phase 3 ships nine rules in shadow, listed un
 
 **Model-targeting switch.** `arbiter.model-targeting.mode` is `off`, `shadow` (the default) or
 `enforce`. It owns the shadow state of `KW-ARB-DIFFICULTY-001` and `KW-ARB-LADDER-001`. A `shadow`
-override on either one fails `KW-ARB-CONFIG-014`, so there is one switch to read. `off` disables both
-rules. `shadow` evaluates and logs them and delivers nothing. `enforce` lets a retarget reach the
-dispatch. The mode also controls the `KW-ARB-MODEL-001` doctor check.
+override on either one under `arbiter.rules` fails `KW-ARB-CONFIG-014`, and a folder file cannot
+set it either — its `retarget` effects are reserved to shipped rules (`-015`) — so there is one
+switch to read. `off`
+disables both rules. `shadow` evaluates and logs them and delivers nothing. `enforce` lets a
+retarget reach the dispatch. The mode also controls the `KW-ARB-MODEL-001` doctor check.
 
 ## Fail-safe points
 
@@ -569,7 +690,7 @@ reference the Squad assemblies, and the bundled model matrix is not on disk at h
 | Scope | Path | Written when |
 |---|---|---|
 | Project | `artifacts/arbiter/model-targets.<harness>.json`, under the project root | The Arbiter is enabled and the scope is project |
-| Global | `~/.kyber-weave/arbiter/model-targets.<harness>.json`, under the user's home directory | The Arbiter is enabled and the scope is global |
+| Global | `.kyber-weave/arbiter/model-targets.<harness>.json`, under that harness's own global root (`~/.copilot` for Copilot, `~/.claude` for Claude, and so on) | The Arbiter is enabled and the scope is global |
 | Instance | None | Never. Targeting keeps every model. |
 
 A table is written for every hooked target, whatever the `model-targeting.mode` value. Warp and
@@ -582,7 +703,7 @@ ZCode are fallback-only and get none.
   "preset": { "name": "work", "digest": "…" },
   "bundle-digest": "…",
   "profiles": { "fast": "claude-haiku-5-5", "general": "claude-sonnet-5-5", "architect": "opus" },
-  "agents": { "csharp-dev": { "profile": "general", "token": "claude-sonnet-5-5" } }
+  "agents": { "dev-medium": { "profile": "general", "token": "claude-sonnet-5-5" } }
 }
 ```
 
@@ -616,6 +737,19 @@ The Arbiter can point a `delegate` dispatch at a different model: a cheaper prof
 one rung up the ladder after a failed attempt. It only retargets. No model call picks the profile, except
 that `KW-ARB-DIFFICULTY-001` is a step-1 rule and asks the decision model its question as every step-1
 rule does.
+
+**Under the tiered roster both rules follow the developer tiers.** With `worker-roster: tiered`,
+`KW-ARB-DIFFICULTY-001` answers from `plan.task.difficulty`, the rating the agent pick already recorded,
+so no second model call is made and a task with no recorded rating answers undecidable and keeps. The
+ladder is the three tiers' model profiles — `fast` for `dev-easy`, `general` for `dev-medium`, and
+`dev-hard` — and `model-targeting.difficulty-profiles` and `model-targeting.ladder` take those values
+whether or not the host set its own. A dispatch the conductor already put on the next tier targets the
+token it is already rendered with, so `same-as-rendered` stops the write. Under `technology`, and when
+no roster is given, both rules are as they ship.
+
+The effective block is resolved at evaluation, not at load, because a loaded configuration does not
+carry the run's roster: `ModelTargetingRules.Targeting` and `ModelTargetingRules.Apply` are called with
+`config.WorkerRoster`, so a configuration built in code follows its roster too.
 
 **Eligibility.** Only an implementation-class target reaches `delegate.model`. `ArbiterSquadCatalog.TargetClassFor`
 maps the `worker`, `publishing-worker` and `documentation` capability profiles to `implementation`. A planner classifies as
@@ -727,7 +861,10 @@ Each is omitted when it has no value.
 
 The `arbiter:` section is merged by `ArbiterConfigLoader` into the host configuration; with
 no section the Arbiter is disabled, the provider is `none`, and all shipped rules are
-enabled. A host may tune a shipped rule's `enabled`, confidence/probability threshold, and
+enabled. Before that merge the loader applies the host's role and technology folders, described in
+[Where the rules come from](#where-the-rules-come-from), and `arbiter.rules` is applied last, so it
+wins over a folder. A host may tune a
+shipped rule's `enabled`, confidence/probability threshold, and
 `effects`, and set `shadow` on the rules that support it. Anything else is a hint to add a host rule. The per-user
 `~/.config/kyber-weave/arbiter.yml` override may hold `provider:` and nothing else. The key
 never appears in any configuration file: `ArbiterKeyResolver` reads `TYPESAFE_API_KEY`,
@@ -846,7 +983,7 @@ The degradation records these outcomes produce are listed once, in the
 | Codex | 2 | Owned block in the shared `.codex/hooks.json` (`PreToolUse`/`PostToolUse` matcher groups) | `spawn_agent` (also matched as `Agent`, under any namespace prefix) | Header inference from the marker | `tool_input.agent_type`, `tool_input.message`; returns pair by `tool_use_id` | Unsupported (unverified): no `spawn_agent` model parameter is documented [CX-HOOK], [CX-SUB] |
 | Cursor | 2 | Owned entries in the shared `.cursor/hooks.json` (`preToolUse`/`postToolUse`, `failClosed: true`) | `Task` | Header inference from the marker | `tool_input.prompt`; `tool_input.subagent_type` is undocumented, so when absent the rules answer `undecidable`. Returns pair by `tool_use_id` | Unsupported (unverified): whether `updated_input` applies to `Task` is undocumented [CU-SUB], [CU-HOOK] |
 | Kilo | 3 | The `.kilo/plugin/kyber-arbiter.ts` shim speaking the plugin envelope | `task` | Header inference from the marker | `args.subagent_type`, `args.prompt`; returns pair by `callID` | Unsupported (unverified): the task tool documents no model [KI-SUB] |
-| Antigravity | 3 | An owned top-level group `kyber-arbiter` in `.agents/hooks.json`, matching `^invoke_subagent$` | `invoke_subagent`; each element of `Subagents` is one dispatch | Header inference from the marker | `TypeName`, `Prompt`. Deny writes `{decision: "deny", reason}`; pass-through writes `{}`, since an explicit allow would bypass the user's approval prompts | Unsupported: `invoke_subagent` has no model field; tier is per custom subagent [AG-SUB], [AG-HOOK] |
+| Antigravity | 3 | An owned top-level group `kyber-arbiter` in `.agents/hooks.json`, matching `^invoke_subagent$` | `invoke_subagent`; each element of `Subagents` is one dispatch | Header inference from the marker | `TypeName`, `Prompt`. Deny writes `{decision: "deny", reason}`; pass-through writes `{}`, since an explicit allow would bypass the user's approval prompts. An inserted prompt writes `{decision: "ask", overwrite: {Subagents: [...]}}` | Unsupported: `invoke_subagent` has no model field; tier is per custom subagent [AG-SUB], [AG-HOOK] |
 | Factory | 3 | An owned block in `.factory/hooks.json`, matcher groups at the top level with no `hooks` wrapper, plus a `SubagentStop` group with no matcher (Factory runs `Task` in the background, so the worker report arrives at stop, not at `PostToolUse`), unless shadowed (below) | `Task` | Header inference from the marker | `tool_input.subagent_type`, `tool_input.prompt`; returns pair by `pair-digest` | Unsupported: the docs say the caller cannot choose a model for a single call [FA-DROID], [FA-HOOK] |
 | Devin | 3 | An owned block in `.devin/hooks.v1.json` (the Claude Code format), matching `^run_subagent$` | `run_subagent` | Header inference from the marker | `tool_input.profile`, `tool_input.prompt`; returns pair by `pair-digest` | Unsupported (unverified): the `run_subagent` schema documents no model [DV-HOOK], [DV-LOG] |
 | Warp, ZCode | 3 | No hooks: the MCP fallback | — | Asserted by the caller in `arbiter_evaluate_agent_dispatch_or_return` | — | Not applicable: no hooks |
@@ -887,6 +1024,44 @@ sets `modifiedResponse` to the agent's response with the note appended, which Co
 replacing the response the parent reads; this delivery has not been confirmed on a live run. The note is
 therefore also kept, and the dispatching agent's next `task` `postToolUse` in the same session carries
 it once as `additionalContext`.
+
+### Dispatch delivery path
+
+A worker learns its task from its dispatch. The task prompt reaches it one of two ways, chosen by
+the harness:
+
+- **rewrite**: the dispatch hook replaces the task-id line with the full prompt inside the
+  dispatch call, before the worker starts. The worker reads no file, and the dispatching agent
+  never holds the prompt text.
+- **file**: the hook cannot rewrite the dispatch, so the prompt is written to
+  `.agent_scratchpad/<task>/prompt.md` (untracked) and the dispatch names that file. The worker's
+  first step is to read it.
+
+A row reads `rewrite` only where the hook's adapter inserts the prompt in a field the harness applies,
+and no row reads `rewrite` for an adapter that does not insert: the worker would then start with only a task
+id. The shipped header-strip rewrite is the evidence wherever it runs today: the hook returns the dispatch
+input with the routing headers removed, the worker starts from the returned input, and the dispatcher's
+transcript keeps what it sent. Antigravity inserts through `overwrite`, whose merge replaces the whole
+`Subagents` array, so it counts as a rewrite by the owner's decision; the live check the row describes still
+has to confirm the harness applies it. Among the harnesses Kyber-Weave serves no adapter is left with
+neither path.
+
+| Harness | Path | Rewrite field and shape | Live check: worker got the replaced text, dispatcher transcript did not | When the hook is not trusted or not enabled | Source, read 2026-11-16 |
+|---|---|---|---|---|---|
+| Claude | rewrite | `hookSpecificOutput.updatedInput` replaces the whole tool input; only `prompt` changes | Shipped header strip | An untrusted workspace leaves the worker with the header lines; it runs `docs packet` for its task id | [CC-HOOK] |
+| Copilot in VS Code | rewrite | `hookSpecificOutput.updatedInput.prompt` (Preview) | Shipped header strip | Without `chat.useHooks` or a trusted workspace the hook does not run; the worker runs `docs packet` | [GH-HOOK] |
+| Copilot CLI | rewrite | `modifiedArgs.prompt` beside `permissionDecision: allow` | Shipped header strip | A missing hook file leaves the worker with the header lines; it runs `docs packet` | [GH-HOOK] |
+| OpenCode | rewrite | `args`, the complete arguments object, which the shim assigns over the call | Shipped header strip | The plugin shim absent leaves the worker with the header lines; it runs `docs packet` | [OC-AGENT] |
+| Pi | rewrite | `args` in the plugin envelope | Shipped header strip | The extension absent leaves the worker with the header lines; it runs `docs packet` | [PI-EXT] |
+| Codex | rewrite | `hookSpecificOutput.updatedInput.message`, valid only with `allow` | Shipped header strip | A hook the user has not trusted is skipped; the worker runs `docs packet` | [CX-HOOK] |
+| Cursor | rewrite | `updated_input.prompt`, riding on `allow` only | Shipped header strip; `updated_input` on `Task` is documented only loosely, so a field the harness drops falls back to the file | A `failClosed` hook that does not run leaves the worker with the header lines; it runs `docs packet` | [CU-HOOK] |
+| Kilo | rewrite | `args` in the plugin envelope | Shipped header strip | The plugin shim absent leaves the worker with the header lines; it runs `docs packet` | [KI-SUB] |
+| Antigravity | rewrite | `overwrite` replaces `toolCall.args` by a **shallow top-level merge**, so the insertion resends the whole `Subagents` array, every element kept and only its `Prompt` replaced. `decision` is required; the hook returns `decision: "ask"` so the user's approval prompt still applies, and never `auto_approve` | The adapter inserts the prompt; the live check that the harness applies the merge has not run, because it is not installed in this worktree. It must show the worker received the replaced `Prompt` and the dispatcher's transcript did not | A project or global `hooks.json` that is absent or disabled means no hook; the worker runs `docs packet` | [AG-HOOK] |
+| Factory | rewrite | `hookSpecificOutput.updatedInput.prompt`, with every `tool_input` field copied | Shipped header strip | A missing or disabled hook file leaves the worker with the header lines; it runs `docs packet` | [FA-HOOK] |
+| Devin | rewrite | `hookSpecificOutput.updatedInput.prompt`, merged into the tool call | Shipped header strip | A missing hook file leaves the worker with the header lines; it runs `docs packet` | [DV-HOOK] |
+| ZCode | file until the check passes | `hookSpecificOutput.updatedInput` is a full replacement of the tool input, re-validated against the tool schema | Not yet: project hooks are ignored by the harness and no Kyber-Weave hook is rendered; a user-scope hook also needs `hooks.enabled: true`. The check must show the worker received the replaced prompt and the dispatcher's transcript did not | The hook is absent or disabled: the worker runs `docs packet` | [ZC-HOOK], read 2026-11-16 |
+| CommandCode | file until the check passes | `hooks.beforeToolCall` returns `input`, which rewrites the tool input the call executes with; rewrites chain across mods | Not yet: project mods are trust-gated and no Kyber-Weave mod is rendered. The check must show the worker received the replaced prompt and the dispatcher's transcript did not | The mod is absent, disabled or the workspace untrusted: the worker runs `docs packet` | [CM-MOD], read 2026-11-16 |
+| Warp | file | No dispatch hook and no rewrite field in the repository's harness notes | Not applicable | Always the file path; the MCP fallback carries the dispatch | [WP-DOC], checked 2026-11-16 |
 
 ### The user-level Claude hook
 
@@ -960,6 +1135,8 @@ one. Rendering it there is an exception to the rule that user-scope agents carry
 The verdicts in the "Per-dispatch model" column cite these vendor pages. They were read on
 2026-11-10 and carried into this guide from the savings design's research. They were not
 re-read live for this revision, so a changed vendor page is a defect to record, not a silent edit.
+The [dispatch delivery path](#dispatch-delivery-path) rows cite the same pages, re-read on
+2026-11-16; [AG-HOOK] is where Antigravity documents the `overwrite` field.
 
 - [CC-SUB] Claude Code subagents: https://code.claude.com/docs/en/sub-agents
 - [CC-HOOK] Claude Code hooks: https://code.claude.com/docs/en/hooks
@@ -978,6 +1155,9 @@ re-read live for this revision, so a changed vendor page is a defect to record, 
 - [FA-HOOK] Factory hooks reference: https://docs.factory.com/reference/hooks-reference
 - [DV-HOOK] Devin lifecycle hooks: https://docs.devin.ai/cli/extensibility/hooks/lifecycle-hooks
 - [DV-LOG] Devin CLI changelog: https://docs.devin.ai/cli/changelog
+- [ZC-HOOK] ZCode hooks, including `PreToolUse.updatedInput`: https://zcode.z.ai/en/docs/hooks
+- [CM-MOD] CommandCode mods, including `hooks.beforeToolCall.input`: https://commandcode.ai/docs/mods
+- [WP-DOC] Warp documentation: https://docs.warp.dev
 
 ### Delivery and caller notes
 

@@ -99,6 +99,34 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
     }
 
     /// <summary>
+    /// A technology the host declares is never an unknown slug, even when no template ships for it: this
+    /// repository declares <c>test</c>, whose standard is its own authored folder, beside the technologies
+    /// whose templates do ship. The catalogue reports the gap instead of refusing the whole run.
+    /// </summary>
+    [Fact]
+    public void ADeclaredTechnologyWithNoShippedTemplateExitsZeroAndReportsNoGatesShipped()
+    {
+        string repo = NewFixtureRepo(
+            "go", ["csharp", "test", "typescript", "rust", "tauri", "go", "github-actions"]);
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
+            () => CommandAppFixture.ReviewCatalogue().Run(["review", "catalogue", repo]));
+
+        Assert.True(
+            execution.Result == 0,
+            $"review catalogue exited {execution.Result}. Output:{Environment.NewLine}{execution.Output}");
+        Assert.Contains("review:", execution.Output, StringComparison.Ordinal);
+
+        CapturedConsoleExecution<int> onlyTest = ProcessConsoleCapture.Run(
+            () => CommandAppFixture.ReviewCatalogue().Run(["review", "catalogue", repo, "--technology", "test"]));
+
+        Assert.True(
+            onlyTest.Result == 0,
+            $"review catalogue --technology test exited {onlyTest.Result}. Output:{Environment.NewLine}{onlyTest.Output}");
+        Assert.Contains("# no gates shipped for test", onlyTest.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A broken <c>.kyber-weave/kyber-weave.yml</c> exits 1: the config load error is fatal.
     /// </summary>
     [Fact]

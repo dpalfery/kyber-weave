@@ -326,11 +326,11 @@ public sealed class SquadModelPresetRenderTests
         string architectContent = Encoding.UTF8.GetString(architectFile.Content.Span);
         Assert.DoesNotContain(ProbeModel, architectContent, StringComparison.Ordinal);
 
-        SquadDeploymentFile csharpDevFile = Assert.Single(
+        SquadDeploymentFile fastWorkerFile = Assert.Single(
             result.Files,
-            f => f.RelativePath == ".github/agents/csharp-dev.agent.md");
-        string csharpDevContent = Encoding.UTF8.GetString(csharpDevFile.Content.Span);
-        Assert.Contains(ProbeModel, csharpDevContent, StringComparison.Ordinal);
+            f => f.RelativePath == ".github/agents/dev-easy.agent.md");
+        string fastWorkerContent = Encoding.UTF8.GetString(fastWorkerFile.Content.Span);
+        Assert.Contains(ProbeModel, fastWorkerContent, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -29,14 +29,14 @@ public sealed class SquadSourceTests
         Assert.Equal("kyber-squad", first.Manifest.Name);
         Assert.Equal("full", first.Bundle.Name);
         Assert.Equal(
-            ["architect", "csharp-dev"],
+            ["architect", "dev-medium"],
             first.Agents.Select(agent => agent.Name));
         Assert.All(
             first.Agents,
             agent => Assert.Equal(["vscode", "read"], agent.CopilotTools));
         Assert.All(first.Agents, agent => Assert.Null(agent.CopilotCapabilityProfile));
         Assert.All(first.Agents, agent => Assert.Null(agent.DevinCapabilityProfile));
-        Assert.Equal(["test-dev"], first.Skills.Select(skill => skill.Name));
+        Assert.Equal(["dev-medium"], first.Skills.Select(skill => skill.Name));
         Assert.Equal(
             first.Agents.Select(agent => (agent.Name, agent.SourcePath, agent.BodyDigest)),
             second.Agents.Select(agent => (agent.Name, agent.SourcePath, agent.BodyDigest)));
@@ -76,7 +76,7 @@ public sealed class SquadSourceTests
 
     /// <summary>
     /// Pins the operator-selected model assignments across planning, coding, review, and
-    /// orchestration profiles, including unchanged harness values that must remain stable.
+    /// profiles that do not change, including unchanged harness values that must remain stable.
     /// </summary>
     [Theory]
     [InlineData("architect", "claude", "opus")]
@@ -97,7 +97,7 @@ public sealed class SquadSourceTests
     [InlineData("deep-planning", "devin", "claude-opus-5-5-high")]
     [InlineData("fast", "claude", "claude-haiku-5-5")]
     [InlineData("fast", "codex", "gpt-6-luna")]
-    [InlineData("fast", "copilot", "GPT-6.1 Terra (copilot)")]
+    [InlineData("fast", "copilot", "Claude Haiku 5.5 (copilot)")]
     [InlineData("fast", "cursor", "composer-2.5[]")]
     [InlineData("fast", "kilo", "opencode-go/muse-spark-1.3-contributor")]
     [InlineData("fast", "opencode", "opencode-go/muse-spark-1.3-contributor")]
@@ -119,12 +119,16 @@ public sealed class SquadSourceTests
     [InlineData("reviewer", "opencode", "opencode-go/kimi-k2.7-code")]
     [InlineData("reviewer", "pi", "opencode-go/kimi-k2.7-code[thinking=high]")]
     [InlineData("reviewer", "devin", "grok-4-7-high")]
-    [InlineData("orchestration", "claude", "sonnet")]
-    [InlineData("orchestration", "copilot", "GPT-6.1 Terra (copilot)")]
-    [InlineData("orchestration", "kilo", "opencode-go/deepseek-v4.1-flash")]
-    [InlineData("orchestration", "opencode", "opencode/big-pickle")]
-    [InlineData("orchestration", "pi", "inherit")]
-    [InlineData("orchestration", "devin", "inherit")]
+    [InlineData("dev-hard", "claude", "opus")]
+    [InlineData("dev-hard", "codex", "gpt-6.1-sol")]
+    [InlineData("dev-hard", "copilot", "Gemini 4 Hydrogen (copilot)")]
+    [InlineData("dev-hard", "cursor", "claude-sonnet-5-5[effort=high]")]
+    [InlineData("dev-hard", "factory", "glm-5.3[reasoningEffort=high]")]
+    [InlineData("dev-hard", "kilo", "zai-coding-plan/glm-5.3")]
+    [InlineData("dev-hard", "opencode", "zai-coding-plan/glm-5.3")]
+    [InlineData("dev-hard", "pi", "zai/glm-5.3[thinking=high]")]
+    [InlineData("dev-hard", "devin", "claude-opus-5-5-high")]
+    [InlineData("dev-hard", "zcode", "glm-5.3")]
     public void ModelsYmlDeclaresExactHarnessValuesPerProfilePerPlan(string profileName, string harbessName, string expectedValue)
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
@@ -160,7 +164,7 @@ public sealed class SquadSourceTests
     }
 
     [Fact]
-    public void ModelsYmlUsesHaiku55OnlyForClaudeFastAndCopilotGeneralProfiles()
+    public void ModelsYmlUsesHaiku55OnlyForTheFastProfile()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
 
@@ -173,7 +177,7 @@ public sealed class SquadSourceTests
                 {
                     Assert.True(
                         (profileName == "fast" && harness == "claude" && model == "claude-haiku-5-5") ||
-                        (profileName == "general" && harness == "copilot" && model == "Claude Haiku 5.5 (copilot)"),
+                        (profileName == "fast" && harness == "copilot" && model == "Claude Haiku 5.5 (copilot)"),
                         $"Profile '{profileName}' on harness '{harness}' unexpectedly resolves to '{model}'.");
                 }
             }
@@ -182,7 +186,7 @@ public sealed class SquadSourceTests
 
 
     /// <summary>
-    /// Pins Antigravity planning and review to Pro while routine work stays on Flash.
+    /// Pins Antigravity planning, review and the hard developer tier to Pro while routine work stays on Flash.
     /// This catches unintended model changes independently of the renderer's YAML echo.
     /// </summary>
     [Theory]
@@ -190,9 +194,9 @@ public sealed class SquadSourceTests
     [InlineData("deep-planning", "pro")]
     [InlineData("fast", "flash")]
     [InlineData("general", "flash")]
-    [InlineData("orchestration", "flash")]
+    [InlineData("dev-hard", "pro")]
     [InlineData("reviewer", "pro")]
-    public void ModelsYmlAntigravityColumnPinsPlanningAndReviewOnProAndOtherProfilesOnFlash(
+    public void ModelsYmlAntigravityColumnPinsPlanningReviewAndTheHardTierOnProAndOtherProfilesOnFlash(
         string profileName,
         string expectedAntigravityModel)
     {
@@ -225,11 +229,8 @@ public sealed class SquadSourceTests
         SquadAgent productOwner = Assert.Single(source.Agents, agent => agent.Name == "product-owner");
         Assert.Equal("architect", productOwner.ModelProfile);
 
-        foreach (string peerName in new[] { "sql-database-architect", "bug-crusher-investigator" })
-        {
-            SquadAgent peer = Assert.Single(source.Agents, agent => agent.Name == peerName);
-            Assert.Equal("deep-planning", peer.ModelProfile);
-        }
+        SquadAgent peer = Assert.Single(source.Agents, agent => agent.Name == "bug-crusher-investigator");
+        Assert.Equal("deep-planning", peer.ModelProfile);
 
         Assert.DoesNotContain(
             source.Agents.Where(agent => agent.Name != "architect" && agent.Name != "product-owner"),
@@ -282,15 +283,20 @@ public sealed class SquadSourceTests
         }
     }
 
+    /// <summary>
+    /// The developer agents that the tiered roster dispatches are the ones modelled for cheap work:
+    /// <c>dev-easy</c> is the <c>fast</c> profile. The two removed planning and testing agents used to
+    /// live here; their profiles are still declared for the roles that keep them.
+    /// </summary>
     [Fact]
-    public void TestDevDeclaresModelProfileFast()
+    public void DevEasyDeclaresModelProfileFast()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
 
-        SquadAgent testDev = Assert.Single(
+        SquadAgent devEasy = Assert.Single(
             source.Agents,
-            candidate => candidate.Name == "test-dev");
-        Assert.Equal("fast", testDev.ModelProfile);
+            candidate => candidate.Name == "dev-easy");
+        Assert.Equal("fast", devEasy.ModelProfile);
     }
 
     /// <summary>
@@ -422,7 +428,7 @@ public sealed class SquadSourceTests
     {
         using SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
-            "agents/csharp-dev.md",
+            "agents/dev-medium.md",
             "copilot-tools: [vscode, read]",
             "copilot-tools: [vscode, edit]");
         fixture.Replace(
@@ -430,7 +436,7 @@ public sealed class SquadSourceTests
             "      filesystem.write: ask",
             $"      filesystem.write: {decision}");
 
-        Diagnostic diagnostic = AssertInvalid(fixture, "agents/csharp-dev.md", "filesystem.write");
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/dev-medium.md", "filesystem.write");
 
         Assert.Contains($"'{decision}'", diagnostic.Message, StringComparison.Ordinal);
         Assert.Contains("Remove 'edit'", diagnostic.Hint!, StringComparison.Ordinal);
@@ -491,11 +497,11 @@ public sealed class SquadSourceTests
             "copilot-capability-profile: architect-copilot\n" +
             "copilot-tools: [vscode, read, edit]");
         fixture.Replace(
-            "agents/csharp-dev.md",
+            "agents/dev-medium.md",
             "capability-profile: worker",
             "capability-profile: architect-copilot");
 
-        Diagnostic diagnostic = AssertInvalid(fixture, "agents/csharp-dev.md", "Copilot-only");
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/dev-medium.md", "Copilot-only");
 
         Assert.Contains("shared capability profile", diagnostic.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("copilot-capability-profile", diagnostic.Hint!, StringComparison.Ordinal);
@@ -735,11 +741,11 @@ public sealed class SquadSourceTests
             "capability-profile: architect\n" +
             "devin-capability-profile: architect-devin\n");
         fixture.Replace(
-            "agents/csharp-dev.md",
+            "agents/dev-medium.md",
             "capability-profile: worker",
             "capability-profile: architect-devin");
 
-        Diagnostic diagnostic = AssertInvalid(fixture, "agents/csharp-dev.md", "Devin-only");
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/dev-medium.md", "Devin-only");
 
         Assert.Contains("shared capability profile", diagnostic.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("devin-capability-profile", diagnostic.Hint!, StringComparison.Ordinal);
@@ -823,16 +829,16 @@ public sealed class SquadSourceTests
             "      filesystem.write: allow\n" +
             "      delegate: ask\n");
         fixture.Replace(
-            "agents/csharp-dev.md",
+            "agents/dev-medium.md",
             "invocation: subagent\n",
             "invocation: primary\n");
         fixture.Replace(
-            "agents/csharp-dev.md",
+            "agents/dev-medium.md",
             "capability-profile: worker\n",
             "capability-profile: worker\n" +
             "devin-capability-profile: architect-devin\n");
 
-        Diagnostic diagnostic = AssertInvalid(fixture, "agents/csharp-dev.md", "primary agent");
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/dev-medium.md", "primary agent");
 
         Assert.Contains("primary agent", diagnostic.Message, StringComparison.Ordinal);
         Assert.Contains("skill", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
@@ -873,6 +879,49 @@ public sealed class SquadSourceTests
         fixture.Replace(relativePath, $"{key}: {original}", $"{key}: {missingProfile}");
 
         AssertInvalid(fixture, relativePath, missingProfile);
+    }
+
+    /// <summary>
+    /// A model profile is required: the model comes from the agent, so an agent without one would
+    /// render a worker whose model nobody chose. The conductor is the single exception, and the error
+    /// says so.
+    /// </summary>
+    [Fact]
+    public void LoadAgentWithNoModelProfileFailsUnlessItIsTheConductor()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace("agents/architect.md", "model-profile: deep-planning\n", string.Empty);
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "architect");
+
+        Assert.Contains("model-profile", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("conductor", diagnostic.Hint!, StringComparison.Ordinal);
+        Assert.Contains("profiles/models.yml", diagnostic.Hint!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LoadConductorWithNoModelProfileIsValid()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Write("agents/conductor.md", """
+            ---
+            schema: kyber-squad.agent/v1
+            name: conductor
+            description: Routes work to the agents a run may dispatch.
+            invocation: primary
+            capability-profile: architect
+            copilot-tools: [vscode, read]
+            delegates-to: []
+            fallback: role-skill
+            aliases: []
+            ---
+            You are conductor.
+            """);
+
+        SquadSource source = SquadSourceLoader.Load(fixture.Path);
+
+        Assert.True(string.IsNullOrWhiteSpace(
+            source.Agents.Single(agent => agent.Name == "conductor").ModelProfile));
     }
 
     [Fact]
@@ -1053,7 +1102,7 @@ public sealed class SquadSourceTests
         string missingIdentity)
     {
         using SquadFixture fixture = SquadFixture.CreateValid();
-        string anchor = identityKind == "agent" ? "  - csharp-dev" : "  - test-dev";
+        string anchor = identityKind == "agent" ? "  - dev-medium" : "  - dev-medium";
         fixture.Replace("bundles/full.yml", anchor, $"{anchor}\n  - {missingIdentity}");
 
         Diagnostic diagnostic = AssertInvalid(fixture, "bundles/full.yml", missingIdentity);
@@ -1063,7 +1112,7 @@ public sealed class SquadSourceTests
 
     [Theory]
     [InlineData("agent", "agents/reviewer.md", "architect")]
-    [InlineData("skill", "skills/reviewer/SKILL.md", "test-dev")]
+    [InlineData("skill", "skills/reviewer/SKILL.md", "dev-medium")]
     public void LoadDuplicateIdentityReportsBothSourceLocations(
         string identityKind,
         string duplicateRelativePath,
@@ -1075,14 +1124,14 @@ public sealed class SquadSourceTests
             fixture.Write(
                 duplicateRelativePath,
                 SquadFixture.Agent("reviewer", name: duplicateName, aliases: "[]"));
-            fixture.Replace("bundles/full.yml", "  - csharp-dev", "  - csharp-dev\n  - reviewer");
+            fixture.Replace("bundles/full.yml", "  - dev-medium", "  - dev-medium\n  - reviewer");
         }
         else
         {
             fixture.Write(
                 duplicateRelativePath,
-                SquadFixture.Skill("test-dev", "A second path with the same identity."));
-            fixture.Replace("bundles/full.yml", "  - test-dev", "  - test-dev\n  - reviewer");
+                SquadFixture.Skill("dev-medium", "A second path with the same identity."));
+            fixture.Replace("bundles/full.yml", "  - dev-medium", "  - dev-medium\n  - reviewer");
         }
 
         SquadSourceValidationException exception = Assert.Throws<SquadSourceValidationException>(
@@ -1107,8 +1156,8 @@ public sealed class SquadSourceTests
     {
         using SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Write(
-            "agents/csharp-dev.md",
-            SquadFixture.Agent("csharp-dev", aliases: $"[{alias}]"));
+            "agents/dev-medium.md",
+            SquadFixture.Agent("dev-medium", aliases: $"[{alias}]"));
         if (alias == "shared-alias")
         {
             fixture.Write(
@@ -1116,7 +1165,7 @@ public sealed class SquadSourceTests
                 SquadFixture.Agent("architect", aliases: "[shared-alias]"));
         }
 
-        Diagnostic diagnostic = AssertInvalid(fixture, "agents/csharp-dev.md", alias);
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/dev-medium.md", alias);
 
         Assert.Contains("alias", diagnostic.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -1138,7 +1187,7 @@ public sealed class SquadSourceTests
     [Theory]
     [InlineData("agent", "agents/architect.md", "role-architect")]
     [InlineData("alias", "agents/architect.md", "role-planner")]
-    [InlineData("skill", "skills/test-dev/SKILL.md", "role-test-dev")]
+    [InlineData("skill", "skills/dev-medium/SKILL.md", "role-test-dev")]
     public void LoadIdentityUsesReservedFallbackPrefixReportsDeclaringSourceAndFallbackProfile(
         string identityKind,
         string expectedSourcePath,
@@ -1162,7 +1211,10 @@ public sealed class SquadSourceTests
                 fixture.Write(
                     expectedSourcePath,
                     SquadFixture.Skill(reservedIdentity, "Use when writing tests."));
-                fixture.Replace("bundles/full.yml", "  - test-dev", $"  - {reservedIdentity}");
+                fixture.Replace(
+                    "bundles/full.yml",
+                    "skills:\n  - dev-medium",
+                    $"skills:\n  - {reservedIdentity}");
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(identityKind));
@@ -1187,6 +1239,30 @@ public sealed class SquadSourceTests
                 StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// The retired roster is not a selectable value. An agent that declares it is told the one roster that ships,
+    /// not pointed back at the value the removal deleted.
+    /// </summary>
+    [Theory]
+    [InlineData("technology", "deleted")]
+    [InlineData("side-by-side", "not a roster")]
+    public void AnAgentDeclaringARosterThisBuildDoesNotHaveIsToldTheOnlyRoster(
+        string declared,
+        string expectedMessageFragment)
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "agents/architect.md",
+            "aliases: []\n",
+            $"aliases: []\nworker-roster: {declared}\n");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", expectedMessageFragment);
+
+        Assert.Contains("tiered", diagnostic.Hint!, StringComparison.Ordinal);
+        Assert.DoesNotContain("both rosters", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("'technology' or", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void LoadIdentitiesDifferingOnlyByReservedPrefixCaseRemainValid()
     {
@@ -1195,10 +1271,10 @@ public sealed class SquadSourceTests
             "agents/architect.md",
             SquadFixture.Agent("architect", name: "Role-architect", aliases: "[Role-planner]"));
         fixture.Write(
-            "skills/test-dev/SKILL.md",
+            "skills/dev-medium/SKILL.md",
             SquadFixture.Skill("Role-test-dev", "Use when writing tests."));
         fixture.Replace("bundles/full.yml", "  - architect", "  - Role-architect");
-        fixture.Replace("bundles/full.yml", "  - test-dev", "  - Role-test-dev");
+        fixture.Replace("bundles/full.yml", "skills:\n  - dev-medium", "skills:\n  - Role-test-dev");
 
         SquadSource source = SquadSourceLoader.Load(fixture.Path);
 
@@ -1240,7 +1316,7 @@ public sealed class SquadSourceTests
             "model-profile: deep-planning\n" +
             "capability-profile: architect\n" +
             "copilot-tools: [vscode, read]\n" +
-            "delegates-to: [csharp-dev]\n" +
+            "delegates-to: [dev-medium]\n" +
             "fallback: role-skill\n" +
             "aliases: []\n" +
             "---\n" +
@@ -1258,16 +1334,16 @@ public sealed class SquadSourceTests
         using SquadFixture fixture = SquadFixture.CreateValid();
         string invalidSkill =
             "---\n" +
-            "name: test-dev\n" +
+            "name: dev-medium\n" +
             "unexpected: field\n" +
             "description: Use when writing tests.\n" +
             "license: MIT\n" +
             "---\n" +
-            "# test-dev\n";
+            "# dev-medium\n";
 
-        fixture.Write("skills/test-dev/SKILL.md", invalidSkill);
+        fixture.Write("skills/dev-medium/SKILL.md", invalidSkill);
 
-        Diagnostic diagnostic = AssertInvalid(fixture, "skills/test-dev/SKILL.md", "unexpected");
+        Diagnostic diagnostic = AssertInvalid(fixture, "skills/dev-medium/SKILL.md", "unexpected");
         Assert.Equal(3, diagnostic.StartLine);
     }
 
@@ -1430,7 +1506,7 @@ public sealed class SquadSourceTests
             "model-profile: deep-planning\n" +
             "capability-profile: architect\n" +
             "copilot-tools: [vscode, read]\n" +
-            "delegates-to: [csharp-dev]\n" +
+            "delegates-to: [dev-medium]\n" +
             "fallback: role-skill\n" +
             "aliases: []\n" +
             "---\n" +
@@ -1466,9 +1542,9 @@ public sealed class SquadSourceTests
                 name: full
                 agents:
                   - architect
-                  - csharp-dev
+                  - dev-medium
                 skills:
-                  - test-dev
+                  - dev-medium
                 """);
             fixture.Write("profiles/models.yml", """
                 schema: kyber-squad.model-profiles/v1
@@ -1520,8 +1596,8 @@ public sealed class SquadSourceTests
                 }
                 """);
             fixture.Write("agents/architect.md", ArchitectAgentLf);
-            fixture.Write("agents/csharp-dev.md", Agent("csharp-dev"));
-            fixture.Write("skills/test-dev/SKILL.md", Skill("test-dev", "Use when writing tests."));
+            fixture.Write("agents/dev-medium.md", Agent("dev-medium"));
+            fixture.Write("skills/dev-medium/SKILL.md", Skill("dev-medium", "Use when writing tests."));
 
             foreach (string schema in new[]
                      {

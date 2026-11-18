@@ -145,7 +145,10 @@ public sealed class KiloRendererContractTests : IDisposable
             result.Files,
             file => file.RelativePath == $".kilo/agents/{ResourceBearingSquadFixture.AgentName}.md");
         string body = Encoding.UTF8.GetString(principal.Content.Span);
-        Assert.Contains(ResourceBearingSquadFixture.AgentTextOnlyLink, body, StringComparison.Ordinal);
+        Assert.Contains(
+            $"[Payload](.kilo/agents/{ResourceBearingSquadFixture.AgentName}/assets/agent-payload.txt)",
+            body,
+            StringComparison.Ordinal);
 
         SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
         SquadAgent agent = Assert.Single(
@@ -345,7 +348,7 @@ public sealed class KiloRendererContractTests : IDisposable
         YamlMappingNode task = RequireMapping(RequireMapping(frontmatter, "permission", "code-reviewer"), "task", "code-reviewer");
 
         Assert.Equal(
-            ["azure-reader", "review-lens", "review-triage"],
+            ["platform-researcher", "review-lens", "review-triage"],
             task.Children.Keys.Cast<YamlScalarNode>().Select(key => key.Value!).ToArray());
         Assert.All(task.Children.Values, value => Assert.Equal("allow", ((YamlScalarNode)value).Value));
 

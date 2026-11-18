@@ -84,7 +84,7 @@ public sealed class ArbiterServeCallerSourceTests : IDisposable
             "delegate",
             new ArbiterFacts
             {
-                Target = "csharp-dev",
+                Target = "dev-medium",
                 PlanFile = "docs/plans/x.md",
                 Prompt = "Implement the change.",
             });

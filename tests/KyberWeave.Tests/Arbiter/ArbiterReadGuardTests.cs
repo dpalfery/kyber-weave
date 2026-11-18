@@ -35,9 +35,9 @@ public sealed class ArbiterReadGuardTests
     }
 
     [Theory]
-    [InlineData("csharp-dev")]
-    [InlineData("test-dev")]
-    [InlineData("github-devops")]
+    [InlineData("dev-easy")]
+    [InlineData("dev-medium")]
+    [InlineData("devops")]
     public void IsImplementationSpecialist_NamesTheGuardedSpecialists(string caller)
     {
         Assert.True(ReadGuard.IsImplementationSpecialist(caller));
@@ -285,7 +285,7 @@ public sealed class ArbiterReadGuardTests
         string stdin = File.ReadAllText(Path.Combine(
             KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.Tests",
             "Fixtures", "arbiter-hooks", "claude", "pre-read-denied.json"))
-            .Replace("\"agent_type\": \"csharp-dev\",", string.Empty, StringComparison.Ordinal);
+            .Replace("\"agent_type\": \"dev-medium\",", string.Empty, StringComparison.Ordinal);
         int loads = 0;
         KyberWeaveConfig config = new() { Arbiter = new ArbiterConfig { Enabled = true } };
         HookCommand command = ArbiterTestServices.Command(

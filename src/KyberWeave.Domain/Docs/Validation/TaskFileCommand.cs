@@ -15,6 +15,10 @@ internal static class TaskFileCommand
     /// <param name="artifactPath">The repository-relative path of the plan, or of the specification's <c>tasks.md</c>.</param>
     public static string Check(string artifactPath) => "`" + Spell(artifactPath) + " --check`";
 
+    /// <summary>The command that rewrites the JSON task file an older release wrote as YAML.</summary>
+    /// <param name="artifactPath">The repository-relative path of the plan, or of the specification's <c>tasks.md</c>.</param>
+    public static string Convert(string artifactPath) => "`" + Spell(artifactPath) + " --convert`";
+
     /// <summary>The command name and path, without a mode flag.</summary>
     /// <param name="artifactPath">The repository-relative path of the plan, or of the specification's <c>tasks.md</c>.</param>
     public static string Spell(string artifactPath) =>

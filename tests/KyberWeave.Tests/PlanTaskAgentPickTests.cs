@@ -34,7 +34,7 @@ public sealed class PlanTaskAgentPickTests : IDisposable
         - **Files:** `web/src/JobStatusCards.tsx`
         - **Depends on:** none
         - **Capabilities:** React UI with Playwright tests
-        - **Role:** `react-dev`
+        - **Role:** `dev-medium`
 
         Build it. Command: `npm test -- cards`
         Acceptance criteria: four cards show counts.
@@ -66,23 +66,25 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     [Fact]
     public void AConfidentPick_IsWrittenForAnUnassignedTaskOnly_AndTheReadyQueueNamesIt()
     {
-        StubProvider provider = new("dal-dev", 0.97);
+        StubProvider provider = new("dev-medium", 0.97);
 
         PlanTaskFile file = Write(Picker(provider));
 
         PlanTaskFileEntry picked = file.Tasks![0];
-        Assert.Equal("dal-dev", picked.Agent);
+        Assert.Equal("dev-medium", picked.Agent);
         Assert.Equal(0.97, picked.AgentConfidence);
         Assert.Null(file.Tasks[1].Agent);
-        Assert.Equal(["KW-DOC-TASKS-PICK-T1"], provider.Asked);
-        Assert.Contains("| agent=dal-dev |", PlanTaskPacket.ReadyQueue(file.Tasks), StringComparison.Ordinal);
-        Assert.Contains("| role=react-dev |", PlanTaskPacket.ReadyQueue(file.Tasks), StringComparison.Ordinal);
+        Assert.Contains("KW-DOC-TASKS-PICK-T1", provider.Asked);
+        Assert.Contains("KW-DOC-TASKS-RATE-T1", provider.Asked);
+        Assert.Equal(1, provider.Calls);
+        Assert.Contains("| agent=dev-medium |", PlanTaskPacket.ReadyQueue(file.Tasks), StringComparison.Ordinal);
+        Assert.Contains("| role=dev-medium |", PlanTaskPacket.ReadyQueue(file.Tasks), StringComparison.Ordinal);
     }
 
     [Fact]
     public void APickBelowTheFloor_LeavesTheConductorToChoose()
     {
-        PlanTaskFile file = Write(Picker(new StubProvider("dal-dev", 0.6)));
+        PlanTaskFile file = Write(Picker(new StubProvider("dev-medium", 0.6)));
 
         Assert.Null(file.Tasks![0].Agent);
         Assert.DoesNotContain("agent=", PlanTaskPacket.ReadyQueue(file.Tasks), StringComparison.Ordinal);
@@ -107,15 +109,15 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     [Fact]
     public void ACheckKeepsThePickOnDisk_WithoutAskingAgain_AndARewriteDoesNotMoveIt()
     {
-        Write(Picker(new StubProvider("dal-dev", 0.97)));
-        StubProvider second = new("csharp-dev", 0.99);
+        Write(Picker(new StubProvider("dev-medium", 0.97)));
+        StubProvider second = new("dev-easy", 0.99);
 
         PlanTaskFileOutcome check = new PlanTaskFileGenerator(_repo.Path, KyberWeaveConfig.ProductDefaults, DocsPorts.Files,
             Picker(second)).Run(Plan, PlanTaskFileMode.Check);
         PlanTaskFile rewritten = Write(Picker(second));
 
         Assert.False(check.Report.HasErrors, string.Join("; ", check.Report.Items.Select(item => item.Message)));
-        Assert.Equal("dal-dev", rewritten.Tasks![0].Agent);
+        Assert.Equal("dev-medium", rewritten.Tasks![0].Agent);
         Assert.Empty(second.Asked);
     }
 
@@ -139,12 +141,15 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     {
         public List<string> Asked { get; } = [];
 
+        public int Calls { get; private set; }
+
         public Task<ArbiterStep1BatchResult> AskStep1Async(
             IReadOnlyList<ArbiterRule> rules,
             ArbiterFactSet facts,
             IReadOnlyDictionary<string, string>? step0Answers = null,
             CancellationToken cancellationToken = default)
         {
+            Calls++;
             Asked.AddRange(rules.Select(rule => rule.Id));
             if (fail)
                 throw new HttpRequestException("model unreachable");

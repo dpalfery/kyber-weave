@@ -37,12 +37,12 @@ public sealed class ArbiterHeaderlessCopilotCliTests : IDisposable
     [Fact]
     public void ARootDispatchWithNoHeaders_IsEvaluatedAndAllowed()
     {
-        string stdout = Run(Payload("csharp-dev", "Add the status cards to the dashboard."));
+        string stdout = Run(Payload("dev-medium", "Add the status cards to the dashboard."));
 
         Assert.DoesNotContain("\"deny\"", stdout, StringComparison.Ordinal);
         ArbiterDecisionRecord record = Assert.Single(Decisions(), decision => decision.Trigger != "delegate.model");
         Assert.Equal("delegate", record.Trigger);
-        Assert.Equal("csharp-dev", record.Target);
+        Assert.Equal("dev-medium", record.Target);
         Assert.Contains(record.Rules, rule => rule.Id == "KW-ARB-ROSTER-001" && rule.Answer == "no-roster");
         Assert.Contains(record.Rules, rule => rule.Id == "KW-ARB-PLAN-001" && rule.Answer == "unresolved");
         Assert.DoesNotContain(record.Rules, rule => rule.Effect == "escalate");
@@ -51,7 +51,7 @@ public sealed class ArbiterHeaderlessCopilotCliTests : IDisposable
     [Fact]
     public void ARootDispatchWithNoHeaders_IsAllowedWhenTheModelFaults()
     {
-        string stdout = Run(Payload("csharp-dev", "Add the status cards to the dashboard."), new FaultingProvider());
+        string stdout = Run(Payload("dev-medium", "Add the status cards to the dashboard."), new FaultingProvider());
 
         Assert.DoesNotContain("\"deny\"", stdout, StringComparison.Ordinal);
         Assert.DoesNotContain(Decisions().SelectMany(decision => decision.Rules), rule => rule.Effect == "escalate");
@@ -70,7 +70,7 @@ public sealed class ArbiterHeaderlessCopilotCliTests : IDisposable
     public void ASubagentCaller_IsReadFromThePayload_AndItsWriterDispatchNeedsARun()
     {
         string stdout = Run(Payload(
-            "typescript-dev",
+            "dev-medium",
             "Fix the parser.",
             new Dictionary<string, string> { ["agentId"] = "a1", ["parentAgentId"] = "p1", ["agentType"] = "bug-crusher" }));
 
@@ -101,11 +101,11 @@ public sealed class ArbiterHeaderlessCopilotCliTests : IDisposable
     }
 
     [Theory]
-    [InlineData("typescript-dev", "Fix the parser.", "not-read-only")]
+    [InlineData("dev-medium", "Fix the parser.", "not-read-only")]
     [InlineData("architect", "Plan the parser fix.", "not-read-only")]
     [InlineData("research-agent", "Find the parser.", "changed")]
     [InlineData("Explore", "KYBER-ARBITER: true\n\nMap the repository.", "changed")]
-    [InlineData("github-devops", "RUN-START: true\nkyber-weave run start --harness copilot --type fix --slug a", "changed")]
+    [InlineData("devops", "RUN-START: true\nkyber-weave run start --harness copilot --type fix --slug a", "changed")]
     public void ReadOnlyRule_HoldsOnlyDispatchesThatPromiseAnUnchangedTree(string target, string prompt, string expected)
     {
         ArbiterRule rule = ArbiterConfig.ProductDefaults.Rules.First(

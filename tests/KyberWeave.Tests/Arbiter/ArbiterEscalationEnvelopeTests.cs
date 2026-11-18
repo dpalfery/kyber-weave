@@ -25,7 +25,7 @@ public sealed class ArbiterEscalationEnvelopeTests
         new(
             "delegate",
             "conductor (harness)",
-            "csharp-dev",
+            "dev-medium",
             "docs/plans/plan.md",
             "T3",
             entries ?? [Step0Entry()],
@@ -40,7 +40,7 @@ public sealed class ArbiterEscalationEnvelopeTests
         ArbiterEscalationEnvelope envelope = new(
             "delegate",
             "conductor (harness)",
-            "csharp-dev",
+            "dev-medium",
             "docs/plans/plan.md",
             "T3",
             [new ArbiterEnvelopeEntry(
@@ -54,7 +54,7 @@ public sealed class ArbiterEscalationEnvelopeTests
             "STATUS: ARBITER_ESCALATION\n" +
             "TRIGGER: delegate\n" +
             "CALLER: conductor (harness)\n" +
-            "TARGET: csharp-dev\n" +
+            "TARGET: dev-medium\n" +
             "PLAN_FILE: docs/plans/plan.md\n" +
             "TASK: T3\n" +
             "RULES: KW-ARB-SCOPE-002\n" +
@@ -82,7 +82,7 @@ public sealed class ArbiterEscalationEnvelopeTests
             "STATUS: ARBITER_ESCALATION\n" +
             "TRIGGER: delegate\n" +
             "CALLER: conductor (harness)\n" +
-            "TARGET: csharp-dev\n" +
+            "TARGET: dev-medium\n" +
             "PLAN_FILE: docs/plans/plan.md\n" +
             "TASK: T3\n" +
             "RULES: KW-ARB-SCOPE-001, KW-ARB-SCOPE-002\n" +

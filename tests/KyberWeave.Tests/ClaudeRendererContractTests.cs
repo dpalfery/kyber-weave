@@ -132,6 +132,16 @@ public sealed class ClaudeRendererContractTests : IDisposable
                 string.Equals(agent.Description, RequireScalar(frontmatter, "description", agent.Name), StringComparison.Ordinal),
                 $"Agent '{agent.Name}' description mismatch.");
 
+            // The conductor names no profile: it runs on whatever model the main session started
+            // with, so its file carries no model key at all.
+            if (string.IsNullOrWhiteSpace(agent.ModelProfile))
+            {
+                Assert.False(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+                    $"Agent '{agent.Name}' names no model profile and must omit 'model'.");
+                continue;
+            }
+
             // Model resolution: verify against loaded ModelProfiles. Every assertion names
             // the agent so a failure identifies the offender out of the 21-agent corpus.
             SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
@@ -246,7 +256,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
         SquadCapabilityProfile architectProfile = source.CapabilityProfiles.Profiles["architect"];
         Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["filesystem.write"]);
         Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["process.execute"]);
-        AssertTools(result, "architect", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kw-docs__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Bash", "PowerShell", "WebFetch", "WebSearch", "Agent(azure-reader, research-agent)"]);
+        AssertTools(result, "architect", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kw-docs__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Bash", "PowerShell", "WebFetch", "WebSearch", "Agent(platform-researcher, research-agent)"]);
 
         SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];
         Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["filesystem.write"]);
@@ -338,7 +348,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     /// <c>architect</c>, then reached for the Skill tool where the Agent tool was needed.
     /// </summary>
     [Fact]
-    public async Task RenderAsync_Claude_ConductorRunsOnSonnet()
+    public async Task RenderAsync_Claude_ConductorRunsOnTheSessionModel()
     {
         SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
@@ -355,16 +365,16 @@ public sealed class ClaudeRendererContractTests : IDisposable
         (YamlMappingNode frontmatter, _) = SplitFrontmatter(
             Encoding.UTF8.GetString(file.Content.Span),
             "conductor");
-        Assert.Equal("sonnet", RequireScalar(frontmatter, "model", "conductor"));
+        Assert.False(
+            frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+            "The conductor names no profile, so it must render no model and run on the session's.");
     }
 
     /// <summary>
     /// Pins the operator-selected Haiku 5.5 model for Claude's fast authoring workers.
     /// </summary>
     [Theory]
-    [InlineData("test-dev")]
-    [InlineData("docs-dev")]
-    [InlineData("dal-dev")]
+    [InlineData("dev-easy")]
     public async Task RenderAsync_Claude_FastProfileWorkersRunOnHaiku55(string agent)
     {
         SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
@@ -414,9 +424,9 @@ public sealed class ClaudeRendererContractTests : IDisposable
     /// Pins Sonnet 5.5 for Claude's general workers without changing planning membership.
     /// </summary>
     [Theory]
-    [InlineData("github-devops")]
-    [InlineData("pulumi-dev")]
-    [InlineData("tauri-dev")]
+    [InlineData("devops")]
+    [InlineData("dev-medium")]
+    [InlineData("docs-dev")]
     public async Task RenderAsync_Claude_GeneralProfileWorkersRunOnSonnet55(string agent)
     {
         SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
@@ -454,16 +464,10 @@ public sealed class ClaudeRendererContractTests : IDisposable
         Assert.True(result.Success, string.Join("; ", result.Errors));
         HashSet<string> fastAgentPaths = new(StringComparer.Ordinal)
         {
-            ".claude/agents/azure-reader.md",
             ".claude/agents/bug-crusher.md",
-            ".claude/agents/csharp-dev.md",
-            ".claude/agents/dal-dev.md",
-            ".claude/agents/docs-dev.md",
-            ".claude/agents/maui-dev.md",
-            ".claude/agents/python-dev.md",
-            ".claude/agents/react-dev.md",
-            ".claude/agents/research-agent.md",
-            ".claude/agents/test-dev.md"
+            ".claude/agents/dev-easy.md",
+            ".claude/agents/platform-researcher.md",
+            ".claude/agents/research-agent.md"
         };
         SquadDeploymentFile[] agentFiles = result.Files
             .Where(f => f.RelativePath.StartsWith(".claude/agents/", StringComparison.Ordinal)
@@ -477,6 +481,15 @@ public sealed class ClaudeRendererContractTests : IDisposable
             (YamlMappingNode frontmatter, _) = SplitFrontmatter(
                 Encoding.UTF8.GetString(file.Content.Span),
                 file.RelativePath);
+
+            // The conductor is the one agent with no profile, and so the one file with no model
+            // key; it runs on the session's model and cannot be on Haiku.
+            if (!frontmatter.Children.ContainsKey(new YamlScalarNode("model")))
+            {
+                Assert.Equal(".claude/agents/conductor.md", file.RelativePath);
+                continue;
+            }
+
             string model = RequireScalar(frontmatter, "model", file.RelativePath);
             if (fastAgentPaths.Contains(file.RelativePath))
             {
@@ -1098,22 +1111,39 @@ public sealed class ClaudeRendererContractTests : IDisposable
     }
 
     [Theory]
-    [InlineData(SquadDeploymentScope.Project)]
-    [InlineData(SquadDeploymentScope.Global)]
-    public async Task RenderAsync_ArbiterDisabled_NoAgentFileCarriesHooks(SquadDeploymentScope scope)
+    [InlineData(SquadDeploymentScope.Project, true)]
+    [InlineData(SquadDeploymentScope.Global, false)]
+    public async Task RenderAsync_ArbiterDisabled_CarriesTheDispatchHookOnlyAtProjectScope(
+        SquadDeploymentScope scope,
+        bool dispatchHooks)
     {
+        // Prompt insertion is not an Arbiter action, so a project render installs the dispatch hook for the
+        // dispatchers even with the Arbiter off. A global install reads no project configuration, so it installs none.
         SquadRenderResult result = await RenderClaudeArbiterAsync(
             ProductRoot,
             scope,
             new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: ShellHookTimeoutSeconds));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
+        int carriers = 0;
         foreach (SquadDeploymentFile file in result.Files.Where(HasFrontmatter))
         {
             (YamlMappingNode frontmatter, _) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span), file.RelativePath);
-            Assert.False(
-                frontmatter.Children.ContainsKey(new YamlScalarNode("hooks")),
-                $"Agent file '{file.RelativePath}' must not carry hooks when Arbiter is disabled at {scope} scope.");
+            bool carriesHooks = frontmatter.Children.ContainsKey(new YamlScalarNode("hooks"));
+            if (carriesHooks)
+            {
+                carriers++;
+                Assert.Contains("kyber-weave-arbiter hook", Encoding.UTF8.GetString(file.Content.Span), StringComparison.Ordinal);
+            }
+        }
+
+        if (dispatchHooks)
+        {
+            Assert.True(carriers > 0, "A project render with the Arbiter off must install the dispatch hook.");
+        }
+        else
+        {
+            Assert.Equal(0, carriers);
         }
     }
 

@@ -27,7 +27,7 @@ public sealed class KyberWeaveDocsSkillVocabularyTests
         Assert.Contains("<documentation-ontology>", skill, StringComparison.Ordinal);
         Assert.Contains("`todo`", skill, StringComparison.Ordinal);
         Assert.Contains("`coding-standard`", skill, StringComparison.Ordinal);
-        Assert.Contains("standards/<technology>/README.md", skill, StringComparison.Ordinal);
+        Assert.Contains("standards/<technology>/<technology>.standards.md", skill, StringComparison.Ordinal);
         Assert.Contains("ontology.technologies", skill, StringComparison.Ordinal);
         Assert.Contains("KW-DOC-SPEC-007", skill, StringComparison.Ordinal);
     }
@@ -37,7 +37,7 @@ public sealed class KyberWeaveDocsSkillVocabularyTests
     {
         string retrofit = File.ReadAllText(Path.Combine(SkillRoot, "references", "retrofit.md"));
 
-        Assert.Contains("`standards/<technology>/README.md` | `coding-standard`", retrofit, StringComparison.Ordinal);
+        Assert.Contains("`standards/<scope>/<scope>.standards.md` | `coding-standard`", retrofit, StringComparison.Ordinal);
         Assert.Contains("`todo/` | `todo`", retrofit, StringComparison.Ordinal);
         Assert.DoesNotContain("`standards/<technology>/` | `coding-standard`", retrofit, StringComparison.Ordinal);
     }
@@ -49,6 +49,6 @@ public sealed class KyberWeaveDocsSkillVocabularyTests
 
         Assert.Contains("### `KW-DOC-SPEC-007`", rules, StringComparison.Ordinal);
         Assert.Contains("ontology.technologies", rules, StringComparison.Ordinal);
-        Assert.Contains("standards/<technology>/README.md", rules, StringComparison.Ordinal);
+        Assert.Contains("standards/<technology>/<technology>.standards.md", rules, StringComparison.Ordinal);
     }
 }

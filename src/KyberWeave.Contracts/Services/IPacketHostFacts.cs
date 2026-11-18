@@ -11,5 +11,12 @@ public interface IPacketHostFacts
     /// <param name="role">The agent working the task: the worker's own name, else the one the plan assigned; null when neither is known.</param>
     /// <param name="taskId">The task id, for the scratchpad path.</param>
     /// <param name="diagnostics">Receives notes for the log; they are never part of the returned text.</param>
-    string Render(string repoRoot, KyberWeaveConfig config, string? role, string? taskId, IList<string>? diagnostics = null);
+    /// <param name="technology">The one technology the task names, so its gates resolve by technology; null when it names none.</param>
+    string Render(
+        string repoRoot,
+        KyberWeaveConfig config,
+        string? role,
+        string? taskId,
+        IList<string>? diagnostics = null,
+        string? technology = null);
 }

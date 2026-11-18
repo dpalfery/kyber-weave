@@ -1,3 +1,5 @@
+using KyberWeave.Arbiter.Hooks;
+
 namespace KyberWeave.Core.Arbiter.Facts;
 
 /// <summary>One dispatch inside an <see cref="ArbiterEvent"/>: its own target and prompt.</summary>
@@ -46,6 +48,14 @@ public sealed record ArbiterEvent
 
     /// <summary>The dispatch prompt, header block included.</summary>
     public string Prompt { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Whether this event's prompt is one a dispatch hook inserted. A return event carries the input the harness
+    /// executed, so an expanded prompt there is that proof. A pre event carries the conductor's own text, where an
+    /// expanded-looking prompt only means the conductor typed the tags, so it is never trusted.
+    /// </summary>
+    public bool PromptInserted =>
+        Phase is "post" or "return" && DispatchPromptInsertion.IsExpanded(Prompt);
 
     /// <summary>The harness tool-call id, where the payload carries one.</summary>
     public string? ToolCallId { get; init; }

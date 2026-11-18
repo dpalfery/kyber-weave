@@ -3,8 +3,8 @@ using System.Text.Json.Serialization;
 namespace KyberWeave.Core.Docs.Validation;
 
 /// <summary>
-/// The task file beside a plan — <c>&lt;plan&gt;.tasks.json</c> — or beside a specification's
-/// <c>tasks.md</c> as <c>tasks.json</c>, as the architect writes it and <c>docs validate</c> reads it.
+/// The task file beside a plan — <c>&lt;plan&gt;.tasks.yml</c> — or beside a specification's
+/// <c>tasks.md</c> as <c>tasks.yml</c>, as the architect writes it and <c>docs validate</c> reads it.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -26,7 +26,7 @@ namespace KyberWeave.Core.Docs.Validation;
 /// silently valid, because the version decides which fields exist.
 /// </param>
 /// <param name="Plan">
-/// The plan this file was written from, repository-relative. For a specification's <c>tasks.json</c>,
+/// The plan this file was written from, repository-relative. For a specification's <c>tasks.yml</c>,
 /// the specification's <c>tasks.md</c> path.
 /// </param>
 /// <param name="ExecutionDigest">
@@ -34,11 +34,16 @@ namespace KyberWeave.Core.Docs.Validation;
 /// <c>KyberWeave.Core.Arbiter.Plans.PlanDocumentParser</c>.
 /// </param>
 /// <param name="Tasks">One entry per plan task, in plan order; null when the file declares none.</param>
+/// <param name="WorkerRoster">
+/// The roster the file was written under, <c>technology</c> or <c>tiered</c>; every later reader takes
+/// the run's roster from here, so a file outlives a configuration change.
+/// </param>
 public sealed record PlanTaskFile(
     [property: JsonPropertyName("schema-version")] int SchemaVersion,
     [property: JsonPropertyName("plan")] string? Plan = null,
     [property: JsonPropertyName("execution-digest")] string? ExecutionDigest = null,
-    [property: JsonPropertyName("tasks")] IReadOnlyList<PlanTaskFileEntry>? Tasks = null);
+    [property: JsonPropertyName("tasks")] IReadOnlyList<PlanTaskFileEntry>? Tasks = null,
+    [property: JsonPropertyName("worker-roster")] string? WorkerRoster = null);
 
 /// <summary>
 /// One task of a <see cref="PlanTaskFile" />: what the conductor needs to dispatch it, and the
@@ -61,10 +66,23 @@ public sealed record PlanTaskFile(
 /// </param>
 /// <param name="Prompt">The worker's whole brief, pasted unchanged at dispatch.</param>
 /// <param name="Agent">
-/// The agent the decision model picked for the task from its capabilities when the file was written; null when the
-/// plan assigned a <paramref name="Role"/>, when no model is configured, or when the pick fell below the confidence floor.
+/// The developer tier the task's rating in use gives, or the documentation or delivery agent the decision model
+/// picked from its capabilities; null when the plan assigned a <paramref name="Role"/> or the task names no
+/// technology and no model picked one.
 /// </param>
 /// <param name="AgentConfidence">The model's confidence in <paramref name="Agent"/>; null when there is no pick.</param>
+/// <param name="Difficulty">
+/// The rating the dispatch uses: <c>easy</c>, <c>medium</c> or <c>hard</c>. A task that names no
+/// difficulty is written as <c>medium</c>.
+/// </param>
+/// <param name="DifficultySource">
+/// Who rated the task: <c>architect</c> when the plan carries a <c>Difficulty:</c> line,
+/// <c>default</c> when it carries none, and <c>decision-model</c> when the model's answer replaced it.
+/// </param>
+/// <param name="Technology">
+/// The one technology the task is written in, from its <c>Technology:</c> line; null when the task
+/// names none, which a documentation or delivery task may do.
+/// </param>
 public sealed record PlanTaskFileEntry(
     [property: JsonPropertyName("id")] string? Id = null,
     [property: JsonPropertyName("role")] string? Role = null,
@@ -74,4 +92,7 @@ public sealed record PlanTaskFileEntry(
     [property: JsonPropertyName("session")] string? Session = null,
     [property: JsonPropertyName("prompt")] string? Prompt = null,
     [property: JsonPropertyName("agent")] string? Agent = null,
-    [property: JsonPropertyName("agent-confidence")] double? AgentConfidence = null);
+    [property: JsonPropertyName("agent-confidence")] double? AgentConfidence = null,
+    [property: JsonPropertyName("difficulty")] string? Difficulty = null,
+    [property: JsonPropertyName("difficulty-source")] string? DifficultySource = null,
+    [property: JsonPropertyName("technology")] string? Technology = null);

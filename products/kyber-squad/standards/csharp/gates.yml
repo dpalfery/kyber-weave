@@ -63,13 +63,13 @@ task-gates:
   # gate skipped outside that restriction is reported rather than read as a pass.
   - id: workflow-lint
     role: lint
-    agents: [github-devops]
+    agents: [github-devops, devops]
     include: [".github/workflows/*.yml", ".github/workflows/*.yaml", ".github/workflows/**/*.yml", ".github/workflows/**/*.yaml"]
     os: "unix"
     run: [actionlint, "{changed}"]
   - id: shellcheck
     role: lint
-    agents: [github-devops]
+    agents: [github-devops, devops]
     include: ["scripts/*.sh", "scripts/**/*.sh"]
     os: "unix"
     note: "Narrow to scripts/**/*.sh if the repository carries shell fixtures or vendored scripts."

@@ -101,6 +101,29 @@ public sealed class CursorHookAdapter : IHarnessHookAdapter
             $"Malformed Cursor hook event: unknown hook_event_name '{eventName ?? "<missing>"}'.");
     }
 
+    /// <inheritdoc/>
+    public string? RenderPromptInsertion(JsonElement payload, string? renderedCaller, HookContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        _ = renderedCaller;
+
+        if (!IsPreEvent(GetString(payload, "hook_event_name"))
+            || !IsDispatchTool(GetString(payload, "tool_name")))
+        {
+            return null;
+        }
+
+        JsonElement toolInput = RequireToolInput(payload);
+        string prompt = GetString(toolInput, "prompt") ?? string.Empty;
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+        return insertion.Kind switch
+        {
+            DispatchInsertionKind.Inserted => RenderPreAllowPrompt(toolInput, insertion.Text),
+            DispatchInsertionKind.Stopped => RenderPreDenyFor(insertion.Reason),
+            _ => null,
+        };
+    }
+
     private string HandlePre(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
     {
         if (!IsDispatchTool(tool))
@@ -114,16 +137,37 @@ public sealed class CursorHookAdapter : IHarnessHookAdapter
             ?? throw new InvalidOperationException(
                 "Malformed Cursor hook event: Task input carries no prompt.");
         HookOutcome outcome = DecidePre(payload, caller, target, prompt, config, context);
+
+        // The rules judge the short dispatch first; the prompt is inserted only for a dispatch they allowed.
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+        if (outcome.Kind == HookOutcomeKind.Deny)
+        {
+            return RenderPreDenyFor(outcome.Reason);
+        }
+
+        if (insertion.Kind == DispatchInsertionKind.Stopped)
+        {
+            return RenderPreDenyFor(insertion.Reason);
+        }
+
+        bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
         return outcome.Kind switch
         {
-            HookOutcomeKind.PassThrough => RenderPreAllow(),
-            HookOutcomeKind.Allow => ReadGuard.IsImplementationSpecialist(target)
-                ? RenderPreAllowStrip(toolInput, prompt)
+            HookOutcomeKind.PassThrough => inserted
+                ? RenderPreAllowPrompt(toolInput, insertion.Text)
                 : RenderPreAllow(),
+            HookOutcomeKind.Allow => inserted
+                ? RenderPreAllowPrompt(toolInput, insertion.Text)
+                : ReadGuard.IsImplementationSpecialist(target)
+                    ? RenderPreAllowStrip(toolInput, prompt)
+                    : RenderPreAllow(),
             HookOutcomeKind.AllowWithRewrite => RenderPreAllowRaw(
                 outcome.RewrittenInputJson ?? throw new InvalidOperationException(
-                    "Hook engine returned allow-with-rewrite without rewritten input.")),
+                    "Hook engine returned allow-with-rewrite without rewritten input."),
+                inserted ? insertion.Text : null),
             HookOutcomeKind.AllowWithNote => RenderPreAllowNote(
+                toolInput,
+                inserted ? insertion.Text : null,
                 outcome.Reason ?? throw new InvalidOperationException(
                     "Hook engine allowed with a note but wrote none.")),
             HookOutcomeKind.Deny => RenderPreDenyFor(outcome.Reason),
@@ -279,13 +323,30 @@ public sealed class CursorHookAdapter : IHarnessHookAdapter
         return RenderPreDeny(reason, FirstLine(reason));
     }
 
-    private static string RenderPreAllowNote(string note) =>
-        new JsonObject
+    private static string RenderPreAllowNote(JsonElement toolInput, string? insertedPrompt, string note)
+    {
+        JsonObject output = new()
         {
             ["permission"] = "allow",
             ["agent_message"] = note,
             ["user_message"] = FirstLine(note),
-        }.ToJsonString();
+        };
+        if (insertedPrompt is not null)
+        {
+            output["updated_input"] = UpdatedInput(toolInput, insertedPrompt);
+        }
+
+        return output.ToJsonString();
+    }
+
+    private static JsonObject UpdatedInput(JsonElement toolInput, string prompt)
+    {
+        JsonObject updated = JsonNode.Parse(toolInput.GetRawText()) as JsonObject
+            ?? throw new InvalidOperationException(
+                "Malformed Cursor hook event: tool_input is not a JSON object.");
+        updated["prompt"] = prompt;
+        return updated;
+    }
 
     private static string RenderPreDeny(string agentMessage, string userMessage) =>
         new JsonObject
@@ -307,7 +368,14 @@ public sealed class CursorHookAdapter : IHarnessHookAdapter
                 "Malformed Cursor hook event: tool_input is not a JSON object."),
             node => node["prompt"] = HeaderBlock.Strip(prompt));
 
-    private static string RenderPreAllowRaw(string rewrittenInputJson)
+    /// <summary>The allow that writes the prompt in place of the dispatch's identity line, every other field kept.</summary>
+    private static string RenderPreAllowPrompt(JsonElement toolInput, string prompt) =>
+        RenderPreAllowWithInput(JsonNode.Parse(toolInput.GetRawText()) as JsonObject
+            ?? throw new InvalidOperationException(
+                "Malformed Cursor hook event: tool_input is not a JSON object."),
+            node => node["prompt"] = prompt);
+
+    private static string RenderPreAllowRaw(string rewrittenInputJson, string? insertedPrompt)
     {
         JsonNode rewritten;
         try
@@ -327,7 +395,13 @@ public sealed class CursorHookAdapter : IHarnessHookAdapter
                 "Hook engine rewritten input must be a JSON object.");
         }
 
-        return RenderPreAllowWithInput(updated, _ => { });
+        return RenderPreAllowWithInput(updated, node =>
+        {
+            if (insertedPrompt is not null)
+            {
+                node["prompt"] = insertedPrompt;
+            }
+        });
     }
 
     private static string RenderPreAllowWithInput(JsonObject updatedInput, Action<JsonObject> mutate)

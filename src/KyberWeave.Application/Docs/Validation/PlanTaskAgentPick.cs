@@ -20,10 +20,71 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     /// <summary>The confidence a pick needs to be written to the task file.</summary>
     public const double ConfidenceFloor = 0.8;
 
+    /// <summary>The first tier of the step-up ladder.</summary>
+    public const string EasyTier = "dev-easy";
+
+    /// <summary>
+    /// The tier that stands for the developer kind under the tiered roster. A pick returns it as the kind of
+    /// worker; the task-file writer records the tier the rating gives, and the dispatch steps it up by failed attempts.
+    /// </summary>
+    public const string DeveloperKind = "dev-medium";
+
+    /// <summary>The last tier of the step-up ladder, which a failed attempt never climbs past.</summary>
+    public const string HardTier = "dev-hard";
+
+    /// <summary>The agent a removed planning agent's schema and data-model work goes to.</summary>
+    public const string ArchitectAgent = "architect";
+
+    /// <summary>The agent that replaces the removed read-only platform agent.</summary>
+    public const string PlatformResearcherAgent = "platform-researcher";
+
+    /// <summary>The agent that replaces the removed delivery agent.</summary>
+    public const string DevopsAgent = "devops";
+
+    /// <summary>The three developer agents in step-up order (Requirement 3.2).</summary>
+    public static IReadOnlyList<string> DeveloperTiers { get; } = [EasyTier, DeveloperKind, HardTier];
+
+    /// <summary>
+    /// The names the removal phase deletes, each mapped to the agent that does its work afterwards. A technology
+    /// developer maps to <see cref="DeveloperKind"/>: the task's difficulty and failed attempts then choose the
+    /// tier, as they do for every developer dispatch under the tiered roster.
+    /// </summary>
+    /// <remarks>
+    /// The lookup ignores case because the name it answers comes from a plan's hand-written <c>Role:</c> line, which
+    /// no check normalises: an author who writes <c>CSharp-Dev</c> must still reach the developer tier rather than
+    /// have the conductor dispatch a name no installed agent answers to. The values stay the canonical lowercase
+    /// agent names.
+    /// </remarks>
+    public static IReadOnlyDictionary<string, string> RemovedAgents { get; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["csharp-dev"] = DeveloperKind,
+            ["dal-dev"] = DeveloperKind,
+            ["maui-dev"] = DeveloperKind,
+            ["pulumi-dev"] = DeveloperKind,
+            ["typescript-dev"] = DeveloperKind,
+            ["react-dev"] = DeveloperKind,
+            ["rust-dev"] = DeveloperKind,
+            ["tauri-dev"] = DeveloperKind,
+            ["go-dev"] = DeveloperKind,
+            ["python-dev"] = DeveloperKind,
+            ["test-dev"] = DeveloperKind,
+            ["sql-database-architect"] = ArchitectAgent,
+            ["azure-reader"] = PlatformResearcherAgent,
+            ["github-devops"] = DevopsAgent,
+        };
+
     /// <summary>The question every pick asks.</summary>
     public const string Question = "Which agent should do this task, judged by the abilities it needs and the files it changes?";
 
+    /// <summary>The difficulty question, asked in the same call as the pick (the shipped <c>KW-ARB-DIFFICULTY-001</c> question).</summary>
+    public const string DifficultyQuestion = "How hard is this task: easy, standard or hard?";
+
+    /// <summary>The answer that maps to <c>medium</c>; the shipped rule spells the middle value <c>standard</c>.</summary>
+    public const string StandardAnswer = "standard";
+
     private const string RulePrefix = "KW-DOC-TASKS-PICK-";
+    private const string DifficultyPrefix = "KW-DOC-TASKS-RATE-";
     private const int MaxCapabilityCharacters = 1200;
 
     private readonly IArbiterProvider _provider;
@@ -44,14 +105,99 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     public void Dispose() => (_provider as IDisposable)?.Dispose();
 
     /// <summary>
-    /// The agents a task may go to: every agent of the installed Squad whose capability profile takes implementation or
-    /// documentation work, read from the agent files the build embeds, so a new agent file is a new candidate.
+    /// The developer tier for a task: <c>min(hard, rated difficulty + failed attempts)</c>. A task with no rating
+    /// is a medium task, as the task file writes it, so a dispatch that belongs to no task also starts at medium.
     /// </summary>
-    public static IReadOnlyList<ArbiterSquadAgent> ImplementationAgents() =>
-        [.. ArbiterSquadCatalog.LoadEmbedded().Agents.Values
+    /// <param name="difficulty">The rating in use: <c>easy</c>, <c>medium</c> or <c>hard</c>, or null when none is recorded.</param>
+    /// <param name="failedAttempts">How many attempts at this task already failed.</param>
+    public static string DeveloperTier(string? difficulty, int failedAttempts)
+    {
+        int rated = difficulty?.Trim() switch
+        {
+            "easy" => 0,
+            "hard" => DeveloperTiers.Count - 1,
+            _ => 1,
+        };
+
+        // Long arithmetic: a retry count at the top of its range must clamp to the last tier, not wrap to a
+        // negative index a few steps below zero.
+        long climbed = Math.Min(
+            DeveloperTiers.Count - 1,
+            rated + (long)Math.Max(failedAttempts, 0));
+        return DeveloperTiers[(int)climbed];
+    }
+
+    /// <summary>
+    /// The sentence that refuses a dispatch to a technology developer under the tiered roster and names the tier the
+    /// task belongs on. Both dispatch paths that refuse one — the task-prompt tool and the Arbiter's roster rule —
+    /// read it from here, so the refusal a conductor sees is the same whichever path answered.
+    /// </summary>
+    /// <param name="named">The technology developer the dispatch named.</param>
+    /// <param name="difficulty">The task's rating: <c>easy</c>, <c>medium</c> or <c>hard</c>, or null when none is recorded.</param>
+    /// <param name="failedAttempts">How many attempts at the task already failed, which steps a developer up.</param>
+    public static string TieredDeveloperRefusal(string named, string? difficulty, int failedAttempts = 0)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(named);
+        string tier = DeveloperTier(difficulty, failedAttempts);
+        return $"'{named}' is a worker-roster: technology agent, and this run is worker-roster: tiered. " +
+            $"This task's developer is '{tier}' (tier = min(hard, rated difficulty + failed attempts)). " +
+            $"Dispatch '{tier}' instead.";
+    }
+
+    /// <summary>
+    /// The agent a removed name resolves to and the sentence that reports it, or null when the name is not one the
+    /// removal deletes. A removed technology developer becomes the tier its task's difficulty gives; a removed
+    /// platform or planning agent becomes the role that took its work over (Requirement 13.5).
+    /// </summary>
+    /// <param name="agent">The agent a plan, task file or dispatch names.</param>
+    /// <param name="difficulty">The task's rating: <c>easy</c>, <c>medium</c> or <c>hard</c>, or null when none is recorded.</param>
+    /// <param name="failedAttempts">How many attempts at the task already failed, which steps a developer up.</param>
+    public static RemovedAgentResolution? ResolveRemovedAgent(string? agent, string? difficulty, int failedAttempts = 0)
+    {
+        string? named = string.IsNullOrWhiteSpace(agent) ? null : agent.Trim();
+        if (named is null || !RemovedAgents.TryGetValue(named, out string? replacement))
+            return null;
+
+        string resolved = string.Equals(replacement, DeveloperKind, StringComparison.Ordinal)
+            ? DeveloperTier(difficulty, failedAttempts)
+            : replacement;
+        return new RemovedAgentResolution(named, resolved, $"'{named}' was removed; this task goes to '{resolved}'.");
+    }
+
+    /// <summary>
+    /// The agents a task may go to under both rosters: every agent of the installed Squad whose capability profile
+    /// takes implementation or documentation work, read from the agent files the build embeds, so a new agent file
+    /// is a new candidate.
+    /// </summary>
+    public static IReadOnlyList<ArbiterSquadAgent> ImplementationAgents() => ImplementationAgents(null);
+
+    /// <summary>
+    /// The agents a task may go to under <paramref name="roster"/>. An agent that declares no roster serves both,
+    /// so the agents that stay under either roster are always candidates. Under the tiered roster the three
+    /// developer agents are one candidate, <see cref="DeveloperKind"/>: the pick chooses the kind of worker and
+    /// the difficulty then chooses the tier (Requirement 3.1). A null roster offers every agent, as the
+    /// decision-model tests ask.
+    /// </summary>
+    /// <param name="roster">The active roster, <c>technology</c> or <c>tiered</c>; null for both.</param>
+    public static IReadOnlyList<ArbiterSquadAgent> ImplementationAgents(string? roster)
+    {
+        IEnumerable<ArbiterSquadAgent> agents = ArbiterSquadCatalog.LoadEmbedded().Agents.Values
             .Where(agent => string.Equals(agent.TargetClass, "implementation", StringComparison.Ordinal)
-                            && !string.IsNullOrWhiteSpace(agent.Description))
-            .OrderBy(agent => agent.Name, StringComparer.Ordinal)];
+                            && !string.IsNullOrWhiteSpace(agent.Description));
+
+        if (roster is not null)
+        {
+            agents = agents.Where(agent => agent.WorkerRoster is null
+                                           || string.Equals(agent.WorkerRoster, roster, StringComparison.Ordinal));
+        }
+
+        if (string.Equals(roster, WorkerRosters.Tiered, StringComparison.Ordinal))
+        {
+            agents = agents.Where(agent => agent.Name is not (EasyTier or HardTier));
+        }
+
+        return [.. agents.OrderBy(agent => agent.Name, StringComparer.Ordinal)];
+    }
 
     /// <inheritdoc />
     public IReadOnlyDictionary<string, PlanTaskAgentChoice> Pick(IReadOnlyList<PlanTaskFileEntry> tasks)
@@ -92,10 +238,13 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
             .With($"{key}.capabilities", Bounded(task.Capabilities ?? "(not stated)"), ArbiterFactLabel.Derived)
             .With($"{key}.files", string.Join(", ", task.Files ?? []), ArbiterFactLabel.Derived);
         string id = RulePrefix + task.Id;
+        string difficultyId = DifficultyPrefix + task.Id;
         ArbiterStep1BatchResult result;
         try
         {
-            result = await _provider.AskStep1Async([RuleFor(task.Id!, key)], facts).ConfigureAwait(false);
+            // One request per task carries both questions, so the rating costs no second round trip.
+            result = await _provider.AskStep1Async(
+                [RuleFor(task.Id!, key), DifficultyRuleFor(task.Id!, key)], facts).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -107,8 +256,67 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
         double? confidence = result.ScoresByRule is not null && result.ScoresByRule.TryGetValue(id, out ArbiterStep1Score? score)
             ? score.Confidence
             : null;
-        return confidence is { } sure && sure >= ConfidenceFloor ? new PlanTaskAgentChoice(answer, Math.Round(sure, 3)) : null;
+        if (confidence is not { } sure || sure < ConfidenceFloor)
+        {
+            return null;
+        }
+
+        string? difficulty = null;
+        double? difficultyConfidence = null;
+        if (result.AnswersByRule.TryGetValue(difficultyId, out string? rated)
+            && result.ScoresByRule is not null
+            && result.ScoresByRule.TryGetValue(difficultyId, out ArbiterStep1Score? difficultyScore)
+            && difficultyScore.Confidence >= ConfidenceFloor
+            && DifficultyOf(rated) is { } ratedDifficulty)
+        {
+            difficulty = ratedDifficulty;
+            difficultyConfidence = Math.Round(difficultyScore.Confidence!.Value, 3);
+        }
+
+        return new PlanTaskAgentChoice(answer, Math.Round(sure, 3), difficulty, difficultyConfidence);
     }
+
+    /// <summary>
+    /// The difficulty to record for an answer, or null when the answer is not one the difficulty
+    /// question offered. A value that is not a legal difficulty is never recorded: the agent's name
+    /// or a model the question did not list would otherwise be written into the task file as a
+    /// difficulty, and the task-file check would refuse the plan.
+    /// </summary>
+    private static string? DifficultyOf(string? answer) => answer switch
+    {
+        "easy" => "easy",
+        StandardAnswer => "medium",
+        "hard" => "hard",
+        _ => null,
+    };
+
+    /// <summary>The difficulty rule, with the shipped rule's question, answers and criteria, asked beside the pick.</summary>
+    private static ArbiterRule DifficultyRuleFor(string taskId, string key) => new(
+        DifficultyPrefix + taskId,
+        "docs.tasks",
+        DifficultyQuestion,
+        ["easy", StandardAnswer, "hard"],
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["easy"] = RuleEffects.Allow,
+            [StandardAnswer] = RuleEffects.Allow,
+            ["hard"] = RuleEffects.Allow,
+        },
+        Ask: new RuleAsk(
+            "choice",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["title"] = $"{key}.title",
+                ["capabilities"] = $"{key}.capabilities",
+                ["files"] = $"{key}.files",
+            },
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["easy"] = "A small, local change with one obvious path.",
+                [StandardAnswer] = "A change with several files or a non-obvious path, but no cross-cutting risk.",
+                ["hard"] = "A change that spans layers, alters contracts, or needs careful design.",
+            },
+            ConfidenceAtLeast: ConfidenceFloor));
 
     private ArbiterRule RuleFor(string taskId, string key) => new(
         RulePrefix + taskId,
@@ -137,3 +345,9 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
         return first.StartsWith(prefix, StringComparison.Ordinal) ? first[prefix.Length..].TrimStart(':', ' ') : first;
     }
 }
+
+/// <summary>A removed agent's replacement, and the sentence that reports the substitution.</summary>
+/// <param name="Named">The removed agent the plan, task file or dispatch still names.</param>
+/// <param name="Resolved">The agent that does the work now.</param>
+/// <param name="Report">One sentence naming both, for the conductor's output.</param>
+public sealed record RemovedAgentResolution(string Named, string Resolved, string Report);

@@ -55,7 +55,7 @@ writing a preset that resolves to nothing.
 
 ## Step 2 — Ask tier by tier, then verify the id
 
-Ask which of the six profiles the user wants to set. For each one, ask for a **rough intent**
+Ask which profile the user wants to set. For each one, ask for a **rough intent**
 in the user's own words — "strongest reasoning", "cheap and fast", "best at reading code",
 "long context" — and whether they have a **provider preference** (GitHub Copilot, Anthropic,
 ZAI, OpenCode Zen, and so on). If they have no preference, propose two or three candidates
@@ -65,10 +65,11 @@ confirm it with the user.
 | Profile | Intent | Agents that use it |
 |---|---|---|
 | `architect` | Deep architectural and product reasoning | `architect`, `product-owner` |
-| `deep-planning` | Investigative planning and diagnosis | `bug-crusher-investigator`, `sql-database-architect` |
-| `fast` | Bounded, checkable work | Most `*-dev`, `docs-dev`, `test-dev`, triage roles |
-| `general` | Standard implementation and support | `dal-dev`, `github-devops`, `pulumi-dev`, `rust-dev`, `tauri-dev`, `typescript-dev` |
-| `orchestration` | Coordination and dispatch | `conductor` |
+| `deep-planning` | Investigative planning and diagnosis | `bug-crusher-investigator` |
+| `fast` | Bounded, checkable work | `bug-crusher`, `dev-easy`, `platform-researcher`, `research-agent` |
+| `general` | Standard implementation and support | `dev-medium`, `devops`, `docs-dev` |
+| `dev-hard` | The strongest developer tier | `dev-hard` |
+| `orchestration` | Coordination and dispatch | none: the conductor names no profile and runs on its session's model |
 | `reviewer` | Adversarial code reading | `code-reviewer`, `review-lens`, `review-triage` |
 
 Verification is mandatory and harness-specific. Do not accept a model name the user typed

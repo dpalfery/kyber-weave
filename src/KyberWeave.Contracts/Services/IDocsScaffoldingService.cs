@@ -15,6 +15,10 @@ public interface IDocsScaffoldingService
     /// <param name="force">Whether existing hand-authored files may be overwritten.</param>
     /// <param name="kyberStandards">Whether every technology Kyber-Weave ships a standard for is declared.</param>
     /// <param name="reviewGates">Whether the catalogue review gates are rendered into the host configuration.</param>
+    /// <param name="standards">
+    /// The technology, role and platform template folders to install, or null to install only
+    /// what the configuration already declares. Each name is declared in the ontology.
+    /// </param>
     /// <returns>What was created, updated, skipped and preserved.</returns>
     /// <exception cref="ArgumentException">The docs root escapes the repository, or the owner cannot be emitted.</exception>
     /// <exception cref="InvalidDataException">The host configuration exists and cannot be read.</exception>
@@ -25,5 +29,6 @@ public interface IDocsScaffoldingService
         string owner = "unassigned",
         bool force = false,
         bool kyberStandards = false,
-        bool reviewGates = true);
+        bool reviewGates = true,
+        IReadOnlyList<string>? standards = null);
 }

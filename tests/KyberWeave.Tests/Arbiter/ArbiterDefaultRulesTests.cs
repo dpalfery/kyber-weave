@@ -66,7 +66,14 @@ public sealed class ArbiterDefaultRulesTests
     [Fact]
     public void ShippedRules_EqualTheCatalogue()
     {
-        Assert.Equal(ExpectedRuleIds, ArbiterConfig.ProductDefaults.Rules.Select(rule => rule.Id).Distinct());
+        // The split groups rules by role, so position is no longer a global order. The set is
+        // what matters: every id ships once, and no id was added or removed.
+        Assert.Equal(
+            ExpectedRuleIds.OrderBy(id => id, StringComparer.Ordinal),
+            ArbiterConfig.ProductDefaults.Rules
+                .Select(rule => rule.Id)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(id => id, StringComparer.Ordinal));
     }
 
     /// <summary>
@@ -156,7 +163,7 @@ public sealed class ArbiterDefaultRulesTests
         Assert.DoesNotContain("ledger.red-evidence", ArbiterTriggerCatalog.FactsByTrigger["delegate"]);
 
         ArbiterRule owner = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-OWNER-001");
-        // The one step-0 owner answer is the target named among the task's skills; test-dev is not owner of every test-first task.
+        // The one step-0 owner answer is the target named among the task's skills; dev-medium is not owner of every test-first task.
         Assert.Single(owner.Decide!, clause => clause.Answer == "owner");
     }
 

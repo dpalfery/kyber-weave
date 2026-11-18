@@ -179,6 +179,22 @@ profiles:
       network.publish: deny
       delegate: deny
       decision.query: deny
+  # A platform research agent: it inspects a live cloud or delivery platform through its own
+  # tools and command line, and can change nothing. The read-only profile it replaces runs no
+  # shell at all; this one does, because the platform's own CLI is often the only way to read
+  # state. ACCEPTED WIDENING: the lattice has no command scoping, so the read-only command
+  # allow-list lives in the technology's <name>.arbiter-rules.yml and is enforced where the
+  # worker guard sees the call (Claude and Copilot CLI); elsewhere it is instruction-only.
+  platform-reader:
+    permissions:
+      filesystem.read: allow
+      filesystem.search: allow
+      filesystem.write: deny
+      process.execute: allow
+      network.read: allow
+      network.publish: deny
+      delegate: deny
+      decision.query: deny
   # A review council seat (review-lens, review-triage) reads like read-only and writes one file: its
   # own seat file in the review cycle's seats folder, when its packet names one. That write exists
   # for the review-council skill (ADR 0079): on a harness where a sub-agent cannot dispatch, the main

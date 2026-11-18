@@ -188,20 +188,39 @@ public class DocumentKeywordScoringTests
 /// </summary>
 public class DocumentAuthorityTests
 {
-    private static DocumentModel Doc(DocType docType) => new DocumentModel
+    private static DocumentModel Doc(DocType docType, string? technology = null) => new DocumentModel
     {
         RelativePath = "6-Docs/x.md",
         FilePath = "/tmp/6-Docs/x.md",
         HasFrontmatter = true,
+        Frontmatter = new DocumentFrontmatter { Technology = technology },
         DocType = docType,
         Status = DocStatus.Current
     };
 
+    /// <summary>
+    /// A worker already holds its standard, rules and skills in its task prompt, so those
+    /// documents rank below other current guidance in a search.
+    /// </summary>
     [Fact]
-    public void ACodingStandardCarriesUndemotedAuthority()
+    public void APromptedDocumentRanksBelowOtherCurrentDocuments()
     {
-        Assert.Equal(DocumentIndex.Authority(Doc(DocType.Reference)), DocumentIndex.Authority(Doc(DocType.CodingStandard)));
-        Assert.True(DocumentIndex.Authority(Doc(DocType.Plan)) < DocumentIndex.Authority(Doc(DocType.CodingStandard)));
+        Assert.Equal(0.55, DocumentIndex.Authority(Doc(DocType.CodingStandard)));
+        Assert.Equal(0.55, DocumentIndex.Authority(Doc(DocType.Skill, "csharp")));
+        Assert.Equal(0.55, DocumentIndex.Authority(Doc(DocType.Rule, "csharp")));
+        Assert.True(
+            DocumentIndex.Authority(Doc(DocType.CodingStandard))
+            < DocumentIndex.Authority(Doc(DocType.Reference)));
+    }
+
+    /// <summary>
+    /// The shared rules file names no technology and keeps full weight: it is the small file
+    /// that always fits, so it is what remains when a budget cut drops a section.
+    /// </summary>
+    [Fact]
+    public void AnUnscopedRuleKeepsFullAuthority()
+    {
+        Assert.Equal(1.0, DocumentIndex.Authority(Doc(DocType.Rule)));
     }
 }
 
@@ -931,6 +950,85 @@ public sealed class CodingStandardsLookupTests : IDisposable
         DocumentIndex index = TwoCsharpStandards();
 
         Assert.Equal(["csharp"], index.CodingStandardTechnologies());
+    }
+
+    private static string ScopedDocument(
+        string id,
+        string docType,
+        string scopeKey,
+        string scope,
+        string? buildsOn = null) =>
+        $"""
+        ---
+        id: {id}
+        title: {id}
+        doc-type: {docType}
+        status: current
+        {scopeKey}: {scope}
+        {(buildsOn is null ? string.Empty : $"builds-on: {buildsOn}")}
+        owner: Maintainers
+        last-reviewed: 2026-07-21
+        ---
+
+        # {id}
+
+        Rules and guidance for {scope}.
+        """;
+
+    /// <summary>
+    /// The bundle is every part a worker needs for one technology, stitched from one lookup:
+    /// shared rules, the parent's rules and skills, then the technology's own.
+    /// </summary>
+    [Fact]
+    public void AStandardsBundleCarriesEveryPartIncludingTheParent()
+    {
+        DocumentIndex index = IndexOf(
+            ("6-Docs/standards/csharp/csharp.standards.md",
+                ScopedDocument("standards/csharp", "coding-standard", "technology", "csharp", "typescript")),
+            ("6-Docs/standards/csharp/csharp.rules.md",
+                ScopedDocument("standards/csharp/rules", "rule", "technology", "csharp")),
+            ("6-Docs/standards/csharp/csharp.skills.md",
+                ScopedDocument("standards/csharp/skills", "skill", "technology", "csharp")),
+            ("6-Docs/standards/typescript/typescript.rules.md",
+                ScopedDocument("standards/typescript/rules", "rule", "technology", "typescript")),
+            ("6-Docs/standards/typescript/typescript.skills.md",
+                ScopedDocument("standards/typescript/skills", "skill", "technology", "typescript")),
+            ("6-Docs/standards/shared-rules.md",
+                ScopedDocument("standards/shared-rules", "rule", "component", "MotorcycleRAG system")));
+
+        StandardsBundle bundle = index.StandardsFor("csharp")!;
+
+        Assert.Equal("6-Docs/standards/shared-rules.md", bundle.SharedRules!.RelativePath);
+        Assert.Equal("6-Docs/standards/typescript/typescript.rules.md", bundle.ParentRules!.RelativePath);
+        Assert.Equal("6-Docs/standards/typescript/typescript.skills.md", bundle.ParentSkills!.RelativePath);
+        Assert.Equal("6-Docs/standards/csharp/csharp.rules.md", bundle.Rules!.RelativePath);
+        Assert.Equal("6-Docs/standards/csharp/csharp.skills.md", bundle.Skills!.RelativePath);
+        Assert.Equal("6-Docs/standards/csharp/csharp.standards.md", bundle.Standard!.RelativePath);
+    }
+
+    /// <summary>A standard that names no parent yields no parent parts, not another technology's.</summary>
+    [Fact]
+    public void AStandardWithNoParentHasNoParentParts()
+    {
+        DocumentIndex index = IndexOf(
+            ("6-Docs/standards/go/go.standards.md",
+                ScopedDocument("standards/go", "coding-standard", "technology", "go")),
+            ("6-Docs/standards/python/python.rules.md",
+                ScopedDocument("standards/python/rules", "rule", "technology", "python")));
+
+        StandardsBundle bundle = index.StandardsFor("go")!;
+
+        Assert.Null(bundle.ParentRules);
+        Assert.Null(bundle.ParentSkills);
+        Assert.Null(bundle.Rules);
+    }
+
+    [Fact]
+    public void AnUnknownTechnologyHasNoBundle()
+    {
+        DocumentIndex index = OneStandard(CsharpSections());
+
+        Assert.Null(index.StandardsFor("undeclared"));
     }
 
     public void Dispose() => _fixture.Dispose();

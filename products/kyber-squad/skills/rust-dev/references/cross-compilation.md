@@ -20,7 +20,7 @@ cargo build --release --target <triple>
 - For Linux targets from macOS or Windows, `cargo zigbuild` or `cross` (Docker) supply the
   linker and sysroot. Use whichever the standard names; do not add the other.
 - A fully static Linux binary targets `x86_64-unknown-linux-musl`.
-- Release automation is `github-devops`; hand them the list of triples and the build command.
+- Release automation is `devops`; hand them the list of triples and the build command.
 
 ## TLS without OpenSSL
 

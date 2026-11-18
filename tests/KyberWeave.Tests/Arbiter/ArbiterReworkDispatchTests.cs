@@ -79,9 +79,14 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
         public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification, ArbiterEvent ev) => facts;
     }
 
+    /// <summary>
+    /// The plan facts the evaluator reads. The rating the task file records is what the difficulty rule answers
+    /// from under the one remaining roster, so this reader states it and no model call is made.
+    /// </summary>
     private sealed class PassThroughPlanReader : IArbiterPlanReader
     {
-        public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) => facts;
+        public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) =>
+            facts.With("plan.task.difficulty", "hard", ArbiterFactLabel.Derived);
     }
 
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
@@ -138,7 +143,7 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
     {
         Harness = "claude",
         Phase = "pre",
-        Target = "csharp-dev",
+        Target = "dev-medium",
         Prompt = "KYBER-ARBITER: true\n\nFAILURE-CLUSTER: " + ClusterKey + "\n\nFAILURE:\n" + failureText + "\n\nRework the change.",
         HarnessCaller = "conductor",
         IsDispatch = true,
@@ -156,18 +161,15 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
         await Evaluator(new AnswerByRuleProvider(new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [FailureRule] = Different,
-            [ModelRule] = Hard,
         })).EvaluateAsync(Rework(FirstFailure), ReworkConfig());
 
         AnswerByRuleProvider provider = new(new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [FailureRule] = Same,
-            [ModelRule] = Hard,
         });
         ArbiterEvaluationResult result = await Evaluator(provider).EvaluateAsync(Rework(SecondFailure), ReworkConfig());
 
         IReadOnlyList<string> asked = Assert.Single(provider.Calls);
-        Assert.Contains(ModelRule, asked);
         Assert.Contains(FailureRule, asked);
 
         ArbiterDispatchEvaluation dispatch = Assert.Single(result.Dispatches);

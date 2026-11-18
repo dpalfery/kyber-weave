@@ -1094,10 +1094,10 @@ public sealed class ZCodeRendererContractTests : IDisposable
 internal sealed class ZCodeModelOverrideFixture : IDisposable
 {
     internal const string OverriddenProfile = "general";
-    internal const string OverriddenAgentName = "go-dev";
+    internal const string OverriddenAgentName = "dev-medium";
     internal const string OverrideModel = "acme/zcode-test-model";
     internal const string InheritProfile = "fast";
-    internal const string InheritAgentName = "csharp-dev";
+    internal const string InheritAgentName = "dev-easy";
 
     private readonly TempDirectory _temp = new();
 

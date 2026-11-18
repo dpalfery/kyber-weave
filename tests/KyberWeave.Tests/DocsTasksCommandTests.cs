@@ -1,5 +1,6 @@
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Core.Docs.Validation;
 using Xunit;
 
 using KyberWeave.Tests.Fakes;
@@ -80,11 +81,14 @@ public sealed class DocsTasksCommandTests
         Assert.True(exit == 0, output);
         Assert.DoesNotContain("KW-DOC-TASKS", validated.Output, StringComparison.Ordinal);
 
-        using JsonDocument file = JsonDocument.Parse(TaskFileOf(fixture, PlanTaskFileProbe.TaskFilePath));
+        PlanTaskFile? file = PlanTaskFileFormat.Deserialize(
+            PlanTaskFileProbe.TaskFilePath,
+            TaskFileOf(fixture, PlanTaskFileProbe.TaskFilePath));
+        Assert.NotNull(file);
         Assert.Equal(
             PlanTaskFileProbe.ExecutionDigest(PlanTaskFileProbe.PlanMarkdown()),
-            file.RootElement.GetProperty("execution-digest").GetString());
-        Assert.Equal(2, file.RootElement.GetProperty("tasks").GetArrayLength());
+            file.ExecutionDigest);
+        Assert.Equal(2, file.Tasks?.Count);
     }
 
     /// <summary>A second write changes nothing: the file is rewritten whole, never appended or reordered.</summary>

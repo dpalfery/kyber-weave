@@ -51,18 +51,18 @@ public sealed class CopilotBackgroundReturnHookProcessTests : IDisposable
         "Discovery: codegraph 6, docs 4, direct reads 8; test-file reads supplied details omitted by the index.\n\n" +
         "STATUS: PASS  \nFILES: Eight T1 files and tests  \nTESTS: total=47 failed=0 passed=47  \n" +
         "COMMIT: 14ecc75b8cb3f53ccd52f8c75baa9b62bf1b70e2  \nREMOTE_HEAD: UNPUSHED  \n" +
-        "TASK_GATE: PASS — agent=csharp-dev gates=1 failed=none skipped=0 report=.agent_scratchpad/t1/task-gate.json runs=1";
+        "TASK_GATE: PASS — agent=dev-medium gates=1 failed=none skipped=0 report=.agent_scratchpad/t1/task-gate.json runs=1";
 
     private const string BackendReworkTurn =
         "Artifact: .agent_scratchpad/T1/input-sites.md  \nInput sites: 1 traced, 7 files with none  \n\n" +
         "STATUS: PASS  \nFILES: src/Api/JobController.cs  \nTESTS: total=47 failed=0 passed=47  \n" +
         "COMMIT: 14ecc75b8cb3f53ccd52f8c75baa9b62bf1b70e2  \nREMOTE_HEAD: UNPUSHED  \n" +
-        "TASK_GATE: PASS — agent=csharp-dev gates=1 failed=none skipped=0 report=.agent_scratchpad/t1/task-gate.json runs=1";
+        "TASK_GATE: PASS — agent=dev-medium gates=1 failed=none skipped=0 report=.agent_scratchpad/t1/task-gate.json runs=1";
 
     private const string FrontendTurn =
         "STATUS: READY_FOR_REVIEW\nARTIFACTS: Dashboard CSS, types, API service, overview, three status-card components.\n" +
         "SUMMARY: Added validated job-status summary cards with loading and error handling.\n" +
-        "TASK_GATE: PASS — agent=react-dev gates=4 failed=none skipped=0 report=.agent_scratchpad/t2/task-gate.json runs=4\n" +
+        "TASK_GATE: PASS — agent=dev-medium gates=4 failed=none skipped=0 report=.agent_scratchpad/t2/task-gate.json runs=4\n" +
         "COMMIT: fe9034b\nOPEN_QUESTIONS: none";
 
     private readonly RunStartProbe _probe = RunStartProbe.Create();
@@ -89,15 +89,15 @@ public sealed class CopilotBackgroundReturnHookProcessTests : IDisposable
     [Fact]
     public void TheInstalledHookCommand_RecordsEachBackgroundTurnAsItsTasksReturn_AndTheDependentTaskIsReady()
     {
-        Hook(Pre("csharp-dev", "T1"));
-        Hook(Pre("react-dev", "T2"));
-        Hook(BackgroundStart("csharp-dev", "T1", BackendAgent, "call_Kiv5uIqrjMOUoE5TQNeEZqLx"));
-        Hook(BackgroundStart("react-dev", "T2", FrontendAgent, "call_e2Tq0oDqJ2nUO6rVY7sC1kLm"));
+        Hook(Pre("dev-medium", "T1"));
+        Hook(Pre("dev-medium", "T2"));
+        Hook(BackgroundStart("dev-medium", "T1", BackendAgent, "call_Kiv5uIqrjMOUoE5TQNeEZqLx"));
+        Hook(BackgroundStart("dev-medium", "T2", FrontendAgent, "call_e2Tq0oDqJ2nUO6rVY7sC1kLm"));
         Assert.DoesNotContain(Ledger(), e => e.Phase == ArbiterLedgerPhases.Post);
 
-        Hook(Stop(FrontendAgent, "react-dev", FrontendTurn));
-        Hook(Stop(BackendAgent, "csharp-dev", BackendFirstTurn));
-        Hook(Stop(BackendAgent, "csharp-dev", BackendReworkTurn));
+        Hook(Stop(FrontendAgent, "dev-medium", FrontendTurn));
+        Hook(Stop(BackendAgent, "dev-medium", BackendFirstTurn));
+        Hook(Stop(BackendAgent, "dev-medium", BackendReworkTurn));
 
         IReadOnlyList<ArbiterLedgerEvent> ledger = Ledger();
         List<ArbiterLedgerEvent> posts = [.. ledger.Where(e => e.Phase == ArbiterLedgerPhases.Post)];
@@ -110,7 +110,7 @@ public sealed class CopilotBackgroundReturnHookProcessTests : IDisposable
         Assert.All(posts, post => Assert.Equal("PASS", post.Returns?.TaskGate));
         Assert.Equal(["T1", "T2"], ArbiterLedgerQueries.CompletedTasks(ledger, Plan));
 
-        string answer = Hook(Pre("test-dev", "T3"));
+        string answer = Hook(Pre("dev-medium", "T3"));
 
         ArbiterDecisionRecord decision = Decisions().Last(d => d.Trigger == "delegate");
         ArbiterDecisionRule ready = Assert.Single(decision.Rules, rule => rule.Id == "KW-ARB-READY-001");
@@ -122,7 +122,7 @@ public sealed class CopilotBackgroundReturnHookProcessTests : IDisposable
     [Fact]
     public void TheInstalledHookCommand_DoesNotAnswerATurnsEndBeforeItReachesTheDecisionEngine()
     {
-        Assert.False(HookFastPath.IsPassThrough("copilot-cli", null, Stop(FrontendAgent, "react-dev", FrontendTurn)));
+        Assert.False(HookFastPath.IsPassThrough("copilot-cli", null, Stop(FrontendAgent, "dev-medium", FrontendTurn)));
     }
 
     [Fact]
@@ -130,10 +130,10 @@ public sealed class CopilotBackgroundReturnHookProcessTests : IDisposable
     {
         string budgets = Path.Combine(_home.Path, ".kyber-weave", "arbiter", "budgets");
 
-        Run(["worker-guard", "--harness", "copilot-cli"], ToolCall(BackendAgent, "csharp-dev"));
+        Run(["worker-guard", "--harness", "copilot-cli"], ToolCall(BackendAgent, "dev-medium"));
         Assert.Single(Directory.GetFiles(budgets, "*.log"));
 
-        Run(["worker-guard", "--harness", "copilot-cli"], Stop(BackendAgent, "csharp-dev", BackendFirstTurn));
+        Run(["worker-guard", "--harness", "copilot-cli"], Stop(BackendAgent, "dev-medium", BackendFirstTurn));
         Assert.Empty(Directory.GetFiles(budgets, "*.log"));
     }
 
@@ -143,12 +143,12 @@ public sealed class CopilotBackgroundReturnHookProcessTests : IDisposable
         // A live case: run 5's two background workers never got a return row, and run 6, started later over the
         // same plan path and files, had its first two dispatches refused as overlapping them.
         StartRun("run-a");
-        Hook(Pre("csharp-dev", "T1"));
+        Hook(Pre("dev-medium", "T1"));
         AssertDispatched();
-        Hook(BackgroundStart("csharp-dev", "T1", BackendAgent, "call_Kiv5uIqrjMOUoE5TQNeEZqLx"));
+        Hook(BackgroundStart("dev-medium", "T1", BackendAgent, "call_Kiv5uIqrjMOUoE5TQNeEZqLx"));
 
         StartRun("run-b");
-        string answer = Hook(Pre("csharp-dev", "T1"));
+        string answer = Hook(Pre("dev-medium", "T1"));
 
         Assert.Equal("ready", ReadyAnswer());
         Assert.DoesNotContain("KW-ARB-READY-001", answer, StringComparison.Ordinal);
@@ -158,11 +158,11 @@ public sealed class CopilotBackgroundReturnHookProcessTests : IDisposable
     public void WithinOneRun_AnUnreturnedDispatchStillHoldsItsFiles()
     {
         StartRun("run-a");
-        Hook(Pre("csharp-dev", "T1"));
+        Hook(Pre("dev-medium", "T1"));
         AssertDispatched();
-        Hook(BackgroundStart("csharp-dev", "T1", BackendAgent, "call_Kiv5uIqrjMOUoE5TQNeEZqLx"));
+        Hook(BackgroundStart("dev-medium", "T1", BackendAgent, "call_Kiv5uIqrjMOUoE5TQNeEZqLx"));
 
-        string answer = Hook(Pre("csharp-dev", "T1"));
+        string answer = Hook(Pre("dev-medium", "T1"));
 
         Assert.Equal("overlaps-in-flight", ReadyAnswer());
         Assert.Contains("KW-ARB-READY-001", answer, StringComparison.Ordinal);
@@ -173,34 +173,34 @@ public sealed class CopilotBackgroundReturnHookProcessTests : IDisposable
     {
         StartRun("run-a");
         ReturnBothDependencies(BackendAgent, FrontendAgent);
-        Hook(Pre("test-dev", "T3"));
+        Hook(Pre("dev-medium", "T3"));
         Assert.Equal("ready", ReadyAnswer());
 
         StartRun("run-b");
-        Hook(Pre("test-dev", "T3"));
+        Hook(Pre("dev-medium", "T3"));
         // The ledger no longer says ready, so the question goes to the model; with none configured it is unanswered.
         Assert.Equal(ArbiterStep1BatchResult.NotEvaluated, ReadyAnswer());
 
         // That dispatch ran (no model refused it) and ends blocked, so it holds no files when it is tried again.
         const string VerifierAgent = "33333333-9085-4edf-a169-44bd0cdfbffc";
-        Hook(BackgroundStart("test-dev", "T3", VerifierAgent, "call_Z6JSwlrA2mQeT1yUo8pLkNbV"));
-        Hook(Stop(VerifierAgent, "test-dev", "STATUS: BLOCKED\nBLOCKER: T1 and T2 are not committed yet."));
+        Hook(BackgroundStart("dev-medium", "T3", VerifierAgent, "call_Z6JSwlrA2mQeT1yUo8pLkNbV"));
+        Hook(Stop(VerifierAgent, "dev-medium", "STATUS: BLOCKED\nBLOCKER: T1 and T2 are not committed yet."));
 
         ReturnBothDependencies("11111111-0e61-4a61-8785-43b058ab723a", "22222222-20dd-4012-a22b-041605f7a556");
-        Hook(Pre("test-dev", "T3"));
+        Hook(Pre("dev-medium", "T3"));
         Assert.Equal("ready", ReadyAnswer());
     }
 
     private void ReturnBothDependencies(string backendAgent, string frontendAgent)
     {
-        Hook(Pre("csharp-dev", "T1"));
+        Hook(Pre("dev-medium", "T1"));
         AssertDispatched();
-        Hook(Pre("react-dev", "T2"));
+        Hook(Pre("dev-medium", "T2"));
         AssertDispatched();
-        Hook(BackgroundStart("csharp-dev", "T1", backendAgent, "call_Kiv5uIqrjMOUoE5TQNeEZqLx"));
-        Hook(BackgroundStart("react-dev", "T2", frontendAgent, "call_e2Tq0oDqJ2nUO6rVY7sC1kLm"));
-        Hook(Stop(frontendAgent, "react-dev", FrontendTurn));
-        Hook(Stop(backendAgent, "csharp-dev", BackendFirstTurn));
+        Hook(BackgroundStart("dev-medium", "T1", backendAgent, "call_Kiv5uIqrjMOUoE5TQNeEZqLx"));
+        Hook(BackgroundStart("dev-medium", "T2", frontendAgent, "call_e2Tq0oDqJ2nUO6rVY7sC1kLm"));
+        Hook(Stop(frontendAgent, "dev-medium", FrontendTurn));
+        Hook(Stop(backendAgent, "dev-medium", BackendFirstTurn));
     }
 
     /// <summary>The newest task dispatch was let through, so its worker ran and holds its files.</summary>
@@ -318,7 +318,7 @@ public sealed class CopilotBackgroundReturnHookProcessTests : IDisposable
         ["parentAgentId"] = Session,
         ["agentType"] = agentType,
         ["toolName"] = "bash",
-        ["toolArgs"] = new JsonObject { ["command"] = "kyber-weave docs packet T1 --agent csharp-dev" },
+        ["toolArgs"] = new JsonObject { ["command"] = "kyber-weave docs packet T1 --agent dev-medium" },
     }.ToJsonString();
 
     private string Hook(string stdin) => Run(["hook", "--harness", "copilot-cli", "--scope", "global"], stdin);

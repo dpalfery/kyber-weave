@@ -89,7 +89,6 @@ public sealed class SquadWorktreeMcpContractTests
     [InlineData(ConductorAgentPath)]
     [InlineData("products/kyber-squad/agents/review-lens.md")]
     [InlineData("products/kyber-squad/agents/review-triage.md")]
-    [InlineData("products/kyber-squad/agents/azure-reader.md")]
     [InlineData("products/kyber-squad/agents/research-agent.md")]
     [InlineData("products/kyber-squad/agents/product-owner.md")]
     [InlineData("products/kyber-squad/skills/product-owner/SKILL.md")]

@@ -164,7 +164,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     [Fact]
     public async Task WithoutAReturn_DependentTaskWaits()
     {
-        await Dispatch("csharp-dev", Prompt("T2"));
+        await Dispatch("dev-medium", Prompt("T2"));
 
         Assert.Equal(Asked, Answer("KW-ARB-READY-001"));
     }
@@ -173,9 +173,9 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     public async Task AReturnsReportTail_ReachesTheDependentTasksQuestion()
     {
         // The report carries no RESULT: marker, so the ledger cannot show T1 complete; the model reads the tail.
-        await Dispatch("csharp-dev", Prompt("T1"));
-        await Return("csharp-dev", Prompt("T1"), "Implemented the parser; all tests pass.");
-        await Dispatch("csharp-dev", Prompt("T2"));
+        await Dispatch("dev-medium", Prompt("T1"));
+        await Return("dev-medium", Prompt("T1"), "Implemented the parser; all tests pass.");
+        await Dispatch("dev-medium", Prompt("T2"));
 
         List<string> tails = [.. _provider.FactsSent
             .Select(facts => facts.TryGet("ledger.task-returns", out ArbiterFact? fact) ? fact.Value as IEnumerable<string> : null)
@@ -189,9 +189,9 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     [Fact]
     public async Task ADryRunReturn_StoresNoReportTail()
     {
-        await Dispatch("csharp-dev", Prompt("T1"));
+        await Dispatch("dev-medium", Prompt("T1"));
         await Evaluator().EvaluateAsync(
-            Event("post", "csharp-dev", HeaderBlock.Strip(Prompt("T1")), "s1", "Implemented the parser."),
+            Event("post", "dev-medium", HeaderBlock.Strip(Prompt("T1")), "s1", "Implemented the parser."),
             Config(),
             new ArbiterEvaluatorOptions(DryRun: true),
             TestContext.Current.CancellationToken);
@@ -205,10 +205,10 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     [Fact]
     public async Task WorkerReport_CompletesTheTaskForItsDependents()
     {
-        await Dispatch("test-dev", Prompt("T1"));
-        await Return("test-dev", Prompt("T1"), PassReport);
+        await Dispatch("dev-medium", Prompt("T1"));
+        await Return("dev-medium", Prompt("T1"), PassReport);
 
-        await Dispatch("csharp-dev", Prompt("T2"));
+        await Dispatch("dev-medium", Prompt("T2"));
 
         Assert.Equal("ready", Answer("KW-ARB-READY-001"));
     }
@@ -216,10 +216,10 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     [Fact]
     public async Task FailedReport_LeavesTheDependentWaiting()
     {
-        await Dispatch("test-dev", Prompt("T1"));
-        await Return("test-dev", Prompt("T1"), "STATUS: ESCALATION\nRESULT: FAIL\n");
+        await Dispatch("dev-medium", Prompt("T1"));
+        await Return("dev-medium", Prompt("T1"), "STATUS: ESCALATION\nRESULT: FAIL\n");
 
-        await Dispatch("csharp-dev", Prompt("T2"));
+        await Dispatch("dev-medium", Prompt("T2"));
 
         Assert.Equal(Asked, Answer("KW-ARB-READY-001"));
     }
@@ -227,10 +227,10 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     [Fact]
     public async Task ReportForAnotherPlan_DoesNotCount()
     {
-        await Dispatch("test-dev", Prompt("T1", "docs/plans/other.md"));
-        await Return("test-dev", Prompt("T1", "docs/plans/other.md"), PassReport);
+        await Dispatch("dev-medium", Prompt("T1", "docs/plans/other.md"));
+        await Return("dev-medium", Prompt("T1", "docs/plans/other.md"), PassReport);
 
-        await Dispatch("csharp-dev", Prompt("T2"));
+        await Dispatch("dev-medium", Prompt("T2"));
 
         Assert.Equal(Asked, Answer("KW-ARB-READY-001"));
     }
@@ -238,10 +238,10 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     [Fact]
     public async Task AnAbsolutePlanPath_IsNoPlanHeader_SoItsReportCountsForNoPlan()
     {
-        await Dispatch("test-dev", Prompt("T1", "/repo/" + Plan));
-        await Return("test-dev", Prompt("T1", "/repo/" + Plan), PassReport);
+        await Dispatch("dev-medium", Prompt("T1", "/repo/" + Plan));
+        await Return("dev-medium", Prompt("T1", "/repo/" + Plan), PassReport);
 
-        await Dispatch("csharp-dev", Prompt("T2"));
+        await Dispatch("dev-medium", Prompt("T2"));
 
         Assert.Equal(Asked, Answer("KW-ARB-READY-001"));
     }
@@ -249,10 +249,10 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     [Fact]
     public async Task APlanSharingOnlyAPathSuffix_IsAnotherPlan()
     {
-        await Dispatch("test-dev", Prompt("T1", "plans/x.md"));
-        await Return("test-dev", Prompt("T1", "plans/x.md"), PassReport);
+        await Dispatch("dev-medium", Prompt("T1", "plans/x.md"));
+        await Return("dev-medium", Prompt("T1", "plans/x.md"), PassReport);
 
-        await Dispatch("csharp-dev", Prompt("T2"));
+        await Dispatch("dev-medium", Prompt("T2"));
 
         Assert.Equal(Asked, Answer("KW-ARB-READY-001"));
     }
@@ -275,10 +275,10 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     [Fact]
     public async Task UnfinishedDispatch_HoldsItsFiles()
     {
-        await Dispatch("test-dev", Prompt("T1"));
+        await Dispatch("dev-medium", Prompt("T1"));
         AssertLastAllowed();
 
-        await Dispatch("test-dev", Prompt("T5"));
+        await Dispatch("dev-medium", Prompt("T5"));
 
         Assert.Equal("overlaps-in-flight", Answer("KW-ARB-READY-001"));
     }
@@ -286,11 +286,11 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     [Fact]
     public async Task FinishedDispatch_ReleasesItsFiles()
     {
-        await Dispatch("test-dev", Prompt("T1"));
+        await Dispatch("dev-medium", Prompt("T1"));
         AssertLastAllowed();
-        await Return("test-dev", Prompt("T1"), PassReport);
+        await Return("dev-medium", Prompt("T1"), PassReport);
 
-        await Dispatch("test-dev", Prompt("T5"));
+        await Dispatch("dev-medium", Prompt("T5"));
 
         Assert.Equal("ready", Answer("KW-ARB-READY-001"));
     }
@@ -300,11 +300,11 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     {
         // A confident "adds work the task does not describe" from the model refuses the dispatch.
         _provider.Answers["KW-ARB-SCOPE-002"] = "adds-work";
-        await Dispatch("csharp-dev", Prompt("T5"));
+        await Dispatch("dev-medium", Prompt("T5"));
         _provider.Answers.Clear();
         Assert.Equal("escalate", LastPrimary().Outcome);
 
-        await Dispatch("test-dev", Prompt("T1"));
+        await Dispatch("dev-medium", Prompt("T1"));
 
         Assert.Equal("ready", Answer("KW-ARB-READY-001"));
     }
@@ -312,10 +312,10 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     [Fact]
     public async Task DispatchInAnotherSession_HoldsNothing()
     {
-        await Dispatch("test-dev", Prompt("T1"), session: "other");
+        await Dispatch("dev-medium", Prompt("T1"), session: "other");
         AssertLastAllowed();
 
-        await Dispatch("test-dev", Prompt("T5"), session: "s1");
+        await Dispatch("dev-medium", Prompt("T5"), session: "s1");
 
         Assert.Equal("ready", Answer("KW-ARB-READY-001"));
     }
@@ -372,9 +372,9 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
         }
 
         string pass = WriteReport("task-gate.json", "3 passed", earlier.AddMinutes(10));
-        await Dispatch("csharp-dev", Prompt("T5"));
+        await Dispatch("dev-medium", Prompt("T5"));
         await Evaluator().EvaluateAsync(
-            Event("post", "csharp-dev", Prompt("T5"), output: $"{PassReport}TASK_GATE: PASS — agent=csharp-dev gates=1 failed=none skipped=0 report={pass} runs=2\n"),
+            Event("post", "dev-medium", Prompt("T5"), output: $"{PassReport}TASK_GATE: PASS — agent=dev-medium gates=1 failed=none skipped=0 report={pass} runs=2\n"),
             Config(),
             null,
             TestContext.Current.CancellationToken);
@@ -390,8 +390,8 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     [Fact]
     public async Task AReturnWithItsHeadersStrippedIsNotJudgedByTheFailingRunRule()
     {
-        await Dispatch("csharp-dev", Prompt("T5"));
-        await Return("csharp-dev", Prompt("T5"), PassReport);
+        await Dispatch("dev-medium", Prompt("T5"));
+        await Return("dev-medium", Prompt("T5"), PassReport);
 
         Assert.Equal("no-task", Answer("KW-ARB-MODE-002"));
     }

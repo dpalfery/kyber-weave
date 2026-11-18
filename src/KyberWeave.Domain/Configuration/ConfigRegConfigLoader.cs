@@ -18,7 +18,8 @@ public static class ConfigRegConfigLoader
         string? autonomy = null,
         RunYamlSection? run = null,
         string? stopOnToolFailure = null,
-        string? onboarding = null)
+        string? onboarding = null,
+        string? workerRoster = null)
     {
         ArgumentNullException.ThrowIfNull(defaults);
         string? setting = ParseAutonomy(autonomy) ?? defaults.Autonomy;
@@ -34,11 +35,13 @@ public static class ConfigRegConfigLoader
                 "a run stops when a tool fails unless the setting says otherwise.") ??
             defaults.StopOnToolFailure;
         string? baseBranch = ParseBaseBranch(run?.BaseBranch) ?? defaults.RunBaseBranch;
+        string? roster = string.IsNullOrWhiteSpace(workerRoster) ? defaults.WorkerRoster : workerRoster;
 
         bool unchanged = setting == defaults.Autonomy
                          && answer == defaults.Onboarding
                          && toolFailure == defaults.StopOnToolFailure
-                         && baseBranch == defaults.RunBaseBranch;
+                         && baseBranch == defaults.RunBaseBranch
+                         && roster == defaults.WorkerRoster;
         if (section is null && unchanged)
             return defaults;
 
@@ -48,7 +51,8 @@ public static class ConfigRegConfigLoader
             Autonomy = setting,
             Onboarding = answer,
             StopOnToolFailure = toolFailure,
-            RunBaseBranch = baseBranch
+            RunBaseBranch = baseBranch,
+            WorkerRoster = roster
         };
     }
 

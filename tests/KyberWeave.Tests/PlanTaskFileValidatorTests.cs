@@ -88,12 +88,210 @@ public sealed class PlanTaskFileValidatorTests
             $"did not expect {rule} from 'docs validate'; it reported {run.Describe()}.");
     }
 
+    /// <summary>The difficulty and technology a task file carries are checked before dispatch.</summary>
+    /// <summary>
+    /// The probe's task file with the first task's difficulty and technology replaced, so exactly one field
+    /// differs from the plan the file was written from.
+    /// </summary>
+    private static DocFixture CorpusWithTaskFields(string? difficulty, string? technology)
+    {
+        DocFixture fixture = PlanTaskFileProbe.Corpus();
+        string[] lines = PlanTaskFileProbe.TaskFile().Split('\n');
+        List<string> edited = [];
+        bool firstTask = false;
+        foreach (string line in lines)
+        {
+            if (line.TrimStart().StartsWith("- id: " + PlanTaskFileProbe.FirstTask, StringComparison.Ordinal))
+            {
+                firstTask = true;
+            }
+            else if (line.TrimStart().StartsWith("- id: ", StringComparison.Ordinal))
+            {
+                firstTask = false;
+            }
+
+            if (firstTask && technology is not null && line.TrimStart().StartsWith("technology: ", StringComparison.Ordinal))
+            {
+                edited.Add("    technology: " + technology);
+                continue;
+            }
+
+            edited.Add(line);
+            if (firstTask && difficulty is not null
+                && line.TrimStart().StartsWith("- id: " + PlanTaskFileProbe.FirstTask, StringComparison.Ordinal))
+            {
+                edited.Add("    difficulty: " + difficulty);
+            }
+        }
+
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, string.Join('\n', edited));
+        return fixture;
+    }
+
+    private static readonly OntologyConfig TwoTechnologies = new()
+    {
+        Technologies = ["csharp", "typescript"]
+    };
+
+    private static DiagnosticReport ValidateScope(DocFixture fixture, OntologyConfig ontology) =>
+        new PlanTaskFileValidator(
+            fixture.Root,
+            KyberWeaveConfig.ProductDefaults.WithOntology(ontology),
+            DocsPorts.Files).Validate(fixture.Load());
+
+    [Fact]
+    public void AnUnknownDifficultyIsKWDOCTASKS015NamingTheThreeValues()
+    {
+        using DocFixture fixture = CorpusWithTaskFields("tricky", null);
+
+        DiagnosticReport report = ValidateScope(fixture, TwoTechnologies);
+
+        Diagnostic finding = Assert.Single(report.Items, item => item.Code == PlanTaskFileRules.InvalidDifficulty);
+        Assert.Contains("easy", finding.Message, StringComparison.Ordinal);
+        Assert.Contains("medium", finding.Message, StringComparison.Ordinal);
+        Assert.Contains("hard", finding.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AVersionOneYamlFileWarnsAndNamesTheWriteCommand()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile(schemaVersion: 1));
+
+        DiagnosticReport report = ValidateScope(fixture, OntologyConfig.ProductDefaults);
+
+        Diagnostic warning = Assert.Single(report.Items, item => item.Code == PlanTaskFileRules.LegacyJsonTaskFile);
+        Assert.Equal(Severity.Warning, warning.Severity);
+        Assert.Contains("--write", warning.Hint, StringComparison.Ordinal);
+        Assert.DoesNotContain("--convert", warning.Hint, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnUndeclaredTechnologyIsKWDOCTASKS016NamingTheDeclaredList()
+    {
+        using DocFixture fixture = CorpusWithTaskFields(null, "cobol");
+
+        DiagnosticReport report = ValidateScope(fixture, TwoTechnologies);
+
+        Diagnostic finding = Assert.Single(report.Items, item => item.Code == PlanTaskFileRules.UndeclaredTechnology);
+        Assert.Contains("csharp", finding.Message, StringComparison.Ordinal);
+        Assert.Contains("typescript", finding.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TwoTechnologiesOnOneTaskIsKWDOCTASKS017TellingTheAuthorToSplitIt()
+    {
+        using DocFixture fixture = CorpusWithTaskFields(null, "csharp, typescript");
+
+        DiagnosticReport report = ValidateScope(fixture, TwoTechnologies);
+
+        Diagnostic finding = Assert.Single(report.Items, item => item.Code == PlanTaskFileRules.MultipleTechnologies);
+        Assert.Contains("Split", finding.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ADeclaredDifficultyAndTechnologyReportNothing()
+    {
+        using DocFixture fixture = CorpusWithTaskFields("hard", "csharp");
+
+        DiagnosticReport report = ValidateScope(fixture, TwoTechnologies);
+
+        Assert.DoesNotContain(report.Items, item => item.Code is
+            PlanTaskFileRules.InvalidDifficulty or
+            PlanTaskFileRules.UndeclaredTechnology or
+            PlanTaskFileRules.MultipleTechnologies);
+    }
+
+    [Fact]
+    public void ATaskWithNeitherLineReportsNothing()
+    {
+        using DocFixture fixture = CorpusWithTaskFields(null, null);
+
+        DiagnosticReport report = ValidateScope(fixture, TwoTechnologies);
+
+        Assert.DoesNotContain(report.Items, item => item.Code is
+            PlanTaskFileRules.InvalidDifficulty or
+            PlanTaskFileRules.UndeclaredTechnology or
+            PlanTaskFileRules.MultipleTechnologies);
+    }
+
     /// <summary>A truncated file cannot be read at all, which is the malformed case.</summary>
     [Fact]
     public void ATruncatedTaskFileIsKWDOCTASKS001()
     {
         using DocFixture fixture = PlanTaskFileProbe.Corpus();
         fixture.Write(PlanTaskFileProbe.TaskFilePath, "{\n  \"schema-version\": 1,\n  \"tasks\": [");
+
+        ReportedFindings run = Validate(fixture);
+
+        AssertReports(run, Malformed);
+        Assert.Equal(1, run.Exit);
+    }
+
+    /// <summary>
+    /// YAML reads every scalar as text, and the number normalizer converts the numeric fields. A
+    /// non-finite value such as <c>NaN</c> parses as a double but has no JSON literal, so converting
+    /// it would throw an ArgumentException out of the reader instead of reporting a malformed file.
+    /// </summary>
+    [Fact]
+    public void ANonFiniteAgentConfidenceIsKWDOCTASKS001()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, """
+            schema-version: 1
+            plan: docs/plans/2026-08-01-task-file.md
+            execution-digest: not-used
+            tasks:
+              - id: T1
+                agent-confidence: NaN
+            """);
+
+        ReportedFindings run = Validate(fixture);
+
+        AssertReports(run, Malformed);
+        Assert.Equal(1, run.Exit);
+    }
+
+    /// <summary>
+    /// An explicit <c>!!float</c> tag makes the reader hand back a double rather than text, so the check
+    /// on the text form never runs. The value still has no JSON literal, so it must become a validation
+    /// finding that names the field rather than an exception escaping the reader.
+    /// </summary>
+    [Fact]
+    public void ATaggedNonFiniteAgentConfidenceIsKWDOCTASKS001NamingTheField()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        string file = PlanTaskFileProbe.TaskFile();
+        string tagged = file.Replace(
+            $"- id: {PlanTaskFileProbe.FirstTask}\n",
+            $"- id: {PlanTaskFileProbe.FirstTask}\n    agent-confidence: !!float .nan\n",
+            StringComparison.Ordinal);
+        Assert.NotEqual(file, tagged);
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, tagged);
+
+        ReportedFindings run = Validate(fixture);
+
+        AssertReports(run, Malformed);
+        Assert.Equal(1, run.Exit);
+        Assert.Contains("agent-confidence", run.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A tag makes a map key a double, not text, and JSON has no literal for a non-finite one. The reader
+    /// must refuse it as a malformed file: a stringified key is an unknown property, which the model's reader
+    /// ignores, so the file would validate.
+    /// </summary>
+    [Fact]
+    public void ATaggedNonFiniteTaskKeyIsKWDOCTASKS001()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        string file = PlanTaskFileProbe.TaskFile();
+        string tagged = file.Replace(
+            $"- id: {PlanTaskFileProbe.FirstTask}\n",
+            $"- id: {PlanTaskFileProbe.FirstTask}\n    !!float .nan : not-a-field\n",
+            StringComparison.Ordinal);
+        Assert.NotEqual(file, tagged);
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, tagged);
 
         ReportedFindings run = Validate(fixture);
 
@@ -937,12 +1135,13 @@ internal sealed class ReportedFindings
 internal static class PlanTaskFileProbe
 {
     /// <summary>The schema version this build reads.</summary>
-    internal const int SchemaVersion = 1;
+    internal const int SchemaVersion = 2;
 
     internal const string PlansFolder = "6-Docs/plans";
     internal const string PlanName = "2026-11-07-ready-tasks";
     internal const string PlanPath = PlansFolder + "/" + PlanName + ".md";
-    internal const string TaskFilePath = PlansFolder + "/" + PlanName + ".tasks.json";
+    internal const string TaskFilePath = PlansFolder + "/" + PlanName + ".tasks.yml";
+    internal const string LegacyTaskFilePath = PlansFolder + "/" + PlanName + ".tasks.json";
     internal const string PlanIndexPath = PlansFolder + "/README.md";
 
     /// <summary>This fixture's two tasks, the second depending on the first.</summary>
@@ -962,6 +1161,13 @@ internal static class PlanTaskFileProbe
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
+    private static readonly YamlDotNet.Serialization.ISerializer Yaml =
+        new YamlDotNet.Serialization.SerializerBuilder()
+            .WithNamingConvention(YamlDotNet.Serialization.NamingConventions.HyphenatedNamingConvention.Instance)
+            .ConfigureDefaultValuesHandling(YamlDotNet.Serialization.DefaultValuesHandling.OmitNull)
+            .WithIndentedSequences()
+            .Build();
+
     /// <summary>The test class every fixture prompt names, read from the type it names.</summary>
     internal static string TestClass => typeof(PlanTaskFileValidatorTests).FullName!;
 
@@ -973,6 +1179,13 @@ internal static class PlanTaskFileProbe
     internal static DocFixture Corpus(string? planMarkdown = null)
     {
         return new DocFixture().WithCatalog()
+            .Write(
+                ".kyber-weave/kyber-weave.yml",
+                """
+                ontology:
+                  technologies:
+                    - csharp
+                """)
             .Write(
                 PlanIndexPath,
                 """
@@ -1035,12 +1248,14 @@ internal static class PlanTaskFileProbe
 
         - **Files:** {{Backticked(FirstTaskFiles)}}
         - **Depends on:** none
+        - **Technology:** csharp
         - **Required skills:** `csharp-dev`
 
         ### {{SecondTask}}: The drift and prompt rules
 
         - **Files:** {{Backticked(SecondTaskFiles)}}
         - **Depends on:** {{FirstTask}}
+        - **Technology:** csharp
         - **Required skills:** `test-dev`
 
         ## Out of scope
@@ -1093,6 +1308,48 @@ internal static class PlanTaskFileProbe
     internal static string TaskFile(
         string? planMarkdown = null,
         int schemaVersion = SchemaVersion,
+        string? edit = null,
+        string? missingPromptPart = null,
+        string? promptPrefix = null,
+        string? digest = null)
+    {
+        string plan = planMarkdown ?? PlanMarkdown();
+        List<Dictionary<string, object?>> tasks =
+        [
+            Row(
+                FirstTask,
+                "csharp-dev",
+                edit == "files" ? [FirstTaskFiles[0]] : FirstTaskFiles,
+                [],
+                Prompt(FirstTask, missingPromptPart, promptPrefix)),
+            Row(
+                SecondTask,
+                "test-dev",
+                SecondTaskFiles,
+                edit == "depends-on" ? [] : [FirstTask],
+                Prompt(SecondTask, missingPromptPart, promptPrefix))
+        ];
+
+        if (edit == "task")
+        {
+            tasks.RemoveAt(1);
+        }
+
+        Dictionary<string, object?> file = new(StringComparer.Ordinal)
+        {
+            ["schema-version"] = schemaVersion,
+            ["plan"] = PlanPath,
+            ["execution-digest"] = digest ?? ExecutionDigest(plan),
+            ["tasks"] = tasks
+        };
+
+        return Yaml.Serialize(file);
+    }
+
+    /// <summary>The same task file in the JSON form an older release wrote, for the conversion tests.</summary>
+    internal static string LegacyJsonTaskFile(
+        string? planMarkdown = null,
+        int schemaVersion = 1,
         string? edit = null,
         string? missingPromptPart = null,
         string? promptPrefix = null,
@@ -1187,7 +1444,8 @@ internal static class PlanTaskFileProbe
             ["depends-on"] = dependsOn,
             ["files"] = files,
             ["session"] = id,
-            ["prompt"] = prompt
+            ["prompt"] = prompt,
+            ["technology"] = "csharp"
         };
 
     private static string Prompt(string taskId, string? missingPromptPart, string? promptPrefix)
@@ -1229,7 +1487,8 @@ internal static class SpecTaskFileProbe
     internal const string SpecFolder = "6-Docs/specs/ready-feature";
     internal const string SpecIndexPath = "6-Docs/specs/README.md";
     internal const string TasksPath = SpecFolder + "/tasks.md";
-    internal const string TaskFilePath = SpecFolder + "/tasks.json";
+    internal const string TaskFilePath = SpecFolder + "/tasks.yml";
+    internal const string LegacyTaskFilePath = SpecFolder + "/tasks.json";
     internal const string DesignPath = SpecFolder + "/design.md";
 
     /// <summary>This fixture's two spec tasks, the second depending on the first.</summary>
@@ -1240,12 +1499,24 @@ internal static class SpecTaskFileProbe
     internal const string FirstTaskFile = "tests/KyberWeave.Tests/PlanTaskFileValidatorTests.cs";
     internal const string SecondTaskFile = "src/KyberWeave.Core.Docs/Validation/PlanTaskFileValidator.cs";
 
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly YamlDotNet.Serialization.ISerializer Yaml =
+        new YamlDotNet.Serialization.SerializerBuilder()
+            .WithNamingConvention(YamlDotNet.Serialization.NamingConventions.HyphenatedNamingConvention.Instance)
+            .ConfigureDefaultValuesHandling(YamlDotNet.Serialization.DefaultValuesHandling.OmitNull)
+            .WithIndentedSequences()
+            .Build();
 
     /// <summary>A corpus holding the specification index, the spec folder and its four files.</summary>
     internal static DocFixture Corpus(string? tasksMarkdown = null)
     {
         return new DocFixture().WithCatalog()
+            .Write(
+                ".kyber-weave/kyber-weave.yml",
+                """
+                ontology:
+                  technologies:
+                    - csharp
+                """)
             .Write(
                 SpecIndexPath,
                 """
@@ -1328,6 +1599,7 @@ internal static class SpecTaskFileProbe
             - `tests/KyberWeave.Tests/PlanTaskFileValidatorTests.cs`
           - **Acceptance:**
             - `Widget.Flag` is reported when the digest is stale.
+          - **Technology:** csharp
           - **Skills:** `test-dev`
           - **Depends on:** none
           - _Requirements: 1.1, 1.2_
@@ -1337,6 +1609,7 @@ internal static class SpecTaskFileProbe
             - `src/KyberWeave.Core.Docs/Validation/PlanTaskFileValidator.cs`
           - **Acceptance:**
             - `Widget.Flag` is reported when a task is missing.
+          - **Technology:** csharp
           - **Skills:** `csharp-dev`
           - **Depends on:** 1.1
           - _Requirements: 1.1, 1.2_
@@ -1383,7 +1656,7 @@ internal static class SpecTaskFileProbe
             ["tasks"] = tasks
         };
 
-        return JsonSerializer.Serialize(file, JsonOptions);
+        return Yaml.Serialize(file);
     }
 
     /// <summary>
@@ -1471,6 +1744,7 @@ internal static class SpecTaskFileProbe
             ["depends-on"] = dependsOn,
             ["files"] = files,
             ["session"] = id,
-            ["prompt"] = prompt
+            ["prompt"] = prompt,
+            ["technology"] = "csharp"
         };
 }

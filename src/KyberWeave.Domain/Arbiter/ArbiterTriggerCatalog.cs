@@ -11,6 +11,12 @@ namespace KyberWeave.Core.Arbiter;
 /// </remarks>
 public static class ArbiterTriggerCatalog
 {
+    /// <summary>
+    /// The fact holding the task's one technology, from its <c>Technology:</c> label, when it names one. It
+    /// selects the technology folder's rules; a task that names none leaves it absent.
+    /// </summary>
+    public const string TaskTechnologyFact = "plan.task.technology";
+
     private static readonly IReadOnlySet<string> DelegateFacts = new HashSet<string>(StringComparer.Ordinal)
     {
         "caller",
@@ -39,6 +45,7 @@ public static class ArbiterTriggerCatalog
         "plan.task.files",
         "plan.task.depends-on",
         "plan.task.skills",
+        "plan.task.technology",
         "plan.out-of-scope",
         "plan.test-contract.row",
         "ledger.in-flight.paths",
@@ -78,6 +85,7 @@ public static class ArbiterTriggerCatalog
                 [
                     "git.changed-paths.since-dispatch", "git.changed-paths.attributed", "ledger.concurrent.paths", "gate.report.agrees",
                     "gate.report.failing-run-first", "gate.report.claim", "delegation.returned-tail", "checkout.stray-paths", "config.task-gates-declared",
+                    "plan.task.files-all-tests",
                 ]),
             ["delegate.planner"] = DelegatePlannerFacts,
             ["delegate.planner.returned"] = Union(
@@ -111,6 +119,9 @@ public static class ArbiterTriggerCatalog
                 "plan.task.text",
                 "plan.task.files",
                 "plan.task.file-kinds",
+                // The rating the task file records, which the difficulty rule reads under the tiered roster
+                // instead of asking the model a second time.
+                "plan.task.difficulty",
                 "ledger.task.prior-attempt",
                 "model-targeting.prior-result",
                 "model-targeting.prior-profile",
@@ -213,6 +224,20 @@ public static class ArbiterTriggerCatalog
                 "gate.applies-when.paths",
                 "review.changed-paths",
                 "review.base-ref",
+            },
+            // Raised by the worker guard on a sub-agent's own command call, so a technology's rules can
+            // declare the forms a read-only dispatch may run.
+            ["worker.command"] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "worker.name",
+                "worker.capability-profile",
+                "worker.harness",
+                "command.text",
+                "command.form",
+                "command.single",
+                "command.head",
+                "command.program",
+                "command.words",
             },
         };
 

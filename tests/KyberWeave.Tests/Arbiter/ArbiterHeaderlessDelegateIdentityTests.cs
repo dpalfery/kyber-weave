@@ -43,12 +43,12 @@ public sealed class ArbiterHeaderlessDelegateIdentityTests : IDisposable
         Documentation-impact review and closeout for a completed, plan-backed change.
 
         WORKTREE: /work/demo.worktrees/run
-        PLAN: docs/plans/cards.md (Ready; task file .tasks.json beside it)
+        PLAN: docs/plans/cards.md (Ready; task file .tasks.yml beside it)
 
         Completed tasks (committed on the branch):
-        - T1 dal-dev: f43ed15
-        - T2 csharp-dev: 0b08d4c
-        - T3 react-dev: 04cb146
+        - T1 dev-medium: f43ed15
+        - T2 dev-medium: 0b08d4c
+        - T3 dev-medium: 04cb146
         """;
 
     private const string Delivery =
@@ -89,9 +89,9 @@ public sealed class ArbiterHeaderlessDelegateIdentityTests : IDisposable
     public void Dispose() => _repo.Dispose();
 
     [Theory]
-    [InlineData("dal-dev", DataLayerTask, "T1")]
-    [InlineData("csharp-dev", ApiTask, "T2")]
-    [InlineData("react-dev", ProsePacket, "T3")]
+    [InlineData("dev-medium", DataLayerTask, "T1")]
+    [InlineData("dev-medium", ApiTask, "T2")]
+    [InlineData("dev-medium", ProsePacket, "T3")]
     public void AHeaderlessTaskDispatch_IsADelegate_WithItsTaskResolved(string target, string prompt, string task)
     {
         (TriggerClassification classification, ArbiterFactSet facts) = Facts(target, prompt);
@@ -104,7 +104,7 @@ public sealed class ArbiterHeaderlessDelegateIdentityTests : IDisposable
 
     [Theory]
     [InlineData("docs-dev", Closeout)]
-    [InlineData("github-devops", Delivery)]
+    [InlineData("devops", Delivery)]
     public void ADispatchThatIsNoPlanTask_KnowsThePlan_AndIsAllowedAtStepZero(string target, string prompt)
     {
         (TriggerClassification classification, ArbiterFactSet facts) = Facts(target, prompt);
@@ -122,10 +122,10 @@ public sealed class ArbiterHeaderlessDelegateIdentityTests : IDisposable
     [Fact]
     public void AMachineIdentifiedTaskWithAnUnfinishedDependency_IsNotJudgedOnReturnsItCannotSee()
     {
-        (_, ArbiterFactSet facts) = Facts("csharp-dev", ApiTask);
+        (_, ArbiterFactSet facts) = Facts("dev-medium", ApiTask);
         facts = facts
             .With("ledger.completed-tasks", new List<string>(), ArbiterFactLabel.Derived)
-            .With("ledger.task-returns", new List<string> { "task: T3\ntarget: react-dev\nRESULT: done" }, ArbiterFactLabel.Derived)
+            .With("ledger.task-returns", new List<string> { "task: T3\ntarget: dev-medium\nRESULT: done" }, ArbiterFactLabel.Derived)
             .With("harness.observes-returns", true, ArbiterFactLabel.Derived);
 
         Assert.Equal("returns-unread", Decide("KW-ARB-READY-001", facts));
@@ -136,7 +136,7 @@ public sealed class ArbiterHeaderlessDelegateIdentityTests : IDisposable
     {
         File.Delete(Path.Combine(_repo.Path, "docs", "plans", "cards.md"));
 
-        (_, ArbiterFactSet facts) = Facts("dal-dev", DataLayerTask);
+        (_, ArbiterFactSet facts) = Facts("dev-medium", DataLayerTask);
 
         Assert.Equal("unresolved", Decide("KW-ARB-PLAN-001", facts));
         Assert.Equal("task-unknown", Decide("KW-ARB-SCOPE-001", facts));
@@ -147,7 +147,7 @@ public sealed class ArbiterHeaderlessDelegateIdentityTests : IDisposable
     {
         File.WriteAllText(Path.Combine(_repo.Path, "docs", "plans", "other.md"), PlanText);
 
-        (_, ArbiterFactSet facts) = Facts("dal-dev", DataLayerTask);
+        (_, ArbiterFactSet facts) = Facts("dev-medium", DataLayerTask);
 
         Assert.Null(Value(facts, "plan.exists"));
         Assert.Equal("unresolved", Decide("KW-ARB-PLAN-001", facts));
@@ -169,7 +169,7 @@ public sealed class ArbiterHeaderlessDelegateIdentityTests : IDisposable
     public void HeadersStillWin_OverMachineIdentity()
     {
         (TriggerClassification classification, ArbiterFactSet facts) = Facts(
-            "csharp-dev", "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/cards.md\nTASK: T2\n\nTASK_ID: T1\nDo the work.");
+            "dev-medium", "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/cards.md\nTASK: T2\n\nTASK_ID: T1\nDo the work.");
 
         Assert.Equal("delegate", classification.Trigger);
         Assert.Equal(PlanFacts.HeaderIdentity, Value(facts, PlanFacts.IdentityFact));
@@ -181,7 +181,7 @@ public sealed class ArbiterHeaderlessDelegateIdentityTests : IDisposable
     [InlineData("antigravity")]
     public void OnAHarnessWhereNoCallerMeansUnknown_AHeaderlessDispatchStaysAnInvestigate(string harness)
     {
-        TriggerClassification classification = Assert.Single(TriggerClassifier.Classify(Event("dal-dev", DataLayerTask, harness)));
+        TriggerClassification classification = Assert.Single(TriggerClassifier.Classify(Event("dev-medium", DataLayerTask, harness)));
 
         Assert.Equal("investigate", classification.Trigger);
     }

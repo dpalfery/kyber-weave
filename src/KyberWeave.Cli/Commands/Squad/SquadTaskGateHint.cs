@@ -7,10 +7,12 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// Prints the one-line task-gate hint after a project-scope squad deployment.
 /// </summary>
 /// <remarks>
-/// Squad writes no configuration: when the project's host config declares no
-/// <c>review.task-gates</c> — or cannot be read at all, which is the same as no gates
-/// for this purpose — the verb prints where those gates come from instead of writing
-/// them. The load never fails the verb; an unreadable config still deploys.
+/// Squad writes no configuration: when the project's host config declares neither
+/// <c>review.task-gates</c> nor <c>review.technology-gates</c> — or cannot be read at all, which is the
+/// same as no gates for this purpose — the verb prints where those gates come from instead of writing
+/// them. A tiered roster keys its gates by technology, so testing the agent-keyed form alone would tell
+/// a project that declares the right gates that it has none. The load never fails the verb; an
+/// unreadable config still deploys.
 /// </remarks>
 internal static class SquadTaskGateHint
 {
@@ -22,7 +24,8 @@ internal static class SquadTaskGateHint
 
     /// <summary>
     /// Prints <see cref="Message"/> when the project at <paramref name="projectRoot"/>
-    /// declares no task gates. Global scope never calls this, because there is no project.
+    /// declares no task gates, keyed by agent or by technology. Global scope never calls this, because
+    /// there is no project.
     /// </summary>
     internal static void WriteIfNoTaskGates(string projectRoot)
     {
@@ -32,7 +35,8 @@ internal static class SquadTaskGateHint
             KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(projectRoot);
             hasTaskGates = result.Success
                            && result.Config is not null
-                           && result.Config.Review.TaskGates.Count > 0;
+                           && (result.Config.Review.TaskGates.Count > 0
+                               || result.Config.Review.TechnologyGates.Count > 0);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or YamlException
                                        or InvalidDataException or ArgumentException)

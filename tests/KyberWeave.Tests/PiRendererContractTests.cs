@@ -290,31 +290,23 @@ public sealed class PiRendererContractTests : IDisposable
                 "deep-planning" => "zai/glm-5.3",
                 "fast" => "opencode-go/muse-spark-1.3-contributor",
                 "general" => "opencode-go/muse-spark-1.3-contributor",
+                "dev-hard" => "zai/glm-5.3",
                 "reviewer" => "opencode-go/kimi-k2.7-code",
-                "orchestration" => "inherit",
+                "" => "inherit",
                 _ => throw new InvalidOperationException($"Unknown profile '{agent.ModelProfile}' for agent '{agent.Name}'.")
             };
 
-            // Extract thinking level from the profile's pi value
-            string? expectedThinking = null;
-            if (expectedModel != "inherit" && source.ModelProfiles.Profiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? profile))
+            // The approved thinking level per profile, pinned here rather than read back from
+            // models.yml: a value derived from the file under test agrees with any suffix that file
+            // carries, so a wrong level could never fail.
+            string? expectedThinking = agent.ModelProfile switch
             {
-                if (profile.HarnessModels.TryGetValue("pi", out string? piValue))
-                {
-                    // Parse [thinking=<level>] suffix if present
-                    const string thinkingPrefix = "[thinking=";
-                    int thinkingStart = piValue.IndexOf(thinkingPrefix, 0, StringComparison.Ordinal);
-                    if (thinkingStart >= 0)
-                    {
-                        int thinkingValueStart = thinkingStart + thinkingPrefix.Length;
-                        int thinkingEnd = piValue.IndexOf(']', thinkingValueStart);
-                        if (thinkingEnd > thinkingValueStart)
-                        {
-                            expectedThinking = piValue.Substring(thinkingValueStart, thinkingEnd - thinkingValueStart);
-                        }
-                    }
-                }
-            }
+                "architect" or "deep-planning" or "dev-hard" or "reviewer" => "high",
+                "general" => "medium",
+                "fast" => "low",
+                "" => null,
+                _ => throw new InvalidOperationException($"Unknown profile '{agent.ModelProfile}' for agent '{agent.Name}'.")
+            };
 
             if (expectedModel == "inherit")
             {
@@ -1141,6 +1133,7 @@ public sealed class PiRendererContractTests : IDisposable
     /// deep-planning → model <c>zai/glm-5.3</c>, thinking <c>high</c>;
     /// reviewer → <c>opencode-go/kimi-k2.7-code</c>, <c>high</c>;
     /// general → <c>opencode-go/muse-spark-1.3-contributor</c>, <c>medium</c>;
+    /// dev-hard → <c>zai/glm-5.3</c>, <c>high</c>;
     /// fast → <c>opencode-go/muse-spark-1.3-contributor</c>, <c>low</c>;
     /// orchestration → no model, no thinking.
     /// This contract pins the approved mapping directly from the plan.
@@ -1150,6 +1143,7 @@ public sealed class PiRendererContractTests : IDisposable
     [InlineData("deep-planning", "zai/glm-5.3", "high")]
     [InlineData("reviewer", "opencode-go/kimi-k2.7-code", "high")]
     [InlineData("general", "opencode-go/muse-spark-1.3-contributor", "medium")]
+    [InlineData("dev-hard", "zai/glm-5.3", "high")]
     [InlineData("fast", "opencode-go/muse-spark-1.3-contributor", "low")]
     public async Task RenderAsync_Pi_CanonicalProfilesEmitApprovedThinkingLevels(
         string profileName,
@@ -1180,9 +1174,9 @@ public sealed class PiRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// Plan §8 A1 / D2: The orchestration profile has <c>pi: inherit</c> and must omit
-    /// both <c>model</c> and <c>thinking</c> keys. The conductor (primary agent on orchestration)
-    /// lowers to a skill, so verify the lowered skill file omits these keys.
+    /// The conductor has no model profile and must omit both <c>model</c> and <c>thinking</c>.
+    /// The conductor (the primary agent) lowers to a skill, so verify the lowered skill file
+    /// omits these keys.
     /// </summary>
     [Fact]
     public async Task RenderAsync_Pi_OrchestrationProfileOmitsModelAndThinking()
@@ -1190,7 +1184,7 @@ public sealed class PiRendererContractTests : IDisposable
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent conductor = source.Agents.First(a =>
             a.Invocation == SquadInvocation.Primary &&
-            string.Equals(a.ModelProfile, "orchestration", StringComparison.Ordinal));
+            string.Equals(a.Name, "conductor", StringComparison.Ordinal));
 
         SquadRenderResult result = await RenderPiAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -1238,10 +1232,10 @@ public sealed class PiRendererContractTests : IDisposable
 internal sealed class PiModelOverrideFixture : IDisposable
 {
     internal const string OverriddenProfile = "general";
-    internal const string OverriddenAgentName = "go-dev";
+    internal const string OverriddenAgentName = "dev-medium";
     internal const string OverrideModel = "acme/pi-test-model";
     internal const string InheritProfile = "fast";
-    internal const string InheritAgentName = "csharp-dev";
+    internal const string InheritAgentName = "dev-easy";
 
     private readonly TempDirectory _temp = new();
 
@@ -1469,7 +1463,7 @@ internal sealed class PiFileReadDeniedFixture : IDisposable
 /// </summary>
 internal sealed class PiThinkingSuffixFixture : IDisposable
 {
-    internal const string TestAgentName = "go-dev";
+    internal const string TestAgentName = "dev-medium";
 
     private readonly TempDirectory _temp = new();
 

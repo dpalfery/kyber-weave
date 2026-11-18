@@ -16,7 +16,7 @@ public sealed class ArbiterClassificationTests
 {
     private static ArbiterEvent Dispatch(
         string prompt,
-        string? target = "csharp-dev",
+        string? target = "dev-medium",
         string harness = "antigravity",
         string phase = "pre",
         string? harnessCaller = null,
@@ -160,8 +160,8 @@ public sealed class ArbiterClassificationTests
     [Fact]
     public void TargetClasses_FollowTheCatalogProfiles()
     {
-        Assert.Equal("implementation", TriggerClassifier.TargetClassFor("csharp-dev"));
-        Assert.Equal("implementation", TriggerClassifier.TargetClassFor("test-dev"));
+        Assert.Equal("implementation", TriggerClassifier.TargetClassFor("dev-medium"));
+        Assert.Equal("implementation", TriggerClassifier.TargetClassFor("dev-medium"));
         Assert.Equal("planner", TriggerClassifier.TargetClassFor("architect"));
         Assert.Equal("planner", TriggerClassifier.TargetClassFor("product-owner"));
         Assert.Equal("read-only", TriggerClassifier.TargetClassFor("review-triage"));
@@ -177,15 +177,15 @@ public sealed class ArbiterClassificationTests
     public void CallerInference_PlanFileOrTaskMeansConductor()
     {
         var plan = TriggerClassifier.ClassifySingle(
-            Dispatch(Marked("work", "PLAN_FILE: docs/plans/plan.md"), target: "csharp-dev"),
-            "csharp-dev",
+            Dispatch(Marked("work", "PLAN_FILE: docs/plans/plan.md"), target: "dev-medium"),
+            "dev-medium",
             Marked("work", "PLAN_FILE: docs/plans/plan.md"));
 
         Assert.Equal("conductor", plan.Caller);
 
         var task = TriggerClassifier.ClassifySingle(
-            Dispatch(Marked("work", "TASK: T3"), target: "csharp-dev"),
-            "csharp-dev",
+            Dispatch(Marked("work", "TASK: T3"), target: "dev-medium"),
+            "dev-medium",
             Marked("work", "TASK: T3"));
 
         Assert.Equal("conductor", task.Caller);
@@ -267,8 +267,8 @@ public sealed class ArbiterClassificationTests
     public void CallerInference_MarkerOnlyStaysUnidentified()
     {
         TriggerClassification plan = TriggerClassifier.ClassifySingle(
-            Dispatch(Marked("work"), target: "csharp-dev", harness: "antigravity"),
-            "csharp-dev",
+            Dispatch(Marked("work"), target: "dev-medium", harness: "antigravity"),
+            "dev-medium",
             Marked("work"));
 
         Assert.Null(plan.Caller);
@@ -280,11 +280,11 @@ public sealed class ArbiterClassificationTests
         TriggerClassification plan = TriggerClassifier.ClassifySingle(
             Dispatch(
                 Marked("work", "PLAN_FILE: docs/plans/plan.md\nTASK: T3"),
-                target: "csharp-dev",
+                target: "dev-medium",
                 harness: "claude",
                 harnessCaller: "conductor",
                 renderedCaller: "architect"),
-            "csharp-dev",
+            "dev-medium",
             Marked("work", "PLAN_FILE: docs/plans/plan.md\nTASK: T3"));
 
         Assert.Equal("conductor", plan.Caller);
@@ -297,15 +297,15 @@ public sealed class ArbiterClassificationTests
     {
         string prompt = Marked("Implement.", "PLAN_FILE: docs/plans/plan.md\nTASK: T3");
         TriggerClassification pre = TriggerClassifier.ClassifySingle(
-            Dispatch(prompt, target: "csharp-dev", harness: "claude", harnessCaller: "conductor"),
-            "csharp-dev",
+            Dispatch(prompt, target: "dev-medium", harness: "claude", harnessCaller: "conductor"),
+            "dev-medium",
             prompt);
 
         Assert.Equal("delegate", pre.Trigger);
 
         TriggerClassification post = TriggerClassifier.ClassifySingle(
-            Dispatch(prompt, target: "csharp-dev", harness: "claude", harnessCaller: "conductor", phase: "post"),
-            "csharp-dev",
+            Dispatch(prompt, target: "dev-medium", harness: "claude", harnessCaller: "conductor", phase: "post"),
+            "dev-medium",
             prompt);
 
         Assert.Equal("delegate.returned", post.Trigger);
@@ -409,8 +409,8 @@ public sealed class ArbiterClassificationTests
     {
         string prompt = Marked("Look around.");
         TriggerClassification plan = TriggerClassifier.ClassifySingle(
-            Dispatch(prompt, target: "csharp-dev", harness: "claude", harnessCaller: "architect"),
-            "csharp-dev",
+            Dispatch(prompt, target: "dev-medium", harness: "claude", harnessCaller: "architect"),
+            "dev-medium",
             prompt);
 
         // An identified caller outside its roster still classifies; ROSTER-001 escalates it.
@@ -493,7 +493,7 @@ public sealed class ArbiterClassificationTests
     [InlineData("claude", "investigate")]
     public void Classification_UnmarkedUnidentifiedDispatchToASquadAgent_IsEvaluated(string harness, string expected)
     {
-        var ev = Dispatch("Do anything with `src/a.cs`.", target: "csharp-dev", harness: harness);
+        var ev = Dispatch("Do anything with `src/a.cs`.", target: "dev-medium", harness: harness);
 
         TriggerClassification single = Assert.Single(TriggerClassifier.Classify(ev));
 
@@ -527,8 +527,8 @@ public sealed class ArbiterClassificationTests
             IsDispatch = true,
             Dispatches =
             [
-                new ArbiterDispatch("csharp-dev", Marked("One.", "PLAN_FILE: docs/plans/plan.md\nTASK: T1")),
-                new ArbiterDispatch("test-dev", Marked("Two.", "PLAN_FILE: docs/plans/plan.md\nTASK: T2")),
+                new ArbiterDispatch("dev-medium", Marked("One.", "PLAN_FILE: docs/plans/plan.md\nTASK: T1")),
+                new ArbiterDispatch("dev-medium", Marked("Two.", "PLAN_FILE: docs/plans/plan.md\nTASK: T2")),
             ],
         };
 
@@ -536,8 +536,8 @@ public sealed class ArbiterClassificationTests
 
         Assert.Equal(2, rows.Count);
         Assert.All(rows, row => Assert.Equal("delegate", row.Trigger));
-        Assert.Equal("csharp-dev", rows[0].Target);
-        Assert.Equal("test-dev", rows[1].Target);
+        Assert.Equal("dev-medium", rows[0].Target);
+        Assert.Equal("dev-medium", rows[1].Target);
     }
 
     [Fact]
@@ -556,8 +556,8 @@ public sealed class ArbiterClassificationTests
     {
         // The body names a plan path, but without headers nothing is inferred.
         TriggerClassification plan = TriggerClassifier.ClassifySingle(
-            Dispatch("Read docs/plans/other.md and implement `src/a.cs`.", target: "csharp-dev", harness: "antigravity"),
-            "csharp-dev",
+            Dispatch("Read docs/plans/other.md and implement `src/a.cs`.", target: "dev-medium", harness: "antigravity"),
+            "dev-medium",
             "Read docs/plans/other.md and implement `src/a.cs`.");
 
         Assert.Null(plan.Caller);
@@ -578,13 +578,13 @@ public sealed class ArbiterClassificationTests
     [Fact]
     public void Classification_RunStartMarkerIsInvestigateNotDelegate()
     {
-        // csharp-dev is an implementation-class target, so conductor-to-implementation is otherwise
+        // dev-medium is an implementation-class target, so conductor-to-implementation is otherwise
         // the textbook delegate row. Only the marker separates the two.
         string prompt = Marked("RUN-START: true\n\nRun the run-start step and report the facts.");
 
         TriggerClassification runStart = TriggerClassifier.ClassifySingle(
-            Dispatch(prompt, target: "csharp-dev", harness: "antigravity", harnessCaller: "conductor"),
-            "csharp-dev",
+            Dispatch(prompt, target: "dev-medium", harness: "antigravity", harnessCaller: "conductor"),
+            "dev-medium",
             prompt);
 
         Assert.NotEqual("delegate", runStart.Trigger);

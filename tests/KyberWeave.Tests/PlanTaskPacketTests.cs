@@ -102,7 +102,7 @@ public sealed class PlanTaskPacketTests
         (PlanTaskFile? second, _) = Build(markdown);
 
         Assert.Contains("The widget is 320px wide and sits left of the chart.", first!.Tasks![0].Prompt, StringComparison.Ordinal);
-        Assert.Equal(PlanTaskFileJson.Serialize(first), PlanTaskFileJson.Serialize(second!));
+        Assert.Equal(PlanTaskFileFormat.Serialize(first), PlanTaskFileFormat.Serialize(second!));
     }
 
     [Fact]

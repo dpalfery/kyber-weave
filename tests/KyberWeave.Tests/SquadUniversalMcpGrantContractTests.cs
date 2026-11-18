@@ -564,8 +564,8 @@ public sealed class SquadUniversalMcpGrantContractTests
         Assert.Contains("kw-docs", conductorServers, StringComparer.Ordinal);
         Assert.DoesNotContain("codegraph", conductorServers, StringComparer.Ordinal);
 
-        // 2. Read-entitled specialists: csharp-dev, test-dev, architect
-        string[] specialists = ["csharp-dev", "test-dev", "architect"];
+        // 2. Read-entitled specialists: dev-easy, dev-medium, architect
+        string[] specialists = ["dev-easy", "dev-medium", "architect"];
         foreach (string specialist in specialists)
         {
             SquadDeploymentFile specialistFile = Assert.Single(
@@ -605,7 +605,7 @@ public sealed class SquadUniversalMcpGrantContractTests
         IReadOnlyList<string> conductorServers = McpServerEntryNames(Frontmatter(conductorFile));
         Assert.Equal(["kw-docs"], conductorServers);
 
-        foreach (string specialist in new[] { "csharp-dev", "test-dev", "architect" })
+        foreach (string specialist in new[] { "dev-easy", "dev-medium", "architect" })
         {
             SquadDeploymentFile specialistFile = Assert.Single(
                 result.Files,
@@ -640,8 +640,8 @@ public sealed class SquadUniversalMcpGrantContractTests
         Assert.Contains("kw-docs", conductorServers, StringComparer.Ordinal);
         Assert.DoesNotContain("codegraph", conductorServers, StringComparer.Ordinal);
 
-        // 2. Read-entitled specialists: csharp-dev, test-dev, architect
-        string[] specialists = ["csharp-dev", "test-dev", "architect"];
+        // 2. Read-entitled specialists: dev-easy, dev-medium, architect
+        string[] specialists = ["dev-easy", "dev-medium", "architect"];
         foreach (string specialist in specialists)
         {
             SquadDeploymentFile specialistFile = Assert.Single(

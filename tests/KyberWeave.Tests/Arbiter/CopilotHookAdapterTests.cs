@@ -134,7 +134,7 @@ public sealed class CopilotHookAdapterTests
         // updatedInput is the complete tool_input: every original field survives.
         JsonElement updated = output.GetProperty("updatedInput");
         Assert.Equal("Implement T4.2", updated.GetProperty("description").GetString());
-        Assert.Equal("csharp-dev", updated.GetProperty("agentName").GetString());
+        Assert.Equal("dev-medium", updated.GetProperty("agentName").GetString());
         string prompt = updated.GetProperty("prompt").GetString() ?? string.Empty;
         Assert.Equal("Implement the parser.", prompt);
         Assert.DoesNotContain("KYBER-ARBITER", prompt, StringComparison.Ordinal);
@@ -148,10 +148,10 @@ public sealed class CopilotHookAdapterTests
         string stdin = VsCodeFixture("pre-runsubagent-no-agentname.json").Replace(
             "toolu-copilot-vs-dispatch-2", "toolu-copilot-vs-noagent-1", StringComparison.Ordinal);
 
-        (int exit, _, _) = Run(CopilotHookAdapter.VsCodeToken, stdin, "csharp-dev", engine);
+        (int exit, _, _) = Run(CopilotHookAdapter.VsCodeToken, stdin, "dev-medium", engine);
 
         Assert.Equal(0, exit);
-        Assert.Equal("csharp-dev", engine.SeenPreTarget);
+        Assert.Equal("dev-medium", engine.SeenPreTarget);
     }
 
     [Fact]
@@ -162,7 +162,7 @@ public sealed class CopilotHookAdapterTests
         (int exit, string stdout, _) = Run(
             CopilotHookAdapter.VsCodeToken,
             VsCodeFixture("pre-tool-content-denied.json"),
-            "csharp-dev",
+            "dev-medium",
             new ScriptedEngine(),
             _ => DocsRootConfig());
 
@@ -181,7 +181,7 @@ public sealed class CopilotHookAdapterTests
         (int exit, string stdout, _) = Run(
             CopilotHookAdapter.VsCodeToken,
             VsCodeFixture("pre-tool-content-allowed.json"),
-            "csharp-dev",
+            "dev-medium",
             engine,
             _ => DocsRootConfig());
 
@@ -240,7 +240,7 @@ public sealed class CopilotHookAdapterTests
         using JsonDocument doc = JsonDocument.Parse(stdout);
         Assert.Equal("deny", doc.RootElement.GetProperty("permissionDecision").GetString());
         Assert.Equal(envelope, doc.RootElement.GetProperty("permissionDecisionReason").GetString());
-        Assert.Equal("csharp-dev", engine.SeenPreTarget);
+        Assert.Equal("dev-medium", engine.SeenPreTarget);
     }
 
     [Fact]
@@ -257,7 +257,7 @@ public sealed class CopilotHookAdapterTests
         using JsonDocument doc = JsonDocument.Parse(stdout);
         Assert.Equal("deny", doc.RootElement.GetProperty("permissionDecision").GetString());
         Assert.Equal(envelope, doc.RootElement.GetProperty("permissionDecisionReason").GetString());
-        Assert.Equal("csharp-dev", engine.SeenPreTarget);
+        Assert.Equal("dev-medium", engine.SeenPreTarget);
     }
 
     [Fact]
@@ -273,7 +273,7 @@ public sealed class CopilotHookAdapterTests
         // modifiedArgs is the complete arguments: every original field survives.
         JsonElement modified = doc.RootElement.GetProperty("modifiedArgs");
         Assert.Equal("Implement T4.2", modified.GetProperty("description").GetString());
-        Assert.Equal("csharp-dev", modified.GetProperty("agent_type").GetString());
+        Assert.Equal("dev-medium", modified.GetProperty("agent_type").GetString());
         string prompt = modified.GetProperty("prompt").GetString() ?? string.Empty;
         Assert.Equal("Implement the parser.", prompt);
         Assert.DoesNotContain("KYBER-ARBITER", prompt, StringComparison.Ordinal);
@@ -490,7 +490,7 @@ public sealed class CopilotHookAdapterTests
     public void Local_SubagentStop_PassesThroughWithoutLoadingConfig()
     {
         // VS Code loads the CLI hook file too, and names the event in its own schema.
-        const string Payload = """{"hook_event_name":"SubagentStop","session_id":"s1","cwd":"/repo","agent_id":"a1","agent_type":"csharp-dev"}""";
+        const string Payload = """{"hook_event_name":"SubagentStop","session_id":"s1","cwd":"/repo","agent_id":"a1","agent_type":"dev-medium"}""";
         int loads = 0;
 
         (int exit, string stdout, string log) = Run(
@@ -518,7 +518,7 @@ public sealed class CopilotHookAdapterTests
     public void Cli_NextTaskResult_CarriesANoteStillPendingFromABackgroundReturn()
     {
         BackgroundEngine engine = new();
-        engine.Pending.Add("Arbiter note on the return of background agent 'csharp-dev':\nARBITER_ESCALATION: gate report disagrees");
+        engine.Pending.Add("Arbiter note on the return of background agent 'dev-medium':\nARBITER_ESCALATION: gate report disagrees");
 
         string stdout = RunCli(engine, BackgroundStartPayload);
 

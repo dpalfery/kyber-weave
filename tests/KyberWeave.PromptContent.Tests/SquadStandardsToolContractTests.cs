@@ -28,27 +28,6 @@ public sealed class SquadStandardsToolContractTests
     private const string ToolName = "docs_get_coding_standard_for_technology";
 
     /// <summary>
-    /// The canonical developer agents: the roles that write code, and so the ones whose
-    /// instructions decide whether a standard arrives for a budget or is read whole.
-    /// </summary>
-    private static readonly string[] DeveloperAgents =
-    [
-        "csharp-dev",
-        "dal-dev",
-        "github-devops",
-        "go-dev",
-        "maui-dev",
-        "pulumi-dev",
-        "python-dev",
-        "react-dev",
-        "rust-dev",
-        "sql-database-architect",
-        "tauri-dev",
-        "test-dev",
-        "typescript-dev"
-    ];
-
-    /// <summary>
     /// The canonical developer skills that state the coding-standard policy line for their own
     /// role. Chosen by reading the tree rather than by assuming symmetry with the agents:
     /// <c>react-dev</c> and <c>tauri-dev</c> ship no skill at all, and <c>csharp-dev</c> and
@@ -61,7 +40,6 @@ public sealed class SquadStandardsToolContractTests
         "maui-dev",
         "python-dev",
         "rust-dev",
-        "testing",
         "typescript-dev"
     ];
 
@@ -79,35 +57,24 @@ public sealed class SquadStandardsToolContractTests
     /// </summary>
     /// <param name="agentName">The canonical agent identity.</param>
     [Theory]
-    [InlineData("csharp-dev")]
-    [InlineData("dal-dev")]
-    [InlineData("github-devops")]
-    [InlineData("go-dev")]
-    [InlineData("maui-dev")]
-    [InlineData("pulumi-dev")]
-    [InlineData("python-dev")]
-    [InlineData("react-dev")]
-    [InlineData("rust-dev")]
-    [InlineData("sql-database-architect")]
-    [InlineData("tauri-dev")]
-    [InlineData("test-dev")]
-    [InlineData("typescript-dev")]
+    [InlineData("dev-easy")]
+    [InlineData("dev-hard")]
+    [InlineData("dev-medium")]
     public void EveryDeveloperAgentReachesItsCodingStandardThroughTheTool(string agentName)
     {
         AssertRoutesThroughTheTool($"agents/{agentName}.md");
     }
 
     /// <summary>
-    /// When github-devops runs another technology's toolchain (for example, dotnet via csharp-coding-standard),
-    /// its workflow routes that secondary standard through the tool as well rather than relying on built-in defaults.
+    /// The delivery agent names no platform of its own, so it asks for the one its task names through
+    /// the tool rather than embedding a path to it.
     /// </summary>
     [Fact]
-    public void GithubDevopsWorkflowRoutesSecondaryToolchainStandardThroughTheTool()
+    public void DevopsAsksForItsPlatformStandardThroughTheTool()
     {
-        string path = Path.Combine(ProductRoot, "agents", "github-devops.md");
+        string path = Path.Combine(ProductRoot, "agents", "devops.md");
         string text = File.ReadAllText(path);
 
-        Assert.Contains("<csharp-coding-standard>", text, StringComparison.Ordinal);
         Assert.Contains(ToolName, text, StringComparison.Ordinal);
     }
 
@@ -121,7 +88,6 @@ public sealed class SquadStandardsToolContractTests
     [InlineData("maui-dev")]
     [InlineData("python-dev")]
     [InlineData("rust-dev")]
-    [InlineData("testing")]
     [InlineData("typescript-dev")]
     public void EveryDeveloperSkillReachesItsCodingStandardThroughTheTool(string skillName)
     {
@@ -135,7 +101,7 @@ public sealed class SquadStandardsToolContractTests
     /// a route that replaced them with a bare technology word would lose all three.
     /// </summary>
     [Fact]
-    public void EveryRoutingFileKeepsTheRegistryPropertyNamesItCarried()
+    public void EveryTechnologyRoutingFileKeepsTheRegistryPropertyNamesItCarried()
     {
         List<string> missing = new();
         foreach (string relativePath in AgentAndSkillPaths())
@@ -150,9 +116,13 @@ public sealed class SquadStandardsToolContractTests
             + "name the standard it found missing: " + string.Join(", ", missing));
     }
 
+    /// <summary>
+    /// The files that route to a standard by a registry property name. A developer agent names no technology,
+    /// so its body carries no `<technology>-coding-standard` token; the technology skills are where a host's
+    /// property name is still published on the routing path.
+    /// </summary>
     private static IEnumerable<string> AgentAndSkillPaths() =>
-        DeveloperAgents.Select(name => $"agents/{name}.md")
-            .Concat(DeveloperSkills.Select(name => $"skills/{name}/SKILL.md"));
+        DeveloperSkills.Select(name => $"skills/{name}/SKILL.md");
 
     /// <summary>
     /// A routing instruction names the tool. What it says about reading the file instead is graded

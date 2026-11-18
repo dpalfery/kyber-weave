@@ -1,9 +1,12 @@
 using KyberWeave.Application;
 using KyberWeave.Contracts.Docs;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.CodeGraph;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Delivery;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Docs.Search;
+using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -22,6 +25,96 @@ internal static class DocsToolsComposition
     /// <summary>The container the shared collaborators are resolved from: <paramref name="services"/>, or the default one.</summary>
     /// <param name="services">The caller's container, or null.</param>
     public static IServiceProvider ServicesOrDefault(IServiceProvider? services) => services ?? DefaultServices.Value;
+
+    /// <summary>
+    /// Registers the root-bound services the server's tools resolve, and the registry that serves a per-call
+    /// <c>projectPath</c>. <c>Program.cs</c> and the composition-root test both build the server from these, so a
+    /// tool constructor that asks for an unregistered service fails the test rather than the first tool call.
+    /// </summary>
+    /// <param name="services">The collection to populate; <see cref="AddWeaveApplication"/> comes first.</param>
+    /// <param name="repositoryRoot">The checkout this process serves.</param>
+    /// <param name="codeGraphRefreshEnabled">False when the process runs with <c>--no-codegraph-refresh</c>.</param>
+    /// <returns>The same collection, for chaining.</returns>
+    public static IServiceCollection AddDocsHostServices(
+        this IServiceCollection services,
+        string repositoryRoot,
+        bool codeGraphRefreshEnabled)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
+
+        services.AddSingleton(provider =>
+        {
+            // Read through the container's configuration repository once, at first resolution, so the
+            // corpus this process serves is the one its configuration names.
+            OntologyConfig ontology = DocsRootRegistry.ResolveOntology(repositoryRoot, provider);
+            return new DocumentIndexHost(
+                repositoryRoot,
+                () => provider.GetRequiredService<ICodeGraphPortsFactory>().ForRepository(repositoryRoot).Resolver,
+                () => provider.GetRequiredService<IDocumentSourceFactory>().Create(repositoryRoot, ontology).Load(),
+                ontology.DocsRoots,
+                ontology.ResolvedCatalogPath);
+        });
+        services.AddSingleton<IDocsAnalysisReader>(provider => AnalysisReader(provider, repositoryRoot));
+
+        // A tool constructor parameter has to be a service the container resolves: the SDK builds each tool type from
+        // the container on every call, so a bare root string would make every tool call fail.
+        services.AddSingleton(new DocsHostRoot(Path.GetFullPath(repositoryRoot)));
+
+        // The refresh schedule is a process-wide decision, made once from this process's own argv. The
+        // tools receive it by injection so a test that asks them directly gets the default cadence.
+        services.AddSingleton<ICodeGraphFreshnessGate>(provider => new CodeGraphFreshness(
+            repositoryRoot,
+            codeGraphRefreshEnabled,
+            provider.GetRequiredService<ICodeGraphProvisioner>(),
+            provider.GetRequiredService<IKyberWeaveConfigRepository>(),
+            provider.GetRequiredService<TimeProvider>()));
+        services.AddSingleton<IDocsGateRunner, DocsGateRunner>();
+        services.AddSingleton<IDocsQueryService, DocsQueryService>();
+        services.AddSingleton<IPlanLifecycleService>(provider => new PlanLifecycleService(
+            repositoryRoot,
+            provider.GetRequiredService<IDocsQueryService>(),
+            provider.GetRequiredService<IDocsHostConfiguration>(),
+            provider.GetRequiredService<IPlanFinalizeService>(),
+            provider.GetRequiredService<IPlanCloseoutService>(),
+            provider.GetRequiredService<IRepositoryFileStore>(),
+            provider.GetRequiredService<TimeProvider>()));
+        services.AddSingleton<IRunDeliveryService>(provider => new RunDeliveryService(
+            repositoryRoot,
+            provider.GetRequiredService<IDocsQueryService>(),
+            provider.GetRequiredService<IDocsHostConfiguration>(),
+            provider.GetRequiredService<RunDeliveryPorts>()));
+        services.AddSingleton<IToolingCheckService>(provider => new ToolingCheckService(
+            repositoryRoot,
+            provider.GetRequiredService<IDocsQueryService>(),
+            provider.GetRequiredService<IRepositoryDoctor>(),
+            provider.GetRequiredService<IBoundedProcessExecutor>(),
+            provider.GetRequiredService<IProcessEnvironment>()));
+
+        // The dispatch tool asks for this one directly, and the SDK constructs the tool from the container on each
+        // call, so an unregistered parameter is an invocation error every client sees rather than a startup failure.
+        services.AddSingleton<ITaskPromptService>(provider =>
+            Prompts(provider, provider.GetRequiredService<DocumentIndexHost>()));
+
+        // A tool call may name another worktree of this repository with projectPath. Those are served by
+        // tools of their own, built on demand and kept in a small least-recently-used set.
+        services.AddSingleton(provider => DocsRootRegistry.ForRepository(repositoryRoot, codeGraphRefreshEnabled, provider));
+        return services;
+    }
+
+    /// <summary>The task prompt service over <paramref name="host"/>'s checkout, built from the ports of <paramref name="provider"/>.</summary>
+    /// <param name="provider">The container the ports are resolved from.</param>
+    /// <param name="host">The corpus whose standards the prompt carries, and the root it is bound to.</param>
+    public static ITaskPromptService Prompts(IServiceProvider provider, DocumentIndexHost host)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        ArgumentNullException.ThrowIfNull(host);
+        return new TaskPromptService(
+            provider.GetRequiredService<IPlanTaskService>(),
+            provider.GetRequiredService<IPacketHostFacts>(),
+            provider.GetRequiredService<IFileSystem>(),
+            technology => host.Current().StandardsFor(technology));
+    }
 
     /// <summary>The analysis reader over <paramref name="repositoryRoot"/>, built from the ports of <paramref name="provider"/>.</summary>
     /// <param name="provider">The container the ports are resolved from.</param>
@@ -95,6 +188,9 @@ internal static class DocsToolsComposition
                 Executor = toolingExecutor,
                 McpExecutable = toolingMcpExecutable,
             },
+            Prompts(provider, host),
+            hostConfiguration,
+            new DocsHostRoot(host.RepositoryRoot),
             roots);
     }
 }

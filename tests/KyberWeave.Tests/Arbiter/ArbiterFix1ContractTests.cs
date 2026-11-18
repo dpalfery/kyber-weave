@@ -126,12 +126,12 @@ public sealed class ArbiterFix1ContractTests : IDisposable
     [Fact]
     public async Task Fix4_DispatcherPlusGuardedAgent_KeepsBothHooks()
     {
-        // Make csharp-dev (worker profile, dispatch target) a dispatcher too.
-        string agentPath = Path.Combine(_fixture.Path, "agents", "csharp-dev.md");
+        // Make dev-medium (worker profile, dispatch target) a dispatcher too.
+        string agentPath = Path.Combine(_fixture.Path, "agents", "dev-medium.md");
         await File.WriteAllTextAsync(agentPath, """
             ---
             schema: kyber-squad.agent/v1
-            name: csharp-dev
+            name: dev-medium
             description: Arbiter fixture agent exercising the worker profile.
             invocation: subagent
             model-profile: general
@@ -153,7 +153,7 @@ public sealed class ArbiterFix1ContractTests : IDisposable
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadDeploymentFile file = Assert.Single(
-            result.Files, f => f.RelativePath == ".claude/agents/csharp-dev.md");
+            result.Files, f => f.RelativePath == ".claude/agents/dev-medium.md");
         YamlMappingNode frontmatter = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span));
         YamlMappingNode hooks = RequireMapping(frontmatter, "hooks");
         YamlSequenceNode pre = RequireSequence(hooks, "PreToolUse");

@@ -98,7 +98,7 @@ public static class SquadHarnessLowering
         string harnessToken,
         SquadModelPolicy policy)
     {
-        if (policy == SquadModelPolicy.NotRendered)
+        if (policy == SquadModelPolicy.NotRendered || string.IsNullOrWhiteSpace(agent.ModelProfile))
         {
             return null;
         }

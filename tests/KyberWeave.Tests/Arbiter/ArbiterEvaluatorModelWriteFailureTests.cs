@@ -54,15 +54,20 @@ public sealed class ArbiterEvaluatorModelWriteFailureTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// The plan facts the evaluator reads. Under the one remaining roster the difficulty rule takes the recorded
+    /// rating as its answer and makes no model call, so the fake states the hard rating these tests retarget on.
+    /// </summary>
     private sealed class PlanFacts : IArbiterPlanReader
     {
         public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) =>
             facts
                 .With("plan.exists", true, ArbiterFactLabel.Derived)
+                .With("plan.task.difficulty", "hard", ArbiterFactLabel.Derived)
                 .With("plan.tasks.count", 3, ArbiterFactLabel.Derived)
                 .With("plan.development-mode", "standard", ArbiterFactLabel.Derived)
                 .With("plan.task", "T2", ArbiterFactLabel.Derived)
-                .With("plan.task.skills", new List<string> { "csharp-dev" }, ArbiterFactLabel.Derived)
+                .With("plan.task.skills", new List<string> { "dev-medium" }, ArbiterFactLabel.Derived)
                 .With("plan.task.files", new List<string> { "src/A.cs" }, ArbiterFactLabel.Derived)
                 .With("plan.task.depends-on", new List<string>(), ArbiterFactLabel.Derived)
                 .With("plan.test-contract.row", "A failing test", ArbiterFactLabel.Derived);
@@ -84,9 +89,9 @@ public sealed class ArbiterEvaluatorModelWriteFailureTests : IDisposable
                 {
                     ["easy"] = "fast",
                     ["standard"] = "general",
-                    ["hard"] = "deep-planning",
+                    ["hard"] = "dev-hard",
                 },
-                ["fast", "general", "deep-planning"]),
+                ["fast", "general", "dev-hard"]),
         },
         Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
     };
@@ -107,7 +112,7 @@ public sealed class ArbiterEvaluatorModelWriteFailureTests : IDisposable
     {
         Harness = Harness,
         Phase = "pre",
-        Target = "csharp-dev",
+        Target = "dev-medium",
         Prompt = Prompt,
         HarnessCaller = "conductor",
         Session = "s1",
@@ -129,11 +134,11 @@ public sealed class ArbiterEvaluatorModelWriteFailureTests : IDisposable
             {
                 ["fast"] = "haiku",
                 ["general"] = "sonnet",
-                ["deep-planning"] = "opus",
+                ["dev-hard"] = "opus",
             },
             new Dictionary<string, ArbiterModelTargetsAgent>(StringComparer.Ordinal)
             {
-                ["csharp-dev"] = new("general", "sonnet"),
+                ["dev-medium"] = new("general", "sonnet"),
             });
         File.WriteAllText(
             Path.Combine(ArbiterDirectory, $"model-targets.{Harness}.json"),

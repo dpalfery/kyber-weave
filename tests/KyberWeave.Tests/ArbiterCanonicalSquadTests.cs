@@ -38,6 +38,7 @@ public sealed class ArbiterCanonicalSquadTests
         "architect-devin",
         "documentation",
         "investigator",
+        "platform-reader",
         "product-planning",
         "product-planning-devin",
         "publishing-worker",

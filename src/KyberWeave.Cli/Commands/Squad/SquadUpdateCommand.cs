@@ -439,7 +439,8 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             run.Version,
             ReplaceManaged: run.ReplaceManaged,
             DryRun: run.DryRun,
-            Arbiter: arbiterWiring);
+            Arbiter: arbiterWiring,
+            WorkerRoster: configResult.Config?.WorkerRoster);
 
         // A --global run writes beneath each selected target's own physical global root,
         // not beneath the home anchor. Resolve the roots through the same resolver the

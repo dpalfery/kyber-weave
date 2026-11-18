@@ -317,13 +317,13 @@ public static class ArbiterHookWiring
         }
     }
 
-    /// <summary>Produces the hook decisions for a render, gated on Enabled and Project scope.</summary>
+    /// <summary>Produces the hook decisions for a render, under project scope.</summary>
     /// <remarks>
-    /// Hooks are produced only when the wiring is enabled and the scope is
-    /// <see cref="SquadDeploymentScope.Project"/>: a global install reads no project
-    /// configuration, so there is nowhere to enforce from (Req 22.4). Every wired agent —
-    /// dispatcher or guarded — gets one hook per hooked target, in stable ordinal order so
-    /// renders are deterministic.
+    /// Hooks are produced only at <see cref="SquadDeploymentScope.Project"/>: a global install reads no project
+    /// configuration, so there is nowhere to enforce from (Req 22.4). With the Arbiter enabled every wired agent —
+    /// dispatcher or guarded — gets one hook per hooked target, in stable ordinal order so renders are
+    /// deterministic. With it off, only the dispatchers get one: the tools they call are dispatch calls, and the one
+    /// action left is prompt insertion, which runs with or without the Arbiter (Req 9.7).
     /// </remarks>
     public static IReadOnlyList<SquadArbiterHook> BuildHooks(
         SquadSource source,
@@ -333,15 +333,19 @@ public static class ArbiterHookWiring
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(wiring);
 
-        if (!wiring.Enabled || scope != SquadDeploymentScope.Project)
+        if (scope != SquadDeploymentScope.Project)
         {
             return [];
         }
 
+        IReadOnlySet<string> callers = wiring.Enabled
+            ? Dispatchers(source).Concat(GuardedAgents(source)).ToHashSet(StringComparer.Ordinal)
+            : Dispatchers(source);
+
         List<SquadArbiterHook> hooks = [];
         foreach (SquadTarget target in HookedSquadTargets)
         {
-            foreach (string caller in Dispatchers(source).Concat(GuardedAgents(source)).Order(StringComparer.Ordinal))
+            foreach (string caller in callers.Order(StringComparer.Ordinal))
             {
                 hooks.Add(new SquadArbiterHook(
                     SquadTargetCatalog.GetToken(target),

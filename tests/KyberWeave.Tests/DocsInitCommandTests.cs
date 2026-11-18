@@ -51,10 +51,10 @@ public sealed class DocsInitCommandTests : IDisposable
             .Result;
         Assert.Equal(0, exitCode);
 
-        // 3. Verifies that all 11 rich standards were created
+        // 3. Verifies that every shipped standard was created
         foreach (string tech in KyberStandardsTemplates.All)
         {
-            string standardPath = Path.Combine(_temp.Path, "docs", "standards", tech, "README.md");
+            string standardPath = Path.Combine(_temp.Path, "docs", "standards", tech, $"{tech}.standards.md");
             Assert.True(File.Exists(standardPath), $"Expected standard for '{tech}' to exist at '{standardPath}'.");
             string content = File.ReadAllText(standardPath);
             Assert.Contains($"technology: {tech}", content, StringComparison.Ordinal);
@@ -76,9 +76,10 @@ public sealed class DocsInitCommandTests : IDisposable
         Assert.NotNull(result);
         Assert.Equal(
             KyberStandardsTemplates.All.Count,
-            result.Files.Count(f => f.RelativePath.StartsWith("docs/standards/", StringComparison.Ordinal)
-                && f.RelativePath != "docs/standards/README.md"
-                && f.RelativePath.EndsWith("/README.md", StringComparison.Ordinal)
-                && f.Outcome == ScaffoldOutcome.Created));
+            result.Files.Count(f => f.Outcome == ScaffoldOutcome.Created
+                && KyberStandardsTemplates.All.Any(tech => string.Equals(
+                    f.RelativePath,
+                    $"docs/standards/{tech}/{tech}.standards.md",
+                    StringComparison.Ordinal))));
     }
 }

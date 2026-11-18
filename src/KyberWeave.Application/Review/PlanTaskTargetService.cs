@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
@@ -14,7 +15,11 @@ namespace KyberWeave.Application.Review;
 /// </summary>
 /// <param name="tasks">Reads the active plans and their task files.</param>
 /// <param name="taskGates">Checks a path the way the task gate will take it.</param>
-public sealed partial class PlanTaskTargetService(IPlanTaskService tasks, ITaskGateSelectionService taskGates) : IPlanTaskTargetService
+/// <param name="git">Lists the repository's worktrees, so the run's plan is found from a worker's checkout.</param>
+public sealed partial class PlanTaskTargetService(
+    IPlanTaskService tasks,
+    ITaskGateSelectionService taskGates,
+    IGitRepositoryFacts git) : IPlanTaskTargetService
 {
     /// <inheritdoc />
     public PlanTaskTargetMatch? Find(string root, KyberWeaveConfig config, string typedTask, out string? reason)
@@ -24,10 +29,16 @@ public sealed partial class PlanTaskTargetService(IPlanTaskService tasks, ITaskG
         ArgumentNullException.ThrowIfNull(typedTask);
 
         IReadOnlyList<string> active = tasks.ActivePlans(root, config);
+        if (active.Count == 0 && FindInOtherWorktree(root, config, typedTask) is { } elsewhere)
+        {
+            reason = null;
+            return elsewhere;
+        }
+
         if (active.Count != 1)
         {
             reason = active.Count == 0
-                ? "no plan is Ready or In progress in this checkout"
+                ? "no plan is Ready or In progress in this checkout or any other worktree of this repository"
                 : $"{active.Count} plans are Ready or In progress ({string.Join(", ", active)})";
             return null;
         }
@@ -47,6 +58,36 @@ public sealed partial class PlanTaskTargetService(IPlanTaskService tasks, ITaskG
 
         reason = null;
         return new PlanTaskTargetMatch(active[0], entry, ContractRow(root, active[0], entry.Id));
+    }
+
+    /// <summary>
+    /// The task in a plan that is active in one other worktree of this repository, or null when none has it or more
+    /// than one does. The conductor's plan and task file live in the run's worktree, while a worker runs its task gate
+    /// in a worktree of its own; <c>docs packet</c> reads the plan from there, so the gate reads it the same way.
+    /// </summary>
+    private PlanTaskTargetMatch? FindInOtherWorktree(string root, KyberWeaveConfig config, string typedTask)
+    {
+        string here = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        List<PlanTaskTargetMatch> matches = [];
+        foreach (string worktree in git.ListWorktrees(root))
+        {
+            string other = Path.TrimEndingDirectorySeparator(Path.GetFullPath(worktree));
+            if (string.Equals(other, here, StringComparison.Ordinal) || !Directory.Exists(other))
+                continue;
+
+            IReadOnlyList<string> active = tasks.ActivePlans(other, config);
+            if (active.Count != 1)
+                continue;
+
+            PlanTaskFileOutcome outcome = tasks.Run(other, config, active[0], PlanTaskFileMode.Check);
+            if (outcome.File is null || outcome.Report.HasErrors)
+                continue;
+
+            if (PlanTaskPacket.FindTask(outcome.File, typedTask) is { } entry)
+                matches.Add(new PlanTaskTargetMatch(active[0], entry, ContractRow(other, active[0], entry.Id)));
+        }
+
+        return matches.Count == 1 ? matches[0] : null;
     }
 
     /// <inheritdoc />

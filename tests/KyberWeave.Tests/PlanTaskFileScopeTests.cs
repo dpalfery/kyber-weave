@@ -15,7 +15,7 @@ namespace KyberWeave.Tests;
 public sealed class PlanTaskFileScopeTests : IDisposable
 {
     private const string Plan = "6-Docs/plans/2026-11-16-cards.md";
-    private const string TaskFile = "6-Docs/plans/2026-11-16-cards.tasks.json";
+    private const string TaskFile = "6-Docs/plans/2026-11-16-cards.tasks.yml";
 
     private const string FrontMatter = """
         ---

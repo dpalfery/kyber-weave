@@ -141,7 +141,7 @@ public sealed class RootAgentsOperationalPointerTests
     /// a command dropped from one of them leaves an empty target.
     /// </summary>
     [Theory]
-    [InlineData("docs/standards/test/README.md", "FullyQualifiedName~")]
+    [InlineData("docs/standards/test/test.standards.md", "FullyQualifiedName~")]
     [InlineData("tests/KyberWeave.RepoPolicy.Tests/AGENTS.md", "FullyQualifiedName~")]
     [InlineData("dash/AGENTS.md", "test:related")]
     [InlineData("dash/tray/AGENTS.md", "cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '")]

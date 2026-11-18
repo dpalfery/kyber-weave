@@ -17,7 +17,7 @@ Those three have no standard declared in `.kyber-weave/kyber-weave.yml`, so the 
 
 PR #440 (still a draft) added the checklists at
 `products/kyber-squad/skills/code-review/references/{typescript,rust,tauri,go}.md`. The
-TypeScript checklist points at `docs/standards/typescript/README.md`, which is declared. The
+TypeScript checklist points at `docs/standards/typescript/typescript.standards.md`, which is declared. The
 other three have nothing to point at.
 
 Kilo bot review comments on PRs #407 to #439 hit Rust, Tauri and Go code. The council cannot

@@ -97,6 +97,10 @@ public static class RuleEffects
 /// <param name="Ask">Step-1 question, when the rule asks one.</param>
 /// <param name="Enabled">Disabled rules answer undecidable.</param>
 /// <param name="Shadow">A shadow rule is evaluated and logged but its effect does not gate the trigger.</param>
+/// <param name="Technology">
+/// The technology folder the rule came from, or null for a shipped, role-folder or <c>arbiter.rules</c> rule.
+/// A rule with a technology judges only an event whose task is in that technology or one that builds on it.
+/// </param>
 public sealed record ArbiterRule(
     string Id,
     string Trigger,
@@ -106,7 +110,8 @@ public sealed record ArbiterRule(
     IReadOnlyList<RuleDecideClause>? Decide = null,
     RuleAsk? Ask = null,
     bool Enabled = true,
-    bool Shadow = false)
+    bool Shadow = false,
+    string? Technology = null)
 {
     /// <summary>Whether the rule asks its step-1 question for this step-0 answer.</summary>
     /// <remarks>

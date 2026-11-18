@@ -53,7 +53,7 @@ public sealed class ArbiterModelTargetFactsTests : IDisposable
     private static ArbiterFactSet DelegateModelBag(IReadOnlyList<string>? taskFiles, string? delegationModel = null)
     {
         ArbiterFactSet bag = TriggerFactBuilder.Build(
-            "delegate.model", "csharp-dev", Prompt, "conductor", "harness", Config(),
+            "delegate.model", "dev-medium", Prompt, "conductor", "harness", Config(),
             delegationModel: delegationModel);
         bag = bag.With("plan.task", "T2", ArbiterFactLabel.Derived);
         return taskFiles is null
@@ -72,7 +72,7 @@ public sealed class ArbiterModelTargetFactsTests : IDisposable
             "delegate",
             "conductor",
             "header",
-            "csharp-dev",
+            "dev-medium",
             Plan,
             null,
             "T2",
@@ -88,7 +88,7 @@ public sealed class ArbiterModelTargetFactsTests : IDisposable
         new(id, At, "hook", "claude", null, ArbiterLedgerPhases.Pre)
         {
             Trigger = "delegate",
-            Target = "csharp-dev",
+            Target = "dev-medium",
             Headers = new ArbiterLedgerHeaders(PlanFile: Plan, Task: task),
             ModelProfile = profile,
             ModelToken = token,
@@ -122,9 +122,9 @@ public sealed class ArbiterModelTargetFactsTests : IDisposable
     // 1. delegate.model derives from delegate events to implementation-class targets, and from nothing else.
 
     [Theory]
-    [InlineData("csharp-dev")]
-    [InlineData("test-dev")]
-    [InlineData("react-dev")]
+    [InlineData("dev-easy")]
+    [InlineData("dev-medium")]
+    [InlineData("dev-hard")]
     public void SecondaryTriggers_DelegateToAnImplementationTarget_DerivesDelegateModel(string target)
     {
         ArbiterEvent ev = new() { Harness = "claude", Caller = "conductor", Target = target, Prompt = Prompt };

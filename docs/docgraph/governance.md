@@ -5,7 +5,7 @@ doc-type: governance
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-17
 code-refs:
   - DocSpecValidator
   - DocDriftLinter
@@ -69,14 +69,35 @@ Needs no code index. Exits non-zero on any error.
 | `KW-DOC-SPEC-004` | `component` or `owner` is not a row in [catalog.md](../catalog.md) |
 | `KW-DOC-SPEC-005` | `source-root` names a path that does not exist |
 | `KW-DOC-SPEC-006` | Duplicate `id`, or `decided-by` / `supersedes` referencing an unknown id |
-| `KW-DOC-SPEC-007` | `technology` declared on a document that is not a coding standard, or naming a technology other than its folder |
+| `KW-DOC-SPEC-007` | `technology` declared on a document that is not a coding standard, a rule or a skill; `role` on one that is not one of those three; or a scope that names a technology or role other than its folder |
+| `KW-DOC-SPEC-011` | A standard or skills document names neither a technology nor a role |
+| `KW-DOC-SPEC-012` | A declared technology, role or platform folder is missing one of its four files; a legacy `README.md` standard is a warning naming the migration command |
+| `KW-DOC-SPEC-013` | A standard's headings are not the six the ontology requires, in order. During the warning period this is a warning naming `docs standards migrate`, not an error, so a host that renamed but has not reshaped still runs |
+| `KW-DOC-SPEC-014` | `builds-on` names an undeclared parent, the standard itself, or a parent that already names a parent; or it sits outside a coding standard |
+| `KW-DOC-TASKS-014` | A task file is in the JSON form an older release wrote (hint: `--convert`), or declares schema version 1 (hint: `--write`): either is read with a warning |
+| `KW-DOC-TASKS-015` | A task file entry names a `Difficulty:` other than `easy`, `medium` or `hard` |
+| `KW-DOC-TASKS-016` | A task file entry names a technology `ontology.technologies` does not declare |
+| `KW-DOC-TASKS-017` | A task file entry names more than one technology, which must be split into one task per technology |
+| `KW-DOC-TASKS-018` | Under the `tiered` worker roster, a developer task names no technology; a documentation or delivery task needs none |
 | `KW-CONFIG-REG-001` | A configuration registry property names a path that does not exist |
-| `KW-CONFIG-REG-002` | The registry block rendered into the root `AGENTS.md` no longer matches configuration |
+| `KW-CONFIG-REG-002` | The registry properties rendered into the root `AGENTS.md` no longer match configuration. A block differing only in legacy `README.md` standard names is a warning naming `docs standards migrate`, not an error |
 | `KW-DOC-LIFECYCLE-001` | A `plan` document sits in the plans folder but the plan index does not reach it |
 | `KW-DOC-LIFECYCLE-002` | A `todo` document sits in the todo folder but the todo index does not reach it |
 | `KW-DOC-LIFECYCLE-003` | A plan or specification still in its active folder — raised only by `docs validate --merge-ready` |
 | `KW-DOC-LIFECYCLE-004` | An archived entry the change touches without closeout evidence (C0–C9) — raised only by `docs validate --merge-ready` |
 | `KW-DOC-LIFECYCLE-006` | The plan index lists an open plan whose file is gone, or restates a plan's status in a sentence outside its table |
+
+The `KW-DOC-TASKS` rules in this table read the task file beside a plan, or a specification's
+`tasks.yml` beside its `tasks.md`. The file is YAML at schema version 2
+([ADR 0086](../adr/0086-the-task-file-is-yaml.md)); the JSON form an older release wrote is read
+for two minor releases with `-014` and converted with `docs tasks <plan> --convert`. A YAML file
+that still declares schema version 1 is read too, and `-014` names `docs tasks <plan> --write` to
+rewrite it at the current version. A task entry
+carries an optional `Difficulty:` (`easy`, `medium` or `hard`, `medium` when omitted) and at most
+one `Technology:`, checked against `ontology.technologies`; `-015` and `-016` name the bad value,
+`-017` tells the author to split a task that names two, and `-018` names a developer task with no
+technology under the `tiered` roster
+([ADR 0085](../adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md)).
 
 The two `KW-CONFIG-REG` rules fire only once a repository has adopted the registry — its
 `AGENTS.md` carries the generated block, or it declared `config-reg` entries. A corpus that

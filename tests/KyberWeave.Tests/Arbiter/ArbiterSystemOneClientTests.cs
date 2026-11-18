@@ -25,8 +25,8 @@ public sealed class ArbiterSystemOneClientTests
     private static ArbiterFactSet Facts() => new ArbiterFactSet()
         .With("plan.task.text", "Migrate the login flow.", ArbiterFactLabel.Asserted)
         .With("delegation.prompt", "Migrate the login flow to the new SDK.", ArbiterFactLabel.Asserted)
-        .With("roster.descriptions", "csharp-dev owns C#.", ArbiterFactLabel.Derived)
-        .With("delegation.target", "csharp-dev", ArbiterFactLabel.Asserted)
+        .With("roster.descriptions", "dev-medium owns C#.", ArbiterFactLabel.Derived)
+        .With("delegation.target", "dev-medium", ArbiterFactLabel.Asserted)
         .With("lens.applicability", "Applies to C# changes.", ArbiterFactLabel.Asserted)
         .With("review.diff-summary", "+1 line in login.cs", ArbiterFactLabel.Derived)
         // Declared by no rule state: must never leave the machine (R9).
