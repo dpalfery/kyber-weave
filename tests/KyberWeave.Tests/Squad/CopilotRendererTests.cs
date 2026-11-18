@@ -440,9 +440,11 @@ public sealed class CopilotRendererTests
         Directory.CreateDirectory(Path.Combine(root, "agents"));
         Directory.CreateDirectory(Path.Combine(root, "schemas"));
 
-        foreach (string schemaFile in Directory.GetFiles(Path.Combine(ProductRoot, "schemas"), "*.json"))
+        foreach (string schemaFile in Corpus.EnumerateFiles("products/kyber-squad/schemas", "*.json", recursive: false))
         {
-            File.Copy(schemaFile, Path.Combine(root, "schemas", Path.GetFileName(schemaFile)), true);
+            File.WriteAllBytes(
+                Path.Combine(root, "schemas", Path.GetFileName(schemaFile)),
+                Corpus.ReadBytes(schemaFile));
         }
 
         File.WriteAllText(Path.Combine(root, "squad.yml"), """
@@ -535,9 +537,11 @@ public sealed class CopilotRendererTests
         Directory.CreateDirectory(Path.Combine(root, "agents"));
         Directory.CreateDirectory(Path.Combine(root, "schemas"));
 
-        foreach (string schemaFile in Directory.GetFiles(Path.Combine(ProductRoot, "schemas"), "*.json"))
+        foreach (string schemaFile in Corpus.EnumerateFiles("products/kyber-squad/schemas", "*.json", recursive: false))
         {
-            File.Copy(schemaFile, Path.Combine(root, "schemas", Path.GetFileName(schemaFile)), true);
+            File.WriteAllBytes(
+                Path.Combine(root, "schemas", Path.GetFileName(schemaFile)),
+                Corpus.ReadBytes(schemaFile));
         }
 
         File.WriteAllText(Path.Combine(root, "squad.yml"), """

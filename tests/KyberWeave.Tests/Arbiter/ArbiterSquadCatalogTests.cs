@@ -113,11 +113,11 @@ public sealed class ArbiterSquadCatalogTests
             Assert.Equal(agent.CapabilityProfile, entry.CapabilityProfile);
         }
 
-        foreach (string lensFile in Directory.EnumerateFiles(
-                     Path.Combine(squadRoot, "skills", "code-review", "references", "lenses"), "*.md"))
+        foreach (string lensFile in Corpus.EnumerateFiles(
+                     "products/kyber-squad/skills/code-review/references/lenses", "*.md", recursive: false))
         {
             string name = Path.GetFileNameWithoutExtension(lensFile);
-            string expected = ArbiterSquadCatalog.ReadApplicabilitySection(File.ReadAllText(lensFile));
+            string expected = ArbiterSquadCatalog.ReadApplicabilitySection(Corpus.ReadText(lensFile));
             Assert.True(catalog.Lenses.TryGetValue(name, out ArbiterSquadLens? entry), $"Missing lens '{name}'.");
             Assert.Equal(expected, entry.Applicability);
         }
