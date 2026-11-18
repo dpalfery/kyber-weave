@@ -465,7 +465,7 @@ public sealed class ArbiterShortcutRuleTests
     public async Task AnUntouchedDocsImpactAnsweredWithConfidenceIsAnswered()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(NoDocChange, 0.95);
-        ArbiterEvaluator evaluator = Evaluator( provider, new ChangedPathsGitFacts("src/Widget.cs"));
+        ArbiterEvaluator evaluator = Evaluator(provider, new ChangedPathsGitFacts("src/Widget.cs"));
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             DocsImpactDispatch(), ConfigWith([Enforced(DocsImpactRule)]));
@@ -478,7 +478,7 @@ public sealed class ArbiterShortcutRuleTests
     public async Task ATouchedDocsImpactKeepsTheDispatchWithoutAskingTheProvider()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(NoDocChange, 0.95);
-        ArbiterEvaluator evaluator = Evaluator( provider, new ChangedPathsGitFacts("docs/uploader.md"));
+        ArbiterEvaluator evaluator = Evaluator(provider, new ChangedPathsGitFacts("docs/uploader.md"));
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             DocsImpactDispatch(), ConfigWith([Enforced(DocsImpactRule)]));
@@ -496,7 +496,7 @@ public sealed class ArbiterShortcutRuleTests
     public async Task ADocsPathInTheRunsDiffSetsTheGovernedPathsFactAndKeepsTheDispatch()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(NoDocChange, 0.95);
-        ArbiterEvaluator evaluator = Evaluator( provider, new ChangedPathsGitFacts("src/Widget.cs", "docs/uploader.md"));
+        ArbiterEvaluator evaluator = Evaluator(provider, new ChangedPathsGitFacts("src/Widget.cs", "docs/uploader.md"));
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             DocsImpactDispatch(), ConfigWith([Enforced(DocsImpactRule)]));
@@ -515,7 +515,7 @@ public sealed class ArbiterShortcutRuleTests
     public async Task ANonDocsDiffSetsTheGovernedPathsFactFalseAndTheProviderCanAnswer()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(NoDocChange, 0.95);
-        ArbiterEvaluator evaluator = Evaluator( provider, new ChangedPathsGitFacts("src/Widget.cs", "tests/WidgetTests.cs"));
+        ArbiterEvaluator evaluator = Evaluator(provider, new ChangedPathsGitFacts("src/Widget.cs", "tests/WidgetTests.cs"));
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             DocsImpactDispatch(), ConfigWith([Enforced(DocsImpactRule)]));
@@ -531,7 +531,7 @@ public sealed class ArbiterShortcutRuleTests
     public async Task TheDocsImpactAnswerCarriesTheNoDocChangeDigest()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(NoDocChange, 0.95);
-        ArbiterEvaluator evaluator = Evaluator( provider, new ChangedPathsGitFacts("src/Widget.cs"));
+        ArbiterEvaluator evaluator = Evaluator(provider, new ChangedPathsGitFacts("src/Widget.cs"));
 
         await evaluator.EvaluateAsync(DocsImpactDispatch(), ConfigWith([Enforced(DocsImpactRule)]));
 

@@ -361,7 +361,7 @@ public sealed class ArbiterNitpickRuleTests
     [Fact]
     public async Task WithNoProviderTheFindingIsKept()
     {
-        ArbiterEvaluator evaluator = Evaluator( new NoneProvider());
+        ArbiterEvaluator evaluator = Evaluator(new NoneProvider());
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             LensReturn(MinorFinding), ConfigWith([Enforced(NitpickRule)]));
@@ -584,7 +584,7 @@ public sealed class ArbiterNitpickRuleTests
         ArbiterRunStore store = _arbiter.RunStore(clock: new FakeTimeProvider(Now));
         await store.AppendFindingAsync(ReviewRun, ReturnedFinding.StoredText(
             "id: correctness/nit-1\nseverity: Minor\nfile: src/Widget.cs\nline: 12\nclaim: naming", dropped: true));
-        ArbiterEvaluator evaluator = Evaluator( new ScriptedProvider());
+        ArbiterEvaluator evaluator = Evaluator(new ScriptedProvider());
         ArbiterEvent refute = new()
         {
             Harness = "claude",

@@ -389,7 +389,7 @@ public sealed class ArbiterDuplicateFindingRuleTests
     {
         await SeedAsync(ThisRun, Prior("prior-1", "src/Widget.cs", 10));
         BatchDuplicateProvider provider = new(_ => SameDefect);
-        ArbiterEvaluator evaluator = Evaluator( new ScoredProvider(provider, 0.5));
+        ArbiterEvaluator evaluator = Evaluator(new ScoredProvider(provider, 0.5));
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             Refute("KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\n"), ConfigWith([Enforced(DuplicateRule)]));
@@ -422,7 +422,7 @@ public sealed class ArbiterDuplicateFindingRuleTests
     {
         await SeedAsync(ThisRun, Prior("prior-1", "src/Widget.cs", 10));
         BatchDuplicateProvider provider = new(_ => SameDefect);
-        ArbiterEvaluator evaluator = Evaluator( new ScoredProvider(provider, 0.95));
+        ArbiterEvaluator evaluator = Evaluator(new ScoredProvider(provider, 0.95));
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             Refute("KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\n"), ConfigWith([Enforced(DuplicateRule)]));
@@ -442,7 +442,7 @@ public sealed class ArbiterDuplicateFindingRuleTests
     [Fact]
     public async Task EachRefuterReturnRecordsItsOutcomeAgainstItsFindingIdInTheStore()
     {
-        ArbiterEvaluator evaluator = Evaluator( new BatchDuplicateProvider(_ => DifferentDefect));
+        ArbiterEvaluator evaluator = Evaluator(new BatchDuplicateProvider(_ => DifferentDefect));
         ArbiterEvent returned = new()
         {
             Harness = "claude",
