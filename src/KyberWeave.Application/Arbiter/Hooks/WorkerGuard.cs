@@ -240,23 +240,23 @@ public sealed class WorkerGuard(
     }
 
     /// <summary>The project and user-level directories one repository's ledger may sit in.</summary>
-    private static IReadOnlyList<string> LedgerDirectories(string cwd, string home)
+    private IReadOnlyList<string> LedgerDirectories(string cwd, string home)
     {
         string root = RepositoryRootOf(cwd);
         List<string> directories = [Path.Combine(root, "artifacts", "arbiter")];
         if (!string.IsNullOrWhiteSpace(home))
         {
             directories.Add(Path.Combine(
-                home, ".kyber-weave", "arbiter", "projects", ArbiterHookDecisionEngine.ProjectRootKey(root)));
+                home, ".kyber-weave", "arbiter", "projects", ArbiterHookDecisionEngine.ProjectRootKey(root, process.CurrentDirectory)));
         }
 
         return [.. directories.Distinct(StringComparer.Ordinal)];
     }
 
     /// <summary>The nearest ancestor holding <c>.git</c>, or the working directory when no ancestor does.</summary>
-    private static string RepositoryRootOf(string cwd)
+    private string RepositoryRootOf(string cwd)
     {
-        string full = Path.GetFullPath(cwd);
+        string full = Path.GetFullPath(cwd, process.CurrentDirectory);
         for (DirectoryInfo? directory = new(full); directory is not null; directory = directory.Parent)
         {
             if (Directory.Exists(Path.Combine(directory.FullName, ".git"))

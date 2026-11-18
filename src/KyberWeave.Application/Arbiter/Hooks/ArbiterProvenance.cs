@@ -17,10 +17,20 @@ namespace KyberWeave.Arbiter.Mcp;
 public static class ArbiterProvenance
 {
     /// <summary>The line for <paramref name="root"/> answered from <paramref name="ruleSetHash"/> over <paramref name="ruleCount"/> rules.</summary>
-    public static string Line(string root, string ruleSetHash, int ruleCount) =>
-        "provenance: root=" + Path.GetFullPath(root)
-        + " rules=" + ruleSetHash
-        + " rule-count=" + ruleCount.ToString(CultureInfo.InvariantCulture);
+    /// <exception cref="ArgumentException"><paramref name="root"/> is not fully qualified: the line never reads the working directory.</exception>
+    public static string Line(string root, string ruleSetHash, int ruleCount)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        if (!Path.IsPathFullyQualified(root))
+        {
+            throw new ArgumentException($"The provenance root '{root}' must be fully qualified.", nameof(root));
+        }
+
+        // A fully qualified path ignores the base, so the base names no directory to read; the call only normalises.
+        return "provenance: root=" + Path.GetFullPath(root, root)
+            + " rules=" + ruleSetHash
+            + " rule-count=" + ruleCount.ToString(CultureInfo.InvariantCulture);
+    }
 
     /// <summary>The provenance value used when no configuration could be loaded.</summary>
     public const string Unavailable = "unavailable";
