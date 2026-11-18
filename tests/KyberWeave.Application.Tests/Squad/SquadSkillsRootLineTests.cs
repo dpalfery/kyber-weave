@@ -1,10 +1,11 @@
 using System.Text;
 using System.Text.RegularExpressions;
-using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 using KyberWeave.Tests.Corpus;
 
@@ -20,8 +21,11 @@ public sealed class SquadSkillsRootLineTests
 {
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
+    private const string BaselinePath = "shared/worker-baseline.md";
     private const string SampleWorker = "dev-medium";
     private const string SampleSkill = "task-gate";
+
+    private readonly InMemoryFileSystem _files = new(caseSensitive: true);
 
     private static readonly Regex SkillsLine = new(
         @"it is at `(?<root>[^`]+)/<name>/SKILL\.md`",
@@ -46,8 +50,7 @@ public sealed class SquadSkillsRootLineTests
         SquadTarget target,
         SquadDeploymentScope scope)
     {
-        using TempDirectory home = new();
-        SquadGlobalRoots roots = new(_ => null, home.Path);
+        SquadGlobalRoots roots = new(_ => null, Home());
         SquadRenderResult result = await RenderAsync(target, scope, roots);
 
         string expected = ExpectedRoot(result, scope, roots, target);
@@ -68,9 +71,8 @@ public sealed class SquadSkillsRootLineTests
     [Fact]
     public async Task AGlobalRootOutsideTheHomeDirectoryIsWrittenAbsolute()
     {
-        using TempDirectory home = new();
-        using TempDirectory custom = new();
-        SquadGlobalRoots roots = new(name => name == "COPILOT_HOME" ? custom.Path : null, home.Path);
+        string custom = Path.Combine(_files.Root, "custom-copilot-home");
+        SquadGlobalRoots roots = new(name => name == "COPILOT_HOME" ? custom : null, Home());
         SquadRenderResult result = await RenderAsync(SquadTarget.Copilot, SquadDeploymentScope.Global, roots);
 
         Match line = SkillsLine.Match(CarrierBody(result));
@@ -105,19 +107,27 @@ public sealed class SquadSkillsRootLineTests
             SquadWorkerBaselineInjector.BindSkillsRoot(block, ".claude/skills"));
     }
 
-    private static Task<SquadRenderResult> RenderAsync(
+    private string Home() => Path.Combine(_files.Root, "home");
+
+    private string SourceRoot() => Path.Combine(_files.Root, "products", "kyber-squad");
+
+    private Task<SquadRenderResult> RenderAsync(
         SquadTarget target,
         SquadDeploymentScope scope,
         ISquadGlobalRootResolver? roots)
     {
-        SquadRenderRequest request = new SquadRenderRequest(
-            Path.Combine(Corpus.Root, "products", "kyber-squad"),
+        string sourceRoot = SourceRoot();
+        _files.CreateDirectory(Path.Combine(sourceRoot, "shared"));
+        _files.WriteAllText(Path.Combine(sourceRoot, "shared", "worker-baseline.md"), Corpus.ReadText($"products/kyber-squad/{BaselinePath}"));
+        SquadRendererRegistry registry = new(SquadHostDefaults.CreateRenderers(), new InMemorySquadServices(_files).RenderInputReader());
+        SquadRenderRequest request = new(
+            sourceRoot,
             [target],
             scope,
             GlobalRoots: roots,
-            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
+            PreloadedSource: TestSquadCorpus.CanonicalSource);
 
-        return SquadHostDefaults.ResolveRenderer().RenderAsync(request);
+        return registry.RenderAsync(request);
     }
 
     /// <summary>
