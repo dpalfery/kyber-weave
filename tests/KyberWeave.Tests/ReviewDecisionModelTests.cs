@@ -26,7 +26,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         FakeProvider provider = new() { Noul = 0.02 };
         ReviewDecisionModel model = Model(provider);
 
-        IReadOnlyDictionary<string, string> notSeated = await ReviewLensApplicability.NotApplicableAsync(
+        IReadOnlyDictionary<string, string> notSeated = await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(
             model, ["security", "performance"], "src/\n  src/a.cs +1 -0");
 
         Assert.Equal("decision model: not applicable (confidence 0.98)", notSeated["security"]);
@@ -39,7 +39,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     {
         ReviewDecisionModel model = Model(new FakeProvider { Noul = 0.5 });
 
-        IReadOnlyDictionary<string, string> notSeated = await ReviewLensApplicability.NotApplicableAsync(model, ["security"], "x");
+        IReadOnlyDictionary<string, string> notSeated = await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(model, ["security"], "x");
 
         Assert.Empty(notSeated);
     }
@@ -49,7 +49,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     {
         FakeProvider provider = new() { Noul = 0.0 };
 
-        IReadOnlyDictionary<string, string> notSeated = await ReviewLensApplicability.NotApplicableAsync(
+        IReadOnlyDictionary<string, string> notSeated = await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(
             Model(provider), ["correctness", "test-adequacy", "duplicate-implementation", "static-analysis-triage"], "x");
 
         Assert.Empty(notSeated);
@@ -62,7 +62,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         FakeProvider provider = new() { Fault = true };
         ReviewDecisionModel model = Model(provider);
 
-        IReadOnlyDictionary<string, string> notSeated = await ReviewLensApplicability.NotApplicableAsync(
+        IReadOnlyDictionary<string, string> notSeated = await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(
             model, ["security", "performance", "supportability", "prior-art", "authz-tenancy", "intent-alignment"], "x");
 
         Assert.Empty(notSeated);
@@ -77,7 +77,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         FakeProvider provider = new() { Throws = new TimeoutException("the endpoint did not answer") };
         ReviewDecisionModel model = Model(provider);
 
-        await ReviewLensApplicability.NotApplicableAsync(model, ["security", "performance"], "x");
+        await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(model, ["security", "performance"], "x");
 
         Assert.True(model.Faulted);
         Assert.Contains("stopped after a provider fault (TimeoutException)", model.SummaryLine([]), StringComparison.Ordinal);
@@ -94,7 +94,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         };
         ReviewDecisionModel model = Model(provider);
 
-        await ReviewLensApplicability.NotApplicableAsync(model, ["security", "performance"], "x");
+        await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(model, ["security", "performance"], "x");
 
         string summary = model.SummaryLine([])!;
         Assert.Equal(2, provider.Calls);
@@ -107,7 +107,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     {
         ReviewDecisionModel model = Model(new FakeProvider { Fault = true });
 
-        await ReviewLensApplicability.NotApplicableAsync(model, ["security"], "x");
+        await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(model, ["security"], "x");
 
         string summary = model.SummaryLine([])!;
         Assert.Contains("stopped after a provider fault, the rest went unasked", summary, StringComparison.Ordinal);
@@ -121,7 +121,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         await File.WriteAllTextAsync(LogDirectory, "not a folder");
         ReviewDecisionModel model = Model(new FakeProvider { Noul = 0.02 });
 
-        IReadOnlyDictionary<string, string> notSeated = await ReviewLensApplicability.NotApplicableAsync(model, ["security", "performance"], "x");
+        IReadOnlyDictionary<string, string> notSeated = await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(model, ["security", "performance"], "x");
 
         Assert.Equal(2, notSeated.Count);
         string? summary = model.SummaryLine([]);
@@ -133,7 +133,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     {
         ReviewDecisionModel model = Model(new FakeProvider { Noul = 0.02 });
 
-        await ReviewLensApplicability.NotApplicableAsync(model, ["security"], "x");
+        await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(model, ["security"], "x");
 
         Assert.DoesNotContain("could not be written", model.SummaryLine([]), StringComparison.Ordinal);
         Assert.True(File.Exists(Path.Combine(LogDirectory, "decisions.jsonl")));
@@ -144,7 +144,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     {
         ReviewDecisionModel model = new(new NoneProvider(), ArbiterConfig.ProductDefaults.Rules, LogDirectory, TimeProvider.System);
 
-        IReadOnlyDictionary<string, string> notSeated = await ReviewLensApplicability.NotApplicableAsync(model, ["security"], "x");
+        IReadOnlyDictionary<string, string> notSeated = await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(model, ["security"], "x");
 
         Assert.Empty(notSeated);
         Assert.False(model.Configured);

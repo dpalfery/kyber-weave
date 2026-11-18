@@ -66,6 +66,9 @@ internal static class ReviewTestServices
     /// <summary>Repairs the lines findings cite.</summary>
     public static ICitedLineChecker CitedLines { get; } = Provider.GetRequiredService<ICitedLineChecker>();
 
+    /// <summary>The decision-model steps the review commands ask, over the registered cited-file readers.</summary>
+    public static IReviewDecisionSteps DecisionSteps { get; } = Provider.GetRequiredService<IReviewDecisionSteps>();
+
     /// <summary>Reports the declarations whose bodies repeat verbatim.</summary>
     public static IDuplicateDetectionService Duplicates { get; } = Provider.GetRequiredService<IDuplicateDetectionService>();
 
