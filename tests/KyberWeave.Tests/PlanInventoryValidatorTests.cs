@@ -149,7 +149,7 @@ public sealed class PlanInventoryValidatorTests
             .Write("6-Docs/README.md", Index("None.", "docs/index"))
             .Write("6-Docs/archive/plans/closed-spine.md", Plan("plans/closed-spine"));
 
-        DocumentSet set = new DocumentLoader(fixture.Root, ArchiveInCorpus).Load();
+        DocumentSet set = RealDocumentLoader.Create(fixture.Root, ArchiveInCorpus).Load();
         DiagnosticReport report = new PlanInventoryValidator(RootPlanIndexOverrides).Validate(set);
 
         Assert.True(report.Items.Count == 0, Describe(report));

@@ -713,7 +713,7 @@ public sealed class ExploreAnswerTests : IDisposable
         return new DocumentIndexHost(
             root,
             () => CodeGraphResolverAdapter.ForRepository(root),
-            () => new DocumentLoader(root, config.Ontology).Load(),
+            () => RealDocumentLoader.Create(root, config.Ontology).Load(),
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
     }

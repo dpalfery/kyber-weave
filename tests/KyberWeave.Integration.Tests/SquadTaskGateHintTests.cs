@@ -36,7 +36,7 @@ public sealed class SquadTaskGateHintTests
     /// no gates.
     /// </summary>
     private static IKyberWeaveConfigRepository ProjectConfigs =>
-        new FileKyberWeaveConfigRepository(new FileRepositoryTreeProbe());
+        new FileKyberWeaveConfigRepository(RealRepositoryTreeProbe.Create());
 
     /// <summary>
     /// A project with no config file gets the hint, because there are no task gates to find.

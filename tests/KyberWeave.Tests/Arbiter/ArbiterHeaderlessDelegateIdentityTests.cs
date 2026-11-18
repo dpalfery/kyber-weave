@@ -215,7 +215,7 @@ public sealed class ArbiterHeaderlessDelegateIdentityTests : IDisposable
         KyberWeaveConfig config = KyberWeaveConfig.ProductDefaults;
         ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, config);
         facts = facts.With("config.planning-dirs", new List<string> { "docs/plans/**" }, ArbiterFactLabel.Derived);
-        return (classification, new KyberWeave.Core.Arbiter.Plans.PlanFacts(new PlanPathResolver()).Enrich(facts, classification, _repo.Path));
+        return (classification, RealPlanFacts.Create().Enrich(facts, classification, _repo.Path));
     }
 
     private static ArbiterEvent Event(string target, string prompt, string harness = "copilot-cli", string phase = "pre") =>

@@ -143,7 +143,7 @@ public sealed class ModelTargetingTieredTests : IDisposable
         new InFlightLedger(ArbiterDirectory),
         new DecisionLog(ArbiterDirectory),
         new NoGitFacts(),
-        new RealPlanReader(new PlanFacts(new PlanPathResolver()), _repo.Path),
+        new RealPlanReader(RealPlanFacts.Create(), _repo.Path),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
         new GateReportFacts(),
         new FileArbiterStateFactory(),
@@ -327,7 +327,7 @@ public sealed class ModelTargetingTieredTests : IDisposable
     public void ThePlanReaderPublishesTheRecordedDifficulty()
     {
         WritePlan("hard");
-        PlanFacts facts = new(new PlanPathResolver());
+        PlanFacts facts = RealPlanFacts.Create();
 
         ArbiterFactSet enriched = facts.Enrich(
             new ArbiterFactSet(),

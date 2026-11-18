@@ -2,6 +2,7 @@ using System.Reflection;
 
 using KyberWeave.Application;
 using KyberWeave.Data.Configuration;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Review;
 using KyberWeave.Mcp;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -44,7 +45,7 @@ string repoRoot;
 try
 {
     repoRoot = RepositoryRootResolver.Resolve(
-        new FileKyberWeaveConfigRepository(new FileRepositoryTreeProbe()),
+        new FileKyberWeaveConfigRepository(new FileRepositoryTreeProbe(new PhysicalFileSystem())),
         args,
         workingDirectory,
         Environment.GetEnvironmentVariable(RepositoryRootResolver.EnvironmentVariable));

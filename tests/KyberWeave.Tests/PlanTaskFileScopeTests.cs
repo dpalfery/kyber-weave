@@ -162,7 +162,7 @@ public sealed class PlanTaskFileScopeTests : IDisposable
 
     private DiagnosticReport Validate()
     {
-        DocumentSet corpus = new DocumentLoader(_repo.Path, Config.Ontology).Load();
+        DocumentSet corpus = RealDocumentLoader.Create(_repo.Path, Config.Ontology).Load();
         return new PlanTaskFileValidator(_repo.Path, Config, DocsPorts.Files).Validate(corpus);
     }
 

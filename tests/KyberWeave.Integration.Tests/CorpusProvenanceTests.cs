@@ -197,7 +197,7 @@ public sealed class CorpusProvenanceTests : IDisposable
         DocumentIndexHost host = new(
             root,
             () => FakeCodeGraphResolver.WithSymbols(),
-            () => new DocumentLoader(root, config.Ontology).Load(),
+            () => RealDocumentLoader.Create(root, config.Ontology).Load(),
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 

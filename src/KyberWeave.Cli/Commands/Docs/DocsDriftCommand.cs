@@ -8,13 +8,16 @@ using Spectre.Console.Cli;
 namespace KyberWeave.Cli.Commands.Docs;
 
 /// <summary>Entity-drift tier: resolves documented code references against CodeGraph.</summary>
-public sealed class DocsDriftCommand(ICodeGraphPortsFactory codeGraph, IKyberWeaveConfigRepository configs) : Command<DocsSettings>
+public sealed class DocsDriftCommand(
+    ICodeGraphPortsFactory codeGraph,
+    IKyberWeaveConfigRepository configs,
+    IDocumentSourceFactory documents) : Command<DocsSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, DocsSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
-        if (!DocsCommandComposition.TryCreateLoader(configs, settings, report, out DocumentLoader? loader))
+        if (!DocsCommandComposition.TryCreateLoader(configs, settings, report, documents, out IDocumentSource? loader))
         {
             CommandHelpers.Finish(report, settings, "docs drift", "Document");
             return 1;

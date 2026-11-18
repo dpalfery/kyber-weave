@@ -12,6 +12,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Host;
 using KyberWeave.Data.Review;
+using KyberWeave.Tests.Configuration;
 
 namespace KyberWeave.Tests.Fakes;
 
@@ -42,7 +43,7 @@ internal static class SquadTestCommands
             new FileSquadTargetResolver(),
             roots,
             new SquadConsoleOptions(isInteractive, readAnswer),
-            configs ?? new FakeKyberWeaveConfigRepository(),
+            configs ?? new FileKyberWeaveConfigRepository(RealRepositoryTreeProbe.Create()),
             capturePluginStep);
     }
 
@@ -71,7 +72,7 @@ internal static class SquadTestCommands
             roots,
             new PhysicalSquadFileAccess(),
             new SquadConsoleOptions(isInteractive, readAnswer),
-            configs ?? new FakeKyberWeaveConfigRepository(),
+            configs ?? new FileKyberWeaveConfigRepository(RealRepositoryTreeProbe.Create()),
             picker,
             capturePluginStep);
     }
@@ -178,7 +179,7 @@ internal static class SquadTestCommands
             new FileZCodeMcpInspector(),
             new SquadDoctorOptions(executor, workingDirectory),
             SquadFileSystemPathSemantics.Instance,
-            configs ?? new FileKyberWeaveConfigRepository(new FileRepositoryTreeProbe()));
+            configs ?? new FileKyberWeaveConfigRepository(RealRepositoryTreeProbe.Create()));
     }
 
     public static SquadPresetUseCommand PresetUse(

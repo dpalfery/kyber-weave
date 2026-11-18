@@ -12,6 +12,7 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.RunStart;
 using Xunit;
+using KyberWeave.Tests.Arbiter;
 using KyberWeave.Tests.RunStart;
 
 namespace KyberWeave.Integration.Tests.Arbiter;
@@ -326,7 +327,7 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
     private sealed class RealPlanReader(string root) : IArbiterPlanReader
     {
         public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) =>
-            new KyberWeave.Core.Arbiter.Plans.PlanFacts(new PlanPathResolver()).Enrich(facts, classification, root);
+            RealPlanFacts.Create().Enrich(facts, classification, root);
     }
 
     /// <summary>The live misfire: the model confidently calls any file the task does not name outside it.</summary>

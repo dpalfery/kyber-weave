@@ -1,12 +1,11 @@
-using System.Diagnostics;
+using System.Globalization;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Mcp;
-using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Data.Docs.Mcp;
 
-/// <summary>Reads a working tree's identity from <c>git rev-parse</c>, bounded by a five-second timeout.</summary>
-public sealed class GitWorktreeIdentity : IGitWorktreeIdentity
+/// <summary>Reads a working tree's identity from <c>git rev-parse</c> through the process seam, bounded by a five-second timeout.</summary>
+public sealed class GitWorktreeIdentity(IProcessRunner process) : IGitWorktreeIdentity
 {
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(5);
 
@@ -15,23 +14,24 @@ public sealed class GitWorktreeIdentity : IGitWorktreeIdentity
     {
         topLevel = null;
         commonDirectory = null;
-        ProcessStartInfo startInfo = new("git")
+        ProcessRunRequest request = new()
         {
+            Program = "git",
+            Arguments = ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"],
             WorkingDirectory = directory,
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
+            Timeout = GitTimeout,
+            StandardInput = string.Empty,
         };
-        foreach (string argument in new[] { "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir" })
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
 
         try
         {
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);
+            ProcessRunResult result = process.RunAsync(request).GetAwaiter().GetResult();
+            if (result.TimedOut)
+            {
+                failure = $"The process did not exit within {GitTimeout.TotalSeconds.ToString("0", CultureInfo.InvariantCulture)} seconds.";
+                return false;
+            }
+
             if (result.ExitCode != 0)
             {
                 failure = CorpusProvenance.FirstLine(result.StandardError);
@@ -51,8 +51,9 @@ public sealed class GitWorktreeIdentity : IGitWorktreeIdentity
             return true;
         }
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception
-            or InvalidOperationException
-            or TimeoutException)
+            or FileNotFoundException
+            or DirectoryNotFoundException
+            or InvalidOperationException)
         {
             failure = exception.Message;
             return false;

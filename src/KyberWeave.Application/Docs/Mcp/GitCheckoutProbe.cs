@@ -1,6 +1,4 @@
-using System.Diagnostics;
 using KyberWeave.Contracts.Repositories;
-using KyberWeave.Core.Processes;
 using KyberWeave.Mcp;
 
 namespace KyberWeave.Data.Docs.Mcp;
@@ -10,10 +8,10 @@ namespace KyberWeave.Data.Docs.Mcp;
 /// provenance header costs no child process for them, and the short revision and dirty marker through git.
 /// </summary>
 /// <remarks>
-/// A missing git, a directory that is not a repository, or a failed command all yield <c>rev=unavailable</c> and
+/// Every file read goes through the file-system seam and every git call through the process seam. A missing git, a directory that is not a repository, or a failed command all yield <c>rev=unavailable</c> and
 /// <c>dirty=unknown</c>, which are success paths for the header, never an invented value.
 /// </remarks>
-internal sealed class GitCheckoutProbe : IGitCheckoutProbe
+public sealed class GitCheckoutProbe(IFileSystem files, IProcessRunner process) : IGitCheckoutProbe
 {
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(5);
 
@@ -49,10 +47,9 @@ internal sealed class GitCheckoutProbe : IGitCheckoutProbe
         string gitPath = Path.Combine(root, ".git");
         try
         {
-            if (File.Exists(gitPath))
+            if (files.FileExists(gitPath))
             {
-                FileInfo link = new(gitPath);
-                long pointerStamp = (link.LastWriteTimeUtc.Ticks * 31) + link.Length;
+                long pointerStamp = (files.GetLastWriteTimeUtc(gitPath).Ticks * 31) + files.GetLength(gitPath);
 
                 // Worktree / submodule indirection: the file itself notices a retarget.
                 return GitDirectoryFor(root) is { } worktree
@@ -60,7 +57,7 @@ internal sealed class GitCheckoutProbe : IGitCheckoutProbe
                     : pointerStamp;
             }
 
-            if (!Directory.Exists(gitPath)) return 0;
+            if (!files.DirectoryExists(gitPath)) return 0;
 
             long stamp = 17;
             stamp = MixFile(stamp, Path.Combine(gitPath, "HEAD"));
@@ -77,15 +74,15 @@ internal sealed class GitCheckoutProbe : IGitCheckoutProbe
     /// The directory holding this checkout's own git metadata: <c>.git</c> itself in a normal
     /// checkout, or the worktree directory a linked worktree's <c>.git</c> file points at.
     /// </summary>
-    private static string? GitDirectoryFor(string root)
+    private string? GitDirectoryFor(string root)
     {
         string dotGit = Path.Combine(root, ".git");
-        if (Directory.Exists(dotGit)) return dotGit;
-        if (!File.Exists(dotGit)) return null;
+        if (files.DirectoryExists(dotGit)) return dotGit;
+        if (!files.FileExists(dotGit)) return null;
 
         try
         {
-            string pointer = File.ReadAllText(dotGit).Trim();
+            string pointer = files.ReadAllText(dotGit).Trim();
             if (!pointer.StartsWith(GitDirPrefix, StringComparison.Ordinal)) return null;
 
             string target = pointer[GitDirPrefix.Length..].Trim();
@@ -104,14 +101,14 @@ internal sealed class GitCheckoutProbe : IGitCheckoutProbe
     /// The git directory every worktree of this repository shares. A linked worktree's metadata
     /// directory carries a <c>commondir</c> file naming it; the main worktree is its own.
     /// </summary>
-    private static string CommonGitDirectory(string gitDirectory)
+    private string CommonGitDirectory(string gitDirectory)
     {
         string pointer = Path.Combine(gitDirectory, "commondir");
-        if (!File.Exists(pointer)) return gitDirectory;
+        if (!files.FileExists(pointer)) return gitDirectory;
 
         try
         {
-            string common = File.ReadAllText(pointer).Trim();
+            string common = files.ReadAllText(pointer).Trim();
             return common.Length == 0 ? gitDirectory : Path.GetFullPath(common, gitDirectory);
         }
         catch (Exception exception) when (exception is IOException
@@ -124,13 +121,13 @@ internal sealed class GitCheckoutProbe : IGitCheckoutProbe
     }
 
     /// <summary>The branch reported by <c>HEAD</c>, which is a ref name, a commit id when detached, or unavailable.</summary>
-    private static string ReadBranch(string headPath)
+    private string ReadBranch(string headPath)
     {
         string head;
         try
         {
-            if (!File.Exists(headPath)) return CorpusProvenance.Unavailable;
-            head = File.ReadAllText(headPath).Trim();
+            if (!files.FileExists(headPath)) return CorpusProvenance.Unavailable;
+            head = files.ReadAllText(headPath).Trim();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -149,39 +146,34 @@ internal sealed class GitCheckoutProbe : IGitCheckoutProbe
         return head.Length == 0 ? CorpusProvenance.Unavailable : CorpusProvenance.Detached;
     }
 
-    private static long MixFile(long stamp, string path)
+    private long MixFile(long stamp, string path)
     {
-        if (!File.Exists(path)) return stamp;
-        FileInfo info = new(path);
-        stamp = (stamp * 31) + info.LastWriteTimeUtc.Ticks;
-        stamp = (stamp * 31) + info.Length;
+        if (!files.FileExists(path)) return stamp;
+        stamp = (stamp * 31) + files.GetLastWriteTimeUtc(path).Ticks;
+        stamp = (stamp * 31) + files.GetLength(path);
         return stamp;
     }
 
-    private static string? RunGit(string root, params string[] arguments)
+    private string? RunGit(string root, params string[] arguments)
     {
-        ProcessStartInfo startInfo = new("git")
+        ProcessRunRequest request = new()
         {
+            Program = "git",
+            Arguments = arguments,
             WorkingDirectory = root,
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
+            Timeout = GitTimeout,
+            StandardInput = string.Empty,
         };
-        foreach (string argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
 
         try
         {
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);
-            return result.ExitCode == 0 ? result.StandardOutput : null;
+            ProcessRunResult result = process.RunAsync(request).GetAwaiter().GetResult();
+            return result.ExitCode == 0 && !result.TimedOut ? result.StandardOutput : null;
         }
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception
-            or InvalidOperationException
-            or TimeoutException)
+            or FileNotFoundException
+            or DirectoryNotFoundException
+            or InvalidOperationException)
         {
             return null;
         }

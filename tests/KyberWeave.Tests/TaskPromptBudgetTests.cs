@@ -139,7 +139,7 @@ public sealed class TaskPromptBudgetTests
         .Build(new TaskPromptRequest(fixture.Root, TaskId: "T1", RetryText: retryText), config);
 
     private static DocumentIndex Index(DocFixture fixture, KyberWeaveConfig config) =>
-        DocumentIndex.Build(new DocumentLoader(fixture.Root, config.Ontology).Load(), FakeCodeGraphResolver.WithSymbols());
+        DocumentIndex.Build(RealDocumentLoader.Create(fixture.Root, config.Ontology).Load(), FakeCodeGraphResolver.WithSymbols());
 
     [Fact]
     public void EveryPartFitsTheDefaultBudget()
@@ -252,7 +252,7 @@ public sealed class TaskPromptBudgetTests
               docs-root: 6-Docs
             """);
         DocumentIndex index = DocumentIndex.Build(
-            new DocumentLoader(fixture.Root, site.Ontology).Load(), FakeCodeGraphResolver.WithSymbols());
+            RealDocumentLoader.Create(fixture.Root, site.Ontology).Load(), FakeCodeGraphResolver.WithSymbols());
         TaskPromptService service = new(
             DocsTestCommands.Services().GetRequiredService<IPlanTaskService>(),
             DocsTestCommands.Services().GetRequiredService<IPacketHostFacts>(),

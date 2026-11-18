@@ -135,7 +135,7 @@ public sealed class TaskPromptServiceTests
     {
         IServiceProvider provider = DocsTestCommands.Services();
         DocumentIndex index = DocumentIndex.Build(
-            new DocumentLoader(fixture.Root, config.Ontology).Load(), FakeCodeGraphResolver.WithSymbols());
+            RealDocumentLoader.Create(fixture.Root, config.Ontology).Load(), FakeCodeGraphResolver.WithSymbols());
         return new TaskPromptService(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),

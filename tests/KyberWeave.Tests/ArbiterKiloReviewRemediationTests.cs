@@ -201,16 +201,16 @@ public sealed class ArbiterKiloReviewRemediationTests
         string configPath = Path.Combine(configDir, "kyber-weave.yml");
 
         File.WriteAllText(configPath, "");
-        Assert.Empty(new FileUserHostConfigStore().ReadGlobalTargets(home.Path));
+        Assert.Empty(RealUserHostConfigStore.Create().ReadGlobalTargets(home.Path));
 
         File.WriteAllText(configPath, "   \n\r\n  ");
-        Assert.Empty(new FileUserHostConfigStore().ReadGlobalTargets(home.Path));
+        Assert.Empty(RealUserHostConfigStore.Create().ReadGlobalTargets(home.Path));
 
         File.WriteAllText(configPath, "arbiter: : malformed yaml");
-        Assert.Empty(new FileUserHostConfigStore().ReadGlobalTargets(home.Path));
+        Assert.Empty(RealUserHostConfigStore.Create().ReadGlobalTargets(home.Path));
 
         File.WriteAllText(configPath, "arbiter:\n  global:\n    targets: 12345");
-        Assert.Empty(new FileUserHostConfigStore().ReadGlobalTargets(home.Path));
+        Assert.Empty(RealUserHostConfigStore.Create().ReadGlobalTargets(home.Path));
     }
 
     [Fact]
@@ -296,7 +296,7 @@ public sealed class ArbiterKiloReviewRemediationTests
         string home = Path.Combine(temp.Path, "home");
         Directory.CreateDirectory(home);
 
-        new FileUserHostConfigStore().WriteGlobalTargets(home, ["kilo", "opencode", "pi", "copilot", "cursor"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(home, ["kilo", "opencode", "pi", "copilot", "cursor"]);
 
         SquadGlobalRoots roots = new(_ => null, home);
         string kiloRoot = roots.ResolveGlobalRoot(SquadTarget.Kilo);
@@ -412,7 +412,7 @@ public sealed class ArbiterKiloReviewRemediationTests
 
         using (FileStream lockStream = new(configPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
         {
-            IReadOnlyList<string> targets = new FileUserHostConfigStore().ReadGlobalTargets(home.Path);
+            IReadOnlyList<string> targets = RealUserHostConfigStore.Create().ReadGlobalTargets(home.Path);
             Assert.Empty(targets);
         }
     }

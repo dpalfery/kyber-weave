@@ -475,7 +475,7 @@ public sealed class ManagedGlossaryTests
 
         Service(repository).Write([Proposal("loop", "component:Gameplay", "claim-1")]);
 
-        DocumentSet set = new DocumentLoader(repository.Root, repository.Ontology).Load();
+        DocumentSet set = RealDocumentLoader.Create(repository.Root, repository.Ontology).Load();
         DocumentModel glossary = Assert.Single(set.Documents, document => document.RelativePath == "docs/glossary.md");
         Assert.Null(glossary.ParseError);
         Assert.Equal(owner, glossary.Frontmatter.Owner);

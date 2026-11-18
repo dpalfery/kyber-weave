@@ -1,13 +1,13 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Scaffolding;
-using KyberWeave.Core.FileSystem;
 using YamlDotNet.Core;
 
 namespace KyberWeave.Data.Configuration;
 
-/// <summary>Keeps the per-user host config in <c>~/.kyber-weave/kyber-weave.yml</c> on the real file system.</summary>
-public sealed class FileUserHostConfigStore : IUserHostConfigStore
+/// <summary>Keeps the per-user host config in <c>~/.kyber-weave/kyber-weave.yml</c> through the file-system seam.</summary>
+/// <param name="files">The file system the config lives on.</param>
+public sealed class FileUserHostConfigStore(IWritableFileSystem files) : IUserHostConfigStore
 {
     /// <inheritdoc />
     public string EnsureUserConfig(string home)
@@ -15,16 +15,16 @@ public sealed class FileUserHostConfigStore : IUserHostConfigStore
         ArgumentException.ThrowIfNullOrWhiteSpace(home);
 
         string path = UserHostConfigPath.Of(home);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        files.CreateDirectory(Path.GetDirectoryName(path)!);
 
-        string yaml = File.Exists(path)
-            ? File.ReadAllText(path)
+        string yaml = files.FileExists(path)
+            ? files.ReadAllText(path)
             : string.Empty;
 
         string updated = HostConfigYaml.WithArbiterEnabled(yaml);
-        if (!File.Exists(path) || !string.Equals(yaml, updated, StringComparison.Ordinal))
+        if (!files.FileExists(path) || !string.Equals(yaml, updated, StringComparison.Ordinal))
         {
-            AtomicFile.WriteAllText(path, updated);
+            files.WriteAllTextAtomic(path, updated);
         }
 
         return updated;
@@ -37,16 +37,16 @@ public sealed class FileUserHostConfigStore : IUserHostConfigStore
         ArgumentNullException.ThrowIfNull(targets);
 
         string path = UserHostConfigPath.Of(home);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        files.CreateDirectory(Path.GetDirectoryName(path)!);
 
-        string yaml = File.Exists(path)
-            ? File.ReadAllText(path)
+        string yaml = files.FileExists(path)
+            ? files.ReadAllText(path)
             : EnsureUserConfig(home);
 
         string updated = HostConfigYaml.WithArbiterGlobalTargets(yaml, targets);
         if (!string.Equals(yaml, updated, StringComparison.Ordinal))
         {
-            AtomicFile.WriteAllText(path, updated);
+            files.WriteAllTextAtomic(path, updated);
         }
     }
 
@@ -57,16 +57,16 @@ public sealed class FileUserHostConfigStore : IUserHostConfigStore
         ArgumentException.ThrowIfNullOrWhiteSpace(target);
 
         string path = UserHostConfigPath.Of(home);
-        if (!File.Exists(path))
+        if (!files.FileExists(path))
         {
             return;
         }
 
-        string yaml = File.ReadAllText(path);
+        string yaml = files.ReadAllText(path);
         string updated = HostConfigYaml.WithoutArbiterGlobalTarget(yaml, target);
         if (!string.Equals(yaml, updated, StringComparison.Ordinal))
         {
-            AtomicFile.WriteAllText(path, updated);
+            files.WriteAllTextAtomic(path, updated);
         }
     }
 
@@ -76,14 +76,14 @@ public sealed class FileUserHostConfigStore : IUserHostConfigStore
         ArgumentException.ThrowIfNullOrWhiteSpace(home);
 
         string path = UserHostConfigPath.Of(home);
-        if (!File.Exists(path))
+        if (!files.FileExists(path))
         {
             return [];
         }
 
         try
         {
-            string yaml = File.ReadAllText(path);
+            string yaml = files.ReadAllText(path);
             if (string.IsNullOrWhiteSpace(yaml))
             {
                 return [];

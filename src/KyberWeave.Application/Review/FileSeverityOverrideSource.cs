@@ -7,7 +7,7 @@ using KyberWeave.Core.Review;
 namespace KyberWeave.Data.Review;
 
 /// <summary>Reads the severity overrides from the review guidance file on the file system.</summary>
-public sealed class FileSeverityOverrideSource : ISeverityOverrideSource
+public sealed class FileSeverityOverrideSource(IFileSystem files) : ISeverityOverrideSource
 {
     /// <inheritdoc />
     public string? GuidancePath(string root, ConfigRegConfig configReg)
@@ -18,7 +18,7 @@ public sealed class FileSeverityOverrideSource : ISeverityOverrideSource
             .FirstOrDefault(entry => string.Equals(entry.Name, "review-guidance", StringComparison.Ordinal))?.Path
             ?? SeverityOverrides.DefaultGuidancePath;
         string path = Path.GetFullPath(Path.Combine(root, declared));
-        return File.Exists(path) ? path : null;
+        return files.FileExists(path) ? path : null;
     }
 
     /// <inheritdoc />
@@ -30,7 +30,7 @@ public sealed class FileSeverityOverrideSource : ISeverityOverrideSource
 
         try
         {
-            return SeverityOverrides.Parse(File.ReadAllText(path), Path.GetRelativePath(root, path).Replace('\\', '/'));
+            return SeverityOverrides.Parse(files.ReadAllText(path), Path.GetRelativePath(root, path).Replace('\\', '/'));
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {

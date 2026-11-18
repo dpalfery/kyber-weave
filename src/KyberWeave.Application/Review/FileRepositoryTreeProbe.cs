@@ -4,20 +4,21 @@ using KyberWeave.Core.Review;
 
 namespace KyberWeave.Data.Review;
 
-/// <summary>Probes a repository root and the symbolic links under it on disk.</summary>
-public sealed class FileRepositoryTreeProbe : IRepositoryTreeProbe
+/// <summary>Probes a repository root and the symbolic links under it through the file-system seam.</summary>
+/// <param name="files">Answers every existence, listing and link question.</param>
+public sealed class FileRepositoryTreeProbe(IFileSystem files) : IRepositoryTreeProbe
 {
     /// <inheritdoc />
     public RepositoryRootAccess ProbeRoot(string root)
     {
         try
         {
-            if (!Directory.Exists(root))
+            if (!files.DirectoryExists(root))
                 return new RepositoryRootAccess(false);
 
-            // Directory.Exists returns false without throwing on permission-denied roots;
+            // DirectoryExists returns false without throwing on permission-denied roots;
             // enumerate to detect accessibility issues.
-            _ = Directory.EnumerateFileSystemEntries(root).FirstOrDefault();
+            _ = files.EnumerateEntries(root).FirstOrDefault();
             return RepositoryRootAccess.Accessible;
         }
         catch (Exception ex) when (FileFailure.Is(ex))
@@ -27,14 +28,15 @@ public sealed class FileRepositoryTreeProbe : IRepositoryTreeProbe
     }
 
     /// <inheritdoc />
-    public bool DirectoryExists(string path) => Directory.Exists(path);
+    public bool DirectoryExists(string path) => files.DirectoryExists(path);
 
     /// <inheritdoc />
     /// <remarks>
     /// Each prefix of the path is checked as its own entry, outermost first, so a link in the middle of the path is
     /// found even when the final file is an ordinary one. The walk splits on the separators this host reads, so it
     /// inspects the same entries the gate would open: a backslash is a separator on Windows and a name character
-    /// elsewhere. Only the link's target is read; nothing behind it is opened.
+    /// elsewhere. Only the link's target is read; nothing behind it is opened. A link whose final target does not
+    /// exist cannot be resolved and is treated as escaping.
     /// </remarks>
     public bool LeadsOutsideThroughSymlink(string root, string path)
     {
@@ -47,16 +49,15 @@ public sealed class FileRepositoryTreeProbe : IRepositoryTreeProbe
         foreach (string segment in segments)
         {
             current = Path.Combine(current, segment);
-            FileSystemInfo entry = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
-            if (entry.LinkTarget is not { } linkTarget)
+            if (files.GetLinkTarget(current) is null)
                 continue;
 
             try
             {
-                FileSystemInfo? resolved = entry.ResolveLinkTarget(returnFinalTarget: true);
-                string target = resolved?.FullName
-                    ?? Path.GetFullPath(Path.Combine(Path.GetDirectoryName(current)!, linkTarget));
-                if (!TaskGatePlanning.IsWithin(full, target))
+                // The seam answers null for a link that cannot be followed to an existing final target (a loop or a
+                // missing target), and such a link is treated as escaping.
+                string? target = files.GetFinalLinkTarget(current);
+                if (target is null || !TaskGatePlanning.IsWithin(full, target))
                     return true;
             }
             catch (Exception exception) when (FileFailure.Is(exception))
