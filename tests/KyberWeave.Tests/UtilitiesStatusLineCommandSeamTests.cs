@@ -61,6 +61,58 @@ public sealed class UtilitiesStatusLineCommandSeamTests
         Assert.StartsWith(ClaudeStagingRoot, Assert.Single(_host.EvaluatedFiles), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The digest the receipt records is the one the command asks the host to compare against. A host answer scripted
+    /// independently of the receipt must not hide a command that drops or truncates the digest.
+    /// </summary>
+    [Fact]
+    public void StatusPassesTheReceiptsDigestToTheHost()
+    {
+        _plans.WithReceipt(StatusLineTarget.Claude, Owned("statusline/statusline.sh"));
+
+        _ = Status().Execute(null!, new UtilitiesStatusLineSettings());
+
+        (_, string expectedSha256) = Assert.Single(_host.Evaluations);
+        Assert.Equal("0123456789abcdef", expectedSha256);
+    }
+
+    /// <summary>
+    /// Two owned files with the same name in different directories are distinct. A fake keyed by file name alone would
+    /// report the wrong one and pass a command that lost the directory part of the path.
+    /// </summary>
+    [Fact]
+    public void StatusTellsApartTwoOwnedFilesWithTheSameNameInDifferentDirectories()
+    {
+        _plans.WithReceipt(
+            StatusLineTarget.Claude,
+            Owned("a/statusline.sh"),
+            Owned("b/statusline.sh"));
+        _host.FileStates["a/statusline.sh"] = UtilitiesStatusLineFileState.Missing;
+
+        int result = Status().Execute(null!, new UtilitiesStatusLineSettings());
+
+        Assert.Equal(1, result);
+        Assert.Contains("missing a/statusline.sh", _console.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("missing b/statusline.sh", _console.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// When the fake is given the file's bytes it compares their digest with the receipt, so a command that passes the
+    /// wrong digest is reported as drift rather than as healthy.
+    /// </summary>
+    [Fact]
+    public void StatusReportsDriftWhenTheBytesDoNotMatchTheReceipt()
+    {
+        _plans.WithReceipt(StatusLineTarget.Claude, Owned("statusline/statusline.sh"));
+        _host.Contents[Path.Combine(ClaudeStagingRoot, "statusline", "statusline.sh")] =
+            "locally edited by the operator\n"u8.ToArray();
+
+        int result = Status().Execute(null!, new UtilitiesStatusLineSettings());
+
+        Assert.Equal(1, result);
+        Assert.Contains("drift", _console.Output, StringComparison.Ordinal);
+    }
+
     /// <summary>No receipt at all names the deploy command and fails the run.</summary>
     [Fact]
     public void StatusWithNoReceiptNamesTheDeployCommand()
