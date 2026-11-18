@@ -12,10 +12,9 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SeatOutputParserTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     private static string Fixture(string name) =>
-        Corpus.ReadText($"tests/KyberWeave.Tests/Fixtures/review-seats/{name}");
+        EmbeddedFixtureText.Read(typeof(SeatOutputParserTests).Assembly, $"review-seats/{name}");
 
     [Theory]
     [InlineData("589-prior-art-performance.md", "prior-art-performance", 5, SeatOutputKind.Findings)]

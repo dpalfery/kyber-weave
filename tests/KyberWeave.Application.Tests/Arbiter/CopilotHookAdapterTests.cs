@@ -24,7 +24,6 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class CopilotHookAdapterTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     private sealed class ScriptedEngine : IHookDecisionEngine
     {
@@ -76,10 +75,10 @@ public sealed class CopilotHookAdapterTests
         };
 
     private static string VsCodeFixture(string name) =>
-        Corpus.ReadText($"tests/KyberWeave.Tests/Fixtures/arbiter-hooks/copilot-vscode/{name}");
+        EmbeddedFixtureText.Read(typeof(CopilotHookAdapterTests).Assembly, $"arbiter-hooks/copilot-vscode/{name}");
 
     private static string CliFixture(string name) =>
-        Corpus.ReadText($"tests/KyberWeave.Tests/Fixtures/arbiter-hooks/copilot-cli/{name}");
+        EmbeddedFixtureText.Read(typeof(CopilotHookAdapterTests).Assembly, $"arbiter-hooks/copilot-cli/{name}");
 
     private static (int Exit, string Stdout, string Log) Run(
         string harness,
