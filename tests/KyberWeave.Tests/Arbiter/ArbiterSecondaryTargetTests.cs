@@ -58,13 +58,13 @@ public sealed class ArbiterSecondaryTargetTests : IDisposable
     private ArbiterEvaluator Evaluator() => new(
         FakeArbiterProvider.AnsweringByRule((ScopeRule, "within-task")),
         _ => null,
-        new InFlightLedger(ArbiterDirectory),
-        new DecisionLog(ArbiterDirectory),
+        RealArbiterState.Ledger(ArbiterDirectory),
+        RealArbiterState.Decisions(ArbiterDirectory),
         new NoGitFacts(),
         new PlanFacts(),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new GateReportFacts(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
         TimeProvider.System);
 
     /// <summary>A multi-dispatch event. The event's own target is left unset: each dispatch names its own.</summary>

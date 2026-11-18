@@ -93,7 +93,7 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
                 },
                 ForEach: "plan.task.files"));
 
-    private IReadOnlyList<ArbiterDecisionRecord> Records() => new DecisionLog(ArbiterDirectory).ReadAll();
+    private IReadOnlyList<ArbiterDecisionRecord> Records() => RealArbiterState.Decisions(ArbiterDirectory).ReadAll();
 
     /// <summary>The provider these tests use: it answers every asked rule and reports no confidence.</summary>
     private static FakeArbiterProvider Recording() => new() { AnswerAsked = "within-task" };
@@ -105,13 +105,13 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
         ArbiterEvaluator evaluator = new(
             provider,
             _ => null,
-            new InFlightLedger(ArbiterDirectory),
-            new DecisionLog(ArbiterDirectory),
+            RealArbiterState.Ledger(ArbiterDirectory),
+            RealArbiterState.Decisions(ArbiterDirectory),
             new PassThroughGitFacts(),
             new FileListPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new GateReportFacts(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
             new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
 
         await evaluator.EvaluateAsync(DelegateEvent(), ConfigWith([ForEachRule()]));
@@ -126,13 +126,13 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
         ArbiterEvaluator evaluator = new(
             Recording(),
             _ => null,
-            new InFlightLedger(ArbiterDirectory),
-            new DecisionLog(ArbiterDirectory),
+            RealArbiterState.Ledger(ArbiterDirectory),
+            RealArbiterState.Decisions(ArbiterDirectory),
             new PassThroughGitFacts(),
             new FileListPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new GateReportFacts(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
             new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
 
         await evaluator.EvaluateAsync(DelegateEvent(), ConfigWith([ForEachRule()]));
@@ -154,13 +154,13 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
         ArbiterEvaluator evaluator = new(
             provider,
             _ => null,
-            new InFlightLedger(ArbiterDirectory),
-            new DecisionLog(ArbiterDirectory),
+            RealArbiterState.Ledger(ArbiterDirectory),
+            RealArbiterState.Decisions(ArbiterDirectory),
             new PassThroughGitFacts(),
             new FileListPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new GateReportFacts(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
             new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
 
         await evaluator.EvaluateAsync(DelegateEvent(), ConfigWith([ForEachRule()]));

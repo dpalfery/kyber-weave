@@ -8,6 +8,7 @@ using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Arbiter.Mcp;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Data;
+using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Hooks.Arbiter;
 using KyberWeave.Data.Review;
@@ -24,6 +25,10 @@ public static class ArbiterApplicationServiceCollectionExtensions
     /// <returns>The same collection, for chaining.</returns>
     internal static IServiceCollection AddWeaveArbiterApplication(this IServiceCollection services)
     {
+        services.TryAddSingleton<IArbiterStateFactory>(sp => new FileArbiterStateFactory(
+            sp.GetRequiredService<IArbiterLogStore>(),
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<IArbiterEvaluatorFactory, Core.Arbiter.ArbiterEvaluatorFactory>();
         services.TryAddSingleton<ICommentTriageFactory, Core.Arbiter.CommentTriageFactory>();
         services.TryAddSingleton<IArbiterKeyService, Core.Arbiter.ArbiterKeyService>();
@@ -110,6 +115,10 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton<IWorkerBudgetStore, FileWorkerBudgetStore>();
         services.TryAddSingleton<IFileLinkProbe, FileLinkProbe>();
         services.TryAddSingleton<IGitRepositoryFacts, GitFacts>();
+        services.TryAddSingleton<IArbiterStateFactory>(sp => new FileArbiterStateFactory(
+            sp.GetRequiredService<IArbiterLogStore>(),
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<IConductorGuard, ConductorGuard>();
         services.TryAddSingleton<IWorkerGuard, WorkerGuard>();
         return services;

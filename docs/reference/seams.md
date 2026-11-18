@@ -79,6 +79,7 @@ task's list.
 | `ExclusiveFileWriter` | File system | `KyberWeave.Data` | `Docs/Closeout/ExclusiveFileWriter.cs` | Exclusive create |
 | `FileBoundedFileReader` | File system | `KyberWeave.Data` | `Review/FileBoundedFileReader.cs` | Reads up to a byte limit and refuses a file that grew |
 | `FileHookFileWindowReader` | File system | `KyberWeave.Data` | `Hooks/Arbiter/FileHookFileWindowReader.cs` | Reads a line window from a file |
+| `ArbiterLogFiles` | File system (`IArbiterLogStore`) | `KyberWeave.Data` | `Arbiter/Ledger/ArbiterLogFiles.cs` | The Arbiter's append-only log: one line per append under an exclusively opened lock file, plus the lock-free windowed read every ledger, decision log and run store shares |
 | `FileStatReader` | File system | `KyberWeave.Data` | `Arbiter/FileStatReader.cs` | Length and last-write time |
 | `FileLinkProbe` | File system | `KyberWeave.Data` | `Hooks/Arbiter/FileLinkProbe.cs` | Link target and link kind |
 | `AtomicFile` | File system | `KyberWeave.Kernel` | `FileSystem/AtomicFile.cs` | The kernel-side atomic write, rename and link resolution the file-system adapter builds on |
@@ -176,6 +177,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `TomlAgentParser` (`Agents/Parsing/TomlAgentParser.cs`) | paths | 2.5 |
 | `AgentSpecValidator` (`Agents/Validation/AgentSpecValidator.cs`) | paths | 2.5 |
 | `ArbiterEvaluator` (`Arbiter/ArbiterEvaluator.cs`) | clock | 4.3 |
+| `ArbiterRunStore` (`Arbiter/Stores/ArbiterRunStore.cs`) | paths | 4.3 |
 | `ArbiterHarnessGating` (`Arbiter/ArbiterHarnessGating.cs`) | paths | 4.3 |
 | `ArbiterInstallService` (`Arbiter/ArbiterInstallService.cs`) | paths | 4.3 |
 | `ArbiterPlanService` (`Arbiter/ArbiterPlanService.cs`) | paths | 4.3 |
@@ -315,11 +317,9 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ConfiguredArbiterProviderFactory` (`Arbiter/ConfiguredArbiterProviderFactory.cs`) | environment, network | 4.4 |
 | `FileTextFacts` (`Arbiter/Facts/FileTextFacts.cs`) | file system, paths | 4.4 |
 | `GateReportFacts` (`Arbiter/Facts/GateReportFacts.cs`) | file system, paths | 4.4 |
-| `InFlightLedger` (`Arbiter/Ledger/InFlightLedger.cs`) | file system, clock | 4.4 |
 | `PlanPathResolver` (`Arbiter/Plans/PlanPathResolver.cs`) | file system, paths | 4.4 |
 | `SystemOneClient` (`Arbiter/Providers/SystemOneClient.cs`) | clock, network | 4.4 |
 | `SocketArbiterHttpHandlers` (`Arbiter/SocketArbiterHttpHandlers.cs`) | network | 4.4 |
-| `ArbiterRunStore` (`Arbiter/Stores/ArbiterRunStore.cs`) | file system, paths, clock | 4.4 |
 | `SystemOneProviderFactory` (`Arbiter/SystemOneProviderFactory.cs`) | network | 4.4 |
 | `CodeGraphResolverAdapter` (`CodeGraph/CodeGraphResolverAdapter.cs`) | file system, paths | 4.4 |
 | `OpenAiCompatibleEmbeddingGenerator` (`Docs/Analysis/Embeddings/OpenAiCompatibleEmbeddingGenerator.cs`) | environment, network | 4.4 |
@@ -438,10 +438,10 @@ the behaviour: where a test observes the value, the seam still wraps it.
 | `FileStream` | The stream type at the bottom of the file-system adapter. It is an exception only **inside** an adapter, where it is the adapter's whole job | 27 files, 37 sites. Adapter uses: `PhysicalFileSystem`, `PhysicalDoctorFileSystem`, `ExclusiveFileWriter`, `FileBoundedFileReader`, `FileCodeGraphIndexWorkspace` (lease) and Kernel `BoundedFileReader`; `TransactionLease` is adapter-shaped but task 3.4 moves it onto `ILease` | The file-system seam: `InMemoryFileSystem`, proven by the file-system contract suite |
 
 `FileStream` needs a caveat. The design allows it only inside the file-system adapter, and the code
-does not yet meet that: 18 non-adapter classes open a `FileStream` directly. They are
+does not yet meet that: 17 non-adapter classes open a `FileStream` directly. They are
 `Application/Docs/Scaffolding/StandardsFolderMigration.cs`, `Application/Update/SelfUpdater.cs`,
 `Data/Arbiter/Facts/FileTextFacts.cs` and `GateReportFacts.cs`,
-`Data/Arbiter/Ledger/InFlightLedger.cs`, `Data/Hooks/Arbiter/FileHookSnapshotStore.cs` and
+`Data/Hooks/Arbiter/FileHookSnapshotStore.cs` and
 `FileWorkerBudgetStore.cs`, `Data/Squad/Deployment/SquadStateMigration.cs`, `SquadStateStore.cs`,
 `SquadTransaction.cs`, `Data/Squad/Instances/SquadInstanceLinkSync.cs`,
 `Data/Squad/Presets/SquadCanonicalProfileStore.cs` and

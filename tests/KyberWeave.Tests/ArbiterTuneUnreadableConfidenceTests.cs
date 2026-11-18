@@ -1,6 +1,7 @@
 using System.Text.Json;
 using KyberWeave.Core.Arbiter.Facts;
 using Xunit;
+using KyberWeave.Tests.Arbiter;
 
 namespace KyberWeave.Tests;
 
@@ -34,7 +35,7 @@ public sealed class ArbiterTuneUnreadableConfidenceTests : IDisposable
     private async Task WriteFixtureAsync()
     {
         Directory.CreateDirectory(ArbiterDirectory);
-        DecisionLog decisions = new(ArbiterDirectory);
+        DecisionLog decisions = RealArbiterState.Decisions(ArbiterDirectory);
         await decisions.AppendAsync(Decision("d-1", "ledger-1", 0.95));
         await decisions.AppendAsync(Decision("d-2", "ledger-2", 1.5));
         await decisions.AppendAsync(Decision("d-3", "ledger-3", -0.2));

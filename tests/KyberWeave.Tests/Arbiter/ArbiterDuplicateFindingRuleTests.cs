@@ -162,13 +162,13 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
         new(
             provider,
             _ => null,
-            new InFlightLedger(arbiterDirectory),
-            new DecisionLog(arbiterDirectory),
+            RealArbiterState.Ledger(arbiterDirectory),
+            RealArbiterState.Decisions(arbiterDirectory),
             new PassThroughGitFacts(),
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new GateReportFacts(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
             new FixedClock(Now),
             (_, _) => []);
 
@@ -178,7 +178,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
 
     private async Task SeedAsync(string reviewRun, params string[] findings)
     {
-        ArbiterRunStore store = new(ArbiterDirectory, null, () => Now);
+        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, () => Now);
         foreach (string finding in findings)
         {
             ArbiterStoreStatus status = await store.AppendFindingAsync(reviewRun, finding);
@@ -324,7 +324,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
         Assert.Equal(
             [Prior("prior-old", "src/Widget.cs", 10), Prior("prior-new", "src/Widget.cs", 11)],
             provider.Asked);
-        ArbiterDecisionRecord record = Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll());
+        ArbiterDecisionRecord record = Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll());
         Assert.Equal(RuleEffects.Duplicate, Assert.Single(result.Dispatches).Outcome);
         Assert.Equal($"ARBITER_DUPLICATE: {Refuted} of prior-old decision={record.Id}", DuplicateLineOf(record));
     }
@@ -347,7 +347,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
             Refute("KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\n"), ConfigWith([Enforced(DuplicateRule)]));
 
         Assert.Equal(1, provider.CallCount);
-        ArbiterDecisionRecord record = Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll());
+        ArbiterDecisionRecord record = Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll());
         Assert.Equal($"ARBITER_DUPLICATE: {Refuted} of prior-b decision={record.Id}", DuplicateLineOf(record));
     }
 
@@ -435,7 +435,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
             Refute("KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\n"), ConfigWith([Enforced(DuplicateRule)]));
 
         Assert.Equal(RuleEffects.Duplicate, Assert.Single(result.Dispatches).Outcome);
-        ArbiterDecisionRecord record = Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll());
+        ArbiterDecisionRecord record = Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll());
         Assert.Equal($"ARBITER_DUPLICATE: {Refuted} of prior-1 decision={record.Id}", DuplicateLineOf(record));
     }
 
@@ -464,7 +464,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
 
         await evaluator.EvaluateAsync(returned, ConfigWith([Enforced(DuplicateRule)]));
 
-        IReadOnlyList<string> stored = new ArbiterRunStore(ArbiterDirectory, null, () => Now).ReadFindings(ThisRun);
+        IReadOnlyList<string> stored = RealArbiterState.RunStore(ArbiterDirectory, null, () => Now).ReadFindings(ThisRun);
         string item = Assert.Single(stored);
         Assert.Contains(Refuted, item, StringComparison.Ordinal);
     }

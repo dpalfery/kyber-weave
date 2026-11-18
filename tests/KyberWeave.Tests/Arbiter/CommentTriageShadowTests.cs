@@ -129,7 +129,7 @@ public sealed class CommentTriageShadowTests : IDisposable
 
         CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick)).ClassifyAsync(Request());
 
-        ArbiterDecisionRecord record = Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll(), entry => entry.Id == result.DecisionId);
+        ArbiterDecisionRecord record = Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), entry => entry.Id == result.DecisionId);
         Assert.Equal(Nitpick, record.Outcome);
         ArbiterDecisionRule rule = Assert.Single(record.Rules);
         Assert.Equal(CommentTriageService.CommentRuleId, rule.Id);

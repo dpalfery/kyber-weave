@@ -54,7 +54,7 @@ public sealed class ArbiterAuditPlanArgumentTests : IDisposable
                 $"---\nid: plans/{name[..^3]}\ntitle: Plan\ndoc-type: plan\nstatus: current\n---\n\n# Plan\n\n**Status: Ready.**\n");
         }
 
-        InFlightLedger ledger = new(Path.Combine(root, "artifacts", "arbiter"));
+        InFlightLedger ledger = RealArbiterState.Ledger(Path.Combine(root, "artifacts", "arbiter"));
         Append(ledger, OnPlan, Plan);
         Append(ledger, OnPlanBySlug, "job-status-cards");
         Append(ledger, OffPlan, OtherPlan);

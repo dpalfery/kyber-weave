@@ -48,7 +48,7 @@ public sealed class ArbiterRunStoreTests : IDisposable
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     private ArbiterRunStore Store(DateTimeOffset at, ArbiterStoreOptions? options = null) =>
-        new(ArbiterDirectory, options, () => at);
+        RealArbiterState.RunStore(ArbiterDirectory, options, () => at);
 
     private static ArbiterLedgerEvent PreEvent(DateTimeOffset at) =>
         new(ArbiterRecordId.New(at), at, ArbiterSources.Hook, "test-harness", "session-1", ArbiterLedgerPhases.Pre)
@@ -426,11 +426,11 @@ public sealed class ArbiterRunStoreTests : IDisposable
     {
         string sibling = Path.Combine(ArbiterDirectory, "stores", "returns-vanishing");
         Directory.CreateDirectory(sibling);
-        ArbiterRunStore store = new(
+        ArbiterRunStore store = RealArbiterState.RunStore(
             ArbiterDirectory,
             null,
             () => Now,
-            directory => throw new DirectoryNotFoundException($"'{directory.Name}' was removed during the sweep."));
+            directory => throw new DirectoryNotFoundException($"'{directory}' was removed during the sweep."));
 
         ArbiterStoreStatus status = await store.AppendFindingAsync("RUN-OK", "still stored");
 
@@ -452,8 +452,8 @@ public sealed class ArbiterRunStoreTests : IDisposable
         ArbiterStoreStatus status = await store.AppendFindingAsync("RUN-SECRET", $"finding text carrying {SentinelSecret}");
         Assert.Equal(ArbiterStoreStatus.Stored, status);
 
-        InFlightLedger ledger = new(ArbiterDirectory);
-        DecisionLog decisions = new(ArbiterDirectory);
+        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
+        DecisionLog decisions = RealArbiterState.Decisions(ArbiterDirectory);
         ArbiterLedgerEvent pre = PreEvent(Now);
         await ledger.AppendAsync(pre);
         await decisions.AppendAsync(Decision(Now, pre.Id));
@@ -481,7 +481,7 @@ public sealed class ArbiterRunStoreTests : IDisposable
     [Fact]
     public async Task ARunAppendedToRecentlyIsNotSweptWhenItsDirectoryIsOld()
     {
-        ArbiterRunStore store = new(ArbiterDirectory, null, () => Now);
+        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, () => Now);
         await store.AppendFindingAsync("RUN-OLD", "id: old-1\nclaim: first");
         string runDirectory = Assert.Single(Directory.GetDirectories(Path.Combine(ArbiterDirectory, "stores")));
         Directory.SetLastWriteTimeUtc(runDirectory, Now.UtcDateTime.AddDays(-30));

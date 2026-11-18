@@ -86,13 +86,13 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
         new(
             provider,
             _ => null,
-            new InFlightLedger(arbiterDirectory),
-            new DecisionLog(arbiterDirectory),
+            RealArbiterState.Ledger(arbiterDirectory),
+            RealArbiterState.Decisions(arbiterDirectory),
             new PassThroughGitFacts(),
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new GateReportFacts(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
             new FixedClock(Now),
             (_, _) => []);
 
@@ -117,7 +117,7 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
         $"id: nit-{number}\nseverity: Minor\nfile: src/Widget.cs\nline: {number}\nclaim: naming";
 
     private IReadOnlyList<ArbiterDecisionRecord> LensRecords() =>
-        new DecisionLog(ArbiterDirectory).ReadAll().Where(record => record.Trigger == LensTrigger).ToList();
+        RealArbiterState.Decisions(ArbiterDirectory).ReadAll().Where(record => record.Trigger == LensTrigger).ToList();
 
     /// <summary>Every evidence line of every rule on a record, joined so a test can search the notes it carries.</summary>
     private static string NotesOf(ArbiterDecisionRecord record) =>
@@ -182,7 +182,7 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
         await evaluator.EvaluateAsync(LensReturnWithRun(ReviewRun, MinorFinding), Config());
         await evaluator.EvaluateAsync(LensReturnWithRun(ReviewRun, MinorFinding), Config());
 
-        ArbiterRunStore store = new(ArbiterDirectory, null, () => Now);
+        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, () => Now);
         Assert.Equal(2, store.ReadFindings(ReviewRun).Count);
         Assert.Empty(store.ReadFindings(OtherRun));
     }
@@ -193,7 +193,7 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
 
         await Evaluator(ArbiterDirectory, provider).EvaluateAsync(LensReturnWithRun(reviewRun, MinorFinding), Config());
 
-        ArbiterRunStore store = new(ArbiterDirectory, null, () => Now);
+        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, () => Now);
         IReadOnlyList<string> stored = store.ReadFindings(reviewRun);
         string item = Assert.Single(stored);
         Assert.Contains("nit-1", item, StringComparison.Ordinal);
@@ -217,7 +217,7 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
         await Evaluator(ArbiterDirectory, provider).EvaluateAsync(LensReturnWithRun(ReviewRun, findings), Config());
 
         Assert.Equal(StateBudget.MaxQuestions, provider.CallCount);
-        IReadOnlyList<string> stored = new ArbiterRunStore(ArbiterDirectory, null, () => Now).ReadFindings(ReviewRun);
+        IReadOnlyList<string> stored = RealArbiterState.RunStore(ArbiterDirectory, null, () => Now).ReadFindings(ReviewRun);
         Assert.Equal(total, stored.Count);
         Assert.EndsWith("status: dropped", stored[0], StringComparison.Ordinal);
         for (int index = StateBudget.MaxQuestions; index < total; index++)

@@ -47,6 +47,19 @@ public sealed class ArbiterGuardCompositionTests
     }
 
     [Fact]
+    public void TheGuardsContainerResolvesTheArbiterStateTheWorkerGuardReadsTheLedgerThrough()
+    {
+        using ServiceProvider services = (ServiceProvider)ArbiterContainer.CreateGuards();
+        string directory = Path.Combine(AppContext.BaseDirectory, "no-such-arbiter-state");
+
+        IArbiterStateFactory state = services.GetRequiredService<IArbiterStateFactory>();
+
+        Assert.Empty(state.OpenLedger(directory).ReadAll());
+        Assert.Empty(state.OpenDecisionLog(directory).ReadAll());
+        Assert.Empty(state.OpenRunStore(directory).ReadFindings("REVIEW-1"));
+    }
+
+    [Fact]
     public void TheGuardsContainerResolvesTheTreeProbeThroughTheFileSystemSeam()
     {
         using ServiceProvider services = (ServiceProvider)ArbiterContainer.CreateGuards();

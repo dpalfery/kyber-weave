@@ -70,7 +70,7 @@ public sealed class ArbiterServeCallerSourceTests : IDisposable
 
         Assert.Contains("outcome: allow", response, StringComparison.Ordinal);
 
-        IReadOnlyList<ArbiterLedgerEvent> events = new InFlightLedger(
+        IReadOnlyList<ArbiterLedgerEvent> events = RealArbiterState.Ledger(
             Path.Combine(_repo.Path, "artifacts", "arbiter")).ReadAll();
         ArbiterLedgerEvent? record = Assert.Single(events);
         Assert.Equal("serve", record.Harness);

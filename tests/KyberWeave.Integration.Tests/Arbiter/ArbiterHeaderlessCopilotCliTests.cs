@@ -7,6 +7,7 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using Xunit;
+using KyberWeave.Tests.Arbiter;
 
 namespace KyberWeave.Integration.Tests.Arbiter;
 
@@ -161,5 +162,5 @@ public sealed class ArbiterHeaderlessCopilotCliTests : IDisposable
     }
 
     private IReadOnlyList<ArbiterDecisionRecord> Decisions() =>
-        new DecisionLog(Path.Combine(_probe.Root, "artifacts", "arbiter")).ReadAll();
+        RealArbiterState.Decisions(Path.Combine(_probe.Root, "artifacts", "arbiter")).ReadAll();
 }

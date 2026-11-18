@@ -115,7 +115,7 @@ public sealed class ArbiterAuditModelEvaluationTests : IDisposable
             Path.Combine(root, ".kyber-weave", "kyber-weave.yml"),
             $"ontology:\n  docs-root: docs\narbiter:\n  provider:\n    kind: {provider}\n");
         string arbiter = Path.Combine(root, "artifacts", "arbiter");
-        new InFlightLedger(arbiter).AppendAsync(
+        RealArbiterState.Ledger(arbiter).AppendAsync(
             new ArbiterLedgerEvent(LedgerId, DateTimeOffset.UtcNow, "hook", "copilot-cli", "s-1", ArbiterLedgerPhases.Pre)
             {
                 Trigger = "delegate",

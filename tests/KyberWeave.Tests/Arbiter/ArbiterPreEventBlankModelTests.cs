@@ -59,13 +59,13 @@ public sealed class ArbiterPreEventBlankModelTests : IDisposable
     private ArbiterEvaluator Evaluator() => new(
         FakeArbiterProvider.AnsweringByRule((ScopeRule, "within-task")),
         _ => null,
-        new InFlightLedger(ArbiterDirectory),
-        new DecisionLog(ArbiterDirectory),
+        RealArbiterState.Ledger(ArbiterDirectory),
+        RealArbiterState.Decisions(ArbiterDirectory),
         new NoGitFacts(),
         new PlanFacts(),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new GateReportFacts(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
         TimeProvider.System);
 
     private ArbiterEvent Dispatch(string? model) => new()
@@ -115,7 +115,7 @@ public sealed class ArbiterPreEventBlankModelTests : IDisposable
         WriteTable();
         _ = await Evaluator().EvaluateAsync(Dispatch(model), Config(), null, TestContext.Current.CancellationToken);
 
-        ArbiterLedgerEvent pre = new InFlightLedger(ArbiterDirectory).ReadAll().Single(
+        ArbiterLedgerEvent pre = RealArbiterState.Ledger(ArbiterDirectory).ReadAll().Single(
             ev => ev.Phase == ArbiterLedgerPhases.Pre && ev.Trigger == "delegate");
         Assert.Equal("rendered", pre.ModelSource);
         Assert.Equal("sonnet", pre.ModelToken);

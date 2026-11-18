@@ -127,13 +127,13 @@ public sealed class ModelTargetResolverTests : IDisposable
     private ArbiterEvaluator Evaluator(IArbiterProvider provider) => new(
         provider,
         _ => null,
-        new InFlightLedger(ArbiterDirectory),
-        new DecisionLog(ArbiterDirectory),
+        RealArbiterState.Ledger(ArbiterDirectory),
+        RealArbiterState.Decisions(ArbiterDirectory),
         new NoGitFacts(),
         new PlanFacts(provider is HardProvider { Hard: false } ? null : provider is HardProvider hard ? hard.Difficulty : "hard"),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new GateReportFacts(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
         TimeProvider.System,
         secondaryTriggers: (primary, ev) => string.Equals(primary, "delegate", StringComparison.Ordinal)
             ? ["delegate.model"]
@@ -166,11 +166,11 @@ public sealed class ModelTargetResolverTests : IDisposable
             (await Evaluator(provider ?? new HardProvider()).EvaluateAsync(
                 ev, config ?? Config(), null, TestContext.Current.CancellationToken)).Dispatches);
         ArbiterDecisionRecord primary = Assert.Single(
-            new DecisionLog(ArbiterDirectory).ReadAll(), decision => decision.Trigger == "delegate");
+            RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), decision => decision.Trigger == "delegate");
         string blockers = string.Join(", ", primary.Rules.Where(rule => rule.Effect != "allow").Select(rule => $"{rule.Id}={rule.Answer}"));
         Assert.True(primary.Outcome == "allow", $"fixture precondition: primary outcome {primary.Outcome}: {blockers}");
         ArbiterDecisionRecord record = Assert.Single(
-            new DecisionLog(ArbiterDirectory).ReadAll(), decision => decision.Trigger == "delegate.model");
+            RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), decision => decision.Trigger == "delegate.model");
         return (record, result);
     }
 
@@ -211,7 +211,7 @@ public sealed class ModelTargetResolverTests : IDisposable
     /// <summary>Seeds one earlier attempt at T2: the profile it ran on (null when unrecorded) and its task review.</summary>
     private async Task SeedPriorAttemptAsync(string? profile, string taskReview)
     {
-        InFlightLedger ledger = new(ArbiterDirectory);
+        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
         await ledger.AppendAsync(new ArbiterLedgerEvent("pre-1", At, "hook", Harness, null, ArbiterLedgerPhases.Pre)
         {
             Trigger = "delegate",
@@ -385,7 +385,7 @@ public sealed class ModelTargetResolverTests : IDisposable
 
         (ArbiterDecisionRecord record, _) = await RunAsync(Dispatch(renderedToken: null));
 
-        Assert.Equal("rendered", PreEventOf(new InFlightLedger(ArbiterDirectory)).ModelSource);
+        Assert.Equal("rendered", PreEventOf(RealArbiterState.Ledger(ArbiterDirectory)).ModelSource);
         ArbiterModelBlock block = BlockOf(record);
         Assert.False(block.Delivered);
         Assert.Equal("same-as-rendered", block.Reason);
@@ -460,7 +460,7 @@ public sealed class ModelTargetResolverTests : IDisposable
 
         await RunAsync(Dispatch(model: null, renderedToken: Model));
 
-        ArbiterLedgerEvent pre = PreEventOf(new InFlightLedger(ArbiterDirectory));
+        ArbiterLedgerEvent pre = PreEventOf(RealArbiterState.Ledger(ArbiterDirectory));
         Assert.Equal("rendered", pre.ModelSource);
     }
 
@@ -471,7 +471,7 @@ public sealed class ModelTargetResolverTests : IDisposable
 
         await RunAsync(Dispatch(model: "claude-opus-5-5"));
 
-        ArbiterLedgerEvent pre = PreEventOf(new InFlightLedger(ArbiterDirectory));
+        ArbiterLedgerEvent pre = PreEventOf(RealArbiterState.Ledger(ArbiterDirectory));
         Assert.Equal("caller", pre.ModelSource);
     }
 
@@ -483,7 +483,7 @@ public sealed class ModelTargetResolverTests : IDisposable
 
         await RunAsync(Dispatch(model: null, renderedToken: null));
 
-        ArbiterLedgerEvent pre = PreEventOf(new InFlightLedger(ArbiterDirectory));
+        ArbiterLedgerEvent pre = PreEventOf(RealArbiterState.Ledger(ArbiterDirectory));
         Assert.Equal("unknown", pre.ModelSource);
     }
 

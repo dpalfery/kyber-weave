@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using KyberWeave.Core.Arbiter.Facts;
 using Xunit;
+using KyberWeave.Tests.Arbiter;
 
 namespace KyberWeave.Tests;
 
@@ -96,8 +97,8 @@ public sealed class ArbiterLogFilesReadTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_temp.Path, DecisionLog.FileName));
 
         Assert.Empty(Logs.ReadCompleteLines(path));
-        Assert.Empty(new InFlightLedger(_temp.Path).ReadAll());
-        Assert.Empty(new DecisionLog(_temp.Path).ReadAll());
+        Assert.Empty(RealArbiterState.Ledger(_temp.Path).ReadAll());
+        Assert.Empty(RealArbiterState.Decisions(_temp.Path).ReadAll());
     }
 
     [Fact]

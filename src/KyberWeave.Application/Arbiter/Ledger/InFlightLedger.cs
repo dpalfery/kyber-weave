@@ -19,13 +19,17 @@ public sealed class InFlightLedger : IArbiterLedger
     public const string FileName = "ledger.jsonl";
 
     private readonly string _directory;
-    private readonly IArbiterLogStore _log = new ArbiterLogFiles();
+    private readonly IArbiterLogStore _log;
 
     /// <summary>Creates a ledger over <paramref name="arbiterDirectory"/>.</summary>
-    public InFlightLedger(string arbiterDirectory)
+    /// <param name="arbiterDirectory">The arbiter state directory the ledger file sits in.</param>
+    /// <param name="log">The append and windowed-read mechanics the ledger shares with the decision log.</param>
+    public InFlightLedger(string arbiterDirectory, IArbiterLogStore log)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(arbiterDirectory);
+        ArgumentNullException.ThrowIfNull(log);
         _directory = arbiterDirectory;
+        _log = log;
     }
 
     /// <summary>The directory holding the ledger, the decision log and the lock.</summary>
@@ -62,11 +66,11 @@ public sealed class InFlightLedger : IArbiterLedger
             cancellationToken);
     }
 
-    /// <summary>Reads every complete event in the newest <see cref="ArbiterLogFiles.MaxReadBytes"/> bytes, in append order. Takes no lock.</summary>
+    /// <summary>Reads every complete event in the newest bytes, in append order. Takes no lock.</summary>
     public IReadOnlyList<ArbiterLedgerEvent> ReadAll() => ReadAllWithDiagnostics().Records;
 
     /// <summary>
-    /// Reads every complete event in the newest <see cref="ArbiterLogFiles.MaxReadBytes"/> bytes and reports what
+    /// Reads every complete event in the newest bytes and reports what
     /// the read could not show: how many lines were malformed, whether older events fell outside the window, and
     /// why a log that exists could not be read. The hook uses <see cref="ReadAll"/> and stays quiet about all three;
     /// <c>audit</c> and <c>tune</c> use this overload to report them instead of presenting a partial log as whole.

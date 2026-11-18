@@ -173,13 +173,13 @@ public sealed class ArbiterNitpickRuleTests : IDisposable
         new(
             provider,
             _ => null,
-            new InFlightLedger(arbiterDirectory),
-            new DecisionLog(arbiterDirectory),
+            RealArbiterState.Ledger(arbiterDirectory),
+            RealArbiterState.Decisions(arbiterDirectory),
             new PassThroughGitFacts(),
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new GateReportFacts(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
             new FixedClock(Now),
             (_, _) => []);
 
@@ -448,7 +448,7 @@ public sealed class ArbiterNitpickRuleTests : IDisposable
             ConfigWith([Enforced(NitpickRule), annotate]));
 
         Assert.Equal(RuleEffects.Annotate, Assert.Single(result.Dispatches).Outcome);
-        ArbiterDecisionRecord record = Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll());
+        ArbiterDecisionRecord record = Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll());
         // The rule also has a step-0 entry (its decide clause was undecidable); the step-1 entry is the drop.
         ArbiterDecisionRule nitpick = Assert.Single(record.Rules, rule => rule.Id == NitpickRule && rule.Step == 1);
         Assert.Equal(RuleEffects.Drop, nitpick.Effect);
@@ -473,7 +473,7 @@ public sealed class ArbiterNitpickRuleTests : IDisposable
 
         await evaluator.EvaluateAsync(LensReturn(MinorFinding), ConfigWith([Enforced(NitpickRule)]));
 
-        IReadOnlyList<string> stored = new ArbiterRunStore(ArbiterDirectory, null, () => Now).ReadFindings(ReviewRun);
+        IReadOnlyList<string> stored = RealArbiterState.RunStore(ArbiterDirectory, null, () => Now).ReadFindings(ReviewRun);
         string item = Assert.Single(stored);
         Assert.Contains(FindingId, item, StringComparison.Ordinal);
         Assert.Contains("dropped", item, StringComparison.Ordinal);
@@ -498,7 +498,7 @@ public sealed class ArbiterNitpickRuleTests : IDisposable
 
         await evaluator.EvaluateAsync(LensReturn(twoFindings), ConfigWith([Enforced(NitpickRule)]));
 
-        IReadOnlyList<string> stored = new ArbiterRunStore(ArbiterDirectory, null, () => Now).ReadFindings(ReviewRun);
+        IReadOnlyList<string> stored = RealArbiterState.RunStore(ArbiterDirectory, null, () => Now).ReadFindings(ReviewRun);
         Assert.Equal(2, stored.Count);
         Assert.Contains("id: nit-1", stored[0], StringComparison.Ordinal);
         Assert.EndsWith("status: kept", stored[0], StringComparison.Ordinal);
@@ -588,7 +588,7 @@ public sealed class ArbiterNitpickRuleTests : IDisposable
     [Fact]
     public async Task ARefuterForAFindingDroppedUnderItsLensIdIsDenied()
     {
-        ArbiterRunStore store = new(ArbiterDirectory, null, () => Now);
+        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, () => Now);
         await store.AppendFindingAsync(ReviewRun, ReturnedFinding.StoredText(
             "id: correctness/nit-1\nseverity: Minor\nfile: src/Widget.cs\nline: 12\nclaim: naming", dropped: true));
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, new ScriptedProvider());

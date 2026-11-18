@@ -63,7 +63,7 @@ public sealed class FileFailureGuardTests : IDisposable
 
         string arbiter = Path.Combine(_temp.Path, "arbiter");
         string stores = Path.Combine(arbiter, "stores");
-        ArbiterRunStore store = new(arbiter);
+        ArbiterRunStore store = RealArbiterState.RunStore(arbiter);
         Assert.Equal(ArbiterStoreStatus.Stored, await store.AppendFindingAsync("RUN-A", "first"));
 
         // Execute without read: the store directory can be entered but not enumerated, so the sweep's listing throws.
@@ -87,7 +87,7 @@ public sealed class FileFailureGuardTests : IDisposable
     {
         string arbiter = Path.Combine(_temp.Path, "arbiter");
         Directory.CreateDirectory(Path.Combine(arbiter, "stores", "review-sibling"));
-        ArbiterRunStore store = new(
+        ArbiterRunStore store = RealArbiterState.RunStore(
             arbiter,
             options: null,
             clock: () => DateTimeOffset.UtcNow,

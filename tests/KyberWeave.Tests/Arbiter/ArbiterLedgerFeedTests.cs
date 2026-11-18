@@ -78,13 +78,13 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     private ArbiterEvaluator Evaluator() => new(
         _provider,
         _ => null,
-        new InFlightLedger(ArbiterDirectory),
-        new DecisionLog(ArbiterDirectory),
+        RealArbiterState.Ledger(ArbiterDirectory),
+        RealArbiterState.Decisions(ArbiterDirectory),
         new NoGitFacts(),
         new PlanFacts(),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new GateReportFacts(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
         TimeProvider.System);
 
     private static KyberWeaveConfig Config() => new()
@@ -126,7 +126,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     /// after it, so reading the newest record alone would look at the secondary, not the primary.
     /// </summary>
     private ArbiterDecisionRecord LastPrimary() =>
-        new DecisionLog(ArbiterDirectory).ReadAll().Last(record => record.Trigger != "delegate.model");
+        RealArbiterState.Decisions(ArbiterDirectory).ReadAll().Last(record => record.Trigger != "delegate.model");
 
     private void AssertLastAllowed()
     {
@@ -237,7 +237,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     [Fact]
     public async Task AnAttestationNamingNoPlan_CountsForNoPlan()
     {
-        InFlightLedger ledger = new(ArbiterDirectory);
+        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
         DateTimeOffset at = DateTimeOffset.UtcNow;
         await ledger.AppendAsync(
             new ArbiterLedgerEvent(ArbiterRecordId.New(at), at, ArbiterSources.Hook, "factory", "s1", ArbiterLedgerPhases.Post)

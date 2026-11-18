@@ -108,8 +108,8 @@ public sealed class ArbiterModelTargetFactsTests : IDisposable
     private ArbiterFactSet Enrich(ArbiterFactSet bag) =>
         ModelTargetFacts.Enrich(
             bag,
-            new InFlightLedger(ArbiterDirectory),
-            new DecisionLog(ArbiterDirectory),
+            RealArbiterState.Ledger(ArbiterDirectory),
+            RealArbiterState.Decisions(ArbiterDirectory),
             CurrentLedgerId,
             Targeting());
 
@@ -194,8 +194,8 @@ public sealed class ArbiterModelTargetFactsTests : IDisposable
     [Fact]
     public async Task PriorAttempt_TakesTheProfileFromTheDecisionModelBlockWhenDelivered()
     {
-        InFlightLedger ledger = new(ArbiterDirectory);
-        DecisionLog decisions = new(ArbiterDirectory);
+        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
+        DecisionLog decisions = RealArbiterState.Decisions(ArbiterDirectory);
         await ledger.AppendAsync(Pre("pre-1", "T2", profile: "fast", token: "stale-token"));
         await ledger.AppendAsync(Post("post-1", "pre-1", "FAIL"));
         await decisions.AppendAsync(Decision("dec-1", "pre-1", Block("general", "delivered-token", delivered: true)));
@@ -210,8 +210,8 @@ public sealed class ArbiterModelTargetFactsTests : IDisposable
     [Fact]
     public async Task PriorAttempt_TakesTheProfileFromThePreEventWhenNotDelivered()
     {
-        InFlightLedger ledger = new(ArbiterDirectory);
-        DecisionLog decisions = new(ArbiterDirectory);
+        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
+        DecisionLog decisions = RealArbiterState.Decisions(ArbiterDirectory);
         await ledger.AppendAsync(Pre("pre-1", "T2", profile: "fast", token: "fast-token"));
         await ledger.AppendAsync(Post("post-1", "pre-1", "PASS"));
         await decisions.AppendAsync(Decision("dec-1", "pre-1", Block("general", "unused-token", delivered: false)));
@@ -226,7 +226,7 @@ public sealed class ArbiterModelTargetFactsTests : IDisposable
     [Fact]
     public async Task PriorAttempt_UsesTheLatestEarlierPairForTheSameTask()
     {
-        InFlightLedger ledger = new(ArbiterDirectory);
+        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
         await ledger.AppendAsync(Pre("pre-1", "T2", profile: "fast", token: "t-fast"));
         await ledger.AppendAsync(Post("post-1", "pre-1", "FAIL"));
         await ledger.AppendAsync(Pre("pre-2", "T2", profile: "general", token: "t-general"));
@@ -244,7 +244,7 @@ public sealed class ArbiterModelTargetFactsTests : IDisposable
     [Fact]
     public async Task PriorAttempt_ABudgetExceededReturnIsAFailureSoTheReworkClimbsARung()
     {
-        InFlightLedger ledger = new(ArbiterDirectory);
+        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
         await ledger.AppendAsync(Pre("pre-1", "T2", profile: "fast", token: "t-fast"));
         await ledger.AppendAsync(new ArbiterLedgerEvent("post-1", At, "hook", "claude", null, ArbiterLedgerPhases.Post)
         {
@@ -272,8 +272,8 @@ public sealed class ArbiterModelTargetFactsTests : IDisposable
     [Fact]
     public async Task LadderNext_IsTheConfiguredEntryAfterThePriorProfile()
     {
-        InFlightLedger ledger = new(ArbiterDirectory);
-        DecisionLog decisions = new(ArbiterDirectory);
+        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
+        DecisionLog decisions = RealArbiterState.Decisions(ArbiterDirectory);
         await ledger.AppendAsync(Pre("pre-1", "T2", profile: "fast", token: "t-fast"));
         await ledger.AppendAsync(Post("post-1", "pre-1", "FAIL"));
 
@@ -286,7 +286,7 @@ public sealed class ArbiterModelTargetFactsTests : IDisposable
     [Fact]
     public async Task LadderNext_AbsentWhenThePriorProfileIsTheTop()
     {
-        InFlightLedger ledger = new(ArbiterDirectory);
+        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
         await ledger.AppendAsync(Pre("pre-1", "T2", profile: "deep-planning", token: "t-deep"));
         await ledger.AppendAsync(Post("post-1", "pre-1", "FAIL"));
 
@@ -298,7 +298,7 @@ public sealed class ArbiterModelTargetFactsTests : IDisposable
     [Fact]
     public async Task LadderNext_AbsentWhenThePriorProfileIsUnrecorded()
     {
-        InFlightLedger ledger = new(ArbiterDirectory);
+        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
         await ledger.AppendAsync(Pre("pre-1", "T2", profile: null, token: null, source: null));
         await ledger.AppendAsync(Post("post-1", "pre-1", "FAIL"));
 

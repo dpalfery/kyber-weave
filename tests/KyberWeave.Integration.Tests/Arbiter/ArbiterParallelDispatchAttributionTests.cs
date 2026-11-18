@@ -241,13 +241,13 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
     private ArbiterEvaluator Evaluator() => new(
         new OutsideTaskProvider(),
         _ => null,
-        new InFlightLedger(_arbiter),
-        new DecisionLog(_arbiter),
+        RealArbiterState.Ledger(_arbiter),
+        RealArbiterState.Decisions(_arbiter),
         ArbiterTestServices.HookGitFacts(_repo.Path, _home.Path, _arbiter),
         new RealPlanReader(_repo.Path),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new GateReportFacts(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
         TimeProvider.System);
 
     private Task<ArbiterEvaluationResult> Dispatch(ArbiterEvaluator evaluator, string phase, string task, string callId) =>
@@ -295,7 +295,7 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
             TestContext.Current.CancellationToken);
 
     private string LastAnswer(string trigger = "delegate.returned", string ruleId = RuleId) =>
-        new DecisionLog(_arbiter).ReadAll()
+        RealArbiterState.Decisions(_arbiter).ReadAll()
             .Where(record => record.Trigger == trigger)
             .SelectMany(record => record.Rules)
             .Last(rule => rule.Id == ruleId)

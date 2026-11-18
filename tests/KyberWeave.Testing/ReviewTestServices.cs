@@ -7,6 +7,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Tests.Arbiter;
 using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -93,7 +94,7 @@ internal static class ReviewTestServices
         new(
             provider,
             rules,
-            logDirectory is null ? null : new DecisionLog(logDirectory),
+            logDirectory is null ? null : RealArbiterState.Decisions(logDirectory),
             clock,
             unavailableReason,
             cacheStore ?? new FakeReviewDecisionCacheStore(),

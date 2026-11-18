@@ -115,13 +115,13 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
         new(
             provider,
             _ => null,
-            new InFlightLedger(arbiterDirectory),
-            new DecisionLog(arbiterDirectory),
+            RealArbiterState.Ledger(arbiterDirectory),
+            RealArbiterState.Decisions(arbiterDirectory),
             gitFacts ?? new PassThroughGitFacts(),
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new GateReportFacts(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
             new FixedClock(Now),
             SecondaryTriggers.For);
 
@@ -339,7 +339,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
 
         await evaluator.EvaluateAsync(BugCrusherInvestigate(), ConfigWith([Enforced(TriageRule)]));
 
-        IReadOnlyList<ArbiterDecisionRecord> records = new DecisionLog(ArbiterDirectory).ReadAll();
+        IReadOnlyList<ArbiterDecisionRecord> records = RealArbiterState.Decisions(ArbiterDirectory).ReadAll();
         ArbiterDecisionRecord triage = Assert.Single(records, record => record.Trigger == TriageTrigger);
         string expected = string.Join(
             "\n",
@@ -362,7 +362,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
             BugCrusherInvestigate(), ConfigWith([Shipped(TriageRule)]));
 
         Assert.Equal(RuleEffects.Allow, result.Outcome);
-        ArbiterDecisionRecord triage = Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll(), record => record.Trigger == TriageTrigger);
+        ArbiterDecisionRecord triage = Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), record => record.Trigger == TriageTrigger);
         ArbiterDecisionRule rule = Assert.Single(triage.Rules, r => r.Id == TriageRule);
         Assert.Equal(Answered, rule.WouldEffect);
     }
@@ -432,7 +432,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
 
         await evaluator.EvaluateAsync(IntakePlanner(), ConfigWith([Enforced(IntakeRule)]));
 
-        ArbiterDecisionRecord intake = Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll(), record => record.Trigger == IntakeTrigger);
+        ArbiterDecisionRecord intake = Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), record => record.Trigger == IntakeTrigger);
         string expected = string.Join(
             "\n",
             "STATUS: INTAKE_RECOMMENDATION",
@@ -553,7 +553,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
 
         await evaluator.EvaluateAsync(DocsImpactDispatch(), ConfigWith([Enforced(DocsImpactRule)]));
 
-        ArbiterDecisionRecord docs = Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll(), record => record.Trigger == DocsImpactTrigger);
+        ArbiterDecisionRecord docs = Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), record => record.Trigger == DocsImpactTrigger);
         // The digest only means "shortcut" when the rule itself answered: not when the question was kept and escalated.
         ArbiterDecisionRule answered = Assert.Single(docs.Rules, rule => rule.Id == DocsImpactRule);
         Assert.Equal(NoDocChange, answered.Answer);
@@ -581,7 +581,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             BugCrusherInvestigate(), ConfigWith([Enforced(TriageRule)]));
 
-        Assert.Contains(result.LedgerId, LedgerFacts.NotDispatchedLedgerIds(new DecisionLog(ArbiterDirectory)));
+        Assert.Contains(result.LedgerId, LedgerFacts.NotDispatchedLedgerIds(RealArbiterState.Decisions(ArbiterDirectory)));
     }
 
     /// <summary>A shadow shortcut dispatched the worker, so its ledger id is not in the not-dispatched set.</summary>
@@ -594,7 +594,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             BugCrusherInvestigate(), ConfigWith([Shipped(TriageRule)]));
 
-        Assert.DoesNotContain(result.LedgerId, LedgerFacts.NotDispatchedLedgerIds(new DecisionLog(ArbiterDirectory)));
+        Assert.DoesNotContain(result.LedgerId, LedgerFacts.NotDispatchedLedgerIds(RealArbiterState.Decisions(ArbiterDirectory)));
     }
 
     // ---- Shipped pins (acceptance: the three ids are in the catalogue and shipped in shadow) ----

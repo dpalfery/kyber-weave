@@ -78,7 +78,7 @@ public sealed class CommentTriageServiceTests : IDisposable
         Assert.True(result.Shadow);
         Assert.Equal(Nitpick, result.WouldClass);
         Assert.Equal(0.95, result.Confidence);
-        Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll(), record => record.Id == result.DecisionId);
+        Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), record => record.Id == result.DecisionId);
     }
 
     /// <summary>
