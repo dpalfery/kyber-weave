@@ -1023,7 +1023,7 @@ public sealed partial class ReviewVerdictService(
         (List<ReviewFinding> graded, List<(ReviewFinding Finding, SeverityOverrideRow Row, double? Confidence)> matched) =
             decisions.MatchOverridesAsync(model, overrides, findings, cancellationToken).GetAwaiter().GetResult();
         foreach ((ReviewFinding finding, SeverityOverrideRow row, double? confidence) in matched)
-            report.Add(SeverityOverrides.Note(finding, row, $"matched by decision model, confidence {ReviewDecisionText.Format(confidence)}"));
+            report.Add(SeverityOverrideRules.Note(finding, row, $"matched by decision model, confidence {ReviewDecisionText.Format(confidence)}"));
 
         if (matched.Count > 0)
             effects.Add($"{matched.Count} severity override(s) matched");

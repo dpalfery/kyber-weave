@@ -30,7 +30,7 @@ public sealed class FileSeverityOverrideSource(IFileSystem files) : ISeverityOve
 
         try
         {
-            return SeverityOverrides.Parse(files.ReadAllText(path), Path.GetRelativePath(root, path).Replace('\\', '/'));
+            return SeverityOverrideRules.Parse(files.ReadAllText(path), Path.GetRelativePath(root, path).Replace('\\', '/'));
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {

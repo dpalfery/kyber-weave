@@ -338,7 +338,7 @@ public sealed class ReviewDecisionSteps(ICitedSourceFiles sources, IContainedFil
 
             if (best is { } winner)
             {
-                ReviewFinding graded = SeverityOverrides.Apply(findings[group.Key], winner.Row, SeverityOverrides.ModelSource);
+                ReviewFinding graded = SeverityOverrideRules.Apply(findings[group.Key], winner.Row, SeverityOverrides.ModelSource);
                 result[group.Key] = graded;
                 matched.Add((graded, winner.Row, winner.Score));
             }

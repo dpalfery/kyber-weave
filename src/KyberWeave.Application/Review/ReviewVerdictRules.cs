@@ -241,7 +241,7 @@ public static partial class ReviewVerdictRules
     }
 
     /// <summary>A severity as seat files write it.</summary>
-    public static string SeverityName(ReviewSeverity severity) => SeverityOverrides.SeverityName(severity);
+    public static string SeverityName(ReviewSeverity severity) => SeverityOverrideRules.SeverityName(severity);
 
     public static string PairSubject(ReviewFinding a, ReviewFinding b) => $"{a.Id} ~ {b.Id}";
 

@@ -43,7 +43,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     [Fact]
     public void AGuidanceFileWithNoSectionHasNoRows()
     {
-        SeverityOverrides overrides = SeverityOverrides.Parse("# Review guidance\n\n## Ground rules\n\n| a | b |\n|---|---|\n| x | y |\n");
+        SeverityOverrides overrides = SeverityOverrideRules.Parse("# Review guidance\n\n## Ground rules\n\n| a | b |\n|---|---|\n| x | y |\n");
 
         Assert.Empty(overrides.Rows);
         Assert.Empty(overrides.Problems);
@@ -52,7 +52,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     [Fact]
     public void EachRowIsReadWithItsIdSeverityScopeAndReason()
     {
-        SeverityOverrides overrides = SeverityOverrides.Parse(Table);
+        SeverityOverrides overrides = SeverityOverrideRules.Parse(Table);
 
         Assert.Empty(overrides.Problems);
         Assert.Equal(["SO-1", "SO-2", "SO-3"], overrides.Rows.Select(row => row.Id));
@@ -70,7 +70,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     [Fact]
     public void ACommentedOrFencedExampleIsNotARow()
     {
-        SeverityOverrides overrides = SeverityOverrides.Parse("""
+        SeverityOverrides overrides = SeverityOverrideRules.Parse("""
             ## Severity overrides
 
             | Id | Finding class | Severity | Applies to | Why |
@@ -92,7 +92,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     [Fact]
     public void ColumnsAreFoundByHeaderAndARowWithNoIdGetsItsPosition()
     {
-        SeverityOverrides overrides = SeverityOverrides.Parse("""
+        SeverityOverrides overrides = SeverityOverrideRules.Parse("""
             ### Severity overrides
 
             | Severity | Finding class |
@@ -115,7 +115,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     [InlineData("| SO-1 | Some class | major | model-placment | |", SeverityOverrides.UnknownScopeCode)]
     public void AnInvalidRowIsReportedAsAnErrorAndLeftOut(string row, string code)
     {
-        SeverityOverrides overrides = SeverityOverrides.Parse(Section(row));
+        SeverityOverrides overrides = SeverityOverrideRules.Parse(Section(row));
 
         Assert.Empty(overrides.Rows);
         Diagnostic problem = Assert.Single(overrides.Problems);
@@ -127,7 +127,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     [Fact]
     public void ADuplicateIdIsReportedAndOnlyTheFirstRowIsKept()
     {
-        SeverityOverrides overrides = SeverityOverrides.Parse(Section("| SO-1 | One class | major | | |", "| so-1 | Two class | minor | | |"));
+        SeverityOverrides overrides = SeverityOverrideRules.Parse(Section("| SO-1 | One class | major | | |", "| so-1 | Two class | minor | | |"));
 
         Assert.Equal("One class", Assert.Single(overrides.Rows).FindingClass);
         Assert.Equal(SeverityOverrides.DuplicateIdCode, Assert.Single(overrides.Problems).Code);
@@ -136,7 +136,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     [Fact]
     public void ATableWithoutTheRequiredColumnsIsReported()
     {
-        SeverityOverrides overrides = SeverityOverrides.Parse("## Severity overrides\n\n| Id | Why |\n|---|---|\n| SO-1 | x |\n");
+        SeverityOverrides overrides = SeverityOverrideRules.Parse("## Severity overrides\n\n| Id | Why |\n|---|---|\n| SO-1 | x |\n");
 
         Assert.Empty(overrides.Rows);
         Assert.Equal(SeverityOverrides.EmptyClassCode, Assert.Single(overrides.Problems).Code);
@@ -145,7 +145,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     [Fact]
     public void LoweringAClassTheShippedLensGradesCriticalIsAnAdvisoryAndTheRowStillApplies()
     {
-        SeverityOverrides overrides = SeverityOverrides.Parse(Section(
+        SeverityOverrides overrides = SeverityOverrideRules.Parse(Section(
             "| SO-1 | A described capability with no implementation | minor | intent-alignment | |"));
 
         Assert.Single(overrides.Rows);
@@ -157,7 +157,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     [Fact]
     public void ThePlacementRowDrawsNoAdvisory()
     {
-        Assert.Empty(SeverityOverrides.Parse(Table).Problems);
+        Assert.Empty(SeverityOverrideRules.Parse(Table).Problems);
     }
 
     // ---------------------------------------------------------------- delivery to seats
@@ -165,7 +165,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     [Fact]
     public void AnUnscopedRowReachesEverySeatAndAScopedRowOnlyItsLensWhenItsTechnologyChanged()
     {
-        SeverityOverrides overrides = SeverityOverrides.Parse(Table);
+        SeverityOverrides overrides = SeverityOverrideRules.Parse(Table);
         string[] changed = ["src/Foo.cs", "docs/a.md"];
 
         Assert.Equal(["SO-1", "SO-2"], overrides.RowsFor("model-placement", changed).Select(row => row.Id));
@@ -177,10 +177,10 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     [Fact]
     public void DeliveryFailsOpenWhenTheChangedFilesOrTheTechnologyGlobsAreUnknown()
     {
-        SeverityOverrides overrides = SeverityOverrides.Parse(Table.Replace("| csharp | `*.cs`, `*.csproj` | 2 |", "| csharp | C# sources | 2 |", StringComparison.Ordinal));
+        SeverityOverrides overrides = SeverityOverrideRules.Parse(Table.Replace("| csharp | `*.cs`, `*.csproj` | 2 |", "| csharp | C# sources | 2 |", StringComparison.Ordinal));
 
         Assert.Equal(["SO-1", "SO-2"], overrides.RowsFor("model-placement", ["docs/a.md"]).Select(row => row.Id));
-        Assert.Equal(["SO-2", "SO-3"], SeverityOverrides.Parse(Table).RowsFor("security", null).Select(row => row.Id));
+        Assert.Equal(["SO-2", "SO-3"], SeverityOverrideRules.Parse(Table).RowsFor("security", null).Select(row => row.Id));
     }
 
     [Fact]
@@ -188,7 +188,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     {
         CouncilSeatContext context = new(
             "/tree", "/evidence.md", true, "balanced", 7, "minor", "/tree/REVIEW.md", null,
-            SeverityOverrides.Parse(Table), ["src/Foo.cs"]);
+            SeverityOverrideRules.Parse(Table), ["src/Foo.cs"]);
 
         string placement = CouncilSeating.Packet(context, "model-placement");
         string security = CouncilSeating.Packet(context, "security");
@@ -230,7 +230,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     [Fact]
     public void ACitedRowSetsTheSeverityAndRecordsTheSeatsOwn()
     {
-        SeverityOverrides overrides = SeverityOverrides.Parse(Table);
+        SeverityOverrides overrides = SeverityOverrideRules.Parse(Table);
         List<Diagnostic> notes = [];
 
         ReviewFinding applied = Assert.Single(overrides.ApplyCited([Finding("model-placement/wrong-folder", ReviewSeverity.Minor) with { Override = "SO-1" }], notes));
@@ -251,7 +251,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     {
         List<Diagnostic> notes = [];
 
-        ReviewFinding kept = Assert.Single(SeverityOverrides.Parse(Table).ApplyCited([Finding("a/b", ReviewSeverity.Minor) with { Override = "SO-9" }], notes));
+        ReviewFinding kept = Assert.Single(SeverityOverrideRules.Parse(Table).ApplyCited([Finding("a/b", ReviewSeverity.Minor) with { Override = "SO-9" }], notes));
 
         Assert.Equal(ReviewSeverity.Minor, kept.Severity);
         Assert.Null(kept.Override);
@@ -264,7 +264,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
         List<Diagnostic> notes = [];
         ReviewFinding carried = Finding("a/b", ReviewSeverity.Major) with { Override = "SO-1", OverrideSource = SeverityOverrides.ModelSource, SeatSeverity = ReviewSeverity.Minor };
 
-        Assert.Same(carried, Assert.Single(SeverityOverrides.Parse(Table).ApplyCited([carried], notes)));
+        Assert.Same(carried, Assert.Single(SeverityOverrideRules.Parse(Table).ApplyCited([carried], notes)));
         Assert.Empty(notes);
     }
 
@@ -276,7 +276,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
         FakeProvider provider = new(_ => ("belongs", 0.95));
 
         (List<ReviewFinding> findings, var matched) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(
-            Model(provider), SeverityOverrides.Parse(Table), [Finding("model-placement/wrong-folder", ReviewSeverity.Minor)]);
+            Model(provider), SeverityOverrideRules.Parse(Table), [Finding("model-placement/wrong-folder", ReviewSeverity.Minor)]);
 
         ReviewFinding graded = Assert.Single(findings);
         Assert.Equal(ReviewSeverity.Major, graded.Severity);
@@ -289,7 +289,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     public async Task AnUnsureAnswerChangesNothing()
     {
         (List<ReviewFinding> findings, var matched) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(
-            Model(new FakeProvider(_ => ("belongs", 0.6))), SeverityOverrides.Parse(Table), [Finding("model-placement/x", ReviewSeverity.Minor)]);
+            Model(new FakeProvider(_ => ("belongs", 0.6))), SeverityOverrideRules.Parse(Table), [Finding("model-placement/x", ReviewSeverity.Minor)]);
 
         Assert.Equal(ReviewSeverity.Minor, Assert.Single(findings).Severity);
         Assert.Empty(matched);
@@ -302,7 +302,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
         ReviewDecisionSession model = Model(provider);
         ReviewFinding[] many = [.. Enumerable.Range(1, 160).Select(index => Finding($"model-placement/x{index}", ReviewSeverity.Minor))];
 
-        await ReviewTestServices.DecisionSteps.MatchOverridesAsync(model, SeverityOverrides.Parse(Table), many);
+        await ReviewTestServices.DecisionSteps.MatchOverridesAsync(model, SeverityOverrideRules.Parse(Table), many);
 
         Assert.Equal(ReviewVerdictRules.MaxQuestionsPerStep, provider.Calls);
         Assert.Contains("20 comparison(s) skipped", model.SummaryLine([]), StringComparison.Ordinal);
@@ -320,7 +320,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
             .. Enumerable.Range(0, 10).Select(index => Finding($"model-placement/c{index}", ReviewSeverity.Critical)),
         ];
 
-        (List<ReviewFinding> graded, _) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(Model(provider), SeverityOverrides.Parse(Table), findings);
+        (List<ReviewFinding> graded, _) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(Model(provider), SeverityOverrideRules.Parse(Table), findings);
 
         Assert.Equal(ReviewVerdictRules.MaxQuestionsPerStep, provider.Calls);
         Assert.All(graded.Skip(150), finding => Assert.Equal(SeverityOverrides.ModelSource, finding.OverrideSource));
@@ -337,7 +337,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
         ReviewDecisionSession model = Model(provider);
         ReviewFinding[] many = [.. Enumerable.Range(0, ReviewVerdictRules.MaxFindingsPerStep + 100).Select(index => Finding($"model-placement/x{index}", ReviewSeverity.Minor))];
 
-        await ReviewTestServices.DecisionSteps.MatchOverridesAsync(model, SeverityOverrides.Parse(Table), many);
+        await ReviewTestServices.DecisionSteps.MatchOverridesAsync(model, SeverityOverrideRules.Parse(Table), many);
 
         Assert.Equal(ReviewVerdictRules.MaxQuestionsPerStep, provider.Calls);
         Assert.Contains("100 finding(s) left out of the comparison", model.SummaryLine([]), StringComparison.Ordinal);
@@ -350,7 +350,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
         ReviewDecisionSession model = Model(provider);
         ReviewFinding[] many = [.. Enumerable.Range(1, 6).Select(index => Finding($"model-placement/x{index}", ReviewSeverity.Minor))];
 
-        (List<ReviewFinding> findings, var matched) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(model, SeverityOverrides.Parse(Table), many);
+        (List<ReviewFinding> findings, var matched) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(model, SeverityOverrideRules.Parse(Table), many);
 
         Assert.All(findings, finding => Assert.Equal(ReviewSeverity.Minor, finding.Severity));
         Assert.Empty(matched);
@@ -364,7 +364,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
         ReviewDecisionSession model = ReviewTestServices.DecisionModel(new NoneProvider(), ArbiterConfigDefaults.Product.Rules, LogDirectory, TimeProvider.System);
 
         (List<ReviewFinding> findings, var matched) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(
-            model, SeverityOverrides.Parse(Table), [Finding("model-placement/x", ReviewSeverity.Minor)]);
+            model, SeverityOverrideRules.Parse(Table), [Finding("model-placement/x", ReviewSeverity.Minor)]);
 
         Assert.Equal(ReviewSeverity.Minor, Assert.Single(findings).Severity);
         Assert.Empty(matched);
@@ -373,7 +373,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     [Fact]
     public async Task TheMostConfidentRowWinsAndATieGoesToTheRowFirstInTheTable()
     {
-        SeverityOverrides overrides = SeverityOverrides.Parse(Table);
+        SeverityOverrides overrides = SeverityOverrideRules.Parse(Table);
         ReviewFinding finding = Finding("model-placement/x", ReviewSeverity.Minor);
 
         (List<ReviewFinding> confident, _) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(
@@ -391,7 +391,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
         FakeProvider provider = new(_ => ("belongs", 0.99));
         ReviewFinding cited = Finding("model-placement/x", ReviewSeverity.Major) with { Override = "SO-1" };
 
-        await ReviewTestServices.DecisionSteps.MatchOverridesAsync(Model(provider), SeverityOverrides.Parse(Table), [cited]);
+        await ReviewTestServices.DecisionSteps.MatchOverridesAsync(Model(provider), SeverityOverrideRules.Parse(Table), [cited]);
         Assert.Equal(0, provider.Calls);
 
         ReviewFinding overridden = Finding("a/minor", ReviewSeverity.Minor) with { Override = "SO-9", OverrideSource = SeverityOverrides.SeatSource };
