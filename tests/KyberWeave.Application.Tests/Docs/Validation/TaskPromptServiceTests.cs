@@ -2,13 +2,12 @@ using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
-using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
+using Spectre.Console.Testing;
 using Xunit;
-using Xunit.Sdk;
 
 namespace KyberWeave.Tests;
 
@@ -30,14 +29,15 @@ public sealed class TaskPromptServiceTests
     /// <summary>A corpus with a Ready plan whose tasks name <paramref name="technology"/>, and a task file.</summary>
     private static DocFixture Ready(string technology = "csharp", string? planMarkdown = null)
     {
-        DocFixture fixture = PlanTaskFileProbe.Corpus(planMarkdown ?? PlanNaming(technology));
+        DocFixture fixture = PlanTaskFileProbe.CorpusInMemory(planMarkdown ?? PlanNaming(technology));
         Standards(fixture);
-        Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
-        DocsTestCommands.Tasks().Execute(
+        _ = fixture.EnsureDirectory(".git");
+        using TestConsole console = new() { EmitAnsiSequences = false };
+        _ = DocsTestCommands.Tasks(DocsMemoryServicesD.Services(fixture), console).Execute(
             null!,
             new DocsTasksSettings
             {
-                Path = Path.Combine(fixture.Root, PlanTaskFileProbe.PlanPath),
+                Path = fixture.FullPath(PlanTaskFileProbe.PlanPath),
                 Format = "json",
                 Write = true
             },
@@ -133,9 +133,9 @@ public sealed class TaskPromptServiceTests
 
     private static TaskPromptService Service(DocFixture fixture, KyberWeaveConfig config)
     {
-        IServiceProvider provider = DocsTestCommands.Services();
+        IServiceProvider provider = DocsMemoryServicesD.Services(fixture);
         DocumentIndex index = DocumentIndex.Build(
-            RealDocumentLoader.Create(fixture.Root, config.Ontology).Load(), FakeCodeGraphResolver.WithSymbols());
+            fixture.Loader(config.Ontology).Load(), FakeCodeGraphResolver.WithSymbols());
         return new TaskPromptService(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
@@ -326,9 +326,9 @@ public sealed class TaskPromptServiceTests
     public void PriorResultsFromTheRunsScratchAreaReachTheTaskPart()
     {
         using DocFixture fixture = Ready();
-        string scratch = Path.Combine(fixture.Root, TaskPromptService.ScratchFolder);
-        Directory.CreateDirectory(scratch);
-        File.WriteAllText(Path.Combine(scratch, "results.txt"), "T1 reported: built, four tests green.");
+        string scratch = fixture.FullPath(TaskPromptService.ScratchFolder);
+        fixture.Memory!.CreateDirectory(scratch);
+        fixture.Memory.WriteAllText(Path.Combine(scratch, "results.txt"), "T1 reported: built, four tests green.");
         KyberWeaveConfig config = Config();
 
         TaskPromptResult result = Service(fixture, config).Build(
@@ -366,27 +366,24 @@ public sealed class TaskPromptServiceTests
     [InlineData("directory")]
     public void APriorResultsSymlinkOutOfTheScratchAreaIsRefused(string linked)
     {
-        if (OperatingSystem.IsWindows())
-            throw SkipException.ForSkip("Symbolic-link creation requires platform-specific privileges on Windows.");
-
         using DocFixture fixture = Ready();
-        string scratch = Path.Combine(fixture.Root, TaskPromptService.ScratchFolder);
+        string scratch = fixture.FullPath(TaskPromptService.ScratchFolder);
         if (linked == "file")
         {
-            string secret = Path.Combine(fixture.Root, "results.txt");
-            File.WriteAllText(secret, "a tracked file the worker must not receive.");
-            Directory.CreateDirectory(Path.Combine(scratch, "t1"));
-            File.CreateSymbolicLink(Path.Combine(scratch, "t1", "link.md"), secret);
+            string secret = fixture.FullPath("results.txt");
+            fixture.Memory!.WriteAllText(secret, "a tracked file the worker must not receive.");
+            fixture.Memory.CreateDirectory(Path.Combine(scratch, "t1"));
+            fixture.Memory.CreateFileLink(Path.Combine(scratch, "t1", "link.md"), secret);
         }
         else
         {
-            string outside = Path.Combine(fixture.Root, "elsewhere");
-            Directory.CreateDirectory(outside);
-            File.WriteAllText(
+            string outside = fixture.FullPath("elsewhere");
+            fixture.Memory!.CreateDirectory(outside);
+            fixture.Memory.WriteAllText(
                 Path.Combine(outside, "link.md"),
                 "a tracked file the worker must not receive.");
-            Directory.CreateDirectory(scratch);
-            Directory.CreateSymbolicLink(Path.Combine(scratch, "t1"), outside);
+            fixture.Memory.CreateDirectory(scratch);
+            fixture.Memory.CreateDirectoryLink(Path.Combine(scratch, "t1"), outside);
         }
 
         KyberWeaveConfig config = Config();
@@ -413,7 +410,7 @@ public sealed class TaskPromptServiceTests
     public void APriorResultsPathOutsideTheScratchAreaIsRefused(string relative)
     {
         using DocFixture fixture = Ready();
-        File.WriteAllText(Path.Combine(fixture.Root, "results.txt"), "a tracked file the worker must not receive.");
+        fixture.Write("results.txt", "a tracked file the worker must not receive.");
         KyberWeaveConfig config = Config();
 
         TaskPromptResult result = Service(fixture, config).Build(
@@ -450,19 +447,19 @@ public sealed class TaskPromptServiceTests
     public void BuildingAPromptWritesNoFile()
     {
         using DocFixture fixture = Ready();
-        Dictionary<string, (long Length, DateTime Written)> before = Snapshot(fixture.Root);
+        Dictionary<string, (long Length, DateTime Written)> before = Snapshot(fixture);
 
         TaskPromptResult result = Build(fixture);
 
         Assert.True(result.Built, result.Refusal);
-        Assert.Equal(before, Snapshot(fixture.Root));
+        Assert.Equal(before, Snapshot(fixture));
     }
 
-    private static Dictionary<string, (long Length, DateTime Written)> Snapshot(string root) =>
-        Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+    private static Dictionary<string, (long Length, DateTime Written)> Snapshot(DocFixture fixture) =>
+        fixture.Memory!.EnumerateFiles(fixture.Root, "*", recursive: true)
             .ToDictionary(
-                file => Path.GetRelativePath(root, file).Replace('\\', '/'),
-                file => (new FileInfo(file).Length, File.GetLastWriteTimeUtc(file)),
+                file => Path.GetRelativePath(fixture.Root, file).Replace('\\', '/'),
+                file => (fixture.Memory.GetLength(file), fixture.Memory.GetLastWriteTimeUtc(file)),
                 StringComparer.Ordinal);
 
     private static string Between(string prompt, string tag)

@@ -7,6 +7,7 @@ using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
+using Spectre.Console.Testing;
 using Xunit;
 using YamlDotNet.Core;
 using KyberWeave.Tests.Corpus;
@@ -57,14 +58,15 @@ public sealed class TaskPromptBudgetTests
     /// <summary>A corpus whose rules are small and whose skills and standard sections are large.</summary>
     private static DocFixture Ready()
     {
-        DocFixture fixture = PlanTaskFileProbe.Corpus(BudgetPlan());
+        DocFixture fixture = PlanTaskFileProbe.CorpusInMemory(BudgetPlan());
         Standards(fixture);
-        Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
-        DocsTestCommands.Tasks().Execute(
+        _ = fixture.EnsureDirectory(".git");
+        using TestConsole console = new() { EmitAnsiSequences = false };
+        _ = DocsTestCommands.Tasks(DocsMemoryServicesD.Services(fixture), console).Execute(
             null!,
             new DocsTasksSettings
             {
-                Path = Path.Combine(fixture.Root, PlanTaskFileProbe.PlanPath),
+                Path = fixture.FullPath(PlanTaskFileProbe.PlanPath),
                 Format = "json",
                 Write = true
             },
@@ -132,15 +134,15 @@ public sealed class TaskPromptBudgetTests
 
     private static TaskPromptResult Build(DocFixture fixture, KyberWeaveConfig config, string? retryText = null) =>
         new TaskPromptService(
-            DocsTestCommands.Services().GetRequiredService<IPlanTaskService>(),
-            DocsTestCommands.Services().GetRequiredService<IPacketHostFacts>(),
-            DocsTestCommands.Services().GetRequiredService<IWritableFileSystem>(),
+            DocsMemoryServicesD.Services(fixture).GetRequiredService<IPlanTaskService>(),
+            DocsMemoryServicesD.Services(fixture).GetRequiredService<IPacketHostFacts>(),
+            DocsMemoryServicesD.Services(fixture).GetRequiredService<IWritableFileSystem>(),
             Index(fixture, config).StandardsFor,
-            DocsTestCommands.Services().GetRequiredService<IProcessEnvironment>())
+            DocsMemoryServicesD.Services(fixture).GetRequiredService<IProcessEnvironment>())
         .Build(new TaskPromptRequest(fixture.Root, TaskId: "T1", RetryText: retryText), config);
 
     private static DocumentIndex Index(DocFixture fixture, KyberWeaveConfig config) =>
-        DocumentIndex.Build(RealDocumentLoader.Create(fixture.Root, config.Ontology).Load(), FakeCodeGraphResolver.WithSymbols());
+        DocumentIndex.Build(fixture.Loader(config.Ontology).Load(), FakeCodeGraphResolver.WithSymbols());
 
     [Fact]
     public void EveryPartFitsTheDefaultBudget()
@@ -240,7 +242,7 @@ public sealed class TaskPromptBudgetTests
         ];
         Assert.NotEmpty(technologies);
 
-        using DocFixture fixture = new DocFixture();
+        using DocFixture fixture = DocFixture.CreateInMemory();
         foreach (string file in Corpus.EnumerateFiles(Templates, "*.md"))
         {
             string relative = file[(Templates.Length + 1)..];
@@ -253,13 +255,13 @@ public sealed class TaskPromptBudgetTests
               docs-root: 6-Docs
             """);
         DocumentIndex index = DocumentIndex.Build(
-            RealDocumentLoader.Create(fixture.Root, site.Ontology).Load(), FakeCodeGraphResolver.WithSymbols());
+            fixture.Loader(site.Ontology).Load(), FakeCodeGraphResolver.WithSymbols());
         TaskPromptService service = new(
-            DocsTestCommands.Services().GetRequiredService<IPlanTaskService>(),
-            DocsTestCommands.Services().GetRequiredService<IPacketHostFacts>(),
-            DocsTestCommands.Services().GetRequiredService<IWritableFileSystem>(),
+            DocsMemoryServicesD.Services(fixture).GetRequiredService<IPlanTaskService>(),
+            DocsMemoryServicesD.Services(fixture).GetRequiredService<IPacketHostFacts>(),
+            DocsMemoryServicesD.Services(fixture).GetRequiredService<IWritableFileSystem>(),
             index.StandardsFor,
-            DocsTestCommands.Services().GetRequiredService<IProcessEnvironment>());
+            DocsMemoryServicesD.Services(fixture).GetRequiredService<IProcessEnvironment>());
 
         foreach (string technology in technologies)
         {
