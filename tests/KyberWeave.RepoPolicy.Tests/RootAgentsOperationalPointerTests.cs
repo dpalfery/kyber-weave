@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -16,8 +17,7 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class RootAgentsOperationalPointerTests
 {
-    private static string AgentsPath =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "AGENTS.md");
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     /// <summary>
     /// An agent told that restore, format, build, test, and skill commands live on the CLI
@@ -39,8 +39,7 @@ public sealed class RootAgentsOperationalPointerTests
             commands.Contains("cli-command-surface.md", StringComparison.Ordinal),
             "The Commands section must not send format/build/test/skill argv to docs/cli-command-surface.md.");
 
-        string catalogue = File.ReadAllText(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, ".kyber-weave", "kyber-weave.yml"));
+        string catalogue = Corpus.ReadText(".kyber-weave/kyber-weave.yml");
         foreach (string gateId in new[] { "id: format-whitespace", "id: format-style", "id: build", "id: test", "id: skill-validate" })
         {
             Assert.True(
@@ -125,8 +124,7 @@ public sealed class RootAgentsOperationalPointerTests
     [Fact]
     public void FastLoopNeitherOffersAFullRunNorDocumentsAClassPatternThatMatchesNothing()
     {
-        string script = File.ReadAllText(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "fast-loop.sh"));
+        string script = Corpus.ReadText("scripts/fast-loop.sh");
 
         Assert.False(
             script.Contains("Use --full only for", StringComparison.Ordinal),
@@ -148,7 +146,7 @@ public sealed class RootAgentsOperationalPointerTests
     public void EachAreaDocumentHoldsTheTargetedCommandTheRootFilePointsAt(string relativePath, string command)
     {
         string commands = Section(ReadAgents(), "## Commands", "## Exploration order");
-        string target = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, relativePath));
+        string target = Corpus.ReadText(relativePath);
 
         Assert.True(
             commands.Contains(relativePath, StringComparison.Ordinal),
@@ -160,8 +158,8 @@ public sealed class RootAgentsOperationalPointerTests
 
     private static string ReadAgents()
     {
-        Assert.True(File.Exists(AgentsPath), $"Root instruction file '{AgentsPath}' is missing.");
-        return File.ReadAllText(AgentsPath);
+        Assert.True(Corpus.Exists("AGENTS.md"), "Root instruction file 'AGENTS.md' is missing.");
+        return Corpus.ReadText("AGENTS.md");
     }
 
     private static string Section(string text, string startHeading, string endHeading)

@@ -1,4 +1,5 @@
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -23,6 +24,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class StandardsCompletionSectionTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string[] SixHeadings =
     [
         "## Naming and layout",
@@ -46,8 +49,8 @@ public sealed class StandardsCompletionSectionTests
     {
         string path = StandardPath(technology);
 
-        Assert.True(File.Exists(path), $"The configuration declares technology '{technology}' and '{path}' does not exist.");
-        IReadOnlyList<string> headings = Headings(File.ReadAllText(path));
+        Assert.True(Corpus.Exists(path), $"The configuration declares technology '{technology}' and '{path}' does not exist.");
+        IReadOnlyList<string> headings = Headings(Corpus.ReadText(path));
 
         Assert.Equal(SixHeadings, headings);
     }
@@ -56,7 +59,7 @@ public sealed class StandardsCompletionSectionTests
     [MemberData(nameof(DeclaredTechnologies))]
     public void EveryDeclaredStandardCarriesOneDoneChecklist(string technology)
     {
-        int count = Headings(File.ReadAllText(StandardPath(technology)))
+        int count = Headings(Corpus.ReadText(StandardPath(technology)))
             .Count(heading => heading == "## Done checklist");
 
         Assert.True(
@@ -78,10 +81,10 @@ public sealed class StandardsCompletionSectionTests
     public void NoLiveDocumentLinksToALegacyStandardsReadme()
     {
         string[] offenders = LiveMarkdown()
-            .SelectMany(file => File.ReadAllLines(file)
+            .SelectMany(file => Corpus.ReadText(file).ReplaceLineEndings("\n").Split('\n')
                 .Select((line, index) => (File: file, Line: index + 1, Text: line))
                 .Where(row => row.Text.Contains(LegacyPath, StringComparison.Ordinal))
-                .Select(row => $"{Relative(row.File)}:{row.Line}: {row.Text.Trim()}"))
+                .Select(row => $"{row.File}:{row.Line}: {row.Text.Trim()}"))
             .ToArray();
 
         Assert.True(
@@ -92,13 +95,12 @@ public sealed class StandardsCompletionSectionTests
 
     private static IReadOnlyList<string> DeclaredStandards()
     {
-        return KyberWeaveConfigLoader.Load(KyberWeaveTestPaths.ToolRoot).Ontology.Technologies;
+        return KyberWeaveConfigLoader.Load(Corpus.Root).Ontology.Technologies;
     }
 
     private static string StandardPath(string technology)
     {
-        return Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "docs", "standards", technology, $"{technology}.standards.md");
+        return $"docs/standards/{technology}/{technology}.standards.md";
     }
 
     /// <summary>The level-two headings of a Markdown document, hashes included.</summary>
@@ -117,36 +119,20 @@ public sealed class StandardsCompletionSectionTests
     /// </summary>
     private static IEnumerable<string> LiveMarkdown()
     {
-        string root = KyberWeaveTestPaths.ToolRoot;
-        IEnumerable<string> roots =
-        [
-            Path.Combine(root, "AGENTS.md"),
-            Path.Combine(root, "README.md"),
-            Path.Combine(root, "REVIEW.md"),
-            Path.Combine(root, "CONTRIBUTING.md"),
-            Path.Combine(root, "SECURITY.md")
-        ];
+        IEnumerable<string> roots = ["AGENTS.md", "README.md", "REVIEW.md", "CONTRIBUTING.md", "SECURITY.md"];
 
-        foreach (string file in roots.Where(File.Exists))
+        foreach (string file in roots.Where(Corpus.Exists))
             yield return file;
 
-        foreach (string directory in new[] { Path.Combine(root, "docs"), Path.Combine(root, "products"), Path.Combine(root, ".apm") })
+        foreach (string directory in new[] { "docs", "products", ".apm" })
         {
-            if (!Directory.Exists(directory))
-                continue;
-
-            foreach (string file in Directory.EnumerateFiles(directory, "*.md", SearchOption.AllDirectories))
+            foreach (string file in Corpus.EnumerateFiles(directory, "*.md"))
             {
-                if (file.Split(Path.DirectorySeparatorChar).Contains("archive", StringComparer.Ordinal))
+                if (file.Split('/').Contains("archive", StringComparer.Ordinal))
                     continue;
 
                 yield return file;
             }
         }
-    }
-
-    private static string Relative(string path)
-    {
-        return Path.GetRelativePath(KyberWeaveTestPaths.ToolRoot, path).Replace('\\', '/');
     }
 }

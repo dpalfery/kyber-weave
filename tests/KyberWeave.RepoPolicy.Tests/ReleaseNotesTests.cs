@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Processes;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 using Xunit.Sdk;
 
@@ -38,11 +39,11 @@ public sealed class ReleaseNotesTests
     private const string ForFlag = "--for";
     private const string PreviousTagKey = "PREVIOUS_TAG";
 
-    private static string NextReleaseVersionScript =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "next-release-version.sh");
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private static string ReleaseWorkflowPath =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, ".github", "workflows", "release.yml");
+    private static string NextReleaseVersionScript => Path.Combine(Corpus.Root, "scripts", "next-release-version.sh");
+
+    private const string ReleaseWorkflowPath = ".github/workflows/release.yml";
 
     // ---------------------------------------------------------------------------------------
     // (a) previous-tag lookup
@@ -465,7 +466,7 @@ public sealed class ReleaseNotesTests
 
     private static string ReadWorkflow()
     {
-        return File.ReadAllText(ReleaseWorkflowPath);
+        return Corpus.ReadText(ReleaseWorkflowPath);
     }
 
     /// <summary>

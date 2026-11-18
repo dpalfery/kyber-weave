@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Processes;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 using Xunit.Sdk;
 using YamlDotNet.Serialization;
@@ -35,12 +36,13 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ReleaseTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly char[] OperandsSeparators = { ' ', '\t' };
 
-    private static string InstallShPath => Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "install.sh");
+    private static string InstallShPath => Path.Combine(Corpus.Root, "scripts", "install.sh");
 
-    private static string ReleaseWorkflowPath =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, ".github", "workflows", "release.yml");
+    private const string ReleaseWorkflowPath = ".github/workflows/release.yml";
 
     private static ProcessStartInfo CreateShellStartInfo(string script)
     {
@@ -526,7 +528,7 @@ public sealed class ReleaseTests
     [Fact]
     public void BuildTrayPublishesTheAssetNamesTheInstallerAsksFor()
     {
-        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+        string workflow = Corpus.ReadText(ReleaseWorkflowPath);
 
         foreach (string asset in TrayAssetNames)
         {
@@ -536,14 +538,8 @@ public sealed class ReleaseTests
         }
 
         // And the installer still asks for exactly these.
-        string origin = File.ReadAllText(
-            Path.Combine(
-                KyberWeaveTestPaths.ToolRoot,
-                "dash",
-                "server",
-                "KyberDash.Application",
-                "Services",
-                "MenubarService.cs"));
+        string origin = Corpus.ReadText(
+            "dash/server/KyberDash.Application/Services/MenubarService.cs");
         Assert.Contains("kyberdash-tray-darwin-", origin, StringComparison.Ordinal);
         Assert.Contains("kyberdash-tray-win-x64-setup.exe", origin, StringComparison.Ordinal);
     }
@@ -556,7 +552,7 @@ public sealed class ReleaseTests
     [Fact]
     public void BuildTrayFailsTheMacOsLegsBeforeBuildingWhenASecretIsMissing()
     {
-        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+        string workflow = Corpus.ReadText(ReleaseWorkflowPath);
 
         foreach (string secret in RequiredSigningSecrets)
         {
@@ -599,11 +595,11 @@ public sealed class ReleaseTests
     public void LocalKyberDashBuildMatchesTheReleaseJob()
     {
         string job = ReadBuildKyberDashJob();
-        string local = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "release-local.sh"));
+        string local = Corpus.ReadText("scripts/release-local.sh");
 
         Match nodeVersion = Regex.Match(job, "NODE_VERSION: \"([^\"]+)\"");
         Assert.True(nodeVersion.Success, "build-kyberdash no longer pins NODE_VERSION.");
-        string nvmrc = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "dash", ".nvmrc")).Trim()
+        string nvmrc = Corpus.ReadText("dash/.nvmrc").Trim()
             .TrimStart('v');
         Assert.True(
             nodeVersion.Groups[1].Value == nvmrc,
@@ -663,7 +659,7 @@ public sealed class ReleaseTests
     /// </summary>
     private static string ReadBuildKyberDashJob()
     {
-        string workflow = File.ReadAllText(ReleaseWorkflowPath).ReplaceLineEndings("\n");
+        string workflow = Corpus.ReadText(ReleaseWorkflowPath).ReplaceLineEndings("\n");
         int start = workflow.IndexOf("\n  build-kyberdash:\n", StringComparison.Ordinal);
         Assert.True(start >= 0, "release.yml has no build-kyberdash job.");
         // The job runs to the next two-space-indented key, which is the next job.
@@ -683,7 +679,7 @@ public sealed class ReleaseTests
     /// </remarks>
     private static string ReadReleaseJob(string jobName)
     {
-        string workflow = File.ReadAllText(ReleaseWorkflowPath).ReplaceLineEndings("\n");
+        string workflow = Corpus.ReadText(ReleaseWorkflowPath).ReplaceLineEndings("\n");
         int start = workflow.IndexOf("\n  " + jobName + ":\n", StringComparison.Ordinal);
         Assert.True(start >= 0, "release.yml has no " + jobName + " job.");
         Match next = Regex.Match(workflow[(start + 1)..], @"\n  [A-Za-z0-9_-]+:\n");
@@ -716,7 +712,7 @@ public sealed class ReleaseTests
     /// </summary>
     private static string ScopeBuildKyberDashFunction()
     {
-        string local = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "release-local.sh"));
+        string local = Corpus.ReadText("scripts/release-local.sh");
         int start = local.IndexOf("\nbuild_kyberdash() {\n", StringComparison.Ordinal);
         Assert.True(start >= 0, "release-local.sh has no build_kyberdash() function.");
         int end = local.IndexOf("\nif [ -z \"$NO_KYBERDASH\" ]", start, StringComparison.Ordinal);
@@ -963,12 +959,11 @@ public sealed class ReleaseTests
     [Fact]
     public void EveryWorkflowActionIsPinnedToAFullCommitSha()
     {
-        string workflowsDir = Path.Combine(KyberWeaveTestPaths.ToolRoot, ".github", "workflows");
         List<string> unpinned = [];
 
-        foreach (string file in Directory.EnumerateFiles(workflowsDir, "*.yml"))
+        foreach (string file in Corpus.EnumerateFiles(".github/workflows", "*.yml", recursive: false))
         {
-            foreach (string line in File.ReadAllLines(file))
+            foreach (string line in Corpus.ReadText(file).ReplaceLineEndings("\n").Split('\n'))
             {
                 string trimmed = line.Trim();
                 if (!trimmed.StartsWith("uses:", StringComparison.Ordinal)) continue;
@@ -1000,7 +995,7 @@ public sealed class ReleaseTests
     [Fact]
     public void ReleaseNotesCarryTheWindowsSmartScreenLine()
     {
-        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+        string workflow = Corpus.ReadText(ReleaseWorkflowPath);
 
         Assert.Contains("SmartScreen", workflow, StringComparison.Ordinal);
         Assert.Contains("More info", workflow, StringComparison.Ordinal);
@@ -1014,7 +1009,7 @@ public sealed class ReleaseTests
     [Fact]
     public void TrayAssetsJoinTheChecksumManifest()
     {
-        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+        string workflow = Corpus.ReadText(ReleaseWorkflowPath);
 
         Assert.Contains("name: tray-${{ matrix.rid }}", workflow, StringComparison.Ordinal);
 
@@ -1046,7 +1041,7 @@ public sealed class ReleaseTests
     [Fact]
     public void VerifyChecksumStepPrecedesReleaseCreation()
     {
-        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+        string workflow = Corpus.ReadText(ReleaseWorkflowPath);
 
         int verify = workflow.IndexOf("Verify and compute checksums", StringComparison.Ordinal);
         int create = workflow.IndexOf("Create tag and GitHub Release", StringComparison.Ordinal);
@@ -1063,7 +1058,7 @@ public sealed class ReleaseTests
     [Fact]
     public void PostPublishVerificationUsesScriptListMode()
     {
-        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+        string workflow = Corpus.ReadText(ReleaseWorkflowPath);
 
         // The post-publish step must come after release creation.
         int create = workflow.IndexOf("Create tag and GitHub Release", StringComparison.Ordinal);
@@ -1091,7 +1086,7 @@ public sealed class ReleaseTests
     [Fact]
     public void ReleaseNotesAccuratelyDescribeWindowsSigningState()
     {
-        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+        string workflow = Corpus.ReadText(ReleaseWorkflowPath);
 
         // Pattern that matches "EV" followed by any whitespace (including newlines and blockquote
         // markers like "> ") and then "certificate". This catches the old phrasing even if a
@@ -1129,7 +1124,7 @@ public sealed class ReleaseTests
     [Fact]
     public void ReleaseWorkflowIsValidYaml()
     {
-        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+        string workflow = Corpus.ReadText(ReleaseWorkflowPath);
 
         try
         {
@@ -1167,7 +1162,7 @@ public sealed class ReleaseTests
             UseShellExecute = false
         };
         startInfo.ArgumentList.Add(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
         startInfo.ArgumentList.Add("--list");
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
@@ -1219,7 +1214,7 @@ public sealed class ReleaseTests
             UseShellExecute = false
         };
         startInfo.ArgumentList.Add(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
         startInfo.ArgumentList.Add("--list");
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
@@ -1299,7 +1294,7 @@ public sealed class ReleaseTests
             UseShellExecute = false
         };
         startInfo.ArgumentList.Add(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
@@ -1321,12 +1316,11 @@ public sealed class ReleaseTests
     [Fact]
     public void VerifyReleaseChecksumsDefinesTheArtifactSbomNameMapping()
     {
-        string scriptsDir = Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts");
         string[] candidates =
         [
-            Path.Combine(scriptsDir, "verify-release-checksums.sh"),
-            Path.Combine(scriptsDir, "syft-bootstrap.sh"),
-            Path.Combine(scriptsDir, "generate-artifact-sboms.sh")
+            "scripts/verify-release-checksums.sh",
+            "scripts/syft-bootstrap.sh",
+            "scripts/generate-artifact-sboms.sh"
         ];
 
         // A bare mention in a comment is not the mapping: verify-release-checksums.sh:49-50
@@ -1337,8 +1331,8 @@ public sealed class ReleaseTests
         bool defined = false;
         foreach (string candidate in candidates)
         {
-            if (File.Exists(candidate)
-                && File.ReadAllText(candidate).Contains(definition, StringComparison.Ordinal))
+            if (Corpus.Exists(candidate)
+                && Corpus.ReadText(candidate).Contains(definition, StringComparison.Ordinal))
             {
                 defined = true;
                 break;
@@ -1440,7 +1434,7 @@ public sealed class ReleaseTests
             UseShellExecute = false
         };
         startInfo.ArgumentList.Add(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
         startInfo.ArgumentList.Add("--list");
         startInfo.ArgumentList.Add(sandbox.Root);
 
@@ -1459,7 +1453,7 @@ public sealed class ReleaseTests
             UseShellExecute = false
         };
         startInfo2.ArgumentList.Add(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
 
         ProcessResult result2 = ProcessRunner.Run(startInfo2, string.Empty, TimeSpan.FromSeconds(60));
 
@@ -1557,7 +1551,7 @@ public sealed class ReleaseTests
             UseShellExecute = false
         };
         startInfo.ArgumentList.Add(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
@@ -1608,7 +1602,7 @@ public sealed class ReleaseTests
             UseShellExecute = false
         };
         startInfo.ArgumentList.Add(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
@@ -1658,7 +1652,7 @@ public sealed class ReleaseTests
             UseShellExecute = false
         };
         startInfo.ArgumentList.Add(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
@@ -1700,7 +1694,7 @@ public sealed class ReleaseTests
             UseShellExecute = false
         };
         startInfo.ArgumentList.Add(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
@@ -1745,7 +1739,7 @@ public sealed class ReleaseTests
             UseShellExecute = false
         };
         startInfo.ArgumentList.Add(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
@@ -1796,7 +1790,7 @@ public sealed class ReleaseTests
             UseShellExecute = false
         };
         startInfo.ArgumentList.Add(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
@@ -1830,7 +1824,7 @@ public sealed class ReleaseTests
             UseShellExecute = false
         };
         startInfo.ArgumentList.Add(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
@@ -1893,7 +1887,7 @@ public sealed class ReleaseTests
             WorkingDirectory = sandbox.Root  // Set working directory to sandbox root.
         };
         startInfo.ArgumentList.Add(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
         startInfo.ArgumentList.Add("release-assets");  // Relative path, as release.yml does.
         startInfo.ArgumentList.Add(version);
 
@@ -1934,7 +1928,7 @@ public sealed class ReleaseTests
             UseShellExecute = false
         };
         startInfo.ArgumentList.Add(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
@@ -1999,7 +1993,7 @@ public sealed class ReleaseTests
             };
             startInfo.EnvironmentVariables["PATH"] = shimDir + Path.PathSeparator + "/usr/bin:/bin";
             startInfo.ArgumentList.Add(
-                Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+                Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
             startInfo.ArgumentList.Add(sandbox.Root);
             startInfo.ArgumentList.Add(version);
 
@@ -2089,7 +2083,7 @@ public sealed class ReleaseTests
             UseShellExecute = false
         };
         normalInfo.ArgumentList.Add(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
         normalInfo.ArgumentList.Add(sandbox.Root);
         normalInfo.ArgumentList.Add(version);
         ProcessResult normalResult = ProcessRunner.Run(normalInfo, string.Empty, TimeSpan.FromSeconds(60));
@@ -2137,7 +2131,7 @@ public sealed class ReleaseTests
             };
             fallbackInfo.EnvironmentVariables["PATH"] = hermBinDir;
             fallbackInfo.ArgumentList.Add(
-                Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+                Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
             fallbackInfo.ArgumentList.Add(sandbox.Root);
             fallbackInfo.ArgumentList.Add(version);
             ProcessResult fallbackResult = ProcessRunner.Run(fallbackInfo, string.Empty, TimeSpan.FromSeconds(60));
@@ -2598,7 +2592,7 @@ public sealed class ReleaseTests
             """;
         ProcessStartInfo startInfo = new("node")
         {
-            WorkingDirectory = KyberWeaveTestPaths.ToolRoot,
+            WorkingDirectory = Corpus.Root,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -2982,7 +2976,7 @@ public sealed class ReleaseTests
     [Fact]
     public void ReleaseWorkflowPublishesFiveArbiterArchives()
     {
-        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+        string workflow = Corpus.ReadText(ReleaseWorkflowPath);
 
         Assert.Contains("kyber-weave-arbiter-${RID}.tar.gz", workflow, StringComparison.Ordinal);
         Assert.Contains("kyber-weave-arbiter-${RID}.zip", workflow, StringComparison.Ordinal);
@@ -3004,8 +2998,7 @@ public sealed class ReleaseTests
     [Fact]
     public void CiPublishSmokePublishesArbiterArchive()
     {
-        string workflow = File.ReadAllText(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, ".github", "workflows", "ci.yml"));
+        string workflow = Corpus.ReadText(".github/workflows/ci.yml");
 
         Assert.Contains("KyberWeave.Arbiter", workflow, StringComparison.Ordinal);
         Assert.Contains("kyber-weave-arbiter", workflow, StringComparison.Ordinal);
@@ -3021,8 +3014,7 @@ public sealed class ReleaseTests
     [Fact]
     public void CiPublishSmokeRunsTheArbiterVersionNotAnExcusedHelp()
     {
-        string workflow = File.ReadAllText(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, ".github", "workflows", "ci.yml"));
+        string workflow = Corpus.ReadText(".github/workflows/ci.yml");
 
         Assert.Contains(
             "kyber-weave-arbiter --version",
@@ -3055,7 +3047,7 @@ public sealed class ReleaseTests
             UseShellExecute = false
         };
         startInfo.ArgumentList.Add(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            Path.Combine(Corpus.Root, "scripts", "verify-release-checksums.sh"));
         startInfo.ArgumentList.Add("--list");
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
@@ -3078,7 +3070,7 @@ public sealed class ReleaseTests
     [Fact]
     public void InstallShSupportsNoArbiterOptOut()
     {
-        string installer = File.ReadAllText(InstallShPath);
+        string installer = Corpus.ReadText("scripts/install.sh");
 
         Assert.Contains("--no-arbiter", installer, StringComparison.Ordinal);
         Assert.Contains("KYBER_WEAVE_NO_ARBITER", installer, StringComparison.Ordinal);
@@ -3093,7 +3085,7 @@ public sealed class ReleaseTests
     [Fact]
     public void InstallShGatesArbiterOnPublishedFloor()
     {
-        string installer = File.ReadAllText(InstallShPath);
+        string installer = Corpus.ReadText("scripts/install.sh");
 
         Assert.Contains("ARBITER_MIN_VERSION", installer, StringComparison.Ordinal);
         Assert.Contains("kyber_weave_release_has_arbiter", installer, StringComparison.Ordinal);
@@ -3150,8 +3142,7 @@ public sealed class ReleaseTests
     [Fact]
     public void UpdateLoopAssertsArbiterVersion()
     {
-        string loop = File.ReadAllText(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "update-loop.sh"));
+        string loop = Corpus.ReadText("scripts/update-loop.sh");
 
         Assert.Contains("kyber-weave-arbiter", loop, StringComparison.Ordinal);
         Assert.Contains("--version", loop, StringComparison.Ordinal);
@@ -3167,8 +3158,7 @@ public sealed class ReleaseTests
     [Fact]
     public void UpdateLoopRunsTheArbiterRefreshAfterARealSwap()
     {
-        string loop = File.ReadAllText(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "update-loop.sh"));
+        string loop = Corpus.ReadText("scripts/update-loop.sh");
 
         // Anchored at the layout release's definition rather than at the `begin_case` header so the body
         // window captures the `Copyright=...release-local.sh` padded-publish that makes the size guard
@@ -3367,7 +3357,7 @@ public sealed class ReleaseTests
                 }
 
                 server = ListeningServer.Start(
-                    Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "local-release-server.py"),
+                    Path.Combine(Corpus.Root, "scripts", "local-release-server.py"),
                     "--root",
                     sandbox.Root,
                     "--port",

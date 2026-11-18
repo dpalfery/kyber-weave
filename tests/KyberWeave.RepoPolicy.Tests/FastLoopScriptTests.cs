@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Diagnostics;
 using KyberWeave.Core.Processes;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 using Xunit.Sdk;
 
@@ -17,6 +18,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class FastLoopScriptTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static void SkipIfBashUnavailable()
     {
         if (OperatingSystem.IsWindows() || !File.Exists("/bin/bash"))
@@ -311,7 +314,7 @@ public sealed class FastLoopScriptTests
     [Fact]
     public void PolicySourceScansNameTestClassesThatExist()
     {
-        string script = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "fast-loop.sh"));
+        string script = Corpus.ReadText("scripts/fast-loop.sh");
         // Read to the closing parenthesis, not the end of the line, so a wrapped array still parses.
         int start = script.IndexOf("POLICY_SOURCE_SCANS=(", StringComparison.Ordinal);
         Assert.True(start >= 0, "scripts/fast-loop.sh no longer declares POLICY_SOURCE_SCANS.");
@@ -462,10 +465,9 @@ public sealed class FastLoopScriptTests
             RunGit(Root, "config", "user.email", "test@example.com");
             RunGit(Root, "config", "commit.gpgsign", "false");
 
-            string fastLoopSource = Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "fast-loop.sh");
             string fastLoopDest = Path.Combine(Root, "scripts", "fast-loop.sh");
             Directory.CreateDirectory(Path.GetDirectoryName(fastLoopDest)!);
-            File.Copy(fastLoopSource, fastLoopDest, true);
+            File.WriteAllText(fastLoopDest, Corpus.ReadText("scripts/fast-loop.sh").ReplaceLineEndings("\n"));
             MakeExecutable(fastLoopDest);
 
             string classListDest = Path.Combine(Root, "scripts", "fast-loop-classes.txt");

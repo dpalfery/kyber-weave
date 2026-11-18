@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Processes;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 using Xunit.Sdk;
 
@@ -137,19 +138,17 @@ public sealed class SbomTests
                                           }
                                           """;
 
-    private static string ToolRoot => KyberWeaveTestPaths.ToolRoot;
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
+    private static string ToolRoot => Corpus.Root;
 
     private static string ValidatorPath => Path.Combine(ToolRoot, "scripts", "validate-sbom.py");
 
-    private static string SchemaDir => Path.Combine(ToolRoot, "scripts", "schemas");
+    private const string ProvenancePath = "scripts/schemas/PROVENANCE.md";
 
-    private static string ProvenancePath => Path.Combine(SchemaDir, "PROVENANCE.md");
+    private const string ReleaseWorkflowPath = ".github/workflows/release.yml";
 
-    private static string ReleaseWorkflowPath =>
-        Path.Combine(ToolRoot, ".github", "workflows", "release.yml");
-
-    private static string CiWorkflowPath =>
-        Path.Combine(ToolRoot, ".github", "workflows", "ci.yml");
+    private const string CiWorkflowPath = ".github/workflows/ci.yml";
 
     /// <summary>The validator shells out to python3, so these assertions are POSIX-only.</summary>
     private static void SkipOnWindows()
@@ -190,13 +189,11 @@ public sealed class SbomTests
         return path;
     }
 
-    private static string Sha256Hex(string path)
+    private static string Sha256Hex(byte[] bytes)
     {
-        using SHA256 sha = SHA256.Create();
-        using FileStream stream = File.OpenRead(path);
-        byte[] bytes = sha.ComputeHash(stream);
-        StringBuilder builder = new(bytes.Length * 2);
-        foreach (byte b in bytes)
+        byte[] hash = SHA256.HashData(bytes);
+        StringBuilder builder = new(hash.Length * 2);
+        foreach (byte b in hash)
         {
             builder.Append(b.ToString("x2", CultureInfo.InvariantCulture));
         }
@@ -207,7 +204,7 @@ public sealed class SbomTests
     [Fact]
     public void TheVendoredCycloneDxSchemasMatchTheHashesRecordedInProvenance()
     {
-        string provenance = File.ReadAllText(ProvenancePath);
+        string provenance = Corpus.ReadText(ProvenancePath);
 
         string[] schemaFiles =
         [
@@ -218,10 +215,10 @@ public sealed class SbomTests
 
         foreach (string schemaFile in schemaFiles)
         {
-            string path = Path.Combine(SchemaDir, schemaFile);
-            Assert.True(File.Exists(path), $"the vendored schema is missing: {schemaFile}");
+            string path = $"scripts/schemas/{schemaFile}";
+            Assert.True(Corpus.Exists(path), $"the vendored schema is missing: {schemaFile}");
 
-            string actual = Sha256Hex(path);
+            string actual = Sha256Hex(Corpus.ReadBytes(path));
 
             // The provenance file records one "| `file` | `hash` |" row per schema.
             bool recorded = false;
@@ -494,7 +491,7 @@ public sealed class SbomTests
     [Fact]
     public void TheReleaseWorkflowGeneratesTheSbomBeforeTheReleaseJob()
     {
-        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+        string workflow = Corpus.ReadText(ReleaseWorkflowPath);
 
         int sbomJob = workflow.IndexOf("  sbom:", StringComparison.Ordinal);
         Assert.True(sbomJob >= 0, "release.yml has no sbom job.");
@@ -519,7 +516,7 @@ public sealed class SbomTests
     [Fact]
     public void TheCiWorkflowValidatesTheSbomWithoutNeedingARelease()
     {
-        string workflow = File.ReadAllText(CiWorkflowPath);
+        string workflow = Corpus.ReadText(CiWorkflowPath);
 
         Assert.Contains("scripts/generate-sbom.sh", workflow, StringComparison.Ordinal);
         Assert.Contains("scripts/validate-sbom.py", workflow, StringComparison.Ordinal);
@@ -620,7 +617,7 @@ public sealed class SbomTests
 
         string script = Path.Combine(ToolRoot, "scripts", "generate-artifact-sboms.sh");
         Assert.True(
-            File.Exists(script),
+            Corpus.Exists("scripts/generate-artifact-sboms.sh"),
             "scripts/generate-artifact-sboms.sh is missing; issue #417 generates one SBOM per published archive.");
 
         string dir = Directory.CreateTempSubdirectory("kyber-weave-artifact-sboms-test-").FullName;
@@ -841,7 +838,7 @@ public sealed class SbomTests
     /// </summary>
     private static string ReadReleaseJob(string jobName)
     {
-        string workflow = File.ReadAllText(ReleaseWorkflowPath).ReplaceLineEndings("\n");
+        string workflow = Corpus.ReadText(ReleaseWorkflowPath).ReplaceLineEndings("\n");
         int start = workflow.IndexOf("\n  " + jobName + ":\n", StringComparison.Ordinal);
         Assert.True(start >= 0, "release.yml has no " + jobName + " job.");
         Match next = Regex.Match(workflow[(start + 1)..], @"\n  [A-Za-z0-9_-]+:\n");

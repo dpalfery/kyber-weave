@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 
@@ -29,6 +30,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class ReviewGateFullSuiteConfigTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string CouncilFlagText = "--council";
 
     private static readonly string[] FullSuiteGates = ["test", "integration-test", "ts-test", "cargo-test"];
@@ -80,11 +83,9 @@ public sealed class ReviewGateFullSuiteConfigTests
     [Fact]
     public void CiTemplateReviewGatesCallPassesCouncil()
     {
-        string[] lines = File.ReadAllLines(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "templates",
-            "github-actions",
-            "kyber-weave-review-gate.yml"));
+        string[] lines = Corpus.ReadText("templates/github-actions/kyber-weave-review-gate.yml")
+            .ReplaceLineEndings("\n")
+            .Split('\n');
 
         int start = Array.FindIndex(lines,
             line => line.Contains("kyber-weave review gates .", StringComparison.Ordinal));
@@ -190,8 +191,7 @@ public sealed class ReviewGateFullSuiteConfigTests
 
     private static YamlMappingNode LoadRoot()
     {
-        string path = Path.Combine(KyberWeaveTestPaths.ToolRoot, ".kyber-weave", "kyber-weave.yml");
-        using StreamReader reader = new(path);
+        using StringReader reader = new(Corpus.ReadText(".kyber-weave/kyber-weave.yml"));
         YamlStream stream = new();
         stream.Load(reader);
         return (YamlMappingNode)stream.Documents[0].RootNode;
