@@ -425,7 +425,7 @@ public sealed class DoctorEnsureTests : IDisposable
 
         string mcpExecutable = DoctorHarness.HealthyStub(_stubs.Path, Root);
 
-        DoctorCommand command = new(DoctorServices.Doctor, new DoctorTestEnvironment(false, _ => null), executor, mcpExecutable);
+        DoctorCommand command = new(DoctorServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, mcpExecutable);
 
         DoctorReport report = RepositoryDoctor.Run(
             Root,
@@ -487,7 +487,7 @@ public sealed class DoctorEnsureTests : IDisposable
 
         string mcpExecutable = DoctorHarness.HealthyStub(_stubs.Path, Root);
 
-        DoctorCommand command = new(DoctorServices.Doctor, new DoctorTestEnvironment(false, _ => null), executor, mcpExecutable);
+        DoctorCommand command = new(DoctorServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, mcpExecutable);
 
         DoctorReport report = RepositoryDoctor.Run(
             Root,
@@ -549,7 +549,7 @@ public sealed class DoctorEnsureTests : IDisposable
 
         string mcpExecutable = DoctorHarness.HealthyStub(_stubs.Path, Root);
 
-        DoctorCommand command = new(DoctorServices.Doctor, new DoctorTestEnvironment(false, _ => null), executor, mcpExecutable);
+        DoctorCommand command = new(DoctorServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, mcpExecutable);
 
         DoctorReport report = RepositoryDoctor.Run(
             Root,
@@ -760,7 +760,7 @@ public sealed class DoctorEnsureTests : IDisposable
 
     private int RunEnsure(ScriptedProcessExecutor executor)
     {
-        DoctorCommand command = new(DoctorServices.Doctor, new DoctorTestEnvironment(false, _ => null), executor, DoctorHarness.HealthyStub(_stubs.Path, Root));
+        DoctorCommand command = new(DoctorServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, DoctorHarness.HealthyStub(_stubs.Path, Root));
 
         return DoctorAppHarness.Run(command, "doctor", "--ensure", Root);
     }

@@ -1,4 +1,5 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Domain.Hooks;
 using Xunit;
@@ -35,7 +36,10 @@ public sealed class HooksConfigSourceTests : IDisposable
     }
 
     private HooksConfig Load() =>
-        new YamlHooksConfigSource(new PhysicalFileSystem(), new FixedEnvironment(_home)).Load(_repository);
+        new YamlHooksConfigSource(new PhysicalFileSystem(), FakeProcessEnvironment.UseRunningProcess(
+                variables: name => name is "HOME" or "USERPROFILE" ? _home : null,
+                currentDirectory: _home,
+                homeDirectory: _home)).Load(_repository);
 
     [Fact]
     public void ARepositoryRuleThatNamesACommandIsRefusedWithAWarningThatNamesTheUserFile()
@@ -128,16 +132,4 @@ public sealed class HooksConfigSourceTests : IDisposable
         Assert.False(rule.Blocking);
     }
 
-    private sealed class FixedEnvironment(string home) : IProcessEnvironment
-    {
-        public string CurrentDirectory => home;
-
-        public bool IsInputRedirected => true;
-
-        public string HomeDirectory => home;
-
-        public string TempDirectory => Path.GetTempPath();
-
-        public string? GetVariable(string name) => name is "HOME" or "USERPROFILE" ? home : null;
-    }
 }

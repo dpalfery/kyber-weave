@@ -1,5 +1,6 @@
 using KyberWeave.Cli.Composition;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console.Cli;
 using Xunit;
@@ -13,7 +14,7 @@ public sealed class ServiceCollectionTypeRegistrarTests
     public void ARegisteredServiceComesFromTheContainer()
     {
         ServiceCollection services = [];
-        FixedEnvironment environment = new();
+        FakeProcessEnvironment environment = new(currentDirectory: "/work", homeDirectory: "/home", tempDirectory: "/tmp");
         ITypeRegistrar registrar = new ServiceCollectionTypeRegistrar(services);
         registrar.RegisterInstance(typeof(IProcessEnvironment), environment);
 
@@ -26,7 +27,7 @@ public sealed class ServiceCollectionTypeRegistrarTests
     public void AConcreteTypeTheContainerDoesNotHoldIsConstructedWithWhatTheContainerCanSupply()
     {
         ServiceCollection services = [];
-        FixedEnvironment environment = new();
+        FakeProcessEnvironment environment = new(currentDirectory: "/work", homeDirectory: "/home", tempDirectory: "/tmp");
         services.AddSingleton<IProcessEnvironment>(environment);
         ITypeRegistrar registrar = new ServiceCollectionTypeRegistrar(services);
 
@@ -56,7 +57,7 @@ public sealed class ServiceCollectionTypeRegistrarTests
         registrar.RegisterLazy(typeof(IProcessEnvironment), () =>
         {
             built++;
-            return new FixedEnvironment();
+            return new FakeProcessEnvironment(currentDirectory: "/work", homeDirectory: "/home", tempDirectory: "/tmp");
         });
         ITypeResolver resolver = registrar.Build();
 
@@ -64,19 +65,6 @@ public sealed class ServiceCollectionTypeRegistrarTests
         _ = resolver.Resolve(typeof(IProcessEnvironment));
         _ = resolver.Resolve(typeof(IProcessEnvironment));
         Assert.Equal(1, built);
-    }
-
-    private sealed class FixedEnvironment : IProcessEnvironment
-    {
-        public string CurrentDirectory => "/work";
-
-        public string HomeDirectory => "/home";
-
-        public string TempDirectory => "/tmp";
-
-        public bool IsInputRedirected => true;
-
-        public string? GetVariable(string name) => null;
     }
 }
 

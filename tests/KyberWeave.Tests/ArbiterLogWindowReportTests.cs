@@ -1,5 +1,6 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Tests.Arbiter;
+using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Arbiter;

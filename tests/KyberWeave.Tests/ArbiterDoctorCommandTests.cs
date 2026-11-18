@@ -1,6 +1,7 @@
 using KyberWeave.Data.Configuration;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Tests.Arbiter;
+using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Hooks;

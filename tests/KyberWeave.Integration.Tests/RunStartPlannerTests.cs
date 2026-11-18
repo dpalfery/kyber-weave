@@ -3,6 +3,7 @@ using System.Text;
 using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.RunStart;
 using Microsoft.Extensions.DependencyInjection;
@@ -696,7 +697,17 @@ internal sealed class RunStartProbe : IDisposable
     private ProbeResult RunStartOn(string path, params string[] arguments)
     {
         List<string> argv = ["run", "start", .. arguments];
-        ProbeEnvironment environment = new(Root, _home, _tmp, path);
+        FakeProcessEnvironment environment = FakeProcessEnvironment.UseRunningProcess(
+            variables: name => name switch
+            {
+                "PATH" => path,
+                "HOME" or "USERPROFILE" => _home,
+                "TMPDIR" or "TEMP" or "TMP" => _tmp,
+                _ => Environment.GetEnvironmentVariable(name)
+            },
+            currentDirectory: Root,
+            homeDirectory: _home,
+            tempDirectory: _tmp);
         ProbeGit git = new(this, path);
         ProbeExecutor executor = new(this, path);
 
@@ -886,26 +897,6 @@ internal sealed class RunStartProbe : IDisposable
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
             UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
             UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-    }
-
-    /// <summary>Gives the command the probe's directories and PATH instead of this test host's.</summary>
-    private sealed class ProbeEnvironment(string current, string home, string temp, string path) : IProcessEnvironment
-    {
-        public string CurrentDirectory => current;
-
-        public string HomeDirectory => home;
-
-        public string TempDirectory => temp;
-
-        public bool IsInputRedirected => true;
-
-        public string? GetVariable(string name) => name switch
-        {
-            "PATH" => path,
-            "HOME" or "USERPROFILE" => home,
-            "TMPDIR" or "TEMP" or "TMP" => temp,
-            _ => Environment.GetEnvironmentVariable(name)
-        };
     }
 
     /// <summary>Runs git against the probe's PATH, home and temp directory, the way the child process would have.</summary>
