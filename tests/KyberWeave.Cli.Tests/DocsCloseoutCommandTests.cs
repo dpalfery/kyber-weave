@@ -1,84 +1,40 @@
-using System.Diagnostics;
 using System.Globalization;
-using System.Runtime.Versioning;
-using System.Text;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
-using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Processes;
+using KyberWeave.Tests.Fakes;
+using Microsoft.Extensions.DependencyInjection;
+using Spectre.Console.Testing;
 using Xunit;
 
-using KyberWeave.Tests.Fakes;
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 /// <c>docs closeout</c>: the mechanical half of a plan closeout. A plan with complete closeout evidence is archived
 /// with its task file removed and both indexes updated; one without it is refused and nothing moves. Each test
-/// builds the repository on disk, because the evidence check reads the same files the archive gate does.
+/// builds the repository in memory, because the evidence check reads the same files the archive gate does. What
+/// needs a real disk (links, file modes, the exclusive create, git staging) is in
+/// <c>DocsCloseoutRealFileSystemTests</c> in the integration project.
 /// </summary>
 public sealed class DocsCloseoutCommandTests
 {
-    private const string Plan = "6-Docs/plans/2026-10-20-widget.md";
-    private const string TaskFile = "6-Docs/plans/2026-10-20-widget.tasks.yml";
-    private const string Archived = "6-Docs/archive/plans/2026-10-20-widget.md";
-    private const string PlanIndex = "6-Docs/plans/README.md";
-    private const string Inventory = "6-Docs/archive/plans/README.md";
-    private const string Date = "2026-11-13";
+    private const string Plan = DocsCloseoutRepository.Plan;
+    private const string TaskFile = DocsCloseoutRepository.TaskFile;
+    private const string Archived = DocsCloseoutRepository.Archived;
+    private const string PlanIndex = DocsCloseoutRepository.PlanIndex;
+    private const string Inventory = DocsCloseoutRepository.Inventory;
+    private const string Date = DocsCloseoutRepository.Date;
+    private const string EarlierArchive = "# an earlier archive entry that is not ours\n";
 
-    private static DocFixture Repository(string? planText = null, string? planIndex = null)
-    {
-        DocFixture fixture = DocFixture.Create().WithCatalog()
-            .Write("6-Docs/reference/widget.md", CloseoutCorpus.TargetDocument())
-            .Write(Plan, planText ?? CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready"))
-            .Write(TaskFile, "{}\n")
-            .Write(PlanIndex, planIndex ?? PlanIndexWithRow)
-            .Write(Inventory, InventoryWithOneRow);
-        Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
-        return fixture;
-    }
+    private static string PlanIndexWithRow => DocsCloseoutRepository.PlanIndexWithRow;
 
-    private static string PlanIndexWithRow => """
-        ---
-        id: plans/index
-        title: Plan Inventory
-        doc-type: index
-        status: current
-        owner: Maintainers
-        last-reviewed: 2026-11-01
-        ---
-
-        # Plan Inventory
-
-        ## Active Plans
-
-        | Plan | Status |
-        |---|---|
-        | [2026-10-20-widget.md](2026-10-20-widget.md) | Ready |
-
-        ## Archived Plans
-
-        See the archive.
-        """;
-
-    private static string InventoryWithOneRow => """
-        ---
-        id: archive/plans/index
-        title: Archived Plan Inventory
-        doc-type: index
-        status: current
-        owner: Maintainers
-        last-reviewed: 2026-11-01
-        ---
-
-        # Archived Plan Inventory
-
-        | Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
-        |---|---|---|---|---|---|
-        | [older.md](older.md) | Archived — complete 2026-10-01 | 2026-10-01 | 2026-10-01 | none | Older plan |
-        """;
+    private static DocFixture Repository(string? planText = null, string? planIndex = null) =>
+        DocsCloseoutRepository.Create(inMemory: true, planText, planIndex);
 
     private static (int Exit, string Output) Run(DocFixture fixture, bool archive, string path = Plan, string? date = Date)
     {
@@ -90,9 +46,9 @@ public sealed class DocsCloseoutCommandTests
             Date = date
         };
 
-        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
-            () => DocsTestCommands.Closeout().Execute(null!, settings, CancellationToken.None));
-        return (run.Result, run.Output);
+        TestConsole console = new() { EmitAnsiSequences = false };
+        int exit = DocsTestCommands.Closeout(Services(fixture), console).Execute(null!, settings, CancellationToken.None);
+        return (exit, console.Output);
     }
 
     /// <summary>Runs the check with the plan spelled as <paramref name="typed"/> from <paramref name="workingDirectory"/>.</summary>
@@ -106,45 +62,25 @@ public sealed class DocsCloseoutCommandTests
             WorkingDirectory = Path.Combine(fixture.Root, workingDirectory.Replace('/', Path.DirectorySeparatorChar))
         };
 
-        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
-            () => DocsTestCommands.Closeout().Execute(null!, settings, CancellationToken.None));
-        return (run.Result, run.Output);
+        TestConsole console = new() { EmitAnsiSequences = false };
+        int exit = DocsTestCommands.Closeout(Services(fixture), console).Execute(null!, settings, CancellationToken.None);
+        return (exit, console.Output);
     }
 
-    private static string Read(DocFixture fixture, string relative) =>
-        File.ReadAllText(Path.Combine(fixture.Root, relative.Replace('/', Path.DirectorySeparatorChar)));
-
-    private static bool Exists(DocFixture fixture, string relative) =>
-        File.Exists(Path.Combine(fixture.Root, relative.Replace('/', Path.DirectorySeparatorChar)));
-
-    [Theory]
-    [InlineData(PlanIndex)]
-    [InlineData(Inventory)]
-    public void ALinkAtAnIndexPathIsRefusedAndNothingMoves(string linkedPath)
-    {
-        using DocFixture fixture = Repository();
-        string linked = Path.Combine(fixture.Root, linkedPath.Replace('/', Path.DirectorySeparatorChar));
-        string target = Path.Combine(fixture.Root, "owner-copy.md");
-        string before = File.ReadAllText(linked);
-        File.Move(linked, target);
-        try
+    /// <summary>The host's services over the in-memory checkout: git answers as it does in a folder that is no repository, and the exclusive create writes into memory.</summary>
+    private static IServiceProvider Services(DocFixture fixture) =>
+        DocsMemoryServicesD.Services(fixture, services =>
         {
-            File.CreateSymbolicLink(linked, target);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
-        {
-            Assert.Skip("Symbolic-link creation is not available here; the link refusal was not run.");
-        }
+            services.AddSingleton<IBoundedProcessExecutor>(NotAGitRepository());
+            services.AddSingleton<IExclusiveFileWriter>(new InMemoryExclusiveFileWriter(fixture.Memory!));
+        });
 
-        (int exit, string output) = Run(fixture, archive: true);
+    private static ScriptedProcessExecutor NotAGitRepository() =>
+        new(_ => new ProcessResult(128, string.Empty, "fatal: not a git repository"));
 
-        Assert.Equal(1, exit);
-        Assert.Contains("KW-DOC-CLOSEOUT-003", output, StringComparison.Ordinal);
-        Assert.Contains("is a symbolic link", output, StringComparison.Ordinal);
-        Assert.Equal(before, File.ReadAllText(target));
-        Assert.True(Exists(fixture, Plan));
-        Assert.False(Exists(fixture, Archived));
-    }
+    private static string Read(DocFixture fixture, string relative) => fixture.ReadText(relative);
+
+    private static bool Exists(DocFixture fixture, string relative) => fixture.Exists(relative);
 
     [Fact]
     public void ArchivingMovesThePlanSetsItsStatusRemovesTheTaskFileAndUpdatesBothIndexes()
@@ -369,7 +305,7 @@ public sealed class DocsCloseoutCommandTests
         string sections = CloseoutCorpus.DecisionsSection("D1", "D2", "ADMIN-DASH") + CloseoutCorpus.DesignHarvestSection("H1");
         using DocFixture fixture = Repository(
             CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", componentsLine: string.Empty, sections: sections));
-        File.Delete(Path.Combine(fixture.Root, PlanIndex.Replace('/', Path.DirectorySeparatorChar)));
+        fixture.Memory!.DeleteFile(fixture.FullPath(PlanIndex));
 
         (int exit, string output) = Run(fixture, archive: true);
 
@@ -427,7 +363,7 @@ public sealed class DocsCloseoutCommandTests
     public void AMissingArchiveInventoryIsCreatedWithTheTableHeaderAndTheRow()
     {
         using DocFixture fixture = Repository();
-        File.Delete(Path.Combine(fixture.Root, Inventory.Replace('/', Path.DirectorySeparatorChar)));
+        fixture.Memory!.DeleteFile(fixture.FullPath(Inventory));
 
         (int exit, string output) = Run(fixture, archive: true);
 
@@ -457,22 +393,22 @@ public sealed class DocsCloseoutCommandTests
     public void DryRunWithArchiveReportsEveryChangeIncludingTheInventoryItWouldCreateAndChangesNothing()
     {
         using DocFixture fixture = Repository();
-        File.Delete(Path.Combine(fixture.Root, Inventory.Replace('/', Path.DirectorySeparatorChar)));
+        fixture.Memory!.DeleteFile(fixture.FullPath(Inventory));
         DocsCloseoutSettings settings = new()
         {
-            Path = Path.Combine(fixture.Root, Plan.Replace('/', Path.DirectorySeparatorChar)),
+            Path = fixture.FullPath(Plan),
             Format = "json",
             Archive = true,
             DryRun = true,
             Date = Date
         };
 
-        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
-            () => DocsTestCommands.Closeout().Execute(null!, settings, CancellationToken.None));
+        TestConsole console = new() { EmitAnsiSequences = false };
+        int exit = DocsTestCommands.Closeout(Services(fixture), console).Execute(null!, settings, CancellationToken.None);
 
-        Assert.True(run.Result == 0, run.Output);
-        Assert.Contains("Would create", run.Output, StringComparison.Ordinal);
-        Assert.Contains("Would remove", run.Output, StringComparison.Ordinal);
+        Assert.True(exit == 0, console.Output);
+        Assert.Contains("Would create", console.Output, StringComparison.Ordinal);
+        Assert.Contains("Would remove", console.Output, StringComparison.Ordinal);
         Assert.True(Exists(fixture, Plan));
         Assert.True(Exists(fixture, TaskFile));
         Assert.False(Exists(fixture, Archived));
@@ -512,25 +448,6 @@ public sealed class DocsCloseoutCommandTests
         Assert.True(Exists(fixture, Plan));
     }
 
-    private const string EarlierArchive = "# an earlier archive entry that is not ours\n";
-
-    private static string Absolute(DocFixture fixture, string relative) =>
-        Path.Combine(fixture.Root, relative.Replace('/', Path.DirectorySeparatorChar));
-
-    private static PlanCloseout Closer(DocFixture fixture, Action<string>? afterActivePlanCheck = null, Action<string>? beforeWriteTarget = null) =>
-        new(fixture.Root, KyberWeaveConfigDefaults.Product,
-            () => RealDocumentLoader.Create(fixture.Root, KyberWeaveConfigDefaults.Product.Ontology),
-            DocsPorts.Files, DocsPorts.Process, DocsPorts.Exclusive, DocsPorts.Paths, DocsPorts.Environment)
-        {
-            AfterActivePlanCheck = afterActivePlanCheck,
-            BeforeWriteTarget = beforeWriteTarget
-        };
-
-    private static DateOnly ArchiveDate => DateOnly.Parse(Date, CultureInfo.InvariantCulture);
-
-    private static Diagnostic SingleError(PlanCloseoutOutcome outcome) =>
-        Assert.Single(outcome.Report.Items, item => item.Severity == Severity.Error);
-
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -551,176 +468,12 @@ public sealed class DocsCloseoutCommandTests
     }
 
     [Fact]
-    public void AnArchiveEntryThatAppearsJustBeforeTheDryRunWriteIsRefusedNotOverwrittenAndNotDeleted()
-    {
-        using DocFixture fixture = Repository();
-
-        PlanCloseoutOutcome outcome = Closer(fixture, beforeWriteTarget: target => File.WriteAllText(target, EarlierArchive))
-            .Run(Plan, ArchiveDate, archive: false);
-
-        Assert.False(outcome.Archived);
-        Assert.Equal(PlanCloseout.ArchiveTargetExists, SingleError(outcome).Code);
-        Assert.Equal(EarlierArchive, Read(fixture, Archived));
-        Assert.True(Exists(fixture, Plan));
-        Assert.True(Exists(fixture, TaskFile));
-    }
-
-    [Fact]
-    public void AnArchiveEntryThatAppearsJustBeforeTheRealMoveIsRefusedAndNothingMoves()
-    {
-        using DocFixture fixture = Repository();
-        int creates = 0;
-
-        // The first create is the evidence check's copy, which the run removes again; the second is the real move.
-        PlanCloseoutOutcome outcome = Closer(fixture, beforeWriteTarget: target =>
-            {
-                creates++;
-                if (creates == 2)
-                    File.WriteAllText(target, EarlierArchive);
-            })
-            .Run(Plan, ArchiveDate, archive: true);
-
-        Assert.Equal(2, creates);
-        Assert.False(outcome.Archived);
-        Diagnostic refusal = SingleError(outcome);
-        Assert.Equal(PlanCloseout.ArchiveTargetExists, refusal.Code);
-        Assert.Contains("Nothing was moved", refusal.Message, StringComparison.Ordinal);
-        Assert.Equal(EarlierArchive, Read(fixture, Archived));
-        Assert.True(Exists(fixture, Plan));
-        Assert.True(Exists(fixture, TaskFile));
-        Assert.Contains("2026-10-20-widget.md", Read(fixture, PlanIndex), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void TheExclusiveCreateRefusesAnExistingFileAndLeavesItsBytesAlone()
-    {
-        using DocFixture fixture = Repository();
-        string path = Absolute(fixture, Archived);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, EarlierArchive);
-
-        bool written = DocsPorts.Exclusive.TryWriteNew(path, "replacement");
-
-        Assert.False(written);
-        Assert.Equal(EarlierArchive, File.ReadAllText(path));
-    }
-
-    [Fact]
-    public void TheExclusiveCreateWritesANewFileWithoutAByteOrderMark()
-    {
-        using DocFixture fixture = Repository();
-        string path = Absolute(fixture, "6-Docs/archive/plans/new.md");
-
-        bool written = DocsPorts.Exclusive.TryWriteNew(path, "# new\n");
-
-        Assert.True(written);
-        Assert.Equal(Encoding.UTF8.GetBytes("# new\n"), File.ReadAllBytes(path));
-    }
-
-    /// <summary>
-    /// A failure while writing is not "the archive already exists": it propagates, and the partial file this call
-    /// created is removed so the next closeout is not refused on it. A lone surrogate cannot be encoded, which fails
-    /// the write after the file was created, as a full disk would.
-    /// </summary>
-    [Fact]
-    public void AWriteThatFailsAfterTheCreatePropagatesAndRemovesThePartialFile()
-    {
-        using DocFixture fixture = Repository();
-        string path = Absolute(fixture, "6-Docs/archive/plans/partial.md");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-
-        Assert.ThrowsAny<EncoderFallbackException>(() => DocsPorts.Exclusive.TryWriteNew(path, "text then a lone surrogate \uD800 here"));
-
-        Assert.False(File.Exists(path));
-    }
-
-    /// <summary>
-    /// When removing the partial file fails too, the write error is still what propagates: a cleanup failure must not
-    /// replace the error the caller needs to see.
-    /// </summary>
-    [Fact]
-    public void AFailingCleanupDoesNotMaskTheWriteError()
-    {
-        using DocFixture fixture = Repository();
-        string path = Absolute(fixture, "6-Docs/archive/plans/stuck.md");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        List<string> deleteAttempts = [];
-
-        Assert.ThrowsAny<EncoderFallbackException>(() => DocsPorts.Exclusive.TryWriteNew(
-            path,
-            "text then a lone surrogate \uD800 here",
-            attempted =>
-            {
-                deleteAttempts.Add(attempted);
-                throw new IOException("the file is in use");
-            }));
-
-        Assert.Equal([path], deleteAttempts);
-    }
-
-    /// <summary>
-    /// A folder where the archive file belongs fails the exclusive create without a file being there to find: Windows
-    /// answers with an access error, Unix with "exists". Either is a taken path, refused with nothing overwritten and no
-    /// second look at the path to decide it.
-    /// </summary>
-    [Fact]
-    public void ThePathHoldingAFolderIsRefusedAsTakenAndTheFolderIsLeftAlone()
-    {
-        using DocFixture fixture = Repository();
-        string path = Absolute(fixture, "6-Docs/archive/plans/folder.md");
-        Directory.CreateDirectory(path);
-        File.WriteAllText(Path.Combine(path, "inside.txt"), "kept");
-
-        bool written = DocsPorts.Exclusive.TryWriteNew(path, "text");
-
-        Assert.False(written);
-        Assert.Equal("kept", File.ReadAllText(Path.Combine(path, "inside.txt")));
-    }
-
-    [Fact]
-    [UnsupportedOSPlatform("windows")]
-    public void AFolderThatCannotBeWrittenToIsRefusedNotThrownAndNothingIsCreated()
-    {
-        Assert.SkipWhen(
-            OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
-            "Unix directory modes are not enforced on Windows or for a privileged user, so a denied create cannot be simulated.");
-        using DocFixture fixture = Repository();
-        string directory = Absolute(fixture, "6-Docs/archive/plans/locked");
-        Directory.CreateDirectory(directory);
-        File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
-        try
-        {
-            bool written = DocsPorts.Exclusive.TryWriteNew(Path.Combine(directory, "new.md"), "text");
-
-            Assert.False(written);
-            Assert.False(File.Exists(Path.Combine(directory, "new.md")));
-        }
-        finally
-        {
-            File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
-    }
-
-    [Fact]
-    public void APlanThatVanishesAfterTheActiveCheckIsRefusedAsMissingAndNothingIsCreated()
-    {
-        using DocFixture fixture = Repository();
-
-        PlanCloseoutOutcome outcome = Closer(fixture, afterActivePlanCheck: File.Delete).Run(Plan, ArchiveDate, archive: true);
-
-        Assert.False(outcome.Archived);
-        Diagnostic refusal = Assert.Single(outcome.Report.Items, item => item.Code == PlanCloseout.NotAnActivePlan);
-        Assert.Contains("does not exist", refusal.Message, StringComparison.Ordinal);
-        Assert.False(Exists(fixture, Archived));
-    }
-
-    [Fact]
     public void AnUnreadablePlanIndexIsNamedInTheReportNotThrown()
     {
         using DocFixture fixture = Repository();
-        string index = Absolute(fixture, PlanIndex);
-        File.Delete(index);
-        Directory.CreateDirectory(index);
+        string index = fixture.FullPath(PlanIndex);
+        fixture.Memory!.DeleteFile(index);
+        fixture.Memory.CreateDirectory(index);
 
         (int exit, string output) = Run(fixture, archive: true);
 
@@ -735,9 +488,9 @@ public sealed class DocsCloseoutCommandTests
     public void AnUnreadableArchiveInventoryIsNamedInTheReportAndTheCheckCopyIsRemoved()
     {
         using DocFixture fixture = Repository();
-        string inventory = Absolute(fixture, Inventory);
-        File.Delete(inventory);
-        Directory.CreateDirectory(inventory);
+        string inventory = fixture.FullPath(Inventory);
+        fixture.Memory!.DeleteFile(inventory);
+        fixture.Memory.CreateDirectory(inventory);
 
         (int exit, string output) = Run(fixture, archive: true);
 
@@ -746,32 +499,6 @@ public sealed class DocsCloseoutCommandTests
         Assert.Contains("could not be read", output, StringComparison.Ordinal);
         Assert.True(Exists(fixture, Plan));
         Assert.False(Exists(fixture, Archived));
-    }
-
-    [Fact]
-    [UnsupportedOSPlatform("windows")]
-    public void AnUnreadablePlanIsNamedInTheReportNotThrown()
-    {
-        Assert.SkipWhen(
-            OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
-            "Unix file modes are not enforced on Windows or for a privileged user, so an unreadable plan cannot be simulated.");
-
-        using DocFixture fixture = Repository();
-        string plan = Absolute(fixture, Plan);
-        File.SetUnixFileMode(plan, UnixFileMode.None);
-        try
-        {
-            (int exit, string output) = Run(fixture, archive: true);
-
-            Assert.Equal(1, exit);
-            Assert.Contains(PlanCloseout.NotAnActivePlan, output, StringComparison.Ordinal);
-            Assert.Contains("could not be read", output, StringComparison.Ordinal);
-            Assert.False(Exists(fixture, Archived));
-        }
-        finally
-        {
-            File.SetUnixFileMode(plan, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        }
     }
 
     [Fact]
@@ -784,41 +511,5 @@ public sealed class DocsCloseoutCommandTests
         Assert.Equal(1, exit);
         Assert.Contains("KW-DOC-CLOSEOUT-005", output, StringComparison.Ordinal);
         Assert.True(Exists(fixture, Plan));
-    }
-
-    [Fact]
-    public void InAGitRepositoryTheMovedAndEditedFilesAreStaged()
-    {
-        using DocFixture fixture = Repository();
-        Directory.Delete(Path.Combine(fixture.Root, ".git"));
-        Git(fixture, "init", "--quiet");
-        Git(fixture, "add", "-A");
-        Git(fixture, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "start");
-
-        (int exit, string output) = Run(fixture, archive: true);
-
-        Assert.True(exit == 0, output);
-        string status = Git(fixture, "status", "--porcelain");
-        Assert.DoesNotContain("??", status, StringComparison.Ordinal);
-        Assert.Contains("6-Docs/archive/plans/2026-10-20-widget.md", status, StringComparison.Ordinal);
-    }
-
-    private static string Git(DocFixture fixture, params string[] arguments)
-    {
-        ProcessStartInfo startInfo = new("git")
-        {
-            WorkingDirectory = fixture.Root,
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-        foreach (string argument in arguments)
-            startInfo.ArgumentList.Add(argument);
-
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
-        Assert.True(result.ExitCode == 0, $"git {string.Join(' ', arguments)}: {result.StandardError}");
-        return result.StandardOutput;
     }
 }

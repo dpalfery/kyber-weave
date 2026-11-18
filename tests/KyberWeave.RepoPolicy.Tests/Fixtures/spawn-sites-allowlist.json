@@ -608,13 +608,13 @@
       "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git ls-files -z in the repository root."
     },
     {
-      "file": "tests/KyberWeave.Integration.Tests/CliHelpRenderingTests.cs",
+      "file": "tests/KyberWeave.Integration.Tests/CliRealHostHelpTests.cs",
       "text": "ProcessStartInfo startInfo = new(host)",
       "count": 1,
       "bound": "Started by RunCli: Timeout (60 s) kills the tree; the built CLI host rendering --help or its command model."
     },
     {
-      "file": "tests/KyberWeave.Integration.Tests/CliHelpRenderingTests.cs",
+      "file": "tests/KyberWeave.Integration.Tests/CliRealHostHelpTests.cs",
       "text": "return ProcessRunner.Run(startInfo, string.Empty, Timeout);",
       "count": 1,
       "bound": "Timeout (60 s) kills the tree; the built CLI host rendering --help or its command model."
@@ -1040,13 +1040,13 @@
       "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temporary repository."
     },
     {
-      "file": "tests/KyberWeave.Integration.Tests/DocsCloseoutCommandTests.cs",
+      "file": "tests/KyberWeave.Integration.Tests/DocsCloseoutRealFileSystemTests.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
       "count": 1,
       "bound": "Builds only; started by the ProcessRunner.Run below. git argv only, in a temporary repository."
     },
     {
-      "file": "tests/KyberWeave.Integration.Tests/DocsCloseoutCommandTests.cs",
+      "file": "tests/KyberWeave.Integration.Tests/DocsCloseoutRealFileSystemTests.cs",
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
       "count": 1,
       "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temporary repository."
