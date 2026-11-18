@@ -14,7 +14,8 @@ public sealed partial class ProseRuleCatalogTests
 {
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private static readonly Lazy<ProseRuleCatalog> Catalog = new(() => ProseRuleCatalog.Load(ProseRuleCatalog.DefaultPath()));
+    private static readonly Lazy<ProseRuleCatalog> Catalog = new(
+        () => ProseRuleCatalog.Parse(Corpus.ReadText(ProseRuleCatalog.RelativePath), ProseRuleCatalog.RelativePath));
 
     [Fact]
     public void EveryRuleHasAUniqueIdAStatementAHomeAndANegativeControl()
@@ -194,21 +195,14 @@ public sealed partial class ProseRuleCatalogTests
     }
 
     [Fact]
-    public void Load_RefusesAnUnknownKeyByName()
+    public void Parse_RefusesAnUnknownKeyByName()
     {
-        string path = Path.GetTempFileName();
-        try
-        {
-            File.WriteAllText(path, "version: 1\nconfidence-floor: 0.8\nrules:\n  - id: x\n    statement: s\n    stated-in: [a.md]\n    controls: [b.md]\n    phrase: pinned\n");
+        const string text = "version: 1\nconfidence-floor: 0.8\nrules:\n  - id: x\n    statement: s\n    stated-in: [a.md]\n    controls: [b.md]\n    phrase: pinned\n";
 
-            InvalidDataException error = Assert.Throws<InvalidDataException>(() => ProseRuleCatalog.Load(path));
+        InvalidDataException error = Assert.Throws<InvalidDataException>(
+            () => ProseRuleCatalog.Parse(text, ProseRuleCatalog.RelativePath));
 
-            Assert.Contains("unknown key 'phrase'", error.Message, StringComparison.Ordinal);
-        }
-        finally
-        {
-            File.Delete(path);
-        }
+        Assert.Contains("unknown key 'phrase'", error.Message, StringComparison.Ordinal);
     }
 
     private static string Read(string path) => Corpus.ReadText(path);
