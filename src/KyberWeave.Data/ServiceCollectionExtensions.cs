@@ -35,6 +35,7 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
 
         _ = services.AddWeaveRunData();
+        services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IProductRootLocator>(sp => new CheckoutProductRootLocator(sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<IRepositoryFileStore>(_ => new PhysicalRepositoryFileStore());
         services.TryAddSingleton<IBoundedProcessExecutor>(_ => new KernelBoundedProcessExecutor());

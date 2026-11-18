@@ -75,7 +75,7 @@ task's list.
 | `PhysicalMcpConfigFiles` | File system | `KyberWeave.Data` | `Docs/Mcp/PhysicalMcpConfigFiles.cs` | Reads, attributes and deletes MCP configuration files |
 | `FileGitHookFiles` | File system | `KyberWeave.Data` | `Doctor/FileGitHookFiles.cs` | Hook files and executable bits |
 | `FileStatusLineFiles` | File system | `KyberWeave.Data` | `Utilities/FileStatusLineFiles.cs` | Status-line artifact files |
-| `FileCodeGraphIndexWorkspace` | Lease (file-lock variant) | `KyberWeave.Data` | `Doctor/FileCodeGraphIndexWorkspace.cs` | Holds the index lock as an exclusively opened file. It also reads the clock and sleeps directly, which is a second seam; the conversion register below tracks that as `clock: 4.9` |
+| `FileCodeGraphIndexWorkspace` | Lease (file-lock variant) | `KyberWeave.Data` | `Doctor/FileCodeGraphIndexWorkspace.cs` | Holds the index lock as an exclusively opened file; its wait and poll run on the injected `TimeProvider` |
 | `ExclusiveFileWriter` | File system | `KyberWeave.Data` | `Docs/Closeout/ExclusiveFileWriter.cs` | Exclusive create |
 | `FileBoundedFileReader` | File system | `KyberWeave.Data` | `Review/FileBoundedFileReader.cs` | Reads up to a byte limit and refuses a file that grew |
 | `FileHookFileWindowReader` | File system | `KyberWeave.Data` | `Hooks/Arbiter/FileHookFileWindowReader.cs` | Reads a line window from a file |
@@ -89,7 +89,7 @@ task's list.
 | `SquadFileSystemPathSemantics` | Paths | `KyberWeave.Data` | `Squad/Deployment/SquadFileSystemPathSemantics.cs` | Instance singleton the deployment code shares; it implements `IPathResolver` and `IFileSystemPathSemantics` |
 | `KernelProcessRunner` | Process | `KyberWeave.Data` | `Hooks/KernelProcessRunner.cs` | The product's one `IProcessRunner` |
 | `ProcessRunner` | Process | `KyberWeave.Kernel` | `Processes/ProcessRunner.cs` | The one place that calls `Process.Start`; `KernelProcessRunner` and the role-view adapters build on it |
-| `StdioSession` | Process | `KyberWeave.Kernel` | `Processes/StdioSession.cs` | Interactive stdin/stdout session. Its timeout reads `DateTime.UtcNow` directly, which is a second seam; the conversion register below tracks that as `clock: 4.9` |
+| `StdioSession` | Process | `KyberWeave.Kernel` | `Processes/StdioSession.cs` | Interactive stdin/stdout session; its budget and read wait run on the injected `TimeProvider` |
 | `ProcessProgramRunner` | Process | `KyberWeave.Data` | `Review/ProcessProgramRunner.cs` | The `IProgramRunner` role view |
 | `KernelBoundedProcessExecutor` | Process | `KyberWeave.Data` | `Docs/FileSystem/KernelBoundedProcessExecutor.cs` | The `IBoundedProcessExecutor` role view |
 | `ProcessGitCommandRunner` | Process | `KyberWeave.Data` | `RunStart/ProcessGitCommandRunner.cs` | Git with standard output and error kept apart |
@@ -331,7 +331,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `SqliteAnalysisPersistence` (`Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs`) | file system, paths | 4.4 |
 | `PresentFile` (`Docs/Closeout/PresentFile.cs`) | file system | 4.4 |
 | `LaunchCommandResolver` (`Docs/Mcp/LaunchCommandResolver.cs`) | file system, paths, environment | 4.4 |
-| `FileCodeGraphIndexWorkspace` (`Doctor/FileCodeGraphIndexWorkspace.cs`) | file system, clock, identifiers | clock: 4.9 |
 | `DocsRootWalk` (`FileSystem/DocsRootWalk.cs`) | file system | 4.4 |
 | `FileBackgroundDispatchStore` (`Hooks/Arbiter/FileBackgroundDispatchStore.cs`) | file system, clock, identifiers | 4.4 |
 | `FileDispatchClaimStore` (`Hooks/Arbiter/FileDispatchClaimStore.cs`) | file system, clock, identifiers | 4.4 |
@@ -397,7 +396,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | Class (file) | Calls directly | Task |
 |---|---|---|
 | `FileReferenceExtractor` (`Parsing/FileReferenceExtractor.cs`) | file system, paths | 4.9 |
-| `StdioSession` (`Processes/StdioSession.cs`) | process, clock | clock: 4.9 |
 | `CodeGraphIndexStaleness` (`VersionControl/CodeGraphIndexStaleness.cs`) | file system | 4.9 |
 
 #### KyberWeave.Mcp (4 classes)
