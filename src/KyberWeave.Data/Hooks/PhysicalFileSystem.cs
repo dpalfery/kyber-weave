@@ -80,6 +80,14 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
         });
 
     /// <inheritdoc />
+    public Stream OpenExclusive(string path) =>
+        new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+
+    /// <inheritdoc />
+    public Stream OpenAppendShared(string path) =>
+        new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+
+    /// <inheritdoc />
     public void MoveDirectory(string sourcePath, string destinationPath) => Directory.Move(sourcePath, destinationPath);
 
     /// <inheritdoc />

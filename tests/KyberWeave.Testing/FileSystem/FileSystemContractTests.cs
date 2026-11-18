@@ -529,6 +529,127 @@ public abstract class FileSystemContractTests : IDisposable
     }
 
     [Fact]
+    public void OpenExclusiveCreatesAMissingFileAndKeepsTheBytesWrittenOnDispose()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string path = At(root, "lock.txt");
+
+        using (Stream stream = files.OpenExclusive(path))
+        {
+            stream.Write([4, 5]);
+        }
+
+        Assert.Equal([4, 5], files.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void OpenExclusiveKeepsTheContentOfAnExistingFile()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string path = WriteFile(files, root, "lock.txt", "held");
+
+        using (files.OpenExclusive(path))
+        {
+        }
+
+        Assert.Equal("held", files.ReadAllText(path));
+    }
+
+    [Fact]
+    public void OpenExclusiveRefusesASecondOpenWhileTheFirstIsHeld()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string path = At(root, "lock.txt");
+        using Stream first = files.OpenExclusive(path);
+
+        _ = Assert.Throws<IOException>(() => files.OpenExclusive(path));
+        _ = Assert.Throws<IOException>(() => files.OpenAppendShared(path));
+    }
+
+    [Fact]
+    public void OpenExclusiveCanBeTakenAgainOnceTheFirstIsDisposed()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string path = At(root, "lock.txt");
+        files.OpenExclusive(path).Dispose();
+
+        using Stream second = files.OpenExclusive(path);
+
+        Assert.NotNull(second);
+    }
+
+    [Fact]
+    public void OpenExclusiveDoesNotLockAnotherFile()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        using Stream first = files.OpenExclusive(At(root, "one.lock"));
+
+        using Stream other = files.OpenExclusive(At(root, "two.lock"));
+
+        Assert.NotNull(other);
+    }
+
+    [Fact]
+    public void OpenExclusiveIntoAMissingDirectoryFailsAsDocumented()
+    {
+        IWritableFileSystem files = Starting(out string root);
+
+        _ = Assert.Throws<DirectoryNotFoundException>(() => files.OpenExclusive(At(root, "missing/lock.txt")));
+    }
+
+    [Fact]
+    public void OpenAppendSharedCreatesAMissingFileAndAddsToAnExistingOne()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string path = At(root, "log.txt");
+
+        using (Stream stream = files.OpenAppendShared(path))
+        {
+            stream.Write(Encoding.UTF8.GetBytes("one\n"));
+        }
+
+        using (Stream stream = files.OpenAppendShared(path))
+        {
+            stream.Write(Encoding.UTF8.GetBytes("two\n"));
+        }
+
+        Assert.Equal("one\ntwo\n", files.ReadAllText(path));
+    }
+
+    [Fact]
+    public void OpenAppendSharedAllowsASecondOpenWhileTheFirstIsHeld()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string path = At(root, "log.txt");
+
+        using (Stream first = files.OpenAppendShared(path))
+        using (Stream second = files.OpenAppendShared(path))
+        {
+            second.Write(Encoding.UTF8.GetBytes("b"));
+        }
+
+        Assert.Equal("b", files.ReadAllText(path));
+    }
+
+    [Fact]
+    public void OpenAppendSharedLeavesTheFileReadableWhileHeld()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string path = WriteFile(files, root, "log.txt", "head\n");
+        using Stream stream = files.OpenAppendShared(path);
+
+        Assert.Equal("head\n", files.ReadAllText(path));
+    }
+
+    [Fact]
+    public void OpenAppendSharedIntoAMissingDirectoryFailsAsDocumented()
+    {
+        IWritableFileSystem files = Starting(out string root);
+
+        _ = Assert.Throws<DirectoryNotFoundException>(() => files.OpenAppendShared(At(root, "missing/log.txt")));
+    }
+
+    [Fact]
     public void MoveDirectoryMovesTheWholeTree()
     {
         IWritableFileSystem files = Starting(out string root);

@@ -412,6 +412,34 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
     }
 
     /// <inheritdoc />
+    public Stream OpenExclusive(string path)
+    {
+        Enter(nameof(OpenExclusive), path);
+        Node file = OpenOrCreateForStream(path);
+        if (file.ExclusiveHeld || file.AppendersOpen > 0)
+        {
+            throw new IOException($"The process cannot access the file '{path}' because it is being used by another process.");
+        }
+
+        file.ExclusiveHeld = true;
+        return new ExclusiveStream(file, _time);
+    }
+
+    /// <inheritdoc />
+    public Stream OpenAppendShared(string path)
+    {
+        Enter(nameof(OpenAppendShared), path);
+        Node file = OpenOrCreateForStream(path);
+        if (file.ExclusiveHeld)
+        {
+            throw new IOException($"The process cannot access the file '{path}' because it is being used by another process.");
+        }
+
+        file.AppendersOpen++;
+        return new AppendStream(file, _time);
+    }
+
+    /// <inheritdoc />
     public void MoveDirectory(string sourcePath, string destinationPath)
     {
         Enter(nameof(MoveDirectory), sourcePath, destinationPath);
@@ -694,6 +722,23 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
 
     private Node NewDirectory(string name, Node parent, bool caseSensitiveNames = false) =>
         new(name, parent, isDirectory: true, _names, Now, caseSensitiveNames);
+
+    private Node OpenOrCreateForStream(string path)
+    {
+        Node parent = ResolveParent(path, out string name);
+        Node? existing = Child(parent, name);
+        if (existing is null)
+        {
+            Node created = NewFile(name, parent, []);
+            parent.Children[name] = created;
+            return created;
+        }
+
+        Node file = Follow(existing) ?? throw Missing(path);
+        return file.IsDirectory
+            ? throw new UnauthorizedAccessException($"The path '{path}' is a directory, not a file.")
+            : file;
+    }
 
     private Node NewFile(string name, Node parent, byte[] content) =>
         new(name, parent, isDirectory: false, _names, Now) { Content = content };
@@ -1062,6 +1107,56 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
         }
     }
 
+    /// <summary>A read-write stream over a file held exclusively; its bytes land in the file, and the hold ends, when it is disposed.</summary>
+    private sealed class ExclusiveStream : MemoryStream
+    {
+        private readonly Node _file;
+        private readonly TimeProvider _time;
+        private bool _released;
+
+        internal ExclusiveStream(Node file, TimeProvider time)
+        {
+            _file = file;
+            _time = time;
+            Write(file.Content);
+            Position = 0;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && !_released)
+            {
+                _released = true;
+                _file.Content = ToArray();
+                _file.LastWriteTimeUtc = _time.GetUtcNow().UtcDateTime;
+                _file.ExclusiveHeld = false;
+            }
+
+            base.Dispose(disposing);
+        }
+    }
+
+    /// <summary>A write-only stream that adds its bytes to the end of a file when it is disposed.</summary>
+    private sealed class AppendStream(Node file, TimeProvider time) : MemoryStream
+    {
+        private bool _released;
+
+        public override bool CanRead => false;
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && !_released)
+            {
+                _released = true;
+                file.Content = [.. file.Content, .. ToArray()];
+                file.LastWriteTimeUtc = time.GetUtcNow().UtcDateTime;
+                file.AppendersOpen--;
+            }
+
+            base.Dispose(disposing);
+        }
+    }
+
     private sealed class Node
     {
         internal Node(
@@ -1094,6 +1189,10 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
         internal string? LinkTarget { get; set; }
 
         internal bool LinkNamesDirectory { get; set; }
+
+        internal bool ExclusiveHeld { get; set; }
+
+        internal int AppendersOpen { get; set; }
 
         internal FileAttributes Attributes { get; set; }
 
