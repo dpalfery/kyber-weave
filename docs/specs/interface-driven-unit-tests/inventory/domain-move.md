@@ -63,7 +63,8 @@ to hold.
 - **22 Domain logic types are named by 36 files in `Contracts`**: the finding the
   task asks for, with a decision per type in part 2, taken first in part 3's order.
 - **24 move tasks**, one per Domain folder or group of subfolders, none over 30 logic classes.
-  `Security` (2.5.10) is the pilot, and `Configuration` (2.5.1) waits for task 2.3.
+  `Security` (2.5.10) is the pilot, and `Configuration` (2.5.1) waits for task 2.3, which rewrites the
+  config call sites onto `IKyberWeaveConfigRepository` and adds its fake and contract suite.
 
 ## How a file was classified
 
@@ -714,9 +715,12 @@ each moved class gains or keeps a unit test through fakes, and behaviour does no
 
 `Security` (2.5.10) is the pilot: 2 logic classes in 2 files, no caller outside `Application` and no
 dependency on another group, so it proves the move mechanics and the artefact list above at the
-smallest possible size before a 26-class group runs. `Configuration` (2.5.1) waits for task 2.3: the
-static loader retirement is what puts `KyberWeaveConfigAssembler`, `KyberWeaveYamlParser` and
-`ReviewConfigParser` behind `IKyberWeaveConfigRepository`, so that folder cannot move before it.
+smallest possible size before a 26-class group runs. `Configuration` (2.5.1) waits for task 2.3, which
+rewrites the 23 call sites of the static `KyberWeaveConfigLoader.TryLoad` onto
+`IKyberWeaveConfigRepository` and adds its shared fake and contract suite. 2.3 does not move the
+parsers: `FileKyberWeaveConfigRepository` already calls `KyberWeaveConfigAssembler`,
+`KyberWeaveYamlParser` and `OntologyConfigLoader`, and those move in 2.5.1 itself. Running 2.5.1 first
+would rewrite the same call sites and fake twice.
 
 ## Limits
 
