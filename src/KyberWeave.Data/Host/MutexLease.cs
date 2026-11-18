@@ -126,7 +126,13 @@ public sealed class MutexLease : ILease
         public void Dispose()
         {
             _released.Set();
-            _ = _thread.Join(TimeSpan.FromSeconds(30));
+            if (!_thread.Join(TimeSpan.FromSeconds(30)))
+            {
+                // The owner thread is still inside the mutex. Disposing the mutex or the events under it would throw
+                // there, on a background thread that cannot report the failure, so leave them to the process instead.
+                return;
+            }
+
             _mutex.Dispose();
             _taken.Dispose();
             _released.Dispose();
