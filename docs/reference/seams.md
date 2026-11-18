@@ -168,13 +168,13 @@ clock and no task would track the fix.
 |---|---|---|---|
 | `KyberWeave.Application` | 68 | 208 | 4.1, 4.2, 4.3, 4.8 |
 | `KyberWeave.Cli` | 49 | 180 | 4.5 |
-| `KyberWeave.Data` | 81 | 714 | 3.2, 3.3, 3.4, 3.5, 4.4, 4.9 |
+| `KyberWeave.Data` | 73 | 663 | 3.2, 3.3, 3.4, 3.5, 4.4, 4.9 |
 | `KyberWeave.Domain` | 24 | 46 | 2.5 |
 | `KyberWeave.Hooks` | 1 | 1 | 4.7 |
 | `KyberWeave.Kernel` | 3 | 22 | 4.9 |
 | `KyberWeave.Mcp` | 4 | 16 | 4.6 |
 | `KyberWeave.Arbiter` | 0 | 0 | — (its two files are the Program root and the console-stream adapter) |
-| **Total** | **228** | **1,187** | |
+| **Total** | **220** | **1,136** | |
 
 The totals before adapters and roots are taken out are 68 classes and 212 sites in Application,
 52 and 183 in Cli, 111 and 955 in Data, 28 and 49 in Domain, 2 and 3 in Hooks, 6 and 47 in Kernel,
@@ -270,11 +270,10 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `SelfUpdateHostFactory` (`Composition/SelfUpdateHostFactory.cs`) | environment | 4.5 |
 | `ReportRenderer` (`Rendering/ReportRenderer.cs`) | console | 4.5 |
 
-#### KyberWeave.Data (80 classes)
+#### KyberWeave.Data (72 classes)
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `PlanPathResolver` (`Arbiter/Plans/PlanPathResolver.cs`) | file system, paths | 4.4 |
 | `SystemOneClient` (`Arbiter/Providers/SystemOneClient.cs`) | clock, network | 4.4 |
 | `SocketArbiterHttpHandlers` (`Arbiter/SocketArbiterHttpHandlers.cs`) | network | 4.4 |
 | `SystemOneProviderFactory` (`Arbiter/SystemOneProviderFactory.cs`) | network | 4.4 |
@@ -283,17 +282,10 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `AnalysisCacheSafety` (`Docs/Analysis/Persistence/AnalysisCacheSafety.cs`) | file system, paths | 4.4 |
 | `SqliteAnalysisPersistence` (`Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs`) | file system, paths | 4.4 |
 | `PresentFile` (`Docs/Closeout/PresentFile.cs`) | file system | 4.4 |
-| `LaunchCommandResolver` (`Docs/Mcp/LaunchCommandResolver.cs`) | file system, paths, environment | 4.4 |
 | `DocsRootWalk` (`FileSystem/DocsRootWalk.cs`) | file system | 4.4 |
-| `FileBackgroundDispatchStore` (`Hooks/Arbiter/FileBackgroundDispatchStore.cs`) | file system, clock, identifiers | 4.4 |
-| `FileDispatchClaimStore` (`Hooks/Arbiter/FileDispatchClaimStore.cs`) | file system, clock, identifiers | 4.4 |
-| `FileFactoryTranscriptSource` (`Hooks/Arbiter/FileFactoryTranscriptSource.cs`) | file system | 4.4 |
 | `FileHookSnapshotStore` (`Hooks/Arbiter/FileHookSnapshotStore.cs`) | file system, clock, identifiers | 4.4 |
 | `FileWorkerBudgetStore` (`Hooks/Arbiter/FileWorkerBudgetStore.cs`) | file system | 4.4 |
-| `CheckoutProductRootLocator` (`Host/CheckoutProductRootLocator.cs`) | paths | 4.4 |
 | `FileCoverageReportSource` (`Review/FileCoverageReportSource.cs`) | file system | 4.4 |
-| `FileProjectFileLocator` (`Review/FileProjectFileLocator.cs`) | file system, paths | 4.4 |
-| `FileReviewDecisionCacheStore` (`Review/FileReviewDecisionCacheStore.cs`) | file system, paths | 4.4 |
 | `FileReviewEvidenceStore` (`Review/FileReviewEvidenceStore.cs`) | file system | 4.4 |
 | `FileSeatFolder` (`Review/FileSeatFolder.cs`) | file system | 4.4 |
 | `ZipSkillArchiveWriter` (`Skills/ZipSkillArchiveWriter.cs`) | file system | 4.4 |
@@ -328,6 +320,22 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `FileSquadRenderInputReader` (`Squad/Rendering/FileSquadRenderInputReader.cs`) | file system, environment | 3.5 |
 | `SquadOperatorChannelOverlayFile` (`Squad/Rendering/SquadOperatorChannelOverlayFile.cs`) | file system | 3.5 |
 | `SelfUpdateSystem` (`Update/SelfUpdateSystem.cs`) | file system, process, identifiers | 4.4 |
+
+Task 4.4 leaves these in `Data` outside `Squad/`, each for a named reason:
+
+- `FileHookSnapshotStore` and `FileWorkerBudgetStore` need two operations the file-system seam does not
+  have: an exclusive-lock open (`FileShare.None`) and a shared append. Neither is replaceable by `MutexLease`
+  or by an atomic write without changing what parallel hook processes see, so the seam needs the two members
+  first.
+- `SelfUpdateSystem` replaces the running binary and extracts archives, so requirement 10.2 applies: it
+  moves with crash-safety contract tests and a second reviewer, with task 4.1's `SelfUpdater`.
+- `AnalysisCacheSafety`, `SqliteAnalysisPersistence` and `CodeGraphResolverAdapter` are built with `new` or
+  held as a static delegate by `KyberWeave.Cli` and `KyberWeave.Application` callers, so converting them
+  edits those projects' composition code (tasks 4.5 and 4.2).
+- `SystemOneClient`, `SocketArbiterHttpHandlers`, `SystemOneProviderFactory` and
+  `OpenAiCompatibleEmbeddingGenerator` reach the network; no network seam exists yet.
+- `PresentFile`, `DocsRootWalk`, `FileCoverageReportSource`, `FileReviewEvidenceStore`, `FileSeatFolder` and
+  `ZipSkillArchiveWriter` are not converted yet.
 
 #### KyberWeave.Domain (24 classes)
 
