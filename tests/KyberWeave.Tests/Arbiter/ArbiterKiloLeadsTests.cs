@@ -79,7 +79,7 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
         string full = await WriteCitedFileAsync("src/Locked.cs");
         using FileStream holder = LockAgainstReads(full);
 
-        FileExcerpt? excerpt = new FileTextFacts().ReadExcerpt(_sandbox.Path, "src/Locked.cs", 12);
+        FileExcerpt? excerpt = RealFileTextFacts.Create().ReadExcerpt(_sandbox.Path, "src/Locked.cs", 12);
 
         Assert.Null(excerpt);
     }

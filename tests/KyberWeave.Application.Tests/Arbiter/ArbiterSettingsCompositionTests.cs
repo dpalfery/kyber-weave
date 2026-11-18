@@ -1,4 +1,5 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Data.Arbiter;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -20,5 +21,6 @@ public sealed class ArbiterSettingsCompositionTests
         _ = Assert.IsType<FileArbiterUserSettings>(provider.GetRequiredService<IArbiterUserSettings>());
         _ = Assert.IsType<FileArbiterUserOverrideWriter>(provider.GetRequiredService<IArbiterUserOverrideWriter>());
         _ = Assert.IsType<FileArbiterModelTargetsReader>(provider.GetRequiredService<IArbiterModelTargetsReader>());
+        _ = Assert.IsType<FileTextFacts>(provider.GetRequiredService<IFileTextFacts>());
     }
 }

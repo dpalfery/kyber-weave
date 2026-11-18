@@ -35,6 +35,7 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton<IArbiterModelTargetsReader>(sp => new FileArbiterModelTargetsReader(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IArbiterUserSettings>(sp => new FileArbiterUserSettings(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IArbiterUserOverrideWriter>(sp => new FileArbiterUserOverrideWriter(sp.GetRequiredService<IWritableFileSystem>()));
+        services.TryAddSingleton<IFileTextFacts>(sp => new FileTextFacts(sp.GetRequiredService<IRepositoryFileStore>()));
         services.TryAddSingleton<IPlanRootResolver>(sp => new Core.Arbiter.Plans.PlanRootResolver(
             sp.GetRequiredService<IGitRepositoryFacts>(),
             sp.GetRequiredService<IPlanFileResolver>(),
