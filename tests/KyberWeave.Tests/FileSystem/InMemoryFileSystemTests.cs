@@ -116,6 +116,22 @@ public sealed class InMemoryFileSystemBehaviourTests
     }
 
     [Fact]
+    public void WritingToAReadOnlyFileIsRefused()
+    {
+        InMemoryFileSystem files = new();
+        string root = files.CreateTemporaryDirectory("kw-memfs-readonly-");
+        string path = At(root, "locked.txt");
+        files.WriteAllText(path, "old");
+        files.SetAttributes(path, FileAttributes.ReadOnly);
+
+        _ = Assert.Throws<UnauthorizedAccessException>(() => files.WriteAllText(path, "new"));
+        _ = Assert.Throws<UnauthorizedAccessException>(() => files.WriteAllBytes(path, [1]));
+
+        Assert.Equal("old", files.ReadAllText(path));
+        Assert.Equal(FileAttributes.ReadOnly, files.GetAttributes(path));
+    }
+
+    [Fact]
     public void TemporaryDirectoriesStayInsideTheVirtualRoot()
     {
         InMemoryFileSystem files = new();

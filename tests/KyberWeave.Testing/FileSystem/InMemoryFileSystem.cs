@@ -759,8 +759,12 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
             throw new UnauthorizedAccessException($"The path '{CanonicalPath(node)}' is a directory, not a file.");
         }
 
+        if ((node.Attributes & FileAttributes.ReadOnly) != 0)
+        {
+            throw new UnauthorizedAccessException($"The file '{CanonicalPath(node)}' is read-only.");
+        }
+
         node.Content = content;
-        node.Attributes = FileAttributes.Normal;
         node.LastWriteTimeUtc = Now;
     }
 
