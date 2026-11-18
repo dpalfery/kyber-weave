@@ -153,6 +153,22 @@ public sealed class DocsMcpCommandSeamTests
 
         Assert.Equal(0, exit);
         Assert.Equal([Root], _wiring.RepairedRoots);
+        Assert.Equal<IReadOnlyList<string>>(["claude-code"], _wiring.RepairTargets[0]);
+        Assert.False(_wiring.RepairDryRuns[0]);
+    }
+
+    /// <summary>
+    /// A dry run reaches the repair with the named target and the dry-run flag, so the preview and the write are the
+    /// same computation and only the bytes are held back.
+    /// </summary>
+    [Fact]
+    public void ADryRunHandsTheNamedTargetToTheRepairAsADryRun()
+    {
+        int exit = Wire("repo", targets: "claude-code", dryRun: true);
+
+        Assert.Equal(0, exit);
+        Assert.Equal<IReadOnlyList<string>>(["claude-code"], _wiring.RepairTargets[0]);
+        Assert.True(_wiring.RepairDryRuns[0]);
     }
 
     /// <summary>
@@ -176,14 +192,14 @@ public sealed class DocsMcpCommandSeamTests
         Assert.Empty(_wiring.UnwiredRoots);
     }
 
-    private int Wire(string path, string targets) =>
+    private int Wire(string path, string targets, bool dryRun = false) =>
         new DocsMcpWireCommand(
             _wiring,
             _configs,
             _files,
             new FakePathResolver(_files),
             _environment,
-            _console).Execute(null!, new DocsMcpWireSettings { Path = path, Target = targets });
+            _console).Execute(null!, new DocsMcpWireSettings { Path = path, Target = targets, DryRun = dryRun });
 
     /// <summary>The declaration <c>docs init</c> scaffolds, naming the shipped binary.</summary>
     private static string Declaration() =>

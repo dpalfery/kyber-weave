@@ -13,6 +13,8 @@ public sealed class FakeMcpWiringService : IMcpWiringService
 {
     private readonly List<string> _inspectedRoots = [];
     private readonly List<string> _repairedRoots = [];
+    private readonly List<IReadOnlyList<string>> _repairTargets = [];
+    private readonly List<bool> _repairDryRuns = [];
     private readonly List<string> _unwiredRoots = [];
     private readonly List<string> _scannedRoots = [];
     private readonly List<string?> _scanHarnesses = [];
@@ -24,6 +26,12 @@ public sealed class FakeMcpWiringService : IMcpWiringService
 
     /// <summary>The roots <see cref="Repair"/> was asked to write, in call order.</summary>
     public IReadOnlyList<string> RepairedRoots => _repairedRoots;
+
+    /// <summary>The targets each <see cref="Repair"/> was asked to write, in call order.</summary>
+    public IReadOnlyList<IReadOnlyList<string>> RepairTargets => _repairTargets;
+
+    /// <summary>Whether each <see cref="Repair"/> was a dry run, in call order.</summary>
+    public IReadOnlyList<bool> RepairDryRuns => _repairDryRuns;
 
     /// <summary>The roots <see cref="Unwire"/> was asked to restore, in call order.</summary>
     public IReadOnlyList<string> UnwiredRoots => _unwiredRoots;
@@ -80,6 +88,8 @@ public sealed class FakeMcpWiringService : IMcpWiringService
         bool dryRun = false)
     {
         _repairedRoots.Add(repositoryRoot);
+        _repairTargets.Add(targets);
+        _repairDryRuns.Add(dryRun);
         return new McpWiringRepairReport(Repairs, dryRun);
     }
 
