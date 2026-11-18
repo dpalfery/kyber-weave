@@ -299,7 +299,7 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
     /// <summary>
     ///     When updating an existing deployment from Antigravity's fallback role-skill lowering
     ///     shape (.agents/skills/&lt;name&gt;/SKILL.md) to its native agent shape (.agents/agents/&lt;name&gt;/agent.md),
-    ///     receipt-diff logic in <see cref="RealSquadDeployment.Planner.CreateUpdate" /> plans a Delete mutation
+    ///     receipt-diff logic in <see cref="SquadDeploymentPlanner.CreateUpdate" /> plans a Delete mutation
     ///     for orphaned fallback skill files whose on-disk bytes still match the previous receipt digest,
     ///     and retains orphaned skill files whose bytes were locally edited by an operator.
     /// </summary>
