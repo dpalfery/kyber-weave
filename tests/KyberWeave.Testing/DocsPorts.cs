@@ -2,8 +2,10 @@ using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.Analysis.Persistence;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Data.Docs.Analysis.Embeddings;
 using KyberWeave.Data.Docs.Closeout;
 using KyberWeave.Data.Docs.FileSystem;
 using KyberWeave.Data.Hooks;
@@ -23,6 +25,24 @@ internal static class DocsPorts
     internal static readonly IPathResolver Paths = new PhysicalPathResolver(Files);
 
     internal static readonly IProcessEnvironment Environment = new ProcessEnvironment();
+
+    internal static readonly IWritableFileSystem Disk = new PhysicalFileSystem();
+
+    /// <summary>The cache-safety check over the real disk and the real git.</summary>
+    internal static readonly AnalysisCacheSafety CacheSafety = new(Disk, Paths, Environment, Process);
+
+    /// <summary>Opens analysis caches over the real disk and the real <c>sqlite3</c>, for a test that runs them on a temporary checkout.</summary>
+    internal static readonly IAnalysisPersistenceFactory AnalysisPersistence =
+        new SqliteAnalysisPersistenceFactory(Disk, Paths, Environment, Process, CacheSafety);
+
+    /// <summary>Opens the analysis cache of a temporary checkout over the real disk and the real <c>sqlite3</c>.</summary>
+    /// <param name="repositoryRoot">The checkout root.</param>
+    internal static SqliteAnalysisPersistence Sqlite(string repositoryRoot) =>
+        new(repositoryRoot, Disk, Paths, Environment, Process, CacheSafety);
+
+    /// <summary>Creates embedding clients over the real loopback transport; a test that sends nothing may use it.</summary>
+    internal static readonly IEmbeddingGeneratorFactory Embeddings =
+        new OpenAiCompatibleEmbeddingGeneratorFactory(new LoopbackEmbeddingTransport(), Environment, TimeProvider.System);
 
     internal static IPlanTaskService Tasks => new PlanTaskService(Files, Paths, Environment);
 

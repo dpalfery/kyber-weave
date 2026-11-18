@@ -7,6 +7,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Embeddings;
 using KyberWeave.Core.Docs.Analysis.Model;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -21,7 +22,7 @@ public sealed class EmbeddingClientTests
     [Fact]
     public void GenerateWithOrderedBatchesAndOptionalSettingsMapsByIndexNormalizesAndAggregatesUsage()
     {
-        using RecordingHandler handler = new RecordingHandler(
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler(
             JsonResponse("""
                 {
                   "data": [
@@ -91,7 +92,7 @@ public sealed class EmbeddingClientTests
         string endpoint,
         string resolvedAddress)
     {
-        using RecordingHandler handler = new RecordingHandler(JsonResponse("""
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler(JsonResponse("""
             { "data": [{ "index": 0, "embedding": [1, 0] }] }
             """));
         using OpenAiCompatibleEmbeddingGenerator generator = new OpenAiCompatibleEmbeddingGenerator(
@@ -111,7 +112,7 @@ public sealed class EmbeddingClientTests
     [Fact]
     public void ConstructorDisablesHttpClientTimeoutSoConfigTimeoutIsAuthoritative()
     {
-        using RecordingHandler handler = new RecordingHandler(JsonResponse("""
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler(JsonResponse("""
             { "data": [{ "index": 0, "embedding": [1, 0] }] }
             """));
         using OpenAiCompatibleEmbeddingGenerator generator = new OpenAiCompatibleEmbeddingGenerator(
@@ -125,7 +126,7 @@ public sealed class EmbeddingClientTests
             Config());
 
         Assert.Single(result.Embeddings);
-        CapturedRequest request = Assert.Single(handler.Requests);
+        RecordedHttpRequest request = Assert.Single(handler.Requests);
         Assert.True(request.CanBeCanceled);
     }
 
@@ -148,7 +149,7 @@ public sealed class EmbeddingClientTests
     [Fact]
     public void GenerateWithoutOptionalDimensionsOrApiKeyOmitsBothFromTheRequest()
     {
-        using RecordingHandler handler = new RecordingHandler(JsonResponse("""
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler(JsonResponse("""
             {
               "data": [{ "index": 0, "embedding": [1, 0] }]
             }
@@ -161,7 +162,7 @@ public sealed class EmbeddingClientTests
 
         EmbeddingGenerationResult result = generator.Generate([Key("only", dimensions: null)], ["only input"], config);
 
-        CapturedRequest request = Assert.Single(handler.Requests);
+        RecordedHttpRequest request = Assert.Single(handler.Requests);
         Assert.Null(request.Authorization);
         using JsonDocument json = JsonDocument.Parse(request.Body);
         Assert.False(json.RootElement.TryGetProperty("dimensions", out _));
@@ -172,7 +173,7 @@ public sealed class EmbeddingClientTests
     [Fact]
     public void GenerateWhenAnyResolvedAddressIsNotLoopbackRejectsBeforeSending()
     {
-        using RecordingHandler handler = new RecordingHandler(JsonResponse("{}"));
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler(JsonResponse("{}"));
         using OpenAiCompatibleEmbeddingGenerator generator = new OpenAiCompatibleEmbeddingGenerator(
             handler,
             ResolveTo(IPAddress.Loopback, IPAddress.Parse("203.0.113.9")),
@@ -192,7 +193,7 @@ public sealed class EmbeddingClientTests
     [InlineData("http://192.0.2.8/v1/embeddings")]
     public void GenerateWhenEndpointIsNotAbsoluteLoopbackHttpRejectsBeforeSending(string endpoint)
     {
-        using RecordingHandler handler = new RecordingHandler(JsonResponse("{}"));
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler(JsonResponse("{}"));
         using OpenAiCompatibleEmbeddingGenerator generator = new OpenAiCompatibleEmbeddingGenerator(
             handler,
             ResolveTo(IPAddress.Parse("192.0.2.8")),
@@ -213,7 +214,7 @@ public sealed class EmbeddingClientTests
     {
         using HttpResponseMessage redirect = new HttpResponseMessage(HttpStatusCode.Redirect);
         redirect.Headers.Location = new Uri("https://example.com/v1/embeddings");
-        using RecordingHandler handler = new RecordingHandler(redirect);
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler(redirect);
         using OpenAiCompatibleEmbeddingGenerator generator = new OpenAiCompatibleEmbeddingGenerator(
             handler,
             ResolveTo(IPAddress.Loopback),
@@ -232,7 +233,7 @@ public sealed class EmbeddingClientTests
         string response,
         string expectedMessage)
     {
-        using RecordingHandler handler = new RecordingHandler(JsonResponse(response));
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler(JsonResponse(response));
         using OpenAiCompatibleEmbeddingGenerator generator = new OpenAiCompatibleEmbeddingGenerator(
             handler,
             ResolveTo(IPAddress.Loopback),
@@ -307,7 +308,7 @@ public sealed class EmbeddingClientTests
     [Fact]
     public void GenerateWhenProviderFailsDoesNotExposeTheBearerToken()
     {
-        using RecordingHandler handler = new RecordingHandler(new HttpResponseMessage(HttpStatusCode.Unauthorized)
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.Unauthorized)
         {
             Content = new StringContent("provider rejected credentials", Encoding.UTF8, "text/plain")
         });
@@ -475,7 +476,7 @@ public sealed class EmbeddingClientTests
         Severity severity)
     {
         const string secret = "secret-token\nwith-invalid-header-content";
-        using RecordingHandler handler = new RecordingHandler(JsonResponse("{}"));
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler(JsonResponse("{}"));
         using OpenAiCompatibleEmbeddingGenerator generator = new OpenAiCompatibleEmbeddingGenerator(
             handler,
             ResolveTo(IPAddress.Loopback),
@@ -554,41 +555,6 @@ public sealed class EmbeddingClientTests
         Assert.Equal(expected.Count, actual.Count);
         for (int index = 0; index < expected.Count; index++)
             Assert.Equal(expected[index], actual[index], precision: 5);
-    }
-
-    private sealed record CapturedRequest(
-        HttpMethod Method,
-        Uri? Uri,
-        string Body,
-        string? ContentType,
-        AuthenticationHeaderValue? Authorization,
-        bool CanBeCanceled);
-
-    private sealed class RecordingHandler(params HttpResponseMessage[] responses) : HttpMessageHandler
-    {
-        private readonly Queue<HttpResponseMessage> _responses = new(responses);
-
-        public List<CapturedRequest> Requests { get; } = [];
-
-        protected override async Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request,
-            CancellationToken cancellationToken)
-        {
-            string body = request.Content is null
-                ? string.Empty
-                : await request.Content.ReadAsStringAsync(cancellationToken);
-            Requests.Add(new CapturedRequest(
-                request.Method,
-                request.RequestUri,
-                body,
-                request.Content?.Headers.ContentType?.MediaType,
-                request.Headers.Authorization,
-                cancellationToken.CanBeCanceled));
-            if (_responses.Count == 0)
-                throw new Xunit.Sdk.XunitException("The embedding client sent an unexpected request.");
-
-            return _responses.Dequeue();
-        }
     }
 
     private sealed class RecordingGenerator(
