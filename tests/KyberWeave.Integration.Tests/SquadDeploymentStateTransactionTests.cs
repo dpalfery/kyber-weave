@@ -517,10 +517,11 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             new FixedTimeProvider(InstalledAt));
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
         SquadTransaction activeTransaction = new(store, blocker);
-        Task activeExecution = Task.Run(() =>
+        Task activeExecution = StartBlockedTransaction(() =>
             activeTransaction.Execute(activePlan));
-        Assert.True(
-            blocker.Reached.Wait(TimeSpan.FromSeconds(5)),
+        WaitForBlockedStep(
+            blocker,
+            activeExecution,
             "The active transaction did not acquire its lease before contention was tested.");
         SortedDictionary<string, TreeEntry> beforeContention = CaptureTree(fixture.Path);
 

@@ -421,9 +421,10 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
             [],
             false,
             new FixedTimeProvider(InstalledAt));
-        Task active = Task.Run(() => activeTransaction.Execute(upperPlan));
-        Assert.True(
-            blocker.Reached.Wait(TimeSpan.FromSeconds(5)),
+        Task active = StartBlockedTransaction(() => activeTransaction.Execute(upperPlan));
+        WaitForBlockedStep(
+            blocker,
+            active,
             "The first Windows case-sensitive sibling did not acquire its lease.");
         Exception? siblingFailure;
         try
