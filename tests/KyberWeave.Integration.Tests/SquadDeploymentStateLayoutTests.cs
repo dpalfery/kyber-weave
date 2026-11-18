@@ -942,7 +942,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         SortedDictionary<string, byte[]> receiptSnapshotBefore = Snapshot(stateDir);
         SortedDictionary<string, byte[]> deploymentSnapshotBefore = Snapshot(recordedRoot);
 
-        using RecordingReleaseSource releaseSource = new();
+        using FakeSquadReleaseSource releaseSource = FakeSquadReleaseSource.Failing(new NotImplementedException());
         FakeGlobalRootResolver globalRoots = new(new Dictionary<SquadTarget, string>
         {
             [SquadTarget.Codex] = Path.Combine(fixture.Path, "fake-codex")
@@ -1003,7 +1003,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         SortedDictionary<string, byte[]> receiptSnapshotBefore = Snapshot(stateDir);
         SortedDictionary<string, byte[]> deploymentSnapshotBefore = Snapshot(recordedRoot);
 
-        using RecordingReleaseSource releaseSource = new();
+        using FakeSquadReleaseSource releaseSource = FakeSquadReleaseSource.Failing(new NotImplementedException());
         FakeGlobalRootResolver globalRoots = new(new Dictionary<SquadTarget, string>
         {
             [SquadTarget.Codex] = Path.Combine(fixture.Path, "fake-codex")
