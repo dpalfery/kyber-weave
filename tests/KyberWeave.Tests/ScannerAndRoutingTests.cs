@@ -191,4 +191,26 @@ public class RoutingTests
         Assert.Equal(1, summary.Total);
         Assert.Equal(string.Empty, summary.Results[0].Case.Prompt);
     }
+
+    [Fact]
+    public void ACaseThatFiresWithoutASelectionCarriesALabel()
+    {
+        RoutingEvalFile evalFile = new()
+        {
+            Cases = [new RoutingEvalCase { Prompt = "reset my password", Expected = "password-reset" }]
+        };
+
+        RoutingEvalSummary summary = new RoutingEvaluator(new FiredWithoutSelection()).Evaluate(evalFile, SampleSet());
+
+        Assert.False(summary.Results[0].Passed);
+        Assert.NotNull(summary.Results[0].ActualLabel);
+    }
+
+    /// <summary>A strategy that reports a fire without naming the skill it selected.</summary>
+    private sealed class FiredWithoutSelection : IRoutingStrategy
+    {
+        public string Name => "fires-without-selection";
+
+        public RoutingResult Route(string prompt, SkillSet skills) => new(null, true, []);
+    }
 }

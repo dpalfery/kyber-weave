@@ -47,7 +47,7 @@ public sealed class RoutingEvalFile
 /// <summary>One eval case's outcome against the strategy under test.</summary>
 public sealed record RoutingCaseResult(RoutingEvalCase Case, RoutingResult Result, bool Passed)
 {
-    public string ActualLabel => Result.Fired ? Result.SelectedSkill! : "(no fire)";
+    public string ActualLabel => Result.Fired ? Result.SelectedSkill ?? "(no selection)" : "(no fire)";
     public string ExpectedLabel => Case.ExpectsNoFire ? "(no fire)" : Case.Expected!;
 }
 
