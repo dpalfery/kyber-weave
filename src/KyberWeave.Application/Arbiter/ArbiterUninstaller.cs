@@ -486,6 +486,9 @@ public sealed class ArbiterUninstaller : IArbiterUninstaller
 
         try
         {
+            // The root is read once in the spelling the file system uses, so a caller's relative spelling finds the
+            // same receipts and the same registry entry an absolute one does.
+            string full = _paths.GetFullPath(root, _environment.CurrentDirectory);
             IReadOnlyList<string> globalTargets = _userConfig.ReadGlobalTargets(home);
             if (globalTargets.Any(t => !string.Equals(t, token, StringComparison.OrdinalIgnoreCase)))
             {
@@ -500,7 +503,7 @@ public sealed class ArbiterUninstaller : IArbiterUninstaller
                 return true;
             }
 
-            SquadReceipt? currentProjectReceipt = stateStore.ReadReceipt(root, SquadDeploymentScope.Project);
+            SquadReceipt? currentProjectReceipt = stateStore.ReadReceipt(full, SquadDeploymentScope.Project);
             if (currentProjectReceipt is not null &&
                 (currentProjectReceipt.Files.Any(file => !string.Equals(file.Target, token, StringComparison.Ordinal))
                  || currentProjectReceipt.Blocks.Any(block => !string.Equals(block.Target, token, StringComparison.Ordinal))))
@@ -517,10 +520,11 @@ public sealed class ArbiterUninstaller : IArbiterUninstaller
                     continue;
                 }
 
-                bool isCurrent = string.Equals(
+                // The volume's own case rule decides, so two projects that differ only in case stay two projects on a
+                // case-sensitive file system and are one project where names fold.
+                bool isCurrent = _paths.AreSame(
                     _paths.GetFullPath(project.Path, _environment.CurrentDirectory),
-                    _paths.GetFullPath(root, _environment.CurrentDirectory),
-                    StringComparison.OrdinalIgnoreCase);
+                    full);
 
                 if (isCurrent)
                 {

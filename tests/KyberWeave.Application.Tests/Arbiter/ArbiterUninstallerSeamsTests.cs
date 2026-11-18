@@ -95,6 +95,58 @@ public sealed class ArbiterUninstallerSeamsTests
         Assert.False(another, "The project's own Kilo files were read as another target's deployment.");
     }
 
+    /// <summary>
+    /// On a volume that keeps names apart, <c>/repo</c> and <c>/REPO</c> are two projects: the one under <c>/REPO</c>
+    /// must not be read as the registered project, or another target's deployment goes unseen.
+    /// </summary>
+    [Fact]
+    public void AnotherTargetIsDeployed_TreatsADifferentlyCasedRootAsAnotherProject_OnACaseSensitiveVolume()
+    {
+        InMemoryFileSystem files = new(caseSensitive: true);
+        files.CreateDirectory("/repo");
+        FakeSquadStateStore store = Store();
+        store.AddProject(new SquadProjectRegistryEntry("/repo", "/repo", DateTimeOffset.UnixEpoch, [], Stale: false, StaleReason: null));
+        store.Add(new SquadReceipt(
+            "kyber-squad.receipt/v3",
+            SquadDeploymentScope.Project,
+            "/repo",
+            DateTimeOffset.UnixEpoch,
+            [],
+            [new SquadOwnedFile(OwnedFile, Digest, "kilo", Adopted: false)]));
+        ArbiterUninstaller uninstaller = new(
+            store,
+            new FakeSquadGlobalRootResolver(Home),
+            files,
+            new NoGlobalTargets(),
+            _environment,
+            new FakePathResolver(files));
+
+        bool another = uninstaller.AnotherTargetIsDeployed("/REPO", SquadTarget.Kilo);
+
+        Assert.True(another, "A different project's Kilo files were read as the current project's own.");
+    }
+
+    /// <summary>
+    /// The project's own receipt is read at the root the environment seam resolves, so a project the registry does not
+    /// list still reports another target's deployment when its receipt names one.
+    /// </summary>
+    [Fact]
+    public void AnotherTargetIsDeployed_ReadsTheCurrentProjectsReceiptThroughTheResolvedRoot()
+    {
+        FakeSquadStateStore store = Store();
+        store.Add(new SquadReceipt(
+            "kyber-squad.receipt/v3",
+            SquadDeploymentScope.Project,
+            ProjectRoot,
+            DateTimeOffset.UnixEpoch,
+            [],
+            [new SquadOwnedFile(OwnedFile, Digest, "claude", Adopted: false)]));
+
+        bool another = Uninstaller(store).AnotherTargetIsDeployed("repo", SquadTarget.Kilo);
+
+        Assert.True(another, "The project's own receipt names another target and was not read.");
+    }
+
     private ArbiterUninstaller Uninstaller(FakeSquadStateStore store) =>
         new(store, new FakeSquadGlobalRootResolver(Home), _files, new NoGlobalTargets(), _environment, _paths);
 
