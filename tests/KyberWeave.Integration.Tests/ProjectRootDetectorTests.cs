@@ -4,6 +4,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review.Catalogue;
 using KyberWeave.Data.Review;
+using KyberWeave.Tests;
 using Xunit;
 
 namespace KyberWeave.Integration.Tests;
@@ -41,7 +42,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         bool pair = false,
         string[]? fallback = null) =>
         ProjectRootDetection.Detect(
-            new FileRepositoryFileLister(new ProcessProgramRunner()).List(repositoryRoot),
+            RealRepositoryFileLister.Create().List(repositoryRoot),
             markers,
             nesting,
             pair,

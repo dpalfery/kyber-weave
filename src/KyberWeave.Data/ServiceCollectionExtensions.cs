@@ -53,16 +53,13 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IProgramRunner>(_ => new ProcessProgramRunner());
         services.TryAddSingleton<ISeatFolder, FileSeatFolder>();
         services.TryAddSingleton<ISkillArchiveWriter, ZipSkillArchiveWriter>();
-        services.TryAddSingleton<INotSeatedStore>(_ => new FileNotSeatedStore());
         services.TryAddSingleton<IReviewEvidenceStore>(_ => new FileReviewEvidenceStore());
         services.TryAddSingleton<IProjectFileLocator>(_ => new FileProjectFileLocator());
-        services.TryAddSingleton<IRepositoryFileLister>(sp => new FileRepositoryFileLister(sp.GetRequiredService<IProgramRunner>()));
         services.TryAddSingleton<ICoverageReportSource>(_ => new FileCoverageReportSource());
         services.TryAddSingleton<IContainedFileReader>(_ => new FileContainedFileReader());
         services.TryAddSingleton<IBoundedFileReader>(_ => new FileBoundedFileReader());
         services.TryAddSingleton<IReviewDecisionCacheStore>(_ => new FileReviewDecisionCacheStore());
         services.TryAddSingleton<ICitedSourceFiles>(_ => new FileCitedSourceFiles());
-        services.TryAddSingleton<IRepositoryTreeProbe>(_ => new FileRepositoryTreeProbe());
         services.TryAddSingleton<ITestClassSources>(_ => new FileTestClassSources());
         services.TryAddSingleton<IKyberWeaveConfigRepository>(sp => new FileKyberWeaveConfigRepository(sp.GetRequiredService<IRepositoryTreeProbe>()));
         services.TryAddSingleton<IRepositoryToolSettings>(sp => new ConfigFileToolSettings(sp.GetRequiredService<IKyberWeaveConfigRepository>()));

@@ -2,6 +2,7 @@ using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Data.Review;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -43,6 +44,18 @@ public sealed class ArbiterGuardCompositionTests
         IGitRepositoryFacts facts = services.GetRequiredService<IGitRepositoryFacts>();
 
         Assert.NotNull(facts);
+    }
+
+    [Fact]
+    public void TheGuardsContainerResolvesTheTreeProbeThroughTheFileSystemSeam()
+    {
+        using ServiceProvider services = (ServiceProvider)ArbiterContainer.CreateGuards();
+
+        IRepositoryTreeProbe probe = services.GetRequiredService<IRepositoryTreeProbe>();
+
+        Assert.IsType<FileRepositoryTreeProbe>(probe);
+        Assert.True(probe.ProbeRoot(AppContext.BaseDirectory).Exists);
+        Assert.False(probe.ProbeRoot(Path.Combine(AppContext.BaseDirectory, "no-such-root")).Exists);
     }
 
     [Fact]

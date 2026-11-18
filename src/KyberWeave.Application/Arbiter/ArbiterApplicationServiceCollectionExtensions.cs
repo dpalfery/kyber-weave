@@ -104,7 +104,7 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton(TimeProvider.System);
         _ = services.AddWeaveRunData();
         _ = services.AddWeaveRunStartState();
-        services.TryAddSingleton<IRepositoryTreeProbe>(_ => new FileRepositoryTreeProbe());
+        services.TryAddSingleton<IRepositoryTreeProbe>(sp => new FileRepositoryTreeProbe(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IKyberWeaveConfigRepository>(sp =>
             new FileKyberWeaveConfigRepository(sp.GetRequiredService<IRepositoryTreeProbe>()));
         services.TryAddSingleton<IWorkerBudgetStore, FileWorkerBudgetStore>();
