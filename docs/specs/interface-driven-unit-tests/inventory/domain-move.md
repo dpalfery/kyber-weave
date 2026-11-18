@@ -420,7 +420,7 @@ Only 28 types are not (b); the other 53 move as static helpers and need no per-t
 | `Squad/Presets/SquadModelPresetValidator.cs` | `SquadModelPreset`, `SquadSourceValidator` | a, b | move |
 | `Squad/Release/GitHubSquadReleaseSource.cs` | `ReleaseOrigin`, `ReleaseVersion` | a, b | split: HTTP stays, origin resolution and version parsing move |
 | `Squad/Rendering/CopilotMcpServerProbe.cs` | `SquadOperatorChannel` | b | split: the config read stays, the channel rules move |
-| `Squad/Rendering/FileSquadRenderInputReader.cs` | `MemoizedSquadGlobalRoots`, `SquadOperatorChannel`, `SquadRenderRequest` | a, b, c | split: the file reads stay, the request guards move, global roots move behind `ISquadGlobalRootResolver` |
+| `Squad/Rendering/FileSquadRenderInputReader.cs` | `MemoizedSquadGlobalRoots`, `SquadOperatorChannel`, `SquadRenderRequest` | a, b, c | split: the file, directory and environment reads stay, the request guards move, global roots move behind `ISquadGlobalRootResolver`; `SquadSourceLoader`, `SquadWorkerBaselineFile`, `CopilotMcpServerProbe` and `SquadOperatorChannelOverlayFile` are reached through interfaces, not as concrete classes |
 | `Squad/Rendering/SquadOperatorChannelOverlayFile.cs` | `SquadOperatorChannel` | b | split: the file read stays, the overlay rules move |
 | `Squad/SquadServiceCollectionExtensions.cs` | `SquadGlobalRoots` | c | none: it registers `ISquadGlobalRootResolver`, and the implementation moves |
 | `Update/CopilotPromptRefresher.cs` | `CopilotPromptFile` | b | split: the write stays, the embedded text and validation move |
