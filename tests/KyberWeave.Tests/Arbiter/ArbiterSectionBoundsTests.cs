@@ -6,6 +6,7 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Arbiter.Sections;
 using KyberWeave.Data.Review;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -19,23 +20,6 @@ public sealed class ArbiterSectionBoundsTests : IDisposable
     private readonly TempDirectory _temp = new();
 
     public void Dispose() => _temp.Dispose();
-
-    /// <summary>A provider that is never asked and answers nothing; the selector must fail safe on the size cap before any call.</summary>
-    private sealed class UnaskedProvider : IArbiterProvider
-    {
-        public int CallCount { get; private set; }
-
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            CallCount++;
-            return Task.FromResult(new ArbiterStep1BatchResult(
-                new Dictionary<string, string>(StringComparer.Ordinal), null, null, false));
-        }
-    }
 
     /// <summary>A heading past the scan bound is not a section: the split stops at the bound and marks its last section truncated.</summary>
     [Fact]
@@ -76,7 +60,7 @@ public sealed class ArbiterSectionBoundsTests : IDisposable
     {
         string path = Path.Combine(_temp.Path, "huge.md");
         await File.WriteAllTextAsync(path, "# Title\n" + new string('a', (int)SectionSelector.MaxDocumentBytes));
-        UnaskedProvider provider = new();
+        FakeArbiterProvider provider = new() { RequestSent = false, Model = null };
 
         SectionSelection selection = await SelectorFor().SelectAsync(path, "Change the install steps.", provider);
 
@@ -88,7 +72,7 @@ public sealed class ArbiterSectionBoundsTests : IDisposable
     [Fact]
     public async Task APathTheFileSystemCannotTakeFailsSafeWithoutAskingTheProvider()
     {
-        UnaskedProvider provider = new();
+        FakeArbiterProvider provider = new() { RequestSent = false, Model = null };
 
         SectionSelection selection = await SelectorFor()
             .SelectAsync(Path.Combine(_temp.Path, "bad\0name.md"), "Change the install steps.", provider);

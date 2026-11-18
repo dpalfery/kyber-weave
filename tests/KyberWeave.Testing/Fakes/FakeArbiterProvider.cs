@@ -28,8 +28,28 @@ internal sealed class FakeArbiterProvider : IArbiterProvider
     };
 
     /// <summary>A provider that answers every asked rule with <paramref name="answer"/> at <paramref name="confidence"/>.</summary>
-    internal static FakeArbiterProvider Answering(string answer, double confidence = 0.95) =>
-        new() { AnswerAsked = answer, Confidence = confidence };
+    internal static FakeArbiterProvider Answering(string answer, double confidence = 0.95, double? threshold = null) =>
+        new() { AnswerAsked = answer, Confidence = confidence, Threshold = threshold };
+
+    /// <summary>A provider that answers one named rule and leaves the rest unanswered.</summary>
+    /// <param name="ruleId">The rule it answers.</param>
+    /// <param name="answer">The answer it gives.</param>
+    /// <param name="confidence">The confidence it reports.</param>
+    /// <param name="requestSent">Whether the result reports that a request left the machine.</param>
+    /// <param name="fault">The exception to raise instead of answering, when the test models a provider failure.</param>
+    internal static FakeArbiterProvider AnsweringRule(
+        string ruleId,
+        string answer,
+        double confidence = 0.95,
+        bool requestSent = true,
+        Exception? fault = null) =>
+        new()
+        {
+            Answers = new Dictionary<string, string>(StringComparer.Ordinal) { [ruleId] = answer },
+            Confidence = confidence,
+            RequestSent = requestSent,
+            Fault = fault,
+        };
 
     /// <summary>A provider that raises <paramref name="fault"/> for every request.</summary>
     internal static FakeArbiterProvider Throwing(Exception fault) => new() { Fault = fault };

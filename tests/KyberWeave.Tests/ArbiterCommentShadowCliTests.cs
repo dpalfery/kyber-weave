@@ -9,6 +9,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -34,24 +35,6 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
     private readonly TempDirectory _temp = new();
 
     public void Dispose() => _temp.Dispose();
-
-    /// <summary>Answers every comment question with a confident nitpick.</summary>
-    private sealed class NitpickProvider : IArbiterProvider
-    {
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            Dictionary<string, string> answers = rules
-                .Where(rule => rule.Ask is not null && rule.Id == CommentTriageService.CommentRuleId)
-                .ToDictionary(rule => rule.Id, _ => "nitpick", StringComparer.Ordinal);
-            Dictionary<string, ArbiterStep1Score> scores = answers.Keys
-                .ToDictionary(id => id, _ => new ArbiterStep1Score(null, 0.95, 0.85), StringComparer.Ordinal);
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.14.0", null, true, scores));
-        }
-    }
 
     private void WriteCitedFile()
     {
@@ -82,7 +65,7 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
     public void Inline_InShadow_PrintsRealAndTheLineSayingWhatTheModelWouldHaveGiven()
     {
         WriteCitedFile();
-        ArbiterCommentCommand command = Command(new NitpickProvider());
+        ArbiterCommentCommand command = Command(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"));
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -116,7 +99,7 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
     {
         WriteCitedFile();
         WriteHostConfig("arbiter:\n  enabled: true\n  rules:\n    - id: KW-ARB-COMMENT-001\n      shadow: false\n");
-        ArbiterCommentCommand command = Command(new NitpickProvider());
+        ArbiterCommentCommand command = Command(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"));
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -133,7 +116,7 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
     {
         WriteCitedFile();
         WriteHostConfig("arbiter:\n  enabled: true\n  comment-triage:\n    bot-logins:\n      - " + BotLogin + "\n");
-        ArbiterCommentCommand command = Command(new NitpickProvider());
+        ArbiterCommentCommand command = Command(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"));
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -153,7 +136,7 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
         WriteHostConfig(
             "arbiter:\n  enabled: true\n  comment-triage:\n    bot-logins:\n      - " + BotLogin +
             "\n  rules:\n    - id: KW-ARB-COMMENT-001\n      shadow: false\n");
-        ArbiterCommentCommand command = Command(new NitpickProvider());
+        ArbiterCommentCommand command = Command(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"));
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,

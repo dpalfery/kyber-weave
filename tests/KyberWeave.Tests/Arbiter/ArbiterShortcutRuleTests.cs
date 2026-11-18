@@ -7,6 +7,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -66,37 +67,6 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     private string ArbiterDirectory => Path.Combine(_root, "artifacts", "arbiter");
 
     private static DateTimeOffset Now => new(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
-
-    /// <summary>
-    /// Answers every step-1 question with one answer and one confidence, and counts the calls so a test can
-    /// prove a question was never asked. <paramref name="requestSent"/> <c>false</c> models a provider failure.
-    /// </summary>
-    private sealed class ScriptedProvider(string answer, double confidence, bool requestSent = true) : IArbiterProvider
-    {
-        public int CallCount { get; private set; }
-
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            CallCount++;
-            if (!requestSent)
-            {
-                return Task.FromResult(new ArbiterStep1BatchResult(
-                    new Dictionary<string, string>(StringComparer.Ordinal), null, null, RequestSent: false));
-            }
-
-            Dictionary<string, string> answers = rules
-                .Where(rule => rule.Ask is not null)
-                .ToDictionary(rule => rule.Id, _ => answer, StringComparer.Ordinal);
-            Dictionary<string, ArbiterStep1Score> scores = rules
-                .Where(rule => rule.Ask is not null)
-                .ToDictionary(rule => rule.Id, _ => new ArbiterStep1Score(null, confidence, 0.9), StringComparer.Ordinal);
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.13.0", null, RequestSent: true, scores));
-        }
-    }
 
     /// <summary>
     /// Supplies the run's changed paths the way the git reader does, and nothing else. The docs-impact fact
@@ -345,7 +315,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     [Fact]
     public async Task AnEnforcedTrivialTriageAnswerDeniesTheInvestigatorDispatch()
     {
-        ScriptedProvider provider = new(Trivial, 0.95);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(Trivial, 0.95);
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
@@ -364,7 +334,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     [Fact]
     public async Task TheTriageDenyReasonCarriesTheSubstituteDigestForItsDecision()
     {
-        ScriptedProvider provider = new(Trivial, 0.95);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(Trivial, 0.95);
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
 
         await evaluator.EvaluateAsync(BugCrusherInvestigate(), ConfigWith([Enforced(TriageRule)]));
@@ -385,7 +355,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     [Fact]
     public async Task TheShadowTriageAnswerOnlyLogsWhatItWouldHaveDone()
     {
-        ScriptedProvider provider = new(Trivial, 0.95);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(Trivial, 0.95);
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
@@ -401,7 +371,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     [Fact]
     public async Task ATriageAnswerBelowTheFloorLeavesTheDispatchUnchanged()
     {
-        ScriptedProvider provider = new(Trivial, 0.8);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(Trivial, 0.8);
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
@@ -415,7 +385,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     [Fact]
     public async Task AProviderFailureLeavesTheTriageDispatchUnchanged()
     {
-        ScriptedProvider provider = new(Trivial, 0.95, requestSent: false);
+        FakeArbiterProvider provider = new() { RequestSent = false, Model = null };
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
@@ -429,7 +399,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     [Fact]
     public async Task ANeedsArchitectTriageAnswerKeepsTheDispatch()
     {
-        ScriptedProvider provider = new(NeedsArchitect, 0.95);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(NeedsArchitect, 0.95);
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
@@ -444,7 +414,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     [Fact]
     public async Task AnEnforcedIntakePlanAnswerIsAnsweredNotSpawned()
     {
-        ScriptedProvider provider = new(Plan, 0.95);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(Plan, 0.95);
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
@@ -457,7 +427,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     [Fact]
     public async Task TheIntakeAnswerCarriesTheIntakeRecommendationDigest()
     {
-        ScriptedProvider provider = new(Spec, 0.95);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(Spec, 0.95);
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
 
         await evaluator.EvaluateAsync(IntakePlanner(), ConfigWith([Enforced(IntakeRule)]));
@@ -479,7 +449,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     [Fact]
     public async Task TheShadowIntakeAnswerLeavesThePlannerDispatchUnchanged()
     {
-        ScriptedProvider provider = new(Plan, 0.95);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(Plan, 0.95);
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
@@ -492,7 +462,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     [Fact]
     public async Task AnIntakeAnswerBelowTheFloorLeavesThePlannerDispatchUnchanged()
     {
-        ScriptedProvider provider = new(Plan, 0.7);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(Plan, 0.7);
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
@@ -507,7 +477,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     [Fact]
     public async Task AnUntouchedDocsImpactAnsweredWithConfidenceIsAnswered()
     {
-        ScriptedProvider provider = new(NoDocChange, 0.95);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(NoDocChange, 0.95);
         ArbiterEvaluator evaluator = Evaluator(
             ArbiterDirectory, provider, new ChangedPathsGitFacts("src/Widget.cs"));
 
@@ -521,7 +491,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     [Fact]
     public async Task ATouchedDocsImpactKeepsTheDispatchWithoutAskingTheProvider()
     {
-        ScriptedProvider provider = new(NoDocChange, 0.95);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(NoDocChange, 0.95);
         ArbiterEvaluator evaluator = Evaluator(
             ArbiterDirectory, provider, new ChangedPathsGitFacts("docs/uploader.md"));
 
@@ -540,7 +510,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     [Fact]
     public async Task ADocsPathInTheRunsDiffSetsTheGovernedPathsFactAndKeepsTheDispatch()
     {
-        ScriptedProvider provider = new(NoDocChange, 0.95);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(NoDocChange, 0.95);
         ArbiterEvaluator evaluator = Evaluator(
             ArbiterDirectory, provider, new ChangedPathsGitFacts("src/Widget.cs", "docs/uploader.md"));
 
@@ -560,7 +530,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     [Fact]
     public async Task ANonDocsDiffSetsTheGovernedPathsFactFalseAndTheProviderCanAnswer()
     {
-        ScriptedProvider provider = new(NoDocChange, 0.95);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(NoDocChange, 0.95);
         ArbiterEvaluator evaluator = Evaluator(
             ArbiterDirectory, provider, new ChangedPathsGitFacts("src/Widget.cs", "tests/WidgetTests.cs"));
 
@@ -577,7 +547,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     [Fact]
     public async Task TheDocsImpactAnswerCarriesTheNoDocChangeDigest()
     {
-        ScriptedProvider provider = new(NoDocChange, 0.95);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(NoDocChange, 0.95);
         ArbiterEvaluator evaluator = Evaluator(
             ArbiterDirectory, provider, new ChangedPathsGitFacts("src/Widget.cs"));
 
@@ -605,7 +575,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     [Fact]
     public async Task AnAnsweredShortcutIsRecordedAsANotDispatchedDispatch()
     {
-        ScriptedProvider provider = new(Trivial, 0.95);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(Trivial, 0.95);
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
@@ -618,7 +588,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     [Fact]
     public async Task AShadowShortcutDoesNotMarkTheDispatchAsNotDispatched()
     {
-        ScriptedProvider provider = new(Trivial, 0.95);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(Trivial, 0.95);
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(

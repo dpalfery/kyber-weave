@@ -7,6 +7,7 @@ using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -43,33 +44,6 @@ public sealed class CommentTriageServiceTests : IDisposable
 
     private static DateTimeOffset Now => new(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
 
-    /// <summary>
-    /// Answers the comment question with one answer at one confidence. <paramref name="requestSent"/> <c>false</c>
-    /// models a provider that did not answer; <paramref name="throws"/> models a transport failure.
-    /// </summary>
-    private sealed class ScriptedCommentProvider(string answer, double confidence, bool requestSent = true, bool throws = false)
-        : IArbiterProvider
-    {
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            if (throws)
-            {
-                throw new HttpRequestException("provider unreachable");
-            }
-
-            Dictionary<string, string> answers = rules
-                .Where(rule => rule.Ask is not null && rule.Id == CommentRule)
-                .ToDictionary(rule => rule.Id, _ => answer, StringComparer.Ordinal);
-            Dictionary<string, ArbiterStep1Score> scores = answers.Keys
-                .ToDictionary(id => id, _ => new ArbiterStep1Score(null, confidence, 0.85), StringComparer.Ordinal);
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.14.0", null, requestSent, scores));
-        }
-    }
-
     private void WriteCitedFile()
     {
         string full = Path.Combine(Root, CitedPath);
@@ -97,7 +71,7 @@ public sealed class CommentTriageServiceTests : IDisposable
     {
         WriteCitedFile();
 
-        CommentTriageResult result = await Service(new ScriptedCommentProvider(Nitpick, 0.95))
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick))
             .ClassifyAsync(Request());
 
         Assert.Equal(Real, result.Class);
@@ -115,7 +89,7 @@ public sealed class CommentTriageServiceTests : IDisposable
     {
         WriteCitedFile();
 
-        CommentTriageResult result = await Service(new ScriptedCommentProvider(AlreadyFixed, 0.95))
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, AlreadyFixed))
             .ClassifyAsync(Request());
 
         Assert.Equal(Real, result.Class);
@@ -128,7 +102,7 @@ public sealed class CommentTriageServiceTests : IDisposable
     {
         WriteCitedFile();
 
-        CommentTriageResult result = await Service(new ScriptedCommentProvider(Real, 0.95))
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, Real))
             .ClassifyAsync(Request());
 
         Assert.Equal(Real, result.Class);
@@ -143,7 +117,7 @@ public sealed class CommentTriageServiceTests : IDisposable
     {
         WriteCitedFile();
 
-        CommentTriageResult result = await Service(new ScriptedCommentProvider(Nitpick, 0.6))
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick, 0.6))
             .ClassifyAsync(Request());
 
         Assert.Equal(Real, result.Class);
@@ -155,7 +129,7 @@ public sealed class CommentTriageServiceTests : IDisposable
     {
         WriteCitedFile();
 
-        CommentTriageResult result = await Service(new ScriptedCommentProvider(AlreadyFixed, 0.95, requestSent: false))
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, AlreadyFixed, requestSent: false))
             .ClassifyAsync(Request());
 
         Assert.Equal(Real, result.Class);
@@ -167,7 +141,7 @@ public sealed class CommentTriageServiceTests : IDisposable
     {
         WriteCitedFile();
 
-        CommentTriageResult result = await Service(new ScriptedCommentProvider(Nitpick, 0.95, throws: true))
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick, fault: new HttpRequestException("provider unreachable")))
             .ClassifyAsync(Request());
 
         Assert.Equal(Real, result.Class);
@@ -182,7 +156,7 @@ public sealed class CommentTriageServiceTests : IDisposable
     {
         Directory.CreateDirectory(Root);
 
-        CommentTriageResult result = await Service(new ScriptedCommentProvider(AlreadyFixed, 0.95))
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, AlreadyFixed))
             .ClassifyAsync(Request());
 
         Assert.Equal(Real, result.Class);
