@@ -13,11 +13,13 @@ namespace KyberWeave.Tests.Squad;
 /// </summary>
 public sealed class SquadDeploymentProbeSeamTests
 {
-    private const string Root = "/work";
-    private const string Home = "/home/dev";
+    private static readonly string Root = Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "work");
+    private static readonly string Home = Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "home", "dev");
+    private static readonly string InstalledReview = Path.Combine(
+        Path.GetPathRoot(Path.GetTempPath())!, "installed", "review", "SKILL.md");
 
     private readonly InMemoryFileSystem _files = new(caseSensitive: true);
-    private readonly FakeProcessEnvironment _environment = new();
+    private readonly FakeProcessEnvironment _environment = new(currentDirectory: Root);
 
     private FakePathResolver Paths => new(_files);
 
@@ -33,9 +35,23 @@ public sealed class SquadDeploymentProbeSeamTests
         new() { RootPath = root, Operation = SquadTargetOperation.Install };
 
     [Fact]
+    public void TheFakeCurrentDirectoryIsTheWorkspaceRootThePathSeamResolves()
+    {
+        // The path seam refuses an unqualified base directory, and the probes resolve their root against the
+        // fake's current directory. The two must name the same directory inside the virtual file system:
+        // '/kw/work' is drive-relative on Windows, so a default current directory there would make every
+        // probe that resolves a path throw before its assertions ran.
+        Assert.Equal(Root, _environment.CurrentDirectory);
+        Assert.True(
+            Path.IsPathFullyQualified(_environment.CurrentDirectory),
+            $"The path seam refuses the unqualified base directory '{_environment.CurrentDirectory}'.");
+        Assert.Equal(Path.GetFullPath(Root), Paths.GetFullPath(Root, _environment.CurrentDirectory));
+    }
+
+    [Fact]
     public void AHarnessMarkerDirectoryInTheRootSelectsThatTarget()
     {
-        _files.CreateDirectory("/work/.claude");
+        _files.CreateDirectory(Path.Combine(Root, ".claude"));
 
         SquadTargetResolutionDecision decision = Targets.Resolve(Install(Root));
 
@@ -47,8 +63,8 @@ public sealed class SquadDeploymentProbeSeamTests
     [Fact]
     public void AFileMarkerSelectsItsTargetEvenThoughItIsNotADirectory()
     {
-        _files.CreateDirectory("/work/.github");
-        _files.WriteAllText("/work/.github/copilot-instructions.md", "# rules");
+        _files.CreateDirectory(Path.Combine(Root, ".github"));
+        _files.WriteAllText(Path.Combine(Root, ".github", "copilot-instructions.md"), "# rules");
 
         SquadTargetResolutionDecision decision = Targets.Resolve(Install(Root));
 
@@ -84,29 +100,29 @@ public sealed class SquadDeploymentProbeSeamTests
     [Fact]
     public void AProjectSkillThatDiffersFromEveryInstalledCopyIsReported()
     {
-        InstallSkill("/installed/review/SKILL.md", "Be strict.");
+        InstallSkill(InstalledReview, "Be strict.");
         string projectPath = WriteProjectSkill("review", "Be kind.");
 
         IReadOnlyList<SquadSkillShadow> shadows = SkillShadowing.Find(
             Root,
-            [new SquadInstalledSkill("review", "/installed/review/SKILL.md")],
+            [new SquadInstalledSkill("review", InstalledReview)],
             new HashSet<string>(StringComparer.Ordinal));
 
         SquadSkillShadow shadow = Assert.Single(shadows);
         Assert.Equal("review", shadow.Name);
         Assert.Equal(projectPath, shadow.ProjectPath);
-        Assert.Equal("/installed/review/SKILL.md", shadow.InstalledPath);
+        Assert.Equal(InstalledReview, shadow.InstalledPath);
     }
 
     [Fact]
     public void AProjectCopyEqualToAnInstalledCopyIsNotReported()
     {
-        InstallSkill("/installed/review/SKILL.md", "Be kind.");
+        InstallSkill(InstalledReview, "Be kind.");
         WriteProjectSkill("review", "Be kind.");
 
         IReadOnlyList<SquadSkillShadow> shadows = SkillShadowing.Find(
             Root,
-            [new SquadInstalledSkill("review", "/installed/review/SKILL.md")],
+            [new SquadInstalledSkill("review", InstalledReview)],
             new HashSet<string>(StringComparer.Ordinal));
 
         Assert.Empty(shadows);
@@ -115,12 +131,12 @@ public sealed class SquadDeploymentProbeSeamTests
     [Fact]
     public void AProjectCopyTheDeploymentOwnsIsNeverReported()
     {
-        InstallSkill("/installed/review/SKILL.md", "Be strict.");
+        InstallSkill(InstalledReview, "Be strict.");
         string projectPath = WriteProjectSkill("review", "Be kind.");
 
         IReadOnlyList<SquadSkillShadow> shadows = SkillShadowing.Find(
             Root,
-            [new SquadInstalledSkill("review", "/installed/review/SKILL.md")],
+            [new SquadInstalledSkill("review", InstalledReview)],
             new HashSet<string>([projectPath], StringComparer.Ordinal));
 
         Assert.Empty(shadows);
@@ -129,12 +145,12 @@ public sealed class SquadDeploymentProbeSeamTests
     [Fact]
     public void AProjectCopyOfAnotherSkillNameIsNotReported()
     {
-        InstallSkill("/installed/review/SKILL.md", "Be strict.");
+        InstallSkill(InstalledReview, "Be strict.");
         WriteProjectSkill("builder", "Be strict.");
 
         IReadOnlyList<SquadSkillShadow> shadows = SkillShadowing.Find(
             Root,
-            [new SquadInstalledSkill("review", "/installed/review/SKILL.md")],
+            [new SquadInstalledSkill("review", InstalledReview)],
             new HashSet<string>(StringComparer.Ordinal));
 
         Assert.Empty(shadows);
@@ -143,8 +159,8 @@ public sealed class SquadDeploymentProbeSeamTests
     [Fact]
     public void SettingsHooksWithoutAHooksFileDropTheFactoryBlockAndRecordWhy()
     {
-        _files.CreateDirectory("/work/.factory");
-        _files.WriteAllText("/work/.factory/settings.json", "{\"hooks\":{}}");
+        _files.CreateDirectory(Path.Combine(Root, ".factory"));
+        _files.WriteAllText(Path.Combine(Root, ".factory", "settings.json"), "{\"hooks\":{}}");
 
         FactoryHooksShadowingOutcome outcome = HooksShadowing.Resolve(
             Root,
@@ -162,9 +178,9 @@ public sealed class SquadDeploymentProbeSeamTests
     [Fact]
     public void AHooksFileLeavesTheFactoryBlockInPlace()
     {
-        _files.CreateDirectory("/work/.factory");
-        _files.WriteAllText("/work/.factory/settings.json", "{\"hooks\":{}}");
-        _files.WriteAllText("/work/.factory/hooks.json", "{}");
+        _files.CreateDirectory(Path.Combine(Root, ".factory"));
+        _files.WriteAllText(Path.Combine(Root, ".factory", "settings.json"), "{\"hooks\":{}}");
+        _files.WriteAllText(Path.Combine(Root, ".factory", "hooks.json"), "{}");
 
         FactoryHooksShadowingOutcome outcome = HooksShadowing.Resolve(
             Root,
@@ -180,8 +196,8 @@ public sealed class SquadDeploymentProbeSeamTests
     [Fact]
     public void SettingsThatDoNotParseAlsoDropTheFactoryBlock()
     {
-        _files.CreateDirectory("/work/.factory");
-        _files.WriteAllText("/work/.factory/settings.json", "{ not json");
+        _files.CreateDirectory(Path.Combine(Root, ".factory"));
+        _files.WriteAllText(Path.Combine(Root, ".factory", "settings.json"), "{ not json");
 
         FactoryHooksShadowingOutcome outcome = HooksShadowing.Resolve(
             Root,
@@ -197,8 +213,8 @@ public sealed class SquadDeploymentProbeSeamTests
     [Fact]
     public void ADisabledArbiterLeavesTheFactoryBlockAloneWhateverTheFilesSay()
     {
-        _files.CreateDirectory("/work/.factory");
-        _files.WriteAllText("/work/.factory/settings.json", "{\"hooks\":{}}");
+        _files.CreateDirectory(Path.Combine(Root, ".factory"));
+        _files.WriteAllText(Path.Combine(Root, ".factory", "settings.json"), "{\"hooks\":{}}");
 
         FactoryHooksShadowingOutcome outcome = HooksShadowing.Resolve(
             Root,
