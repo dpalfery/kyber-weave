@@ -1,10 +1,13 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Review;
 
 namespace KyberWeave.Data.Review;
 
 /// <summary>Lists the <c>.cs</c> files under a repository root and reads the namespace they declare.</summary>
-public sealed class FileTestClassSources : ITestClassSources
+/// <param name="files">Answers every existence, listing, link and read question.</param>
+/// <param name="environment">Names the working directory and the program's own directory.</param>
+public sealed class FileTestClassSources(IFileSystem files, IProcessEnvironment environment) : ITestClassSources
 {
     private const string SourceExtension = ".cs";
 
@@ -12,13 +15,13 @@ public sealed class FileTestClassSources : ITestClassSources
     public TestSourceTree? Open(string? root)
     {
         string candidateRoot = root ?? DefaultRepositoryRoot();
-        if (string.IsNullOrWhiteSpace(candidateRoot) || !Directory.Exists(candidateRoot))
+        if (string.IsNullOrWhiteSpace(candidateRoot) || !files.DirectoryExists(candidateRoot))
             return null;
 
         string repository;
         try
         {
-            _ = Directory.EnumerateFileSystemEntries(candidateRoot).FirstOrDefault();
+            _ = files.EnumerateEntries(candidateRoot).FirstOrDefault();
             repository = Path.GetFullPath(candidateRoot);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
@@ -39,7 +42,7 @@ public sealed class FileTestClassSources : ITestClassSources
     {
         try
         {
-            return TestClassPlanning.DeclaredNamespaceOf(File.ReadLines(filePath));
+            return TestClassPlanning.DeclaredNamespaceOf(files.ReadLines(filePath));
         }
         catch (IOException)
         {
@@ -60,10 +63,10 @@ public sealed class FileTestClassSources : ITestClassSources
     /// still resolves against the tree it runs in. A process started outside any repository resolves nothing,
     /// which skips the gate rather than running an empty filter.
     /// </remarks>
-    internal static string DefaultRepositoryRoot()
+    private string DefaultRepositoryRoot()
     {
-        string workingDirectory = Directory.GetCurrentDirectory();
-        foreach (string start in new[] { workingDirectory, AppContext.BaseDirectory })
+        string workingDirectory = environment.CurrentDirectory;
+        foreach (string start in new[] { workingDirectory, environment.ApplicationBaseDirectory })
         {
             if (NearestRepositoryRoot(start) is { } found)
                 return found;
@@ -72,20 +75,20 @@ public sealed class FileTestClassSources : ITestClassSources
         return workingDirectory;
     }
 
-    private static string? NearestRepositoryRoot(string start)
+    private string? NearestRepositoryRoot(string start)
     {
-        DirectoryInfo? current = new(Path.GetFullPath(start));
+        string? current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(start));
         while (current is not null)
         {
             // A worktree carries .git as a file and a checkout carries it as a directory.
-            if (File.Exists(Path.Combine(current.FullName, ".git")) ||
-                Directory.Exists(Path.Combine(current.FullName, ".git")) ||
-                Directory.Exists(Path.Combine(current.FullName, ".kyber-weave")))
+            if (files.FileExists(Path.Combine(current, ".git")) ||
+                files.DirectoryExists(Path.Combine(current, ".git")) ||
+                files.DirectoryExists(Path.Combine(current, ".kyber-weave")))
             {
-                return current.FullName;
+                return current;
             }
 
-            current = current.Parent;
+            current = Path.GetDirectoryName(current);
         }
 
         return null;
@@ -96,43 +99,50 @@ public sealed class FileTestClassSources : ITestClassSources
     /// One walk serves every lookup, and the first file found for a name wins, so a class declared in a file
     /// of the same name resolves the same way on every run.
     /// </remarks>
-    private static Dictionary<string, string> SourceFilesByName(string root)
+    private Dictionary<string, string> SourceFilesByName(string root)
     {
         Dictionary<string, string> byName = new(StringComparer.Ordinal);
-        EnumerationOptions options = new()
-        {
-            RecurseSubdirectories = false,
-            AttributesToSkip = 0,
-            IgnoreInaccessible = true
-        };
-
         Stack<string> pending = new();
         pending.Push(root);
         while (pending.Count > 0)
         {
             string directory = pending.Pop();
-            foreach (FileSystemInfo entry in new DirectoryInfo(directory).EnumerateFileSystemInfos("*", options))
+            foreach (FileSystemEntry entry in ListEntries(directory))
             {
-                // A symbolic link is never followed: it can lead outside the repository, and the file
+                // A link is never followed: it can lead outside the repository, and the file
                 // behind it is not this repository's source.
-                if (entry.LinkTarget is not null)
+                if (entry.IsLink)
                     continue;
 
-                if (entry is DirectoryInfo child)
+                string name = Path.GetFileName(entry.Path);
+                if (entry.IsDirectory)
                 {
-                    if (!TestClassPlanning.GeneratedDirectories.Contains(child.Name, StringComparer.OrdinalIgnoreCase))
-                        pending.Push(child.FullName);
+                    if (!TestClassPlanning.GeneratedDirectories.Contains(name, StringComparer.OrdinalIgnoreCase))
+                        pending.Push(entry.Path);
 
                     continue;
                 }
 
-                if (!entry.Name.EndsWith(SourceExtension, StringComparison.Ordinal))
+                if (!name.EndsWith(SourceExtension, StringComparison.Ordinal))
                     continue;
 
-                byName.TryAdd(entry.Name[..^SourceExtension.Length], entry.FullName);
+                byName.TryAdd(name[..^SourceExtension.Length], entry.Path);
             }
         }
 
         return byName;
+    }
+
+    /// <summary>A directory's immediate entries, or none when it cannot be listed, so one locked folder does not stop the walk.</summary>
+    private IReadOnlyList<FileSystemEntry> ListEntries(string directory)
+    {
+        try
+        {
+            return files.EnumerateEntries(directory).ToArray();
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            return [];
+        }
     }
 }

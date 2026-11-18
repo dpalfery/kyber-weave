@@ -14,6 +14,7 @@ public sealed class FakeProcessEnvironmentContractTests : ProcessEnvironmentCont
     /// <inheritdoc />
     protected override IProcessEnvironment CreateEnvironment() => new FakeProcessEnvironment(
         currentDirectory: "/fake/work",
+        applicationBaseDirectory: "/fake/app",
         homeDirectory: "/fake/home",
         tempDirectory: "/fake/temp",
         userName: "fake-user",
@@ -26,6 +27,7 @@ public sealed class FakeProcessEnvironmentContractTests : ProcessEnvironmentCont
     /// <inheritdoc />
     protected override ProcessEnvironmentFacts Facts => new(
         CurrentDirectory: "/fake/work",
+        ApplicationBaseDirectory: "/fake/app",
         HomeDirectory: "/fake/home",
         TempDirectory: "/fake/temp",
         UserName: "fake-user",

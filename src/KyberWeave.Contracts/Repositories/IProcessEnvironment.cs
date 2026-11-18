@@ -10,6 +10,9 @@ public interface IProcessEnvironment
     /// <summary>Gets the directory the process was started in.</summary>
     string CurrentDirectory { get; }
 
+    /// <summary>Gets the directory the application's own files are in, which is where the running program was loaded from.</summary>
+    string ApplicationBaseDirectory { get; }
+
     /// <summary>Gets the operator's home directory, or an empty string when the platform reports none.</summary>
     string HomeDirectory { get; }
 

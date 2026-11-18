@@ -15,6 +15,7 @@ public sealed class FakeProcessEnvironment : IProcessEnvironment
     /// <summary>Creates a fake over the values given, and the defaults for the rest.</summary>
     /// <param name="currentDirectory">The directory the process is said to have started in.</param>
     /// <param name="homeDirectory">The operator's home directory.</param>
+    /// <param name="applicationBaseDirectory">The directory the application's own files are in.</param>
     /// <param name="tempDirectory">The temporary directory.</param>
     /// <param name="userName">The user running the process.</param>
     /// <param name="machineName">The machine running the process.</param>
@@ -31,14 +32,17 @@ public sealed class FakeProcessEnvironment : IProcessEnvironment
         OperatingSystemKind operatingSystem = OperatingSystemKind.Unknown,
         bool isFileSystemCaseInsensitive = false,
         bool isInputRedirected = true,
-        Func<string, string?>? readVariable = null)
+        Func<string, string?>? readVariable = null,
+        string applicationBaseDirectory = "/kw/app")
     {
         ArgumentNullException.ThrowIfNull(currentDirectory);
         ArgumentNullException.ThrowIfNull(homeDirectory);
         ArgumentNullException.ThrowIfNull(tempDirectory);
+        ArgumentNullException.ThrowIfNull(applicationBaseDirectory);
         ArgumentNullException.ThrowIfNull(userName);
         ArgumentNullException.ThrowIfNull(machineName);
         CurrentDirectory = currentDirectory;
+        ApplicationBaseDirectory = applicationBaseDirectory;
         _homeDirectory = () => homeDirectory;
         TempDirectory = tempDirectory;
         UserName = userName;
@@ -57,6 +61,7 @@ public sealed class FakeProcessEnvironment : IProcessEnvironment
         ArgumentNullException.ThrowIfNull(homeDirectory);
         _homeDirectory = homeDirectory;
         CurrentDirectory = "/kw/work";
+        ApplicationBaseDirectory = "/kw/app";
         TempDirectory = "/kw/temp";
         UserName = "kw-user";
         MachineName = "kw-machine";
@@ -68,6 +73,9 @@ public sealed class FakeProcessEnvironment : IProcessEnvironment
 
     /// <inheritdoc />
     public string CurrentDirectory { get; }
+
+    /// <inheritdoc />
+    public string ApplicationBaseDirectory { get; }
 
     /// <inheritdoc />
     public string HomeDirectory => _homeDirectory();

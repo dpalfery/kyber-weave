@@ -326,7 +326,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `FileReviewDecisionCacheStore` (`Review/FileReviewDecisionCacheStore.cs`) | file system, paths | 4.4 |
 | `FileReviewEvidenceStore` (`Review/FileReviewEvidenceStore.cs`) | file system | 4.4 |
 | `FileSeatFolder` (`Review/FileSeatFolder.cs`) | file system | 4.4 |
-| `FileTestClassSources` (`Review/FileTestClassSources.cs`) | file system, paths | 4.4 |
 | `ZipSkillArchiveWriter` (`Skills/ZipSkillArchiveWriter.cs`) | file system | 4.4 |
 | `DevinImportOverlap` (`Squad/Deployment/DevinImportOverlap.cs`) | file system, paths | 3.5 |
 | `FactoryHooksShadowing` (`Squad/Deployment/FactoryHooksShadowing.cs`) | file system | 3.5 |
