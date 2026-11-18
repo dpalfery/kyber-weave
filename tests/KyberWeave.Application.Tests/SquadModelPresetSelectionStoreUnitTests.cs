@@ -12,17 +12,18 @@ namespace KyberWeave.Tests.Squad;
 /// </summary>
 public sealed class SquadModelPresetSelectionStoreUnitTests
 {
-    private const string Home = "/home/dev";
-    private const string Project = "/work/project";
-
     private readonly InMemoryFileSystem _files = new(caseSensitive: true);
+    private readonly string _home;
+    private readonly string _project;
     private readonly SquadModelPresetSelectionStore _store;
 
     public SquadModelPresetSelectionStoreUnitTests()
     {
-        _files.CreateDirectory(Project);
+        _home = Path.Combine(_files.Root, "home", "dev");
+        _project = Path.Combine(_files.Root, "work", "project");
+        _files.CreateDirectory(_project);
         _store = new SquadModelPresetSelectionStore(
-            new FakeSquadUserPaths("/home/data", Home),
+            new FakeSquadUserPaths(Path.Combine(_files.Root, "home", "data"), _home),
             _files,
             new SquadFileSystemPathSemantics(new FakePathResolver(_files)));
     }
@@ -30,19 +31,19 @@ public sealed class SquadModelPresetSelectionStoreUnitTests
     [Fact]
     public void ReadReturnsNullWhenNoSelectionWasStored()
     {
-        Assert.Null(_store.Read(Project));
+        Assert.Null(_store.Read(_project));
     }
 
     [Fact]
     public void SetThenReadRoundTripsThePresetUnderTheHomeSelectionsDirectory()
     {
-        _store.Set(Project, SquadTarget.Claude, "zai");
+        _store.Set(_project, SquadTarget.Claude, "zai");
 
-        SquadModelPresetSelection? selection = _store.Read(Project);
+        SquadModelPresetSelection? selection = _store.Read(_project);
 
         Assert.NotNull(selection);
         Assert.Equal("zai", selection.ModelPresets[SquadTarget.Claude]);
-        string selectionsDirectory = Path.Combine(Home, ".kyber-weave", "squad", "selections");
+        string selectionsDirectory = Path.Combine(_home, ".kyber-weave", "squad", "selections");
         string file = Assert.Single(_files.EnumerateFiles(selectionsDirectory, "*.yml", recursive: false));
         Assert.StartsWith(selectionsDirectory, file, StringComparison.Ordinal);
     }
@@ -50,33 +51,33 @@ public sealed class SquadModelPresetSelectionStoreUnitTests
     [Fact]
     public void SetLeavesNoTemporaryFileBehind()
     {
-        _store.Set(Project, SquadTarget.Claude, "zai");
+        _store.Set(_project, SquadTarget.Claude, "zai");
 
-        string selectionsDirectory = Path.Combine(Home, ".kyber-weave", "squad", "selections");
+        string selectionsDirectory = Path.Combine(_home, ".kyber-weave", "squad", "selections");
         Assert.Empty(_files.EnumerateFiles(selectionsDirectory, "*.tmp", recursive: false));
     }
 
     [Fact]
     public void ClearOfTheLastTargetDeletesTheSelectionFile()
     {
-        _store.Set(Project, SquadTarget.Claude, "zai");
+        _store.Set(_project, SquadTarget.Claude, "zai");
 
-        _store.Clear(Project, SquadTarget.Claude);
+        _store.Clear(_project, SquadTarget.Claude);
 
-        Assert.Null(_store.Read(Project));
-        string selectionsDirectory = Path.Combine(Home, ".kyber-weave", "squad", "selections");
+        Assert.Null(_store.Read(_project));
+        string selectionsDirectory = Path.Combine(_home, ".kyber-weave", "squad", "selections");
         Assert.Empty(_files.EnumerateFiles(selectionsDirectory, "*.yml", recursive: false));
     }
 
     [Fact]
     public void ClearOfOneTargetKeepsTheOthers()
     {
-        _store.Set(Project, SquadTarget.Claude, "zai");
-        _store.Set(Project, SquadTarget.Codex, "fast");
+        _store.Set(_project, SquadTarget.Claude, "zai");
+        _store.Set(_project, SquadTarget.Codex, "fast");
 
-        _store.Clear(Project, SquadTarget.Claude);
+        _store.Clear(_project, SquadTarget.Claude);
 
-        SquadModelPresetSelection? selection = _store.Read(Project);
+        SquadModelPresetSelection? selection = _store.Read(_project);
         Assert.NotNull(selection);
         Assert.Single(selection.ModelPresets);
         Assert.Equal("fast", selection.ModelPresets[SquadTarget.Codex]);
@@ -85,28 +86,28 @@ public sealed class SquadModelPresetSelectionStoreUnitTests
     [Fact]
     public void ClearOfTheProjectDeletesEverySelection()
     {
-        _store.Set(Project, SquadTarget.Claude, "zai");
-        _store.Set(Project, SquadTarget.Codex, "fast");
+        _store.Set(_project, SquadTarget.Claude, "zai");
+        _store.Set(_project, SquadTarget.Codex, "fast");
 
-        _store.Clear(Project);
+        _store.Clear(_project);
 
-        Assert.Null(_store.Read(Project));
+        Assert.Null(_store.Read(_project));
     }
 
     [Fact]
     public void ReadRejectsAnInvalidSelectionFile()
     {
-        _store.Set(Project, SquadTarget.Claude, "zai");
-        string selectionsDirectory = Path.Combine(Home, ".kyber-weave", "squad", "selections");
+        _store.Set(_project, SquadTarget.Claude, "zai");
+        string selectionsDirectory = Path.Combine(_home, ".kyber-weave", "squad", "selections");
         string file = Assert.Single(_files.EnumerateFiles(selectionsDirectory, "*.yml", recursive: false));
         _files.WriteAllText(file, "schema: [unterminated");
 
-        Assert.Throws<InvalidDataException>(() => _store.Read(Project));
+        Assert.Throws<InvalidDataException>(() => _store.Read(_project));
     }
 
     [Fact]
     public void SetRejectsAPresetNameThatIsNotAToken()
     {
-        Assert.Throws<ArgumentException>(() => _store.Set(Project, SquadTarget.Claude, "Not A Token"));
+        Assert.Throws<ArgumentException>(() => _store.Set(_project, SquadTarget.Claude, "Not A Token"));
     }
 }
