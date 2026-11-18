@@ -298,6 +298,12 @@ two classes carries two routes.
   raw-I/O adapter in place and the part that computes moves to `Application`. A split is the right
   route when the file already talks to a resource: requirement 3.1 leaves the adapter no decisions, so
   the adapter returns the raw value and the logic lives one layer up.
+  The two halves meet through a `Contracts` interface, never by naming each other's class: the adapter
+  implements the interface its callers already take — all but five of the 35 split rows do — and the
+  `Application` service takes that interface by injection, because `Data` cannot reference `Application`
+  and `Application` may not name a concrete `Data` class (requirement 1.1). The five that gain one in
+  step 0b are `DocGraphExporter`, `CopilotMcpServerProbe`, `SquadOperatorChannelOverlayFile`,
+  `CopilotPromptRefresher` and `GitHubReleaseClient`.
   A `move` row whose file calls a resource directly is not moved as it stands: its seam conversion
   lands first, in its own commit (rule 2), so `move` means "move once the class calls no resource
   directly". `PlanRootResolver` is the case in point: it calls `Directory.Exists`, `File.Exists`,
