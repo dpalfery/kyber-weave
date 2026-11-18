@@ -321,7 +321,7 @@ internal sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings
             // A recovery under this deployment's lease can refuse the stale plan, or fail and name the journal. Both
             // are this command's ordinary error output, not an unhandled exception.
             _output.WriteTransactionWarnings(transaction.Warnings);
-            _output.WriteClientInputError(failure.Message);
+            _output.WriteFailure(failure);
             return 1;
         }
 

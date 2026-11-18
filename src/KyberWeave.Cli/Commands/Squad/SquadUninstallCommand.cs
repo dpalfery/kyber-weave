@@ -238,7 +238,7 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         }
         catch (Exception ex)
         {
-            _output.Ansi.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(ex.Message)}[/]");
+            _output.WriteFailure(ex);
             return 1;
         }
     }

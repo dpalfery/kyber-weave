@@ -62,6 +62,31 @@ public sealed class SquadLifecycleRecoveryNoticeTests
         Assert.Contains("The render failed.", refused.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task AFailureOfAFileKindAfterRecoveringKeepsItsTypeAndCarriesTheNoticeBesideIt()
+    {
+        (string root, FakeSquadReleaseSource release) = await InstalledAsync();
+        await LeaveAnUpdateInterruptedAsync(root);
+        IOException diskFull = new("The disk is full.");
+        SquadLifecycleService failing = SquadTestCommands.InMemoryLifecycle(
+            _state,
+            release,
+            FakeSquadRenderer.Responding(_ => throw diskFull));
+
+        IOException refused = await Assert.ThrowsAsync<IOException>(() =>
+            failing.UpdateAsync(new SquadUpdateRequest(
+                root,
+                SquadDeploymentScope.Project,
+                [SquadTarget.Codex],
+                Version: "1.2.4")));
+
+        Assert.Same(diskFull, refused);
+        Assert.Contains(
+            "Recovered an unfinished Squad transaction",
+            string.Join(" ", SquadLifecycleService.RecoveryNotices(refused)),
+            StringComparison.Ordinal);
+    }
+
     private async Task<(string Root, FakeSquadReleaseSource Release)> InstalledAsync()
     {
         string root = _state.CreateRoot("recovery-notice");

@@ -204,6 +204,24 @@ public sealed class SquadPresetCommandsTests
     }
 
     [Fact]
+    public void Use_AFailureThatCarriesRecoveryNoticesBesideItsType_PrintsThem()
+    {
+        ArrangeDeployedWorker();
+        InvalidOperationException diskFull = new("The disk is full.");
+        diskFull.Data[SquadLifecycleService.RecoveryNoticesDataKey] = new[] { RecoveryNotice };
+        StubTransactions transactions = new() { Failure = diskFull };
+
+        int exit = Use(transactions).Execute(
+            null!,
+            new SquadPresetUseSettings { Name = "alpha", Targets = ["codex"] },
+            CancellationToken.None);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("warning: " + RecoveryNotice + "\n", Output(), StringComparison.Ordinal);
+        Assert.Contains("kyber-weave squad: error: The disk is full.\n", Output(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Use_AJournalThatCannotBeRecovered_ReportsItInsteadOfLettingTheExceptionEscape()
     {
         ArrangeDeployedWorker();

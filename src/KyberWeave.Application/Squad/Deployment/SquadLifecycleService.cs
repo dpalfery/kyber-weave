@@ -434,10 +434,33 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
     }
 
     /// <summary>
-    ///     Carries the notices recovery raised into a failure that happens afterwards, so an operator whose command
-    ///     failed still learns that an interrupted transaction was finished first. A failure a caller distinguishes by
-    ///     type keeps it; any other is wrapped, as the recovery failure above already is.
+    ///     The key under which a failure carries the notices recovery raised, when the failure's own type is one the
+    ///     lifecycle does not build and must not replace.
     /// </summary>
+    public const string RecoveryNoticesDataKey = "kyber-squad.recovery-notices";
+
+    /// <summary>
+    ///     The notices recovery raised that travel beside a failure rather than in its message, so a command that
+    ///     reports the failure can print them.
+    /// </summary>
+    /// <param name="failure">The failure a command caught.</param>
+    /// <returns>The notices; empty when the failure carries none.</returns>
+    public static IReadOnlyList<string> RecoveryNotices(Exception failure)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+        return failure.Data[RecoveryNoticesDataKey] as IReadOnlyList<string> ?? [];
+    }
+
+    /// <summary>
+    ///     Carries the notices recovery raised into a failure that happens afterwards, so an operator whose command
+    ///     failed still learns that an interrupted transaction was finished first.
+    /// </summary>
+    /// <remarks>
+    ///     A failure the lifecycle builds keeps its own type and gains the notice in its message. Any other failure —
+    ///     a file-system error, say — is rethrown unchanged, because a caller that catches <see cref="IOException" />
+    ///     or asks <c>FileFailure.Is</c> must still see the type it knows; the notices travel in
+    ///     <see cref="Exception.Data" /> for the command that prints them.
+    /// </remarks>
     /// <param name="cause">The failure.</param>
     /// <param name="recovery">The notices recovery raised; empty when nothing was recovered.</param>
     /// <returns>The failure to throw.</returns>
@@ -447,12 +470,18 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             return cause;
 
         string message = $"{cause.Message} {string.Join(" ", recovery)}";
-        return cause switch
+        switch (cause)
         {
-            SquadDeploymentConflictException => new SquadDeploymentConflictException(message, cause),
-            SquadRenderValidationException => new SquadRenderValidationException(message, cause),
-            _ => new InvalidOperationException(message, cause)
-        };
+            case SquadDeploymentConflictException:
+                return new SquadDeploymentConflictException(message, cause);
+            case SquadRenderValidationException:
+                return new SquadRenderValidationException(message, cause);
+            case InvalidOperationException:
+                return new InvalidOperationException(message, cause);
+            default:
+                cause.Data[RecoveryNoticesDataKey] = recovery;
+                return cause;
+        }
     }
 
     private static IReadOnlyList<SquadTarget> MergeAddedTargets(SquadInstallRequest request, SquadReceipt? existing)
