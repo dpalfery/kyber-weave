@@ -120,7 +120,13 @@ internal static class DocsTestCommands
     public static DocsRootRegistry Registry(string root, Func<string, DocsTools> factory)
     {
         IServiceProvider provider = Services();
-        return new DocsRootRegistry(root, factory, provider.GetRequiredService<IGitWorktreeIdentity>(), provider.GetRequiredService<IFileSystem>());
+        return new DocsRootRegistry(
+            root,
+            factory,
+            provider.GetRequiredService<IGitWorktreeIdentity>(),
+            provider.GetRequiredService<IFileSystem>(),
+            provider.GetRequiredService<IPathResolver>(),
+            provider.GetRequiredService<IProcessEnvironment>());
     }
 
     public static IPacketHostFacts HostFacts => Services().GetRequiredService<IPacketHostFacts>();

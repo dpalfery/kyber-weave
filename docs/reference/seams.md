@@ -405,8 +405,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `DocsRootRegistry` (`DocsRootRegistry.cs`) | paths, console | 4.6 |
-| `DocsTools` (`DocsTools.cs`) | paths | 4.6 |
 | `RepositoryRootResolver` (`RepositoryRootResolver.cs`) | paths | 4.6 |
 
 ## Gaps in the task list

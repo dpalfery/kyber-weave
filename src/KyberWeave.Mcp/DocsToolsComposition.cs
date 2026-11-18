@@ -60,7 +60,7 @@ internal static class DocsToolsComposition
 
         // A tool constructor parameter has to be a service the container resolves: the SDK builds each tool type from
         // the container on every call, so a bare root string would make every tool call fail.
-        services.AddSingleton(new DocsHostRoot(Path.GetFullPath(repositoryRoot)));
+        services.AddSingleton(provider => HostRoot(provider, repositoryRoot));
 
         // The refresh schedule is a process-wide decision, made once from this process's own argv. The
         // tools receive it by injection so a test that asks them directly gets the default cadence.
@@ -96,6 +96,16 @@ internal static class DocsToolsComposition
         // tools of their own, built on demand and kept in a small least-recently-used set.
         services.AddSingleton(provider => DocsRootRegistry.ForRepository(repositoryRoot, codeGraphRefreshEnabled, provider));
         return services;
+    }
+
+    /// <summary>The root the tools answer for, as a full path resolved against the process working directory.</summary>
+    /// <param name="provider">The container the path and environment seams are resolved from.</param>
+    /// <param name="repositoryRoot">The checkout root, as the caller spelled it.</param>
+    public static DocsHostRoot HostRoot(IServiceProvider provider, string repositoryRoot)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        return new DocsHostRoot(provider.GetRequiredService<IPathResolver>()
+            .GetFullPath(repositoryRoot, provider.GetRequiredService<IProcessEnvironment>().CurrentDirectory));
     }
 
     /// <summary>The CodeGraph refresh schedule over <paramref name="repositoryRoot"/>, built from the ports of <paramref name="provider"/>.</summary>
@@ -206,7 +216,7 @@ internal static class DocsToolsComposition
             },
             Prompts(provider, host),
             hostConfiguration,
-            new DocsHostRoot(host.RepositoryRoot),
+            HostRoot(provider, host.RepositoryRoot),
             roots);
     }
 }
