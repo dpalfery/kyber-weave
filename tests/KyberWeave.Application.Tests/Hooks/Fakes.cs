@@ -37,7 +37,10 @@ internal sealed class FakeFileSystem : IFileSystem
 
     public bool DirectoryExists(string path) => directories.Contains(path);
 
-    public string ReadAllText(string path) => unreadable.Contains(path) ? throw new UnauthorizedAccessException(path) : files[path];
+    public string ReadAllText(string path) =>
+        unreadable.Contains(path) ? throw new UnauthorizedAccessException(path)
+        : files.TryGetValue(path, out string? content) ? content
+        : throw new FileNotFoundException($"The fake has no file at '{path}'.", path);
 
     public byte[] ReadAllBytes(string path) => System.Text.Encoding.UTF8.GetBytes(ReadAllText(path));
 

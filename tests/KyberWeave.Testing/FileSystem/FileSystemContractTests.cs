@@ -143,6 +143,19 @@ public abstract class FileSystemContractTests : IDisposable
     }
 
     [Fact]
+    public void ReadsOfAMissingFileFailAsDocumented()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string missing = At(root, "absent.txt");
+
+        _ = Assert.Throws<FileNotFoundException>(() => files.ReadAllText(missing));
+        _ = Assert.Throws<FileNotFoundException>(() => files.ReadAllBytes(missing));
+        _ = Assert.Throws<FileNotFoundException>(() => files.OpenRead(missing));
+        _ = Assert.Throws<FileNotFoundException>(() => files.GetLength(missing));
+        _ = Assert.Throws<FileNotFoundException>(() => files.GetAttributes(missing));
+    }
+
+    [Fact]
     public void ReadAllTextReturnsWhatWasWritten()
     {
         IWritableFileSystem files = Starting(out string root);
