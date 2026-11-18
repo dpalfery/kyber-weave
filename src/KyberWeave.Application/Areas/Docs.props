@@ -13,6 +13,106 @@
     <ShippedPullRequestDescription Include="$(MSBuildProjectDirectory)\Docs\Delivery\Resources\pull-request-description.md" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!--
+      The standards templates KyberStandardsTemplates reads. A reader resolves its resources
+      through typeof(KyberStandardsTemplates).Assembly, so the templates travel with the type
+      that reads them.
+
+      The logical names are the ones KyberStandardsTemplates asks for. They moved here with the
+      class from KyberWeave.Domain in task 2.5.19.
+    -->
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\azure\azure.standards.md" LogicalName="Standards.azure.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\azure\azure.rules.md" LogicalName="Standards.azure.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\azure\azure.skills.md" LogicalName="Standards.azure.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\azure\azure.arbiter-rules.yml" LogicalName="Standards.azure.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\csharp\csharp.standards.md" LogicalName="Standards.csharp.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\csharp\csharp.rules.md" LogicalName="Standards.csharp.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\csharp\csharp.skills.md" LogicalName="Standards.csharp.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\csharp\csharp.arbiter-rules.yml" LogicalName="Standards.csharp.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\data-access-layer\data-access-layer.standards.md" LogicalName="Standards.data-access-layer.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\data-access-layer\data-access-layer.rules.md" LogicalName="Standards.data-access-layer.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\data-access-layer\data-access-layer.skills.md" LogicalName="Standards.data-access-layer.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\data-access-layer\data-access-layer.arbiter-rules.yml" LogicalName="Standards.data-access-layer.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\github-actions\github-actions.standards.md" LogicalName="Standards.github-actions.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\github-actions\github-actions.rules.md" LogicalName="Standards.github-actions.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\github-actions\github-actions.skills.md" LogicalName="Standards.github-actions.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\github-actions\github-actions.arbiter-rules.yml" LogicalName="Standards.github-actions.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\go\go.standards.md" LogicalName="Standards.go.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\go\go.rules.md" LogicalName="Standards.go.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\go\go.skills.md" LogicalName="Standards.go.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\go\go.arbiter-rules.yml" LogicalName="Standards.go.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\maui\maui.standards.md" LogicalName="Standards.maui.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\maui\maui.rules.md" LogicalName="Standards.maui.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\maui\maui.skills.md" LogicalName="Standards.maui.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\maui\maui.arbiter-rules.yml" LogicalName="Standards.maui.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\pulumi\pulumi.standards.md" LogicalName="Standards.pulumi.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\pulumi\pulumi.rules.md" LogicalName="Standards.pulumi.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\pulumi\pulumi.skills.md" LogicalName="Standards.pulumi.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\pulumi\pulumi.arbiter-rules.yml" LogicalName="Standards.pulumi.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\python\python.standards.md" LogicalName="Standards.python.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\python\python.rules.md" LogicalName="Standards.python.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\python\python.skills.md" LogicalName="Standards.python.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\python\python.arbiter-rules.yml" LogicalName="Standards.python.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\react\react.standards.md" LogicalName="Standards.react.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\react\react.rules.md" LogicalName="Standards.react.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\react\react.skills.md" LogicalName="Standards.react.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\react\react.arbiter-rules.yml" LogicalName="Standards.react.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\rust\rust.standards.md" LogicalName="Standards.rust.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\rust\rust.rules.md" LogicalName="Standards.rust.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\rust\rust.skills.md" LogicalName="Standards.rust.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\rust\rust.arbiter-rules.yml" LogicalName="Standards.rust.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\tauri\tauri.standards.md" LogicalName="Standards.tauri.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\tauri\tauri.rules.md" LogicalName="Standards.tauri.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\tauri\tauri.skills.md" LogicalName="Standards.tauri.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\tauri\tauri.arbiter-rules.yml" LogicalName="Standards.tauri.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\typescript.standards.md" LogicalName="Standards.typescript.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\typescript.rules.md" LogicalName="Standards.typescript.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\typescript.skills.md" LogicalName="Standards.typescript.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\typescript.arbiter-rules.yml" LogicalName="Standards.typescript.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\aws\aws.standards.md" LogicalName="Standards.aws.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\aws\aws.rules.md" LogicalName="Standards.aws.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\aws\aws.skills.md" LogicalName="Standards.aws.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\aws\aws.arbiter-rules.yml" LogicalName="Standards.aws.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\sql-server\sql-server.standards.md" LogicalName="Standards.sql-server.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\sql-server\sql-server.rules.md" LogicalName="Standards.sql-server.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\sql-server\sql-server.skills.md" LogicalName="Standards.sql-server.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\sql-server\sql-server.arbiter-rules.yml" LogicalName="Standards.sql-server.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\architect\architect.standards.md" LogicalName="Standards.architect.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\architect\architect.rules.md" LogicalName="Standards.architect.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\architect\architect.skills.md" LogicalName="Standards.architect.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\architect\architect.arbiter-rules.yml" LogicalName="Standards.architect.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\conductor\conductor.standards.md" LogicalName="Standards.conductor.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\conductor\conductor.rules.md" LogicalName="Standards.conductor.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\conductor\conductor.skills.md" LogicalName="Standards.conductor.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\conductor\conductor.arbiter-rules.yml" LogicalName="Standards.conductor.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\devops\devops.standards.md" LogicalName="Standards.devops.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\devops\devops.rules.md" LogicalName="Standards.devops.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\devops\devops.skills.md" LogicalName="Standards.devops.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\devops\devops.arbiter-rules.yml" LogicalName="Standards.devops.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\reviewer\reviewer.standards.md" LogicalName="Standards.reviewer.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\reviewer\reviewer.rules.md" LogicalName="Standards.reviewer.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\reviewer\reviewer.skills.md" LogicalName="Standards.reviewer.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\reviewer\reviewer.arbiter-rules.yml" LogicalName="Standards.reviewer.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\azure-devops\azure-devops.standards.md" LogicalName="Standards.azure-devops.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\azure-devops\azure-devops.rules.md" LogicalName="Standards.azure-devops.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\azure-devops\azure-devops.skills.md" LogicalName="Standards.azure-devops.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\azure-devops\azure-devops.arbiter-rules.yml" LogicalName="Standards.azure-devops.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\github\github.standards.md" LogicalName="Standards.github.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\github\github.rules.md" LogicalName="Standards.github.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\github\github.skills.md" LogicalName="Standards.github.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\github\github.arbiter-rules.yml" LogicalName="Standards.github.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\gitlab\gitlab.standards.md" LogicalName="Standards.gitlab.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\gitlab\gitlab.rules.md" LogicalName="Standards.gitlab.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\gitlab\gitlab.skills.md" LogicalName="Standards.gitlab.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\gitlab\gitlab.arbiter-rules.yml" LogicalName="Standards.gitlab.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\jira\jira.standards.md" LogicalName="Standards.jira.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\jira\jira.rules.md" LogicalName="Standards.jira.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\jira\jira.skills.md" LogicalName="Standards.jira.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\jira\jira.arbiter-rules.yml" LogicalName="Standards.jira.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\shared-rules.md" LogicalName="Standards.shared-rules.md" />
+  </ItemGroup>
+
   <Target Name="VerifyPullRequestDescription" BeforeTargets="PrepareForBuild">
     <GetFileHash Files="@(CanonicalPullRequestDescription)" Algorithm="SHA256">
       <Output TaskParameter="Hash" PropertyName="_CanonicalPullRequestDescriptionHash" />

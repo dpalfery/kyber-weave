@@ -140,7 +140,7 @@ public sealed class LaunchCommandResolver : KyberWeave.Contracts.Repositories.IL
     /// <remarks>
     /// The three exceptions are the complete set <see cref="Path.GetFullPath(string, string)"/>
     /// documents for a path this code composed, and they are the set
-    /// <see cref="McpRepositoryPath.Contained"/> already answers with a refusal. Catching two of the
+    /// <c>McpRepositoryPath.Contained</c> already answers with a refusal. Catching two of the
     /// three made the same question — can this process name that path — answer a gap in one place
     /// and a crash in the other: a Windows-shaped colon outside the volume position (a command
     /// spelled as a URL is how one arrives) threw past this method and out of the check, so a
