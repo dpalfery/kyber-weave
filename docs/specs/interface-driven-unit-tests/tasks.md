@@ -155,7 +155,9 @@ from this file when it is marked Ready.
   - _Requirements: 1.5, 4.1, 4.4_
 
 - [ ] 2.3 Retire the static configuration loader
-  - **Objective:** the 23 callers of `KyberWeaveConfigLoader.TryLoad` take `IKyberWeaveConfigRepository`.
+  - **Objective:** the 23 callers of `KyberWeaveConfigLoader.TryLoad` take `IKyberWeaveConfigRepository`;
+    one shared fake of it in the testing library, with a contract suite run on the fake and on
+    `FileKyberWeaveConfigRepository`.
   - **Files:** the call sites listed in the hosts inventory
   - **Acceptance criteria:** the static loader is removed; each caller has a unit test with a fake
     repository.
@@ -242,6 +244,9 @@ Each task below is one folder; split further where the inventory shows more than
 - [ ] 4.5 `KyberWeave.Cli` (181 sites; `CommandHelpers`, `PlanArguments` and `SquadCommandComposition` first)
 - [ ] 4.6 `KyberWeave.Mcp` (32 sites; `CodeGraphFreshness` first)
 - [ ] 4.7 `KyberWeave.Arbiter` and `KyberWeave.Hooks` (6 sites)
+- [ ] 4.8 `KyberWeave.Application` folders no other task names (12 classes: `Agents/AgentFileReader`, `Doctor/CodeGraphIndexProvisioner`, `Doctor/McpServerLiveProbe`, `Doctor/PostCheckoutHookInstaller`, `Hooks/EditHookService`, `RunStart/RunStartRunner`, `Skills/SkillFileReader`, `Squad/Briefs/SquadBriefBuilder`, `Squad/Deployment/FactoryMcpConfiguration`, `Squad/Instances/SquadInstanceService`, `Squad/Packaging/SquadPackService`, `Utilities/StatusLineProductArtifactSource`)
+- [ ] 4.9 `KyberWeave.Kernel` logic and the clock inside adapters (`Parsing/FileReferenceExtractor` and `VersionControl/CodeGraphIndexStaleness` onto the file-system and path seams; `Data/Doctor/FileCodeGraphIndexWorkspace` and `Kernel/Processes/StdioSession` take `TimeProvider` instead of the system clock and `Thread.Sleep`)
+- [ ] 4.10 Credential seam (`ICredentialStore` exists; record it as a seam; `Data/Arbiter/Credentials/WindowsCredentialStore` and its siblings become its adapters, the only code that calls the native credential API; a fake and a contract suite; callers take the interface)
 
 For every task in phase 4:
   - **Acceptance criteria:** every class in the folder is an adapter or has no direct resource call;

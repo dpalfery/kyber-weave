@@ -114,6 +114,7 @@ consumers keep compiling while they move.
 | Lease | `ILease` | acquire a named cross-process lease with timeout, release | `new Mutex`, lock-file polling | `MutexLease` |
 | Embedded resource | `IEmbeddedResources` | read a named resource | `GetManifestResourceStream` | `AssemblyEmbeddedResources` |
 | Configuration | `IKyberWeaveConfigRepository` (exists) | load and save the host configuration | the static `KyberWeaveConfigLoader.TryLoad` | exists |
+| Credentials | `ICredentialStore` (exists) | read, write and delete a named secret in the operating system's credential store | direct P/Invoke of the native credential API | `WindowsCredentialStore` and the other platform stores |
 | Shipped content | `ICorpusSource` | read the shipped agents, skills, standards, documents and workflows by relative path | the `KyberWeaveTestPaths` root walk copied into 159 test files | `CheckoutCorpusSource` (tests), `IDocumentSource` where it already applies |
 
 The sealed framework types used directly and kept (the exceptions register, Requirement 3.3): `JsonDocument`,

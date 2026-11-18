@@ -76,7 +76,7 @@ task's list.
 | `PhysicalMcpConfigFiles` | File system | `KyberWeave.Data` | `Docs/Mcp/PhysicalMcpConfigFiles.cs` | Reads, attributes and deletes MCP configuration files |
 | `FileGitHookFiles` | File system | `KyberWeave.Data` | `Doctor/FileGitHookFiles.cs` | Hook files and executable bits |
 | `FileStatusLineFiles` | File system | `KyberWeave.Data` | `Utilities/FileStatusLineFiles.cs` | Status-line artifact files |
-| `FileCodeGraphIndexWorkspace` | Lease (file-lock variant) | `KyberWeave.Data` | `Doctor/FileCodeGraphIndexWorkspace.cs` | Holds the index lock as an exclusively opened file. It also reads the clock and sleeps directly, which is a second seam; the conversion register below tracks that as `clock: unassigned` |
+| `FileCodeGraphIndexWorkspace` | Lease (file-lock variant) | `KyberWeave.Data` | `Doctor/FileCodeGraphIndexWorkspace.cs` | Holds the index lock as an exclusively opened file. It also reads the clock and sleeps directly, which is a second seam; the conversion register below tracks that as `clock: 4.9` |
 | `ExclusiveFileWriter` | File system | `KyberWeave.Data` | `Docs/Closeout/ExclusiveFileWriter.cs` | Exclusive create |
 | `FileBoundedFileReader` | File system | `KyberWeave.Data` | `Review/FileBoundedFileReader.cs` | Reads up to a byte limit and refuses a file that grew |
 | `FileHookFileWindowReader` | File system | `KyberWeave.Data` | `Hooks/Arbiter/FileHookFileWindowReader.cs` | Reads a line window from a file |
@@ -89,7 +89,7 @@ task's list.
 | `SquadFileSystemPathSemantics` | Paths | `KyberWeave.Data` | `Squad/Deployment/SquadFileSystemPathSemantics.cs` | Instance singleton the deployment code shares; it implements `IPathResolver` and `IFileSystemPathSemantics` |
 | `KernelProcessRunner` | Process | `KyberWeave.Data` | `Hooks/KernelProcessRunner.cs` | The product's one `IProcessRunner` |
 | `ProcessRunner` | Process | `KyberWeave.Kernel` | `Processes/ProcessRunner.cs` | The one place that calls `Process.Start`; `KernelProcessRunner` and the role-view adapters build on it |
-| `StdioSession` | Process | `KyberWeave.Kernel` | `Processes/StdioSession.cs` | Interactive stdin/stdout session. Its timeout reads `DateTime.UtcNow` directly, which is a second seam; the conversion register below tracks that as `clock: unassigned` |
+| `StdioSession` | Process | `KyberWeave.Kernel` | `Processes/StdioSession.cs` | Interactive stdin/stdout session. Its timeout reads `DateTime.UtcNow` directly, which is a second seam; the conversion register below tracks that as `clock: 4.9` |
 | `ProcessProgramRunner` | Process | `KyberWeave.Data` | `Review/ProcessProgramRunner.cs` | The `IProgramRunner` role view |
 | `KernelBoundedProcessExecutor` | Process | `KyberWeave.Data` | `Docs/FileSystem/KernelBoundedProcessExecutor.cs` | The `IBoundedProcessExecutor` role view |
 | `ProcessGitCommandRunner` | Process | `KyberWeave.Data` | `RunStart/ProcessGitCommandRunner.cs` | Git with standard output and error kept apart |
@@ -98,7 +98,7 @@ task's list.
 | `ProcessExecutor` | Process | `KyberWeave.Cli` | `Commands/Squad/Infrastructure/IProcessExecutor.cs` | The CLI's `IProcessExecutor` role view |
 | `MacKeychainCredentialStore` | Process (`ICredentialStore` role view) | `KyberWeave.Data` | `Arbiter/Credentials/MacKeychainCredentialStore.cs` | Invokes `security`, through `ICredentialProcessRunner` |
 | `SecretServiceCredentialStore` | Process (`ICredentialStore` role view) | `KyberWeave.Data` | `Arbiter/Credentials/SecretServiceCredentialStore.cs` | Invokes `secret-tool`, through `ICredentialProcessRunner` |
-| `WindowsCredentialStore` | Native OS (`ICredentialStore`; not a seam) | `KyberWeave.Data` | `Arbiter/Credentials/WindowsCredentialStore.cs` | P/Invoke `advapi32`, gated on Windows; see the gap below |
+| `WindowsCredentialStore` | Credentials (`ICredentialStore`) | `KyberWeave.Data` | `Arbiter/Credentials/WindowsCredentialStore.cs` | P/Invoke `advapi32`, gated on Windows; the only code that calls the native credential API; task 4.10 adds its fake and contract suite |
 | `ProcessEnvironment` | Environment and platform | `KyberWeave.Data` | `Host/ProcessEnvironment.cs` | The environment and platform adapter |
 | `SystemIdGenerator` | Identifiers | `KyberWeave.Data` | `Host/SystemIdGenerator.cs` | GUIDs, random tokens and temp names |
 | `SystemConsole` | Console | `KyberWeave.Data` | `Host/SystemConsole.cs` | Console output, error and input |
@@ -142,22 +142,22 @@ they do it. They are not seams and no test fakes them; a smoke test proves the w
 
 Task 1.8 does not convert any of these; it lists them so phase 2, phase 3 and phase 4 have a
 worklist and so a reviewer can tell an adapter from a violation. A task number is the task whose
-file list or folder covers the class. **`unassigned` means the approved task list names no task
+file list or folder covers the class. **`unassigned` would mean the approved task list names no task
 for that class.** The register does not invent coverage: the gaps are listed after the tables and
 task 1.8's acceptance criterion is not met for them until `tasks.md` assigns an owner.
 
 Two rows are adapters for another seam whose remaining direct call is the clock. They are counted
-here, with `clock: unassigned`, because otherwise a test through the adapter still reads the real
+here, with the task that converts it (4.9), because otherwise a test through the adapter still reads the real
 clock and no task would track the fix.
 
 | Project | Classes calling a resource | Direct-call sites | Tasks |
 |---|---|---|---|
-| `KyberWeave.Application` | 64 | 208 | 4.1, 4.2, 4.3, unassigned |
+| `KyberWeave.Application` | 64 | 208 | 4.1, 4.2, 4.3, 4.8 |
 | `KyberWeave.Cli` | 49 | 180 | 4.5 |
-| `KyberWeave.Data` | 81 | 714 | 3.2, 3.3, 3.4, 3.5, 4.4, clock: unassigned |
+| `KyberWeave.Data` | 81 | 714 | 3.2, 3.3, 3.4, 3.5, 4.4, 4.9 |
 | `KyberWeave.Domain` | 26 | 46 | 2.5 |
 | `KyberWeave.Hooks` | 1 | 1 | 4.7 |
-| `KyberWeave.Kernel` | 3 | 22 | unassigned, clock: unassigned |
+| `KyberWeave.Kernel` | 3 | 22 | 4.9 |
 | `KyberWeave.Mcp` | 4 | 16 | 4.6 |
 | `KyberWeave.Arbiter` | 0 | 0 | — (its two files are the Program root and the console-stream adapter) |
 | **Total** | **228** | **1,187** | |
@@ -172,7 +172,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `AgentFileReader` (`Agents/AgentFileReader.cs`) | paths | unassigned |
+| `AgentFileReader` (`Agents/AgentFileReader.cs`) | paths | 4.8 |
 | `ArbiterEvaluator` (`Arbiter/ArbiterEvaluator.cs`) | clock | 4.3 |
 | `ArbiterHarnessGating` (`Arbiter/ArbiterHarnessGating.cs`) | paths | 4.3 |
 | `ArbiterInstallService` (`Arbiter/ArbiterInstallService.cs`) | paths | 4.3 |
@@ -208,10 +208,10 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `PlanTaskService` (`Docs/Validation/PlanTaskService.cs`) | paths | 4.2 |
 | `TaskPromptService` (`Docs/Validation/TaskPromptService.cs`) | file system, paths | 4.2 |
 | `TaskPromptServiceFactory` (`Docs/Validation/TaskPromptServiceFactory.cs`) | paths | 4.2 |
-| `CodeGraphIndexProvisioner` (`Doctor/CodeGraphIndexProvisioner.cs`) | clock | unassigned |
-| `McpServerLiveProbe` (`Doctor/McpServerLiveProbe.cs`) | paths | unassigned |
-| `PostCheckoutHookInstaller` (`Doctor/PostCheckoutHookInstaller.cs`) | paths | unassigned |
-| `EditHookService` (`Hooks/EditHookService.cs`) | file system, paths | unassigned |
+| `CodeGraphIndexProvisioner` (`Doctor/CodeGraphIndexProvisioner.cs`) | clock | 4.8 |
+| `McpServerLiveProbe` (`Doctor/McpServerLiveProbe.cs`) | paths | 4.8 |
+| `PostCheckoutHookInstaller` (`Doctor/PostCheckoutHookInstaller.cs`) | paths | 4.8 |
+| `EditHookService` (`Hooks/EditHookService.cs`) | file system, paths | 4.8 |
 | `GateRunService` (`Review/GateRunService.cs`) | paths, clock | 4.3 |
 | `PlanTaskTargetService` (`Review/PlanTaskTargetService.cs`) | file system, paths | 4.3 |
 | `ReviewCatalogueService` (`Review/ReviewCatalogueService.cs`) | paths | 4.3 |
@@ -228,14 +228,14 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ReviewWorkTreeService` (`Review/ReviewWorkTreeService.cs`) | file system, paths | 4.3 |
 | `SuppressionScanService` (`Review/SuppressionScanService.cs`) | paths | 4.3 |
 | `TaskGateResolver` (`Review/TaskGateResolver.cs`) | file system | 4.3 |
-| `RunStartRunner` (`RunStart/RunStartRunner.cs`) | paths | unassigned |
-| `SkillFileReader` (`Skills/SkillFileReader.cs`) | paths | unassigned |
-| `SquadBriefBuilder` (`Squad/Briefs/SquadBriefBuilder.cs`) | file system, paths | unassigned |
-| `FactoryMcpConfiguration` (`Squad/Deployment/FactoryMcpConfiguration.cs`) | file system | unassigned |
-| `SquadInstanceService` (`Squad/Instances/SquadInstanceService.cs`) | paths | unassigned |
-| `SquadPackService` (`Squad/Packaging/SquadPackService.cs`) | paths | unassigned |
+| `RunStartRunner` (`RunStart/RunStartRunner.cs`) | paths | 4.8 |
+| `SkillFileReader` (`Skills/SkillFileReader.cs`) | paths | 4.8 |
+| `SquadBriefBuilder` (`Squad/Briefs/SquadBriefBuilder.cs`) | file system, paths | 4.8 |
+| `FactoryMcpConfiguration` (`Squad/Deployment/FactoryMcpConfiguration.cs`) | file system | 4.8 |
+| `SquadInstanceService` (`Squad/Instances/SquadInstanceService.cs`) | paths | 4.8 |
+| `SquadPackService` (`Squad/Packaging/SquadPackService.cs`) | paths | 4.8 |
 | `SelfUpdater` (`Update/SelfUpdater.cs`) | file system, paths, environment, network | 4.1 |
-| `StatusLineProductArtifactSource` (`Utilities/StatusLineProductArtifactSource.cs`) | paths | unassigned |
+| `StatusLineProductArtifactSource` (`Utilities/StatusLineProductArtifactSource.cs`) | paths | 4.8 |
 
 #### KyberWeave.Cli (49 classes)
 
@@ -319,7 +319,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `GitWorktreeIdentity` (`Docs/Mcp/GitWorktreeIdentity.cs`) | paths | 4.4 |
 | `LaunchCommandResolver` (`Docs/Mcp/LaunchCommandResolver.cs`) | file system, paths, environment | 4.4 |
 | `DocumentLoader` (`Docs/Parsing/DocumentLoader.cs`) | file system, paths | 4.4 |
-| `FileCodeGraphIndexWorkspace` (`Doctor/FileCodeGraphIndexWorkspace.cs`) | file system, clock, identifiers | clock: unassigned |
+| `FileCodeGraphIndexWorkspace` (`Doctor/FileCodeGraphIndexWorkspace.cs`) | file system, clock, identifiers | clock: 4.9 |
 | `DocsRootPath` (`FileSystem/DocsRootPath.cs`) | file system | 4.4 |
 | `FileBackgroundDispatchStore` (`Hooks/Arbiter/FileBackgroundDispatchStore.cs`) | file system, clock, identifiers | 4.4 |
 | `FileDispatchClaimStore` (`Hooks/Arbiter/FileDispatchClaimStore.cs`) | file system, clock, identifiers | 4.4 |
@@ -418,9 +418,9 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `FileReferenceExtractor` (`Parsing/FileReferenceExtractor.cs`) | file system, paths | unassigned |
-| `StdioSession` (`Processes/StdioSession.cs`) | process, clock | clock: unassigned |
-| `CodeGraphIndexStaleness` (`VersionControl/CodeGraphIndexStaleness.cs`) | file system | unassigned |
+| `FileReferenceExtractor` (`Parsing/FileReferenceExtractor.cs`) | file system, paths | 4.9 |
+| `StdioSession` (`Processes/StdioSession.cs`) | process, clock | clock: 4.9 |
+| `CodeGraphIndexStaleness` (`VersionControl/CodeGraphIndexStaleness.cs`) | file system | 4.9 |
 
 #### KyberWeave.Mcp (4 classes)
 
@@ -433,17 +433,11 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 ## Gaps in the task list
 
-These are places where the register cannot point at an owning task because the approved
-`tasks.md` does not name one. They are recorded here so the gap is visible and can be closed by
-amending the task list, not by inventing a task number in this page.
-
-| Gap | Classes | Why it matters |
-|---|---|---|
-| `Application` folders with no phase 4 task | 12 classes: `Agents/AgentFileReader`, `Doctor/CodeGraphIndexProvisioner`, `Doctor/McpServerLiveProbe`, `Doctor/PostCheckoutHookInstaller`, `Hooks/EditHookService`, `RunStart/RunStartRunner`, `Skills/SkillFileReader`, `Squad/Briefs/SquadBriefBuilder`, `Squad/Deployment/FactoryMcpConfiguration`, `Squad/Instances/SquadInstanceService`, `Squad/Packaging/SquadPackService`, `Utilities/StatusLineProductArtifactSource` | Task 4.1 names `Update`, 4.2 names `Docs`, and 4.3 names `Review` and `Arbiter`. No task names these folders, so nobody owns the conversion |
-| `Kernel` classes with no phase 2 or phase 4 task | `Parsing/FileReferenceExtractor`, `VersionControl/CodeGraphIndexStaleness` | Task 2.2 names `Core` and `Core.Docs`; 4.6 names `Mcp`. Kernel still calls the file system and path directly |
-| Clock inside a process or lease adapter | `Data/Doctor/FileCodeGraphIndexWorkspace`, `Kernel/Processes/StdioSession` | Each adapter calls a second resource, the clock. A test through either still reads real time and `Thread.Sleep`; no task owns the fix |
-| Native credential store | `Data/Arbiter/Credentials/WindowsCredentialStore` | P/Invoke `advapi32`; the design's seam set has no credential seam and no exception covers it |
-| Configuration fake and contract suite | `IKyberWeaveConfigRepository` | Task 2.3 owns this; until then a caller is tested with a private fake, not a shared one |
+The gaps this register found on 2026-11-17 were closed by amending the task list: the 12
+`Application` classes without a folder task are task 4.8; the two `Kernel` classes and the clock
+inside `FileCodeGraphIndexWorkspace` and `StdioSession` are task 4.9; the native credential store
+becomes the adapter of a new credential seam in task 4.10; and the shared configuration fake and
+its contract suite are part of task 2.3. A new gap is recorded here until the task list names it.
 
 ## The exceptions register
 
