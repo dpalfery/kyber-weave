@@ -65,6 +65,9 @@ public sealed class MutexLease : ILease
         _ = LeaseNames.Validate(name);
         ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
 
+        // One timeout bounds the whole request: the wait behind a holder in this process counts against the wait for
+        // the system mutex that follows it.
+        System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
         if (!TryTakeInProcess(name, timeout))
         {
             throw new LeaseTimeoutException(name, timeout);
@@ -73,7 +76,8 @@ public sealed class MutexLease : ILease
         OwnerThread? owner = null;
         try
         {
-            owner = new OwnerThread(name, timeout);
+            TimeSpan remaining = timeout - clock.Elapsed;
+            owner = new OwnerThread(name, remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero);
             if (!owner.Take())
             {
                 throw new LeaseTimeoutException(name, timeout);

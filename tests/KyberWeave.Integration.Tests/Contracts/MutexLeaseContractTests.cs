@@ -55,6 +55,68 @@ public sealed class MutexLeaseContractTests : LeaseContractTests
     }
 
     [Fact]
+    public void WaitsNoLongerThanOneTimeoutInTotalForASameProcessHolderAndThenAnotherProcess()
+    {
+        MutexLease lease = new();
+        string name = $"kyber-weave-contract-lease-{Guid.NewGuid():N}";
+        TimeSpan timeout = TimeSpan.FromMilliseconds(800);
+        IDisposable first = lease.Acquire(name, GenerousTimeout);
+
+        // The second request queues behind the first inside the process, then meets a mutex that another owner holds:
+        // together the two waits must stay within the one timeout it was given.
+        Thread release = new(() =>
+        {
+            Thread.Sleep(400);
+            first.Dispose();
+        });
+        release.Start();
+        IDisposable foreign = HoldElsewhereAfterRelease(name, release);
+        System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+
+        _ = Assert.Throws<LeaseTimeoutException>(() => lease.Acquire(name, timeout));
+
+        clock.Stop();
+        foreign.Dispose();
+        Assert.True(clock.Elapsed < TimeSpan.FromMilliseconds(1100), $"The request waited {clock.Elapsed}.");
+    }
+
+    private IDisposable HoldElsewhereAfterRelease(string name, Thread release)
+    {
+        // The other owner takes the system mutex the moment the in-process holder lets go, so the queued request has
+        // to wait on the mutex as well.
+        ManualResetEventSlim ready = new(initialState: false);
+        IDisposable owner = new NoOwner();
+        Thread thread = new(() =>
+        {
+            release.Join();
+            owner = HoldElsewhere(name);
+            ready.Set();
+        })
+        {
+            IsBackground = true
+        };
+        thread.Start();
+        return new Waiter(thread, ready, () => owner);
+    }
+
+    private sealed class NoOwner : IDisposable
+    {
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class Waiter(Thread thread, ManualResetEventSlim ready, Func<IDisposable> owner) : IDisposable
+    {
+        public void Dispose()
+        {
+            _ = thread.Join(TimeSpan.FromSeconds(30));
+            _ = ready.Wait(TimeSpan.FromSeconds(30));
+            owner().Dispose();
+        }
+    }
+
+    [Fact]
     public void TakesALeaseAbandonedByItsOwner()
     {
         string name = $"kyber-weave-contract-lease-{Guid.NewGuid():N}";
