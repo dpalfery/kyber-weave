@@ -25,7 +25,7 @@ public sealed class DocLinkFragmentValidationTests
     {
         KyberWeaveConfig config = ConfigFileReader.Load(RepositoryRoot);
         DocumentSet set = RealDocumentLoader.Create(RepositoryRoot, config.Ontology).Load();
-        DiagnosticReport report = new DocSpecValidator(RepositoryRoot, config.Ontology).Validate(set);
+        DiagnosticReport report = RealDocSpecValidator.Create(RepositoryRoot, config.Ontology).Validate(set);
 
         List<LinkFragmentFinding> findings = report.Items
             .Where(item => item.Code == DocSpecValidator.BrokenLinkFragment)

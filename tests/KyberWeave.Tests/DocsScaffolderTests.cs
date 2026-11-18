@@ -702,7 +702,7 @@ public sealed class DocsScaffolderTests : IDisposable
 
         OntologyConfig ontology = ConfigFileReader.Load(_temp.Path).Ontology;
         DocumentSet set = RealDocumentLoader.Create(_temp.Path, ontology).Load();
-        DiagnosticReport report = new DocSpecValidator(_temp.Path, ontology).Validate(set);
+        DiagnosticReport report = RealDocSpecValidator.Create(_temp.Path, ontology).Validate(set);
         Assert.Contains(owner, set.Owners);
         Assert.All(set.Documents, document => Assert.Equal(owner, document.Frontmatter.Owner));
         Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
@@ -716,7 +716,7 @@ public sealed class DocsScaffolderTests : IDisposable
 
         OntologyConfig ontology = ConfigFileReader.Load(_temp.Path).Ontology;
         DocumentSet set = RealDocumentLoader.Create(_temp.Path, ontology).Load();
-        DiagnosticReport report = new DocSpecValidator(_temp.Path, ontology).Validate(set);
+        DiagnosticReport report = RealDocSpecValidator.Create(_temp.Path, ontology).Validate(set);
         Assert.Contains("platform", set.Owners);
         Assert.All(set.Documents, document => Assert.Equal("platform", document.Frontmatter.Owner));
         Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
@@ -819,7 +819,7 @@ public sealed class DocsScaffolderTests : IDisposable
 
         OntologyConfig ontology = ConfigFileReader.Load(_temp.Path).Ontology;
         DocumentSet set = RealDocumentLoader.Create(_temp.Path, ontology).Load();
-        DiagnosticReport report = new DocSpecValidator(_temp.Path, ontology).Validate(set);
+        DiagnosticReport report = RealDocSpecValidator.Create(_temp.Path, ontology).Validate(set);
 
         // The ontology reference, the catalog, the corpus index, and one index per
         // scaffolded folder — every file the command claims to have written is governed.
@@ -955,7 +955,7 @@ public sealed class DocsScaffolderTests : IDisposable
             StringComparison.Ordinal);
 
         OntologyConfig ontology = ConfigFileReader.Load(_temp.Path).Ontology;
-        DiagnosticReport report = new DocSpecValidator(_temp.Path, ontology)
+        DiagnosticReport report = RealDocSpecValidator.Create(_temp.Path, ontology)
             .Validate(RealDocumentLoader.Create(_temp.Path, ontology).Load());
         Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
     }
@@ -1029,7 +1029,7 @@ public sealed class DocsScaffolderTests : IDisposable
 
         // Running DocSpecValidator.Validate yields 0 findings
         DocumentSet set = RealDocumentLoader.Create(_temp.Path, config.Ontology).Load();
-        DiagnosticReport report = new DocSpecValidator(_temp.Path, config.Ontology).Validate(set);
+        DiagnosticReport report = RealDocSpecValidator.Create(_temp.Path, config.Ontology).Validate(set);
         Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
         Assert.Equal(3 + DocsLayout.Folders.Count + (KyberStandardsTemplates.All.Count * 3) + 1, set.Documents.Count);
     }

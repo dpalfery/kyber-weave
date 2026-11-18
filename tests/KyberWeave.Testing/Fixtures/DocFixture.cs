@@ -71,11 +71,11 @@ internal sealed class DocFixture : IDisposable
 
     public DocumentSet Load() => RealDocumentLoader.Create(Root).Load();
 
-    public DiagnosticReport Validate() => new DocSpecValidator(Root).Validate(Load());
+    public DiagnosticReport Validate() => RealDocSpecValidator.Create(Root).Validate(Load());
 
     /// <summary>Validates against a host ontology — the technologies a repository declared.</summary>
     public DiagnosticReport Validate(OntologyConfig ontology) =>
-        new DocSpecValidator(Root, ontology).Validate(RealDocumentLoader.Create(Root, ontology).Load());
+        RealDocSpecValidator.Create(Root, ontology).Validate(RealDocumentLoader.Create(Root, ontology).Load());
 
     public void Dispose()
     {

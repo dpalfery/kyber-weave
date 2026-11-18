@@ -261,7 +261,7 @@ public class MotorcycleRagHostProfileTests
                 .ToList();
 
         public DiagnosticReport Validate() =>
-            new DocSpecValidator(Root, _config.Ontology)
+            RealDocSpecValidator.Create(Root, _config.Ontology)
                 .Validate(RealDocumentLoader.Create(Root, _config.Ontology).Load());
 
         public void Dispose()

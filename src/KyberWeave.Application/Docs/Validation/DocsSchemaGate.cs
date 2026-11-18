@@ -45,7 +45,7 @@ public sealed class DocsSchemaGate(
         DiagnosticReport report = new();
         OntologyConfig ontology = config.Ontology;
 
-        report.AddRange(new DocSpecValidator(repoRoot, ontology).Validate(corpus).Items);
+        report.AddRange(new DocSpecValidator(repoRoot, ontology, files).Validate(corpus).Items);
         report.AddRange(new ConfigRegValidator(repoRoot, config, files).Validate().Items);
         report.AddRange(severityOverrides.Validate(repoRoot, config.ConfigReg).Items);
         report.AddRange(new PlanInventoryValidator(config).Validate(corpus).Items);
