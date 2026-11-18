@@ -20,8 +20,14 @@ public abstract class LeaseContractTests
     protected static readonly TimeSpan ShortTimeout = TimeSpan.FromMilliseconds(150);
 
     /// <summary>Creates the lease seam under test.</summary>
-    /// <returns>The lease seam. The suite may create more than one instance.</returns>
+    /// <returns>The lease seam. Every instance the suite creates belongs to the same machine, as two services in the
+    /// product do.</returns>
     protected abstract ILease CreateLease();
+
+    /// <summary>Creates two lease seams that share one machine.</summary>
+    /// <returns>The instance that takes the lease, and the instance that contends for it.</returns>
+    protected virtual (ILease Holder, ILease Contender) CreateTwoLeasesOnOneMachine() =>
+        (CreateLease(), CreateLease());
 
     /// <summary>Has another owner take <paramref name="name"/> until the returned handle is disposed.</summary>
     /// <param name="name">The lease name.</param>
@@ -75,8 +81,7 @@ public abstract class LeaseContractTests
     [Fact]
     public void RefusesALeaseThatASecondSeamInstanceHolds()
     {
-        ILease holder = CreateLease();
-        ILease contender = CreateLease();
+        (ILease holder, ILease contender) = CreateTwoLeasesOnOneMachine();
         string name = NewName();
 
         using (holder.Acquire(name, GenerousTimeout))
