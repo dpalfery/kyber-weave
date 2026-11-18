@@ -1,17 +1,10 @@
-using KyberWeave.Tests.Configuration;
-using KyberWeave.Data.Configuration;
 using KyberWeave.Contracts.Repositories;
-using KyberWeave.Tests.Arbiter;
-using Microsoft.Extensions.DependencyInjection;
 using System.Text.RegularExpressions;
 using KyberWeave.Cli.Commands.Arbiter;
-using KyberWeave.Cli.Commands.Squad;
-using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Tests.Fakes;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// Contract: <c>arbiter doctor</c> and <c>arbiter status</c> give every installed harness its own
@@ -21,8 +14,8 @@ namespace KyberWeave.Tests;
 /// is how a Claude project went ungated without anyone seeing it.
 /// </summary>
 /// <remarks>
-/// Every test isolates the home directory and the environment reader, so the real user home and
-/// the real environment are never read or written. Global state lives only in the temp home.
+/// Every test runs over the in-memory Arbiter host, so the home directory, the repository and the
+/// environment are all in memory and the real user home is never read or written.
 /// </remarks>
 public sealed class ArbiterHarnessGatingTests : IDisposable
 {
@@ -30,26 +23,16 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     private const string ClaudeHookCommand = "kyber-weave-arbiter hook --harness claude --scope global";
     private const string ClaudeProjectAgentPath = ".claude/agents/csharp-dev.md";
 
-    private readonly TempDirectory _home = new();
-    private readonly TempDirectory _repo = new();
-    private readonly TempDirectory _userPaths = new();
-    private readonly ArbiterTestHost _host;
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
+    private readonly string _repo;
 
     public ArbiterHarnessGatingTests()
     {
-        _host = ArbiterTestHost.Create(services =>
-            services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(
-                () => _home.Path,
-                name => name is "HOME" or "USERPROFILE" ? _home.Path : null)));
+        _repo = _host.InWork("repo");
+        _host.Files.CreateDirectory(_repo);
     }
 
-    public void Dispose()
-    {
-        _host.Dispose();
-        _home.Dispose();
-        _repo.Dispose();
-        _userPaths.Dispose();
-    }
+    public void Dispose() => _host.Dispose();
 
     /// <summary>
     /// Two harnesses listed globally, with a project that enables Arbiter and no hook of any kind. Both
@@ -59,7 +42,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     [Fact]
     public void Doctor_ListsEachUngatedInstalledHarnessWithItsFixCommand_AndNeverNamesAnAbsentClaude()
     {
-        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["antigravity", "copilot"]);
+        _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["antigravity", "copilot"]);
         WriteProjectConfig(EnabledYaml);
 
         string output = RunDoctor().Output;
@@ -116,7 +99,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
         SetUpLiveClaudeHook("PreToolUse");
         WriteProjectConfig(EnabledYaml);
         WriteFile(
-            Path.Combine(_repo.Path, ClaudeProjectAgentPath),
+            Path.Combine(_repo, ClaudeProjectAgentPath),
             """
             ---
             name: csharp-dev
@@ -144,7 +127,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
         WriteGlobalReceipt(
             files: [],
             blocks: [ClaudeBlock()]);
-        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["copilot"]);
+        _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["copilot"]);
         WriteProjectConfig(EnabledYaml);
 
         string output = RunDoctor().Output;
@@ -160,7 +143,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
         WriteGlobalReceipt(
             files: [],
             blocks: [ClaudeBlock()]);
-        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["claude"]);
+        _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["claude"]);
         WriteProjectConfig(EnabledYaml);
 
         string output = RunDoctor().Output;
@@ -197,7 +180,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
         WriteGlobalReceipt(
             files: [OwnedFile("hooks/kyber-arbiter.json", "copilot")],
             blocks: []);
-        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["claude"]);
+        _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["claude"]);
         WriteProjectConfig(EnabledYaml);
 
         string output = RunDoctor().Output;
@@ -213,7 +196,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     [Fact]
     public void Doctor_ReportsWarpAsFallbackOnlyWithoutAFixOrADiagnostic()
     {
-        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["warp"]);
+        _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["warp"]);
         WriteProjectConfig(EnabledYaml);
 
         string output = RunDoctor().Output;
@@ -232,7 +215,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     [Fact]
     public void Doctor_ReportsEachInstalledHarnessOptedOut_WhenTheProjectDisablesArbiter()
     {
-        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["antigravity", "copilot"]);
+        _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["antigravity", "copilot"]);
         WriteProjectConfig(
             """
             arbiter:
@@ -256,9 +239,9 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
         SetUpLiveClaudeHook("PreToolUse");
         WriteProjectConfig(EnabledYaml);
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterStatusCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterStatusCommand>().Execute(
             null!,
-            new ArbiterSettings { Path = _repo.Path }));
+            new ArbiterSettings { Path = _repo }));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.DoesNotContain("project overrides global", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -277,8 +260,8 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     /// </summary>
     private void SetUpLiveClaudeHook(string eventKey)
     {
-        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["claude"]);
-        WriteFile(Path.Combine(_home.Path, ".claude", "settings.json"), UserClaudeSettings(eventKey));
+        _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["claude"]);
+        WriteFile(Path.Combine(_host.HomeDirectory, ".claude", "settings.json"), UserClaudeSettings(eventKey));
         WriteGlobalReceipt(files: [], blocks: [ClaudeBlock()]);
     }
 
@@ -319,17 +302,16 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     /// </summary>
     private void WriteGlobalReceipt(IReadOnlyList<SquadOwnedFile> files, IReadOnlyList<SquadOwnedBlock> blocks)
     {
-        SquadStateStore store = SquadHostDefaults.ResolveStateStore(
-            new FakeSquadUserPaths(_userPaths.Path, _home.Path));
-        string path = store.ResolveReceiptPath(_home.Path, SquadDeploymentScope.Global);
+        ISquadStateStore store = _host.Get<ISquadStateStore>();
+        string path = store.ResolveReceiptPath(_host.HomeDirectory, SquadDeploymentScope.Global);
         string schema = blocks.Count > 0 ? "kyber-squad.receipt/v3" : "kyber-squad.receipt/v1";
         WriteFile(
             path,
             store.SerializeReceipt(new SquadReceipt(
                 schema,
                 SquadDeploymentScope.Global,
-                _home.Path,
-                DateTimeOffset.UtcNow,
+                _host.HomeDirectory,
+                _host.Clock.GetUtcNow(),
                 [],
                 files)
             {
@@ -339,19 +321,15 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
 
     private void WriteProjectConfig(string yaml)
     {
-        WriteFile(Path.Combine(_repo.Path, ".kyber-weave", "kyber-weave.yml"), yaml);
+        WriteFile(Path.Combine(_repo, ".kyber-weave", "kyber-weave.yml"), yaml);
     }
 
-    private static void WriteFile(string path, string content)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, content);
-    }
+    private void WriteFile(string path, string content) => _host.Write(path, content);
 
-    private CommandExecution RunDoctor() =>
-        Capture(() => _host.Command<ArbiterDoctorCommand>().Execute(
+    private ArbiterCommandRun RunDoctor() =>
+        _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
             null!,
-            new ArbiterSettings { Path = _repo.Path }));
+            new ArbiterSettings { Path = _repo }));
 
     private static IEnumerable<string> LinesNaming(string output, string label) =>
         output.Split('\n').Where(line => Regex.IsMatch(line, $@"\b{label}\b"));
@@ -387,12 +365,4 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
 
     private static int CountOf(string output, string value) =>
         Regex.Count(output, Regex.Escape(value));
-
-    private static CommandExecution Capture(Func<int> execute)
-    {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
-        return new CommandExecution(execution.Result, execution.Output);
-    }
-
-    private sealed record CommandExecution(int ExitCode, string Output);
 }

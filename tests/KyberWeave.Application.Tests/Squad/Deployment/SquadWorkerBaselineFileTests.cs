@@ -9,12 +9,15 @@ namespace KyberWeave.Tests.Squad;
 /// <summary>Proves the worker baseline reader and its per-instance stamp cache through the in-memory file system.</summary>
 public sealed class SquadWorkerBaselineFileTests
 {
-    private static readonly string Source = Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "baseline-src");
-
     private readonly ManualClock _clock = new();
     private readonly InMemoryFileSystem _files;
+    private readonly string Source;
 
-    public SquadWorkerBaselineFileTests() => _files = new InMemoryFileSystem(_clock, caseSensitive: true);
+    public SquadWorkerBaselineFileTests()
+    {
+        _files = new InMemoryFileSystem(_clock, caseSensitive: true);
+        Source = Path.Combine(_files.Root, "baseline-src");
+    }
 
     private SquadWorkerBaselineFile NewReader() =>
         new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: Source));

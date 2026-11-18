@@ -15,15 +15,6 @@ public sealed partial class SquadModelPresetStore : ISquadModelPresetStore
     private readonly string _presetsDirectory;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SquadModelPresetStore"/> class over the real file system.
-    /// </summary>
-    /// <param name="userPaths">The user paths provider.</param>
-    public SquadModelPresetStore(ISquadUserPaths userPaths)
-        : this(userPaths, new PhysicalFileSystem())
-    {
-    }
-
-    /// <summary>
     /// Initializes a new instance of the <see cref="SquadModelPresetStore"/> class.
     /// </summary>
     /// <param name="userPaths">The user paths provider.</param>

@@ -2,7 +2,8 @@ using System.Text;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
-using KyberWeave.Tests.Corpus;
+using KyberWeave.Testing.Squad;
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
 using YamlDotNet.RepresentationModel;
@@ -18,10 +19,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ArbiterClaudeRenderingTests : IDisposable
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
+    private static readonly string ProductRoot = CanonicalSquadTree.Shared.ProductRoot;
 
     private static readonly string[] DispatcherAgents =
     [
@@ -43,7 +41,13 @@ public sealed class ArbiterClaudeRenderingTests : IDisposable
     private const string HandbackMatcher = "^SubagentHandback$";
     private const string ShellMatcher = "^(Bash|PowerShell)$";
 
-    private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.Create();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly ArbiterSquadFixture _fixture;
+
+    public ArbiterClaudeRenderingTests()
+    {
+        _fixture = ArbiterSquadFixture.CreateInMemory(_files);
+    }
 
     public void Dispose() => _fixture.Dispose();
 
@@ -184,7 +188,7 @@ public sealed class ArbiterClaudeRenderingTests : IDisposable
         }
     }
 
-    private static async Task<SquadRenderResult> RenderClaudeAsync(
+    private async Task<SquadRenderResult> RenderClaudeAsync(
         string sourceDirectory,
         SquadDeploymentScope scope,
         SquadArbiterWiring? arbiter)
@@ -194,7 +198,10 @@ public sealed class ArbiterClaudeRenderingTests : IDisposable
             SourceDirectory: sourceDirectory,
             Targets: [SquadTarget.Claude],
             Scope: scope,
-            Arbiter: arbiter).Prepared();
+            Arbiter: arbiter);
+        request = string.Equals(sourceDirectory, ProductRoot, StringComparison.Ordinal)
+            ? request.Prepared(CanonicalSquadTree.Shared)
+            : _fixture.Prepare(request);
 
         return await renderer.RenderAsync(request);
     }

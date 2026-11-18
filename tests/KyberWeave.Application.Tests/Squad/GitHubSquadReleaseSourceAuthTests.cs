@@ -5,9 +5,10 @@ using System.Text;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Squad;
 
 /// <summary>
 /// Pins the <see cref="GitHubSquadReleaseSource"/> token contract: GITHUB_TOKEN/GH_TOKEN is
@@ -22,20 +23,28 @@ public sealed class GitHubSquadReleaseSourceAuthTests
     private const string Token = "test-github-token-value";
     private static readonly Uri ApiRoot = new("https://api.github.test/");
 
+    private readonly InMemoryFileSystem _files = new();
+    private readonly string _destination;
+
+    public GitHubSquadReleaseSourceAuthTests()
+    {
+        string work = Path.Combine(_files.Root, "work");
+        _files.CreateDirectory(work);
+        _destination = Path.Combine(work, "squad");
+    }
+
     [Fact]
     public async Task DownloadAndExtractAsyncWithGitHubTokenSendsAuthorizationOnApiHostOnly()
     {
         byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
         string checksum = Sha256(archiveBytes);
         using RecordingHandler handler = ReleaseHandler(archiveBytes, $"{checksum}  {AssetName}\n");
-        using TempDirectory temp = new();
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
-            handler,
-            ApiRoot,
+        using ISquadReleaseSource source = Create(
+            handler.Handler,
             readEnvironment: name => name == "GITHUB_TOKEN" ? Token : null);
 
         SquadReleaseResult result = await source.DownloadAndExtractAsync(
-            new SquadReleaseRequest(Repository, Version, Path.Combine(temp.Path, "squad")),
+            new SquadReleaseRequest(Repository, Version, _destination),
             CancellationToken.None);
 
         Assert.Equal(checksum, result.Checksum.Sha256);
@@ -55,10 +64,8 @@ public sealed class GitHubSquadReleaseSourceAuthTests
         byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
         string checksum = Sha256(archiveBytes);
         using RecordingHandler handler = ReleaseHandler(archiveBytes, $"{checksum}  {AssetName}\n");
-        using TempDirectory temp = new();
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
-            handler,
-            ApiRoot,
+        using ISquadReleaseSource source = Create(
+            handler.Handler,
             readEnvironment: name => name switch
             {
                 "GITHUB_TOKEN" => Token,
@@ -67,7 +74,7 @@ public sealed class GitHubSquadReleaseSourceAuthTests
             });
 
         await source.DownloadAndExtractAsync(
-            new SquadReleaseRequest(Repository, Version, Path.Combine(temp.Path, "squad")),
+            new SquadReleaseRequest(Repository, Version, _destination),
             CancellationToken.None);
 
         (Uri _, string? authorization) = Assert.Single(
@@ -82,14 +89,12 @@ public sealed class GitHubSquadReleaseSourceAuthTests
         byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
         string checksum = Sha256(archiveBytes);
         using RecordingHandler handler = ReleaseHandler(archiveBytes, $"{checksum}  {AssetName}\n");
-        using TempDirectory temp = new();
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
-            handler,
-            ApiRoot,
+        using ISquadReleaseSource source = Create(
+            handler.Handler,
             readEnvironment: name => name == "GH_TOKEN" ? "gh-only-token" : null);
 
         await source.DownloadAndExtractAsync(
-            new SquadReleaseRequest(Repository, Version, Path.Combine(temp.Path, "squad")),
+            new SquadReleaseRequest(Repository, Version, _destination),
             CancellationToken.None);
 
         (Uri _, string? authorization) = Assert.Single(
@@ -105,10 +110,8 @@ public sealed class GitHubSquadReleaseSourceAuthTests
         byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
         string checksum = Sha256(archiveBytes);
         using RecordingHandler handler = ReleaseHandler(archiveBytes, $"{checksum}  {AssetName}\n");
-        using TempDirectory temp = new();
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
-            handler,
-            ApiRoot,
+        using ISquadReleaseSource source = Create(
+            handler.Handler,
             readEnvironment: name => name switch
             {
                 "GITHUB_TOKEN" => string.Empty,
@@ -117,7 +120,7 @@ public sealed class GitHubSquadReleaseSourceAuthTests
             });
 
         await source.DownloadAndExtractAsync(
-            new SquadReleaseRequest(Repository, Version, Path.Combine(temp.Path, "squad")),
+            new SquadReleaseRequest(Repository, Version, _destination),
             CancellationToken.None);
 
         (Uri _, string? authorization) = Assert.Single(
@@ -132,14 +135,12 @@ public sealed class GitHubSquadReleaseSourceAuthTests
         byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
         string checksum = Sha256(archiveBytes);
         using RecordingHandler handler = ReleaseHandler(archiveBytes, $"{checksum}  {AssetName}\n");
-        using TempDirectory temp = new();
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
-            handler,
-            ApiRoot,
+        using ISquadReleaseSource source = Create(
+            handler.Handler,
             readEnvironment: _ => null);
 
         await source.DownloadAndExtractAsync(
-            new SquadReleaseRequest(Repository, Version, Path.Combine(temp.Path, "squad")),
+            new SquadReleaseRequest(Repository, Version, _destination),
             CancellationToken.None);
 
         Assert.NotEmpty(handler.Requests);
@@ -156,14 +157,12 @@ public sealed class GitHubSquadReleaseSourceAuthTests
             archiveBytes,
             $"{checksum}  {AssetName}\n",
             redirectArchiveTo: redirectTarget);
-        using TempDirectory temp = new();
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
-            handler,
-            ApiRoot,
+        using ISquadReleaseSource source = Create(
+            handler.Handler,
             readEnvironment: name => name == "GITHUB_TOKEN" ? Token : null);
 
         SquadReleaseResult result = await source.DownloadAndExtractAsync(
-            new SquadReleaseRequest(Repository, Version, Path.Combine(temp.Path, "squad")),
+            new SquadReleaseRequest(Repository, Version, _destination),
             CancellationToken.None);
 
         Assert.Equal(checksum, result.Checksum.Sha256);
@@ -187,14 +186,12 @@ public sealed class GitHubSquadReleaseSourceAuthTests
             archiveBytes,
             $"{checksum}  {AssetName}\n",
             redirectArchiveTo: redirectTarget);
-        using TempDirectory temp = new();
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
-            handler,
-            ApiRoot,
+        using ISquadReleaseSource source = Create(
+            handler.Handler,
             readEnvironment: name => name == "GITHUB_TOKEN" ? Token : null);
 
         SquadReleaseResult result = await source.DownloadAndExtractAsync(
-            new SquadReleaseRequest(Repository, Version, Path.Combine(temp.Path, "squad")),
+            new SquadReleaseRequest(Repository, Version, _destination),
             CancellationToken.None);
 
         Assert.Equal(checksum, result.Checksum.Sha256);
@@ -216,15 +213,13 @@ public sealed class GitHubSquadReleaseSourceAuthTests
         Uri releaseUri = new Uri(ApiRoot, $"repos/{Repository}/releases/tags/v{Version}");
         using RecordingHandler handler = new();
         handler.Enqueue(releaseUri, _ => new HttpResponseMessage(HttpStatusCode.Forbidden));
-        using TempDirectory temp = new();
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
-            handler,
-            ApiRoot,
+        using ISquadReleaseSource source = Create(
+            handler.Handler,
             readEnvironment: _ => null);
 
         HttpRequestException exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
             source.DownloadAndExtractAsync(
-                new SquadReleaseRequest(Repository, Version, Path.Combine(temp.Path, "squad")),
+                new SquadReleaseRequest(Repository, Version, _destination),
                 CancellationToken.None));
 
         Assert.Contains("GITHUB_TOKEN", exception.Message, StringComparison.Ordinal);
@@ -238,15 +233,13 @@ public sealed class GitHubSquadReleaseSourceAuthTests
         Uri releaseUri = new Uri(ApiRoot, $"repos/{Repository}/releases/tags/v{Version}");
         using RecordingHandler handler = new();
         handler.Enqueue(releaseUri, _ => new HttpResponseMessage(HttpStatusCode.Forbidden));
-        using TempDirectory temp = new();
-        using ISquadReleaseSource source = RealSquadReleaseSource.Create(
-            handler,
-            ApiRoot,
+        using ISquadReleaseSource source = Create(
+            handler.Handler,
             readEnvironment: name => name == "GITHUB_TOKEN" ? Token : null);
 
         HttpRequestException exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
             source.DownloadAndExtractAsync(
-                new SquadReleaseRequest(Repository, Version, Path.Combine(temp.Path, "squad")),
+                new SquadReleaseRequest(Repository, Version, _destination),
                 CancellationToken.None));
 
         Assert.DoesNotContain("anonymous", exception.Message, StringComparison.OrdinalIgnoreCase);
@@ -338,11 +331,28 @@ public sealed class GitHubSquadReleaseSourceAuthTests
     private static string Sha256(byte[] bytes) =>
         Convert.ToHexStringLower(SHA256.HashData(bytes));
 
-    private sealed class RecordingHandler : HttpMessageHandler
+    private GitHubSquadReleaseSource Create(HttpMessageHandler handler, Func<string, string?> readEnvironment) =>
+        new(
+            handler,
+            ApiRoot,
+            _files,
+            new FakePathResolver(_files),
+            new FakeProcessEnvironment(currentDirectory: _files.Root, readVariable: readEnvironment),
+            new FakeIdGenerator());
+
+    /// <summary>Scripts each address with a queue of responses over the shared fake transport.</summary>
+    private sealed class RecordingHandler : IDisposable
     {
         private readonly Dictionary<Uri, Queue<Func<HttpRequestMessage, HttpResponseMessage>>> _responses = [];
 
-        public List<(Uri Uri, string? Authorization)> Requests { get; } = [];
+        public RecordingHandler() => Handler = new FakeHttpMessageHandler(Respond);
+
+        public FakeHttpMessageHandler Handler { get; }
+
+        public IReadOnlyList<(Uri Uri, string? Authorization)> Requests =>
+        [
+            .. Handler.Requests.Select(request => (request.Uri!, request.Authorization?.ToString()))
+        ];
 
         public void Enqueue(Uri uri, Func<HttpRequestMessage, HttpResponseMessage> responseFactory)
         {
@@ -355,22 +365,18 @@ public sealed class GitHubSquadReleaseSourceAuthTests
             queue.Enqueue(responseFactory);
         }
 
-        protected override Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request,
-            CancellationToken cancellationToken)
+        public void Dispose() => Handler.Dispose();
+
+        private HttpResponseMessage Respond(RecordedHttpRequest request)
         {
-            Uri? requestUri = request.RequestUri;
-            Assert.NotNull(requestUri);
-            Requests.Add((requestUri, request.Headers.Authorization?.ToString()));
-            if (!_responses.TryGetValue(requestUri, out Queue<Func<HttpRequestMessage, HttpResponseMessage>>? queue) ||
+            Uri uri = request.Uri!;
+            if (!_responses.TryGetValue(uri, out Queue<Func<HttpRequestMessage, HttpResponseMessage>>? queue) ||
                 queue.Count == 0)
             {
-                throw new InvalidOperationException($"Unexpected HTTP request: {request.RequestUri}");
+                throw new InvalidOperationException($"Unexpected HTTP request: {uri}");
             }
 
-            HttpResponseMessage response = queue.Dequeue()(request);
-            response.RequestMessage ??= request;
-            return Task.FromResult(response);
+            return queue.Dequeue()(new HttpRequestMessage(request.Method, uri));
         }
     }
 }

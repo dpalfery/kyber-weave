@@ -73,19 +73,6 @@ public sealed class AntigravityRendererContractTests : IDisposable
             .ToHashSet(StringComparer.Ordinal);
     }
 
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
-    [Fact]
-    public void ToolRoot_ExistsForCanonicalCorpus()
-    {
-        Assert.True(
-            Corpus.DirectoryExists(string.Empty),
-            $"Expected the corpus root at '{Corpus.Root}'.");
-        Assert.True(
-            Corpus.DirectoryExists("products/kyber-squad"),
-            $"Expected products/kyber-squad under the corpus root at '{ProductRoot}'.");
-    }
-
     /// <summary>
     ///     Antigravity's own decisions on the real corpus: the Native Both pattern renders every agent
     ///     as <c>.agents/agents/&lt;name&gt;/agent.md</c> beside every canonical skill, collisions and

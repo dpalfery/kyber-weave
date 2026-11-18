@@ -1,7 +1,9 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Release;
+using KyberWeave.Data.Hooks;
 
 namespace KyberWeave.Tests.Fakes;
 
@@ -15,7 +17,9 @@ namespace KyberWeave.Tests.Fakes;
 /// (<see cref="FromDirectory"/>), a pack archive (<see cref="FromArchive"/>), per-file content
 /// (<see cref="FileContents"/>), an edit to make after extraction (<see cref="AfterExtract"/>), the reported
 /// asset identity, or a fault (<see cref="Failing"/>), so each stays a configuration of this fake rather than
-/// another local double.
+/// another local double. Every read and write goes through <see cref="Files"/>, so a unit test hands the fake
+/// its in-memory file system and no extraction touches the disk; a test that does not name one gets the
+/// physical file system, which only the integration tests that install onto a real tree rely on.
 /// </remarks>
 public sealed class FakeSquadReleaseSource : ISquadReleaseSource
 {
@@ -25,20 +29,20 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
     private readonly List<SquadReleaseRequest> _requests = [];
 
     /// <summary>A fake that copies every file under <paramref name="sourceDirectory"/> into the destination.</summary>
-    internal static FakeSquadReleaseSource FromDirectory(string sourceDirectory)
+    internal static FakeSquadReleaseSource FromDirectory(string sourceDirectory, IWritableFileSystem? files = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceDirectory);
-        return new FakeSquadReleaseSource { SourceDirectory = sourceDirectory };
+        return new FakeSquadReleaseSource { SourceDirectory = sourceDirectory, Files = files ?? new PhysicalFileSystem() };
     }
 
     /// <summary>
     /// A fake that extracts the pack archive at <paramref name="archivePath"/> after the same entry checks the
     /// product's release source applies, reporting the archive's own size and digest.
     /// </summary>
-    internal static FakeSquadReleaseSource FromArchive(string archivePath)
+    internal static FakeSquadReleaseSource FromArchive(string archivePath, IWritableFileSystem? files = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(archivePath);
-        return new FakeSquadReleaseSource { ArchivePath = archivePath };
+        return new FakeSquadReleaseSource { ArchivePath = archivePath, Files = files ?? new PhysicalFileSystem() };
     }
 
     /// <summary>A fake that records the request, then fails with <paramref name="fault"/> instead of extracting.</summary>
@@ -47,6 +51,9 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
         ArgumentNullException.ThrowIfNull(fault);
         return new FakeSquadReleaseSource { Fault = fault };
     }
+
+    /// <summary>The file system the release is read from and written to.</summary>
+    internal IWritableFileSystem Files { get; init; } = new PhysicalFileSystem();
 
     /// <summary>Every extraction request received, in call order.</summary>
     public IReadOnlyList<SquadReleaseRequest> Requests
@@ -118,10 +125,10 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
         if (ArchivePath is not null)
         {
             ValidateArchiveEntries(ArchivePath, request.DestinationPath, cancellationToken);
-            await ZipFile.ExtractToDirectoryAsync(ArchivePath, request.DestinationPath, true, cancellationToken);
+            ExtractArchive(ArchivePath, request.DestinationPath, cancellationToken);
 
-            byte[] archiveBytes = await File.ReadAllBytesAsync(ArchivePath, cancellationToken);
-            reportedSize = AssetSize ?? new FileInfo(ArchivePath).Length;
+            byte[] archiveBytes = Files.ReadAllBytes(ArchivePath);
+            reportedSize = AssetSize ?? Files.GetLength(ArchivePath);
             reportedSha256 = Sha256 ?? Convert.ToHexStringLower(SHA256.HashData(archiveBytes));
         }
         else if (SourceDirectory is not null)
@@ -130,10 +137,10 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
         }
         else
         {
-            await WriteMinimalCorpusAsync(request.DestinationPath, cancellationToken);
+            WriteMinimalCorpus(request.DestinationPath);
         }
 
-        await WriteFileContentsAsync(request.DestinationPath, cancellationToken);
+        WriteFileContents(request.DestinationPath);
 
         if (AfterExtract is not null)
         {
@@ -177,12 +184,12 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
     /// cannot hand the fake an archive a real download would reject: no rooted or climbing path, no duplicate,
     /// no symbolic link, and no path that descends through a file.
     /// </summary>
-    private static void ValidateArchiveEntries(
+    private void ValidateArchiveEntries(
         string archivePath,
         string destinationPath,
         CancellationToken cancellationToken)
     {
-        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+        using ZipArchive archive = new(Files.OpenRead(archivePath), ZipArchiveMode.Read, leaveOpen: false);
         StringComparer comparison = OperatingSystem.IsWindows()
             ? StringComparer.OrdinalIgnoreCase
             : StringComparer.Ordinal;
@@ -208,6 +215,30 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
             }
 
             ValidateArchiveHierarchy(relativePath, isDirectory, files, directories);
+        }
+    }
+
+    /// <summary>Writes every entry of the already validated archive under the destination, replacing what is there.</summary>
+    private void ExtractArchive(string archivePath, string destinationPath, CancellationToken cancellationToken)
+    {
+        Files.CreateDirectory(destinationPath);
+        using ZipArchive archive = new(Files.OpenRead(archivePath), ZipArchiveMode.Read, leaveOpen: false);
+        foreach (ZipArchiveEntry entry in archive.Entries)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            (string relativePath, bool isDirectory) = ValidateRelativePath(entry.FullName, destinationPath);
+            string path = Path.Combine(destinationPath, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            if (isDirectory)
+            {
+                Files.CreateDirectory(path);
+                continue;
+            }
+
+            Files.CreateDirectory(Path.GetDirectoryName(path)!);
+            using Stream source = entry.Open();
+            using MemoryStream buffer = new();
+            source.CopyTo(buffer);
+            Files.WriteAllBytes(path, buffer.ToArray());
         }
     }
 
@@ -281,31 +312,29 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
         }
     }
 
-    private static async Task WriteMinimalCorpusAsync(string destinationPath, CancellationToken cancellationToken)
+    private void WriteMinimalCorpus(string destinationPath)
     {
-        Directory.CreateDirectory(destinationPath);
+        Files.CreateDirectory(destinationPath);
 
-        await File.WriteAllTextAsync(
+        Files.WriteAllText(
             Path.Combine(destinationPath, "squad.yml"),
-            "schema: kyber-squad.squad/v1\nversion-source: kyber-weave-assembly\n",
-            cancellationToken);
+            "schema: kyber-squad.squad/v1\nversion-source: kyber-weave-assembly\n");
 
         // Mirrors products/kyber-squad/toolchain.yml byte for byte in the shape that
         // matters: no validated-release. A fake that pinned a fabricated digest here kept
         // the suite green while every real install failed lock validation, so this default
         // must keep tracking the canonical file. A test needing a pinned upstream build
         // writes its own toolchain.yml into the destination after this fake returns.
-        await File.WriteAllTextAsync(
+        Files.WriteAllText(
             Path.Combine(destinationPath, "toolchain.yml"),
             """
             schema: kyber-squad.toolchain/v1
             required-features: []
             validated-release: null
-            """,
-            cancellationToken);
+            """);
     }
 
-    private async Task WriteFileContentsAsync(string destinationPath, CancellationToken cancellationToken)
+    private void WriteFileContents(string destinationPath)
     {
         foreach ((string relativePath, string content) in FileContents)
         {
@@ -320,10 +349,10 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
             string? directory = Path.GetDirectoryName(path);
             if (directory is not null)
             {
-                Directory.CreateDirectory(directory);
+                Files.CreateDirectory(directory);
             }
 
-            await File.WriteAllTextAsync(path, content, cancellationToken);
+            Files.WriteAllText(path, content);
         }
     }
 
@@ -376,36 +405,34 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
         return (relativePath, isDirectory);
     }
 
-    private static void CopyDirectory(string sourceDirectory, string destinationDirectory)
+    private void CopyDirectory(string sourceDirectory, string destinationDirectory)
     {
-        Directory.CreateDirectory(destinationDirectory);
+        Files.CreateDirectory(destinationDirectory);
 
-        foreach (FileSystemInfo entry in new DirectoryInfo(sourceDirectory).EnumerateFileSystemInfos(
-                     "*",
-                     new EnumerationOptions { RecurseSubdirectories = false, AttributesToSkip = 0 }))
+        foreach (FileSystemEntry entry in Files.EnumerateEntries(sourceDirectory))
         {
-            if (entry.LinkTarget is not null)
+            if (entry.IsLink)
             {
                 throw new InvalidDataException(
-                    $"The Squad corpus contains a symbolic link entry: '{entry.FullName}'.");
+                    $"The Squad corpus contains a symbolic link entry: '{entry.Path}'.");
             }
 
-            string targetPath = Path.Combine(destinationDirectory, entry.Name);
-            if (entry is DirectoryInfo subDirectory)
+            string targetPath = Path.Combine(destinationDirectory, Path.GetFileName(entry.Path));
+            if (entry.IsDirectory)
             {
-                CopyDirectory(subDirectory.FullName, targetPath);
+                CopyDirectory(entry.Path, targetPath);
             }
-            else if (entry is FileInfo file)
+            else
             {
-                file.CopyTo(targetPath, true);
+                Files.WriteAllBytes(targetPath, Files.ReadAllBytes(entry.Path));
             }
         }
     }
 
-    private static List<string> ListExtractedFiles(string destinationPath)
+    private List<string> ListExtractedFiles(string destinationPath)
     {
-        return Directory
-            .EnumerateFiles(destinationPath, "*", SearchOption.AllDirectories)
+        return Files
+            .EnumerateFiles(destinationPath, "*", recursive: true)
             .Select(path => Path.GetRelativePath(destinationPath, path).Replace(Path.DirectorySeparatorChar, '/'))
             .Order(StringComparer.Ordinal)
             .ToList();

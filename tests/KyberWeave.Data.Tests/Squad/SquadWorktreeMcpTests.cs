@@ -11,17 +11,19 @@ namespace KyberWeave.Tests.Squad;
 /// </summary>
 public sealed class SquadWorktreeMcpTests
 {
-    private static readonly string Base = Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "worktree-mcp");
-    private static readonly string Canonical = Path.Combine(Base, "canonical", "repo");
-    private static readonly string Outside = Path.Combine(Base, "outside");
-
     private readonly InMemoryFileSystem _files = new(caseSensitive: true);
+    private readonly string Base;
+    private readonly string Canonical;
+    private readonly string Outside;
 
     private SquadWorktreeMcp Mcp =>
         new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: Base));
 
     public SquadWorktreeMcpTests()
     {
+        Base = Path.Combine(_files.Root, "worktree-mcp");
+        Canonical = Path.Combine(Base, "canonical", "repo");
+        Outside = Path.Combine(Base, "outside");
         _files.CreateDirectory(Canonical);
         _files.CreateDirectory(Outside);
     }

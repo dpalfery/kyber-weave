@@ -3,9 +3,11 @@ using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
-using KyberWeave.Tests.Fakes;
-using Xunit;
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Corpus;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
+using Xunit;
 
 namespace KyberWeave.Tests.Squad;
 
@@ -19,8 +21,9 @@ public sealed class CopilotRendererTests
 {
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
+    private static readonly string ProductRoot = CanonicalSquadTree.Shared.ProductRoot;
+
+    private readonly InMemoryFileSystem _files = new();
 
     private static readonly Regex ToolsFlowSequenceRegex =
         new(@"^tools:\s*\[(?<items>.*)\]$", RegexOptions.Compiled | RegexOptions.Multiline);
@@ -358,8 +361,8 @@ public sealed class CopilotRendererTests
     [Fact]
     public async Task RenderAsyncUsesExactSyntheticSourceMembershipWithoutInferringTools()
     {
-        using TempDirectory temp = new();
-        WriteSyntheticSquad(temp.Path, """
+        string syntheticRoot = SyntheticRoot();
+        WriteSyntheticSquad(syntheticRoot, """
                                        schema: kyber-squad.capability-profiles/v1
                                        capabilities:
                                          - filesystem.read
@@ -401,9 +404,9 @@ public sealed class CopilotRendererTests
 
         CopilotRenderer renderer = new();
         SquadRenderRequest request = new SquadRenderRequest(
-            temp.Path,
+            syntheticRoot,
             [SquadTarget.Copilot],
-            SquadDeploymentScope.Project).Prepared();
+            SquadDeploymentScope.Project).Prepared(_files);
 
         SquadRenderResult result = await renderer.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -433,21 +436,21 @@ public sealed class CopilotRendererTests
             ExtractToolsLine(ExtractFrontmatterText(Encoding.UTF8.GetString(conductorAgent.Content.Span))));
     }
 
-    private static void WriteSyntheticSquad(string root, string capabilitiesYaml)
+    private void WriteSyntheticSquad(string root, string capabilitiesYaml)
     {
-        Directory.CreateDirectory(Path.Combine(root, "bundles"));
-        Directory.CreateDirectory(Path.Combine(root, "profiles"));
-        Directory.CreateDirectory(Path.Combine(root, "agents"));
-        Directory.CreateDirectory(Path.Combine(root, "schemas"));
+        _files.CreateDirectory(Path.Combine(root, "bundles"));
+        _files.CreateDirectory(Path.Combine(root, "profiles"));
+        _files.CreateDirectory(Path.Combine(root, "agents"));
+        _files.CreateDirectory(Path.Combine(root, "schemas"));
 
         foreach (string schemaFile in Corpus.EnumerateFiles("products/kyber-squad/schemas", "*.json", recursive: false))
         {
-            File.WriteAllBytes(
+            _files.WriteAllBytes(
                 Path.Combine(root, "schemas", Path.GetFileName(schemaFile)),
                 Corpus.ReadBytes(schemaFile));
         }
 
-        File.WriteAllText(Path.Combine(root, "squad.yml"), """
+        _files.WriteAllText(Path.Combine(root, "squad.yml"), """
                                                            schema: kyber-squad.squad/v1
                                                            name: test-squad
                                                            version-source: kyber-weave-assembly
@@ -462,16 +465,16 @@ public sealed class CopilotRendererTests
                                                            mcp: mcp.json
                                                            """);
 
-        File.WriteAllText(Path.Combine(root, "toolchain.yml"), """
+        _files.WriteAllText(Path.Combine(root, "toolchain.yml"), """
                                                                schema: kyber-squad.toolchain/v1
                                                                required-features:
                                                                  - agent-ir/v1
                                                                validated-release: null
                                                                """);
 
-        File.WriteAllText(Path.Combine(root, "mcp.json"), """{ "mcpServers": {} }""");
+        _files.WriteAllText(Path.Combine(root, "mcp.json"), """{ "mcpServers": {} }""");
 
-        File.WriteAllText(Path.Combine(root, "bundles", "full.yml"), """
+        _files.WriteAllText(Path.Combine(root, "bundles", "full.yml"), """
                                                                      schema: kyber-squad.bundle/v1
                                                                      name: full
                                                                      agents:
@@ -482,16 +485,16 @@ public sealed class CopilotRendererTests
                                                                      skills: []
                                                                      """);
 
-        File.WriteAllText(Path.Combine(root, "profiles", "models.yml"), """
+        _files.WriteAllText(Path.Combine(root, "profiles", "models.yml"), """
                                                                         schema: kyber-squad.model-profiles/v1
                                                                         profiles:
                                                                           default:
                                                                             default: inherit
                                                                         """);
 
-        File.WriteAllText(Path.Combine(root, "profiles", "capabilities.yml"), capabilitiesYaml);
+        _files.WriteAllText(Path.Combine(root, "profiles", "capabilities.yml"), capabilitiesYaml);
 
-        File.WriteAllText(Path.Combine(root, "profiles", "fallbacks.yml"), """
+        _files.WriteAllText(Path.Combine(root, "profiles", "fallbacks.yml"), """
                                                                            schema: kyber-squad.fallback-profiles/v1
                                                                            profiles:
                                                                              none:
@@ -505,7 +508,7 @@ public sealed class CopilotRendererTests
         WriteAgent(root, "conductor", "read-only-custom", "[todo, read, vscode]");
     }
 
-    private static void WriteAgent(
+    private void WriteAgent(
         string root,
         string name,
         string capabilityProfile,
@@ -513,7 +516,7 @@ public sealed class CopilotRendererTests
         string invocation = "subagent",
         string delegatesTo = "[]")
     {
-        File.WriteAllText(Path.Combine(root, "agents", $"{name}.md"), $"""
+        _files.WriteAllText(Path.Combine(root, "agents", $"{name}.md"), $"""
                                                                        ---
                                                                        schema: kyber-squad.agent/v1
                                                                        name: {name}
@@ -530,21 +533,21 @@ public sealed class CopilotRendererTests
                                                                        """);
     }
 
-    private static void WritePrimaryDelegationSquad(string root)
+    private void WritePrimaryDelegationSquad(string root)
     {
-        Directory.CreateDirectory(Path.Combine(root, "bundles"));
-        Directory.CreateDirectory(Path.Combine(root, "profiles"));
-        Directory.CreateDirectory(Path.Combine(root, "agents"));
-        Directory.CreateDirectory(Path.Combine(root, "schemas"));
+        _files.CreateDirectory(Path.Combine(root, "bundles"));
+        _files.CreateDirectory(Path.Combine(root, "profiles"));
+        _files.CreateDirectory(Path.Combine(root, "agents"));
+        _files.CreateDirectory(Path.Combine(root, "schemas"));
 
         foreach (string schemaFile in Corpus.EnumerateFiles("products/kyber-squad/schemas", "*.json", recursive: false))
         {
-            File.WriteAllBytes(
+            _files.WriteAllBytes(
                 Path.Combine(root, "schemas", Path.GetFileName(schemaFile)),
                 Corpus.ReadBytes(schemaFile));
         }
 
-        File.WriteAllText(Path.Combine(root, "squad.yml"), """
+        _files.WriteAllText(Path.Combine(root, "squad.yml"), """
                                                            schema: kyber-squad.squad/v1
                                                            name: test-squad
                                                            version-source: kyber-weave-assembly
@@ -559,16 +562,16 @@ public sealed class CopilotRendererTests
                                                            mcp: mcp.json
                                                            """);
 
-        File.WriteAllText(Path.Combine(root, "toolchain.yml"), """
+        _files.WriteAllText(Path.Combine(root, "toolchain.yml"), """
                                                                schema: kyber-squad.toolchain/v1
                                                                required-features:
                                                                  - agent-ir/v1
                                                                validated-release: null
                                                                """);
 
-        File.WriteAllText(Path.Combine(root, "mcp.json"), """{ "mcpServers": {} }""");
+        _files.WriteAllText(Path.Combine(root, "mcp.json"), """{ "mcpServers": {} }""");
 
-        File.WriteAllText(Path.Combine(root, "bundles", "full.yml"), """
+        _files.WriteAllText(Path.Combine(root, "bundles", "full.yml"), """
                                                                      schema: kyber-squad.bundle/v1
                                                                      name: full
                                                                      agents:
@@ -579,14 +582,14 @@ public sealed class CopilotRendererTests
                                                                      skills: []
                                                                      """);
 
-        File.WriteAllText(Path.Combine(root, "profiles", "models.yml"), """
+        _files.WriteAllText(Path.Combine(root, "profiles", "models.yml"), """
                                                                         schema: kyber-squad.model-profiles/v1
                                                                         profiles:
                                                                           default:
                                                                             default: inherit
                                                                         """);
 
-        File.WriteAllText(Path.Combine(root, "profiles", "capabilities.yml"), """
+        _files.WriteAllText(Path.Combine(root, "profiles", "capabilities.yml"), """
                                                                               schema: kyber-squad.capability-profiles/v1
                                                                               capabilities:
                                                                                 - filesystem.read
@@ -617,7 +620,7 @@ public sealed class CopilotRendererTests
                                                                                     delegate: deny
                                                                               """);
 
-        File.WriteAllText(Path.Combine(root, "profiles", "fallbacks.yml"), """
+        _files.WriteAllText(Path.Combine(root, "profiles", "fallbacks.yml"), """
                                                                            schema: kyber-squad.fallback-profiles/v1
                                                                            profiles:
                                                                              none:
@@ -728,13 +731,13 @@ public sealed class CopilotRendererTests
     [Fact]
     public async Task RenderAsync_OmitsDelegationRosterForPrimaryAgentWithoutDelegates()
     {
-        using TempDirectory temp = new();
-        WritePrimaryDelegationSquad(temp.Path);
+        string syntheticRoot = SyntheticRoot();
+        WritePrimaryDelegationSquad(syntheticRoot);
         CopilotRenderer renderer = new();
         SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
-            temp.Path,
+            syntheticRoot,
             [SquadTarget.Copilot],
-            SquadDeploymentScope.Project).Prepared());
+            SquadDeploymentScope.Project).Prepared(_files));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadDeploymentFile file = Assert.Single(
@@ -757,13 +760,13 @@ public sealed class CopilotRendererTests
     [Fact]
     public async Task RenderAsync_PrimaryDelegationRosterDoesNotImplyNonInvocable()
     {
-        using TempDirectory temp = new();
-        WritePrimaryDelegationSquad(temp.Path);
+        string syntheticRoot = SyntheticRoot();
+        WritePrimaryDelegationSquad(syntheticRoot);
         CopilotRenderer renderer = new();
         SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
-            temp.Path,
+            syntheticRoot,
             [SquadTarget.Copilot],
-            SquadDeploymentScope.Project).Prepared());
+            SquadDeploymentScope.Project).Prepared(_files));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -840,13 +843,13 @@ public sealed class CopilotRendererTests
     [Fact]
     public async Task GlobalRenderKeepsFragmentSuffixAndLeavesLinksOutsideTheResourceClosureUnchanged()
     {
-        using TempDirectory temp = new();
-        WriteSyntheticSquad(temp.Path, MinimalCapabilitiesYaml);
-        Directory.CreateDirectory(Path.Combine(temp.Path, "agents", "conductor", "references"));
-        await File.WriteAllTextAsync(
-            Path.Combine(temp.Path, "agents", "conductor", "references", "intake-path.md"),
+        string syntheticRoot = SyntheticRoot();
+        WriteSyntheticSquad(syntheticRoot, MinimalCapabilitiesYaml);
+        _files.CreateDirectory(Path.Combine(syntheticRoot, "agents", "conductor", "references"));
+        _files.WriteAllText(
+            Path.Combine(syntheticRoot, "agents", "conductor", "references", "intake-path.md"),
             "# Intake\n");
-        await File.WriteAllTextAsync(Path.Combine(temp.Path, "agents", "conductor.md"), """
+        _files.WriteAllText(Path.Combine(syntheticRoot, "agents", "conductor.md"), """
             ---
             schema: kyber-squad.agent/v1
             name: conductor
@@ -863,7 +866,7 @@ public sealed class CopilotRendererTests
             See [external](https://example.com/conductor/references/intake-path.md) and [local](#top).
             """);
 
-        SquadRenderResult result = await RenderGloballyAsync(temp.Path, "/home/u/.copilot");
+        SquadRenderResult result = await RenderGloballyAsync(syntheticRoot, "/home/u/.copilot");
 
         string content = ConductorAgentContent(result, "agents/conductor.agent.md");
         Assert.Contains(
@@ -968,12 +971,13 @@ public sealed class CopilotRendererTests
     [Fact]
     public async Task GlobalRenderWithoutAGlobalRootResolverFailsClosedNamingTheMissingInput()
     {
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer()]);
+        CanonicalSquadTree tree = CanonicalSquadTree.Shared;
+        SquadRendererRegistry registry = tree.Registry([new CopilotRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Copilot],
             SquadDeploymentScope.Global,
-            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
+            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared(tree);
 
         SquadRenderValidationException exception =
             await Assert.ThrowsAsync<SquadRenderValidationException>(() => registry.RenderAsync(request));
@@ -1021,30 +1025,37 @@ public sealed class CopilotRendererTests
                                                          delegate: deny
                                                    """;
 
-    private static Task<SquadRenderResult> RenderConductorGloballyAsync(string copilotRoot)
+    private string SyntheticRoot()
+    {
+        string root = Path.Combine(_files.Root, "synthetic-squad");
+        _files.CreateDirectory(root);
+        return root;
+    }
+
+    private Task<SquadRenderResult> RenderConductorGloballyAsync(string copilotRoot)
     {
         return RenderGloballyAsync(ProductRoot, copilotRoot);
     }
 
-    private static Task<SquadRenderResult> RenderGloballyAsync(string sourceDirectory, string copilotRoot)
+    private Task<SquadRenderResult> RenderGloballyAsync(string sourceDirectory, string copilotRoot)
     {
         return RenderAsync(sourceDirectory, SquadDeploymentScope.Global, new FixedGlobalRootResolver(copilotRoot));
     }
 
-    private static async Task<SquadRenderResult> RenderAsync(
+    private async Task<SquadRenderResult> RenderAsync(
         string sourceDirectory,
         SquadDeploymentScope scope,
         ISquadGlobalRootResolver? globalRoots)
     {
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer()]);
-        SquadRenderRequest request = new SquadRenderRequest(
+        bool shipped = string.Equals(sourceDirectory, ProductRoot, StringComparison.Ordinal);
+        InMemorySquadServices services = new(shipped ? CanonicalSquadTree.Shared.Files : _files);
+        SquadRendererRegistry registry = new([new CopilotRenderer()], services.RenderInputReader());
+        SquadRenderRequest request = services.RenderInputReader().Prepare(new SquadRenderRequest(
             sourceDirectory,
             [SquadTarget.Copilot],
             scope,
             GlobalRoots: globalRoots,
-            PreloadedSource: string.Equals(sourceDirectory, ProductRoot, StringComparison.Ordinal)
-                ? TestSquadCorpus.CanonicalSource
-                : null).Prepared();
+            PreloadedSource: shipped ? TestSquadCorpus.CanonicalSource : null));
 
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
