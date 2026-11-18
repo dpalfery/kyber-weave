@@ -16,7 +16,8 @@ namespace KyberWeave.Testing.Squad;
 public sealed class InMemorySquadServices(InMemoryFileSystem files)
 {
     private readonly FakePathResolver _paths = new(files);
-    private readonly FakeProcessEnvironment _environment = new(isFileSystemCaseInsensitive: !files.CaseSensitive);
+    // The working directory is the in-memory root, so it is fully qualified on every platform (Windows refuses '/kw/work').
+    private readonly FakeProcessEnvironment _environment = new(currentDirectory: files.Root, isFileSystemCaseInsensitive: !files.CaseSensitive);
 
     /// <summary>Creates the source loader over the in-memory tree.</summary>
     public SquadSourceLoader SourceLoader() => new(files, _paths, _environment);
