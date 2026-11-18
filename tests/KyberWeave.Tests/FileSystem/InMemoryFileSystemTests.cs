@@ -1,4 +1,5 @@
 using KyberWeave.Contracts.Repositories;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace KyberWeave.Tests.FileSystem;
@@ -39,7 +40,7 @@ public sealed class InMemoryFileSystemBehaviourTests
     [Fact]
     public void LastWriteTimesComeFromTheInjectedClock()
     {
-        ManualTimeProvider clock = new(new DateTimeOffset(2026, 11, 17, 9, 30, 0, TimeSpan.Zero));
+        FakeTimeProvider clock = new(new DateTimeOffset(2026, 11, 17, 9, 30, 0, TimeSpan.Zero));
         InMemoryFileSystem files = new(clock);
         string root = files.CreateTemporaryDirectory("kw-memfs-time-");
         string path = At(root, "stamped.txt");
