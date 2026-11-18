@@ -1,17 +1,12 @@
-using KyberWeave.Testing.Squad;
-using System.Text;
-using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Fakes;
-using KyberWeave.Tests.Fixtures;
-using KyberWeave.Data.Hooks;
-using KyberWeave.Data.Host;
-using KyberWeave.Data.Paths;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Application.Tests.Squad.Instances;
 
 /// <summary>
 ///     Unit and integration tests for <see cref="SquadInstanceService" />, verifying instance installation,
@@ -29,7 +24,7 @@ namespace KyberWeave.Integration.Tests;
 ///         Acceptance Criterion 7.8: Squad deletes only instance files and links, never target files.
 ///     </para>
 /// </remarks>
-public sealed class SquadInstanceServiceTests : IDisposable
+public sealed class SquadInstanceEnsureRemoveTests
 {
     private const string DefaultPresetYaml = """
                                              schema: kyber-squad.model-preset/v1
@@ -55,16 +50,7 @@ public sealed class SquadInstanceServiceTests : IDisposable
                                                         copilot: gpt-4o
                                                     """;
 
-    private static readonly UTF8Encoding Utf8NoBom = new(false);
-    private readonly SharedIdentitySquadFixture _fixture = SharedIdentitySquadFixture.Create();
-
-    private readonly TempDirectory _temp = new();
-
-    public void Dispose()
-    {
-        _fixture.Dispose();
-        _temp.Dispose();
-    }
+    private readonly InMemorySquadState _state = new();
 
     /// <summary>
     ///     Verifies that calling EnsureAsync creates the instance folder and receipt on the first call,
@@ -95,15 +81,15 @@ public sealed class SquadInstanceServiceTests : IDisposable
         string expectedReceiptPath = Path.Combine(expectedStateDir, "squad.receipt.json");
 
         Assert.Equal(expectedInstanceRoot, firstResult.InstanceRoot);
-        Assert.True(Directory.Exists(expectedInstanceRoot));
-        Assert.True(File.Exists(expectedReceiptPath));
+        Assert.True(_state.Files.DirectoryExists(expectedInstanceRoot));
+        Assert.True(_state.Files.FileExists(expectedReceiptPath));
 
-        DateTime lastReceiptWrite = File.GetLastWriteTimeUtc(expectedReceiptPath);
+        DateTime lastReceiptWrite = _state.Files.GetLastWriteTimeUtc(expectedReceiptPath);
 
         SquadInstanceEnsureResult secondResult = await service.EnsureAsync(SquadTarget.Claude, "default");
 
         Assert.Equal(expectedInstanceRoot, secondResult.InstanceRoot);
-        Assert.Equal(lastReceiptWrite, File.GetLastWriteTimeUtc(expectedReceiptPath));
+        Assert.Equal(lastReceiptWrite, _state.Files.GetLastWriteTimeUtc(expectedReceiptPath));
     }
 
     /// <summary>
@@ -133,12 +119,12 @@ public sealed class SquadInstanceServiceTests : IDisposable
             "squad",
             "presets",
             "default.yml");
-        await File.WriteAllTextAsync(presetFilePath, UpdatedDefaultPresetYaml, Utf8NoBom);
+        _state.Files.WriteAllText(presetFilePath, UpdatedDefaultPresetYaml);
 
         SquadInstanceEnsureResult updateResult = await service.EnsureAsync(SquadTarget.Claude, "default");
 
         Assert.Equal(expectedInstanceRoot, updateResult.InstanceRoot);
-        Assert.True(Directory.Exists(expectedInstanceRoot));
+        Assert.True(_state.Files.DirectoryExists(expectedInstanceRoot));
     }
 
     /// <summary>
@@ -153,10 +139,10 @@ public sealed class SquadInstanceServiceTests : IDisposable
         SquadInstanceService service = context.CreateService();
 
         string mainHome = context.GlobalRoots.ResolveGlobalRoot(SquadTarget.Claude);
-        Directory.CreateDirectory(mainHome);
+        _state.Files.CreateDirectory(mainHome);
         string mainSettingsFile = Path.Combine(mainHome, "settings.json");
         string originalContent = "{\"telemetry\": false, \"theme\": \"dark\"}";
-        await File.WriteAllTextAsync(mainSettingsFile, originalContent, Encoding.UTF8);
+        _state.Files.WriteAllText(mainSettingsFile, originalContent);
 
         SquadInstanceEnsureResult result = await service.EnsureAsync(SquadTarget.Claude, "default");
         string instanceRoot = result.InstanceRoot;
@@ -168,20 +154,20 @@ public sealed class SquadInstanceServiceTests : IDisposable
             "claude",
             "default");
 
-        Assert.True(Directory.Exists(instanceRoot));
-        Assert.True(Directory.Exists(instanceStateDir));
+        Assert.True(_state.Files.DirectoryExists(instanceRoot));
+        Assert.True(_state.Files.DirectoryExists(instanceStateDir));
 
         await service.RemoveAsync(SquadTarget.Claude, "default");
 
-        Assert.False(Directory.Exists(instanceRoot));
-        Assert.False(Directory.Exists(instanceStateDir));
+        Assert.False(_state.Files.DirectoryExists(instanceRoot));
+        Assert.False(_state.Files.DirectoryExists(instanceStateDir));
         Assert.Contains(context.LinkFileSystem.DeletedTrees,
             path => string.Equals(path, instanceRoot, StringComparison.Ordinal));
 
         // Main home must remain completely untouched
-        Assert.True(Directory.Exists(mainHome));
-        Assert.True(File.Exists(mainSettingsFile));
-        Assert.Equal(originalContent, await File.ReadAllTextAsync(mainSettingsFile, Encoding.UTF8));
+        Assert.True(_state.Files.DirectoryExists(mainHome));
+        Assert.True(_state.Files.FileExists(mainSettingsFile));
+        Assert.Equal(originalContent, _state.Files.ReadAllText(mainSettingsFile));
     }
 
     [Fact]
@@ -225,9 +211,9 @@ public sealed class SquadInstanceServiceTests : IDisposable
             ".kyber-weave",
             "squad",
             "outside-directory");
-        Directory.CreateDirectory(outsideDir);
+        _state.Files.CreateDirectory(outsideDir);
         string canaryFile = Path.Combine(outsideDir, "canary.txt");
-        await File.WriteAllTextAsync(canaryFile, "untouched", Encoding.UTF8);
+        _state.Files.WriteAllText(canaryFile, "untouched");
 
         try
         {
@@ -238,9 +224,9 @@ public sealed class SquadInstanceServiceTests : IDisposable
             // Expected if preset validation rejects traversal
         }
 
-        Assert.True(Directory.Exists(outsideDir));
-        Assert.True(File.Exists(canaryFile));
-        Assert.Equal("untouched", await File.ReadAllTextAsync(canaryFile, Encoding.UTF8));
+        Assert.True(_state.Files.DirectoryExists(outsideDir));
+        Assert.True(_state.Files.FileExists(canaryFile));
+        Assert.Equal("untouched", _state.Files.ReadAllText(canaryFile));
     }
 
     /// <summary>
@@ -256,13 +242,13 @@ public sealed class SquadInstanceServiceTests : IDisposable
         SquadInstanceEnsureResult claudeResult = await service.EnsureAsync(SquadTarget.Claude, "default");
         SquadInstanceEnsureResult copilotResult = await service.EnsureAsync(SquadTarget.Copilot, "default");
 
-        Assert.True(Directory.Exists(claudeResult.InstanceRoot));
-        Assert.True(Directory.Exists(copilotResult.InstanceRoot));
+        Assert.True(_state.Files.DirectoryExists(claudeResult.InstanceRoot));
+        Assert.True(_state.Files.DirectoryExists(copilotResult.InstanceRoot));
 
         await service.RefreshAllAsync();
 
-        Assert.True(Directory.Exists(claudeResult.InstanceRoot));
-        Assert.True(Directory.Exists(copilotResult.InstanceRoot));
+        Assert.True(_state.Files.DirectoryExists(claudeResult.InstanceRoot));
+        Assert.True(_state.Files.DirectoryExists(copilotResult.InstanceRoot));
     }
 
     /// <summary>
@@ -309,9 +295,9 @@ public sealed class SquadInstanceServiceTests : IDisposable
         Assert.NotEqual(claudeDefault.InstanceRoot, claudeFast.InstanceRoot);
         Assert.NotEqual(claudeDefault.InstanceRoot, copilotDefault.InstanceRoot);
 
-        Assert.True(Directory.Exists(expectedClaudeDefault));
-        Assert.True(Directory.Exists(expectedClaudeFast));
-        Assert.True(Directory.Exists(expectedCopilotDefault));
+        Assert.True(_state.Files.DirectoryExists(expectedClaudeDefault));
+        Assert.True(_state.Files.DirectoryExists(expectedClaudeFast));
+        Assert.True(_state.Files.DirectoryExists(expectedCopilotDefault));
     }
 
     /// <summary>
@@ -325,9 +311,9 @@ public sealed class SquadInstanceServiceTests : IDisposable
         SquadInstanceService service = context.CreateService();
 
         string mainClaude = context.GlobalRoots.ResolveGlobalRoot(SquadTarget.Claude);
-        Directory.CreateDirectory(mainClaude);
+        _state.Files.CreateDirectory(mainClaude);
         string settingsFile = Path.Combine(mainClaude, "settings.json");
-        await File.WriteAllTextAsync(settingsFile, "{\"theme\": \"dark\"}", Encoding.UTF8);
+        _state.Files.WriteAllText(settingsFile, "{\"theme\": \"dark\"}");
 
         SquadInstanceEnsureResult result = await service.EnsureAsync(SquadTarget.Claude, "default");
 
@@ -339,85 +325,63 @@ public sealed class SquadInstanceServiceTests : IDisposable
 
     private TestContext CreateContext()
     {
-        string root = _temp.Path;
-        string appData = Path.Combine(root, "app-data");
-        FakeSquadUserPaths userPaths = new(appData);
-        Directory.CreateDirectory(userPaths.HomeDirectory);
+        ISquadUserPaths userPaths = _state.UserPaths;
+        _state.Files.CreateDirectory(userPaths.HomeDirectory);
 
         string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
-        Directory.CreateDirectory(presetsDir);
-        File.WriteAllText(Path.Combine(presetsDir, "default.yml"), DefaultPresetYaml, Utf8NoBom);
-        File.WriteAllText(Path.Combine(presetsDir, "fast.yml"), FastPresetYaml, Utf8NoBom);
+        _state.Files.CreateDirectory(presetsDir);
+        _state.Files.WriteAllText(Path.Combine(presetsDir, "default.yml"), DefaultPresetYaml);
+        _state.Files.WriteAllText(Path.Combine(presetsDir, "fast.yml"), FastPresetYaml);
 
-        string globalHome = Path.Combine(root, "global-home");
-        Directory.CreateDirectory(globalHome);
+        string globalHome = Path.Combine(_state.Files.Root, "global-home");
+        _state.Files.CreateDirectory(globalHome);
         FakeGlobalRootResolver globalRoots = new(globalHome);
-        FakeSquadLinkFileSystem linkFileSystem = new();
-        SquadModelPresetStore presetStore = new(userPaths, new KyberWeave.Data.Hooks.PhysicalFileSystem());
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
+        FakeSquadLinkFileSystem linkFileSystem = new(_state.Files);
+        SquadModelPresetStore presetStore = new(userPaths, _state.Files);
 
-        FakeSquadReleaseSource releaseSource = new()
-        {
-            SourceDirectory = _fixture.Path,
-            AssetName = "test-asset.tar.gz",
-            DownloadUri = new Uri("https://example.com/asset.tar.gz"),
-            AssetSize = 100,
-            Sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        };
-        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
+        string source = Path.Combine(_state.Files.Root, "release", "kyber-squad");
+        _ = CanonicalSquadTree.CopyInto(_state.Files, source);
+        FakeSquadReleaseSource releaseSource = FakeSquadReleaseSource.FromDirectory(source, _state.Files);
+        ISquadRenderer renderer = new SquadRendererRegistry(
+            SquadHostDefaults.CreateRenderers(),
+            new InMemorySquadServices(_state.Files).RenderInputReader());
 
-        SquadLifecycleService lifecycleService = SquadHostDefaults.CreateLifecycleService(
-            releaseSource,
-            renderer,
-            stateStore,
-            globalRoots: globalRoots,
-            presetStore: presetStore);
+        SquadLifecycleService lifecycleService = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer, globalRoots);
 
-        return new TestContext(
-            userPaths,
-            globalRoots,
-            linkFileSystem,
-            presetStore,
-            lifecycleService,
-            releaseSource);
+        return new TestContext(_state, userPaths, globalRoots, linkFileSystem, presetStore, lifecycleService);
     }
 
-    private sealed class TestContext : IDisposable
+    private sealed class TestContext(
+        InMemorySquadState state,
+        ISquadUserPaths userPaths,
+        FakeGlobalRootResolver globalRoots,
+        FakeSquadLinkFileSystem linkFileSystem,
+        SquadModelPresetStore presetStore,
+        SquadLifecycleService lifecycleService) : IDisposable
     {
-        private readonly FakeSquadReleaseSource _releaseSource;
-
-        public TestContext(
-            FakeSquadUserPaths userPaths,
-            FakeGlobalRootResolver globalRoots,
-            FakeSquadLinkFileSystem linkFileSystem,
-            SquadModelPresetStore presetStore,
-            SquadLifecycleService lifecycleService,
-            FakeSquadReleaseSource releaseSource)
-        {
-            UserPaths = userPaths;
-            GlobalRoots = globalRoots;
-            LinkFileSystem = linkFileSystem;
-            PresetStore = presetStore;
-            LifecycleService = lifecycleService;
-            _releaseSource = releaseSource;
-        }
-
-        public FakeSquadUserPaths UserPaths { get; }
-        public FakeGlobalRootResolver GlobalRoots { get; }
-        public FakeSquadLinkFileSystem LinkFileSystem { get; }
-        public SquadModelPresetStore PresetStore { get; }
-        public SquadLifecycleService LifecycleService { get; }
+        public ISquadUserPaths UserPaths { get; } = userPaths;
+        public FakeGlobalRootResolver GlobalRoots { get; } = globalRoots;
+        public FakeSquadLinkFileSystem LinkFileSystem { get; } = linkFileSystem;
 
         public void Dispose()
         {
-            _releaseSource.Dispose();
         }
 
         public SquadInstanceService CreateService()
         {
-            return new SquadInstanceService(LifecycleService, PresetStore, LinkFileSystem, GlobalRoots, RealSquadServices.InstanceLinkSync(), new PhysicalSquadFileAccess(), new PhysicalPathResolver(new PhysicalFileSystem()), new ProcessEnvironment());
+            return new SquadInstanceService(
+                lifecycleService,
+                presetStore,
+                LinkFileSystem,
+                GlobalRoots,
+                new SquadInstanceLinkSync(state.Files, state.Paths, new InProcessLease(state.LeaseHost), state.Environment),
+                new InMemorySquadFileAccess(state.Files),
+                state.Paths,
+                state.Environment,
+                state.Store);
         }
     }
+
     private sealed class FakeGlobalRootResolver(string baseGlobalRoot) : ISquadGlobalRootResolver
     {
         public string ResolveGlobalRoot(SquadTarget target)
@@ -426,7 +390,7 @@ public sealed class SquadInstanceServiceTests : IDisposable
         }
     }
 
-    private sealed class FakeSquadLinkFileSystem : ISquadLinkFileSystem
+    private sealed class FakeSquadLinkFileSystem(InMemoryFileSystem files) : ISquadLinkFileSystem
     {
         private readonly Dictionary<string, string> _fileLinks = new(StringComparer.Ordinal);
         private readonly Dictionary<string, string> _folderLinks = new(StringComparer.Ordinal);
@@ -474,7 +438,7 @@ public sealed class SquadInstanceServiceTests : IDisposable
                 _folderLinks.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToList();
             foreach (string key in folderKeysToRemove) _folderLinks.Remove(key);
 
-            if (Directory.Exists(directoryPath)) Directory.Delete(directoryPath, true);
+            if (files.DirectoryExists(directoryPath)) files.DeleteTreeNoFollow(directoryPath);
         }
 
         private static string Normalize(string path)
