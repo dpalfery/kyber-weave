@@ -54,6 +54,53 @@ public partial class CanonStoreRepository
         }
     }
 
+    /// <summary>
+    /// Decodes a stored <c>content_json</c> column into the record's string map.
+    /// </summary>
+    /// <remarks>
+    /// The column is an object of recorded parts, but its values are untrusted: a writer that
+    /// predates this engine recorded span attribute values verbatim, so a boolean, a number, an
+    /// object, or an array sits beside the text. Every value is preserved as text (a scalar's JSON
+    /// literal, a container's JSON text) because a row that cannot be represented must not abort
+    /// the listing. A column that is not a JSON object, or not JSON at all, reads as empty.
+    /// </remarks>
+    /// <param name="json">The column text as stored.</param>
+    /// <returns>The decoded content, never <see langword="null"/>.</returns>
+    internal static Dictionary<string, string> ParseContentColumn(string json)
+    {
+        Dictionary<string, string> content = new(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(json))
+            return content;
+
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(json);
+        }
+        catch (JsonException)
+        {
+            return content;
+        }
+
+        using (document)
+        {
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+                return content;
+
+            foreach (JsonProperty property in document.RootElement.EnumerateObject())
+            {
+                content[property.Name] = property.Value.ValueKind switch
+                {
+                    JsonValueKind.String => property.Value.GetString() ?? string.Empty,
+                    JsonValueKind.Null or JsonValueKind.Undefined => string.Empty,
+                    _ => property.Value.GetRawText(),
+                };
+            }
+        }
+
+        return content;
+    }
+
     private IReadOnlyList<CanonicalRecord> QueryRecords(string whereAndOrderClause)
     {
         string output = ExecuteSqlite(
@@ -109,8 +156,7 @@ public partial class CanonStoreRepository
         string status = DecodeHexText(cols[14]);
         TokenUsage tokens = JsonSerializer.Deserialize<TokenUsage>(DecodeHexText(cols[15]), RecordJsonOptions)
             ?? throw new InvalidOperationException($"corrupt tokens_json for span {recordSpanId}.");
-        Dictionary<string, string> storedContent = JsonSerializer.Deserialize<Dictionary<string, string>>(DecodeHexText(cols[16]), RecordJsonOptions)
-            ?? new Dictionary<string, string>(StringComparer.Ordinal);
+        Dictionary<string, string> storedContent = ParseContentColumn(DecodeHexText(cols[16]));
         CostBlock cost = JsonSerializer.Deserialize<CostBlock>(DecodeHexText(cols[17]), RecordJsonOptions)
             ?? throw new InvalidOperationException($"corrupt cost_json for span {recordSpanId}.");
 
