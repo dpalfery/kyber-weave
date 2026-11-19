@@ -75,6 +75,7 @@ internal static class ArbiterTestServices
             Get<IProcessEnvironment>(),
             Get<IBackgroundDispatchStore>(),
             Get<IIdGenerator>(),
+            new ReviewSeatRecorder(Get<IWritableFileSystem>(), Get<IPathResolver>()),
             providerFactory,
             gitFactsFactory,
             planReaderFactory,

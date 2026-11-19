@@ -61,6 +61,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     private readonly IProcessEnvironment _process;
     private readonly IBackgroundDispatchStore _background;
     private readonly IIdGenerator _ids;
+    private readonly ReviewSeatRecorder _seats;
 
     /// <summary>
     /// Creates an engine over the ports it decides through. Every factory is injectable so tests run the real
@@ -78,6 +79,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// <param name="process">The process the engine reads its home, directory and environment variables from.</param>
     /// <param name="background">Keeps the background dispatches whose turns are still to return.</param>
     /// <param name="ids">Builds the decision id for a hook decision that has none of its own.</param>
+    /// <param name="seats">Saves a review lens return as its seat file.</param>
     /// <param name="providerFactory">Replaces the provider the configuration names.</param>
     /// <param name="gitFactsFactory">Replaces the git facts.</param>
     /// <param name="planReaderFactory">Replaces the plan reader.</param>
@@ -98,6 +100,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         IProcessEnvironment process,
         IBackgroundDispatchStore background,
         IIdGenerator ids,
+        ReviewSeatRecorder seats,
         Func<KyberWeaveConfig, IArbiterProvider>? providerFactory = null,
         Func<string, IArbiterGitFacts>? gitFactsFactory = null,
         Func<string, IArbiterPlanReader>? planReaderFactory = null,
@@ -120,6 +123,8 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         _background = background;
         ArgumentNullException.ThrowIfNull(ids);
         _ids = ids;
+        ArgumentNullException.ThrowIfNull(seats);
+        _seats = seats;
         _evaluators = evaluators;
         _state = state;
         _providers = providers;
@@ -359,6 +364,11 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         string? preId = null,
         string? deliveredPrompt = null)
     {
+        if (isPost && toolOutput is not null)
+        {
+            RecordReviewSeat(prompt, toolOutput, context);
+        }
+
         string? resolved = string.IsNullOrWhiteSpace(caller) || IsUnidentified(caller) ? null : caller;
 
         // A serve event arrives with no harness hook: the whole event is the MCP
@@ -456,6 +466,22 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         finally
         {
             owned?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Saves a review lens return as its seat file before any rule runs. A failure is logged and never blocks the
+    /// dispatch: the reviewer sees the missing seat and re-sends it.
+    /// </summary>
+    private void RecordReviewSeat(string prompt, string toolOutput, HookContext context)
+    {
+        try
+        {
+            _seats.Record(prompt, toolOutput, context);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            context.Log.WriteLine($"Arbiter: a review seat was not saved ({exception.GetType().Name}: {OneLine(exception.Message)}).");
         }
     }
 

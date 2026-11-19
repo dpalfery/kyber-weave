@@ -100,6 +100,7 @@ public static class ArbiterApplicationServiceCollectionExtensions
     {
         services.TryAddSingleton<IArbiterHostConfig, ArbiterHostConfig>();
         services.TryAddSingleton<IHookGitFactsFactory, HookGitFactsFactory>();
+        services.TryAddSingleton<ReviewSeatRecorder>();
         services.TryAddSingleton<ArbiterHookDecisionEngine>();
         services.TryAddSingleton<IHookDecisionEngine>(sp => sp.GetRequiredService<ArbiterHookDecisionEngine>());
         services.TryAddSingleton<IContextualHookDecisionEngine>(sp => sp.GetRequiredService<ArbiterHookDecisionEngine>());
