@@ -17,4 +17,19 @@ public class McpForwardingBudgetTests
             McpStdioHost.RequestTimeout >= TimeSpan.FromSeconds(60),
             $"The forwarding budget is {McpStdioHost.RequestTimeout}, which is shorter than a large store needs.");
     }
+
+    /// <summary>
+    /// The host forwards through the client this factory builds, so the budget that matters is the
+    /// one on that client, not only the constant it is read from.
+    /// </summary>
+    [Fact]
+    public void TheForwardingClientCarriesThatBudget()
+    {
+        using HttpClient client = Program.CreateHttpClient();
+
+        Assert.Equal(McpStdioHost.RequestTimeout, client.Timeout);
+        Assert.True(
+            client.Timeout >= TimeSpan.FromSeconds(60),
+            $"The forwarding client's budget is {client.Timeout}, which is shorter than a large store needs.");
+    }
 }
