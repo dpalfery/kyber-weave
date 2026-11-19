@@ -46,7 +46,7 @@ public sealed class PlannerDifficultyAndTechnologyContractTests
         // The tie-break and its exception: guess low where a failure is caught, high where a wrong result can pass.
         Assert.Contains("pick the lower", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("moves the task one tier up", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("pick the higher", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("a choice that can break other callers: pick the higher, without predicting", text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
