@@ -335,6 +335,8 @@ rules:
   # task is; an answer retargets to that difficulty's profile only when the classifier is at
   # least 0.8 sure, and below the floor the answer is undecidable and the dispatch keeps its model.
   # Mode off disables the rule, shadow records it without effect, and enforce lets it gate.
+  # The criteria were reworded (PR 653) to rate decisions rather than size and have not been re-tuned:
+  # tuned-for and the 0.8 floor describe the earlier wording. Re-tune before setting the mode to enforce.
   - id: KW-ARB-DIFFICULTY-001
     trigger: delegate.model
     question: "How hard is this task: easy, standard or hard?"
@@ -343,9 +345,9 @@ rules:
       type: choice
       state: { task: plan.task.text, files: plan.task.files, file-kinds: plan.task.file-kinds }
       criteria:
-        easy: A small, local change with one obvious path.
-        standard: A change with several files or a non-obvious path, but no cross-cutting risk.
-        hard: A change that spans layers, alters contracts, or needs careful design.
+        easy: Every change is stated in the task and an existing pattern covers it, in however many files.
+        standard: The worker makes design choices the task leaves open, in code that has patterns to follow.
+        hard: There is no pattern to copy, a wrong choice breaks other callers, or the work involves concurrency, security or a data migration.
       confidence-at-least: 0.8
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
     effects: { easy: retarget, standard: retarget, hard: retarget }

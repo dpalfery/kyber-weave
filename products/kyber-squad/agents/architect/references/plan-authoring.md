@@ -111,9 +111,13 @@ Every task that changes files carries a `Difficulty:` line and a `Technology:` l
 
 `Difficulty:` is the architect's rating, one of three values:
 
-- `easy`: a small, local change with one obvious path.
-- `medium`: several files or a non-obvious path, with no cross-cutting risk. This is the default when the line is missing.
-- `hard`: a change that spans layers, alters contracts, or needs careful design.
+- `easy`: every change is stated in the plan and an existing pattern covers it, in however many files.
+- `medium`: the worker makes design choices the plan leaves open, in code that has patterns to follow. This is the default when the line is missing.
+- `hard`: there is no pattern to copy, a wrong choice breaks other callers, or the work involves concurrency, security or a data migration.
+
+Rate the decisions the worker must make, not the size: the number of files or layers does not by itself raise the rating. When unsure between two ratings, pick the lower, because a failed attempt moves the task one tier up; the exception is a task that may plausibly be `hard` for security, concurrency, a data migration or a choice that can break other callers: pick the higher, without predicting whether its task gate would catch a wrong result.
+
+Examples: in one technology, a repository method, its service and its endpoint, each copying the neighbouring one, with the names and types in the plan, is `easy` although it spans three layers. One new optional field on a response is `easy` although it alters a contract. A new screen whose state handling the plan leaves to the worker is `medium`. Replacing how background jobs are locked is `hard` although it touches one file.
 
 `Technology:` names exactly one technology the task is written in, chosen from `ontology.technologies`. A change that spans two unrelated technologies is two tasks with a dependency between them, never one task with two technologies: an endpoint and its database migration are separate tasks, the migration first, because one prompt carries one technology's rules and one set of gates. A technology built on another (React on TypeScript) is still one task in the child; the parent's rules arrive with the child's.
 

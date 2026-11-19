@@ -1,7 +1,7 @@
 ---
 schema: kyber-squad.agent/v1
 name: dev-hard
-description: "Implements application code and its tests in any technology, for a task rated hard: many files, or a path with real design risk. Use only when the host's worker roster is tiered. Do not use for documentation-only work or for pushing, publishing and pipelines."
+description: "Implements application code and its tests in any technology, for a task rated hard: no pattern to copy, a wrong choice breaks other callers, or concurrency, security or a data migration. Use only when the host's worker roster is tiered. Do not use for documentation-only work or for pushing, publishing and pipelines."
 invocation: subagent
 model-profile: dev-hard
 capability-profile: worker
