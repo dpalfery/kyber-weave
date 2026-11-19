@@ -196,5 +196,9 @@ public sealed class SquadRequestAndCheckRulesTests
         "summary of the request",
         "summarize the user's request",
         "summarise the user's request",
+        "paraphrase the request",
+        "paraphrase the user's request",
+        "shorten the request",
+        "reorder the request",
     ];
 }
