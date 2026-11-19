@@ -166,6 +166,28 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             };
         }
 
+        if (CliCalls(payload).Count > 1)
+        {
+            // A batch is one event for several calls. The insertion-only path must find the marked dispatch anywhere
+            // in it: reading the first call alone answered null for a turn that read a file and then dispatched.
+            foreach (JsonElement call in CliCalls(payload))
+            {
+                string? document = RenderCliCallInsertion(CliCallPayload(payload, call), context);
+                if (document is not null)
+                {
+                    return document;
+                }
+            }
+
+            return null;
+        }
+
+        return RenderCliCallInsertion(payload, context);
+    }
+
+    /// <summary>The prompt insertion for one CLI call, or null when the call needs none.</summary>
+    private static string? RenderCliCallInsertion(JsonElement payload, HookContext context)
+    {
         if (!string.Equals(CliToolName(payload), "task", StringComparison.Ordinal)
             || payload.TryGetProperty("toolResult", out _)
             || (FirstCliCall(payload) is { } batchCall && batchCall.TryGetProperty("result", out _)))

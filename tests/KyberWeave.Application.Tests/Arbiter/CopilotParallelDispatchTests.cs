@@ -1,3 +1,4 @@
+using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Core.Arbiter;
@@ -77,6 +78,42 @@ public sealed class CopilotParallelDispatchTests
         Assert.Equal(T1Call, tracked.CallId);
         Assert.Equal("dev-hard", tracked.Target);
     }
+
+    /// <summary>
+    /// The insertion-only path — a hook answering without evaluation, such as an Arbiter that is off — must find the
+    /// marked dispatch anywhere in the batch, not only in its first call: a turn that read a file and then dispatched
+    /// a task would otherwise hand the worker no prompt and record nothing.
+    /// </summary>
+    [Fact]
+    public void TheInsertionOnlyPathFindsAMarkedDispatchBesideANonTaskFirstCall()
+    {
+        CopilotHookAdapter adapter = new(new CapturingEngine(), CopilotHookAdapter.CliToken);
+        HookContext context = new(
+            "/Users/dave/git/repo",
+            () => "decision-test-4",
+            TextWriter.Null,
+            BuildDispatchPrompt: _ => new DispatchPromptExpansion(true, "<task>the packet</task>", null));
+
+        string? insertion = adapter.RenderPromptInsertion(
+            JsonDocument.Parse(BatchWithAViewFirst()).RootElement.Clone(), null, context);
+
+        Assert.NotNull(insertion);
+        Assert.Contains("modifiedArgs", insertion, StringComparison.Ordinal);
+        Assert.Contains("the packet", insertion, StringComparison.Ordinal);
+    }
+
+    private static string BatchWithAViewFirst() =>
+        $$"""
+        {
+          "sessionId": "87eb1b25-85dc-4dc9-8812-12a8121be761",
+          "cwd": "/Users/dave/git/repo",
+          "toolCalls": [
+            { "id": "call_view_1", "name": "view", "args": { "path": "README.md" } },
+            { "id": "{{T2Call}}", "name": "task", "args": { "agent_type": "dev-medium",
+              "prompt": "KYBER-ARBITER: true\nPLAN_FILE: {{Plan}}\nTASK: T2\n\nTask T2." } }
+          ]
+        }
+        """;
 
     private static string BatchPre() =>
         $$"""
