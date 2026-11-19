@@ -45,7 +45,7 @@ public abstract class InMemoryDeploymentStateTestBase : SquadStateDocumentFixtur
             "kw",
             "work",
             $"case-{Interlocked.Increment(ref _next):x}");
-        State = new InMemorySquadState(stateRoot: stateRoot, files: Files);
+        State = new InMemorySquadState(stateRoot: stateRoot, existingFiles: Files);
         Paths = State.Paths;
         Semantics = State.Semantics;
         Environment = State.Environment;
