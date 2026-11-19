@@ -66,6 +66,13 @@ internal static class CommandAppFixture
         Build(strictParsing: true, configure, console, ReviewGatesBranch);
 
     /// <summary>
+    /// The council <c>review verdict</c> boundary: the <c>review</c> branch and its single
+    /// <c>verdict</c> command, strict for the same reason as <see cref="ReviewGates"/>.
+    /// </summary>
+    public static CommandApp ReviewVerdict(Action<IServiceCollection>? configure = null, IAnsiConsole? console = null) =>
+        Build(strictParsing: true, configure, console, ReviewVerdictBranch);
+
+    /// <summary>
     /// The <c>review catalogue</c> boundary: the <c>review</c> branch and its single
     /// <c>catalogue</c> command, strict for the same reason as <see cref="ReviewGates"/>.
     /// </summary>
@@ -146,6 +153,13 @@ internal static class CommandAppFixture
 
     private static void ReviewGatesBranch(IConfigurator config) =>
         config.AddBranch("review", review => { review.AddCommand<ReviewGatesCommand>("gates"); });
+
+    private static void ReviewVerdictBranch(IConfigurator config) =>
+        config.AddBranch("review", review =>
+        {
+            review.AddCommand<ReviewVerdictCommand>("verdict")
+                .WithDescription(ReviewVerdictCommand.Description);
+        });
 
     private static void ReviewCatalogueBranch(IConfigurator config) =>
         config.AddBranch("review", review => { review.AddCommand<ReviewCatalogueCommand>("catalogue"); });

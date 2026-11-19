@@ -391,6 +391,23 @@ public abstract class FileSystemContractTests : IDisposable
         Assert.Null(files.GetFinalLinkTarget(dangling));
     }
 
+    /// <summary>
+    /// A gate's <c>working-directory</c> may not pass through a directory link that leads outside the repository.
+    /// The config check decides that by comparing the link's final target with the root, so the two link queries must
+    /// report the outside directory on both the fake and the real disk.
+    /// </summary>
+    [Fact]
+    public void AConfigDirectoryLinkReportsTheOutsideTargetItLeadsTo()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string outside = AnotherDirectory(files, "kw-fs-contract-config-outside-");
+        string link = At(root, "web");
+        files.CreateDirectoryLink(link, outside);
+
+        Assert.Equal(Path.GetFullPath(outside), Path.GetFullPath(files.GetLinkTarget(link)!));
+        Assert.Equal(Path.GetFullPath(outside), Path.GetFullPath(files.GetFinalLinkTarget(link)!));
+    }
+
     [Fact]
     public void WriteAllTextReplacesAnEarlierFile()
     {
@@ -755,6 +772,24 @@ public abstract class FileSystemContractTests : IDisposable
 
         Assert.False(files.DirectoryExists(source));
         Assert.Equal("leaf", files.ReadAllText(At(destination, "nested/leaf.txt")));
+    }
+
+    [Fact]
+    public void MoveDirectoryMovesADirectoryLinkAsALinkWithoutFollowingIt()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string target = At(root, "canonical");
+        files.CreateDirectory(target);
+        _ = WriteFile(files, target, "conductor.toml", "conductor");
+        string source = At(root, "linked");
+        files.CreateDirectoryLink(source, target);
+        string destination = At(root, "claimed");
+
+        files.MoveDirectory(source, destination);
+
+        Assert.False(files.DirectoryExists(source));
+        Assert.NotNull(files.GetLinkTarget(destination));
+        Assert.Equal("conductor", files.ReadAllText(At(destination, "conductor.toml")));
     }
 
     [Fact]

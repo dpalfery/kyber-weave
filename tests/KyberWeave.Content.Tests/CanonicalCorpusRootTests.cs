@@ -9,11 +9,14 @@ public sealed class CanonicalCorpusRootTests
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     [Fact]
-    public void ToolRoot_ExistsForCanonicalCorpus()
+    public void TheShippedCorpusRootHoldsTheCanonicalSquadSource()
     {
         Assert.True(
             Corpus.DirectoryExists(string.Empty),
             $"Expected the corpus root at '{Corpus.Root}'.");
+        Assert.True(
+            Corpus.DirectoryExists("products"),
+            $"Expected the corpus at '{Corpus.Root}' to hold 'products'.");
         Assert.True(
             Corpus.DirectoryExists("products/kyber-squad"),
             $"Expected products/kyber-squad under the corpus root at '{Corpus.Root}'.");

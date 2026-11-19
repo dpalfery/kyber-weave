@@ -241,12 +241,42 @@ public sealed class FakeSquadTargetResolver : ISquadTargetResolver
     }
 }
 
-/// <summary>The global-root resolver in a command test: every target roots beneath one directory.</summary>
-public sealed class FakeSquadGlobalRootResolver(string home) : ISquadGlobalRootResolver
+/// <summary>The global-root resolver in a command test: every target roots beneath one directory, or under the roots a test maps.</summary>
+public sealed class FakeSquadGlobalRootResolver : ISquadGlobalRootResolver
 {
-    /// <inheritdoc />
-    public string ResolveGlobalRoot(SquadTarget target) => home + "/." + SquadTargetCatalog.GetToken(target);
+    private readonly string? _home;
+    private readonly IReadOnlyDictionary<SquadTarget, string>? _roots;
+
+    /// <summary>Creates a resolver that roots every target beneath <paramref name="home"/>.</summary>
+    /// <param name="home">The directory each target's root sits under.</param>
+    public FakeSquadGlobalRootResolver(string home)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(home);
+        _home = home;
+    }
+
+    /// <summary>Creates a resolver that answers the roots a test maps, for targets that live apart.</summary>
+    /// <param name="roots">The root of each target.</param>
+    public FakeSquadGlobalRootResolver(IReadOnlyDictionary<SquadTarget, string> roots)
+    {
+        ArgumentNullException.ThrowIfNull(roots);
+        _roots = roots;
+    }
 
     /// <inheritdoc />
-    public string? HomeDirectory => home;
+    public string ResolveGlobalRoot(SquadTarget target)
+    {
+        if (_roots is not null)
+        {
+            return _roots.TryGetValue(target, out string? root)
+                ? root
+                : throw new ArgumentOutOfRangeException(nameof(target), target, "No root mapped for target.");
+        }
+
+        string home = _home ?? throw new InvalidOperationException("This resolver holds no home directory.");
+        return Path.Combine(home, "." + SquadTargetCatalog.GetToken(target));
+    }
+
+    /// <inheritdoc />
+    public string? HomeDirectory => _home;
 }

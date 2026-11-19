@@ -205,18 +205,22 @@ new catalog rule. The catalog runs as a net at merge points; a rule whose subjec
 and a moved rule's home is repointed. Rules for prose written in this period are added in the later
 refinement phase.
 
-`ProseRuleCatalogTests` runs offline on every build: every file, section heading, seed file and anchor
-the catalog names exists, and every rule has a home and a control. Deleting a file, a heading or a catalog
-entry fails there.
+**The catalog check is a content test.** `ProseRuleCatalogTests` lives in
+`tests/KyberWeave.Content.Tests` and runs offline on every build, with the unit projects: every file, section
+heading, seed file and anchor the catalog names exists, and every rule has a home and a control. Deleting a
+file, a heading or a catalog entry fails there. It reads the shipped content through the corpus seam and
+starts no program, which is what makes it a content test rather than an integration test.
 
-`ProseRuleGradingTests` sends each document to Jev through `SystemOneClient`, one two-option `choice`
-question per rule and document. A home passes at the catalog's `confidence-floor` (0.8); a control or an
-absent-from file must be judged not to state the rule at the same floor. A home is sent whole; a file over
-the model's budget is sent as the section the catalog names, and the report says so. An absent-from file is
-judged one part (one or a few `##` sections) at a time. Outcomes: an answer that points the right way but
-lands below the floor is a warning, listed in the report and not a failure; a confident wrong answer, or a
-wrong-way answer below the floor, fails; a provider error or timeout skips the test with a warning; a
-refused key fails.
+**The model grading is an opt-in integration harness.** `ProseRuleGradingTests` lives in
+`tests/KyberWeave.Integration.Tests` and sends each document to Jev through `SystemOneClient`, one two-option
+`choice` question per rule and document. It makes paid calls over the network, so it is neither a content
+test nor a unit test: its paid grading case is skipped unless `KW_PROSE_GRADE=1`, and no gate or CI job runs
+it. A home passes at the catalog's `confidence-floor` (0.8); a control or an absent-from file must be judged
+not to state the rule at the same floor. A home is sent whole; a file over the model's budget is sent as the
+section the catalog names, and the report says so. An absent-from file is judged one part (one or a few `##`
+sections) at a time. Outcomes: an answer that points the right way but lands below the floor is a warning,
+listed in the report and not a failure; a confident wrong answer, or a wrong-way answer below the floor,
+fails; a provider error or timeout skips the test with a warning; a refused key fails.
 
 **Adding a rule.** Write the statement as one narrow judgment, in the documents' own terms (split an "and"
 into two rules). Name the homes, and give the section heading for any file over about 60 KB. Pick a control
@@ -225,8 +229,8 @@ section repeats the rule). Run the grader on the rule. If a home keeps drawing w
 give that home an `anchor` (a protocol token or heading it already carries, never a sentence of the rule)
 instead of a grade; if an absent-from file keeps drawing warnings, drop it and say why in the commit.
 
-**Running it locally.** The key comes from `TYPESAFE_API_KEY` or the OS credential store entry for the
-endpoint's origin:
+**Running the grading harness locally.** The run is opt-in: set `KW_PROSE_GRADE=1`, and the key comes from
+`TYPESAFE_API_KEY` or the OS credential store entry for the endpoint's origin:
 
 ```bash
 KW_PROSE_GRADE=1 dotnet test tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj \

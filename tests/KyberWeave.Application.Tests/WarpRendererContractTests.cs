@@ -6,7 +6,6 @@ using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
 using Xunit;
 using YamlDotNet.RepresentationModel;
-using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -21,11 +20,6 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class WarpRendererContractTests : IDisposable
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
-
     /// <summary>
     /// Shared identities are read from the loaded fallback profile's shared-identities
     /// list — the same authoritative source the renderer uses — rather than a literal
@@ -65,17 +59,6 @@ public sealed class WarpRendererContractTests : IDisposable
     {
         // No disposable state: the suite only reads the checked-in corpus. IDisposable is
         // implemented per the test-coding-standard so adding fixtures later has a home.
-    }
-
-    [Fact]
-    public void ToolRoot_ExistsForCanonicalCorpus()
-    {
-        Assert.True(
-            CorpusTree.DirectoryExists(Corpus, "products"),
-            $"Expected the corpus at '{Corpus.Root}' to hold 'products'.");
-        Assert.True(
-            CorpusTree.DirectoryExists(Corpus, "products/kyber-squad"),
-            $"Expected products/kyber-squad under the corpus root at '{ProductRoot}'.");
     }
 
     /// <summary>

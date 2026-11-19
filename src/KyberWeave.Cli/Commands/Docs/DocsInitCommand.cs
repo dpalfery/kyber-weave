@@ -87,9 +87,10 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// things of the ambient console because a prompt needs all three: a stdin to read the answer
     /// from, a stdout that may receive interactive markup, and a console Spectre has not been told is
     /// non-interactive — which is how a capturing or piped console identifies itself, and attempting
-    /// a prompt there throws rather than asking.
+    /// a prompt there throws rather than asking. It is set on the instance, not the type, so a test
+    /// that answers it cannot answer it for a class running beside it.
     /// </remarks>
-    internal static Func<bool>? InteractiveCheckOverride { get; set; }
+    internal Func<bool>? InteractiveCheck { get; init; }
 
     /// <summary>
     /// Decides whether to perform the offered repair, defaulting to an
@@ -97,9 +98,10 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// </summary>
     /// <remarks>
     /// The answer is the consent, so it is taken through a seam the tests can answer with a fixed
-    /// value: a case that exercised the real prompt would block on a terminal it does not have.
+    /// value: a case that exercised the real prompt would block on a terminal it does not have. It
+    /// is set on the instance for the reason <see cref="InteractiveCheck"/> is.
     /// </remarks>
-    internal static Func<IReadOnlyList<McpWiringFix>, bool>? ConfirmFixOverride { get; set; }
+    internal Func<IReadOnlyList<McpWiringFix>, bool>? ConfirmFix { get; init; }
 
     /// <summary>
     ///     The bound for a provisioning run's CodeGraph child. It matches the doctor verb's default, so
@@ -631,7 +633,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
 
     /// <summary>Whether this run may ask the operator, honouring the seam when a test set it.</summary>
     private bool CanPrompt() =>
-        InteractiveCheckOverride?.Invoke()
+        InteractiveCheck?.Invoke()
             ?? (!_environment.IsInputRedirected
                 && _console.Profile.Out.IsTerminal
                 && _console.Profile.Capabilities.Interactive);
@@ -648,7 +650,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// </remarks>
     private void OfferRepair(string root, McpConfig config, IReadOnlyList<McpWiringFix> fixes)
     {
-        Func<IReadOnlyList<McpWiringFix>, bool> confirm = ConfirmFixOverride ?? ConfirmRepair;
+        Func<IReadOnlyList<McpWiringFix>, bool> confirm = ConfirmFix ?? ConfirmRepair;
 
         if (!confirm(fixes))
             return;
