@@ -64,6 +64,9 @@ public sealed class GateReportFactsOverSeamsTests
     [InlineData("TASK_GATE: PASS; report={0}")]
     [InlineData("TASK_GATE: `PASS` report={0}")]
     [InlineData("TASK_GATE: PASS \u2014 agent=csharp-dev report={0}")]
+    [InlineData("TASK_GATE: PASS\u2014 report={0}")]
+    [InlineData("TASK_GATE: \u201cPASS\u201d report={0}")]
+    [InlineData("TASK_GATE: <PASS> report={0}")]
     public void APassClaimWithPunctuationAroundTheStatusAgreesWithAPassingReport(string format)
     {
         string path = Write(ReportPath, Passing());

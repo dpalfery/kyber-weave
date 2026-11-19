@@ -30,7 +30,7 @@ internal static partial class ReturnMarkerParser
         string text = Flatten(output);
         string? review = LastGroup(ResultRegex(), text);
         string? status = MarkerWord(LastGroup(StatusRegex(), text));
-        string? gate = LastGroup(TaskGateRegex(), text);
+        string? gate = MarkerWord(LastGroup(TaskGateRegex(), text));
         IReadOnlyList<string>? attested = readAttestations ? ReadAttested(text) : null;
         return review is null && status is null && attested is null && gate is null
             ? null
@@ -62,9 +62,25 @@ internal static partial class ReturnMarkerParser
             return null;
         }
 
-        string trimmed = word.Trim().Trim('*', '`', '"', '\'', '_', ',', ';', ':', '.', '!', '|', '(', ')', '[', ']');
-        return trimmed.Length == 0 ? null : trimmed;
+        // Keep the leading run of word characters: emphasis, quotes, <> and any punctuation an
+        // editor attaches, including a dash glued to a following word, all fall away.
+        string trimmed = word.Trim();
+        int start = 0;
+        while (start < trimmed.Length && !IsWordCharacter(trimmed[start]))
+        {
+            start++;
+        }
+
+        int end = start;
+        while (end < trimmed.Length && IsWordCharacter(trimmed[end]))
+        {
+            end++;
+        }
+
+        return end == start ? null : trimmed[start..end];
     }
+
+    private static bool IsWordCharacter(char value) => char.IsLetterOrDigit(value) || value == '_';
 
     private static string? LastGroup(Regex regex, string text)
     {
@@ -127,7 +143,7 @@ internal static partial class ReturnMarkerParser
     [GeneratedRegex(@"^STATUS:[ \t]*(\S+)", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex StatusRegex();
 
-    [GeneratedRegex(@"^TASK_GATE:[ \t]*([A-Z_]+)\b", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^TASK_GATE:[ \t]*(\S+)", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex TaskGateRegex();
 
     [GeneratedRegex(@"^ATTESTED:[ \t]*(.+?)[ \t]*\r?$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
