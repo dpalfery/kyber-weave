@@ -1,6 +1,7 @@
 using System.Text.Json;
 using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using Xunit;
@@ -35,6 +36,108 @@ public sealed class ArbiterReadGuardTests
         JsonDocument doc = JsonDocument.Parse(json);
         return doc.RootElement.Clone();
     }
+
+    /// <summary>
+    /// Run-9 shape: the payload cwd is the original checkout while the run works in its own worktree. A worker that
+    /// reads the plan by its absolute path in the run worktree must be denied, because that is a planning path of the
+    /// work the run is doing.
+    /// </summary>
+    [Fact]
+    public void Guard_JudgesAWorkersAbsoluteReadInTheRunWorktree_AgainstTheRunContext()
+    {
+        const string payload =
+            """
+            {
+              "hook_event_name": "PreToolUse",
+              "tool_name": "Read",
+              "tool_use_id": "toolu-read-1",
+              "session_id": "session-1",
+              "cwd": "/repo",
+              "agent_type": "dev-medium",
+              "tool_input": { "file_path": "/repo.worktrees/run/docs/plans/2026-11-18-run.md" }
+            }
+            """;
+        HookContext context = new(
+            "/repo",
+            () => "decision-test-1",
+            TextWriter.Null,
+            RunContext: new HookRunContext(
+                "/repo",
+                "/repo/.git",
+                ActiveRun: null,
+                Worktree: "/repo.worktrees/run",
+                Worktrees: ["/repo", "/repo.worktrees/run"],
+                PlanFile: null,
+                PlanPath: null,
+                TaskFile: null,
+                TaskFileExists: false,
+                HookRunContextSource.EventWorktree,
+                Notes: []));
+        IHarnessHookAdapter adapter = new ClaudeHookAdapter(new AllowEngine());
+
+        string output = adapter.Handle(ToolInput(payload), payload, "conductor", ReadGuardConfig(), context);
+
+        Assert.Contains("\"permissionDecision\":\"deny\"", output, StringComparison.Ordinal);
+        Assert.Contains("Req 25", output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The runtime's Local schema judges every non-dispatch tool by its content, and resolves the same run worktree.
+    /// </summary>
+    [Fact]
+    public void LocalGuard_JudgesAnAbsoluteReadInTheRunWorktree_AgainstTheRunContext()
+    {
+        const string payload =
+            """
+            {
+              "hook_event_name": "PreToolUse",
+              "tool_name": "Read",
+              "cwd": "/repo",
+              "tool_input": { "file_path": "/repo.worktrees/run/docs/specs/2026-11-18-spec/tasks.md" }
+            }
+            """;
+        HookContext context = new(
+            "/repo",
+            () => "decision-test-1",
+            TextWriter.Null,
+            RunContext: new HookRunContext(
+                "/repo",
+                "/repo/.git",
+                ActiveRun: null,
+                Worktree: "/repo.worktrees/run",
+                Worktrees: ["/repo", "/repo.worktrees/run"],
+                PlanFile: null,
+                PlanPath: null,
+                TaskFile: null,
+                TaskFileExists: false,
+                HookRunContextSource.EventWorktree,
+                Notes: []));
+        IHarnessHookAdapter adapter = new CopilotHookAdapter(new AllowEngine(), CopilotHookAdapter.VsCodeToken);
+
+        string output = adapter.Handle(ToolInput(payload), payload, null, ReadGuardConfig(), context);
+
+        Assert.Contains("\"permissionDecision\":\"deny\"", output, StringComparison.Ordinal);
+    }
+
+    /// <summary>A path outside the repository and its worktrees is not a planning path of this run, and stays allowed.</summary>
+    [Fact]
+    public void Guard_LeavesAnAbsolutePathOutsideTheRepositoryAndItsWorktreesAlone()
+    {
+        ReadGuardResult result = ReadGuard.Check(
+            "Read",
+            ToolInput("""{"file_path": "/elsewhere/docs/plans/plan.md"}"""),
+            "/repo.worktrees/run",
+            ProtectedDirs,
+            ["/repo", "/repo.worktrees/run"]);
+
+        Assert.True(result.Allowed);
+    }
+
+    private static KyberWeaveConfig ReadGuardConfig() => new()
+    {
+        Ontology = OntologyConfig.ProductDefaults.WithDocsRoots(["docs"]),
+        Arbiter = new ArbiterConfig { Enabled = true },
+    };
 
     [Theory]
     [InlineData("dev-easy")]

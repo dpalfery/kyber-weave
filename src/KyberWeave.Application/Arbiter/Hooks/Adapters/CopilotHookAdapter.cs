@@ -413,7 +413,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         JsonElement input = RequireToolInput(payload);
         IReadOnlyList<string> dirs = ReadGuard.ProtectedDirectories(config);
         string? toolName = tool ?? "<unknown>";
-        ContentGuardResult verdict = CheckContent(toolName, input, RepoRootOf(payload, context.RepoRoot), dirs);
+        ContentGuardResult verdict = CheckContent(toolName, input, GuardRoot(payload, context), dirs, context.RunContext?.Worktrees);
         return verdict.Allowed
             ? string.Empty
             : RenderLocalPreDeny(verdict.Reason ?? "Denied by the Read guard (Req 25.2, Req 25.4).");
@@ -787,11 +787,19 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         public static ContentGuardResult Allow { get; } = new(true, null);
     }
 
+    /// <summary>
+    /// The root the content-keyed Read guard judges a path against: the run context's worktree when the invocation
+    /// resolved one, so a worker's read in the run worktree is judged there rather than in the session's checkout.
+    /// </summary>
+    private static string GuardRoot(JsonElement payload, HookContext context) =>
+        context.RunContext?.Worktree ?? RepoRootOf(payload, context.RepoRoot);
+
     private static ContentGuardResult CheckContent(
         string toolName,
         JsonElement toolInput,
         string repoRoot,
-        IReadOnlyList<string> protectedDirs)
+        IReadOnlyList<string> protectedDirs,
+        IReadOnlyList<string>? repositoryRoots)
     {
         if (protectedDirs.Count == 0)
         {
@@ -805,7 +813,8 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             {
                 // Shell commands match by substring; path-valued inputs resolve
                 // after normalisation relative to the repository root.
-                if (forward.Contains(dir, StringComparison.Ordinal) || ResolvesInside(forward, repoRoot, dir))
+                if (forward.Contains(dir, StringComparison.Ordinal)
+                    || ResolvesInside(forward, repoRoot, repositoryRoots, dir))
                 {
                     return new ContentGuardResult(
                         false,
@@ -854,25 +863,32 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         }
     }
 
-    private static bool ResolvesInside(string forward, string repoRoot, string dir)
+    private static bool ResolvesInside(
+        string forward,
+        string repoRoot,
+        IReadOnlyList<string>? repositoryRoots,
+        string dir)
     {
         string? relative = Path.IsPathFullyQualified(forward)
-            ? ToRepoRelative(forward, repoRoot)
+            ? ToRepoRelative(forward, repoRoot, repositoryRoots)
             : NormalizeLexically(forward);
         return relative is not null
             && (string.Equals(relative, dir, StringComparison.Ordinal)
                 || relative.StartsWith(dir + "/", StringComparison.Ordinal));
     }
 
-    private static string? ToRepoRelative(string forward, string repoRoot)
+    private static string? ToRepoRelative(string forward, string repoRoot, IReadOnlyList<string>? repositoryRoots)
     {
-        string relative = Path.GetRelativePath(repoRoot, forward).Replace('\\', '/');
-        if (relative.StartsWith("..", StringComparison.Ordinal))
+        foreach (string root in new[] { repoRoot }.Concat(repositoryRoots ?? []))
         {
-            return null;
+            string relative = Path.GetRelativePath(root, forward).Replace('\\', '/');
+            if (!relative.StartsWith("..", StringComparison.Ordinal))
+            {
+                return NormalizeLexically(relative);
+            }
         }
 
-        return NormalizeLexically(relative);
+        return null;
     }
 
     private static string? NormalizeLexically(string path)
