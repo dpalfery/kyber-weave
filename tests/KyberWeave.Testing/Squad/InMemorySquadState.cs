@@ -27,13 +27,17 @@ public sealed class InMemorySquadState
     /// <param name="applicationDataDirectory">
     /// The user's application-data directory on its own, with the home kept apart from it; a fixed one when null.
     /// </param>
+    /// <param name="files">
+    /// The file system to build over, so one test can place several state roots in one tree; a new one when null.
+    /// </param>
     public InMemorySquadState(
         InProcessLeaseHost? leaseHost = null,
         ILease? storeLease = null,
         string? stateRoot = null,
-        string? applicationDataDirectory = null)
+        string? applicationDataDirectory = null,
+        InMemoryFileSystem? files = null)
     {
-        Files = new InMemoryFileSystem(caseSensitive: true);
+        Files = files ?? new InMemoryFileSystem(caseSensitive: true);
         string applicationData = stateRoot is not null
             ? Path.GetFullPath(stateRoot)
             : applicationDataDirectory ?? Path.GetFullPath("/kw/application-data");

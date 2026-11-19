@@ -284,25 +284,6 @@ public abstract class SquadDeploymentStateTestBase : SquadStateDocumentFixtures
             Path.GetRelativePath(root, livePath).Replace(Path.DirectorySeparatorChar, '/'));
     }
 
-    internal static AfterImageRestoreScenario CreateAfterImageRestoreScenario(
-        string root,
-        string artifactRole)
-    {
-        (string subject, string originalKind) = artifactRole switch
-        {
-            "target-backup" => ("target", "file"),
-            "target-link-metadata" => ("target", "file-link"),
-            "lock-original" => ("lock", "file"),
-            "lock-link-metadata" => ("lock", "file-link"),
-            "receipt-original" => ("receipt", "file"),
-            "receipt-link-metadata" => ("receipt", "file-link"),
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(artifactRole), artifactRole, null)
-        };
-        ClaimMutationScenario scenario = CreateClaimMutationScenario(root, subject, originalKind);
-        return new AfterImageRestoreScenario(scenario.Plan, scenario.Subject);
-    }
-
     internal static void ConfigureOriginalNode(
         string root,
         string livePath,
@@ -406,88 +387,6 @@ public abstract class SquadDeploymentStateTestBase : SquadStateDocumentFixtures
         }
 
         return count;
-    }
-
-    internal static RestoreArtifactScenario CreateRestoreArtifactScenario(
-        string root,
-        string artifactRole)
-    {
-        const string targetRelativePath = ".codex/agents/conductor.toml";
-        const string installedBody = "installed body";
-        string targetPath = ToPlatformPath(root, targetRelativePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
-        if (string.Equals(artifactRole, "target-link-metadata", StringComparison.Ordinal))
-        {
-            const string canonicalRelativePath = "canonical/conductor.toml";
-            string canonicalPath = Path.Combine(root, "canonical", "conductor.toml");
-            Write(root, canonicalRelativePath, installedBody);
-            File.CreateSymbolicLink(
-                targetPath,
-                Path.GetRelativePath(Path.GetDirectoryName(targetPath)!, canonicalPath));
-        }
-        else
-        {
-            File.WriteAllText(targetPath, installedBody, new UTF8Encoding(false));
-        }
-
-        SquadReceipt previousReceipt = Receipt(new SquadOwnedFile(
-            targetRelativePath,
-            Digest(installedBody),
-            "codex",
-            false));
-        WriteState(root, Lock(), previousReceipt);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
-            root,
-            SquadDeploymentScope.Project,
-            Lock("1.2.4"),
-            [Rendered(targetRelativePath, "updated body")],
-            previousReceipt,
-            [new SquadDegradation("codex", "conductor", "model-profile-narrowed")],
-            false,
-            new FixedTimeProvider(InstalledAt.AddDays(1)));
-        string transactionDirectory = Path.Combine(
-            root,
-            ".kyber-weave",
-            ".squad-transaction");
-        SquadStateStore store = Store(root);
-        (SquadTransactionStepKind boundary, string artifactPath, string liveRelativePath, byte[] expectedBytes) =
-            artifactRole switch
-            {
-                "target-file" => (
-                    SquadTransactionStepKind.FileApplied,
-                    ToPlatformPath(
-                        Path.Combine(transactionDirectory, "backups"),
-                        $"codex/{targetRelativePath}"),
-                    targetRelativePath,
-                    "updated body"u8.ToArray()),
-                "target-link-metadata" => (
-                    SquadTransactionStepKind.FileApplied,
-                    ToPlatformPath(
-                        Path.Combine(transactionDirectory, "links"),
-                        $"codex/{targetRelativePath}"),
-                    targetRelativePath,
-                    "updated body"u8.ToArray()),
-                "lock-original" => (
-                    SquadTransactionStepKind.LockApplied,
-                    Path.Combine(transactionDirectory, "state-originals", "lock"),
-                    StateRelativePath(root, store.ResolveLockPath(root, SquadDeploymentScope.Project)),
-                    Encoding.UTF8.GetBytes(store.SerializeLock(
-                        plan.Lock ?? throw new InvalidOperationException("The update plan has no lock.")))),
-                "receipt-original" => (
-                    SquadTransactionStepKind.ReceiptApplied,
-                    Path.Combine(transactionDirectory, "state-originals", "receipt"),
-                    StateRelativePath(root, store.ResolveReceiptPath(root, SquadDeploymentScope.Project)),
-                    Encoding.UTF8.GetBytes(store.SerializeReceipt(plan.Receipt))),
-                _ => throw new ArgumentOutOfRangeException(
-                    nameof(artifactRole), artifactRole, "Unknown restore artifact role.")
-            };
-        return new RestoreArtifactScenario(
-            plan,
-            boundary,
-            artifactPath,
-            Path.Combine(transactionDirectory, "intent.json"),
-            liveRelativePath,
-            new TreeEntry(TreeEntryKind.File, expectedBytes, null));
     }
 
     internal static string ExtractMethod(string source, string methodName)
@@ -1600,18 +1499,6 @@ public abstract class SquadDeploymentStateTestBase : SquadStateDocumentFixtures
         string Subject,
         string LiveRelativePath);
 
-    internal sealed record AfterImageRestoreScenario(
-        SquadDeploymentPlan Plan,
-        string Subject);
-
-    internal sealed record RestoreArtifactScenario(
-        SquadDeploymentPlan Plan,
-        SquadTransactionStepKind MutationBoundary,
-        string ArtifactPath,
-        string IntentPath,
-        string LiveRelativePath,
-        TreeEntry ExpectedLiveAfterImage);
-
     internal sealed class FakeGlobalRootResolver(IReadOnlyDictionary<SquadTarget, string> roots)
         : ISquadGlobalRootResolver
     {
@@ -1776,29 +1663,6 @@ public abstract class SquadDeploymentStateTestBase : SquadStateDocumentFixtures
                 return;
 
             InterruptedTreeSnapshot = CaptureTree(root);
-            throw new InjectedSquadTransactionFailure(step.Sequence);
-        }
-    }
-
-    internal sealed class RestoreArtifactTamperingObserver(
-        string artifactPath,
-        SquadTransactionStepKind mutationBoundary) : ISquadTransactionObserver
-    {
-        public byte[] CorruptBytes { get; } = Encoding.UTF8.GetBytes(
-            $"corrupted restore artifact after {mutationBoundary}");
-
-        public bool MutatedArtifact { get; private set; }
-
-        public void AfterStep(SquadTransactionStep step)
-        {
-            if (step.Kind != mutationBoundary)
-                return;
-
-            Assert.True(
-                File.Exists(artifactPath),
-                $"Prepared restore artifact '{artifactPath}' was not published.");
-            File.WriteAllBytes(artifactPath, CorruptBytes);
-            MutatedArtifact = true;
             throw new InjectedSquadTransactionFailure(step.Sequence);
         }
     }
@@ -2337,27 +2201,6 @@ public abstract class SquadDeploymentStateTestBase : SquadStateDocumentFixtures
             }
 
             MutatedClaimEntry = CaptureTree(root)[ClaimRelativePath];
-            InterruptedTreeSnapshot = CaptureTree(root);
-            throw new InjectedSquadTransactionFailure(checkpoint.Sequence);
-        }
-    }
-
-    internal sealed class AfterImageCrashObserver(
-        string root,
-        string subject) : ISquadTransactionCheckpointObserver
-    {
-        public IReadOnlyDictionary<string, TreeEntry>? InterruptedTreeSnapshot { get; private set; }
-
-        public void AfterStep(SquadTransactionStep step)
-        {
-        }
-
-        public void AfterCheckpoint(SquadTransactionCheckpoint checkpoint)
-        {
-            if (checkpoint.Kind != SquadTransactionCheckpointKind.AfterImagePublished ||
-                !string.Equals(checkpoint.RelativePath, subject, StringComparison.Ordinal))
-                return;
-
             InterruptedTreeSnapshot = CaptureTree(root);
             throw new InjectedSquadTransactionFailure(checkpoint.Sequence);
         }
