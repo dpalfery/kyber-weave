@@ -32,6 +32,11 @@ public sealed class SquadBriefBuilder(
     /// <inheritdoc />
     public string? ResolveAutonomy(string repositoryRoot, string? given, KyberWeaveConfig config)
     {
+        if (!Accepts("autonomy", given, out string refusal))
+        {
+            throw new ArgumentException(refusal, nameof(given));
+        }
+
         (string value, string source) = BriefAutonomy.Resolve(given, ReadRootAgents(repositoryRoot), config?.ConfigReg.Autonomy);
         return string.Equals(source, "default", StringComparison.Ordinal) ? null : value;
     }

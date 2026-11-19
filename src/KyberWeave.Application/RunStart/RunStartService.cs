@@ -5,6 +5,7 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.RunStart;
+using KyberWeave.Core.Squad.Briefs;
 using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.FileSystem;
 
@@ -37,6 +38,14 @@ public sealed class RunStartService(
         ArgumentNullException.ThrowIfNull(request);
 
         List<RunStartMessage> messages = [];
+        string? autonomy = BriefAutonomy.Normalize(request.Autonomy);
+        if (request.Autonomy is not null && autonomy is null)
+        {
+            return Refuse(
+                messages,
+                $"'{request.Autonomy}' is not an autonomy. Use one of: {string.Join(", ", BriefFacts.Vocabulary["autonomy"])}.");
+        }
+
         string repositoryRoot = request.RepositoryRoot;
         string branch = request.Branch;
         KyberWeaveConfig config = request.Config;
@@ -276,7 +285,7 @@ public sealed class RunStartService(
             environment.HomeDirectory,
             target,
             startRef,
-            repository is null ? null : new RunStartPlace(repository, worktreePath ?? repositoryRoot, clock.GetUtcNow(), request.Autonomy));
+            repository is null ? null : new RunStartPlace(repository, worktreePath ?? repositoryRoot, clock.GetUtcNow(), autonomy));
 
         // A new worktree has no index of its own, so the index goes where the run works. A failure here does not
         // undo the branch: the operator repairs the index and the run continues in that tree.

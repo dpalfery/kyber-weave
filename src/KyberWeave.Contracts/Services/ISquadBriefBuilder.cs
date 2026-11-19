@@ -24,6 +24,7 @@ public interface ISquadBriefBuilder
     /// <param name="given">The value given for this run, or null.</param>
     /// <param name="config">The loaded configuration.</param>
     /// <returns><c>supervised</c> or <c>autonomous</c>, or null when none of the three sets one.</returns>
+    /// <exception cref="ArgumentException"><paramref name="given"/> is set and is not a value of autonomy.</exception>
     string? ResolveAutonomy(string repositoryRoot, string? given, KyberWeaveConfig config);
 
     /// <summary>Checks the facts a caller may give on the command line against the vocabulary.</summary>
