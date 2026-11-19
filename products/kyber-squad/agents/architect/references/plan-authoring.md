@@ -202,7 +202,7 @@ Under `autonomy: autonomous`, decide per the autonomous-decisions reference and 
 
 After every plan save, obtain the two checks. Leave `mergeReady` false while the plan is in the active plans folder. A shell is not permission to implement.
 
-Fix every finding a check reports in the plan — errors and warnings alike — and re-check until it is clean. The standards warning period (`KW-DOC-SPEC-012`, `KW-DOC-SPEC-013`, `KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`) is outside your write boundary and does not stop the plan: `docs-dev` clears it at closeout with `kyber-weave docs standards migrate`, committed with the closeout. Do not list it as a risk, an accepted warning or out of scope. Any other finding outside your write boundary is `STATUS: BLOCKED`, and then name the finding, why you cannot fix it, and who can.
+Fix every finding a check reports in the plan — errors and warnings alike — and re-check until the only findings left are the standards warning period below. The standards warning period (`KW-DOC-SPEC-012`, `KW-DOC-SPEC-013`, `KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`) is outside your write boundary and does not stop the plan: `docs-dev` clears it at closeout with `kyber-weave docs standards migrate`, committed with the closeout. Do not list it as a risk, an accepted warning or out of scope. Any other finding outside your write boundary is `STATUS: BLOCKED`, and then name the finding, why you cannot fix it, and who can.
 
 ### With a shell
 
