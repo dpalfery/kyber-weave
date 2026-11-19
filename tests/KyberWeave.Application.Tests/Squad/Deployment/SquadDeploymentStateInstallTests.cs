@@ -1,27 +1,15 @@
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using KyberWeave.Cli.Commands.Squad;
-using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Core.Squad.Release;
-using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Testing.Squad;
 using Xunit;
-using Xunit.Sdk;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Application.Tests.Squad.Deployment;
 
 /// <summary>
 /// Deployment-state contracts: install, adopt, collision and removal plans. Split from the one class that used to hold all of
 /// them, so xUnit runs the themes on different cores.
 /// </summary>
-public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestBase
+public sealed class SquadDeploymentStateInstallTests : InMemoryDeploymentStateTestBase
 {
     [Fact]
     public void ExecuteWithDurableWritesEnabledDeploysWhatItWrote()
@@ -30,11 +18,9 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
         // that ships would otherwise never run. Exercise it once in an isolated async flow scope.
         using (SquadTransaction.UseSyncToDiskScope(true))
         {
-            using TempDirectory fixture = new();
-            string targetRoot = Path.Combine(fixture.Path, "target");
-            Directory.CreateDirectory(targetRoot);
-            SquadStateStore store = Store(Path.Combine(fixture.Path, "application-data"));
-            SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
+            string targetRoot = Root;
+            SquadStateStore store = StoreAt(targetRoot);
+            SquadDeploymentPlan plan = Planner.CreateInstall(
                 targetRoot,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -43,59 +29,22 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
                 false,
                 new FixedTimeProvider(InstalledAt));
 
-            RealSquadDeployment.Transaction(store).Execute(plan);
+            TransactionAt(targetRoot).Execute(plan);
 
             Assert.Equal(
                 "durable",
-                File.ReadAllText(Path.Combine(targetRoot, ".codex", "agents", "durable.toml")));
+                Read(targetRoot, ".codex/agents/durable.toml"));
         }
-    }
-
-    /// <summary>
-    ///     An uninstall plan's receipt carries only retained files; the dry-run report must list
-    ///     the planned removals with their target, and remove nothing.
-    /// </summary>
-    [Fact]
-    public void UninstallDryRunListsPlannedRemovalsWithTargetsAndRemovesNothing()
-    {
-        using TempDirectory fixture = new();
-        const string relativePath = ".codex/agents/conductor.toml";
-        SquadReceipt receipt = Receipt(new SquadOwnedFile(
-            relativePath,
-            Digest("installed body"),
-            "codex",
-            false));
-        Write(fixture.Path, relativePath, "installed body");
-        WriteState(fixture.Path, Lock(), receipt);
-        SquadStateStore store = Store(fixture.Path);
-        SquadUninstallCommand command = SquadTestCommands.Uninstall(
-            stateStore: store,
-            lifecycleService: SquadHostDefaults.CreateLifecycleService(stateStore: store));
-
-        CapturedConsoleExecution<int> dryRun = ProcessConsoleCapture.Run(() => command.Execute(
-            null!,
-            new SquadUninstallSettings
-            {
-                PathOption = fixture.Path,
-                DryRun = true
-            }));
-
-        Assert.Equal(0, dryRun.Result);
-        Assert.Contains("would uninstall 1 files", dryRun.Output, StringComparison.Ordinal);
-        Assert.Contains(relativePath, dryRun.Output, StringComparison.Ordinal);
-        Assert.Contains("(codex)", dryRun.Output, StringComparison.Ordinal);
-        Assert.True(File.Exists(ToPlatformPath(fixture.Path, relativePath)));
     }
 
     [Fact]
     public void CreateInstallIdenticalUnmanagedFileWithAdoptRecordsOwnershipWithoutRewriting()
     {
-        using TempDirectory fixture = new();
-        Write(fixture.Path, ".codex/agents/conductor.toml", "same bytes");
-        DateTime before = File.GetLastWriteTimeUtc(
-            Path.Combine(fixture.Path, ".codex/agents/conductor.toml"));
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
+        Write(Root, ".codex/agents/conductor.toml", "same bytes");
+        DateTime before = Files.GetLastWriteTimeUtc(
+            Path.Combine(Root, ".codex/agents/conductor.toml"));
+        SquadDeploymentPlan plan = Planner.CreateInstall(
+            Root,
             SquadDeploymentScope.Project,
             Lock(),
             [Rendered(".codex/agents/conductor.toml", "same bytes")],
@@ -103,37 +52,36 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
             true,
             new FixedTimeProvider(InstalledAt));
 
-        Transaction(fixture.Path).Execute(plan);
+        TransactionAt(Root).Execute(plan);
 
         SquadOwnedFile owned = Assert.Single(plan.Receipt.Files);
         Assert.True(owned.Adopted);
         Assert.Equal(Digest("same bytes"), owned.Sha256);
-        Assert.Equal(before, File.GetLastWriteTimeUtc(
-            Path.Combine(fixture.Path, owned.RelativePath)));
+        Assert.Equal(before, Files.GetLastWriteTimeUtc(
+            Path.Combine(Root, owned.RelativePath)));
     }
 
     [Fact]
     public void ExecuteInstallPathCreatedAfterPreflightRefusesToOverwriteRacedUnmanagedFile()
     {
-        using TempDirectory fixture = new();
         const string relativePath = ".codex/agents/conductor.toml";
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
+        SquadDeploymentPlan plan = Planner.CreateInstall(
+            Root,
             SquadDeploymentScope.Project,
             Lock(),
             [Rendered(relativePath, "generated body")],
             [],
             false,
             new FixedTimeProvider(InstalledAt));
-        Write(fixture.Path, relativePath, "raced unmanaged body");
-        SortedDictionary<string, TreeEntry> before = CaptureTree(fixture.Path);
+        Write(Root, relativePath, "raced unmanaged body");
+        SortedDictionary<string, TreeEntry> before = CaptureTree(Root);
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            Transaction(fixture.Path).Execute(plan));
+            TransactionAt(Root).Execute(plan));
 
         Assert.Contains(relativePath, exception.Message, StringComparison.Ordinal);
-        Assert.Equal("raced unmanaged body", Read(fixture.Path, relativePath));
-        AssertTreesEqual(before, CaptureTree(fixture.Path));
+        Assert.Equal("raced unmanaged body", Read(Root, relativePath));
+        AssertTreesEqual(before, CaptureTree(Root));
     }
 
     [Theory]
@@ -144,13 +92,12 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
         string existingContent,
         bool adopt)
     {
-        using TempDirectory fixture = new();
-        Write(fixture.Path, ".codex/agents/conductor.toml", existingContent);
-        SortedDictionary<string, byte[]> before = Snapshot(fixture.Path);
+        Write(Root, ".codex/agents/conductor.toml", existingContent);
+        SortedDictionary<string, byte[]> before = Snapshot(Root);
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            RealSquadDeployment.Planner.CreateInstall(
-                fixture.Path,
+            Planner.CreateInstall(
+                Root,
                 SquadDeploymentScope.Project,
                 Lock(),
                 [Rendered(".codex/agents/conductor.toml", "same bytes")],
@@ -162,13 +109,12 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
             ".codex/agents/conductor.toml",
             exception.Message,
             StringComparison.Ordinal);
-        AssertSnapshotsEqual(before, Snapshot(fixture.Path));
+        AssertSnapshotsEqual(before, Snapshot(Root));
     }
 
     [Fact]
     public void CreateUninstallUnchangedOwnedFileIsRemovedAndEditedOwnedFileIsRetained()
     {
-        using TempDirectory fixture = new();
         SquadOwnedFile unchanged = new(
             ".codex/agents/conductor.toml",
             Digest("installed conductor"),
@@ -180,20 +126,20 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
             "codex",
             false);
         SquadReceipt receipt = Receipt(unchanged, edited);
-        Write(fixture.Path, unchanged.RelativePath, "installed conductor");
-        Write(fixture.Path, edited.RelativePath, "operator reviewer edit");
-        WriteState(fixture.Path, Lock(), receipt);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUninstall(
-            fixture.Path,
+        Write(Root, unchanged.RelativePath, "installed conductor");
+        Write(Root, edited.RelativePath, "operator reviewer edit");
+        WriteState(Root, Lock(), receipt);
+        SquadDeploymentPlan plan = Planner.CreateUninstall(
+            Root,
             SquadDeploymentScope.Project,
             receipt);
 
-        Transaction(fixture.Path).Execute(plan);
+        TransactionAt(Root).Execute(plan);
 
-        Assert.False(File.Exists(Path.Combine(fixture.Path, unchanged.RelativePath)));
-        Assert.Equal("operator reviewer edit", Read(fixture.Path, edited.RelativePath));
-        SquadReceipt? retainedReceipt = Store(fixture.Path).ReadReceipt(
-            fixture.Path,
+        Assert.False(Files.FileExists(Path.Combine(Root, unchanged.RelativePath)));
+        Assert.Equal("operator reviewer edit", Read(Root, edited.RelativePath));
+        SquadReceipt? retainedReceipt = StoreAt(Root).ReadReceipt(
+            Root,
             SquadDeploymentScope.Project);
         SquadOwnedFile retained = Assert.Single(Assert.IsType<SquadReceipt>(retainedReceipt).Files);
         Assert.Equal(edited, retained);
@@ -202,14 +148,13 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
     [Fact]
     public void CreateUninstallOnlyTargetRemovesThatTargetAndKeepsEveryOtherTargetsFiles()
     {
-        using TempDirectory fixture = new();
-        Write(fixture.Path, CodexOwned.RelativePath, "codex body");
-        Write(fixture.Path, CursorOwned.RelativePath, "cursor body");
+        Write(Root, CodexOwned.RelativePath, "codex body");
+        Write(Root, CursorOwned.RelativePath, "cursor body");
         SquadReceipt receipt = Receipt(CodexOwned, CursorOwned);
-        WriteState(fixture.Path, Lock(), receipt);
+        WriteState(Root, Lock(), receipt);
 
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUninstall(
-            fixture.Path,
+        SquadDeploymentPlan plan = Planner.CreateUninstall(
+            Root,
             SquadDeploymentScope.Project,
             receipt,
             onlyTarget: SquadTarget.Cursor);
@@ -219,25 +164,24 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
         Assert.Equal(CodexOwned, Assert.Single(plan.Receipt.Files));
         Assert.Equal(SquadStateMutation.Write, plan.ReceiptMutation);
 
-        Transaction(fixture.Path).Execute(plan);
+        TransactionAt(Root).Execute(plan);
 
-        Assert.True(File.Exists(Path.Combine(fixture.Path, CodexOwned.RelativePath)));
-        Assert.False(File.Exists(Path.Combine(fixture.Path, CursorOwned.RelativePath)));
+        Assert.True(Files.FileExists(Path.Combine(Root, CodexOwned.RelativePath)));
+        Assert.False(Files.FileExists(Path.Combine(Root, CursorOwned.RelativePath)));
         SquadReceipt kept = Assert.IsType<SquadReceipt>(
-            Store(fixture.Path).ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
+            StoreAt(Root).ReadReceipt(Root, SquadDeploymentScope.Project));
         Assert.Equal(CodexOwned, Assert.Single(kept.Files));
     }
 
     [Fact]
     public void CreateUninstallOnlyTargetDeletesTheReceiptOnlyWhenNothingRemains()
     {
-        using TempDirectory fixture = new();
-        Write(fixture.Path, CursorOwned.RelativePath, "cursor body");
+        Write(Root, CursorOwned.RelativePath, "cursor body");
         SquadReceipt receipt = Receipt(CursorOwned);
-        WriteState(fixture.Path, Lock(), receipt);
+        WriteState(Root, Lock(), receipt);
 
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUninstall(
-            fixture.Path,
+        SquadDeploymentPlan plan = Planner.CreateUninstall(
+            Root,
             SquadDeploymentScope.Project,
             receipt,
             onlyTarget: SquadTarget.Cursor);
@@ -253,13 +197,12 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
     public void CreateUninstallOnlyTargetKeepsItsDegradationsWhileAFileIsRetainedAndDropsThemOtherwise(
         bool cursorFileEdited)
     {
-        using TempDirectory fixture = new();
-        Write(fixture.Path, CodexOwned.RelativePath, "codex body");
-        Write(fixture.Path, CursorOwned.RelativePath, cursorFileEdited ? "operator edit" : "cursor body");
+        Write(Root, CodexOwned.RelativePath, "codex body");
+        Write(Root, CursorOwned.RelativePath, cursorFileEdited ? "operator edit" : "cursor body");
         SquadReceipt receipt = Receipt(CodexOwned, CursorOwned) with { Degradations = CodexAndCursorDegradations };
 
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUninstall(
-            fixture.Path,
+        SquadDeploymentPlan plan = Planner.CreateUninstall(
+            Root,
             SquadDeploymentScope.Project,
             receipt,
             onlyTarget: SquadTarget.Cursor);
@@ -273,13 +216,12 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
     [Fact]
     public void CreateUninstallWithoutOnlyTargetDropsEveryDegradationWithTheReceipt()
     {
-        using TempDirectory fixture = new();
-        Write(fixture.Path, CodexOwned.RelativePath, "codex body");
-        Write(fixture.Path, CursorOwned.RelativePath, "cursor body");
+        Write(Root, CodexOwned.RelativePath, "codex body");
+        Write(Root, CursorOwned.RelativePath, "cursor body");
         SquadReceipt receipt = Receipt(CodexOwned, CursorOwned) with { Degradations = CodexAndCursorDegradations };
 
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUninstall(
-            fixture.Path,
+        SquadDeploymentPlan plan = Planner.CreateUninstall(
+            Root,
             SquadDeploymentScope.Project,
             receipt);
 
@@ -290,8 +232,7 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
     [Fact]
     public void CreateUninstallOnlyTargetDropsASiblingOwnedFileInsteadOfRetainingItAndKeepsHomeFiles()
     {
-        using TempDirectory fixture = new();
-        SquadGlobalRoots roots = new(_ => null, fixture.Path);
+        SquadGlobalRoots roots = new(_ => null, Root);
         Write(roots.ResolveGlobalRoot(SquadTarget.Codex), "agents/conductor.toml", "codex body");
         Write(roots.ResolveGlobalRoot(SquadTarget.Cursor), "agents/reviewer.md", "cursor body");
         SquadOwnedFile codex = new("agents/conductor.toml", Digest("codex body"), "codex", false);
@@ -300,8 +241,8 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
         SquadReceipt receipt = GlobalReceiptWithHomeFiles(homeFile) with { Files = [codex, cursor] };
         SquadReceipt sibling = GlobalReceiptWithHomeFiles() with { Files = [codex] };
 
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUninstall(
-            fixture.Path,
+        SquadDeploymentPlan plan = Planner.CreateUninstall(
+            Root,
             SquadDeploymentScope.Global,
             receipt,
             roots,
@@ -316,45 +257,44 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
     [Fact]
     public void ExecuteUninstallFileChangedAfterExactHashPreflightRefusesToDeleteRacedEdit()
     {
-        using TempDirectory fixture = new();
         const string relativePath = ".codex/agents/conductor.toml";
         SquadReceipt receipt = Receipt(new SquadOwnedFile(
             relativePath,
             Digest("installed body"),
             "codex",
             false));
-        Write(fixture.Path, relativePath, "installed body");
-        WriteState(fixture.Path, Lock(), receipt);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUninstall(
-            fixture.Path,
+        Write(Root, relativePath, "installed body");
+        WriteState(Root, Lock(), receipt);
+        SquadDeploymentPlan plan = Planner.CreateUninstall(
+            Root,
             SquadDeploymentScope.Project,
             receipt);
-        Write(fixture.Path, relativePath, "raced operator edit");
-        SortedDictionary<string, TreeEntry> before = CaptureTree(fixture.Path);
+        Write(Root, relativePath, "raced operator edit");
+        SortedDictionary<string, TreeEntry> before = CaptureTree(Root);
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            Transaction(fixture.Path).Execute(plan));
+            TransactionAt(Root).Execute(plan));
 
         Assert.Contains(relativePath, exception.Message, StringComparison.Ordinal);
-        Assert.Equal("raced operator edit", Read(fixture.Path, relativePath));
-        AssertTreesEqual(before, CaptureTree(fixture.Path));
+        Assert.Equal("raced operator edit", Read(Root, relativePath));
+        AssertTreesEqual(before, CaptureTree(Root));
     }
 
     [Fact]
     public void ExecuteFailureAfterEachFileMutationRestoresFilesDirectoriesSymlinksAndFreshParents()
     {
-        using RichTransactionFixture probeFixture = RichTransactionFixture.Create();
-        RecordingObserver probe = new(probeFixture.Path);
-        Transaction(probeFixture.Path, probe).Execute(probeFixture.CreateUpdatePlan());
+        RichTransactionFixture probeFixture = RichTransactionFixture.Create(this);
+        RecordingObserver probe = new(Files, probeFixture.Path);
+        TransactionAt(probeFixture.Path, probe).Execute(probeFixture.CreateUpdatePlan());
         int stepCount = probe.Steps.Count;
 
         Assert.True(stepCount >= 10, "The fixture must exercise multiple stage, backup, apply, and state mutations.");
         for (int failureSequence = 1; failureSequence <= stepCount; failureSequence++)
         {
-            using RichTransactionFixture fixture = RichTransactionFixture.Create();
+            RichTransactionFixture fixture = RichTransactionFixture.Create(this);
             SortedDictionary<string, TreeEntry> before = CaptureTree(fixture.Path);
-            FailingObserver failure = new(fixture.Path, failureSequence);
-            SquadTransaction transaction = Transaction(fixture.Path, failure);
+            FailingObserver failure = new(Files, fixture.Path, failureSequence);
+            SquadTransaction transaction = TransactionAt(fixture.Path, failure);
 
             InjectedSquadTransactionFailure exception = Assert.Throws<InjectedSquadTransactionFailure>(() =>
                 transaction.Execute(fixture.CreateUpdatePlan()));
