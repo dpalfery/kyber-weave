@@ -79,6 +79,16 @@ public static class SquadRenderedFileCount
             or SquadTarget.Devin or SquadTarget.Warp)
             return baseCount - sharedPrimaryCount;
 
-        return baseCount;
+        // The remaining native targets write one principal or skill per counted entry, so the base
+        // count is the receipt count. Every current target is named here; a target added later must
+        // choose its own branch rather than inherit a count that may not fit it.
+        if (target is SquadTarget.Copilot or SquadTarget.Kilo or SquadTarget.Antigravity
+            or SquadTarget.OpenCode or SquadTarget.CommandCode)
+            return baseCount;
+
+        throw new ArgumentOutOfRangeException(
+            nameof(target),
+            target,
+            "No rendered file count is known for this target.");
     }
 }
