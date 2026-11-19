@@ -119,8 +119,13 @@ public sealed class InMemorySquadState
     /// <summary>Resolves an anchor against the in-memory root, so a relative one never depends on the process directory.</summary>
     /// <param name="path">The anchor directory the caller named.</param>
     /// <returns>The full path on the in-memory file system.</returns>
-    private string Full(string path) =>
-        Path.IsPathFullyQualified(path) ? Path.GetFullPath(path) : Path.Combine(Files.Root, path);
+    private string Full(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+        // Anchors a relative path and normalises any dot segments, without the process directory.
+        return Path.GetFullPath(path, Files.Root);
+    }
 
     /// <summary>Creates a project directory and returns its canonical path.</summary>
     /// <param name="name">The directory name under the projects folder.</param>
