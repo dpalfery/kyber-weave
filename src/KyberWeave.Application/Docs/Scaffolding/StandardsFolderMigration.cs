@@ -131,7 +131,10 @@ public sealed partial class StandardsFolderMigration
         List<StandardsFolderChange> changes = [];
         List<StandardSectionMove> moves = [];
         string? refreshedAgents = PlanConfigRegRefresh();
-        string? agentsTarget = refreshedAgents is not null && !dryRun
+
+        // A dry run reaches the same refusal a real run does: the registry block's target is
+        // checked in both modes, and only the write is skipped when previewing.
+        string? agentsTarget = refreshedAgents is not null
             ? RequireWritable(AgentsFilePath)
             : null;
 
@@ -214,7 +217,7 @@ public sealed partial class StandardsFolderMigration
             }
         }
 
-        if (agentsTarget is not null && refreshedAgents is not null)
+        if (!dryRun && agentsTarget is not null && refreshedAgents is not null)
         {
             _files.WriteAllTextAtomic(agentsTarget, refreshedAgents);
             VerifyStillWritable(agentsTarget);
