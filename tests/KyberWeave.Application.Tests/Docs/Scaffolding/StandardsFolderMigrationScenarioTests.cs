@@ -495,6 +495,29 @@ public class StandardsFolderMigrationScenarioTests
     }
 
     /// <summary>
+    /// A write that fails after the standard was renamed moves that rename back, so a failed run
+    /// leaves no partially migrated folder behind for the next check to report.
+    /// </summary>
+    [Fact]
+    public void AFailureWhileWritingAStubRestoresTheStandardItAlreadyMoved()
+    {
+        string folder = Path.Combine(_host.Repo, "6-Docs", "standards", "csharp");
+        _host.Files.CreateDirectory(folder);
+        string legacy = Path.Combine(folder, "README.md");
+        _host.Files.WriteAllText(legacy, LegacyCsharp);
+        _host.Files.FailWhen(
+            operation => operation.Path?.Contains("csharp.rules.md", StringComparison.Ordinal) == true
+                && operation.Name.StartsWith("OpenWrite", StringComparison.Ordinal),
+            new IOException("The disk is full."));
+
+        Assert.Throws<IOException>(() => Migration(_host.Repo).Run());
+
+        Assert.True(_host.Files.FileExists(legacy), "the renamed standard must be moved back");
+        Assert.False(_host.Files.FileExists(StandardPath(_host.Repo, "csharp")));
+        Assert.False(_host.Files.FileExists(Path.Combine(folder, "csharp.rules.md")));
+    }
+
+    /// <summary>
     /// The registry block is re-rendered in place, so an <c>AGENTS.md</c> kept as a symbolic
     /// link is refused rather than rewritten at its target, and the refusal happens before a
     /// single standard moves.

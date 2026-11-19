@@ -216,26 +216,40 @@ public sealed partial class StandardsFolderMigration
             RequireWritableTargets(item.Planned, item.ReshapedText);
         }
 
-        foreach (FolderWork item in work)
+        List<Action> undo = [];
+        try
         {
-            // Only what the migration actually did is reported: a change whose target another
-            // actor created between planning and applying is skipped, and claiming it would
-            // tell the operator about a write that never happened.
-            List<StandardsFolderChange> applied = dryRun
-                ? [.. item.Planned]
-                : Apply(item.Planned, item.Scope, item.Owner, item.ReshapedText);
-
-            changes.AddRange(applied);
-            if (applied.Any(change => change.Kind == StandardsFolderChangeKind.Reshape))
+            foreach (FolderWork item in work)
             {
-                moves.AddRange(item.Moves);
+                // Only what the migration actually did is reported: a change whose target another
+                // actor created between planning and applying is skipped, and claiming it would
+                // tell the operator about a write that never happened.
+                List<StandardsFolderChange> applied = dryRun
+                    ? [.. item.Planned]
+                    : Apply(item.Planned, item.Scope, item.Owner, item.ReshapedText, undo);
+
+                changes.AddRange(applied);
+                if (applied.Any(change => change.Kind == StandardsFolderChangeKind.Reshape))
+                {
+                    moves.AddRange(item.Moves);
+                }
+            }
+
+            if (!dryRun && agentsTarget is not null && refreshedAgents is not null)
+            {
+                string? agentsBefore = ReadOrNull(AgentsFilePath);
+                _files.WriteAllTextAtomic(agentsTarget, refreshedAgents);
+                undo.Add(() => RestoreAgents(agentsTarget, agentsBefore));
+                VerifyStillWritable(agentsTarget);
             }
         }
-
-        if (!dryRun && agentsTarget is not null && refreshedAgents is not null)
+        catch
         {
-            _files.WriteAllTextAtomic(agentsTarget, refreshedAgents);
-            VerifyStillWritable(agentsTarget);
+            // A failure part way through — a write that fails, not a target refused at planning —
+            // would otherwise leave some standards moved and the registry block stale. Undo the
+            // writes newest-first so the repository is exactly as it was.
+            RollBack(undo);
+            throw;
         }
 
         return new StandardsFolderMigrationResult(
@@ -311,12 +325,14 @@ public sealed partial class StandardsFolderMigration
     /// <param name="scope">The technology or role scope.</param>
     /// <param name="owner">The owner the stubs copy, or null.</param>
     /// <param name="reshapedText">The reshaped standard, or null when the plan has no reshape.</param>
+    /// <param name="undo">Receives each write's inverse, for the caller to run if a later folder fails.</param>
     /// <returns>The changes actually made.</returns>
     internal List<StandardsFolderChange> Apply(
         IReadOnlyList<StandardsFolderChange> planned,
         string scope,
         string? owner,
-        string? reshapedText)
+        string? reshapedText,
+        List<Action>? undo = null)
     {
         List<StandardsFolderChange> applied = [];
         HashSet<string> skippedRenames = new(StringComparer.Ordinal);
@@ -333,6 +349,7 @@ public sealed partial class StandardsFolderMigration
                     }
 
                     applied.Add(change);
+                    undo?.Add(() => MoveBack(change.To, change.From));
                     break;
 
                 case StandardsFolderChangeKind.Add:
@@ -349,7 +366,12 @@ public sealed partial class StandardsFolderMigration
                     string content = kind == "arbiter"
                         ? ArbiterRulesStub(scope)
                         : Stub(scope, kind, owner);
-                    if (TryCreateNew(target, new UTF8Encoding(false).GetBytes(content))) applied.Add(change);
+                    if (TryCreateNew(target, new UTF8Encoding(false).GetBytes(content)))
+                    {
+                        applied.Add(change);
+                        undo?.Add(() => DeleteIfPresent(change.To));
+                    }
+
                     break;
 
                 case StandardsFolderChangeKind.Reshape:
@@ -359,7 +381,9 @@ public sealed partial class StandardsFolderMigration
                     if (reshapedText is null || skippedRenames.Contains(change.To)) break;
 
                     string reshapeTarget = RequireWritable(change.To);
+                    string reshapeBefore = _files.ReadAllText(reshapeTarget);
                     _files.WriteAllTextAtomic(reshapeTarget, reshapedText);
+                    undo?.Add(() => _files.WriteAllTextAtomic(reshapeTarget, reshapeBefore));
                     VerifyStillWritable(reshapeTarget);
                     applied.Add(change);
                     break;
@@ -367,6 +391,69 @@ public sealed partial class StandardsFolderMigration
         }
 
         return applied;
+    }
+
+    /// <summary>Moves a renamed standard back to the name it had before a failed run.</summary>
+    /// <param name="from">The relative path the rename produced.</param>
+    /// <param name="to">The relative path the standard had before.</param>
+    private void MoveBack(string from, string to)
+    {
+        string source = Absolute(from);
+        string target = Absolute(to);
+        if (_files.FileExists(source) && !_files.FileExists(target))
+        {
+            _files.MoveFile(source, target, overwrite: false);
+        }
+    }
+
+    /// <summary>Deletes a stub a failed run wrote.</summary>
+    /// <param name="relativePath">The stub's repository-relative path.</param>
+    private void DeleteIfPresent(string relativePath)
+    {
+        string path = Absolute(relativePath);
+        if (_files.FileExists(path))
+        {
+            _files.DeleteFile(path);
+        }
+    }
+
+    /// <summary>Puts the root <c>AGENTS.md</c> back as it was before a failed run.</summary>
+    /// <param name="path">The file's absolute path.</param>
+    /// <param name="previous">Its text before the run, or null when it did not exist.</param>
+    private void RestoreAgents(string path, string? previous)
+    {
+        if (previous is null)
+        {
+            if (_files.FileExists(path))
+            {
+                _files.DeleteFile(path);
+            }
+
+            return;
+        }
+
+        _files.WriteAllTextAtomic(path, previous);
+    }
+
+    /// <summary>Undoes a failed run's writes newest-first, unless the last one is undone first.</summary>
+    /// <param name="undo">Each write's inverse, in the order the writes happened.</param>
+    private static void RollBack(List<Action> undo)
+    {
+        for (int index = undo.Count - 1; index >= 0; index--)
+        {
+            try
+            {
+                undo[index]();
+            }
+            catch (Exception exception) when (exception is IOException
+                                                  or UnauthorizedAccessException
+                                                  or ArgumentException
+                                                  or InvalidOperationException)
+            {
+                // The original failure is the one the caller must see; a rollback that also fails
+                // leaves at most the state the failure already produced.
+            }
+        }
     }
 
     /// <summary>
