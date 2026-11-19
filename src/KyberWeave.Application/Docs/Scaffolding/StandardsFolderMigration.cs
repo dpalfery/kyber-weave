@@ -138,6 +138,7 @@ public sealed partial class StandardsFolderMigration
             ? RequireWritable(AgentsFilePath)
             : null;
 
+        List<FolderWork> work = [];
         foreach (string scope in Scopes())
         {
             foreach (string docsRoot in _ontology.DocsRoots)
@@ -202,18 +203,34 @@ public sealed partial class StandardsFolderMigration
                         new StandardSectionMove(standard, move.Heading, move.Under)));
                 }
 
-                // Only what the migration actually did is reported: a change whose target another
-                // actor created between planning and applying is skipped, and claiming it would
-                // tell the operator about a write that never happened.
-                List<StandardsFolderChange> applied = dryRun
-                    ? planned
-                    : Apply(planned, scope, owner, reshapedText);
+                work.Add(new FolderWork(scope, owner, reshapedText, planned, plannedMoves));
+            }
+        }
 
-                changes.AddRange(applied);
-                if (applied.Any(change => change.Kind == StandardsFolderChangeKind.Reshape))
-                {
-                    moves.AddRange(plannedMoves);
-                }
+        // Every target the run would write is checked before the first write, so a refusal — a
+        // link, a path outside the repository — leaves no standards moved and no stale registry
+        // block behind.
+        if (!dryRun)
+        {
+            foreach (FolderWork item in work)
+            {
+                RequireWritableTargets(item.Planned, item.ReshapedText);
+            }
+        }
+
+        foreach (FolderWork item in work)
+        {
+            // Only what the migration actually did is reported: a change whose target another
+            // actor created between planning and applying is skipped, and claiming it would
+            // tell the operator about a write that never happened.
+            List<StandardsFolderChange> applied = dryRun
+                ? [.. item.Planned]
+                : Apply(item.Planned, item.Scope, item.Owner, item.ReshapedText);
+
+            changes.AddRange(applied);
+            if (applied.Any(change => change.Kind == StandardsFolderChangeKind.Reshape))
+            {
+                moves.AddRange(item.Moves);
             }
         }
 
@@ -254,6 +271,44 @@ public sealed partial class StandardsFolderMigration
     /// Called per folder so a failure leaves the nodes before it complete and rerunnable: every
     /// write is a create, and a rename whose target already exists is skipped rather than reported.
     /// </summary>
+    /// <summary>One standards folder's plan, held until every folder's targets are checked.</summary>
+    /// <param name="Scope">The technology or role scope.</param>
+    /// <param name="Owner">The owner the stubs copy, or null.</param>
+    /// <param name="ReshapedText">The reshaped standard, or null when it needs no reshape.</param>
+    /// <param name="Planned">The changes the folder needs.</param>
+    /// <param name="Moves">The sections a reshape places under required headings.</param>
+    private sealed record FolderWork(
+        string Scope,
+        string? Owner,
+        string? ReshapedText,
+        List<StandardsFolderChange> Planned,
+        List<StandardSectionMove> Moves);
+
+    /// <summary>Checks every target a folder's plan would write, without writing anything.</summary>
+    /// <param name="planned">The folder's planned changes.</param>
+    /// <param name="reshapedText">The reshaped standard, or null when the plan has no reshape.</param>
+    private void RequireWritableTargets(
+        IReadOnlyList<StandardsFolderChange> planned,
+        string? reshapedText)
+    {
+        foreach (StandardsFolderChange change in planned)
+        {
+            switch (change.Kind)
+            {
+                case StandardsFolderChangeKind.Rename:
+                    RequireWritable(change.From);
+                    RequireWritable(change.To);
+                    break;
+                case StandardsFolderChangeKind.Add:
+                    RequireWritable(change.To);
+                    break;
+                case StandardsFolderChangeKind.Reshape when reshapedText is not null:
+                    RequireWritable(change.To);
+                    break;
+            }
+        }
+    }
+
     internal List<StandardsFolderChange> Apply(
         IReadOnlyList<StandardsFolderChange> planned,
         string scope,
