@@ -454,7 +454,10 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                 LogUnpairedReturn(result, ev, arbiterDirectory, context);
             }
 
-            return MapResult(result, harness, resolved, prompt, effective, arbiterDirectory, context, toolOutput, isPost);
+            HookOutcome mapped = MapResult(result, harness, resolved, prompt, effective, arbiterDirectory, context, toolOutput, isPost);
+            return isPost
+                ? WithAutonomousPlanNote(mapped, result, target, toolOutput, toolCallId, preId is null, arbiterDirectory, context)
+                : mapped;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -466,6 +469,57 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         finally
         {
             owned?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Attaches the autonomous plan-approval note to the architect's <c>PLAN_READY</c> return in an autonomous run.
+    /// The note is advisory: a return the rules blocked keeps its own text, and a failure to build the note is
+    /// logged and the outcome returned as it was.
+    /// </summary>
+    /// <param name="outcome">What the rules decided for the return.</param>
+    /// <param name="result">The evaluation's result.</param>
+    /// <param name="target">The dispatch's target.</param>
+    /// <param name="toolOutput">The return's text.</param>
+    /// <param name="toolCallId">The harness's call id for the return, or null.</param>
+    /// <param name="checkRepeat">Whether an earlier recording of the same return suppresses the note; a background turn is already deduplicated by its text.</param>
+    /// <param name="arbiterDirectory">Where the ledger is kept.</param>
+    /// <param name="context">The invocation's context, which carries the run.</param>
+    private HookOutcome WithAutonomousPlanNote(
+        HookOutcome outcome,
+        ArbiterEvaluationResult result,
+        string? target,
+        string? toolOutput,
+        string? toolCallId,
+        bool checkRepeat,
+        string arbiterDirectory,
+        HookContext context)
+    {
+        try
+        {
+            if (outcome.Kind is not (HookOutcomeKind.PassThrough or HookOutcomeKind.Allow or HookOutcomeKind.AllowWithNote or HookOutcomeKind.PostAnnotation)
+                || !AutonomousPlanNudge.Applies(result, target, toolOutput, context.RunContext?.ActiveRun))
+            {
+                return outcome;
+            }
+
+            if (checkRepeat)
+            {
+                IReadOnlyList<ArbiterLedgerEvent> events = _state.OpenLedger(arbiterDirectory).ReadAll();
+                ArbiterLedgerEvent? current = events.FirstOrDefault(e => string.Equals(e.Id, result.LedgerId, StringComparison.Ordinal));
+                if (AutonomousPlanNudge.AlreadyNudged(events, current, toolCallId))
+                {
+                    return outcome;
+                }
+            }
+
+            string note = string.IsNullOrWhiteSpace(outcome.Reason) ? AutonomousPlanNudge.Note : outcome.Reason + "\n\n" + AutonomousPlanNudge.Note;
+            return new HookOutcome(HookOutcomeKind.PostAnnotation, note);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            context.Log.WriteLine($"Arbiter: the autonomous plan-approval note was not built ({exception.GetType().Name}: {OneLine(exception.Message)}).");
+            return outcome;
         }
     }
 

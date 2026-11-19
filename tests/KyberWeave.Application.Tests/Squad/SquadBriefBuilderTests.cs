@@ -1,3 +1,4 @@
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Briefs;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -50,6 +51,22 @@ public sealed class SquadBriefBuilderTests
 
         Assert.False(built);
         Assert.Contains("'/kw/work/repo/nowhere' does not exist", refusal, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheGivenAutonomyWinsAndANoneSetRunHasNone()
+    {
+        Assert.Equal("autonomous", _builder.ResolveAutonomy(Repo, "autonomous", KyberWeaveConfigDefaults.Product));
+        Assert.Null(_builder.ResolveAutonomy(Repo, null, KyberWeaveConfigDefaults.Product));
+    }
+
+    [Fact]
+    public void TheRepositoryRegistryAutonomyIsUsedWhenNoneIsGiven()
+    {
+        _files.CreateDirectory(Repo);
+        _files.WriteAllText(Repo + "/AGENTS.md", "- **<autonomy>**: `autonomous`\n");
+
+        Assert.Equal("autonomous", _builder.ResolveAutonomy(Repo, null, KyberWeaveConfigDefaults.Product));
     }
 
     private sealed class RecordingBriefs : ISquadBriefService

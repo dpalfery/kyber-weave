@@ -30,6 +30,13 @@ public sealed class SquadBriefBuilder(
     private const string AmbiguousPlan = "KW-DOC-PLANREF-001";
 
     /// <inheritdoc />
+    public string? ResolveAutonomy(string repositoryRoot, string? given, KyberWeaveConfig config)
+    {
+        (string value, string source) = BriefAutonomy.Resolve(given, ReadRootAgents(repositoryRoot), config?.ConfigReg.Autonomy);
+        return string.Equals(source, "default", StringComparison.Ordinal) ? null : value;
+    }
+
+    /// <inheritdoc />
     public bool TryBuild(SquadBriefRequest request, out BriefResult? result, out string refusal)
     {
         result = null;

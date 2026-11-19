@@ -276,7 +276,7 @@ public sealed class RunStartService(
             environment.HomeDirectory,
             target,
             startRef,
-            repository is null ? null : new RunStartPlace(repository, worktreePath ?? repositoryRoot, clock.GetUtcNow()));
+            repository is null ? null : new RunStartPlace(repository, worktreePath ?? repositoryRoot, clock.GetUtcNow(), request.Autonomy));
 
         // A new worktree has no index of its own, so the index goes where the run works. A failure here does not
         // undo the branch: the operator repairs the index and the run continues in that tree.

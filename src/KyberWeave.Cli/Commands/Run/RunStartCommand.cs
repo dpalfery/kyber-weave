@@ -148,7 +148,9 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         }
 
         RunStartOutcome outcome = _starts.Start(
-            new RunStartRequest(repositoryRoot, branch, settings.Resume, config, configPath, _executor));
+            new RunStartRequest(
+                repositoryRoot, branch, settings.Resume, config, configPath, _executor,
+                _briefs.ResolveAutonomy(repositoryRoot, settings.Autonomy, config)));
         WriteMessages(outcome.Messages, settings.Json);
 
         if (outcome.Facts is not { } facts)
