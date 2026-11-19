@@ -230,7 +230,7 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
         }
 
         JsonArray rewritten = [];
-        bool inserted = false;
+        bool subagentsInserted = false;
         foreach (JsonElement subagent in subagents.EnumerateArray())
         {
             JsonObject copy = JsonNode.Parse(subagent.GetRawText()) as JsonObject
@@ -248,19 +248,37 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
                 if (insertion.Kind == DispatchInsertionKind.Inserted)
                 {
                     copy["Prompt"] = insertion.Text;
-                    inserted = true;
+                    subagentsInserted = true;
                 }
             }
 
             rewritten.Add(copy);
         }
 
-        return inserted
-            ? new JsonObject
+        // A payload may carry both shapes; the flat prompt is inserted too, never dropped.
+        JsonObject overwrite = [];
+        if (subagentsInserted)
+        {
+            overwrite["Subagents"] = rewritten;
+        }
+
+        string flatPrompt = GetString(args, "Prompt") ?? string.Empty;
+        if (IsMarked(flatPrompt))
+        {
+            DispatchInsertion flat = DispatchPromptInsertion.Expand(flatPrompt, context);
+            if (flat.Kind == DispatchInsertionKind.Stopped)
             {
-                ["decision"] = "ask",
-                ["overwrite"] = new JsonObject { ["Subagents"] = rewritten },
-            }.ToJsonString()
+                return RenderDeny(flat.Reason!);
+            }
+
+            if (flat.Kind == DispatchInsertionKind.Inserted)
+            {
+                overwrite["Prompt"] = flat.Text;
+            }
+        }
+
+        return overwrite.Count > 0
+            ? new JsonObject { ["decision"] = "ask", ["overwrite"] = overwrite }.ToJsonString()
             : null;
     }
 

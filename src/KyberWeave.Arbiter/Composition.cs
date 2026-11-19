@@ -204,6 +204,9 @@ public static class Composition
         return 1;
     }
 
+    /// <summary>The largest hook payload the fail-open path parses, in characters.</summary>
+    private const int MaxPayloadCharacters = 1_048_576;
+
     /// <summary>Parses the hook payload when it is JSON, leaving <paramref name="payload"/> unset otherwise.</summary>
     /// <param name="text">The raw stdin text, or null when the read failed.</param>
     /// <param name="payload">The cloned root element when the text parses.</param>
@@ -211,7 +214,9 @@ public static class Composition
     private static bool TryParsePayload(string? text, out JsonElement payload)
     {
         payload = default;
-        if (string.IsNullOrWhiteSpace(text))
+
+        // The fail-open path must not parse an unbounded host payload either.
+        if (string.IsNullOrWhiteSpace(text) || text.Length > MaxPayloadCharacters)
         {
             return false;
         }

@@ -327,6 +327,36 @@ public sealed class AntigravityRealPayloadTests : IDisposable
     }
 
     [Fact]
+    public void Insertion_WithSubagentsAndAFlatPrompt_RewritesBoth()
+    {
+        HookContext context = new(
+            "/repo",
+            () => "decision-1",
+            TextWriter.Null,
+            BuildDispatchPrompt: _ => new DispatchPromptExpansion(true, "THE FULL PROMPT", null));
+        string stdin = Reshape(Fixture("real-pre-conductor-marked.json"), root =>
+        {
+            root["toolCall"]!["args"]!["Prompt"] = "KYBER-ARBITER: true\nTASK: 1.1\n\nDo it.";
+            root["toolCall"]!["args"]!["Subagents"] = new JsonArray(
+                new JsonObject
+                {
+                    ["TypeName"] = "docs-dev",
+                    ["Prompt"] = "KYBER-ARBITER: true\nTASK: 1.2\n\nDo that.",
+                });
+        });
+
+        string? document = new AntigravityHookAdapter(new RecordingEngine())
+            .RenderPromptInsertion(JsonDocument.Parse(stdin).RootElement, null, context);
+
+        JsonNode overwrite = JsonNode.Parse(document!)!["overwrite"]!;
+        Assert.StartsWith("THE FULL PROMPT", overwrite["Prompt"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.StartsWith(
+            "THE FULL PROMPT",
+            overwrite["Subagents"]![0]!["Prompt"]!.GetValue<string>(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FlatInsertion_OverwritesOnlyThePrompt_AndKeepsTheUserApprovalPrompt()
     {
         HookContext context = new(
