@@ -319,7 +319,15 @@ public sealed class HookRunContextResolver(
         if (containing is not null)
         {
             string? candidateCommon = CommonDirectoryOf(full);
-            if (common is null || candidateCommon is null || IsSame(candidateCommon, common))
+            if (common is not null && candidateCommon is null)
+            {
+                // git named no repository for the candidate: a path this repository's worktrees list happens to hold
+                // is not proof, so it is refused exactly as Worktrees() refuses one it cannot attest.
+                notes.Add($"{name} '{full}': git could not name its repository, so it was refused rather than trusted.");
+                return false;
+            }
+
+            if (common is null || IsSame(candidateCommon!, common))
             {
                 worktree = containing;
                 return true;

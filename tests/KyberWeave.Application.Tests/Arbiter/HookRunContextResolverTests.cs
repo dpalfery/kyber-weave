@@ -199,6 +199,25 @@ public sealed class HookRunContextResolverTests
         Assert.Equal(Path.Combine(_otherWorktree, "docs", "plans", "2026-11-18-other.md"), selected.PlanPath);
     }
 
+    /// <summary>
+    /// A payload cwd inside one of this repository's worktrees, whose own git directory git cannot name, is refused:
+    /// the resolver only anchors where git attested the repository, so plan and git reads cannot land where git never
+    /// answered.
+    /// </summary>
+    [Fact]
+    public void APayloadCwdGitCannotAttestIsRefused()
+    {
+        string target = Path.Combine(_runWorktree, "src");
+        _files.CreateDirectory(target);
+        _git.CommonDirectories[target] = null;
+
+        HookRunContext context = _resolver.Resolve(
+            new HookRunContextRequest("copilot-cli", _main, target, _main, null, "TASK: T1", ArbiterTestRoots.Under("home")));
+
+        Assert.Equal(_main, context.Worktree);
+        Assert.Contains(context.Notes, note => note.Contains("git could not name its repository", StringComparison.Ordinal));
+    }
+
     private HookRunContext Resolve(string prompt) => _resolver.Resolve(Request(prompt));
 
     private HookRunContextRequest Request(string prompt, string? agentWorktree = null) =>
