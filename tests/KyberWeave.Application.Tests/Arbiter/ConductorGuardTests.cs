@@ -1,6 +1,8 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Tests.Arbiter;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Core.RunStart;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter.Facts;
@@ -338,6 +340,47 @@ public sealed class ConductorGuardTests : IDisposable
     private sealed class NoLinks : IFileLinkProbe
     {
         public bool HasLinkBelow(string root, string fullPath) => false;
+    }
+
+    /// <summary>
+    /// A record outlives its run: a worktree reused for another branch is not the run's worktree, so no run is live.
+    /// The fake the unit tests seed must say so too, or a test passes while production refuses the dispatch.
+    /// </summary>
+    [Fact]
+    public void ADispatchIsRefusedWhenTheRunsWorktreeHasAnotherBranchCheckedOut()
+    {
+        const string worktree = "/repo-worktree";
+        FakeRunStateStore runs = new()
+        {
+            Records = [new RunRecord("/repo/.git", "opencode/fix/a", worktree, DateTimeOffset.UtcNow)],
+        };
+        runs.MarkWorktreeReused(worktree, "opencode/other/b");
+
+        using InMemoryArbiterHost host = InMemoryArbiterHost.Create(services =>
+        {
+            services.AddSingleton<IFileLinkProbe>(new NoLinks());
+            services.AddSingleton<IRunStateStore>(runs);
+        });
+        host.Files.CreateDirectory(Cwd);
+        host.Files.CreateDirectory(worktree);
+        host.Git.CommonDirectory = "/repo/.git";
+        host.Git.Worktrees[Cwd] = [Cwd, worktree];
+        string home = host.InHome("stale-run");
+
+        using StringWriter stdout = new();
+        host.Get<IConductorGuard>().Run(
+            JsonSerializer.Serialize(new
+            {
+                cwd = Cwd,
+                toolName = "task",
+                toolArgs = new { agent_type = "dev-hard", prompt = "KYBER-ARBITER: true\nTASK: T1\n\nGo." },
+            }),
+            stdout,
+            TextWriter.Null,
+            copilotHome: CopilotHome,
+            homeDirectory: home);
+
+        Assert.Contains("KW-ARB-RUN-001", stdout.ToString(), StringComparison.Ordinal);
     }
 
     /// <summary>

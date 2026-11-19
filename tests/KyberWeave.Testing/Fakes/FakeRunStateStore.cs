@@ -11,10 +11,40 @@ namespace KyberWeave.Tests.Fakes;
 internal sealed class FakeRunStateStore : IRunStateStore
 {
     /// <summary>The records every read returns; null when the runs directory cannot be read.</summary>
-    public IReadOnlyList<RunRecord>? Records { get; set; } = [];
+    public IReadOnlyList<RunRecord>? Records
+    {
+        get => _records;
+        set
+        {
+            _records = value;
+            // A record `run start` wrote names a worktree it created with its own branch checked out, so a record a
+            // test declares is live unless the test scripts the worktree as reused, missing or elsewhere.
+            foreach (RunRecord record in value ?? [])
+            {
+                _ = CheckedOutBranches.TryAdd(record.Worktree, record.Branch);
+            }
+        }
+    }
+
+    private IReadOnlyList<RunRecord>? _records = [];
 
     /// <summary>The base recorded for each branch.</summary>
     public Dictionary<string, string> Bases { get; init; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The branch each worktree has checked out; a worktree absent here is not on disk. Seeded from
+    /// <see cref="Records"/>, so a record a test declares is live until the test says otherwise.
+    /// </summary>
+    public Dictionary<string, string?> CheckedOutBranches { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Scripts a worktree that outlived its run: another branch is checked out there.</summary>
+    /// <param name="worktree">The worktree the record names.</param>
+    /// <param name="branch">The branch now checked out there.</param>
+    public void MarkWorktreeReused(string worktree, string branch) => CheckedOutBranches[worktree] = branch;
+
+    /// <summary>Scripts a worktree that is no longer on disk.</summary>
+    /// <param name="worktree">The worktree the record names.</param>
+    public void RemoveWorktree(string worktree) => CheckedOutBranches.Remove(worktree);
 
     /// <inheritdoc />
     public void Write(string homeDirectory, string branch, string baseRef, RunStartPlace? place = null)
@@ -40,6 +70,11 @@ internal sealed class FakeRunStateStore : IRunStateStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Mirrors <c>FileRunStateStore.HasLiveRun</c>: a record is a live run only while its worktree still exists and
+    /// has the record's branch checked out. Repository match alone would let a reused worktree pass here while
+    /// production refuses it, and a guard test over this fake would then miss exactly the stale-run case.
+    /// </remarks>
     public bool? HasLiveRun(string homeDirectory, string repository)
     {
         if (Records is null)
@@ -47,7 +82,10 @@ internal sealed class FakeRunStateStore : IRunStateStore
             return null;
         }
 
-        return Records.Any(record => string.Equals(record.Repository, repository, StringComparison.Ordinal));
+        return Records.Any(record =>
+            string.Equals(record.Repository, repository, StringComparison.Ordinal)
+            && CheckedOutBranches.TryGetValue(record.Worktree, out string? branch)
+            && string.Equals(branch, record.Branch, StringComparison.Ordinal));
     }
 
     /// <inheritdoc />
