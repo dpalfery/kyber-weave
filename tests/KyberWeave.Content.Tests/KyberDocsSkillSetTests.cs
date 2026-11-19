@@ -73,7 +73,7 @@ public sealed class KyberDocsSkillSetTests
     [Fact]
     public void SecondBrainIsGoneFromSquadSource()
     {
-        SquadSource source = RealSquadServices.Load(Path.Combine(Corpus.Root, ProductRoot));
+        SquadSource source = CanonicalSquadTree.SharedSource;
 
         Assert.False(
             Corpus.DirectoryExists($"{ProductRoot}/skills/second-brain"),
@@ -91,7 +91,7 @@ public sealed class KyberDocsSkillSetTests
     [Fact]
     public void NoKyberDocsSkillLivesInSquad()
     {
-        SquadSource source = RealSquadServices.Load(Path.Combine(Corpus.Root, ProductRoot));
+        SquadSource source = CanonicalSquadTree.SharedSource;
         string[] kyberDocsDirs = Corpus.EnumerateDirectories($"{ProductRoot}/skills")
             .Where(directory => Path.GetFileName(directory).StartsWith("kyber-docs-", StringComparison.Ordinal))
             .ToArray();

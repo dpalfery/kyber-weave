@@ -11,6 +11,7 @@ namespace KyberWeave.Tests.Corpus;
 public sealed class InMemoryCorpusSource : ICorpusSource
 {
     private readonly Dictionary<string, byte[]> _files;
+    private readonly Dictionary<string, string> _links;
     private readonly HashSet<string> _directories;
     private readonly StringComparer _names;
 
@@ -24,6 +25,7 @@ public sealed class InMemoryCorpusSource : ICorpusSource
         CaseSensitive = caseSensitive ?? OperatingSystem.IsLinux();
         _names = CaseSensitive ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
         _files = new Dictionary<string, byte[]>(_names);
+        _links = new Dictionary<string, string>(_names);
         _directories = new HashSet<string>(_names);
     }
 
@@ -65,8 +67,26 @@ public sealed class InMemoryCorpusSource : ICorpusSource
         return this;
     }
 
+    /// <summary>Adds a file symbolic link, replacing one already at the path.</summary>
+    /// <param name="relativePath">The link's path relative to the corpus root, with forward slashes.</param>
+    /// <param name="targetRelativePath">
+    /// The path the link names, relative to the corpus root with forward slashes, so a fixture can point a link at
+    /// another file of the corpus and prove which side of a root boundary it lands on.
+    /// </param>
+    /// <returns>This corpus, so a fixture can be built in one expression.</returns>
+    /// <exception cref="ArgumentException">Either path is rooted or climbs above the corpus root.</exception>
+    public InMemoryCorpusSource AddFileLink(string relativePath, string targetRelativePath)
+    {
+        _links[CorpusPath.Normalize(relativePath)] = CorpusPath.Normalize(targetRelativePath);
+        return this;
+    }
+
     /// <inheritdoc />
-    public bool Exists(string relativePath) => _files.ContainsKey(CorpusPath.Normalize(relativePath));
+    public bool Exists(string relativePath)
+    {
+        string path = CorpusPath.Normalize(relativePath);
+        return _files.ContainsKey(path) || FinalTarget(path) is not null;
+    }
 
     /// <inheritdoc />
     public bool DirectoryExists(string relativeDirectory)
@@ -79,7 +99,7 @@ public sealed class InMemoryCorpusSource : ICorpusSource
             return true;
 
         string prefix = directory + "/";
-        return _files.Keys.Concat(_directories).Any(path => path.StartsWith(prefix, Comparison));
+        return Entries.Concat(_directories).Any(path => path.StartsWith(prefix, Comparison));
     }
 
     /// <inheritdoc />
@@ -93,12 +113,39 @@ public sealed class InMemoryCorpusSource : ICorpusSource
     public byte[] ReadBytes(string relativePath)
     {
         string path = CorpusPath.Normalize(relativePath);
+        string? file = _files.ContainsKey(path) ? path : FinalTarget(path);
 
-        if (!_files.TryGetValue(path, out byte[]? bytes))
+        if (file is null || !_files.TryGetValue(file, out byte[]? bytes))
             throw new FileNotFoundException($"The corpus holds no file at '{relativePath}'.", path);
 
         return [.. bytes];
     }
+
+    /// <inheritdoc />
+    public string? LinkTarget(string relativePath)
+    {
+        string path = CorpusPath.Normalize(relativePath);
+        return FinalTarget(path) is { } target ? CorpusPath.Resolve(Root, target) : null;
+    }
+
+    /// <summary>Resolves a file link to the file it finally names, or null when the path is no link or names nothing.</summary>
+    /// <param name="path">A canonical corpus path.</param>
+    /// <returns>The canonical path of the file the link resolves to, or null.</returns>
+    private string? FinalTarget(string path)
+    {
+        if (!_links.TryGetValue(path, out string? target))
+            return null;
+
+        for (int hop = 0; hop < 32 && _links.TryGetValue(target, out string? next); hop++)
+        {
+            target = next;
+        }
+
+        return _files.ContainsKey(target) ? target : null;
+    }
+
+    /// <summary>Every path the corpus holds as an entry, with a link listed under its own path.</summary>
+    private IEnumerable<string> Entries => _files.Keys.Concat(_links.Keys);
 
     /// <inheritdoc />
     public IEnumerable<string> EnumerateFiles(
@@ -110,7 +157,7 @@ public sealed class InMemoryCorpusSource : ICorpusSource
         string pattern = string.IsNullOrEmpty(searchPattern) ? "*" : searchPattern;
         string prefix = directory.Length == 0 ? string.Empty : directory + "/";
 
-        return _files.Keys
+        return Entries
             .Where(path => recursive
                 ? path.StartsWith(prefix, Comparison)
                     && !CorpusListing.HasSkippedDirectory(directory, path, Comparison)
@@ -130,7 +177,7 @@ public sealed class InMemoryCorpusSource : ICorpusSource
         string prefix = directory.Length == 0 ? string.Empty : directory + "/";
 
         // A file implies the directories above it; a declared directory names one even when it holds no file.
-        IEnumerable<string> fromFiles = _files.Keys
+        IEnumerable<string> fromFiles = Entries
             .Where(path => path.StartsWith(prefix, Comparison))
             .Select(path => path[prefix.Length..])
             .Where(rest => rest.Contains('/', StringComparison.Ordinal))
