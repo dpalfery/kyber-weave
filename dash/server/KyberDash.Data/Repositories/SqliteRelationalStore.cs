@@ -24,7 +24,13 @@ namespace KyberDash.Data.Repositories;
 public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalStoreWriter, IProjectionStore
 {
     /// <summary>Current normalized relational schema version stamped in <c>store_state</c>.</summary>
-    public const int SchemaVersion = 1;
+    public const int SchemaVersion = 25;
+
+    /// <summary>Current detector generation stamped in <c>store_state</c>.</summary>
+    public const int DetectorVersion = 5;
+
+    /// <summary>Maximum retained WAL journal size in bytes after checkpoint (32 MiB).</summary>
+    public const int WalSizeLimitBytes = 32 * 1024 * 1024;
 
     /// <summary>Error code raised when a relational or domain constraint invariant is violated.</summary>
     public const string ConstraintViolatedCode = "STORE_CONSTRAINT_VIOLATED";
@@ -46,6 +52,9 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     ];
 
     private readonly Lock writeGate = new();
+    private readonly IRelationalStoreFileSystem fileSystem;
+    private readonly Action? onRebuiltFromOlderSchema;
+    private readonly Action<string>? log;
     private bool initialized;
 
     /// <summary>
@@ -55,7 +64,26 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     /// <param name="databasePath">Path to the SQLite database file, created when absent.</param>
     /// <param name="circuitBreaker">Circuit breaker guarding every <c>sqlite3</c> invocation.</param>
     public SqliteRelationalStore(string databasePath, ICircuitBreaker circuitBreaker)
-        : this(databasePath, circuitBreaker, initialize: true)
+        : this(databasePath, circuitBreaker, initialize: true, fileSystem: null, onRebuiltFromOlderSchema: null, log: null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes or opens the relational SQLite store at <paramref name="databasePath"/> with
+    /// explicit filesystem, rebuild callback, and diagnostic logging seams.
+    /// </summary>
+    /// <param name="databasePath">Path to the SQLite database file, created when absent.</param>
+    /// <param name="circuitBreaker">Circuit breaker guarding every <c>sqlite3</c> invocation.</param>
+    /// <param name="fileSystem">Filesystem seam; defaults to <see cref="PhysicalRelationalStoreFileSystem.Instance"/> when <see langword="null"/>.</param>
+    /// <param name="onRebuiltFromOlderSchema">Optional callback invoked after an older schema is rebuilt.</param>
+    /// <param name="log">Optional diagnostic logger.</param>
+    public SqliteRelationalStore(
+        string databasePath,
+        ICircuitBreaker circuitBreaker,
+        IRelationalStoreFileSystem? fileSystem,
+        Action? onRebuiltFromOlderSchema = null,
+        Action<string>? log = null)
+        : this(databasePath, circuitBreaker, initialize: true, fileSystem, onRebuiltFromOlderSchema, log)
     {
     }
 
@@ -63,7 +91,26 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     /// <param name="options">Composition options supplying an optional explicit database path.</param>
     /// <param name="circuitBreaker">Circuit breaker guarding every <c>sqlite3</c> invocation.</param>
     public SqliteRelationalStore(DashOptions options, ICircuitBreaker circuitBreaker)
-        : this(ResolveDatabasePath(options), circuitBreaker, initialize: true)
+        : this(ResolveDatabasePath(options), circuitBreaker, initialize: true, fileSystem: null, onRebuiltFromOlderSchema: null, log: null)
+    {
+    }
+
+    /// <summary>
+    /// Opens or initializes the relational store resolved from <paramref name="options"/> with
+    /// explicit filesystem, rebuild callback, and diagnostic logging seams.
+    /// </summary>
+    /// <param name="options">Composition options supplying an optional explicit database path.</param>
+    /// <param name="circuitBreaker">Circuit breaker guarding every <c>sqlite3</c> invocation.</param>
+    /// <param name="fileSystem">Filesystem seam; defaults to <see cref="PhysicalRelationalStoreFileSystem.Instance"/> when <see langword="null"/>.</param>
+    /// <param name="onRebuiltFromOlderSchema">Optional callback invoked after an older schema is rebuilt.</param>
+    /// <param name="log">Optional diagnostic logger.</param>
+    public SqliteRelationalStore(
+        DashOptions options,
+        ICircuitBreaker circuitBreaker,
+        IRelationalStoreFileSystem? fileSystem,
+        Action? onRebuiltFromOlderSchema = null,
+        Action<string>? log = null)
+        : this(ResolveDatabasePath(options), circuitBreaker, initialize: true, fileSystem, onRebuiltFromOlderSchema, log)
     {
     }
 
@@ -75,6 +122,27 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     /// <param name="circuitBreaker">Circuit breaker guarding every <c>sqlite3</c> invocation.</param>
     /// <param name="initialize">Whether to initialize schema and <c>store_state</c> immediately.</param>
     protected SqliteRelationalStore(string databasePath, ICircuitBreaker circuitBreaker, bool initialize)
+        : this(databasePath, circuitBreaker, initialize, fileSystem: null, onRebuiltFromOlderSchema: null, log: null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new <see cref="SqliteRelationalStore"/> instance with explicit filesystem,
+    /// rebuild callback, and diagnostic logging seams, optionally deferring <see cref="EnsureInitialized"/>.
+    /// </summary>
+    /// <param name="databasePath">Path to the SQLite database file.</param>
+    /// <param name="circuitBreaker">Circuit breaker guarding every <c>sqlite3</c> invocation.</param>
+    /// <param name="initialize">Whether to initialize schema and <c>store_state</c> immediately.</param>
+    /// <param name="fileSystem">Filesystem seam; defaults to <see cref="PhysicalRelationalStoreFileSystem.Instance"/> when <see langword="null"/>.</param>
+    /// <param name="onRebuiltFromOlderSchema">Optional callback invoked after an older schema is rebuilt.</param>
+    /// <param name="log">Optional diagnostic logger.</param>
+    protected SqliteRelationalStore(
+        string databasePath,
+        ICircuitBreaker circuitBreaker,
+        bool initialize,
+        IRelationalStoreFileSystem? fileSystem,
+        Action? onRebuiltFromOlderSchema = null,
+        Action<string>? log = null)
         : base(
             ValidateDatabasePath(databasePath),
             circuitBreaker,
@@ -82,6 +150,10 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             busyTimeoutMilliseconds: BusyTimeoutMilliseconds,
             busyAttempts: BusyAttempts)
     {
+        this.fileSystem = fileSystem ?? PhysicalRelationalStoreFileSystem.Instance;
+        this.onRebuiltFromOlderSchema = onRebuiltFromOlderSchema;
+        this.log = log;
+
         if (initialize)
         {
             EnsureInitialized();
@@ -94,6 +166,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     /// </summary>
     public void EnsureInitialized()
     {
+        Action? rebuildCallback;
         lock (writeGate)
         {
             if (initialized)
@@ -101,9 +174,11 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
                 return;
             }
 
-            Initialize();
+            rebuildCallback = Initialize();
             initialized = true;
         }
+
+        rebuildCallback?.Invoke();
     }
 
     /// <inheritdoc />
@@ -439,6 +514,19 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         ExecuteTransaction($"DELETE FROM prediction WHERE prediction_id = {predictionIdExpr};\n");
     }
 
+    /// <summary>Filesystem seam used for existence checks, directory creation, and rebuild cleanup.</summary>
+    protected IRelationalStoreFileSystem FileSystem => fileSystem;
+
+    /// <summary>Ensures the parent directory of <see cref="BaseSqliteRepository.DatabasePath"/> exists via the filesystem seam.</summary>
+    protected void EnsureDatabaseDirectory()
+    {
+        string? directory = Path.GetDirectoryName(DatabasePath);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            fileSystem.CreateDirectory(directory);
+        }
+    }
+
     /// <summary>
     /// Ensures the parent directory exists before delegating to <see cref="BaseSqliteRepository.ExecuteSqliteCore"/>,
     /// so test subclasses overriding <see cref="ExecuteSqliteCore"/> touch zero filesystem entries.
@@ -447,10 +535,9 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     /// <returns>Standard output captured from <c>sqlite3</c>.</returns>
     protected override string ExecuteSqliteCore(string sql)
     {
-        string? directory = Path.GetDirectoryName(DatabasePath);
-        if (!string.IsNullOrEmpty(directory))
+        if (!fileSystem.FileExists(DatabasePath))
         {
-            Directory.CreateDirectory(directory);
+            EnsureDatabaseDirectory();
         }
 
         return base.ExecuteSqliteCore(sql);
@@ -468,76 +555,14 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         return databasePath;
     }
 
-    private void Initialize()
-    {
-        string storeStateDdl = SchemaDdlGenerator.GenerateTableDdl(RelationalSchemaCatalog.GetTable("store_state"));
-        ExecuteSqlite(
-            "PRAGMA journal_mode = WAL;\n" +
-            "PRAGMA synchronous = NORMAL;\n" +
-            $"PRAGMA journal_size_limit = {IntSql(CanonSchema.WalSizeLimitBytes)};\n" +
-            storeStateDdl);
-
-        int? existingVersion = ReadStoredSchemaVersion();
-        if (existingVersion is int version)
-        {
-            if (version > SchemaVersion)
-            {
-                throw new InvalidOperationException(
-                    $"Relational store at '{DatabasePath}' was written by schema version {IntSql(version)}; this build supports version {IntSql(SchemaVersion)}.");
-            }
-
-            if (version < SchemaVersion)
-            {
-                throw new InvalidOperationException(
-                    $"Relational store at '{DatabasePath}' is at schema version {IntSql(version)} and requires migration to {IntSql(SchemaVersion)}.");
-            }
-        }
-
-        StringBuilder script = new();
-        script.Append("PRAGMA foreign_keys = ON;\n");
-        script.Append("BEGIN IMMEDIATE;\n");
-        script.Append(SchemaDdlGenerator.GenerateSchemaDdl());
-        string schemaVersionSql = IntSql(SchemaVersion);
-        string detectorVersionSql = IntSql(CanonSchema.DetectorVersion);
-        script.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT OR IGNORE INTO store_state (singleton_id, schema_version, detector_version) VALUES (1, {schemaVersionSql}, {detectorVersionSql});\n");
-        script.Append(
-            CultureInfo.InvariantCulture,
-            $"UPDATE store_state SET detector_version = {detectorVersionSql} WHERE singleton_id = 1 AND detector_version <> {detectorVersionSql};\n");
-        script.Append("COMMIT;\n");
-        ExecuteSqlite(script.ToString());
-    }
-
-    private int? ReadStoredSchemaVersion()
-    {
-        string output = ExecuteSqlite(
-            ".mode tabs\n" +
-            ".headers off\n" +
-            "SELECT schema_version, detector_version FROM store_state WHERE singleton_id = 1 LIMIT 1;");
-
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = line.Split('\t', StringSplitOptions.None);
-            if (cols.Length == 0 || !int.TryParse(cols[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int version))
-            {
-                throw new InvalidOperationException(
-                    $"Relational store at '{DatabasePath}' has invalid schema_version row '{line}'.");
-            }
-
-            return version;
-        }
-
-        return null;
-    }
-
     private void ExecuteTransaction(string bodySql)
     {
+        Action? rebuildCallback = null;
         lock (writeGate)
         {
             if (!initialized)
             {
-                Initialize();
+                rebuildCallback = Initialize();
                 initialized = true;
             }
 
@@ -548,6 +573,8 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             script.Append("COMMIT;\n");
             ExecuteSqlite(script.ToString());
         }
+
+        rebuildCallback?.Invoke();
     }
 
     private static string GuardedTextExpr(string tableName, string columnName, string? value)
