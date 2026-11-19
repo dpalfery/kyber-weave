@@ -93,7 +93,7 @@ public sealed class SquadRequestAndCheckRulesTests
         Assert.Contains("| Request instruction | Covered by |", contract, StringComparison.Ordinal);
         Assert.Contains("one row for each explicit instruction", instructions, StringComparison.Ordinal);
         Assert.Contains("## Decisions", instructions, StringComparison.Ordinal);
-        Assert.Contains("recommended", instructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("the recommended resolution", instructions, StringComparison.Ordinal);
         Assert.Contains("hard repository ban", instructions, StringComparison.Ordinal);
         Assert.Contains("never reconcile the conflict silently", instructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("request-traced", Corpus.ReadText(ArchitectPath), StringComparison.Ordinal);
