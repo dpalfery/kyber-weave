@@ -53,8 +53,10 @@ public sealed class InMemoryCorpusSource : ICorpusSource
         ArgumentNullException.ThrowIfNull(bytes);
         string path = CorpusPath.Normalize(relativePath);
 
-        // One path holds one entry, as it does on a real file system: adding the file replaces a link there.
+        // One path holds one entry, as it does on a real file system: adding the file replaces a link
+        // or a directory there.
         _links.Remove(path);
+        _directories.Remove(path);
         _files[path] = [.. bytes];
         return this;
     }
@@ -66,7 +68,12 @@ public sealed class InMemoryCorpusSource : ICorpusSource
     {
         string directory = CorpusPath.NormalizeDirectory(relativeDirectory);
         if (directory.Length > 0)
+        {
+            // A directory cannot share its path with a file or a link either.
+            _files.Remove(directory);
+            _links.Remove(directory);
             _directories.Add(directory);
+        }
 
         return this;
     }
@@ -83,8 +90,10 @@ public sealed class InMemoryCorpusSource : ICorpusSource
     {
         string path = CorpusPath.Normalize(relativePath);
 
-        // A link replaces a file at its own path, as a real link does; the target keeps its entry.
+        // A link replaces a file or a directory at its own path, as a real link does; the target keeps
+        // its entry.
         _files.Remove(path);
+        _directories.Remove(path);
         _links[path] = CorpusPath.Normalize(targetRelativePath);
         return this;
     }
