@@ -560,12 +560,20 @@ public sealed class SquadGlobalHomeCliTests
     ///     Global uninstall removes machine-wide files and nothing else. A project that still depends on
     ///     the registry, or a registry the operator can see, must keep the same bytes.
     /// </summary>
+    /// <remarks>
+    ///     <c>squad uninstall</c> takes no project picker, so there is no seam through which a
+    ///     <c>--global</c> uninstall could consult one and nothing to fake for it. What the case is named
+    ///     for is stronger and is asserted directly: each project's whole tree — receipt, lock and every
+    ///     deployed file — and the registry are the same bytes after the run as before it.
+    /// </remarks>
     [Fact]
     public void UninstallGlobalLeavesProjectStateAndRegistryUntouched()
     {
         Fleet fleet = ArrangeFleet();
         string registry = RegistryPath();
         byte[]? registryBefore = Snapshot(registry);
+        string alphaTreeBefore = CaptureTree(fleet.Alpha.Root);
+        string betaTreeBefore = CaptureTree(fleet.Beta.Root);
         byte[]? alphaLockBefore = Snapshot(fleet.Alpha.LockPath);
         byte[]? alphaReceiptBefore = Snapshot(fleet.Alpha.ReceiptPath);
 
@@ -578,6 +586,9 @@ public sealed class SquadGlobalHomeCliTests
         AssertUnchanged(alphaLockBefore, fleet.Alpha.LockPath);
         AssertUnchanged(alphaReceiptBefore, fleet.Alpha.ReceiptPath);
         AssertUnchanged(registryBefore, registry);
+        Assert.False(string.IsNullOrEmpty(alphaTreeBefore), "The scenario requires project state to compare.");
+        Assert.Equal(alphaTreeBefore, CaptureTree(fleet.Alpha.Root));
+        Assert.Equal(betaTreeBefore, CaptureTree(fleet.Beta.Root));
     }
 
     /// <summary>
@@ -1721,6 +1732,21 @@ public sealed class SquadGlobalHomeCliTests
     /// <summary>Reads state before a run, or null when it is absent, so the run's own assertions go first.</summary>
     private byte[]? Snapshot(string path) =>
         _state.Files.FileExists(path) ? _state.Files.ReadAllBytes(path) : null;
+
+    /// <summary>
+    ///     Every file beneath a root as one <c>relative-path sha256</c> line each, in ordinal order, so two
+    ///     captures of the same tree compare as text and a changed or vanished file cannot pass unnoticed.
+    /// </summary>
+    private string CaptureTree(string root)
+    {
+        IEnumerable<string> lines = _state.Files
+            .EnumerateFiles(root, "*", recursive: true)
+            .Select(path =>
+                $"{Path.GetRelativePath(root, path)} " +
+                Convert.ToHexStringLower(SHA256.HashData(_state.Files.ReadAllBytes(path))))
+            .Order(StringComparer.Ordinal);
+        return string.Join('\n', lines);
+    }
 
     /// <summary>Asserts a file keeps the bytes it had before the run, and that it still exists.</summary>
     private void AssertUnchanged(byte[]? before, string path)
