@@ -194,6 +194,30 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     }
 
     /// <inheritdoc/>
+    public HookOutcome DecidePreDispatch(
+        string harness,
+        string caller,
+        string? target,
+        string prompt,
+        KyberWeaveConfig config,
+        HookContext context,
+        string? toolCallId,
+        string? sessionId,
+        string? dispatchModel,
+        string? deliveredPrompt)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(harness);
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(prompt);
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(context);
+
+        return Decide(
+            harness, caller, target, prompt, null, isPost: false, config, context, toolCallId, sessionId, dispatchModel,
+            deliveredPrompt: deliveredPrompt);
+    }
+
+    /// <inheritdoc/>
     public HookOutcome DecidePostDispatch(
         string harness,
         string caller,
@@ -226,27 +250,35 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
 
         // The pre event of this dispatch was appended a moment ago, so the newest one still open is its own: an
         // older one with the same prompt is a dispatch that was refused, or one another agent already answers.
+        // The harness's call id is exact and survives a prompt the hook rewrote; the digest covers a harness that
+        // gives no id, and is taken over the prompt the worker actually runs.
         HashSet<string> taken = events
             .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
             .Select(e => e.PreId!)
             .Concat(_background.ForSession(arbiterDirectory, dispatch.SessionId).Select(record => record.PreId))
             .ToHashSet(StringComparer.Ordinal);
-        string? preId = digest is null
+        List<ArbiterLedgerEvent> pres = [.. events.Where(e =>
+            e.Phase == ArbiterLedgerPhases.Pre
+            && string.Equals(e.Harness, dispatch.Harness, StringComparison.Ordinal)
+            && !taken.Contains(e.Id))];
+        ArbiterLedgerEvent? pre = dispatch.CallId is { Length: > 0 } callId
+            ? pres.LastOrDefault(e => string.Equals(e.CallId, callId, StringComparison.Ordinal))
+            : null;
+        pre ??= digest is null
             ? null
-            : events.LastOrDefault(e => e.Phase == ArbiterLedgerPhases.Pre
-                && string.Equals(e.Harness, dispatch.Harness, StringComparison.Ordinal)
-                && string.Equals(e.PairDigest, digest, StringComparison.Ordinal)
-                && !taken.Contains(e.Id))?.Id;
-        if (preId is null)
+            : pres.LastOrDefault(e => string.Equals(e.PairDigest, digest, StringComparison.Ordinal));
+        if (pre is null)
         {
             context.Log.WriteLine(
-                $"Arbiter: background agent '{dispatch.AgentId}' has no dispatch on the ledger; its returns are not recorded.");
+                $"Arbiter: background agent '{dispatch.AgentId}' has no dispatch on the ledger; its returns are not recorded. " +
+                $"Pairing keys compared: call-id '{dispatch.CallId ?? "(none)"}', " +
+                $"digest '{digest ?? "(none)"}' against {pres.Count} unpaired pre event(s) of '{dispatch.Harness}'.");
             return;
         }
 
-        _background.Save(arbiterDirectory, new BackgroundDispatchRecord(dispatch, preId));
+        _background.Save(arbiterDirectory, new BackgroundDispatchRecord(dispatch, pre.Id));
         context.Log.WriteLine(
-            $"Arbiter: background agent '{dispatch.AgentId}' started for dispatch {preId}; each finished turn is recorded as its return.");
+            $"Arbiter: background agent '{dispatch.AgentId}' started for dispatch {pre.Id}; each finished turn is recorded as its return.");
     }
 
     /// <inheritdoc/>
@@ -324,7 +356,8 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         string? toolCallId,
         string? sessionId,
         string? dispatchModel = null,
-        string? preId = null)
+        string? preId = null,
+        string? deliveredPrompt = null)
     {
         string? resolved = string.IsNullOrWhiteSpace(caller) || IsUnidentified(caller) ? null : caller;
 
@@ -390,6 +423,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                 AssertedCaller = asserted ? resolved : null,
                 Target = target,
                 Prompt = prompt,
+                DeliveredPrompt = deliveredPrompt,
                 ToolCallId = toolCallId,
                 PreId = preId,
                 Session = sessionId,
@@ -405,6 +439,11 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                 ev, effective,
                 new ArbiterEvaluatorOptions(Source: ArbiterSources.Hook, ConfirmModelWrite: context.ConfirmModelWrite))
                 .GetAwaiter().GetResult();
+            if (isPost)
+            {
+                LogUnpairedReturn(result, ev, arbiterDirectory, context);
+            }
+
             return MapResult(result, harness, resolved, prompt, effective, arbiterDirectory, context, toolOutput, isPost);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -418,6 +457,34 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         {
             owned?.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Says why a return paired with no dispatch, once: an unpaired return is a post event that will never mark a
+    /// task complete or release its dispatch's files, and the line names the keys that were compared.
+    /// </summary>
+    private void LogUnpairedReturn(
+        ArbiterEvaluationResult result, ArbiterEvent ev, string arbiterDirectory, HookContext context)
+    {
+        if (string.IsNullOrEmpty(result.LedgerId))
+        {
+            return;
+        }
+
+        IReadOnlyList<ArbiterLedgerEvent> events = _state.OpenLedger(arbiterDirectory).ReadAll();
+        ArbiterLedgerEvent? post = events.FirstOrDefault(e => string.Equals(e.Id, result.LedgerId, StringComparison.Ordinal));
+        if (post is null || post.PreId is not null)
+        {
+            return;
+        }
+
+        int candidates = events.Count(e =>
+            e.Phase == ArbiterLedgerPhases.Pre
+            && string.Equals(e.Harness, ev.Harness, StringComparison.Ordinal));
+        context.Log.WriteLine(
+            $"Arbiter: the return of '{(ev.Target is { Length: > 0 } target ? target : ev.Caller ?? "unknown")}' paired with no dispatch. " +
+            $"Pairing keys compared: call-id '{post.CallId ?? "(none)"}', digest '{post.PairDigest ?? "(none)"}' " +
+            $"against {candidates} pre event(s) of '{ev.Harness}'.");
     }
 
     private HookOutcome MapResult(

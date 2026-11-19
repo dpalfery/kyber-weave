@@ -191,13 +191,14 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         string? target,
         string prompt,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        string? deliveredPrompt = null)
     {
         if (_engine is IContextualHookDecisionEngine contextual)
         {
             return contextual.DecidePreDispatch(
                 harness, caller, target, prompt, config, context,
-                GetString(payload, "tool_use_id"), sessionId: null);
+                CliCallId(payload), sessionId: null, dispatchModel: null, deliveredPrompt: deliveredPrompt);
         }
 
         return _engine.DecidePreDispatch(caller, target, prompt, config);
@@ -217,7 +218,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         {
             return contextual.DecidePostDispatch(
                 harness, caller, target, prompt, toolOutput, config, context,
-                GetString(payload, "tool_use_id"), sessionId: null);
+                CliCallId(payload), sessionId: null);
         }
 
         return _engine.DecidePostDispatch(caller, target, toolOutput, config);
@@ -478,6 +479,43 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             : GetString(payload, "agentType") is { Length: > 0 } camel ? camel
             : GetString(payload, "agent_type") is { Length: > 0 } snake ? snake
             : "unidentified";
+
+        // One hook event can carry several calls (a turn that started parallel workers, or a review council's lens
+        // fan-out). Each call is its own dispatch, so each is decided and recorded on its own: a pre event per call is
+        // what its return can pair with, and a batch read as one would leave every call but the first unpaired.
+        IReadOnlyList<JsonElement> calls = CliCalls(payload);
+        if (calls.Count > 1)
+        {
+            string firstDocument = string.Empty;
+            foreach (JsonElement call in calls)
+            {
+                JsonElement single = CliCallPayload(payload, call);
+                if (IsCliPassThrough(single))
+                {
+                    continue;
+                }
+
+                string document = HandleCliCall(single, caller, config, context);
+                if (document.Contains("\"permissionDecision\":\"deny\"", StringComparison.Ordinal))
+                {
+                    // Fail closed: one call the rules refuse refuses the batch, as a refused single call would.
+                    return document;
+                }
+
+                if (firstDocument.Length == 0)
+                {
+                    firstDocument = document;
+                }
+            }
+
+            return firstDocument;
+        }
+
+        return HandleCliCall(payload, caller, config, context);
+    }
+
+    private string HandleCliCall(JsonElement payload, string caller, KyberWeaveConfig config, HookContext context)
+    {
         JsonObject args = ParseCliArgs(payload);
         string? target = GetNodeString(args, "agent_type");
         string prompt = GetNodeString(args, "prompt")
@@ -488,11 +526,20 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 
         if (!isPost)
         {
-            HookOutcome outcome = DecidePre(
-                _harnessToken, payload, caller, target, prompt, config, context);
-
-            // The rules judge the short dispatch first; the prompt is inserted only for a dispatch they allowed.
+            // The rules judge the short dispatch; the insertion is computed first because the ledger pairs the return
+            // with the prompt the worker runs, and an inserted packet replaces the dispatch the post event carries.
             DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+            HookOutcome outcome = DecidePre(
+                _harnessToken,
+                payload,
+                caller,
+                target,
+                prompt,
+                config,
+                context,
+                insertion.Kind == DispatchInsertionKind.Inserted ? insertion.Text : null);
+
+            // The prompt is inserted only for a dispatch the rules allowed.
             if (outcome.Kind == HookOutcomeKind.Deny)
             {
                 return RenderCliDeny(
@@ -551,7 +598,9 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
                 && GetString(payload, "sessionId") is { Length: > 0 } sessionId)
             {
                 background.TrackBackgroundDispatch(
-                    new BackgroundDispatch(_harnessToken, sessionId, agentId, caller, target, prompt), context);
+                    new BackgroundDispatch(
+                        _harnessToken, sessionId, agentId, caller, target, prompt, CliCallId(payload)),
+                    context);
             }
             else
             {
@@ -619,6 +668,22 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 
     private static bool IsCliPassThrough(JsonElement payload)
     {
+        // A batch passes through only when no call in it is a marked dispatch: reading the first call alone would let
+        // a turn whose first call is a `view` or a `bash` drop every task dispatch beside it.
+        IReadOnlyList<JsonElement> calls = CliCalls(payload);
+        if (calls.Count > 1)
+        {
+            foreach (JsonElement call in calls)
+            {
+                if (!IsCliPassThrough(CliCallPayload(payload, call)))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         string? toolName = CliToolName(payload);
         if (!string.Equals(toolName, "task", StringComparison.Ordinal))
         {
@@ -676,6 +741,61 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 
     /// <summary>Whether the payload carries a Copilot CLI 1.x <c>toolCalls</c> batch.</summary>
     private static bool HasCliCall(JsonElement payload) => FirstCliCall(payload) is not null;
+
+    /// <summary>
+    /// Every call of a Copilot CLI <c>toolCalls</c> batch, or the one call of the older single-call shape. The whole
+    /// event is one hook invocation, so a turn that started several workers arrives here as one payload and every
+    /// call in it is a dispatch of its own.
+    /// </summary>
+    private static IReadOnlyList<JsonElement> CliCalls(JsonElement payload)
+    {
+        if (payload.ValueKind == JsonValueKind.Object
+            && payload.TryGetProperty("toolCalls", out JsonElement batch)
+            && batch.ValueKind == JsonValueKind.Array)
+        {
+            List<JsonElement> calls = [.. batch.EnumerateArray().Where(call => call.ValueKind == JsonValueKind.Object)];
+            if (calls.Count > 0)
+            {
+                return calls;
+            }
+        }
+
+        return [payload];
+    }
+
+    /// <summary>One call of a batch, as the single-call payload the rest of the adapter reads.</summary>
+    private static JsonElement CliCallPayload(JsonElement payload, JsonElement call)
+    {
+        JsonObject single = new()
+        {
+            ["sessionId"] = GetString(payload, "sessionId"),
+            ["cwd"] = GetString(payload, "cwd"),
+            ["toolName"] = GetString(call, "name"),
+            ["toolCallId"] = GetString(call, "id") ?? GetString(payload, "toolCallId"),
+        };
+        if (call.TryGetProperty("args", out JsonElement args))
+        {
+            single["toolArgs"] = JsonNode.Parse(args.GetRawText());
+        }
+
+        if (call.TryGetProperty("result", out JsonElement result))
+        {
+            single["toolResult"] = result.ValueKind == JsonValueKind.Object
+                ? JsonNode.Parse(result.GetRawText())
+                : new JsonObject { ["textResultForLlm"] = result.ValueKind == JsonValueKind.String ? result.GetString() : result.GetRawText() };
+        }
+
+        return JsonSerializer.SerializeToElement(single);
+    }
+
+    /// <summary>
+    /// The harness's id for this tool call: <c>toolCallId</c> on a single-call event, the call's own <c>id</c> in a
+    /// batch, and <c>tool_use_id</c> on the VS Code schema. It is the exact half of the pair key.
+    /// </summary>
+    private static string? CliCallId(JsonElement payload) =>
+        GetString(payload, "toolCallId")
+        ?? GetString(payload, "tool_use_id")
+        ?? (FirstCliCall(payload) is { } call ? GetString(call, "id") : null);
 
     /// <summary>The first call of a CLI <c>toolCalls</c> batch, or null for the older single-call shape.</summary>
     private static JsonElement? FirstCliCall(JsonElement payload)
