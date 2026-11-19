@@ -1188,10 +1188,12 @@ replies is slow and can alter them. So the hook saves them, and the reviewer nev
   `Discovery:` and `Input sites:` line of one file, because a lens split across two spawns is saved as one
   file with two closing blocks. A reply the file already holds exactly is not appended again, because a
   repeated finding id would make the file unreadable.
-- **Failure policy.** The write goes through `IWritableFileSystem`. A file-system, path, security or
-  malformed-JSON failure, and any refusal above, is logged to the hook's log and never blocks or
-  denies the dispatch, as in [missing input never blocks](#the-run-context). A programming error — a
-  null argument, an invalid operation, a bad cast — is not a save failure and is not swallowed.
+- **Failure policy.** The write goes through `IWritableFileSystem`. A file-system, path, security, JSON,
+  invalid-data, unsupported-operation or argument failure (other than a null argument), and any refusal
+  above, is logged to the hook's log and never blocks or denies the dispatch, as in
+  [missing input never blocks](#the-run-context). A return that is not valid JSON is not a failure: its text
+  is the reply and is saved as it came. A programming error — a null argument, an invalid operation, a
+  bad cast — is not a save failure and is not swallowed.
 
 ## Harness facts
 
