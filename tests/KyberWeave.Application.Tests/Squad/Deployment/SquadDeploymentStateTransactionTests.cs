@@ -1,6 +1,7 @@
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Fakes;
+using System.Text.Json.Nodes;
 using Xunit;
 
 namespace KyberWeave.Application.Tests.Squad.Deployment;
@@ -452,7 +453,6 @@ public sealed class SquadDeploymentStateTransactionTests : InMemoryDeploymentSta
         string applicationData = Path.Combine(fixture.Path, "application-data");
         Files.CreateDirectory(targetRoot);
         Files.CreateDirectoryLink(aliasRoot, targetRoot);
-        SquadStateStore store = StoreAt(applicationData);
         SquadDeploymentPlan activePlan = Planner.CreateInstall(
             targetRoot,
             activeScope,
@@ -638,7 +638,7 @@ public sealed class SquadDeploymentStateTransactionTests : InMemoryDeploymentSta
             ".kyber-weave",
             ".squad-transaction");
         string intentPath = Path.Combine(transactionDirectory, "intent.json");
-        System.Text.Json.Nodes.JsonObject intent = ReadJsonObject(intentPath);
+        JsonObject intent = ReadJsonObject(intentPath);
         EditSemanticArtifactSet(
             intent,
             transactionDirectory,
