@@ -29,7 +29,7 @@ internal static partial class ReturnMarkerParser
 
         string text = Flatten(output);
         string? review = LastGroup(ResultRegex(), text);
-        string? status = LastGroup(StatusRegex(), text);
+        string? status = MarkerWord(LastGroup(StatusRegex(), text));
         string? gate = LastGroup(TaskGateRegex(), text);
         IReadOnlyList<string>? attested = readAttestations ? ReadAttested(text) : null;
         return review is null && status is null && attested is null && gate is null
@@ -48,6 +48,22 @@ internal static partial class ReturnMarkerParser
         List<string> pairs = [.. line
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
         return pairs.Count == 0 ? null : pairs;
+    }
+
+    /// <summary>
+    /// A status word as a model wrote it, without the punctuation or emphasis around it: "PASS," "**PASS**" and
+    /// "`PASS`." all read as PASS. Null when nothing is left.
+    /// </summary>
+    /// <param name="word">The word after a marker such as <c>STATUS:</c> or <c>TASK_GATE:</c>.</param>
+    public static string? MarkerWord(string? word)
+    {
+        if (word is null)
+        {
+            return null;
+        }
+
+        string trimmed = word.Trim().Trim('*', '`', '"', '\'', '_', ',', ';', ':', '.', '!', '|', '(', ')', '[', ']');
+        return trimmed.Length == 0 ? null : trimmed;
     }
 
     private static string? LastGroup(Regex regex, string text)
