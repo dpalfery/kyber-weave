@@ -97,6 +97,21 @@ public sealed class PlanRootResolverTests
         Assert.Equal(OtherWorktree, root);
     }
 
+    /// <summary>
+    /// A stripped return names the worktree only by its path, and a worktree need not live in a directory whose name
+    /// says "worktree" (a checkout beside the repository, or a temporary directory). The cheap gate on the word must
+    /// not answer before the paths in the body are read.
+    /// </summary>
+    [Fact]
+    public void Resolve_NoPlanAndTheTextNamesAWorktreeWhosePathSaysNoWorktree_ReturnsThatWorktree()
+    {
+        const string beside = "/repo-fix";
+        _files.CreateDirectory(beside);
+        string root = Resolver().Resolve(HookRoot, $"Your files are in {beside}\n\nDone.", _ => [HookRoot, beside]);
+
+        Assert.Equal(beside, root);
+    }
+
     [Fact]
     public void Resolve_TwoWorktreesHoldThePlan_AndOnePlansMetadataCannotBeRead_KeepsTheHookRoot()
     {

@@ -66,8 +66,9 @@ public sealed class PlanRootResolver(
             return hookRoot;
         }
 
-        // Without a plan the only signal is a worktree path in the text; skip the git call when none can be there.
-        if (planFile is null && !text.Contains("worktree", StringComparison.OrdinalIgnoreCase))
+        // Without a plan the only signal is a path in the text; skip the git call when the text holds neither a path
+        // nor the word, because a worktree need not live in a directory named after it.
+        if (planFile is null && !text.Contains("worktree", StringComparison.OrdinalIgnoreCase) && !HoldsAPath(text))
         {
             return hookRoot;
         }
@@ -165,12 +166,22 @@ public sealed class PlanRootResolver(
         }
 
         string? identity = GitFileOf(worktree);
-        return identity is not null && text
-            .Split([' ', '\t', '\n', '\r', '`', '"', '\'', '(', ')'], StringSplitOptions.RemoveEmptyEntries)
-            .Select(token => token.TrimEnd('.', ',', ';', ':'))
-            .Where(token => Path.IsPathRooted(token))
-            .Any(token => string.Equals(GitFileOf(token), identity, StringComparison.Ordinal));
+        return identity is not null
+            && Tokens(text).Any(token => Path.IsPathRooted(token)
+                && string.Equals(GitFileOf(token), identity, StringComparison.Ordinal));
     }
+
+    /// <summary>
+    /// Whether the text carries a token that could name a worktree: a rooted path. The word "worktree" alone is not
+    /// the signal — a checkout beside the repository, or one in a temporary directory, is named by its path only —
+    /// so this is what decides whether the worktree list is worth the git call.
+    /// </summary>
+    private static bool HoldsAPath(string text) => Tokens(text).Any(Path.IsPathRooted);
+
+    /// <summary>The words of a return's body, trimmed of the punctuation a sentence leaves on a path.</summary>
+    private static IEnumerable<string> Tokens(string text) =>
+        text.Split([' ', '\t', '\n', '\r', '`', '"', '\'', '(', ')'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(token => token.TrimEnd('.', ',', ';', ':'));
 
     /// <summary>A linked worktree's <c>.git</c> file names its private git directory, which identifies it.</summary>
     private string? GitFileOf(string directory)
