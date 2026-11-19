@@ -1072,18 +1072,6 @@ public abstract class SquadDeploymentStateTestBase : SquadStateDocumentFixtures
             new FixedTimeProvider(InstalledAt));
     }
 
-    internal static int ProbeGlobalInstallStepCount()
-    {
-        using TempDirectory fixture = new();
-        string targetRoot = Path.Combine(fixture.Path, "target");
-        Directory.CreateDirectory(targetRoot);
-        RecordingObserver observer = new(targetRoot);
-        RealSquadDeployment.Transaction(
-            Store(Path.Combine(fixture.Path, "application-data")),
-            observer).Execute(CreateGlobalInstallPlan(targetRoot));
-        return observer.Steps.Count;
-    }
-
     internal static void AssertActiveLeaseConflict(Exception? exception)
     {
         InvalidOperationException conflict = Assert.IsAssignableFrom<InvalidOperationException>(exception);
