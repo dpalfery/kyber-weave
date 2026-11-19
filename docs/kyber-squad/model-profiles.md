@@ -51,8 +51,8 @@ profile of its own rather than an alias of `architect`: its rows are the `archit
 coding model on each harness, so a step-up from `dev-medium` is a real upgrade on every harness that
 renders one, and a later rotation of a planning model changes `architect` and leaves `dev-hard` alone
 ([ADR 0085](../adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md)).
-On GitHub Copilot the three developer tiers are visibly different: Claude Haiku 5.5 for `fast`,
-GPT-6.1 Terra for `general` and Gemini 4 Hydrogen for `dev-hard`.
+On GitHub Copilot the three developer tiers are visibly different: MAI Code 2 Flash for `fast`,
+MAI Code 2 for `general` and Gemini 4 Hydrogen for `dev-hard`; `reviewer` runs on GPT-6.1 Terra.
 
 Bundled tokens live in `products/kyber-squad/profiles/models.yml`, one column per harness.
 The bundled matrix is the baseline; a preset changes only what it names.
