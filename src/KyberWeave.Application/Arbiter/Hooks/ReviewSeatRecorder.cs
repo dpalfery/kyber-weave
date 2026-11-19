@@ -76,7 +76,7 @@ public sealed partial class ReviewSeatRecorder(IWritableFileSystem files, IPathR
         if (files.FileExists(seatFile))
         {
             string existing = files.ReadAllText(seatFile);
-            if (existing.Contains(reply, StringComparison.Ordinal))
+            if (AlreadyHolds(existing, reply))
             {
                 context.Log.WriteLine($"Arbiter: review seat '{lens}' already holds this reply; not appended again.");
                 return;
@@ -92,13 +92,28 @@ public sealed partial class ReviewSeatRecorder(IWritableFileSystem files, IPathR
         context.Log.WriteLine($"Arbiter: review seat '{lens}' saved to '{seatFile}'.");
     }
 
+    /// <summary>The largest host-supplied tool result this recorder parses.</summary>
+    private const int MaxToolOutputChars = 262_144;
+
     /// <summary>The reply inside a tool result: the Copilot CLI result text, the text blocks of a content list, or plain text.</summary>
     /// <param name="toolOutput">The raw tool result.</param>
     /// <returns>The reply, or null when the result holds none.</returns>
     internal static string? ReplyText(string toolOutput)
     {
         string trimmed = toolOutput.TrimStart();
-        if (trimmed.Length == 0 || (trimmed[0] != '{' && trimmed[0] != '"'))
+        if (trimmed.Length == 0)
+        {
+            return null;
+        }
+
+        // A host-supplied payload is parsed only up to a bound, so an oversize result is refused
+        // rather than parsed into a seat file that then grows without limit.
+        if (toolOutput.Length > MaxToolOutputChars)
+        {
+            return null;
+        }
+
+        if (trimmed[0] is not ('{' or '[' or '"' or '-' or >= '0' and <= '9' or 't' or 'f' or 'n'))
         {
             return toolOutput;
         }
@@ -112,9 +127,11 @@ public sealed partial class ReviewSeatRecorder(IWritableFileSystem files, IPathR
                 return root.GetString();
             }
 
+            // An array, a number, a boolean or null is the envelope's shape, not a reply a
+            // reviewer wrote, so it writes no seat file.
             if (root.ValueKind != JsonValueKind.Object)
             {
-                return toolOutput;
+                return null;
             }
 
             foreach (string name in (string[])["textResultForLlm", "result", "output", "text", "response"])
@@ -157,6 +174,19 @@ public sealed partial class ReviewSeatRecorder(IWritableFileSystem files, IPathR
             return toolOutput;
         }
     }
+
+    /// <summary>
+    /// Whether the file already ends with this exact reply, as one of its blank-line-separated
+    /// entries. A reply that is merely a substring of another entry is a different reply and is
+    /// appended, so an exact-match rule never silently drops one.
+    /// </summary>
+    /// <param name="existing">The seat file's current text.</param>
+    /// <param name="reply">The reply about to be saved.</param>
+    /// <returns>True when saving it again would repeat an entry the file already holds.</returns>
+    private static bool AlreadyHolds(string existing, string reply) =>
+        string.Equals(existing, reply, StringComparison.Ordinal)
+        || existing.EndsWith("\n\n" + reply, StringComparison.Ordinal)
+        || existing.EndsWith("\n" + reply, StringComparison.Ordinal);
 
     private bool InsideRunRoots(string folder, HookContext context)
     {

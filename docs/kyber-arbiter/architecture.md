@@ -1142,7 +1142,10 @@ replies is slow and can alter them. So the hook saves them, and the reviewer nev
   headers before the worker runs, so a return's prompt often has no `LENS:` line, and the file name then
   names the lens. Any other dispatch writes nothing.
 - **Reply text.** The reply is the text the harness returned, taken out of its tool-result JSON
-  (`textResultForLlm`, or the `text` blocks of `content`), and written unchanged.
+  (`textResultForLlm`, or the `text` blocks of `content`), and written unchanged. A wire value that
+  is not a string or an object — an array, a number, a boolean, null — carries no reply and writes
+  nothing, and a tool result over 256 KiB is refused unparsed so a host payload cannot make a seat
+  file grow without bound.
 - **Path rule.** The file is `review/cycle-<n>/seats/<lens>.md` beside the packet. The lens must be a
   lowercase name of letters, digits and hyphens.
 - **Containment.** The seats folder must resolve, links followed, strictly inside the run context's
@@ -1154,9 +1157,10 @@ replies is slow and can alter them. So the hook saves them, and the reviewer nev
   `Discovery:` and `Input sites:` line of one file, because a lens split across two spawns is saved as one
   file with two closing blocks. A reply the file already holds exactly is not appended again, because a
   repeated finding id would make the file unreadable.
-- **Failure policy.** The write goes through `IWritableFileSystem`. Any failure, and any refusal above, is
-  logged to the hook's log and never blocks or denies the dispatch, as in
-  [missing input never blocks](#the-run-context).
+- **Failure policy.** The write goes through `IWritableFileSystem`. Any file-system or path failure, and
+  any refusal above, is logged to the hook's log and never blocks or denies the dispatch, as in
+  [missing input never blocks](#the-run-context). An unexpected exception is not a save failure and is
+  not swallowed.
 
 ## Harness facts
 

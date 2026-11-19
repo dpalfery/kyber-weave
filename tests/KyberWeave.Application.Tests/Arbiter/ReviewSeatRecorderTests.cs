@@ -129,6 +129,46 @@ public sealed class ReviewSeatRecorderTests : IDisposable
         Assert.Equal(Reply, _host.Files.ReadAllText(Seat()));
     }
 
+    /// <summary>A reply that is only a substring of an entry the file holds is a different reply and is appended.</summary>
+    [Fact]
+    public void AReplyThatIsASubstringOfTheFileIsAppended()
+    {
+        (HookContext context, _) = Context();
+        const string Substring = "NO FINDINGS";
+
+        _ = Sync(Prompt(Packet()), CopilotResult(Reply), context);
+        _ = Sync(Prompt(Packet()), CopilotResult(Substring), context);
+
+        Assert.Equal(Reply + "\n\n" + Substring, _host.Files.ReadAllText(Seat()));
+    }
+
+    /// <summary>A tool result whose JSON is not a string or an object carries no reply, so no seat file is written.</summary>
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("42")]
+    [InlineData("true")]
+    [InlineData("null")]
+    public void ANonObjectJsonResultWritesNothing(string toolOutput)
+    {
+        (HookContext context, _) = Context();
+
+        _ = Sync(Prompt(Packet()), toolOutput, context);
+
+        Assert.False(_host.Files.FileExists(Seat()));
+    }
+
+    /// <summary>An oversize host payload is refused rather than parsed and appended to a seat file.</summary>
+    [Fact]
+    public void AnOversizeResultWritesNothing()
+    {
+        (HookContext context, _) = Context();
+        string oversize = new string('x', 262_145);
+
+        _ = Sync(Prompt(Packet()), oversize, context);
+
+        Assert.False(_host.Files.FileExists(Seat()));
+    }
+
     /// <summary>An empty reply writes nothing.</summary>
     [Fact]
     public void AnEmptyReplyWritesNothing()
