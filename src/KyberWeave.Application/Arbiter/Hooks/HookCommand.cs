@@ -35,6 +35,7 @@ public sealed class HookCommand : IArbiterHookHost
     private readonly IProcessEnvironment _environment;
     private readonly Func<string> _newDecisionId;
     private readonly ITaskPromptServiceFactory? _promptFactory;
+    private readonly IPlanRootResolver? _planRoots;
 
     /// <summary>
     /// Creates a host over an adapter registry and the ports it decides through. The configuration loader is a port so
@@ -49,6 +50,8 @@ public sealed class HookCommand : IArbiterHookHost
     /// <param name="newDecisionId">Builds a decision id; null uses <paramref name="ids"/>.</param>
     /// <param name="prompts">Builds the task prompt a dispatch's identity line is replaced with; null installs no
     /// prompt service, so no dispatch is expanded.</param>
+    /// <param name="planRoots">Finds the worktree a dispatch's plan lives in, so a prompt is built from the tree that
+    /// holds it; null reads every dispatch from the hook's own root.</param>
     public HookCommand(
         HarnessAdapterRegistry registry,
         IArbiterHostConfig hostConfig,
@@ -57,7 +60,8 @@ public sealed class HookCommand : IArbiterHookHost
         IProcessEnvironment environment,
         IIdGenerator ids,
         Func<string>? newDecisionId = null,
-        ITaskPromptServiceFactory? prompts = null)
+        ITaskPromptServiceFactory? prompts = null,
+        IPlanRootResolver? planRoots = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(hostConfig);
@@ -72,6 +76,7 @@ public sealed class HookCommand : IArbiterHookHost
         _environment = environment;
         _newDecisionId = newDecisionId ?? (() => ids.NewGuid().ToString("N"));
         _promptFactory = prompts;
+        _planRoots = planRoots;
     }
 
     /// <summary>
@@ -416,8 +421,10 @@ public sealed class HookCommand : IArbiterHookHost
 
     /// <summary>The prompt builder this host passes to the adapters, or null when no prompt service was installed.</summary>
     /// <remarks>
-    /// The service is built once per hook process and reads the checkout's documentation, so it is created on the
-    /// first dispatch that needs it rather than for every event.
+    /// The service is built once per root and reads that checkout's documentation, so it is created on the first
+    /// dispatch that needs it rather than for every event. The root is the worktree the dispatch's plan lives in:
+    /// a conductor run writes the plan and its task file in a run worktree while some harnesses run the hook in the
+    /// checkout the session started in, and the task file exists only in the worktree.
     /// </remarks>
     private Func<DispatchPromptQuery, DispatchPromptExpansion>? PromptExpander(string repoRoot, KyberWeaveConfig config)
     {
@@ -426,13 +433,20 @@ public sealed class HookCommand : IArbiterHookHost
             return null;
         }
 
-        ITaskPromptService? service = null;
+        Dictionary<string, ITaskPromptService> services = new(StringComparer.Ordinal);
         return query =>
         {
-            service ??= _promptFactory.ForRepository(repoRoot, config);
+            string root = _planRoots is null
+                ? repoRoot
+                : _planRoots.ResolvePlanRoot(repoRoot, query.PlanFile, query.RetryText);
+            if (!services.TryGetValue(root, out ITaskPromptService? service))
+            {
+                services[root] = service = _promptFactory.ForRepository(root, config);
+            }
+
             TaskPromptResult result = service.Build(
                 new TaskPromptRequest(
-                    repoRoot,
+                    root,
                     query.TaskId,
                     query.PlanFile,
                     Agent: null,

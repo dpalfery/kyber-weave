@@ -106,11 +106,13 @@ internal static class ArbiterTestServices
     /// <param name="configLoader">Loads the project configuration; a test passes one that counts its calls.</param>
     /// <param name="newDecisionId">Builds a decision id; null uses <paramref name="ids"/>.</param>
     /// <param name="ids">The identifier seam; the registered one when null.</param>
+    /// <param name="prompts">The prompt service factory; null installs none, so no dispatch is expanded.</param>
     internal static HookCommand Command(
         HarnessAdapterRegistry registry,
         Func<string, KyberWeaveConfig> configLoader,
         Func<string>? newDecisionId = null,
-        IIdGenerator? ids = null) =>
+        IIdGenerator? ids = null,
+        ITaskPromptServiceFactory? prompts = null) =>
         new(
             registry,
             new DelegateHostConfig(configLoader, Get<IArbiterHostConfig>()),
@@ -118,7 +120,9 @@ internal static class ArbiterTestServices
             Get<IClaudeHookCoverage>(),
             Get<IProcessEnvironment>(),
             ids ?? Get<IIdGenerator>(),
-            newDecisionId);
+            newDecisionId,
+            prompts,
+            Get<IPlanRootResolver>());
 
     /// <summary>The git facts over the real adapters.</summary>
     internal static HookGitFacts HookGitFacts(string workingDirectory, string? homeDirectory = null, string? arbiterDirectory = null) =>

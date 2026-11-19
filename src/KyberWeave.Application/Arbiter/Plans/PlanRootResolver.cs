@@ -36,19 +36,38 @@ public sealed class PlanRootResolver(
     {
         ArgumentNullException.ThrowIfNull(hookRoot);
         ArgumentNullException.ThrowIfNull(prompt);
-        listWorktrees ??= root => git.ListWorktrees(root);
 
         HeaderBlock block = HeaderBlock.Parse(prompt);
         string? planFile = block.Headers.TryGetValue("PLAN_FILE", out string? valid)
             ? valid
             : block.RawValues.TryGetValue("PLAN_FILE", out string? raw) ? raw : null;
+        return ResolvePlanRoot(hookRoot, planFile, prompt, listWorktrees);
+    }
+
+    /// <summary>
+    /// The root to read a dispatch's plan, task file and prompt against when its headers are already parsed.
+    /// </summary>
+    /// <param name="hookRoot">The repository root the hook resolved from its working directory.</param>
+    /// <param name="planFile">The dispatch's <c>PLAN_FILE</c> value, or null when it names no plan.</param>
+    /// <param name="text">The dispatch text, for the worktree it names when no plan is named; null for none.</param>
+    /// <param name="listWorktrees">Lists the repository's worktrees; the git adapter in production.</param>
+    public string ResolvePlanRoot(
+        string hookRoot,
+        string? planFile,
+        string? text,
+        Func<string, IReadOnlyList<string>>? listWorktrees = null)
+    {
+        ArgumentNullException.ThrowIfNull(hookRoot);
+        listWorktrees ??= root => git.ListWorktrees(root);
+        text ??= string.Empty;
+
         if (planFile is not null && Holds(hookRoot, planFile))
         {
             return hookRoot;
         }
 
         // Without a plan the only signal is a worktree path in the text; skip the git call when none can be there.
-        if (planFile is null && !prompt.Contains("worktree", StringComparison.OrdinalIgnoreCase))
+        if (planFile is null && !text.Contains("worktree", StringComparison.OrdinalIgnoreCase))
         {
             return hookRoot;
         }
@@ -73,7 +92,7 @@ public sealed class PlanRootResolver(
         if (planFile is null)
         {
             // A return whose headers were stripped: the worktree its body names, when exactly one is named.
-            List<string> named = [.. others.Where(worktree => Names(prompt, worktree))];
+            List<string> named = [.. others.Where(worktree => Names(text, worktree))];
             return named.Count == 1 ? named[0] : hookRoot;
         }
 
@@ -88,7 +107,7 @@ public sealed class PlanRootResolver(
             return holding[0];
         }
 
-        List<string> namedHolding = [.. holding.Where(worktree => Names(prompt, worktree))];
+        List<string> namedHolding = [.. holding.Where(worktree => Names(text, worktree))];
         if (namedHolding.Count == 1)
         {
             return namedHolding[0];

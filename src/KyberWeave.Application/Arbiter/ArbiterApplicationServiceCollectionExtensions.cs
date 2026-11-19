@@ -110,7 +110,8 @@ public static class ArbiterApplicationServiceCollectionExtensions
                 sp.GetRequiredService<IProcessEnvironment>(),
                 ids,
                 () => ids.NewSortableId(clock.GetUtcNow()),
-                sp.GetRequiredService<ITaskPromptServiceFactory>());
+                sp.GetRequiredService<ITaskPromptServiceFactory>(),
+                sp.GetRequiredService<IPlanRootResolver>());
         });
         services.TryAddSingleton<IArbiterHookHost>(sp => sp.GetRequiredService<HookCommand>());
         services.TryAddSingleton<IArbiterServeService, ArbiterServeService>();

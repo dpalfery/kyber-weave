@@ -133,6 +133,12 @@ public sealed class ArbiterRealEngineTests : IDisposable
     private sealed class ThrowingPlanRoots : IPlanRootResolver
     {
         public string Resolve(string hookRoot, string prompt, Func<string, IReadOnlyList<string>>? listWorktrees = null) => throw new NotSupportedException("container exploded");
+
+        public string ResolvePlanRoot(
+            string hookRoot,
+            string? planFile,
+            string? text,
+            Func<string, IReadOnlyList<string>>? listWorktrees = null) => throw new NotSupportedException("container exploded");
     }
 
     private string Payload(string hookEvent, string target, string prompt, string? status = null, string agentType = "conductor")

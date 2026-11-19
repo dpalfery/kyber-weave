@@ -162,7 +162,9 @@ block. The raw values are evidence, never a gate:
   not under the hook's directory, the resolver lists the repository's worktrees
   (`git worktree list --porcelain`) and uses the one that holds the plan for the plan, the task file
   and the git facts of that decision; several holding it prefer the one the dispatch names, then the
-  newest plan. A return whose headers were stripped follows the worktree its body names. The ledger
+  newest plan. The dispatch hook builds the prompt it inserts from the same root, so a plan and task
+  file that exist only in the run worktree still reach the worker. A return whose headers were
+  stripped follows the worktree its body names. The ledger
   stays in the hook's directory, so a dispatch and its return still pair.
 - **`delegation.plan-file-raw`** and **`delegation.task-raw`** carry the raw values to the model
   questions.

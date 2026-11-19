@@ -45,11 +45,17 @@ public sealed class DispatchPromptInsertionTests
     {
         public List<TaskPromptRequest> Requests { get; } = [];
 
+        public List<string> Repositories { get; } = [];
+
         public string Prompt { get; init; } = TaskPrompt;
 
         public string? Refusal { get; init; }
 
-        public ITaskPromptService ForRepository(string repositoryRoot, KyberWeaveConfig config) => this;
+        public ITaskPromptService ForRepository(string repositoryRoot, KyberWeaveConfig config)
+        {
+            Repositories.Add(repositoryRoot);
+            return this;
+        }
 
         public TaskPromptResult Build(TaskPromptRequest request, KyberWeaveConfig config)
         {
@@ -533,7 +539,11 @@ public sealed class DispatchPromptInsertionTests
         }
     }
 
-    private HookCommand Host(IHookDecisionEngine engine, KyberWeaveConfig config, ScriptedPrompts prompts)
+    private HookCommand Host(
+        IHookDecisionEngine engine,
+        KyberWeaveConfig config,
+        ScriptedPrompts prompts,
+        IPlanRootResolver? planRoots = null)
     {
         HarnessAdapterRegistry registry = ArbiterTestServices.Registry(engine);
         return new HookCommand(
@@ -544,7 +554,8 @@ public sealed class DispatchPromptInsertionTests
             ArbiterTestServices.Get<IProcessEnvironment>(),
             new FakeIdGenerator(),
             () => "decision-test-1",
-            prompts);
+            prompts,
+            planRoots);
     }
 
     private static (int Exit, string Stdout) Run(HookCommand command, string harness, string payload)
@@ -565,6 +576,67 @@ public sealed class DispatchPromptInsertionTests
         Assert.Equal(0, exit);
         Assert.Equal(TaskPrompt + "\n\nImplement the plan parser.", InsertedPrompt("claude", stdout));
         Assert.Single(prompts.Requests);
+    }
+
+    /// <summary>
+    /// A conductor run writes its plan and task file in its run worktree, while the Copilot CLI hook runs in the
+    /// checkout the session started in. The prompt must be built from the worktree that holds the plan, or every
+    /// worker dispatch is refused for a task file that exists only there.
+    /// </summary>
+    [Fact]
+    public void ADispatchForAPlanOnlyTheRunWorktreeHolds_BuildsThePromptAgainstThatWorktree()
+    {
+        const string worktree = "/repo.worktrees/run";
+        ScriptedPrompts prompts = new();
+
+        (int exit, string stdout) = Run(
+            Host(new RecordingEngine(), DisabledConfig(), prompts, new FixedPlanRoots(worktree)),
+            "copilot-cli",
+            Payload("copilot-cli", TaskDispatch));
+
+        Assert.Equal(0, exit);
+        Assert.Equal(TaskPrompt + "\n\nImplement the plan parser.", InsertedPrompt("copilot-cli", stdout));
+        TaskPromptRequest request = Assert.Single(prompts.Requests);
+        Assert.Equal(worktree, request.RepoRoot);
+        Assert.Equal([worktree], prompts.Repositories);
+    }
+
+    /// <summary>
+    /// The resolution is told the dispatch's own plan header and the text below it, so the resolver can pick the
+    /// worktree the dispatch names rather than guessing.
+    /// </summary>
+    [Fact]
+    public void ThePlanResolutionIsAskedWithTheDispatchedPlanAndBody()
+    {
+        RecordingPlanRoots planRoots = new();
+        string dispatch = $"KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nRun worktree: /repo.worktrees/run";
+
+        _ = Run(
+            Host(new RecordingEngine(), DisabledConfig(), new ScriptedPrompts(), planRoots),
+            "copilot-cli",
+            Payload("copilot-cli", dispatch));
+
+        (string hookRoot, string? planFile, string? text) = Assert.Single(planRoots.Calls);
+        Assert.Equal("/repo", hookRoot);
+        Assert.Equal("docs/plans/plan.md", planFile);
+        Assert.Equal("Run worktree: /repo.worktrees/run", text);
+    }
+
+    /// <summary>
+    /// A plan that is under the hook's own checkout keeps it: the worktree lookup may never move a prompt away from
+    /// the repository the dispatch was evaluated in.
+    /// </summary>
+    [Fact]
+    public void ADispatchForAPlanTheHookCheckoutHolds_BuildsThePromptAgainstTheHookCheckout()
+    {
+        ScriptedPrompts prompts = new();
+
+        _ = Run(
+            Host(new RecordingEngine(), DisabledConfig(), prompts, new FixedPlanRoots("/repo")),
+            "copilot-cli",
+            Payload("copilot-cli", TaskDispatch));
+
+        Assert.Equal("/repo", Assert.Single(prompts.Requests).RepoRoot);
     }
 
     [Fact]
@@ -768,5 +840,36 @@ public sealed class DispatchPromptInsertionTests
         public KyberWeaveConfig? LoadProject(string repoRoot) => config;
 
         public string ResolveHomeDirectory(string? homeDirectory) => homeDirectory ?? "/home/test";
+    }
+
+    /// <summary>A plan root resolver that answers one root, standing for the worktree a plan was found in.</summary>
+    private sealed class FixedPlanRoots(string root) : IPlanRootResolver
+    {
+        public string Resolve(string hookRoot, string prompt, Func<string, IReadOnlyList<string>>? listWorktrees = null) => root;
+
+        public string ResolvePlanRoot(
+            string hookRoot,
+            string? planFile,
+            string? text,
+            Func<string, IReadOnlyList<string>>? listWorktrees = null) => root;
+    }
+
+    /// <summary>A plan root resolver that keeps the hook's own root and records what it was asked.</summary>
+    private sealed class RecordingPlanRoots : IPlanRootResolver
+    {
+        public List<(string HookRoot, string? PlanFile, string? Text)> Calls { get; } = [];
+
+        public string Resolve(string hookRoot, string prompt, Func<string, IReadOnlyList<string>>? listWorktrees = null) =>
+            hookRoot;
+
+        public string ResolvePlanRoot(
+            string hookRoot,
+            string? planFile,
+            string? text,
+            Func<string, IReadOnlyList<string>>? listWorktrees = null)
+        {
+            Calls.Add((hookRoot, planFile, text));
+            return hookRoot;
+        }
     }
 }
