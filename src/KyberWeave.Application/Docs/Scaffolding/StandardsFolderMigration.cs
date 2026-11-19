@@ -209,13 +209,11 @@ public sealed partial class StandardsFolderMigration
 
         // Every target the run would write is checked before the first write, so a refusal — a
         // link, a path outside the repository — leaves no standards moved and no stale registry
-        // block behind.
-        if (!dryRun)
+        // block behind. A dry run checks the same targets: it writes nothing, and previewing a
+        // plan the real run would refuse is a false answer.
+        foreach (FolderWork item in work)
         {
-            foreach (FolderWork item in work)
-            {
-                RequireWritableTargets(item.Planned, item.ReshapedText);
-            }
+            RequireWritableTargets(item.Planned, item.ReshapedText);
         }
 
         foreach (FolderWork item in work)
