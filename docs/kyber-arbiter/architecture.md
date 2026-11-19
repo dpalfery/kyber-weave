@@ -1180,7 +1180,7 @@ The degradation records these outcomes produce are listed once, in the
 | Codex | 2 | Owned block in the shared `.codex/hooks.json` (`PreToolUse`/`PostToolUse` matcher groups) | `spawn_agent` (also matched as `Agent`, under any namespace prefix) | Header inference from the marker | `tool_input.agent_type`, `tool_input.message`; returns pair by `tool_use_id` | Unsupported (unverified): no `spawn_agent` model parameter is documented [CX-HOOK], [CX-SUB] |
 | Cursor | 2 | Owned entries in the shared `.cursor/hooks.json` (`preToolUse`/`postToolUse`, `failClosed: true`) | `Task` | Header inference from the marker | `tool_input.prompt`; `tool_input.subagent_type` is undocumented, so when absent the rules answer `undecidable`. Returns pair by `tool_use_id` | Unsupported (unverified): whether `updated_input` applies to `Task` is undocumented [CU-SUB], [CU-HOOK] |
 | Kilo | 3 | The `.kilo/plugin/kyber-arbiter.ts` shim speaking the plugin envelope | `task` | Header inference from the marker | `args.subagent_type`, `args.prompt`; returns pair by `callID` | Unsupported (unverified): the task tool documents no model [KI-SUB] |
-| Antigravity | 3 | An owned top-level group `kyber-arbiter` in `.agents/hooks.json`, matching `^invoke_subagent$` | `invoke_subagent`; each element of `Subagents` is one dispatch | Header inference from the marker | `TypeName`, `Prompt`. Deny writes `{decision: "deny", reason}`; pass-through writes `{}`, since an explicit allow would bypass the user's approval prompts. An inserted prompt writes `{decision: "ask", overwrite: {Subagents: [...]}}` | Unsupported: `invoke_subagent` has no model field; tier is per custom subagent [AG-SUB], [AG-HOOK] |
+| Antigravity | 3 | An owned top-level group `kyber-arbiter` in `.agents/hooks.json`, matching `^invoke_subagent$` | `invoke_subagent`; each element of `Subagents` is one dispatch | Header inference from the marker | `TypeName`, `Prompt`, as one flat `args` object (the shape a real agy call sends) or as the `Subagents` list; see [the Antigravity payload](#the-antigravity-payload-and-caller-rule). Deny writes `{decision: "deny", reason}`; every other answer on a pre-tool event writes `{decision: "allow"}`, never `{}`, which agy reports as a denial with an empty reason. An inserted prompt writes `{decision: "ask", overwrite: {...}}` | Unsupported: `invoke_subagent` has no model field; tier is per custom subagent [AG-SUB], [AG-HOOK] |
 | Factory | 3 | An owned block in `.factory/hooks.json`, matcher groups at the top level with no `hooks` wrapper, plus a `SubagentStop` group with no matcher (Factory runs `Task` in the background, so the worker report arrives at stop, not at `PostToolUse`), unless shadowed (below) | `Task` | Header inference from the marker | `tool_input.subagent_type`, `tool_input.prompt`; returns pair by `pair-digest` | Unsupported: the docs say the caller cannot choose a model for a single call [FA-DROID], [FA-HOOK] |
 | Devin | 3 | An owned block in `.devin/hooks.v1.json` (the Claude Code format), matching `^run_subagent$` | `run_subagent` | Header inference from the marker | `tool_input.profile`, `tool_input.prompt`; returns pair by `pair-digest` | Unsupported (unverified): the `run_subagent` schema documents no model [DV-HOOK], [DV-LOG] |
 | Warp, ZCode | 3 | No hooks: the MCP fallback | — | Asserted by the caller in `arbiter_evaluate_agent_dispatch_or_return` | — | Not applicable: no hooks |
@@ -1253,7 +1253,7 @@ neither path.
 | Codex | rewrite | `hookSpecificOutput.updatedInput.message`, valid only with `allow` | Shipped header strip | A hook the user has not trusted is skipped; the worker runs `docs packet` | [CX-HOOK] |
 | Cursor | rewrite | `updated_input.prompt`, riding on `allow` only | Shipped header strip; `updated_input` on `Task` is documented only loosely, so a field the harness drops falls back to the file | A `failClosed` hook that does not run leaves the worker with the header lines; it runs `docs packet` | [CU-HOOK] |
 | Kilo | rewrite | `args` in the plugin envelope | Shipped header strip | The plugin shim absent leaves the worker with the header lines; it runs `docs packet` | [KI-SUB] |
-| Antigravity | rewrite | `overwrite` replaces `toolCall.args` by a **shallow top-level merge**, so the insertion resends the whole `Subagents` array, every element kept and only its `Prompt` replaced. `decision` is required; the hook returns `decision: "ask"` so the user's approval prompt still applies, and never `auto_approve` | The adapter inserts the prompt; the live check that the harness applies the merge has not run, because it is not installed in this worktree. It must show the worker received the replaced `Prompt` and the dispatcher's transcript did not | A project or global `hooks.json` that is absent or disabled means no hook; the worker runs `docs packet` | [AG-HOOK] |
+| Antigravity | rewrite | `overwrite` replaces `toolCall.args` by a **shallow top-level merge**, so the insertion resends `Prompt` for the flat shape, or the whole `Subagents` array, every element kept and only its `Prompt` replaced, for the list shape. `decision` is required; the hook returns `decision: "ask"` so the user's approval prompt still applies, and never `auto_approve` | The adapter inserts the prompt; the live check that the harness applies the merge has not run, because it is not installed in this worktree. It must show the worker received the replaced `Prompt` and the dispatcher's transcript did not | A project or global `hooks.json` that is absent or disabled means no hook; the worker runs `docs packet` | [AG-HOOK] |
 | Factory | rewrite | `hookSpecificOutput.updatedInput.prompt`, with every `tool_input` field copied | Shipped header strip | A missing or disabled hook file leaves the worker with the header lines; it runs `docs packet` | [FA-HOOK] |
 | Devin | rewrite | `hookSpecificOutput.updatedInput.prompt`, merged into the tool call | Shipped header strip | A missing hook file leaves the worker with the header lines; it runs `docs packet` | [DV-HOOK] |
 | ZCode | file until the check passes | `hookSpecificOutput.updatedInput` is a full replacement of the tool input, re-validated against the tool schema | Not yet: project hooks are ignored by the harness and no Kyber-Weave hook is rendered; a user-scope hook also needs `hooks.enabled: true`. The check must show the worker received the replaced prompt and the dispatcher's transcript did not | The hook is absent or disabled: the worker runs `docs packet` | [ZC-HOOK], read 2026-11-16 |
@@ -1381,8 +1381,8 @@ A read looks only at the newest 8 MiB of the ledger and of the decision log; the
 
 Caller inference from a planner target is one of those gates, and it applies only to a
 marked dispatch or on a trusted harness (`claude`, `copilot-vscode`). So an unmarked
-dispatch to a planner is evaluated on `factory` and `antigravity` with no caller, never as the
-conductor's, and `KW-ARB-AUDIT-002` reports it. An unmarked dispatch that carries `PLAN_FILE:` or `TASK:`, or any header that
+dispatch to a planner is evaluated on `factory` with no caller, never as the
+conductor's (Antigravity passes an unmarked dispatch through untouched), and `KW-ARB-AUDIT-002` reports it. An unmarked dispatch that carries `PLAN_FILE:` or `TASK:`, or any header that
 was rejected, still infers the conductor and stays gated. The cost is that a conductor which drops its marker goes
 ungated on those harnesses. That is the accepted risk the Arbiter design records, and the
 audit rule is how it is seen.
@@ -1439,8 +1439,8 @@ Per-harness notes:
   parameterizes the default export by harness token (`ArbiterPluginShim.Render`) and
   keeps the named `KyberArbiter` export alongside it. A named-only render fails OpenCode
   v2's loader with `SchemaError` and the plugin silently never loads.
-- **Antigravity** can dispatch several subagents in one call (`toolCall.args.Subagents`,
-  each element with its own target and prompt); the call is denied when any element
+- **Antigravity** sends one dispatch as a flat `toolCall.args` object (`TypeName`, `Prompt`, `Role`) and
+  documents a `Subagents` list for several; the call is denied when any marked element
   escalates. It documents no input-rewrite field for `hooks.json`, so routing headers are
   not stripped — only documented fields are written. Because `PostToolUse` output is `{}`,
   the adapter declares returns unobservable (`harness.observes-returns` is false):
@@ -1475,6 +1475,36 @@ post-dispatch finding is surfaced as context rather than enforced. Pre-dispatch 
 still block. On Antigravity and Devin, post-dispatch outcomes are not delivered at all —
 they are recorded and reported by `audit`. No trust gate is documented for any Phase 3
 harness.
+
+### The Antigravity payload and caller rule
+
+The shape below is from two real Antigravity CLI (`agy`) `PreToolUse` payloads captured on 2026-11-18, not from the
+task packet the first adapter was built on. The fixtures in `tests/KyberWeave.Application.Tests/Fixtures/arbiter-hooks/antigravity/`
+carry both, and their README gives the provenance.
+
+- **Event name.** `hookEventName` (camelCase). The adapter also accepts `hook_event_name`, which the older fixtures use.
+- **Dispatch arguments.** `toolCall.args` is one flat object `{TypeName, Prompt, Role}`. The adapter still accepts the
+  `Subagents` list that [AG-HOOK] documents, where each element is one dispatch.
+- **Extra fields.** `cwd`, `artifactDirectoryPath`, `lastUserInput`, `transcriptPath`, `modelName`, and `toolCall.id`,
+  which is the call id used to pair a post event with its pre event (the older `<conversationId>:<stepIdx>` is the fallback).
+- **No caller.** Nothing in the payload names the agent that made the call, so the standard Antigravity agent's dispatch
+  and the conductor's look the same apart from the prompt.
+
+**Caller rule.** The hook acts only when the conductor or another Kyber Weave agent is working. Every Squad dispatch
+starts with the `KYBER-ARBITER: true` marker header, so on Antigravity a dispatch whose prompt does not start with that
+header comes from the standard agent and passes through untouched: an explicit allow, nothing recorded, no run-start or
+roster rule applied, no log line. A marked dispatch is judged as on every other harness. With a `Subagents` list only
+the marked elements are judged. A non-dispatch tool passes through the same way.
+
+**Allow shape.** [AG-HOOK] gives `decision` as the one required field of a `PreToolUse` answer, and defines
+`"allow"` as proceeding "delegating to the next hook or default policy"; only `auto_approve` skips the user's approval
+prompt. An empty `{}` carries no decision, and agy turned it into "tool call denied by pre-tool hook:" with an empty
+reason when the first adapter failed and wrote `{}` (seen in the agy log on the same day). So every pass-through,
+disabled-Arbiter, deferred-to-project and fail-open answer on a pre-tool event writes `{"decision":"allow"}`. The allow
+shape is taken from that documentation; it has not been run against a live agy.
+
+**Post event.** `PostToolUse` has no `decision` field: [AG-HOOK] documents its output as `{}`, and the adapter writes `{}`.
+It never blocks, records the return of a marked dispatch only, and treats an unparseable post event as an allow.
 
 ### Verified global-hook matrix
 
