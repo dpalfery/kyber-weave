@@ -11,7 +11,7 @@ namespace KyberWeave.Tests.Corpus;
 /// </remarks>
 public sealed class CheckoutCorpusSource : ICorpusSource
 {
-    private readonly IWritableFileSystem _files;
+    private readonly IFileSystem _files;
 
     /// <summary>Gets the corpus of the checkout this test process runs from.</summary>
     public static ICorpusSource Checkout { get; } = new CheckoutCorpusSource(KyberWeaveTestPaths.ToolRoot, new PhysicalFileSystem());
@@ -19,7 +19,7 @@ public sealed class CheckoutCorpusSource : ICorpusSource
     /// <summary>Creates a corpus over one checkout.</summary>
     /// <param name="root">The repository root's absolute path.</param>
     /// <param name="files">The file system to read it through.</param>
-    public CheckoutCorpusSource(string root, IWritableFileSystem files)
+    public CheckoutCorpusSource(string root, IFileSystem files)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         Root = Path.GetFullPath(root);
