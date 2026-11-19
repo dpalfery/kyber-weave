@@ -12,8 +12,18 @@ namespace KyberWeave.Tests;
 /// no real <c>kyber-weave-mcp</c>. The stubs live in a temp directory and are removed with it.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Test names use <c>McpHandshake</c> and <c>McpRoot</c> where the plan writes <c>mcp.handshake</c> and
 /// <c>mcp.root</c>: a dot is not legal in a C# method name. The check ids asserted are the dotted ones.
+/// </para>
+/// <para>
+/// The CodeGraph never-initialised cases — <c>FolderNeverInitialised_IsSetUpWithInit</c>,
+/// <c>Ensure_FolderNeverInitialised_PrintsInitAsTheFix</c> and
+/// <c>Provision_UnrelatedNotInitializedMessage_DoesNotRunInit</c> — have an in-memory twin in
+/// <c>KyberWeave.Application.Tests/Doctor/CodeGraphNeverInitialisedDoctorTests.cs</c>. Both copies stay: the
+/// twin proves the decision with no disk and no child, and this class proves the production container's
+/// wiring over the real disk and a shell-stub server.
+/// </para>
 /// </remarks>
 public sealed class McpLiveProbeTests : IDisposable
 {
