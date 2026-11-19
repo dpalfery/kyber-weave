@@ -514,7 +514,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             }
 
             string note = string.IsNullOrWhiteSpace(outcome.Reason) ? AutonomousPlanNudge.Note : outcome.Reason + "\n\n" + AutonomousPlanNudge.Note;
-            return new HookOutcome(HookOutcomeKind.PostAnnotation, note);
+            return outcome with { Kind = HookOutcomeKind.PostAnnotation, Reason = note };
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
