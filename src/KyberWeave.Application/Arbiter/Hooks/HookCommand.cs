@@ -130,7 +130,7 @@ public sealed class HookCommand : IArbiterHookHost
 
             string home = _hostConfig.ResolveHomeDirectory(homeDirectory);
             HookEvent hookEvent = HarnessHookEventReader.Read(adapter.HarnessToken, payload, caller);
-            HookRunContext? runContext = ResolveRunContext(hookEvent, home);
+            HookRunContext? runContext = ResolveRunContext(hookEvent, home, log);
             string repoRoot = runContext?.RepositoryRoot ?? FallbackRoot(hookEvent);
             KyberWeaveConfig config;
             HookScope evaluationScope = scope;
@@ -263,7 +263,7 @@ public sealed class HookCommand : IArbiterHookHost
     /// Resolves the invocation's run context once. A resolver that cannot answer, or one that is not installed, leaves
     /// the host reading the payload's own directory, which is the behaviour of a harness with no run record.
     /// </summary>
-    private HookRunContext? ResolveRunContext(HookEvent hookEvent, string home)
+    private HookRunContext? ResolveRunContext(HookEvent hookEvent, string home, TextWriter log)
     {
         if (_runContexts is null)
         {
@@ -281,8 +281,11 @@ public sealed class HookCommand : IArbiterHookHost
                 hookEvent.Prompt,
                 home));
         }
-        catch (Exception ex) when (FileFailure.Is(ex))
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
+            log.WriteLine(
+                $"{FailClosedCode}: the run context could not be resolved ({OneLine(ex.Message)}); " +
+                $"reading paths from '{FallbackRoot(hookEvent)}'.");
             return null;
         }
     }

@@ -112,7 +112,8 @@ internal static class ArbiterTestServices
         Func<string, KyberWeaveConfig> configLoader,
         Func<string>? newDecisionId = null,
         IIdGenerator? ids = null,
-        ITaskPromptServiceFactory? prompts = null) =>
+        ITaskPromptServiceFactory? prompts = null,
+        IHookRunContextResolver? runContexts = null) =>
         new(
             registry,
             new DelegateHostConfig(configLoader, Get<IArbiterHostConfig>()),
@@ -122,7 +123,7 @@ internal static class ArbiterTestServices
             ids ?? Get<IIdGenerator>(),
             newDecisionId,
             prompts,
-            Get<IHookRunContextResolver>());
+            runContexts ?? Get<IHookRunContextResolver>());
 
     /// <summary>The git facts over the real adapters.</summary>
     internal static HookGitFacts HookGitFacts(string workingDirectory, string? homeDirectory = null, string? arbiterDirectory = null) =>

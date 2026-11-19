@@ -77,9 +77,14 @@ public sealed class HookRunContextResolver(
             notes);
     }
 
-    /// <summary>The repository anchor: the first candidate git names a common directory for.</summary>
+    /// <summary>
+    /// The repository anchor: the first candidate git names a common directory for. When git names none, the first
+    /// candidate still stands — the payload's own directory — because configuration and the ledger are read there and a
+    /// repository git cannot see must not move them to the hook process's directory.
+    /// </summary>
     private (string Root, string? Common) Anchor(HookRunContextRequest request, List<string> notes)
     {
+        string? first = null;
         foreach ((string? candidate, string name) in new[]
                  {
                      (request.WorkspaceRoot, "the payload's workspace root"),
@@ -98,17 +103,27 @@ public sealed class HookRunContextResolver(
                 continue;
             }
 
-            string? common = CommonDirectoryOf(full);
-            if (common is not null)
+            first ??= full;
+            if (!DirectoryExists(full))
             {
-                return (full, common);
+                notes.Add($"{name} '{full}' is not a directory on disk.");
+                continue;
             }
 
-            notes.Add($"{name} '{full}' names no repository.");
+            // The event's own directory is the anchor even when git names no repository there: configuration and the
+            // ledger belong to the workspace the event was sent from, never to whichever later candidate happens to
+            // sit inside some other repository.
+            string? common = CommonDirectoryOf(full);
+            if (common is null)
+            {
+                notes.Add($"{name} '{full}' names no repository; paths are read from it and the rules decide on the absence.");
+            }
+
+            return (full, common);
         }
 
-        string fallback = FullPathOrRaw(request.ProcessDirectory ?? environment.CurrentDirectory);
-        notes.Add($"no candidate names a repository; reading paths from '{fallback}' and letting the rules decide on the absence.");
+        string fallback = first ?? FullPathOrRaw(environment.CurrentDirectory);
+        notes.Add($"no candidate is a directory on disk; reading paths from '{fallback}' and letting the rules decide on the absence.");
         return (fallback, null);
     }
 

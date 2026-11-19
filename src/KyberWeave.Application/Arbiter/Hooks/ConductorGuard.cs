@@ -229,9 +229,12 @@ public sealed class ConductorGuard(
             return null;
         }
 
-        bool? started = (context?.CommonDirectory ?? cwd) is { } repository
-            ? RunStarted(repository, home)
-            : null;
+        // A context that resolved no common directory means git could not name the repository. That is evidence the
+        // guard could not read, so it allows and logs; it never falls back to the directory as if it were a repository.
+        string? repository = context is null
+            ? (cwd is null ? null : git.GetCommonDirectory(cwd))
+            : context.CommonDirectory;
+        bool? started = repository is null ? null : RunStarted(repository, home);
         if (started is null)
         {
             TryLog(log, $"conductor guard could not read whether a run was started for '{cwd}'; the dispatch to {target} continues.");
@@ -245,15 +248,14 @@ public sealed class ConductorGuard(
     }
 
     /// <summary>Whether a run is live for the repository; null when git cannot name it or the records cannot be read.</summary>
-    private bool? RunStarted(string repositoryOrDirectory, string home)
+    private bool? RunStarted(string repository, string home)
     {
-        if (string.IsNullOrWhiteSpace(repositoryOrDirectory) || string.IsNullOrWhiteSpace(home))
+        if (string.IsNullOrWhiteSpace(repository) || string.IsNullOrWhiteSpace(home))
         {
             return null;
         }
 
-        string? repository = runContexts is null ? git.GetCommonDirectory(repositoryOrDirectory) : repositoryOrDirectory;
-        return repository is null ? null : runStates.HasLiveRun(home, repository);
+        return runStates.HasLiveRun(home, repository);
     }
 
     private string ResolveCopilotHome() =>
