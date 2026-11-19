@@ -144,8 +144,14 @@ public sealed class InMemoryCorpusSource : ICorpusSource
         if (!_links.TryGetValue(path, out string? target))
             return null;
 
-        for (int hop = 0; hop < 32 && _links.TryGetValue(target, out string? next); hop++)
+        // Follow every hop, as the adapter's final-target resolution does, and treat a cycle as
+        // unresolvable rather than looping or stopping at an arbitrary length.
+        HashSet<string> visited = new(_names) { path };
+        while (_links.TryGetValue(target, out string? next))
         {
+            if (!visited.Add(target))
+                return null;
+
             target = next;
         }
 
