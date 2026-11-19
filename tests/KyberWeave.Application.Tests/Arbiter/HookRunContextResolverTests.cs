@@ -18,6 +18,7 @@ public sealed class HookRunContextResolverTests
     private readonly FakeGitRepositoryFacts _git = new();
     private readonly FakeProcessEnvironment _environment;
     private readonly FakeRunStateStore _runs = new();
+    private readonly FakeCheckedOutBranchReader _branches = new();
     private readonly FakePathResolver _paths;
     private readonly PlanRootResolver _planRoots;
     private readonly HookRunContextResolver _resolver;
@@ -48,7 +49,8 @@ public sealed class HookRunContextResolverTests
             _files,
             _paths,
             _environment,
-            _runs);
+            _runs,
+            _branches);
     }
 
     [Fact]
@@ -72,6 +74,7 @@ public sealed class HookRunContextResolverTests
     public void TheLiveRunRecordChoosesTheWorktreeWhenTheDispatchNamesNoPlan()
     {
         _runs.Records = [new RunRecord(_git.CommonDirectory!, "opencode/fix/run", _runWorktree, DateTimeOffset.UtcNow)];
+        _branches.Branches[_runWorktree] = "opencode/fix/run";
 
         HookRunContext context = Resolve("TASK: T1");
 
@@ -81,9 +84,40 @@ public sealed class HookRunContextResolverTests
     }
 
     [Fact]
+    public void ARunRecordWhoseWorktreeHasAnotherBranchCheckedOutIsNotUsed()
+    {
+        _runs.Records = [new RunRecord(_git.CommonDirectory!, "opencode/fix/run", _runWorktree, DateTimeOffset.UtcNow)];
+        _branches.Branches[_runWorktree] = "opencode/other/run";
+
+        HookRunContext context = Resolve("TASK: T1");
+
+        Assert.Null(context.ActiveRun);
+        Assert.Equal(_main, context.Worktree);
+        Assert.Contains(context.Notes, note => note.Contains("branch", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void OnlyTheNewestRunRecordWhoseBranchIsStillCheckedOutIsUsed()
+    {
+        _runs.Records =
+        [
+            new RunRecord(_git.CommonDirectory!, "opencode/old/run", _runWorktree, DateTimeOffset.UtcNow.AddHours(-2)),
+            new RunRecord(_git.CommonDirectory!, "opencode/new/run", _otherWorktree, DateTimeOffset.UtcNow),
+        ];
+        _branches.Branches[_runWorktree] = "opencode/old/run";
+        _branches.Branches[_otherWorktree] = "opencode/new/run";
+
+        HookRunContext context = Resolve("TASK: T1");
+
+        Assert.Equal(_otherWorktree, context.Worktree);
+        Assert.Equal("opencode/new/run", context.ActiveRun?.Branch);
+    }
+
+    [Fact]
     public void AWorktreeTheEventNamesWinsOverTheActiveRun()
     {
         _runs.Records = [new RunRecord(_git.CommonDirectory!, "opencode/fix/run", _runWorktree, DateTimeOffset.UtcNow)];
+        _branches.Branches[_runWorktree] = "opencode/fix/run";
 
         HookRunContext context = _resolver.Resolve(Request("TASK: T1", agentWorktree: _otherWorktree));
 

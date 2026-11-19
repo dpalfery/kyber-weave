@@ -72,7 +72,8 @@ public static class ArbiterApplicationServiceCollectionExtensions
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>(),
-            sp.GetRequiredService<IRunStateStore>()));
+            sp.GetRequiredService<IRunStateStore>(),
+            sp.GetRequiredService<ICheckedOutBranchReader>()));
         services.TryAddSingleton<IArbiterPlanService, ArbiterPlanService>();
         services.TryAddSingleton<IArbiterTuneService, ArbiterTuneService>();
         services.TryAddSingleton<IArbiterAuditService, ArbiterAuditService>();

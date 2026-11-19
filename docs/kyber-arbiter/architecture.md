@@ -275,7 +275,8 @@ One service now answers those questions once per hook invocation.
   1. **The worktree the event names** — a path in the dispatch prompt, packet or agent cwd that is a
      worktree of this repository and holds the dispatch's plan.
   2. **The active run** — the live record `run start` wrote for this repository, when its worktree is
-     still a worktree of this repository.
+     still a worktree of this repository and still has the run's own branch checked out. A record
+     outlives its run, and a worktree can be reused for another branch, so both are checked.
   3. **The payload cwd**, then the process directory when the payload carries none.
 
   The repository anchor itself is the adapter's workspace root, else the payload cwd, else the

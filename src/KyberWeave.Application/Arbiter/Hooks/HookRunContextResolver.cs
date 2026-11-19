@@ -24,6 +24,7 @@ namespace KyberWeave.Arbiter.Hooks;
 /// <param name="paths">Compares path spellings and keeps a candidate inside the repository.</param>
 /// <param name="environment">The process directory a payload with no directory falls back to.</param>
 /// <param name="runStates">Reads the records <c>run start</c> wrote.</param>
+/// <param name="branches">Reads the branch a recorded worktree has checked out, which is what makes its run live.</param>
 public sealed class HookRunContextResolver(
     IGitRepositoryFacts git,
     IPlanFileResolver planPaths,
@@ -31,7 +32,8 @@ public sealed class HookRunContextResolver(
     IFileSystem files,
     IPathResolver paths,
     IProcessEnvironment environment,
-    IRunStateStore runStates) : IHookRunContextResolver
+    IRunStateStore runStates,
+    ICheckedOutBranchReader branches) : IHookRunContextResolver
 {
     /// <inheritdoc />
     public HookRunContext Resolve(HookRunContextRequest request)
@@ -221,6 +223,22 @@ public sealed class HookRunContextResolver(
                 continue;
             }
 
+            // A record says where a run started, not that its worktree still works there. The run is live only while
+            // the worktree has the run's branch checked out; a reused worktree, a finished run, or a branch git
+            // cannot read is not this run, and the next candidate is tried.
+            if (!DirectoryExists(record.Worktree))
+            {
+                notes.Add($"run record for branch '{record.Branch}' names worktree '{record.Worktree}', which is no longer on disk; it was not used.");
+                continue;
+            }
+
+            string? checkedOut = BranchOf(record.Worktree);
+            if (!string.Equals(checkedOut, record.Branch, StringComparison.Ordinal))
+            {
+                notes.Add($"run record for branch '{record.Branch}' names worktree '{record.Worktree}', where '{checkedOut ?? "<detached or unreadable>"}' is checked out; it is not this run and was not used.");
+                continue;
+            }
+
             if (newest is null || Later(record, newest))
             {
                 newest = record;
@@ -402,6 +420,19 @@ public sealed class HookRunContextResolver(
         try
         {
             return git.GetCommonDirectory(directory);
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The branch a worktree has checked out; null when git cannot name one, which no record matches.</summary>
+    private string? BranchOf(string worktree)
+    {
+        try
+        {
+            return branches.Read(worktree);
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
