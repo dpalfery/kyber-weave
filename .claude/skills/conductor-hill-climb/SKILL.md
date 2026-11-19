@@ -213,6 +213,12 @@ Climb branch: fix/conductor-hill-climb-<harness>   Best run: run-NN
 - **Autopilot.** The default `--max-autopilot-continues` of 5 can end a long run
   early. The scripts use 20. A run that ends with work left over may have hit this
   limit; it is a harness setting, not a conductor defect.
+- **Environment crashes.** A run that dies on a network fault (DNS or TLS errors reaching the
+  Copilot API, the same minute an opencode worker fails to reach its provider) is not a conductor
+  defect. Score it `crashed (environment)`, mine what it reached, and do not count it toward the
+  stop rule's two quiet runs.
+- **Spend by role.** `metrics.json` → `byAgent` sums AI units per agent role (the conductor is
+  `conductor`). Use it to see which role a fix should target.
 - **Autonomy.** The prompt starts with `autonomy: autonomous`, so the conductor
   approves its own gates and asks nothing. A question to the user in the transcript
   is a defect.

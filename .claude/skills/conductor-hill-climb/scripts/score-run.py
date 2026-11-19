@@ -37,6 +37,7 @@ tool_names = {}
 tool_calls = collections.Counter()
 tool_failures = collections.Counter()
 errors = []
+agent_names = {}
 final_answer = None
 result = None
 
@@ -57,6 +58,8 @@ for e in events:
         tool_calls[name] += 1
         if d.get("success") is False:
             tool_failures[name] += 1
+    elif t == "subagent.started" and e.get("agentId"):
+        agent_names[e["agentId"]] = d.get("agentName", "?")
     elif t == "session.error":
         errors.append(d.get("message"))
     elif t == "result":
@@ -83,11 +86,14 @@ for m in (checkpoint or {}).get("providerModelMetrics") or []:
     for k, v in ((m.get("metrics") or {}).get("usage") or {}).items():
         if isinstance(v, (int, float)):
             tokens[k] += v
-agents = {
-    name: {"aiUnits": round((a.get("totalNanoAiu") or 0) / 1e9, 2),
-           "apiMinutes": round((a.get("totalApiDurationMs") or 0) / 60000, 1)}
-    for name, a in (find_key(checkpoint or {}, "agentMetrics") or {}).items()
-}
+# Spend per agent role (conductor = "main"), summed over every dispatch of that role.
+agents = collections.defaultdict(lambda: {"dispatches": 0, "aiUnits": 0.0, "apiMinutes": 0.0})
+for agent_id, a in (find_key(checkpoint or {}, "agentMetrics") or {}).items():
+    row = agents["conductor" if agent_id == "main" else agent_names.get(agent_id, agent_id)]
+    row["dispatches"] += 1
+    row["aiUnits"] = round(row["aiUnits"] + (a.get("totalNanoAiu") or 0) / 1e9, 2)
+    row["apiMinutes"] = round(row["apiMinutes"] + (a.get("totalApiDurationMs") or 0) / 60000, 1)
+agents = dict(sorted(agents.items(), key=lambda kv: -kv[1]["aiUnits"]))
 
 exit_info = load("exit.json", {})
 print(json.dumps({
