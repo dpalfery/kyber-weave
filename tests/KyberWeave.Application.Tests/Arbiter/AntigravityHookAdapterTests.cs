@@ -25,6 +25,9 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class AntigravityHookAdapterTests : IDisposable
 {
+    // Antigravity needs a decision on every pre-tool answer; `{}` is reported as a denial with an empty reason.
+    private const string AllowDocument = "{\"decision\":\"allow\"}";
+
     private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
     public void Dispose() => _host.Dispose();
@@ -167,23 +170,22 @@ public sealed class AntigravityHookAdapterTests : IDisposable
         Assert.Equal("dev-medium", engine.SeenPre[0].Target);
         Assert.StartsWith("KYBER-ARBITER: true", engine.SeenPre[0].Prompt, StringComparison.Ordinal);
         Assert.Equal("docs-dev", engine.SeenPre[1].Target);
-        Assert.Equal("Document the adapter.", engine.SeenPre[1].Prompt);
+        Assert.EndsWith("Document the adapter.", engine.SeenPre[1].Prompt, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void PreInvoke_EmptyPromptAndTypeName_AllowsAndLogs()
+    public void PreInvoke_EmptyTypeName_AllowsAndLogs()
     {
         ContextualEngine engine = new();
         JsonObject root = JsonNode.Parse(Payload("PreToolUse", "invoke_subagent", _host.RepoRoot))!.AsObject();
         JsonObject subagent = root["toolCall"]!["args"]!["Subagents"]![0]!.AsObject();
-        subagent["Prompt"] = string.Empty;
         subagent["TypeName"] = string.Empty;
 
         (int exit, string stdout, string log) = Run(root.ToJsonString(), null, engine);
 
         // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
-        Assert.Equal("{}", stdout);
+        Assert.Equal(AllowDocument, stdout);
         Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
         Assert.Empty(engine.SeenPre);
     }
@@ -200,32 +202,31 @@ public sealed class AntigravityHookAdapterTests : IDisposable
 
         // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
-        Assert.Equal("{}", stdout);
+        Assert.Equal(AllowDocument, stdout);
         Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
         Assert.Empty(engine.SeenPre);
     }
 
     [Fact]
-    public void PreInvoke_AllAllow_WritesEmptyObjectNeverAllow()
+    public void PreInvoke_AllAllow_WritesTheExplicitAllow()
     {
         (int exit, string stdout, _) = Run(Fixture("pre-invoke-subagent-multi.json"), null, new ScriptedEngine());
 
         Assert.Equal(0, exit);
-        Assert.Equal("{}", stdout);
-        Assert.DoesNotContain("allow", stdout, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(AllowDocument, stdout);
+        Assert.DoesNotContain("overwrite", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
     public void DisabledArbiter_AnswersTheDocumentedAllowDocument_NotEmptyOutput()
     {
-        // The adapter documents {} as the plain allow shape: with the Arbiter disabled
-        // the host still writes it instead of empty output, which Antigravity does not
-        // document as an allow (review 20.1, item d).
+        // With the Arbiter disabled the host still writes the explicit allow: empty output
+        // and {} carry no decision, which Antigravity reports as a denial.
         (int exit, string stdout, string log) =
             Run(Fixture("pre-invoke-subagent.json"), null, new ScriptedEngine(), _ => DisabledConfig());
 
         Assert.Equal(0, exit);
-        Assert.Equal("{}", stdout);
+        Assert.Equal(AllowDocument, stdout);
         Assert.Contains("disabled", log, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -243,14 +244,14 @@ public sealed class AntigravityHookAdapterTests : IDisposable
     }
 
     [Fact]
-    public void PreInvoke_NonDispatchTool_WritesEmptyObjectWithoutEvaluating()
+    public void PreInvoke_NonDispatchTool_WritesTheExplicitAllowWithoutEvaluating()
     {
         ContextualEngine engine = new();
 
         (int exit, string stdout, _) = Run(Fixture("pre-non-dispatch.json"), null, engine);
 
         Assert.Equal(0, exit);
-        Assert.Equal("{}", stdout);
+        Assert.Equal(AllowDocument, stdout);
         Assert.Empty(engine.SeenPre);
     }
 
@@ -269,7 +270,7 @@ public sealed class AntigravityHookAdapterTests : IDisposable
     }
 
     [Fact]
-    public void InternalError_AllowsWithTheEmptyDocumentAndLogs()
+    public void InternalError_AllowsWithTheExplicitAllowAndLogs()
     {
         ScriptedEngine engine = new() { ThrowOnPre = true };
 
@@ -277,7 +278,7 @@ public sealed class AntigravityHookAdapterTests : IDisposable
 
         // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
-        Assert.Equal("{}", stdout);
+        Assert.Equal(AllowDocument, stdout);
         Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
     }
 
@@ -294,7 +295,7 @@ public sealed class AntigravityHookAdapterTests : IDisposable
                     ["Subagents"] = new JsonArray(new JsonObject
                     {
                         ["TypeName"] = "dev-medium",
-                        ["Prompt"] = "Implement the change.",
+                        ["Prompt"] = "KYBER-ARBITER: true\n\nImplement the change.",
                     }),
                 },
             },
@@ -348,8 +349,8 @@ public sealed class AntigravityHookAdapterTests : IDisposable
 
         Assert.Equal(0, exit);
         Assert.Equal([workspace], roots);
-        // Even disabled, Antigravity receives its documented allow document ({}).
-        Assert.Equal("{}", stdout);
+        // Even disabled, Antigravity receives its explicit allow.
+        Assert.Equal(AllowDocument, stdout);
         Assert.Contains("Arbiter is disabled", log, StringComparison.Ordinal);
     }
 
@@ -420,7 +421,7 @@ public sealed class AntigravityHookAdapterTests : IDisposable
     }
 
     [Fact]
-    public void Hook_NonDispatchEvent_AnswersEmptyDocumentBeforeConfigLoad()
+    public void Hook_NonDispatchEvent_AnswersTheExplicitAllowBeforeConfigLoad()
     {
         int loads = 0;
 
@@ -429,7 +430,7 @@ public sealed class AntigravityHookAdapterTests : IDisposable
             root => { loads++; return EnabledConfig(); });
 
         Assert.Equal(0, exit);
-        Assert.Equal("{}", stdout);
+        Assert.Equal(AllowDocument, stdout);
         Assert.Equal(0, loads);
     }
 

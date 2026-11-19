@@ -113,12 +113,13 @@ public sealed class HookCommand : IArbiterHookHost
             return 1;
         }
 
+        JsonElement payload = default;
         try
         {
-            JsonElement payload = ParsePayload(stdin);
+            payload = ParsePayload(stdin);
             if (adapter.IsPassThrough(payload, caller))
             {
-                return 0;
+                return WriteDisabledAllow(adapter, payload, stdout);
             }
 
             string? unconfigured = adapter.AnswerWithoutConfig(payload, caller);
@@ -157,12 +158,12 @@ public sealed class HookCommand : IArbiterHookHost
                         log.WriteLine(
                             $"Arbiter global scope: deferred-to-project ({adapter.HarnessToken}: no per-dispatch probe; " +
                             $"the project's own {adapter.HarnessToken} hooks decide).");
-                        return WriteDisabledAllow(adapter, stdout);
+                        return WriteDisabledAllow(adapter, payload, stdout);
                     }
 
                     if (!TakeUserLevelDispatch(adapter, payload, repoRoot, home, log))
                     {
-                        return WriteDisabledAllow(adapter, stdout);
+                        return WriteDisabledAllow(adapter, payload, stdout);
                     }
 
                     log.WriteLine(EvaluatingUnderProjectLine);
@@ -196,7 +197,7 @@ public sealed class HookCommand : IArbiterHookHost
 
             if (scope == HookScope.Project && TryYieldToGlobalClaim(adapter, payload, repoRoot, log))
             {
-                return WriteDisabledAllow(adapter, stdout);
+                return WriteDisabledAllow(adapter, payload, stdout);
             }
 
             HookContext context = new(
@@ -224,7 +225,7 @@ public sealed class HookCommand : IArbiterHookHost
             log.WriteLine(
                 $"{FailClosedCode}: hook host failed ({_newDecisionId()}) on '{harness}': {OneLine(ex.Message)}. " +
                 "The dispatch continues without an Arbiter decision.");
-            return WriteDisabledAllow(adapter, stdout);
+            return WriteDisabledAllow(adapter, payload, stdout);
         }
     }
 
@@ -418,9 +419,9 @@ public sealed class HookCommand : IArbiterHookHost
         Unavailable,
     }
 
-    private static int WriteDisabledAllow(IHarnessHookAdapter adapter, TextWriter stdout)
+    private static int WriteDisabledAllow(IHarnessHookAdapter adapter, JsonElement payload, TextWriter stdout)
     {
-        string? disabledAllow = adapter.DisabledAllowDocument;
+        string? disabledAllow = adapter.AllowDocument(payload);
         if (disabledAllow is not null)
         {
             stdout.Write(disabledAllow);
@@ -521,7 +522,7 @@ public sealed class HookCommand : IArbiterHookHost
             return 0;
         }
 
-        return WriteDisabledAllow(adapter, stdout);
+        return WriteDisabledAllow(adapter, payload, stdout);
     }
 
     private static string OneLine(string message) =>

@@ -7,26 +7,29 @@ using KyberWeave.Core.Configuration;
 namespace KyberWeave.Arbiter.Hooks.Adapters;
 
 /// <summary>
-/// The Antigravity hook dialect ([F10] of the task packet): <c>PreToolUse</c> on
-/// <c>invoke_subagent</c> for dispatch gating, where each element of
-/// <c>toolCall.args.Subagents</c> is one dispatch (target <c>TypeName</c>, prompt
-/// <c>Prompt</c>), and <c>PostToolUse</c> on the same tool to record the return.
+/// The Antigravity hook dialect, as the real <c>agy</c> CLI sends it: <c>PreToolUse</c> on
+/// <c>invoke_subagent</c> for dispatch gating and <c>PostToolUse</c> on the same tool to record the return.
 /// </summary>
 /// <remarks>
-/// A call is denied when any of its dispatches escalates, and every dispatch is
-/// evaluated so each one is recorded. The harness's <c>overwrite</c> field replaces <c>toolCall.args</c> by a
-/// shallow top-level merge, so the inserted prompt resends the whole <c>Subagents</c> array with each element kept and
-/// only its <c>Prompt</c> replaced. <c>allow</c> is never written: it would auto-approve the call
-/// and bypass the user's approval prompts, so the insertion document carries <c>decision: ask</c>. The call id is
-/// <c>&lt;conversationId&gt;:&lt;stepIdx&gt;</c> and the repository root is
-/// <c>workspacePaths[0]</c>. The hook is project-wide with no caller identity, so the
-/// rendered <c>--caller</c> is honoured when present and the caller is otherwise
-/// unidentified.
+/// The event name is <c>hookEventName</c> (the older <c>hook_event_name</c> is still read). A dispatch is the flat
+/// <c>toolCall.args</c> object <c>{TypeName, Prompt, Role}</c>, or each element of a <c>toolCall.args.Subagents</c>
+/// list. The payload names no caller, so the owner's rule applies: a dispatch whose prompt does not start with the
+/// <c>KYBER-ARBITER: true</c> marker comes from the standard Antigravity agent and passes through untouched, with an
+/// explicit allow, nothing recorded and no rule applied. A marked dispatch is judged as on every harness. A call is
+/// denied when any marked dispatch escalates, and every marked dispatch is evaluated so each one is recorded.
 /// <para>
-/// Every event writes a document, including a non-dispatch one. <c>hooks.json</c>
-/// documents no proceed shape, so an empty stdout is not a documented allow, and the
-/// plain allow shape is <c>{}</c>. The rendered matcher limits events to
-/// <c>invoke_subagent</c>, so a non-dispatch event arrives only through misconfiguration.
+/// Antigravity requires a <c>decision</c> on every <c>PreToolUse</c> answer: an empty object is reported as
+/// "tool call denied by pre-tool hook" with an empty reason. So every allow on a pre-tool event writes
+/// <c>{"decision":"allow"}</c>, which the documentation defines as delegating to the next hook or the default policy
+/// and so keeps the user's approval prompts. A <c>PostToolUse</c> answer has no decision field and is <c>{}</c>.
+/// </para>
+/// <para>
+/// The harness's <c>overwrite</c> field replaces <c>toolCall.args</c> by a shallow top-level merge, so an inserted
+/// prompt resends <c>Prompt</c> for the flat shape, or the whole <c>Subagents</c> array with each element kept and
+/// only its <c>Prompt</c> replaced. The insertion document carries <c>decision: ask</c>, never <c>auto_approve</c>.
+/// The call id is <c>toolCall.id</c>, else <c>&lt;conversationId&gt;:&lt;stepIdx&gt;</c>, and the repository root is
+/// <c>workspacePaths[0]</c>. The rendered <c>--caller</c> is honoured when present and the caller is otherwise
+/// unidentified.
 /// </para>
 /// </remarks>
 public sealed class AntigravityHookAdapter : IHarnessHookAdapter
@@ -55,17 +58,27 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
     public bool ObservesReturns => false;
 
     /// <summary>
-    /// The empty object is Antigravity's only documented allow: even with the Arbiter
-    /// disabled the host writes it, because empty output is not a documented answer.
+    /// The explicit allow: even with the Arbiter disabled the host writes it, because empty output and
+    /// <c>{}</c> carry no decision and Antigravity reports them as a denial.
     /// </summary>
-    public string? DisabledAllowDocument => EmptyDocument();
+    public string? DisabledAllowDocument => RenderAllow();
 
     /// <inheritdoc/>
+    public string? AllowDocument(JsonElement payload) =>
+        string.Equals(EventNameOf(payload), "PostToolUse", StringComparison.Ordinal)
+            ? EmptyDocument()
+            : RenderAllow();
+
+    /// <summary>
+    /// A dispatch with no marked prompt is the standard Antigravity agent's: it passes through untouched. Anything
+    /// malformed is not decided here, so the host reports it and allows.
+    /// </summary>
     public bool IsPassThrough(JsonElement payload, string? renderedCaller)
     {
-        _ = payload;
         _ = renderedCaller;
-        return false;
+        return IsKnownEvent(EventNameOf(payload))
+            && IsDispatchTool(ToolNameOf(payload))
+            && !PromptsOf(payload).Any(IsMarked);
     }
 
     /// <inheritdoc/>
@@ -75,16 +88,14 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
     public string? AnswerWithoutConfig(JsonElement payload, string? renderedCaller)
     {
         _ = renderedCaller;
-        string? eventName = GetString(payload, "hook_event_name");
-        bool classified = string.Equals(eventName, "PreToolUse", StringComparison.Ordinal)
-            || string.Equals(eventName, "PostToolUse", StringComparison.Ordinal);
+        bool classified = IsKnownEvent(EventNameOf(payload));
 
         // A non-dispatch event is answered exactly as Handle answers it, only earlier:
         // the rendered matcher limits events to invoke_subagent, so anything else here
         // arrives through misconfiguration and must not force a configuration load.
         // Events outside the two known event names still take the classified path, so
         // an unknown name keeps failing closed.
-        return classified && !IsDispatchTool(ToolNameOf(payload)) ? EmptyDocument() : null;
+        return classified && !IsDispatchTool(ToolNameOf(payload)) ? AllowDocument(payload) : null;
     }
 
     /// <inheritdoc/>
@@ -93,7 +104,7 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
         ArgumentNullException.ThrowIfNull(context);
         _ = renderedCaller;
 
-        return string.Equals(GetString(payload, "hook_event_name"), "PreToolUse", StringComparison.Ordinal)
+        return string.Equals(EventNameOf(payload), "PreToolUse", StringComparison.Ordinal)
             && IsDispatchTool(ToolNameOf(payload))
                 ? InsertionDocument(payload, context)
                 : null;
@@ -111,7 +122,7 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
         ArgumentNullException.ThrowIfNull(context);
         _ = rawJson;
 
-        string? eventName = GetString(payload, "hook_event_name");
+        string? eventName = EventNameOf(payload);
         string? tool = ToolNameOf(payload);
         string caller = string.IsNullOrWhiteSpace(renderedCaller) ? "unidentified" : renderedCaller;
 
@@ -126,20 +137,20 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
         }
 
         throw new InvalidOperationException(
-            $"Malformed Antigravity hook event: unknown hook_event_name '{eventName ?? "<missing>"}'.");
+            $"Malformed Antigravity hook event: unknown hookEventName '{eventName ?? "<missing>"}'.");
     }
 
     private string HandlePre(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
     {
         if (!IsDispatchTool(tool))
         {
-            return EmptyDocument();
+            return RenderAllow();
         }
 
-        IReadOnlyList<Dispatch> dispatches = DispatchesOf(payload);
+        IReadOnlyList<Dispatch> dispatches = MarkedDispatchesOf(payload);
         if (dispatches.Count == 0)
         {
-            return EmptyDocument();
+            return RenderAllow();
         }
 
         string callId = CallIdOf(payload);
@@ -172,7 +183,7 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
 
         return denial is not null
             ? RenderDeny(denial)
-            : InsertionDocument(payload, context) ?? EmptyDocument();
+            : InsertionDocument(payload, context) ?? RenderAllow();
     }
 
     /// <summary>
@@ -188,9 +199,17 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
         if (!payload.TryGetProperty("toolCall", out JsonElement toolCall)
             || toolCall.ValueKind != JsonValueKind.Object
             || !toolCall.TryGetProperty("args", out JsonElement args)
-            || args.ValueKind != JsonValueKind.Object
-            || !args.TryGetProperty("Subagents", out JsonElement subagents)
-            || subagents.ValueKind != JsonValueKind.Array)
+            || args.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (!args.TryGetProperty("Subagents", out JsonElement subagents))
+        {
+            return FlatInsertion(args, context);
+        }
+
+        if (subagents.ValueKind != JsonValueKind.Array)
         {
             return null;
         }
@@ -202,17 +221,20 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
             JsonObject copy = JsonNode.Parse(subagent.GetRawText()) as JsonObject
                 ?? throw new InvalidOperationException(
                     "Malformed Antigravity hook event: a Subagents element is not an object.");
-            DispatchInsertion insertion = DispatchPromptInsertion.Expand(
-                GetString(subagent, "Prompt") ?? string.Empty, context);
-            if (insertion.Kind == DispatchInsertionKind.Stopped)
+            string prompt = GetString(subagent, "Prompt") ?? string.Empty;
+            if (IsMarked(prompt))
             {
-                return RenderDeny(insertion.Reason!);
-            }
+                DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+                if (insertion.Kind == DispatchInsertionKind.Stopped)
+                {
+                    return RenderDeny(insertion.Reason!);
+                }
 
-            if (insertion.Kind == DispatchInsertionKind.Inserted)
-            {
-                copy["Prompt"] = insertion.Text;
-                inserted = true;
+                if (insertion.Kind == DispatchInsertionKind.Inserted)
+                {
+                    copy["Prompt"] = insertion.Text;
+                    inserted = true;
+                }
             }
 
             rewritten.Add(copy);
@@ -227,6 +249,27 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
             : null;
     }
 
+    private static string? FlatInsertion(JsonElement args, HookContext context)
+    {
+        string prompt = GetString(args, "Prompt") ?? string.Empty;
+        if (!IsMarked(prompt))
+        {
+            return null;
+        }
+
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+        return insertion.Kind switch
+        {
+            DispatchInsertionKind.Stopped => RenderDeny(insertion.Reason!),
+            DispatchInsertionKind.Inserted => new JsonObject
+            {
+                ["decision"] = "ask",
+                ["overwrite"] = new JsonObject { ["Prompt"] = insertion.Text },
+            }.ToJsonString(),
+            _ => null,
+        };
+    }
+
     private string HandlePost(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
     {
         if (!IsDispatchTool(tool))
@@ -234,19 +277,32 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
             return EmptyDocument();
         }
 
-        IReadOnlyList<Dispatch> dispatches = DispatchesOf(payload);
+        HookContext scoped = context with { RepoRoot = WorkspaceOf(payload) ?? context.RepoRoot };
+
+        // A post event never blocks: one that cannot be read is logged and answered like any other.
+        IReadOnlyList<Dispatch> dispatches;
+        string callId;
+        try
+        {
+            dispatches = MarkedDispatchesOf(payload);
+            callId = CallIdOf(payload);
+        }
+        catch (InvalidOperationException ex)
+        {
+            scoped.Log.WriteLine($"{HookCommand.FailClosedCode}: {ex.Message} The return is not recorded.");
+            return EmptyDocument();
+        }
+
         if (dispatches.Count == 0)
         {
             return EmptyDocument();
         }
 
-        string callId = CallIdOf(payload);
         string? sessionId = GetString(payload, "conversationId");
-        HookContext scoped = context with { RepoRoot = WorkspaceOf(payload) ?? context.RepoRoot };
 
         // The return is recorded only: a post event has no way to deliver a note, so
         // any note the engine produces goes to the diagnostics sink.
-        string toolOutput = GetString(payload, "error") ?? string.Empty;
+        string toolOutput = GetString(payload, "error") ?? GetString(payload, "result") ?? string.Empty;
         foreach (Dispatch dispatch in dispatches)
         {
             HookOutcome outcome = DecidePost(caller, dispatch, callId, sessionId, toolOutput, config, scoped);
@@ -306,6 +362,9 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
         return _engine.DecidePostDispatch(caller, dispatch.Target, toolOutput, config);
     }
 
+    private static IReadOnlyList<Dispatch> MarkedDispatchesOf(JsonElement payload) =>
+        [.. DispatchesOf(payload).Where(dispatch => IsMarked(dispatch.Prompt))];
+
     private static IReadOnlyList<Dispatch> DispatchesOf(JsonElement payload)
     {
         if (!payload.TryGetProperty("toolCall", out JsonElement toolCall)
@@ -317,8 +376,12 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
                 "Malformed Antigravity hook event: the tool event carries no toolCall.args object.");
         }
 
-        if (!args.TryGetProperty("Subagents", out JsonElement subagents)
-            || subagents.ValueKind != JsonValueKind.Array)
+        if (!args.TryGetProperty("Subagents", out JsonElement subagents))
+        {
+            return [ReadDispatch(args)];
+        }
+
+        if (subagents.ValueKind != JsonValueKind.Array)
         {
             throw new InvalidOperationException(
                 "Malformed Antigravity hook event: invoke_subagent args carry no Subagents array.");
@@ -333,28 +396,83 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
                     "Malformed Antigravity hook event: a Subagents element is not an object.");
             }
 
-            string? prompt = GetString(subagent, "Prompt");
-            if (string.IsNullOrWhiteSpace(prompt))
-            {
-                throw new InvalidOperationException(
-                    "Malformed Antigravity hook event: a Subagents element carries no Prompt.");
-            }
-
-            string? target = GetString(subagent, "TypeName");
-            if (string.IsNullOrWhiteSpace(target))
-            {
-                throw new InvalidOperationException(
-                    "Malformed Antigravity hook event: a Subagents element carries no TypeName.");
-            }
-
-            dispatches.Add(new Dispatch(target, prompt));
+            dispatches.Add(ReadDispatch(subagent));
         }
 
         return dispatches;
     }
 
+    private static Dispatch ReadDispatch(JsonElement spec)
+    {
+        string? prompt = GetString(spec, "Prompt");
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            throw new InvalidOperationException(
+                "Malformed Antigravity hook event: a dispatch carries no Prompt.");
+        }
+
+        string? target = GetString(spec, "TypeName");
+        if (string.IsNullOrWhiteSpace(target))
+        {
+            throw new InvalidOperationException(
+                "Malformed Antigravity hook event: a dispatch carries no TypeName.");
+        }
+
+        return new Dispatch(target, prompt);
+    }
+
+    /// <summary>Every prompt the event carries, read leniently: anything unreadable is simply absent.</summary>
+    private static IEnumerable<string> PromptsOf(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("toolCall", out JsonElement toolCall)
+            || toolCall.ValueKind != JsonValueKind.Object
+            || !toolCall.TryGetProperty("args", out JsonElement args)
+            || args.ValueKind != JsonValueKind.Object)
+        {
+            yield break;
+        }
+
+        if (args.TryGetProperty("Subagents", out JsonElement subagents))
+        {
+            if (subagents.ValueKind != JsonValueKind.Array)
+            {
+                yield break;
+            }
+
+            foreach (JsonElement subagent in subagents.EnumerateArray())
+            {
+                if (GetString(subagent, "Prompt") is { } listed)
+                {
+                    yield return listed;
+                }
+            }
+
+            yield break;
+        }
+
+        if (GetString(args, "Prompt") is { } flat)
+        {
+            yield return flat;
+        }
+    }
+
+    private static bool IsMarked(string prompt) => HeaderBlock.Parse(prompt).IsMarked;
+
+    private static string? EventNameOf(JsonElement payload) =>
+        GetString(payload, "hookEventName") ?? GetString(payload, "hook_event_name");
+
+    private static bool IsKnownEvent(string? eventName) =>
+        string.Equals(eventName, "PreToolUse", StringComparison.Ordinal)
+        || string.Equals(eventName, "PostToolUse", StringComparison.Ordinal);
+
     private static string CallIdOf(JsonElement payload)
     {
+        if (payload.TryGetProperty("toolCall", out JsonElement call)
+            && GetString(call, "id") is { Length: > 0 } toolCallId)
+        {
+            return toolCallId;
+        }
+
         string conversation = GetString(payload, "conversationId")
             ?? throw new InvalidOperationException(
                 "Malformed Antigravity hook event: the tool event carries no conversationId.");
@@ -408,6 +526,9 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
             ["decision"] = "deny",
             ["reason"] = reason,
         }.ToJsonString();
+
+    private static string RenderAllow() =>
+        new JsonObject { ["decision"] = "allow" }.ToJsonString();
 
     private static string EmptyDocument() =>
         new JsonObject().ToJsonString();

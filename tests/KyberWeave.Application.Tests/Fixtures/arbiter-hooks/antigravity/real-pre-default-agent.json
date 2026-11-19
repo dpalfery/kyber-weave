@@ -1,0 +1,22 @@
+{
+  "artifactDirectoryPath": "/home/user/.gemini/antigravity-cli/brain/722a073f-0384-48c1-9a00-c436d5eb7390",
+  "conversationId": "722a073f-0384-48c1-9a00-c436d5eb7390",
+  "cwd": "/repo",
+  "hookEventName": "PreToolUse",
+  "lastUserInput": "Use invoke_subagent once to call the subagent research-agent with the prompt 'Reply with ok.' Then stop.",
+  "modelName": "gemini-3.8-flash-medium",
+  "stepIdx": 2,
+  "toolCall": {
+    "args": {
+      "Prompt": "Reply with ok.",
+      "Role": "Research Assistant",
+      "TypeName": "research-agent"
+    },
+    "id": "call_14233963241928255968",
+    "name": "invoke_subagent"
+  },
+  "transcriptPath": "/home/user/.gemini/antigravity-cli/brain/722a073f-0384-48c1-9a00-c436d5eb7390/.system_generated/logs/transcript_full.jsonl",
+  "workspacePaths": [
+    "/repo"
+  ]
+}

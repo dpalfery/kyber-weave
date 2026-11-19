@@ -80,9 +80,15 @@ public static class Composition
             try
             {
                 string stdinText = await stdin.ReadToEndAsync().ConfigureAwait(false);
-                if (commandFactory is null && HookFastPath.IsPassThrough(harness, caller, stdinText))
+                if (commandFactory is null && HookFastPath.TryPassThrough(harness, caller, stdinText, out string? allow))
                 {
-                    // Nothing to decide: no container, no configuration, no engine.
+                    // Nothing to decide: no container, no configuration, no engine. A harness that has no silent
+                    // allow (Antigravity) still gets its allow document.
+                    if (allow is not null)
+                    {
+                        await stdout.WriteAsync(allow).ConfigureAwait(false);
+                    }
+
                     return 0;
                 }
 

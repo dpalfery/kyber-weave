@@ -1,22 +1,26 @@
 # Antigravity hook fixtures
 
-Payloads for the task 16.3 hook-host contract tests
-(`AntigravityHookAdapterTests`).
+Payloads for the Antigravity hook-host contract tests
+(`AntigravityHookAdapterTests`, `AntigravityRealPayloadTests`).
 
 ## Provenance
 
-Built from **[F10] of the task packet** (`.arbiter-packet.md` in the repository
-root): the `invoke_subagent` dispatch tool with `toolCall.args.Subagents` holding
-`TypeName` and `Prompt` per dispatch, the `toolCall`, `stepIdx`,
-`conversationId` and `workspacePaths` fields, and the `{decision, reason}` and
-`{}` output shapes. The event name is carried as `hook_event_name`, which F10
-does not document; the fixtures follow the sibling dialects.
+| Files | Source |
+|---|---|
+| `real-pre-default-agent.json`, `real-pre-conductor-marked.json` | Captured from agy (the Antigravity CLI), 2026-11-18, from the installed hook. Only the project path (`/repo`) and the home path (`/home/user`) were replaced; the rest is verbatim. |
+| `pre-invoke-subagent.json`, `pre-invoke-subagent-multi.json`, `pre-non-dispatch.json`, `post-invoke-subagent.json` | Built from the task packet's Antigravity notes, not captured. They use the older `hook_event_name` and the `Subagents` list; the adapter still reads both. |
+
+What the real capture shows that the packet did not: the event name is `hookEventName`; `toolCall.args` is one
+flat `{TypeName, Prompt, Role}` object; the payload adds `cwd`, `artifactDirectoryPath`, `lastUserInput`,
+`transcriptPath`, `modelName` and `toolCall.id`; and nothing names the calling agent.
 
 ## Files
 
 | File | Covers |
 |---|---|
-| `pre-invoke-subagent.json` | Single-subagent `invoke_subagent` dispatch |
-| `pre-invoke-subagent-multi.json` | Two-subagent `invoke_subagent` dispatch |
+| `real-pre-default-agent.json` | The standard Antigravity agent dispatching `research-agent`, no `KYBER-ARBITER` header |
+| `real-pre-conductor-marked.json` | A dispatch carrying `KYBER-ARBITER: true` |
+| `pre-invoke-subagent.json` | Single-element `Subagents` dispatch |
+| `pre-invoke-subagent-multi.json` | Two-element `Subagents` dispatch, both marked |
 | `pre-non-dispatch.json` | Non-dispatch tool (`view_file`) |
 | `post-invoke-subagent.json` | `invoke_subagent` return event |
