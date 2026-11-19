@@ -547,6 +547,32 @@ public sealed class ReviewGatesService(
 
     private string FullPath(string path) => pathResolver.GetFullPath(path, environment.CurrentDirectory);
 
+    /// <summary>
+    ///     The content of every changed file, read before and after a <c>--fix</c> run to tell whether a fix command
+    ///     changed one. A missing file, and one this process cannot read, is recorded as null.
+    /// </summary>
+    /// <param name="root">The repository root the paths are relative to.</param>
+    /// <param name="paths">The changed files, repository-relative.</param>
+    /// <returns>Each path's content, keyed by the path as given.</returns>
+    private Dictionary<string, string?> Snapshot(string root, IReadOnlyList<string> paths)
+    {
+        Dictionary<string, string?> snapshot = new(StringComparer.Ordinal);
+        foreach (string path in paths)
+        {
+            try
+            {
+                string full = pathResolver.GetFullPath(path, root);
+                snapshot[path] = files.FileExists(full) ? files.ReadAllText(full) : null;
+            }
+            catch (Exception ex) when (FileFailure.Is(ex))
+            {
+                snapshot[path] = null;
+            }
+        }
+
+        return snapshot;
+    }
+
     private static string? BaseRef(string? baseRef) =>
         string.IsNullOrWhiteSpace(baseRef) ? null : baseRef.Trim();
 
@@ -580,7 +606,8 @@ public sealed class ReviewGatesService(
         if (target is not null)
             paths = [.. targets.Files(root, target.Entry, target.Row)];
 
-        // The report goes where the Arbiter reads the evidence; a --fix run never counts, so it writes none by default.
+        // The report goes where the Arbiter reads the evidence. A --fix run that changes a task file never counts,
+        // so it writes none by default; one that changes nothing counts, and writes the passing report below.
         string? outPath = request.Out;
         if (outPath is null && taskSlug is not null && !request.Fix)
             outPath = Path.Combine(root, request.Red ? TaskGateNextStep.FailingReportPath(taskSlug) : TaskGateNextStep.PassingReportPath(taskSlug));
@@ -697,8 +724,17 @@ public sealed class ReviewGatesService(
                 ? RedClassifier.BuildSkipReason(brokenBuildSymbols)
                 : null,
         };
+
+        // A --fix run whose fix commands changed no task file is the verification run, so it is judged as one: the
+        // content of each changed file is taken before the gates run and compared after.
+        Dictionary<string, string?> before = request.Fix ? Snapshot(root, changed) : new(StringComparer.Ordinal);
         TaskGateRun run = gateRunner.RunTaskGates(
             plan.Gates, root, request.Fix, request.StopOnFailure && !request.Red, observer);
+        bool fixChangedFiles = request.Fix && Snapshot(root, changed).Any(file => file.Value != before[file.Key]);
+
+        // The counting --fix run writes the report a plain run writes, because the Arbiter reads that path as evidence.
+        if (outPath is null && !fixChangedFiles && taskSlug is not null && !request.Red)
+            outPath = Path.Combine(root, TaskGateNextStep.PassingReportPath(taskSlug));
 
         GateReport finalReport = run.Report;
         RedOutcome? redOutcome = null;
@@ -753,7 +789,7 @@ public sealed class ReviewGatesService(
                     .. agentGates.Select(gate => new ReviewTaskGateView(
                         gate.Id, !gate.Run.Any(arg => arg.Contains("{changed}", StringComparison.Ordinal) || arg.Contains("{tests}", StringComparison.Ordinal)))),
                 ];
-                epilogue.AddRange(TaskGateNextStep.AfterRun(finalReport, views, request.Fix, request.Agent!, changed, outPath));
+                epilogue.AddRange(TaskGateNextStep.AfterRun(finalReport, views, fixChangedFiles, request.Agent!, changed, outPath));
             }
         }
 

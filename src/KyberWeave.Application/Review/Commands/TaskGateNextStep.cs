@@ -46,7 +46,7 @@ public static class TaskGateNextStep
     /// <summary>The lines after a run without <c>--red</c>.</summary>
     /// <param name="report">The gate report the run wrote.</param>
     /// <param name="declared">The agent's declared gates, to tell a whole-project gate from a scoped one.</param>
-    /// <param name="fixRun">Whether the run applied fixes, which never counts as the verification run.</param>
+    /// <param name="fixRun">Whether the run's fix commands changed a task file, which then does not count as the verification run.</param>
     /// <param name="agent">The agent the gates belong to.</param>
     /// <param name="paths">The files the task changed, as given with <c>--paths</c>.</param>
     /// <param name="reportPath">Where the report was written, or null.</param>

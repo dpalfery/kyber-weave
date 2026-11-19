@@ -522,14 +522,15 @@ changed, instead of running the repository-wide `review.gates`. With `--task` an
 the files are the task's own from the one Ready or In progress plan plus the test file its Test
 contract names, and the classes that contract names fill `{tests}` ahead of the classes mapped from
 the files (the lookup `docs packet` prints from). The run prints a `task:` line naming the plan and
-files; when no active plan has the task it says why, and the files are the git change as before. Without `--out` and `--fix`, `--task` writes the
-report to `.agent_scratchpad/<task>/task-gate.json`, or `task-gate-red.json` with `--red`. Each test
+files; when no active plan has the task it says why, and the files are the git change as before. Without `--out`, `--task` writes the
+report to `.agent_scratchpad/<task>/task-gate.json`, or `task-gate-red.json` with `--red`; a `--fix` run writes it only when
+its fix commands changed no task file, because that run is the verification run. Each test
 gate and each failed gate is then printed in a few lines: pass or fail, the test totals, each
 failing test with the first line of its error (or each compile error), at most 10 items of at most
 200 characters, and the path of its full output under `.agent_scratchpad/<task>/logs/`. A test gate
 that exits 0 having run no test prints `NO TESTS RAN`, never a pass. In human output it ends with a
 `next:` line naming the worker's next step: after `--red`, the passing-run command; after a
-`--fix` run, the verification run; after a failure, the 3-cycle cap and the escalation lines with
+`--fix` run whose fix commands changed a task file, the verification run; after a failure, the 3-cycle cap and the escalation lines with
 the failing gate's id; after a passing verification run, the completion digest with `STATUS`,
 `FILES` and the `TASK_GATE:` line filled in and `TESTS`, `COMMIT`, `REMOTE_HEAD` and `runs` left
 as placeholders:
@@ -558,7 +559,8 @@ as placeholders:
 - `--task <SLUG>` is substituted for `{task}` in the gate commands. It must be a lookup name:
   lowercase alphanumerics separated by single hyphens. Requires `--agent`.
 - `--fix` runs each gate's `fix` command before its verify command. The verify command still
-  decides the result. Requires `--agent`.
+  decides the result. A run whose fix commands changed no task file counts as the verification
+  run; one that changed a task file never does. Requires `--agent`.
 - `--task` and `--fix` given without `--agent` are a client-input error (exit `2`).
   `--paths` and `--base` scope the council gates too and are accepted without `--agent`.
 - `--council` declares the run to be the review council or CI, the only callers that may run gates marked

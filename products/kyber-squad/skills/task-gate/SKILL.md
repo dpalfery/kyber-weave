@@ -28,8 +28,9 @@ from the active plan, and the report goes to `.agent_scratchpad/<task-id>/task-g
 active plan has the task, name the files this task created or modified, one `--paths` per file, and
 never another worker's files.
 
-A run with `--fix` applies each gate's fix command first. It never counts: only a run without
-`--fix` that reports every declared gate passing is a pass.
+A run with `--fix` applies each gate's fix command first. It counts as the verification run only
+when its fix commands changed no task file; one that changed a task file never counts. Either way,
+only a run that reports every declared gate passing is a pass.
 
 ## Failing run (test-first)
 
