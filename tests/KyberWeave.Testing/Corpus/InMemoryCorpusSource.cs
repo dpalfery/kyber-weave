@@ -51,7 +51,11 @@ public sealed class InMemoryCorpusSource : ICorpusSource
     public InMemoryCorpusSource AddBytes(string relativePath, byte[] bytes)
     {
         ArgumentNullException.ThrowIfNull(bytes);
-        _files[CorpusPath.Normalize(relativePath)] = [.. bytes];
+        string path = CorpusPath.Normalize(relativePath);
+
+        // One path holds one entry, as it does on a real file system: adding the file replaces a link there.
+        _links.Remove(path);
+        _files[path] = [.. bytes];
         return this;
     }
 
@@ -77,7 +81,11 @@ public sealed class InMemoryCorpusSource : ICorpusSource
     /// <exception cref="ArgumentException">Either path is rooted or climbs above the corpus root.</exception>
     public InMemoryCorpusSource AddFileLink(string relativePath, string targetRelativePath)
     {
-        _links[CorpusPath.Normalize(relativePath)] = CorpusPath.Normalize(targetRelativePath);
+        string path = CorpusPath.Normalize(relativePath);
+
+        // A link replaces a file at its own path, as a real link does; the target keeps its entry.
+        _files.Remove(path);
+        _links[path] = CorpusPath.Normalize(targetRelativePath);
         return this;
     }
 
