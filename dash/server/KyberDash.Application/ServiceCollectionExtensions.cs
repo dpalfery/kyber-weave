@@ -1,5 +1,6 @@
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
+using KyberDash.Data.Collector.Sources;
 using KyberDash.Domain;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -89,10 +90,16 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<CanonRollupsEngine>()));
         services.TryAddSingleton<ICanonProjectionService>(provider => provider.GetRequiredService<CanonProjectionService>());
 
+        services.TryAddSingleton<IHarnessFileSystem>(_ => PhysicalHarnessFileSystem.Instance);
+        services.TryAddSingleton<HarnessSourceRegistry>(_ => new HarnessSourceRegistry());
+
         services.TryAddSingleton<TranscriptIngestionService>(provider => new TranscriptIngestionService(
-            provider.GetRequiredService<ICanonStoreRepository>(),
-            provider.GetRequiredService<ITranscriptReaderRepository>(),
-            provider.GetRequiredService<CanonRefreshEngine>()));
+            provider.GetRequiredService<IRelationalStoreWriter>(),
+            provider.GetRequiredService<IOperationalStore>(),
+            provider.GetRequiredService<HarnessSourceRegistry>(),
+            [.. provider.GetServices<IHarnessMapper>()],
+            provider.GetService<IHarnessFileSystem>(),
+            provider.GetService<DashOptions>()));
         services.TryAddSingleton<ITranscriptIngestionService>(provider => provider.GetRequiredService<TranscriptIngestionService>());
 
         services.TryAddSingleton<IOtlpCollectorService>(provider => new OtlpCollectorService(

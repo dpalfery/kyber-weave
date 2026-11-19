@@ -1,18 +1,21 @@
 using System.Globalization;
 using System.Text.Json;
 using KyberDash.Contracts.Repositories;
+using KyberDash.Data.Collector;
 using KyberDash.Domain;
 
 namespace KyberDash.Application;
 
 /// <summary>
 /// Canonical ingest pipeline translating decoded <see cref="OtlpSpan"/> batches into attributed
-/// <see cref="CanonicalRecord"/> rows, quarantine entries, and problems over
-/// <see cref="ICanonStoreRepository"/>.
+/// relational <see cref="CollectedBatch"/> payloads, quarantine entries, and problems over
+/// <see cref="IRelationalStoreWriter"/> and <see cref="IOperationalStore"/>.
 /// </summary>
 public static class CanonIngestPipeline
 {
     private const string UnnamedSource = "otlp";
+
+    private static readonly string[] ModelKeys = ["gen_ai.response.model", "gen_ai.request.model", "model"];
 
     private static readonly JsonSerializerOptions RawSpanJsonOptions = new()
     {
@@ -100,9 +103,57 @@ public static class CanonIngestPipeline
     }
 
     /// <summary>
-    /// Runs attribution, normalization, token validation, and persistence for a batch of decoded
-    /// OTLP spans against <paramref name="store"/>.
+    /// Runs attribution, normalization, token validation, and relational persistence for a batch of
+    /// decoded OTLP spans against <paramref name="writer"/> and <paramref name="operationalStore"/>.
     /// </summary>
+    /// <param name="spans">Decoded OTLP spans to ingest.</param>
+    /// <param name="writer">Relational store writer receiving mapped batches and diagnostic problems.</param>
+    /// <param name="operationalStore">Operational store receiving quarantined spans.</param>
+    /// <param name="adapters">Harness adapters in tie-break order (defaults to <see cref="CanonAdapters.DefaultAdapters"/>).</param>
+    /// <returns>Per-batch accepted, quarantined, and rejected counters.</returns>
+    public static IngestOutcome IngestBatch(
+        IReadOnlyList<OtlpSpan> spans,
+        IRelationalStoreWriter writer,
+        IOperationalStore operationalStore,
+        IReadOnlyList<IHarnessAdapter>? adapters = null)
+    {
+        ArgumentNullException.ThrowIfNull(spans);
+        ArgumentNullException.ThrowIfNull(writer);
+        ArgumentNullException.ThrowIfNull(operationalStore);
+
+        if (spans.Count == 0)
+        {
+            return new IngestOutcome(0, 0, 0);
+        }
+
+        IngestSpanNormalizer.NormalizedSpanBatch normalized = NormalizeBatch(spans, adapters);
+
+        foreach (StoredQuarantinedSpan quarantinedSpan in normalized.QuarantinedSpans)
+        {
+            operationalStore.PutQuarantinedSpan(quarantinedSpan);
+        }
+
+        foreach (CollectedBatch batch in normalized.RelationalBatches)
+        {
+            writer.WriteBatch(batch);
+        }
+
+        foreach (CollectedProblem problem in normalized.StandaloneProblems)
+        {
+            writer.WriteProblem(problem);
+        }
+
+        return normalized.Outcome;
+    }
+
+    /// <summary>
+    /// Runs attribution, normalization, token validation, and persistence for a batch of decoded
+    /// OTLP spans against the transitional <paramref name="store"/>.
+    /// </summary>
+    /// <remarks>
+    /// Retained temporarily until remaining legacy callers (<c>BoundedIngestWriter</c> and
+    /// <c>CanonIngestTests</c>) finish migrating off <see cref="ICanonStoreRepository"/>.
+    /// </remarks>
     /// <param name="spans">Decoded OTLP spans to ingest.</param>
     /// <param name="store">Canonical store repository receiving records, quarantine, and problems.</param>
     /// <param name="adapters">Harness adapters in tie-break order (defaults to <see cref="CanonAdapters.DefaultAdapters"/>).</param>
@@ -118,6 +169,43 @@ public static class CanonIngestPipeline
         if (spans.Count == 0)
         {
             return new IngestOutcome(0, 0, 0);
+        }
+
+        IngestSpanNormalizer.NormalizedSpanBatch normalized = NormalizeBatch(spans, adapters);
+
+        foreach (QuarantineRow row in normalized.Quarantined)
+        {
+            store.QuarantineAndDelete(row);
+        }
+
+        foreach (SpanProblemRow problem in normalized.Problems)
+        {
+            store.RecordProblem(problem);
+        }
+
+        if (normalized.Records.Count > 0)
+        {
+            store.PutRecords(normalized.Records);
+        }
+
+        return normalized.Outcome;
+    }
+
+    /// <summary>
+    /// Performs pure in-memory attribution, normalization, and validation over <paramref name="spans"/>
+    /// without touching any store, producing both legacy DTOs and normalized relational DTO batches.
+    /// </summary>
+    /// <param name="spans">Decoded OTLP spans to normalize.</param>
+    /// <param name="adapters">Harness adapters in tie-break order (defaults to <see cref="CanonAdapters.DefaultAdapters"/>).</param>
+    /// <returns>Normalized records, quarantined spans, problems, relational batches, and outcome counters.</returns>
+    internal static IngestSpanNormalizer.NormalizedSpanBatch NormalizeBatch(
+        IReadOnlyList<OtlpSpan> spans,
+        IReadOnlyList<IHarnessAdapter>? adapters = null)
+    {
+        ArgumentNullException.ThrowIfNull(spans);
+        if (spans.Count == 0)
+        {
+            return IngestSpanNormalizer.NormalizedSpanBatch.Empty;
         }
 
         IReadOnlyList<IHarnessAdapter> activeAdapters = adapters ?? CanonAdapters.DefaultAdapters;
@@ -161,6 +249,12 @@ public static class CanonIngestPipeline
         int quarantined = 0;
         int rejected = 0;
         List<CanonicalRecord> accepted = [];
+        List<QuarantineRow> legacyQuarantined = [];
+        List<StoredQuarantinedSpan> relationalQuarantined = [];
+        List<SpanProblemRow> legacyProblems = [];
+        List<CollectedProblem> allRelationalProblems = [];
+        List<(string HarnessId, string Source, CollectedProblem Problem)> problemAssignments = [];
+        HashSet<string> usedProblemKeys = new(StringComparer.Ordinal);
 
         for (int index = 0; index < rawSpans.Count; index++)
         {
@@ -170,56 +264,56 @@ public static class CanonIngestPipeline
 
             if (opencodeVersionQuarantined.Contains(index))
             {
-                store.QuarantineAndDelete(new QuarantineRow(
-                    SpanId: raw.SpanId,
-                    ObservedNamespaces: namespaces,
-                    Reason: CanonAdapters.UnknownOpencodeContractVersionReason,
-                    Source: raw.Source,
-                    Name: raw.Name,
-                    Timestamp: otlpSpan.Timestamp,
-                    RawPayload: BoundedSpanPayload(otlpSpan)));
+                AddQuarantine(
+                    legacyQuarantined,
+                    relationalQuarantined,
+                    raw,
+                    otlpSpan,
+                    namespaces,
+                    CanonAdapters.UnknownOpencodeContractVersionReason,
+                    harness: null);
                 quarantined++;
                 continue;
             }
 
             if (droidVersionQuarantined.Contains(index))
             {
-                store.QuarantineAndDelete(new QuarantineRow(
-                    SpanId: raw.SpanId,
-                    ObservedNamespaces: namespaces,
-                    Reason: CanonAdapters.UnknownDroidContractVersionReason,
-                    Source: raw.Source,
-                    Name: raw.Name,
-                    Timestamp: otlpSpan.Timestamp,
-                    RawPayload: BoundedSpanPayload(otlpSpan)));
+                AddQuarantine(
+                    legacyQuarantined,
+                    relationalQuarantined,
+                    raw,
+                    otlpSpan,
+                    namespaces,
+                    CanonAdapters.UnknownDroidContractVersionReason,
+                    harness: null);
                 quarantined++;
                 continue;
             }
 
             if (!attributed.TryGetValue(raw.SpanId, out string? harness))
             {
-                store.QuarantineAndDelete(new QuarantineRow(
-                    SpanId: raw.SpanId,
-                    ObservedNamespaces: namespaces,
-                    Reason: IsStructuralSpan(raw) ? "non-model span" : "unclaimed",
-                    Source: raw.Source,
-                    Name: raw.Name,
-                    Timestamp: otlpSpan.Timestamp,
-                    RawPayload: BoundedSpanPayload(otlpSpan)));
+                AddQuarantine(
+                    legacyQuarantined,
+                    relationalQuarantined,
+                    raw,
+                    otlpSpan,
+                    namespaces,
+                    IsStructuralSpan(raw) ? "non-model span" : "unclaimed",
+                    harness: null);
                 quarantined++;
                 continue;
             }
 
             if (string.Equals(harness, "droid", StringComparison.Ordinal) && !CanonAdapters.IsDroidEnvelopeSpan(raw))
             {
-                store.QuarantineAndDelete(new QuarantineRow(
-                    SpanId: raw.SpanId,
-                    ObservedNamespaces: namespaces,
-                    Reason: IsStructuralSpan(raw) ? "non-model span" : "unclaimed",
-                    Source: raw.Source,
-                    Name: raw.Name,
-                    Timestamp: otlpSpan.Timestamp,
-                    RawPayload: BoundedSpanPayload(otlpSpan)));
+                AddQuarantine(
+                    legacyQuarantined,
+                    relationalQuarantined,
+                    raw,
+                    otlpSpan,
+                    namespaces,
+                    IsStructuralSpan(raw) ? "non-model span" : "unclaimed",
+                    harness: null);
                 quarantined++;
                 continue;
             }
@@ -238,16 +332,34 @@ public static class CanonIngestPipeline
             catch (Exception exception)
             {
                 rejected++;
-                store.RecordProblem(new SpanProblemRow(
+                string? sessionId = CanonAdapters.CanonicalSessionId(raw.Attributes);
+                string severity = CanonModelWireStrings.ProblemWireString(ProblemSeverity.Error);
+                string message = SafeProblemMessage(exception.Message, "Adapter normalization failed.");
+                SpanProblemRow legacyProblem = new(
                     SpanId: raw.SpanId,
-                    Severity: CanonModelWireStrings.ProblemWireString(ProblemSeverity.Error),
+                    Severity: severity,
                     Code: "ADAPTER_NORMALIZE_FAILED",
-                    Message: exception.Message,
-                    Stack: exception.StackTrace,
+                    Message: message,
+                    Stack: SafeOptionalText(exception.StackTrace),
                     Location: raw.SpanId,
-                    SessionId: CanonAdapters.CanonicalSessionId(raw.Attributes),
+                    SessionId: sessionId,
                     Harness: harness,
-                    Timestamp: otlpSpan.Timestamp));
+                    Timestamp: otlpSpan.Timestamp);
+                legacyProblems.Add(legacyProblem);
+
+                CollectedProblem relationalProblem = new(
+                    ProblemKey: UniqueProblemKey(usedProblemKeys, raw.SpanId, "ADAPTER_NORMALIZE_FAILED", index),
+                    Severity: severity,
+                    Code: "ADAPTER_NORMALIZE_FAILED",
+                    Message: message,
+                    SpanId: raw.SpanId,
+                    Location: raw.SpanId,
+                    SessionKey: string.IsNullOrWhiteSpace(sessionId) ? null : sessionId,
+                    HarnessId: harness,
+                    TimestampUtc: otlpSpan.Timestamp,
+                    Stack: SafeOptionalText(exception.StackTrace));
+                allRelationalProblems.Add(relationalProblem);
+                problemAssignments.Add((harness, raw.Source, relationalProblem));
                 continue;
             }
 
@@ -262,15 +374,14 @@ public static class CanonIngestPipeline
 
             if (string.Equals(timed.Op, "unspecified", StringComparison.Ordinal))
             {
-                store.QuarantineAndDelete(new QuarantineRow(
-                    SpanId: raw.SpanId,
-                    ObservedNamespaces: namespaces,
-                    Reason: "non-model span",
-                    Source: raw.Source,
-                    Name: raw.Name,
-                    Timestamp: otlpSpan.Timestamp,
-                    RawPayload: BoundedSpanPayload(otlpSpan),
-                    Harness: harness));
+                AddQuarantine(
+                    legacyQuarantined,
+                    relationalQuarantined,
+                    raw,
+                    otlpSpan,
+                    namespaces,
+                    "non-model span",
+                    harness);
                 quarantined++;
                 continue;
             }
@@ -279,28 +390,407 @@ public static class CanonIngestPipeline
             if (problem is not null)
             {
                 rejected++;
-                store.RecordProblem(new SpanProblemRow(
+                string severity = CanonModelWireStrings.ProblemWireString(problem.Severity);
+                string message = SafeProblemMessage(problem.Message, "Span failed validation.");
+                string location = problem.Location ?? timed.SpanId;
+                SpanProblemRow legacyProblem = new(
                     SpanId: timed.SpanId,
-                    Severity: CanonModelWireStrings.ProblemWireString(problem.Severity),
+                    Severity: severity,
                     Code: problem.Code,
-                    Message: problem.Message,
-                    Stack: problem.Stack,
-                    Location: problem.Location ?? timed.SpanId,
+                    Message: message,
+                    Stack: SafeOptionalText(problem.Stack),
+                    Location: location,
                     SessionId: timed.SessionId,
                     Harness: timed.Harness,
-                    Timestamp: timed.Timestamp));
+                    Timestamp: timed.Timestamp);
+                legacyProblems.Add(legacyProblem);
+
+                CollectedProblem relationalProblem = new(
+                    ProblemKey: UniqueProblemKey(usedProblemKeys, timed.SpanId, problem.Code, index),
+                    Severity: severity,
+                    Code: problem.Code,
+                    Message: message,
+                    SpanId: timed.SpanId,
+                    Location: location,
+                    SessionKey: string.IsNullOrWhiteSpace(timed.SessionId) ? null : timed.SessionId,
+                    HarnessId: timed.Harness,
+                    TimestampUtc: timed.Timestamp,
+                    Stack: SafeOptionalText(problem.Stack));
+                allRelationalProblems.Add(relationalProblem);
+                problemAssignments.Add((timed.Harness, raw.Source, relationalProblem));
                 continue;
             }
 
             accepted.Add(timed);
         }
 
-        if (accepted.Count > 0)
+        (IReadOnlyList<CollectedBatch> relationalBatches, IReadOnlyList<CollectedProblem> standaloneProblems) =
+            BuildRelationalBatches(accepted, problemAssignments);
+
+        IngestOutcome outcome = new(accepted.Count, quarantined, rejected);
+        return new IngestSpanNormalizer.NormalizedSpanBatch(
+            accepted,
+            legacyQuarantined,
+            legacyProblems,
+            relationalBatches,
+            relationalQuarantined,
+            allRelationalProblems,
+            standaloneProblems,
+            outcome);
+    }
+
+    private static (IReadOnlyList<CollectedBatch> Batches, IReadOnlyList<CollectedProblem> StandaloneProblems)
+        BuildRelationalBatches(
+            IReadOnlyList<CanonicalRecord> accepted,
+            IReadOnlyList<(string HarnessId, string Source, CollectedProblem Problem)> problemAssignments)
+    {
+        Dictionary<(string HarnessId, string Source), (List<CollectedRecord> Records, Dictionary<string, CollectedSession> Sessions, List<CollectedProblem> Problems)> groups = [];
+        List<(string HarnessId, string Source)> groupOrder = [];
+        HashSet<string> seenRecordIds = new(StringComparer.Ordinal);
+
+        foreach (CanonicalRecord record in accepted)
         {
-            store.PutRecords(accepted);
+            if (!seenRecordIds.Add(record.SpanId))
+            {
+                continue;
+            }
+
+            string source = string.IsNullOrWhiteSpace(record.Source) ? UnnamedSource : record.Source;
+            (string HarnessId, string Source) key = (record.Harness, source);
+            if (!groups.TryGetValue(key, out (List<CollectedRecord> Records, Dictionary<string, CollectedSession> Sessions, List<CollectedProblem> Problems) bucket))
+            {
+                bucket = ([], new Dictionary<string, CollectedSession>(StringComparer.Ordinal), []);
+                groups[key] = bucket;
+                groupOrder.Add(key);
+            }
+
+            CollectedRecord collected = ToCollectedRecord(record);
+            bucket.Records.Add(collected);
+
+            if (!string.IsNullOrWhiteSpace(collected.SessionKey)
+                && !bucket.Sessions.ContainsKey(collected.SessionKey))
+            {
+                bucket.Sessions[collected.SessionKey] = new CollectedSession(
+                    SessionKey: collected.SessionKey,
+                    HarnessId: collected.HarnessId,
+                    NativeSessionId: collected.SessionKey,
+                    Workspace: null,
+                    Title: null,
+                    ReportedUsage: []);
+            }
         }
 
-        return new IngestOutcome(accepted.Count, quarantined, rejected);
+        List<CollectedProblem> standaloneProblems = [];
+        foreach ((string harnessId, string source, CollectedProblem problem) in problemAssignments)
+        {
+            string normalizedSource = string.IsNullOrWhiteSpace(source) ? UnnamedSource : source;
+            if (groups.TryGetValue((harnessId, normalizedSource), out (List<CollectedRecord> Records, Dictionary<string, CollectedSession> Sessions, List<CollectedProblem> Problems) bucket))
+            {
+                bucket.Problems.Add(problem);
+            }
+            else
+            {
+                standaloneProblems.Add(problem);
+            }
+        }
+
+        List<CollectedBatch> batches = new(groupOrder.Count);
+        foreach ((string harnessId, string source) key in groupOrder)
+        {
+            (List<CollectedRecord> records, Dictionary<string, CollectedSession> sessions, List<CollectedProblem> problems) = groups[key];
+            batches.Add(new CollectedBatch(
+                Source: new CollectedSource(key.harnessId, SourceKind.Otlp, key.source),
+                Sessions: [.. sessions.Values],
+                Records: records,
+                Problems: problems));
+        }
+
+        return (batches, standaloneProblems);
+    }
+
+    private static CollectedRecord ToCollectedRecord(CanonicalRecord record)
+    {
+        DateTimeOffset startedAt = DateTimeOffset.TryParse(
+            record.Timestamp,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.RoundtripKind | DateTimeStyles.AssumeUniversal,
+            out DateTimeOffset parsed)
+            ? parsed.ToUniversalTime()
+            : DateTimeOffset.UnixEpoch;
+
+        DateTimeOffset? endedAt = record.DurationMs > 0
+            ? startedAt.AddMilliseconds(record.DurationMs)
+            : null;
+
+        long? reportedDurationMs = record.DurationMs >= 0 ? record.DurationMs : null;
+
+        List<CollectedTokenCount> tokens =
+        [
+            new CollectedTokenCount(TokenClass.Input, Math.Max(0L, record.Tokens.FreshInput)),
+            new CollectedTokenCount(TokenClass.CacheRead, Math.Max(0L, record.Tokens.CacheRead)),
+            new CollectedTokenCount(TokenClass.CacheWrite, Math.Max(0L, record.Tokens.CacheCreation)),
+            new CollectedTokenCount(TokenClass.Output, Math.Max(0L, record.Tokens.Output)),
+        ];
+
+        if (record.Tokens.Reasoning is long reasoning && reasoning >= 0)
+        {
+            tokens.Add(new CollectedTokenCount(TokenClass.Reasoning, reasoning));
+        }
+
+        CollectedCost? cost = record.Cost.Value is double costValue
+            && double.IsFinite(costValue)
+            && costValue >= 0
+            && !string.IsNullOrWhiteSpace(record.Cost.Currency)
+            && !JsonDocumentText.IsDocument(record.Cost.Currency)
+            ? new CollectedCost(costValue, record.Cost.Currency)
+            : null;
+
+        string? model = ExtractSafeAttributeString(record.Raw, ModelKeys);
+        string? errorMessage = ExtractSafeAttributeString(record.Raw, ["error.message"]);
+        string? sessionKey = string.IsNullOrWhiteSpace(record.SessionId) ? null : record.SessionId;
+        string? parentRecordId = string.IsNullOrWhiteSpace(record.ParentSpanId) ? null : record.ParentSpanId;
+        string? traceId = string.IsNullOrWhiteSpace(record.TraceId) ? null : record.TraceId;
+        string name = !string.IsNullOrWhiteSpace(record.Name) && !JsonDocumentText.IsDocument(record.Name)
+            ? record.Name
+            : record.Op;
+
+        return new CollectedRecord(
+            RecordId: record.SpanId,
+            HarnessId: record.Harness,
+            Op: MapRecordOp(record.Op),
+            Kind: MapRecordKind(record.Kind),
+            Name: name,
+            StartedAt: startedAt,
+            Status: MapRecordStatus(record.Status),
+            SessionKey: sessionKey,
+            ParentRecordId: parentRecordId,
+            TraceId: traceId,
+            Model: model,
+            EndedAt: endedAt,
+            ReportedDurationMs: reportedDurationMs,
+            Tokens: tokens,
+            ReportedCost: cost,
+            Parts: BuildCollectedParts(record),
+            Tool: null,
+            Agent: null,
+            SkillsInvoked: [],
+            AgentInstanceId: null,
+            ToolDefinitions: [],
+            Signals: new CollectedRecordSignals(errorMessage, null, null, null),
+            ReportedInputTokens: record.Tokens.ReportedInput >= 0 ? record.Tokens.ReportedInput : null,
+            ReportedOutputTokens: record.Tokens.ReportedOutput >= 0 ? record.Tokens.ReportedOutput : null);
+    }
+
+    private static List<CollectedContentPart> BuildCollectedParts(CanonicalRecord record)
+    {
+        List<CollectedContentPart> parts = [];
+        HashSet<int> usedPositions = [];
+        int nextPosition = 0;
+
+        if (record.Parts is { Count: > 0 })
+        {
+            foreach (ContentPart part in record.Parts)
+            {
+                if (!TryMapContentBucket(part.Part, out ContentBucket bucket))
+                {
+                    continue;
+                }
+
+                int position = part.Order is >= 0 ? part.Order.Value : nextPosition;
+                while (!usedPositions.Add(position))
+                {
+                    position++;
+                }
+
+                nextPosition = Math.Max(nextPosition, position + 1);
+
+                ToolContentMeasurement measurement = ToolContentMeasurer.Measure(part.Text ?? string.Empty);
+                string? plainText = measurement.IsDocument ? null : measurement.PlainText;
+                CollectedWithheldText? withheld = measurement.IsDocument ? measurement.ToWithheldText() : null;
+                long? originalBytes = measurement.IsDocument ? null : measurement.OriginalUtf8BytesWhenTruncated;
+
+                parts.Add(new CollectedContentPart(
+                    Position: position,
+                    Bucket: bucket,
+                    PlainText: plainText,
+                    Withheld: withheld,
+                    ReportedTokens: part.Tokens is >= 0 ? part.Tokens : null,
+                    Server: SafeOptionalText(part.Server),
+                    Role: SafeOptionalText(part.Role),
+                    Resident: part.Resident,
+                    OriginalUtf8BytesWhenTruncated: originalBytes));
+            }
+
+            return parts;
+        }
+
+        if (record.Content is { Count: > 0 })
+        {
+            foreach (KeyValuePair<string, string> entry in record.Content.OrderBy(static kv => kv.Key, StringComparer.Ordinal))
+            {
+                if (!TryMapContentBucket(entry.Key, out ContentBucket bucket))
+                {
+                    continue;
+                }
+
+                int position = nextPosition++;
+                _ = usedPositions.Add(position);
+
+                ToolContentMeasurement measurement = ToolContentMeasurer.Measure(entry.Value ?? string.Empty);
+                string? plainText = measurement.IsDocument ? null : measurement.PlainText;
+                CollectedWithheldText? withheld = measurement.IsDocument ? measurement.ToWithheldText() : null;
+                long? originalBytes = measurement.IsDocument ? null : measurement.OriginalUtf8BytesWhenTruncated;
+
+                parts.Add(new CollectedContentPart(
+                    Position: position,
+                    Bucket: bucket,
+                    PlainText: plainText,
+                    Withheld: withheld,
+                    ReportedTokens: null,
+                    Server: null,
+                    Role: null,
+                    Resident: null,
+                    OriginalUtf8BytesWhenTruncated: originalBytes));
+            }
+        }
+
+        return parts;
+    }
+
+    private static void AddQuarantine(
+        List<QuarantineRow> legacyQuarantined,
+        List<StoredQuarantinedSpan> relationalQuarantined,
+        RawSpan raw,
+        OtlpSpan otlpSpan,
+        IReadOnlyList<string> namespaces,
+        string reason,
+        string? harness)
+    {
+        legacyQuarantined.Add(new QuarantineRow(
+            SpanId: raw.SpanId,
+            ObservedNamespaces: namespaces,
+            Reason: reason,
+            Source: raw.Source,
+            Name: raw.Name,
+            Timestamp: otlpSpan.Timestamp,
+            RawPayload: BoundedSpanPayload(otlpSpan),
+            Harness: harness));
+
+        // Decision OD-6 / DD-10: relational quarantine drops raw payloads completely.
+        relationalQuarantined.Add(new StoredQuarantinedSpan(
+            SpanId: raw.SpanId,
+            Reason: reason,
+            ObservedNamespaces: namespaces,
+            Source: SafeOptionalText(raw.Source),
+            Name: SafeOptionalText(raw.Name),
+            TimestampUtc: SafeOptionalText(otlpSpan.Timestamp),
+            HarnessId: SafeOptionalText(harness)));
+    }
+
+    private static string UniqueProblemKey(HashSet<string> usedKeys, string spanId, string code, int index)
+    {
+        string baseKey = string.Create(CultureInfo.InvariantCulture, $"otlp:{spanId}:{code}");
+        if (usedKeys.Add(baseKey))
+        {
+            return baseKey;
+        }
+
+        string indexedKey = string.Create(CultureInfo.InvariantCulture, $"{baseKey}:{index}");
+        _ = usedKeys.Add(indexedKey);
+        return indexedKey;
+    }
+
+    private static string? ExtractSafeAttributeString(
+        IReadOnlyDictionary<string, JsonElement>? attributes,
+        IReadOnlyList<string> keys)
+    {
+        if (attributes is null)
+        {
+            return null;
+        }
+
+        foreach (string key in keys)
+        {
+            if (attributes.TryGetValue(key, out JsonElement el) && el.ValueKind == JsonValueKind.String)
+            {
+                string? text = el.GetString();
+                if (!string.IsNullOrWhiteSpace(text) && !JsonDocumentText.IsDocument(text))
+                {
+                    return text;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string? SafeOptionalText(string? value) =>
+        string.IsNullOrWhiteSpace(value) || JsonDocumentText.IsDocument(value) ? null : value;
+
+    private static string SafeProblemMessage(string? message, string fallback) =>
+        string.IsNullOrWhiteSpace(message) || JsonDocumentText.IsDocument(message) ? fallback : message;
+
+    private static RecordOp MapRecordOp(string op) => op switch
+    {
+        "llm.invoke" => RecordOp.LlmInvoke,
+        "tool.invoke" => RecordOp.ToolInvoke,
+        "agent.invoke" => RecordOp.AgentInvoke,
+        _ => RecordOp.Unspecified,
+    };
+
+    private static RecordKind MapRecordKind(string kind) => kind switch
+    {
+        "internal" => RecordKind.Internal,
+        "server" => RecordKind.Server,
+        "client" => RecordKind.Client,
+        "producer" => RecordKind.Producer,
+        "consumer" => RecordKind.Consumer,
+        _ => RecordKind.Unspecified,
+    };
+
+    private static RecordStatus MapRecordStatus(string status) => status switch
+    {
+        "ok" => RecordStatus.Ok,
+        "error" => RecordStatus.Error,
+        "unset" => RecordStatus.Unset,
+        _ => RecordStatus.Unspecified,
+    };
+
+    private static bool TryMapContentBucket(string bucket, out ContentBucket result)
+    {
+        switch (bucket)
+        {
+            case "system_prompt":
+                result = ContentBucket.SystemPrompt;
+                return true;
+            case "tool_definitions":
+                result = ContentBucket.ToolDefinitions;
+                return true;
+            case "tool_definition":
+                result = ContentBucket.ToolDefinition;
+                return true;
+            case "instruction_context":
+                result = ContentBucket.InstructionContext;
+                return true;
+            case "conversation_history":
+                result = ContentBucket.ConversationHistory;
+                return true;
+            case "tool_result_content":
+                result = ContentBucket.ToolResultContent;
+                return true;
+            case "user_prompt":
+                result = ContentBucket.UserPrompt;
+                return true;
+            case "user_message":
+                result = ContentBucket.UserMessage;
+                return true;
+            case "reasoning":
+                result = ContentBucket.Reasoning;
+                return true;
+            default:
+                result = default;
+                return false;
+        }
     }
 
     private static string BoundedSpanPayload(OtlpSpan span)
