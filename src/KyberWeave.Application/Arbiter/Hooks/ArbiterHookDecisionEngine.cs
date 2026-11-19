@@ -393,7 +393,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             // conductor run is often not the checkout the hook runs in. The invocation resolved that worktree once
             // through the run-context resolver; the resolver call here is the fallback for a caller outside the hook.
             // The ledger stays with the hook's directory so a dispatch and its return still pair.
-            string evaluationRoot = context.RunContext?.Worktree ?? _planRoots.Resolve(repoRoot, prompt);
+            string evaluationRoot = EvaluationRootFor(context, repoRoot, prompt, _planRoots);
             if (!string.Equals(evaluationRoot, repoRoot, StringComparison.Ordinal))
             {
                 context.Log.WriteLine($"Arbiter: evaluating against worktree '{evaluationRoot}', which holds the dispatch's plan.");
@@ -486,6 +486,65 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             $"Pairing keys compared: call-id '{post.CallId ?? "(none)"}', digest '{post.PairDigest ?? "(none)"}' " +
             $"against {candidates} pre event(s) of '{ev.Harness}'.");
     }
+
+    /// <summary>
+    /// The worktree this dispatch is judged in: the plan, its task file and the git facts are read there. One hook
+    /// invocation resolves one run context from the event, which is right for a single dispatch; a batch's other calls
+    /// carry their own plans, and a plan that lives in another worktree of this repository is read there.
+    /// </summary>
+    /// <param name="context">The invocation's context.</param>
+    /// <param name="repoRoot">The repository root configuration and the ledger are read under.</param>
+    /// <param name="prompt">This dispatch's own prompt.</param>
+    /// <param name="planRoots">Finds the worktree that holds a dispatch's plan.</param>
+    internal static string EvaluationRootFor(
+        HookContext context, string repoRoot, string prompt, IPlanRootResolver planRoots)
+    {
+        HookRunContext? run = context.RunContext;
+        if (run is null)
+        {
+            return planRoots.Resolve(repoRoot, prompt);
+        }
+
+        // The run context was resolved from one event, which is this dispatch's own for a single call. A batch's other
+        // calls name their own plan; a plan held by another worktree of this repository is read there, because the
+        // plan, its task file and the git facts all belong to the worktree that holds it. Anything else keeps the
+        // context's worktree, so a plan that resolves nowhere reads where the invocation's evidence put the work.
+        string? plan = PlanFileFor(prompt);
+        if (plan is null
+            || (run.PlanFile is { } anchored && SamePlan(anchored, plan)))
+        {
+            return run.Worktree;
+        }
+
+        string chosen = planRoots.ResolvePlanRoot(repoRoot, plan, prompt, _ => run.Worktrees);
+        return !SamePath(chosen, repoRoot) && run.Worktrees.Any(worktree => SamePath(worktree, chosen))
+            ? chosen
+            : run.Worktree;
+    }
+
+    /// <summary>The plan a dispatch names: its routing header, else the <c>PLAN_FILE</c> line of an escalation envelope.</summary>
+    private static string? PlanFileFor(string prompt)
+    {
+        if (HeaderBlock.Parse(prompt).RawValues.TryGetValue("PLAN_FILE", out string? named)
+            && !string.IsNullOrWhiteSpace(named))
+        {
+            return named.Trim();
+        }
+
+        return ArbiterLedgerQueries.EnvelopePlan(prompt);
+    }
+
+    private static bool SamePlan(string left, string right) =>
+        string.Equals(NormalizePlan(left), NormalizePlan(right), StringComparison.Ordinal);
+
+    private static string NormalizePlan(string path) =>
+        path.Trim().Replace('\\', '/').TrimStart('.', '/');
+
+    private static bool SamePath(string left, string right) =>
+        string.Equals(
+            left.TrimEnd('/', '\\'),
+            right.TrimEnd('/', '\\'),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     private HookOutcome MapResult(
         ArbiterEvaluationResult result,
