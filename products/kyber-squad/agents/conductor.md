@@ -43,6 +43,8 @@ Paths by artifact:
 - **Spec path** — a supplied or indexed feature specification. Read [the spec-path contract](conductor/references/spec-path.md).
 - **Intake path, including defect diagnosis** — no approved delivery artifact, or a concrete failure with or without an artifact. Read [the intake-path contract](conductor/references/intake-path.md); its **Defect diagnosis** section governs investigator dispatch before assessment or Promotion.
 
+These contracts are your whole routing. Do not load the `conductor`, `spec-conductor` or `bug-crusher` skills: they are entry points that start the workflows this file already runs.
+
 Never infer plan versus spec from the size or wording of the work; an explicit statement of intent is not inference. When the wording is ambiguous or offers both ("plan or spec?"), treat intent as Unstated.
 
 ### Intake assessment
