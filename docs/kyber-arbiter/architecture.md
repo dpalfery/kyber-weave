@@ -1125,6 +1125,39 @@ and a task the attestation names still counts only for the plan it is scoped to.
 investigator that writes `ATTESTED:` is ignored, which is the fail-closed behaviour the marker has always
 had.
 
+### Review seat files
+
+A review council's lens dispatches each return a reply that the verdict command reads from a file:
+`<lens>.md` in the cycle's `seats` folder, a sibling of its `packets` folder. A reviewer on a harness with
+no file-write tool (Copilot CLI's read-only code reviewer) could not save them, and retyping fourteen
+replies is slow and can alter them. So the hook saves them, and the reviewer never writes a seat file.
+
+- **Trigger.** Every post-return path ends in `ArbiterHookDecisionEngine.Decide` with `isPost`: a
+  synchronous return, a batched call, and a background agent's turn (`DecideBackgroundReturn`, which
+  passes the stored dispatch prompt). Decide's first step hands the dispatch prompt and the reply to
+  `ReviewSeatRecorder`, before any rule runs, so a failed evaluation never loses a reply.
+- **What counts as a seat dispatch.** The prompt has a `Packet:` line whose path ends
+  `review/cycle-<n>/packets/<lens>.md`. A `LENS:` header, when the prompt still carries one, must equal the
+  `<lens>` in that file name; a mismatch is refused and logged. The dispatch hook strips the routing
+  headers before the worker runs, so a return's prompt often has no `LENS:` line, and the file name then
+  names the lens. Any other dispatch writes nothing.
+- **Reply text.** The reply is the text the harness returned, taken out of its tool-result JSON
+  (`textResultForLlm`, or the `text` blocks of `content`), and written unchanged.
+- **Path rule.** The file is `review/cycle-<n>/seats/<lens>.md` beside the packet. The lens must be a
+  lowercase name of letters, digits and hyphens.
+- **Containment.** The seats folder must resolve, links followed, strictly inside the run context's
+  repository root, its worktree or one of the repository's own worktrees. Anything else, and a seat file that
+  is itself a link, is refused and logged. A relative packet path resolves against the run's worktree.
+- **Append rule.** An empty reply writes nothing, so the reviewer sees the seat is missing and re-sends it. A
+  later non-empty reply for the same lens in the same cycle (a lens split across spawns, or a retry) is
+  appended after a blank line. That is the shape the verdict reads: `SeatOutputParser` sums every
+  `Discovery:` and `Input sites:` line of one file, because a lens split across two spawns is saved as one
+  file with two closing blocks. A reply the file already holds exactly is not appended again, because a
+  repeated finding id would make the file unreadable.
+- **Failure policy.** The write goes through `IWritableFileSystem`. Any failure, and any refusal above, is
+  logged to the hook's log and never blocks or denies the dispatch, as in
+  [missing input never blocks](#the-run-context).
+
 ## Harness facts
 
 One table covers every harness at project scope. Phase 1 hooks Claude, Copilot in VS Code, Copilot CLI and
