@@ -34,6 +34,8 @@ public sealed class SquadRequestAndCheckRulesTests
 
     private const string AgentsRoot = "products/kyber-squad/agents";
 
+    private const string PlanPathPath = "products/kyber-squad/agents/conductor/references/plan-path.md";
+
     /// <summary>
     ///     The conductor's dispatch guidance forwards the request and forbids restating it. No
     ///     directive that asks for a summary of the request survives anywhere in the body.
@@ -109,6 +111,35 @@ public sealed class SquadRequestAndCheckRulesTests
         Assert.Contains("why you cannot fix it, and who can", closeout, StringComparison.Ordinal);
         Assert.Contains("kyber-weave docs standards migrate", body, StringComparison.Ordinal);
         Assert.DoesNotContain("Report any finding as a blocker", body, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     One check rule in every prompt: no agent says warnings pass or that the standards warning period may
+    ///     stay, and the conductor never undoes the migration that clears it. Run 12's architect and conductor
+    ///     still said "warnings never block", undid <c>docs-dev</c>'s migration, and the closeout stalled.
+    /// </summary>
+    [Fact]
+    public void NoAgentLetsAWarningStayOrUndoesTheStandardsMigration()
+    {
+        string[] retired =
+        [
+            "warnings never block",
+            "warnings do not fail it",
+            "has passed: the standards warning period",
+            "record those warnings in the plan's risks",
+            "the host has not run `kyber-weave docs standards migrate` yet",
+        ];
+        string[] repeating = [.. Corpus.EnumerateFiles(AgentsRoot, "*.md")
+            .SelectMany(path => retired
+                .Where(phrase => Corpus.ReadText(path).Contains(phrase, StringComparison.OrdinalIgnoreCase))
+                .Select(phrase => $"{path}: {phrase}"))];
+
+        Assert.True(repeating.Length == 0, "Retired warning rule still present: " + string.Join("; ", repeating));
+        Assert.Contains("Never undo it", Corpus.ReadText(PlanPathPath), StringComparison.Ordinal);
+        Assert.Contains(
+            "every file `kyber-weave docs standards migrate` changed",
+            Corpus.ReadText(DocsDevPath),
+            StringComparison.Ordinal);
     }
 
     /// <summary>

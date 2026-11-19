@@ -195,23 +195,21 @@ public sealed class TieredRosterConductorContractTests
     }
 
     /// <summary>
-    /// The planner's gate is the CLI's: it fails on an error, not on a warning. A host that has not
-    /// run the standards migration reports warnings only, and a planner that read those as a failed
-    /// check stopped a run that the configuration itself made valid.
+    /// The standards warning period never stops planning: a planner that read it as a failed check
+    /// stopped a run the configuration made valid. It is not left in place either: the planner fixes
+    /// its own findings, and docs-dev clears the warning period at closeout with the migration.
     /// </summary>
     [Fact]
-    public void TheArchitectTreatsAWarningOnlyPlanningCheckAsAPass()
+    public void TheArchitectLeavesTheWarningPeriodToTheCloseoutMigration()
     {
         string architect = Read(ArchitectPath);
         string planAuthoring = Read("products/kyber-squad/agents/architect/references/plan-authoring.md");
 
+        Assert.Contains("does not stop the plan", architect, StringComparison.Ordinal);
+        Assert.Contains("does not stop the plan", planAuthoring, StringComparison.Ordinal);
+        Assert.Contains("errors and warnings alike", architect, StringComparison.Ordinal);
         Assert.Contains(
-            "A check passes when it reports no error, so warnings never block the plan",
-            architect,
-            StringComparison.Ordinal);
-        Assert.Contains("warnings do not fail it", planAuthoring, StringComparison.Ordinal);
-        Assert.Contains(
-            "`kyber-weave docs standards migrate`",
+            "`docs-dev` clears it at closeout with `kyber-weave docs standards migrate`",
             architect,
             StringComparison.Ordinal);
     }

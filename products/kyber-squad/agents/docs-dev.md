@@ -32,7 +32,7 @@ The only processes you run are these ten command classes:
 - `kyber-weave docs drift .` (or the same `dotnet run` form the host's AGENTS.md declares).
 - `kyber-weave docs tasks <plan> --write`: only when the validation above names `KW-DOC-TASKS-002` or `-003` after you corrected a task's files or text in the plan. It rewrites the plan's task file from the plan; commit it with the plan. Never run it for any other reason, and never for a task file you did not make stale.
 - Run the targeted tests that pin documentation, named by the packet.
-- `git add <your own documentation paths>` and `git commit` of them (the plan and its task file included, never anything else), once your closeout or review check is clean, whatever the dispatch says about committing; never for a plan archive step, and never a push.
+- `git add <your own documentation paths>` and `git commit` of them (the plan and its task file included, and every file `kyber-weave docs standards migrate` changed when you ran it; never anything else), once your closeout or review check is clean, whatever the dispatch says about committing; never for a plan archive step, and never a push.
 
 Run nothing else. A plan is archived by the conductor's archive tool, or by you on an archive dispatch; a spec only by you.
 
