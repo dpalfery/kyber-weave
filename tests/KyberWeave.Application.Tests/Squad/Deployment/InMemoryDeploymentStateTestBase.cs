@@ -902,6 +902,28 @@ public abstract class InMemoryDeploymentStateTestBase : SquadStateDocumentFixtur
         }
     }
 
+    /// <summary>Stops the run at the first checkpoint of one kind, capturing the tree the process leaves behind.</summary>
+    internal sealed class CheckpointFailingObserver(
+        InMemoryFileSystem files,
+        string root,
+        SquadTransactionCheckpointKind checkpoint) : ISquadTransactionCheckpointObserver
+    {
+        public IReadOnlyDictionary<string, TreeEntry>? InterruptedTreeSnapshot { get; private set; }
+
+        public void AfterStep(SquadTransactionStep step)
+        {
+        }
+
+        public void AfterCheckpoint(SquadTransactionCheckpoint value)
+        {
+            if (value.Kind != checkpoint)
+                return;
+
+            InterruptedTreeSnapshot = CaptureTree(files, root);
+            throw new InjectedSquadTransactionFailure(value.Sequence);
+        }
+    }
+
     /// <summary>Stops the run at the after-image checkpoint of one artifact.</summary>
     internal sealed class AfterImageCrashObserver(
         InMemoryFileSystem files,
