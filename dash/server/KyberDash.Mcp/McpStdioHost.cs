@@ -25,6 +25,9 @@ public partial class McpStdioHost
     /// <summary>Largest analytics envelope this server will hand back to an agent.</summary>
     public const int MaxReplyBytes = 65_536;
 
+    /// <summary>Longest engine reply excerpt copied into a diagnostic message.</summary>
+    private const int MaxSnippetChars = 200;
+
     /// <summary>How long a single forwarded analytics request may take.</summary>
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
 
@@ -338,32 +341,124 @@ public partial class McpStdioHost
             }
             catch (ArgumentException)
             {
-                return BuildErrorEnvelope(
-                    "incompatible_engine",
-                    "The analytics engine returned a response that is not valid UTF-8.",
-                    "Retry the request and report the engine build if it recurs.");
+                throw new InvalidOperationException(
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"incompatible_engine: the analytics engine answered HTTP {(int)response.StatusCode} with a body that is not valid UTF-8."));
             }
 
-            JsonNode? parsed;
-            try
+            // A non-success status is reported as itself. Parsing first would turn an empty or HTML
+            // engine answer into "malformed JSON", which names the symptom and hides the status.
+            if (!response.IsSuccessStatusCode)
             {
-                parsed = JsonNode.Parse(rawText);
-            }
-            catch (JsonException ex)
-            {
-                throw new InvalidOperationException($"incompatible_engine: the analytics engine returned malformed JSON ({ex.Message}).", ex);
+                JsonObject? errorEnvelope = TryParseContractEnvelope(rawText);
+                if (errorEnvelope?["error"] is JsonObject)
+                    return errorEnvelope;
+
+                if (errorEnvelope is not null)
+                {
+                    throw new InvalidOperationException(
+                        string.Create(
+                            CultureInfo.InvariantCulture,
+                            $"engine_unavailable: the analytics engine answered HTTP {(int)response.StatusCode} with a contract version 1 envelope that carries no error."));
+                }
+
+                throw new InvalidOperationException(DescribeFailedReply(response.StatusCode, rawText));
             }
 
+            JsonNode? parsed = TryParse(rawText, response.StatusCode);
             if (parsed is not JsonObject envelope || !IsValidContractV1Envelope(envelope))
-                throw new InvalidOperationException("incompatible_engine: the discovered server does not provide analytics contract version 1.");
-
-            if (!response.IsSuccessStatusCode && envelope["error"] is null)
             {
                 throw new InvalidOperationException(
-                    string.Create(CultureInfo.InvariantCulture, $"engine_unavailable: analytics HTTP status {(int)response.StatusCode}."));
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"incompatible_engine: the analytics engine answered HTTP {(int)response.StatusCode} with a body that is not an analytics contract version 1 envelope."));
             }
 
             return envelope;
+        }
+    }
+
+    /// <summary>Names the real cause of a non-success engine reply so an agent can act on it.</summary>
+    /// <param name="statusCode">The HTTP status the engine answered with.</param>
+    /// <param name="rawText">The reply body, possibly empty or not JSON.</param>
+    /// <returns>A message carrying the status code and the shape of the body.</returns>
+    private static string DescribeFailedReply(HttpStatusCode statusCode, string rawText)
+    {
+        string code = ((int)statusCode).ToString(CultureInfo.InvariantCulture);
+        string body = rawText.Trim();
+        if (body.Length == 0)
+        {
+            return $"engine_unavailable: the analytics engine answered HTTP {code} with an empty body. "
+                + "Check the engine log for the failure behind it.";
+        }
+
+        if (body[0] is not ('{' or '['))
+        {
+            return string.Create(
+                CultureInfo.InvariantCulture,
+                $"engine_unavailable: the analytics engine answered HTTP {code} with a non-JSON body ({Snippet(body)}).");
+        }
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"engine_unavailable: the analytics engine answered HTTP {code} with a body that is not an analytics contract version 1 envelope ({Snippet(body)}).");
+    }
+
+    /// <summary>Bounds a reply body for a message an agent reads.</summary>
+    /// <param name="body">The reply body text.</param>
+    /// <returns>At most <see cref="MaxSnippetChars"/> characters, whitespace collapsed.</returns>
+    private static string Snippet(string body)
+    {
+        string collapsed = string.Join(' ', body.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return collapsed.Length <= MaxSnippetChars
+            ? collapsed
+            : string.Concat(collapsed.AsSpan(0, MaxSnippetChars), "…");
+    }
+
+    /// <summary>Parses a reply that is expected to be a contract envelope, or reports why it is not.</summary>
+    /// <param name="rawText">The reply body text.</param>
+    /// <param name="statusCode">The HTTP status the engine answered with.</param>
+    /// <returns>The parsed node.</returns>
+    private static JsonNode? TryParse(string rawText, HttpStatusCode statusCode)
+    {
+        string body = rawText.Trim();
+        if (body.Length == 0)
+        {
+            throw new InvalidOperationException(
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"incompatible_engine: the analytics engine answered HTTP {(int)statusCode} with an empty body."));
+        }
+
+        try
+        {
+            return JsonNode.Parse(body);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException(
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"incompatible_engine: the analytics engine answered HTTP {(int)statusCode} with malformed JSON ({ex.Message})."),
+                ex);
+        }
+    }
+
+    /// <summary>Parses a reply as a contract envelope, returning <see langword="null"/> when it is not one.</summary>
+    /// <param name="rawText">The reply body text.</param>
+    /// <returns>The envelope, or <see langword="null"/>.</returns>
+    private static JsonObject? TryParseContractEnvelope(string rawText)
+    {
+        try
+        {
+            return JsonNode.Parse(rawText.Trim()) is JsonObject envelope && IsValidContractV1Envelope(envelope)
+                ? envelope
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 
