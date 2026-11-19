@@ -45,10 +45,12 @@ public sealed class InMemorySquadState
     {
         Files = existingFiles ?? new InMemoryFileSystem(caseSensitive: true);
         string applicationData = stateRoot is not null
-            ? Path.GetFullPath(stateRoot)
-            : applicationDataDirectory ?? Path.GetFullPath(existingFiles is null ? "/kw/application-data" : Path.Combine(Files.Root, "application-data"));
+            ? Full(stateRoot)
+            : applicationDataDirectory is not null
+                ? Full(applicationDataDirectory)
+                : Path.Combine(Files.Root, "application-data");
         string home = homeDirectory is not null
-            ? Path.GetFullPath(homeDirectory)
+            ? Full(homeDirectory)
             : stateRoot is null && existingFiles is null
                 ? Path.GetFullPath("/kw/home")
                 : Path.Combine(applicationData, "home");
@@ -113,6 +115,12 @@ public sealed class InMemorySquadState
     /// <returns>A new transaction.</returns>
     public SquadTransaction Transaction(ISquadTransactionObserver? observer = null) =>
         new(Store, Files, Semantics, new InProcessLease(LeaseHost), new FakeIdGenerator(), observer);
+
+    /// <summary>Resolves an anchor against the in-memory root, so a relative one never depends on the process directory.</summary>
+    /// <param name="path">The anchor directory the caller named.</param>
+    /// <returns>The full path on the in-memory file system.</returns>
+    private string Full(string path) =>
+        Path.IsPathFullyQualified(path) ? Path.GetFullPath(path) : Path.Combine(Files.Root, path);
 
     /// <summary>Creates a project directory and returns its canonical path.</summary>
     /// <param name="name">The directory name under the projects folder.</param>
