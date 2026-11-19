@@ -134,7 +134,16 @@ public sealed class SquadBriefBuilder(
     private static bool Accepts(string fact, string? value, out string error)
     {
         error = string.Empty;
-        if (value is null || BriefFacts.Vocabulary[fact].Contains(value, StringComparer.Ordinal))
+        if (value is null)
+        {
+            return true;
+        }
+
+        // Autonomy is read the way every other path reads it: trimmed and case-insensitive.
+        // Comparing the raw text here refused a value the resolver accepts.
+        if (string.Equals(fact, "autonomy", StringComparison.Ordinal)
+            ? BriefAutonomy.Normalize(value) is not null
+            : BriefFacts.Vocabulary[fact].Contains(value, StringComparer.Ordinal))
         {
             return true;
         }

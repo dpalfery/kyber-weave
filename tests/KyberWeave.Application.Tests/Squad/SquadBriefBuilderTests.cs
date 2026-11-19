@@ -54,9 +54,30 @@ public sealed class SquadBriefBuilderTests
     }
 
     [Fact]
-    public void TheGivenAutonomyWinsAndANoneSetRunHasNone()
+    public void TheGivenAutonomyWinsAndTheConfigurationIsTheLastSource()
     {
-        Assert.Equal("autonomous", _builder.ResolveAutonomy(Repo, "autonomous", KyberWeaveConfigDefaults.Product));
+        // The given value wins over both the registry and the configuration, read case- and space-insensitively.
+        _files.CreateDirectory(Repo);
+        _files.WriteAllText(Repo + "/AGENTS.md", "- **<autonomy>**: `supervised`\n");
+        KyberWeaveConfig configured = new()
+        {
+            Arbiter = KyberWeave.Core.Arbiter.ArbiterConfigDefaults.Product,
+            ConfigReg = new KyberWeave.Core.Configuration.ConfigRegConfig { Autonomy = "supervised" }
+        };
+
+        Assert.Equal("autonomous", _builder.ResolveAutonomy(Repo, "  AUTONOMOUS ", configured));
+
+        // With nothing given and no registry line, the configuration supplies the value.
+        _files.DeleteFile(Repo + "/AGENTS.md");
+        KyberWeaveConfig autonomous = new()
+        {
+            Arbiter = KyberWeave.Core.Arbiter.ArbiterConfigDefaults.Product,
+            ConfigReg = new KyberWeave.Core.Configuration.ConfigRegConfig { Autonomy = "autonomous" }
+        };
+
+        Assert.Equal("autonomous", _builder.ResolveAutonomy(Repo, null, autonomous));
+
+        // With nothing set anywhere, the run has none and reads the default.
         Assert.Null(_builder.ResolveAutonomy(Repo, null, KyberWeaveConfigDefaults.Product));
     }
 
