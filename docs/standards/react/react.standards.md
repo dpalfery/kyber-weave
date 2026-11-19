@@ -13,8 +13,9 @@ last-reviewed: 2026-11-19
 
 How React is written in this repository, wherever React code lives. Agents and skills resolve this
 document as `<react-coding-standard>`. It builds on the
-[TypeScript standard](../typescript/typescript.standards.md), which still governs the language.
-A UI displays the data its server provides and holds no business logic of its own.
+[TypeScript standard](../typescript/typescript.standards.md), which still governs the language, its
+"Output and display" rules and its completion gates. A UI displays the data its server provides and
+holds no business logic of its own.
 
 ## Naming and layout
 
@@ -26,25 +27,26 @@ A UI displays the data its server provides and holds no business logic of its ow
 
 ### Data from the server
 
-- Server data comes through TanStack Query (`useQuery`/`useMutation`) and the shared API client,
-  never `fetch` inside a component or an effect.
-- Every query-backed view renders four distinct states: loading, error, empty and data. A value
-  that has not loaded, or failed to load, is never shown as `0`, `—` or a default; measured zero,
-  derived value and missing data look different (see the TypeScript standard's display section).
+- Server data comes through TanStack Query (`useQuery`/`useMutation`) over the shared API client.
+  Nothing calls `fetch` outside that client: not a component, hook, effect, utility or event handler.
+- Every query-backed view renders four distinct states: loading, error, empty and data. A value that
+  has not loaded, or failed to load, is never shown as `0`, `—` or a default, and measured zero,
+  derived value and missing data look different (the TypeScript standard's "Output and display").
 - A section waits only for its own queries. Never gate a section on unrelated requests.
-- Validate each server response's shape at the API client boundary; a response that fails
-  validation is an error state, not a crash and not a silent default.
-- An error message says only what is known. Network and validation errors reach the user, not
-  only `console.error`.
+- The API client validates each response's shape. A response that fails validation becomes an error
+  state: never a crash, and never a silent default such as an empty list.
+- An error message says only what is known. Network and validation errors reach the user, not only
+  the console.
 
 ### Components
 
-- One responsibility per component: a component that both fetches and renders a non-trivial tree
-  is two components (a container that queries, a view that renders props).
-- Repeated logic becomes a custom hook, not a copied block or a seven-argument utility.
-- No prop drilling past two levels: use context or restructure.
-- Layouts are responsive and match the approved design exactly; a different layout is a plan
-  change, not an implementation choice.
+- One responsibility per component: a component that both fetches and renders a non-trivial tree is
+  two components (a container that queries, a view that renders props).
+- Repeated logic becomes a custom hook, not a copied block or a many-argument utility.
+- Prefer context or restructuring over passing a value through components that do not use it; as a
+  guide, a value passed through more than two components that only forward it is a sign to change.
+- Layouts are responsive and follow the design the plan names; a layout that departs from it is
+  raised with the planner, not decided in the implementation.
 
 ### State and effects
 
@@ -57,14 +59,17 @@ A UI displays the data its server provides and holds no business logic of its ow
 
 ### Rendering cost
 
-- Memoize (`React.memo`, `useMemo`, `useCallback`) when a measurement says to, not by default.
-- Heavy transforms do not run in the render path; do them on the server or in a `select` on the
-  query.
+- Memoize (`React.memo`, `useMemo`, `useCallback`) only where the React DevTools Profiler shows a
+  component re-rendering with unchanged props and that render is measurably slow; say so in the
+  change. Otherwise do not memoize.
+- Heavy transforms do not run in the render path; do them on the server or in a query `select`.
 
 ### Styling
 
-- Tailwind utility classes, composed with `clsx` and `tailwind-merge`. No inline `style` objects
-  for anything Tailwind expresses, and no colour the theme already names hardcoded.
+- Tailwind utility classes, composed with `clsx` and `tailwind-merge`. An inline `style` object is
+  only for a value computed at runtime (a measured width, a chart position).
+- Colours, spacing and fonts come from the Tailwind theme (`@theme` tokens in the app's stylesheet);
+  do not hardcode a value the theme defines.
 - Charts use Recharts; icons use `lucide-react`.
 
 ### Accessibility
@@ -75,41 +80,37 @@ requirement, not a polish step.
 
 ### Hygiene
 
-ESLint decides formatting and the mechanical rules; code that fails it is not merged. No
-`console.log` or commented-out blocks. No direct DOM queries (`document.getElementById`); a ref
-only where accessibility needs to move focus. A new dependency states what it does, why the
-existing stack cannot, and who maintains it.
+ESLint decides formatting and the mechanical rules; code that fails it is not merged. No commented-out
+blocks, and no `console` calls in merged code except `console.error` for an error that is also shown
+to the user. No direct DOM access of any kind (`document.querySelector`, `getElementById`,
+`getElementsBy…`, or a ref used to query the DOM); a ref is only for moving focus where accessibility
+requires it. A new dependency states what it does, why the existing stack cannot, and who maintains it.
 
 ## Testing
 
-- Components and hooks are unit-tested with Vitest and Testing Library over fixtures and mocked
-  query results, in memory: the web equivalent of the interface-first rule. Assert what the user
-  sees, by role and text, not implementation details.
-- Each data state (loading, error, empty, data) of a query-backed view has a test. Hold the
-  response back to assert loading; never assert a transient state after it may have passed.
+- Components and hooks are tested in memory with Vitest and Testing Library, rendering over fixtures
+  and mocked query results. Assert what the user sees, by role and text, not implementation details.
+- Each data state (loading, error, empty, data) of a query-backed view has a test. Hold the response
+  back to assert loading; never assert a transient state after it may have passed.
 - A mock one test needs is set up inside that test, never in shared setup.
-- Playwright end-to-end tests are the exception, for flows that need the real browser and server.
+- Playwright end-to-end tests are the exception, for behaviour that needs the real browser and
+  server: keyboard and focus flows and navigation across views.
 
 ## Commands
 
-From the package root:
-
-```bash
-npm ci
-npm run typecheck
-npm run lint
-npx vitest run <paths of the tests covering your change>
-npm run build
-```
+React code runs the TypeScript standard's completion gates (typecheck, lint, the related tests and
+the reachability check); there is no separate React command set.
 
 ## Security and data handling
 
-- `dangerouslySetInnerHTML` requires sanitized input and a comment naming the source.
+- Do not use `dangerouslySetInnerHTML`. Render text, or structure the data so React renders it. The
+  stack has no approved HTML sanitizer; adding one is a reviewed dependency decision first.
 - No secrets in client code; anything shipped to the browser is public.
 
 ## Done checklist
 
 ### Completion
 
-The commands above pass, every changed query-backed view has its four state tests, and a change
-to rendered output got a manual look in a browser, keyboard-only for anything interactive.
+The TypeScript completion gates pass, every changed query-backed view has its four data-state tests,
+and a change to rendered output got a manual look in a browser, keyboard-only for anything
+interactive.

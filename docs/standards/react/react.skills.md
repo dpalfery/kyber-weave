@@ -14,7 +14,8 @@ last-reviewed: 2026-11-19
 
 - Component structure, props and composition.
 - State, effects and the rules for when a value belongs to neither.
-- Styling through the mechanism the standard names.
-- Accessibility tooling and the lint rules the repository enforces.
-- Bundle splitting, asset sizing and render-cost measurement.
-- Unit and component tests with React Testing Library.
+- Data from the server: TanStack Query, the shared API client, the four data states.
+- Styling with Tailwind theme tokens.
+- Accessibility: semantic, keyboard-operable markup and focus management.
+- Render cost: when the React DevTools Profiler justifies memoization.
+- Component and hook tests with Vitest and Testing Library; Playwright for browser-only flows.
