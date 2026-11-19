@@ -18,14 +18,24 @@ component: KyberDash
 
 | Blocker | What it is | What it blocks | What it does not block | Resolved by |
 |---|---|---|---|---|
-| **BL-1** | OD-7 deletes the database and says every harness's history is re-ingested. History that reached the store only over OTLP has no harness file, so it cannot be re-ingested (requirements, BL-1; design, "Blocker BL-1") | Task 16.2, which ships the deleting schema-version bump, and every destructive rollout | Every other task: they run against in-memory fakes and delete nothing | An owner decision recorded in the decisions table. The options are listed there; none is chosen here |
-| **BL-2** | Which 17 harness ids the owner's store holds is unproven; the code gives candidates only | Release acceptance (task 16.4) and every destructive rollout: the claim that every harness in today's store is re-ingested | Development: tasks 6.1 to 10.12 cover every candidate | One proof route from design, "Closing the 17-id gap". The owner's own list is optional; no agent, test or code reads the store for it |
-| **BL-3** | `windsurf` and `aider` have no evidenced history format | Tasks 10.11 and 10.12 beyond their evidence step, and every destructive rollout | Their discovery entries, which report `SOURCE_FORMAT_UNEVIDENCED` (task 5.1) | Public format evidence, or the owner's authorisation to exclude. The specification grants neither |
+| **BL-1** | OD-7 deletes the database and says every harness's history is re-ingested. History that reached the store only over OTLP has no harness file, so it cannot be re-ingested (requirements, BL-1; design, "Blocker BL-1") | Gate 0.1, and through it task 16.2 (the deleting schema-version bump), closeout 18.1 and every destructive rollout | Every other task: they run against in-memory fakes and delete nothing | An owner decision recorded in the decisions table. The options are listed there; none is chosen here |
+| **BL-2** | Which 17 harness ids the owner's store holds is unproven; the code gives candidates only | Gate 0.2, and through it task 16.2, closeout 18.1 and every destructive rollout | Development: tasks 1.1 to 16.4 except 10.11, 10.12 and 16.2. Tasks 6.1 to 10.10 cover every candidate | One proof route from design, "Closing the 17-id gap", accepted by the owner. The owner's own list is optional; no agent, test or code reads the store for it |
+| **BL-3** | `windsurf` and `aider` have no evidenced history format | Gate 0.3, and through it tasks 10.11, 10.12 and 16.2, closeout 18.1 and every destructive rollout | Their discovery entries, which report `SOURCE_FORMAT_UNEVIDENCED` (task 5.1) | Public format evidence accepted by the owner, or the owner's authorisation to exclude. The specification grants neither |
 
-The blockers are **not tasks**. None has a checkbox, and none can be ticked by finishing work in
-this plan. Each is resolved only by an owner decision or by evidence, recorded in the decisions
-table of [requirements](requirements.md#decisions). A task that waits on a blocker says so on a
-`Blocked by:` line; its `Depends on:` line names task ids only.
+The blockers are **not work an agent can do**. Each is resolved only by the owner, recorded in the
+decisions table of [requirements](requirements.md#decisions) with the status `RESOLVED BY OWNER`.
+So that the task graph enforces them rather than prose, each blocker has one owner-only gate task in
+group 0 (0.1 for BL-1, 0.2 for BL-2, 0.3 for BL-3). Every task a blocker holds back names its gate
+on its `Depends on:` line, so the task file never puts it in the ready queue before the gate is
+done. A gate task's command passes only once the owner's resolution is recorded. A worker given a
+gate task must not write, choose or infer a resolution: it runs the command, and if the command
+fails it reports `BLOCKED` and leaves the gate open.
+
+**Limit of this enforcement.** The dependencies are machine-enforced. That only the owner closes a
+gate is not: the task-file format has no owner-only field, and a role that names no shipped agent
+falls back to a developer tier at dispatch (`TaskPromptService.cs`, lines 90–91). The gate is held
+by the gate's own acceptance criteria, by its command, and by review, which must reject any change
+that records `RESOLVED BY OWNER` without the owner's own instruction.
 
 **No destructive rollout until BL-1, BL-2 and BL-3 are all resolved.** "Destructive rollout" means
 merging to a release, publishing, or running on any machine a build that contains task 16.2's
@@ -58,6 +68,43 @@ change (Requirement 6.6). Task 15.1 creates the register and the test that enfor
 tasks depend on it.
 
 ## Tasks
+
+### 0. Owner resolution gates
+
+These tasks hold work back until the owner has decided. They write no code. A worker must not
+author their resolution; if the command fails, the task is reported `BLOCKED` and stays open.
+
+- [ ] 0.1 Gate: the owner has resolved BL-1
+  Difficulty: easy
+  Role: owner
+  Depends on: none
+  Capabilities: owner decision verification only; no authoring, no code, no delivery
+  Files: `docs/specs/kyberdash-relational-store/requirements.md`
+  Command: `grep -Eq "^[|] BL-1 [|].*[|] RESOLVED BY OWNER" docs/specs/kyberdash-relational-store/requirements.md`
+  Acceptance criteria: the BL-1 row of the decisions table records the owner's chosen option and the status `RESOLVED BY OWNER`, written on the owner's own instruction; the command passes. If it fails, report `BLOCKED` and change nothing.
+  - No agent, specification or conductor chooses among the BL-1 options, and none records loss
+    as accepted on the owner's behalf.
+  - _Requirements: 7.1, 7.6_
+- [ ] 0.2 Gate: the owner has resolved BL-2
+  Difficulty: easy
+  Role: owner
+  Depends on: none
+  Capabilities: owner decision verification only; no authoring, no code, no delivery
+  Files: `docs/specs/kyberdash-relational-store/requirements.md`
+  Command: `grep -Eq "^[|] BL-2 [|].*[|] RESOLVED BY OWNER" docs/specs/kyberdash-relational-store/requirements.md`
+  Acceptance criteria: the BL-2 row records the proof route that named the harness ids and the status `RESOLVED BY OWNER`; the command passes. If it fails, report `BLOCKED` and change nothing.
+  - No agent, test or code reads the owner's store to resolve it.
+  - _Requirements: 6.5, 11.1_
+- [ ] 0.3 Gate: the owner has resolved BL-3
+  Difficulty: easy
+  Role: owner
+  Depends on: none
+  Capabilities: owner decision verification only; no authoring, no code, no delivery
+  Files: `docs/specs/kyberdash-relational-store/requirements.md`
+  Command: `grep -Eq "^[|] BL-3 [|].*[|] RESOLVED BY OWNER" docs/specs/kyberdash-relational-store/requirements.md`
+  Acceptance criteria: the BL-3 row records, for both Windsurf and Aider, either a cited public format document or the owner's authorisation to exclude, and the status `RESOLVED BY OWNER`; the command passes. If it fails, report `BLOCKED` and change nothing.
+  - Evidence an agent finds is offered to the owner; it does not resolve the gate by itself.
+  - _Requirements: 6.2, 8.1_
 
 ### 1. Schema catalog
 
@@ -428,8 +475,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
 - [ ] 10.11 Establish a Windsurf source
   Difficulty: hard
   Technology: csharp
-  Depends on: 5.1
-  Blocked by: BL-3 (evidence or an owner decision; not a task)
+  Depends on: 5.1, 0.3
   Capabilities: public-format research, then a C# file reader into typed DTOs, with xUnit tests
   Files: `dash/server/KyberDash.Data/Harnesses/Windsurf/WindsurfMapper.cs`, `dash/server.tests/KyberDash.Data.Tests/Harnesses/WindsurfMapperTests.cs`, `docs/dash/field-register.md`
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~WindsurfMapper`
@@ -440,8 +486,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
 - [ ] 10.12 Establish an Aider source
   Difficulty: hard
   Technology: csharp
-  Depends on: 5.1
-  Blocked by: BL-3 (evidence or an owner decision; not a task)
+  Depends on: 5.1, 0.3
   Capabilities: public-format research, then a C# file reader into typed DTOs, with xUnit tests
   Files: `dash/server/KyberDash.Data/Harnesses/Aider/AiderMapper.cs`, `dash/server.tests/KyberDash.Data.Tests/Harnesses/AiderMapperTests.cs`, `docs/dash/field-register.md`
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~AiderMapper`
@@ -523,7 +568,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
 - [ ] 13.3 Assemble the all-harness fixture set
   Difficulty: medium
   Technology: csharp
-  Depends on: 6.3, 7.3, 7.4, 8.5, 9.2, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 10.10
+  Depends on: 6.3, 7.3, 7.4, 8.3, 8.4, 8.5, 9.2, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 10.10
   Capabilities: C# test fixture composition over in-memory fakes, with xUnit
   Files: `dash/server.tests/KyberDash.Application.Tests/Analytics/AllHarnessFixtureSet.cs`, `dash/server.tests/KyberDash.Application.Tests/Analytics/AllHarnessFixtureSetTests.cs`
   Command: `dotnet test dash/server.tests/KyberDash.Application.Tests --filter FullyQualifiedName~AllHarnessFixtureSet`
@@ -597,15 +642,15 @@ Each port maps only the fields its deleted TypeScript provider read, from
 - [ ] 16.2 Delete an older store and re-ingest
   Difficulty: medium
   Technology: csharp
-  Depends on: 16.1, 16.3
-  Blocked by: BL-1 (owner decision; not a task). Rollout also needs BL-2 and BL-3 resolved.
+  Depends on: 16.1, 16.3, 0.1, 0.2, 0.3
   Capabilities: C# file-lifecycle handling over a fake file system, with xUnit tests
   Files: `dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Version.cs`, `dash/server.tests/KyberDash.Data.Tests/Repositories/StoreRebuildTests.cs`
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~StoreRebuild`
-  Acceptance criteria: through a fake file system and the fake store, an older version deletes `canon.db`, `-wal` and `-shm` without opening them, keeps no copy, creates the schema and starts a full re-ingest; the log names the path, both versions, the settings reset and the history classes re-ingest cannot recover.
-  - Do not start until the owner has resolved BL-1 and the decision is recorded.
-  - When done, the deletion must not be merged to a release, published or run on any machine
-    until BL-1, BL-2 and BL-3 are all resolved (see "Open blockers").
+  Acceptance criteria: through a fake file system and the fake store, an older version deletes the store's database file and its write-ahead-log and shared-memory companions without opening them, keeps no copy, creates the schema and starts a full re-ingest; the log names the path, both versions, the settings reset and the history classes re-ingest cannot recover.
+  - Gates 0.1, 0.2 and 0.3 are dependencies, so this task is never ready before the owner has
+    resolved BL-1, BL-2 and BL-3.
+  - The deletion must not be merged to a release, published or run on any machine until those
+    resolutions are recorded (see "Open blockers"). No test touches a real database file.
   - _Requirements: 7.1, 7.2, 7.4, 7.6_
 - [ ] 16.3 Run a full re-ingest with per-harness counts
   Difficulty: medium
@@ -649,7 +694,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
 
 - [ ] 18.1 Specification closeout
   Difficulty: easy
-  Depends on: 17.1, 17.2
+  Depends on: 0.1, 0.2, 0.3, 10.11, 10.12, 14.2, 16.2, 17.1, 17.2
   Capabilities: documentation harvest and specification archiving, assigned to `docs-dev`
   Files: `docs/specs/kyberdash-relational-store/README.md`, `docs/specs/README.md`
   Command: `kyber-weave docs validate`
