@@ -98,8 +98,16 @@ public sealed class CopilotParallelDispatchTests
             JsonDocument.Parse(BatchWithAViewFirst()).RootElement.Clone(), null, context);
 
         Assert.NotNull(insertion);
-        Assert.Contains("modifiedArgs", insertion, StringComparison.Ordinal);
-        Assert.Contains("the packet", insertion, StringComparison.Ordinal);
+        using JsonDocument document = JsonDocument.Parse(insertion);
+        JsonElement modifiedArgs = document.RootElement.GetProperty("modifiedArgs");
+
+        // The insertion must replace the marked dispatch's own arguments: a document built from the view call beside
+        // it would carry that call's fields and hand the worker a prompt on the wrong call.
+        Assert.Equal("dev-medium", modifiedArgs.GetProperty("agent_type").GetString());
+        string prompt = modifiedArgs.GetProperty("prompt").GetString()!;
+        Assert.StartsWith("<task>the packet</task>", prompt, StringComparison.Ordinal);
+        Assert.EndsWith("Task T2.", prompt, StringComparison.Ordinal);
+        Assert.False(modifiedArgs.TryGetProperty("path", out _));
     }
 
     private static string BatchWithAViewFirst() =>
