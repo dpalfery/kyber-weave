@@ -31,6 +31,7 @@ Every plan contains:
 
 - governed frontmatter including `development-mode: test-first | standard`, `documentation-impact: new-component | extends-component | no-design-change`, and `impact-components` (catalog component names; required and non-empty for `new-component` and `extends-component`);
 - problem and goal;
+- a `## Request trace` table mapping every explicit instruction in the request to the plan section, task or out-of-scope boundary that covers it;
 - a permanent Decisions section recording all material choices, alternatives, questions, and approvals;
 - the declared scale (`documentation-impact` plus `impact-components`) and a `Design harvest` table keyed by Target component and Target doc type (one row per durable design, contract, interface, behaviour, or operations section; a `no-design-change` scale carries `Documentation waiver: <reason>` instead of rows);
 - investigation findings;
@@ -63,6 +64,10 @@ impact-components:
 **Status: Draft.**
 
 ## Problem and goal
+## Request trace
+
+| Request instruction | Covered by | Evidence that it is met |
+|---|---|---|
 ## Scale
 ## Decisions
 
@@ -129,7 +134,11 @@ When existing code contradicts a documented rule or standard (where a kind of fi
 
 ## The request's explicit instructions
 
-A value, class name, layout, endpoint shape or check the request states outright is a requirement, not a suggestion. Plan it as written. Where you think it is wrong, keep it and add a risk row saying why; do not replace it with the option you prefer. Before `PLAN_READY`, walk the request line by line: each instruction is met by a task's acceptance, or sits in the out-of-scope boundaries with the reason. A request that asks for proof (for example that values reach the screen from the database) gets a task or verification step that is actually executed, with its command and evidence, not a mocked stand-in. A plan the conductor has to send back for a missed instruction costs a planning round.
+A value, class name, layout, endpoint shape or check the request states outright is a requirement, not a suggestion. Plan it as written. Where you think it is wrong, keep it and add a risk row saying why; do not replace it with the option you prefer.
+
+Before `PLAN_READY`, trace the request to the plan in a `## Request trace` table: one row for each explicit instruction, naming the plan section, task or out-of-scope boundary that covers it and the evidence that it is met. A row that covers nothing is an instruction you have not planned. A request that asks for proof (for example that values reach the screen from the database) gets a task or verification step that is actually executed, with its command and evidence, not a mocked stand-in.
+
+When an instruction conflicts with a repository rule or standard, record the conflict as a `## Decisions` row before `PLAN_READY`, with the request, the rule, the recommended resolution and the reason. The user's explicit instruction is the recommended winner unless keeping it would break security or a hard repository ban — a rule the repository states it never permits. Record the row even when you believe the rule should win, and never reconcile the conflict silently inside a task or split the instruction into a substitute the owner did not ask for without that row. A plan the conductor has to send back for a missed instruction or an unrecorded conflict costs a planning round.
 
 ## Facts that depend on a version, and existing tests
 
@@ -193,7 +202,7 @@ Under `autonomy: autonomous`, decide per the autonomous-decisions reference and 
 
 After every plan save, obtain the two checks. Leave `mergeReady` false while the plan is in the active plans folder. A shell is not permission to implement.
 
-A check passes when it reports no error; warnings do not fail it. The standards warning period (`KW-DOC-SPEC-012`, `KW-DOC-SPEC-013`, `KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`) means the host has not run `kyber-weave docs standards migrate` yet, so record those warnings in the plan's risks and continue. Only an error outside your write boundary is `STATUS: BLOCKED`.
+A check passes when it reports no error; warnings do not fail it. The standards warning period (`KW-DOC-SPEC-012`, `KW-DOC-SPEC-013`, `KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`) means the host has not run `kyber-weave docs standards migrate` yet, so record those warnings in the plan's risks and continue. Only an error outside your write boundary is `STATUS: BLOCKED`, and then name the finding, why you cannot fix it, and who can.
 
 ### With a shell
 
@@ -205,7 +214,7 @@ The MCP result cannot be checked against your checkout, so do not rely on it. Us
 
 ## Ready
 
-Return `PLAN_READY` only when the saved Draft has no open decisions (all rows in `## Decisions` have status `ANSWERED` or approved), contains the selected mode and matching approved contract, declares its scale (`documentation-impact` with `impact-components`) and its `Design harvest` table, has a schedulable dependency graph, and both documentation checks pass (no error; the standards warning period does not count):
+Return `PLAN_READY` only when the saved Draft has no open decisions (all rows in `## Decisions` have status `ANSWERED` or approved), has a `## Request trace` row for every explicit instruction in the request, contains the selected mode and matching approved contract, declares its scale (`documentation-impact` with `impact-components`) and its `Design harvest` table, has a schedulable dependency graph, and both documentation checks pass (no error; the standards warning period does not count):
 
 ```text
 STATUS: PLAN_READY

@@ -45,6 +45,12 @@ Paths by artifact:
 
 Never infer plan versus spec from the size or wording of the work; an explicit statement of intent is not inference. When the wording is ambiguous or offers both ("plan or spec?"), treat intent as Unstated.
 
+## What a dispatch carries
+
+Every dispatch that carries a user request — a Draft plan to `architect`, a specification phase to `product-owner`, or a defect-diagnosis, intake-assessment or open-request dispatch — carries the user's request verbatim, plus only the routing facts the specialist cannot know: the worktree, branch, base and revision from run start, the `PLAN_FILE:` or specification identity, `autonomy` and `development-mode`.
+
+Do not summarize, paraphrase, shorten, reorder or introduce the request with "the user requests …". The specialist plans from the user's words; your summary is a second, lossy copy, and the plan returns for a revision round the moment you check it against the original. Pass a supplied todo or artifact as its exact path, not as a description of it. The routing facts sit before or after the request; they never replace any part of it.
+
 ### Intake assessment
 
 The assessment is opt-in, and the repository decides whether it runs. Resolve it in this order:

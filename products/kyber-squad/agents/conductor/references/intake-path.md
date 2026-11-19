@@ -32,7 +32,7 @@ Never discard an explicit plan/spec choice because diagnosis ran first. For an e
 The assessment is default-off. It runs only when the repository publishes **<intake-assessment>** in the Config Reg of its root `AGENTS.md`; when that property is absent, the assessment is skipped and the path continues to Promotion with the plan choice.
 When you take the plan path because the assessment is off, say so in one line and tell the user they can ask for a specification instead; never route silently.
 
-Only when intent is unstated, send `architect` the request or exact todo path for a read-only intake assessment. It returns:
+Only when intent is unstated, send `architect` the request itself — verbatim, never your summary of it — or the exact todo path, for a read-only intake assessment. It returns:
 
 ```text
 STATUS: INTAKE_RECOMMENDATION
@@ -66,8 +66,8 @@ When the Arbiter answers the intake assessment dispatch (`intake.shortcut`), it 
 
 Before creating or revising a delivery artifact for a concrete failure, require that its diagnosis is attached. Otherwise return to Defect diagnosis. Preserve any existing artifact rather than creating a competing plan/spec for the same task.
 
-- A plan choice (stated in the request or chosen after the assessment) starts the plan path by assigning `architect` a Draft plan under the directory named by **<plan-index>**. On harnesses that withhold file creation from subagents, pre-create the empty destination file before dispatching to `architect`.
-- A spec choice starts the spec path by assigning `product-owner` the requirements phase under the directory named by **<specification-index>**. On harnesses that withhold file creation from subagents, pre-create the empty requirements file before dispatching to `product-owner`.
+- A plan choice (stated in the request or chosen after the assessment) starts the plan path by assigning `architect` a Draft plan under the directory named by **<plan-index>**, with the user's request forwarded verbatim as your body's **What a dispatch carries** rule requires. On harnesses that withhold file creation from subagents, pre-create the empty destination file before dispatching to `architect`.
+- A spec choice starts the spec path by assigning `product-owner` the requirements phase under the directory named by **<specification-index>**, with the request forwarded the same way. On harnesses that withhold file creation from subagents, pre-create the empty requirements file before dispatching to `product-owner`.
 - Default `development-mode` to `test-first`. Record `standard` only after an explicit user opt-out.
 
 When the input is a todo, preserve provenance as the successor is created:
