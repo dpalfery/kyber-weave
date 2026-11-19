@@ -1499,17 +1499,6 @@ public abstract class SquadDeploymentStateTestBase : SquadStateDocumentFixtures
         string Subject,
         string LiveRelativePath);
 
-    internal sealed class FakeGlobalRootResolver(IReadOnlyDictionary<SquadTarget, string> roots)
-        : ISquadGlobalRootResolver
-    {
-        public string ResolveGlobalRoot(SquadTarget target)
-        {
-            return roots.TryGetValue(target, out string? root)
-                ? root
-                : throw new ArgumentOutOfRangeException(nameof(target), target, "No root mapped for target.");
-        }
-    }
-
     internal sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow()
