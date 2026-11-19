@@ -122,7 +122,7 @@ internal static class ArbiterTestServices
             ids ?? Get<IIdGenerator>(),
             newDecisionId,
             prompts,
-            Get<IPlanRootResolver>());
+            Get<IHookRunContextResolver>());
 
     /// <summary>The git facts over the real adapters.</summary>
     internal static HookGitFacts HookGitFacts(string workingDirectory, string? homeDirectory = null, string? arbiterDirectory = null) =>

@@ -41,6 +41,9 @@ code-refs:
   - RuleEffects
   - PlanFacts
   - PlanRootResolver
+  - HookRunContextResolver
+  - HookRunContext
+  - HookEvent
   - TextExcerpts
   - ArbiterHookTimeout
 ---

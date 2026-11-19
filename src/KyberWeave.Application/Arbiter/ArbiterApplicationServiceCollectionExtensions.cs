@@ -65,6 +65,14 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton<IPlanFacts>(sp => new Core.Arbiter.Plans.PlanFacts(
             sp.GetRequiredService<IPlanFileResolver>(),
             sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<IHookRunContextResolver>(sp => new HookRunContextResolver(
+            sp.GetRequiredService<IGitRepositoryFacts>(),
+            sp.GetRequiredService<IPlanFileResolver>(),
+            sp.GetRequiredService<IPlanRootResolver>(),
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IRunStateStore>()));
         services.TryAddSingleton<IArbiterPlanService, ArbiterPlanService>();
         services.TryAddSingleton<IArbiterTuneService, ArbiterTuneService>();
         services.TryAddSingleton<IArbiterAuditService, ArbiterAuditService>();
@@ -111,7 +119,7 @@ public static class ArbiterApplicationServiceCollectionExtensions
                 ids,
                 () => ids.NewSortableId(clock.GetUtcNow()),
                 sp.GetRequiredService<ITaskPromptServiceFactory>(),
-                sp.GetRequiredService<IPlanRootResolver>());
+                sp.GetRequiredService<IHookRunContextResolver>());
         });
         services.TryAddSingleton<IArbiterHookHost>(sp => sp.GetRequiredService<HookCommand>());
         services.TryAddSingleton<IArbiterServeService, ArbiterServeService>();

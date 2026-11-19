@@ -357,9 +357,10 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         try
         {
             // The plan, its task file and the git facts are read in the worktree that holds the plan, which in a
-            // conductor run is often not the checkout the hook runs in. The ledger stays with the hook's directory
-            // so a dispatch and its return still pair.
-            string evaluationRoot = _planRoots.Resolve(repoRoot, prompt);
+            // conductor run is often not the checkout the hook runs in. The invocation resolved that worktree once
+            // through the run-context resolver; the resolver call here is the fallback for a caller outside the hook.
+            // The ledger stays with the hook's directory so a dispatch and its return still pair.
+            string evaluationRoot = context.RunContext?.Worktree ?? _planRoots.Resolve(repoRoot, prompt);
             if (!string.Equals(evaluationRoot, repoRoot, StringComparison.Ordinal))
             {
                 context.Log.WriteLine($"Arbiter: evaluating against worktree '{evaluationRoot}', which holds the dispatch's plan.");

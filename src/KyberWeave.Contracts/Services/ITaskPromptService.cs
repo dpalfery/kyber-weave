@@ -34,6 +34,22 @@ public sealed record TaskPromptRequest(
     string? Harness = null,
     string? RetryText = null);
 
+/// <summary>Why a task prompt was not built, which decides whether the dispatch may continue.</summary>
+public enum TaskPromptRefusalKind
+{
+    /// <summary>A prompt was built, so there is no refusal.</summary>
+    None,
+
+    /// <summary>
+    /// A plan, task file, task id or prior-results file that is absent or unreadable. The dispatch continues: an
+    /// input the hook could not read is not a finding against the work.
+    /// </summary>
+    MissingInput,
+
+    /// <summary>A positive finding about the dispatch itself, such as a path that escapes the run's scratch area.</summary>
+    Finding,
+}
+
 /// <summary>The task prompt, or why no prompt was built.</summary>
 /// <param name="Built">Whether <paramref name="Prompt"/> holds a prompt.</param>
 /// <param name="Prompt">The whole prompt, each part inside its own named tag; empty when none was built.</param>
@@ -53,6 +69,7 @@ public sealed record TaskPromptRequest(
 /// The sentence reporting that a removed agent's name was replaced by the agent that works the task now, or null
 /// when nothing was substituted.
 /// </param>
+/// <param name="RefusalKind">Whether a refusal is an unreadable input, which never blocks, or a positive finding.</param>
 public sealed record TaskPromptResult(
     bool Built,
     string Prompt,
@@ -63,12 +80,17 @@ public sealed record TaskPromptResult(
     IReadOnlyList<string> LeftOut,
     string? Refusal,
     string? PromptFile = null,
-    string? Substitution = null)
+    string? Substitution = null,
+    TaskPromptRefusalKind RefusalKind = TaskPromptRefusalKind.None)
 {
     /// <summary>A refusal that names the command repairing the reason no prompt was built.</summary>
     /// <param name="refusal">Why the prompt could not be built, and what repairs it.</param>
-    public static TaskPromptResult NotBuilt(string refusal) => new(
-        false, string.Empty, null, null, null, null, [], refusal);
+    /// <param name="kind">
+    /// Whether the refusal is an input the hook could not read, which never blocks a dispatch, or a positive finding
+    /// about the dispatch, which does.
+    /// </param>
+    public static TaskPromptResult NotBuilt(string refusal, TaskPromptRefusalKind kind = TaskPromptRefusalKind.MissingInput) => new(
+        false, string.Empty, null, null, null, null, [], refusal, RefusalKind: kind);
 }
 
 /// <summary>
