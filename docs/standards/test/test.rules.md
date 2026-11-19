@@ -5,7 +5,7 @@ doc-type: rule
 status: current
 technology: test
 owner: dpalfery
-last-reviewed: 2026-11-16
+last-reviewed: 2026-11-19
 ---
 
 # test rules
@@ -13,17 +13,21 @@ last-reviewed: 2026-11-16
 ## Unit tests by default
 
 - New behaviour gets an in-memory unit test. In C# that test runs against an interface with the
-  shared fakes the seam register names; in a React or TypeScript UI it renders the component over
-  fixtures and mocked query results, as the React standard says; in Rust it is a `#[cfg(test)]`
-  unit test beside the code it exercises, as the Rust standard says.
+  shared fakes the seam register names; in a React or TypeScript UI, including the tray UI, it
+  renders the component over fixtures and mocked query results, as the React standard says (the
+  tray UI's gate is `npm --prefix dash/tray/ui run test`, the Tauri standard's completion gate); in
+  Rust, including Tauri's Rust, it is a
+  `#[cfg(test)]` unit test beside the code it exercises, as the Rust standard says. A GitHub Actions
+  change is pinned by a repository-policy test in `tests/KyberWeave.RepoPolicy.Tests`, as the
+  GitHub Actions standard says.
 - Integration and end-to-end tests are the exception. A C# integration test proves an adapter or a
   whole flow against the real resource in the integration project; a browser flow that needs the
   real browser and server is a Playwright end-to-end test. Both run in CI, never in a developer's
   task gate or the review council's gates; `AGENTS.md` names their homes.
 - In C#, a behaviour you can only test through a real disk, process or network means a seam is
-  missing: add the seam and unit-test against it. The browser-only behaviour the React standard
-  sends to Playwright (keyboard and focus behaviour, multi-view navigation) is the sanctioned
-  exception.
+  missing: add the seam and unit-test against it. Browser-only behaviour that the React standard
+  sends to Playwright is the sanctioned exception. That standard gives the examples; this rule does
+  not keep a second list.
 
 ## Running tests in this repository
 

@@ -28,9 +28,10 @@ holds no business logic of its own.
 ### Data from the server
 
 - Server data comes through TanStack Query (`useQuery`/`useMutation`) over the shared API client.
-  All network access goes through that client: nothing else calls `fetch`, `axios`,
-  `XMLHttpRequest`, `WebSocket` or `EventSource` — not a component, hook, effect, utility or event
-  handler. A live channel (SignalR, WebSocket) is wrapped by a client module the same way.
+  All network access goes through that client. No other code — not a component, hook, effect,
+  utility or event handler — calls a network API. Named clients are examples of that ban, not the
+  whole of it: `fetch`, `axios`, `ky`, `XMLHttpRequest`, `sendBeacon`, `WebSocket`, `EventSource`
+  and `WebTransport`. A live channel (SignalR, WebSocket) is wrapped by a client module the same way.
 - Every query-backed view renders four distinct states: loading, error, empty and data. A value that
   has not loaded, or failed to load, is never shown as `0`, `—` or a default, and measured zero,
   derived value and missing data look different (the TypeScript standard's "Output and display").
@@ -61,17 +62,22 @@ holds no business logic of its own.
 
 ### Rendering cost
 
-- Memoize (`React.memo`, `useMemo`, `useCallback`) only with a React DevTools Profiler measurement:
-  record the commit duration before and after in the change. Memoize a component that re-renders
-  with unchanged props, or a computation (a sort or filter over a large list) that the Profiler shows
-  repeating on every render. Otherwise do not memoize.
+- Memoize (`React.memo`, `useMemo`, `useCallback`) only with a React DevTools Profiler measurement.
+  Record the commit duration before and after in the pull request description. Memoize a component
+  that re-renders with unchanged props, or a computation (a sort or filter) whose repeated work
+  shows in that recorded duration. There is no separate list-size cutoff; the recorded commit
+  duration is the cost threshold. Otherwise do not memoize.
 - Heavy transforms do not run in the render path; do them on the server or in a query `select`.
 
 ### Styling
 
 - Tailwind utility classes, composed with `clsx` and `tailwind-merge`. An inline `style` object is
   only for a value the theme cannot express: one computed at runtime (a measured width, a chart
-  position) or provided by the server (a status colour, passed as a CSS variable).
+  position) or provided by the server (a status colour). A server-provided value is used only after
+  the code checks it against an allowlist — a theme token name, or a colour that matches `#rgb` or
+  `#rrggbb`, with an optional alpha of the same length — and is then passed as a CSS variable of
+  that checked value. An unchecked server string is never written into a style, a CSS variable or a
+  stylesheet.
 - Colours, spacing and fonts come from the Tailwind theme (`@theme` tokens in the app's stylesheet);
   do not hardcode a value the theme defines.
 - Charts use Recharts; icons use `lucide-react`.
@@ -88,15 +94,19 @@ ESLint decides formatting and the mechanical rules; code that fails it is not me
 blocks, and no `console` calls in merged code except `console.error` for an error that is also shown
 to the user. No direct DOM access of any kind (`document.querySelector`, `getElementById`,
 `getElementsBy…`, or a ref used to look up nodes React renders). A ref may move focus, measure an
-element (`getBoundingClientRect`, `ResizeObserver`) or observe it (`IntersectionObserver`); browser
-APIs outside React's tree (`matchMedia`, `document.title`) are reached from an effect. A new dependency states what it does, why the existing stack cannot, and who maintains it.
+element (`getBoundingClientRect`, `ResizeObserver`) or observe it (`IntersectionObserver`). A browser
+API outside React's tree may be read once to seed state, in a lazy state initializer
+(`useState(() => window.matchMedia(...).matches)`). Subscribing to that API, and writing through it
+(`document.title`, a `matchMedia` change listener), happens in an effect. A new dependency states what it does, why the existing stack cannot, and who maintains it.
 
 ## Testing
 
 - Components and hooks are tested in memory with Vitest and Testing Library, rendering over fixtures
   and mocked query results. A fixture or mock satisfies the API client's response schema: build it
-  through the client's validator or a shared factory, so a mock cannot drift from what production
-  accepts. Assert what the user sees, by role and text, not implementation details.
+  through the client's validator, or through a shared factory that returns only values that
+  validator accepts. A test that uses the fixture fails when the fixture does not pass the
+  validator, so a factory cannot drift from what production accepts. Assert what the user sees, by
+  role and text, not implementation details.
 - Each data state (loading, error, empty, data) of a query-backed view has a test. Hold the response
   back to assert loading; never assert a transient state after it may have passed.
 - A mock one test needs is set up inside that test, never in shared setup.

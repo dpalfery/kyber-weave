@@ -13,8 +13,9 @@ last-reviewed: 2026-11-19
 ## Interface first, unit tested
 
 The seam register ([`docs/reference/seams.md`](../../reference/seams.md)) is the authority for
-which seams exist and where each adapter and fake lives; where `AGENTS.md`'s "Seams" summary is
-narrower, the register wins.
+which seams exist and where each adapter and fake lives. `AGENTS.md`'s "Seams" section is a summary
+of that register; when the two disagree — the summary narrower, broader, or in conflict — the
+register wins.
 
 - Write the interface before the class. A class that does work depends on interfaces, not on a
   concrete service that touches an outside resource; the sealed framework types the register lists
