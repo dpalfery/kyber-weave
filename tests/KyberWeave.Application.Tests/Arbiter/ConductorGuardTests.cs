@@ -340,6 +340,26 @@ public sealed class ConductorGuardTests : IDisposable
         public bool HasLinkBelow(string root, string fullPath) => false;
     }
 
+    /// <summary>
+    /// Run 9's layout: the Copilot session started in the canonical checkout while `run start` put the plan and its
+    /// task file in a worktree. The conductor may read the plan it is asked to work from, in that worktree.
+    /// </summary>
+    [Fact]
+    public void APlanInTheRunWorktree_IsReadableWhileThePayloadCwdIsTheCanonicalCheckout()
+    {
+        string main = ArbiterTestRoots.Under("kw", "canonical");
+        string worktree = ArbiterTestRoots.Under("kw", "run");
+        _host.Files.CreateDirectory(main);
+        _host.Files.CreateDirectory(Path.Combine(worktree, "docs", "plans"));
+        string plan = Path.Combine(worktree, "docs", "plans", "2026-11-18-run.md");
+        _host.Write(plan, "# Plan\n");
+        _host.Write(Path.Combine(worktree, "docs", "plans", "2026-11-18-run.tasks.yml"), "schema: 2\n");
+        _host.Git.CommonDirectory = Path.Combine(main, ".git");
+        _host.Git.Worktrees[main] = [main, worktree];
+
+        Assert.Empty(RunIn(main, plan));
+    }
+
     private static string Event(string tool, object arguments) =>
         JsonSerializer.Serialize(new { cwd = Cwd, toolName = tool, toolArgs = arguments });
 

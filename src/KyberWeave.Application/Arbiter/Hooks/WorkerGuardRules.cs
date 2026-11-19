@@ -1,8 +1,7 @@
 using System.Globalization;
+using System.Text.Json.Nodes;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Rules;
 
@@ -96,12 +95,12 @@ internal static class WorkerGuardRules
     {
         try
         {
-            if (TurnEndOf(harness, stdin) is not null)
+            if (WorkerGuardEventReader.TurnEndOf(harness, stdin) is not null)
             {
                 return true;
             }
 
-            ToolCall? call = Read(harness, stdin);
+            ToolCall? call = WorkerGuardEventReader.Read(harness, stdin);
             return call is not null
                 && (call.WritePath is not null
                     || IsCommandJudged(call)
@@ -360,91 +359,8 @@ internal static class WorkerGuardRules
         return idle > TimeSpan.FromMinutes(window.Minutes) || (window.IsOver(window.LastCall) && idle > TimeSpan.FromMinutes(1));
     }
 
-    /// <summary>
-    /// The agent whose turn a Copilot CLI <c>subagentStop</c> event ends, or null for any other event. The event
-    /// names an agent and a stop reason and no tool.
-    /// </summary>
-    /// <param name="harness">The harness token.</param>
-    /// <param name="stdin">The hook event as JSON.</param>
-    internal static string? TurnEndOf(string harness, string stdin)
-    {
-        if (!string.Equals(harness, CopilotCliHarness, StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        using JsonDocument document = JsonDocument.Parse(stdin);
-        JsonElement root = document.RootElement;
-        return root.ValueKind == JsonValueKind.Object
-            && Text(root, "toolName") is null
-            && Text(root, "stopReason") is not null
-                ? Text(root, "agentId")
-                : null;
-    }
-
     internal static string KeyOf(string harness, string agentId) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(harness + "\n" + agentId)))[..24];
-
-    internal static ToolCall? Read(string harness, string stdin)
-    {
-        using JsonDocument document = JsonDocument.Parse(stdin);
-        JsonElement root = document.RootElement;
-        if (root.ValueKind != JsonValueKind.Object)
-        {
-            return null;
-        }
-
-        string? cwd = Text(root, "cwd");
-        if (string.Equals(harness, CopilotCliHarness, StringComparison.Ordinal))
-        {
-            // A subagent's call carries the runtime's subagent fields at the top level; a root call carries none.
-            string? agentId = Text(root, "agentId") ?? Text(root, "agent_id");
-            string? parent = Text(root, "parentAgentId") ?? Text(root, "parent_agent_id");
-            string? type = Text(root, "agentType") ?? Text(root, "agent_type");
-            string? tool = Text(root, "toolName");
-            if (agentId is null || parent is null || SquadAgentOf(type) is not { } agent || tool is null)
-            {
-                return null;
-            }
-
-            JsonObject? args = ArgumentsOf(root, "toolArgs");
-            string? path = tool is "edit" or "create" && args is not null ? NodeText(args, "path") : null;
-            string? command = tool is "bash" && args is not null ? NodeText(args, "command") : null;
-            return new ToolCall(harness, agentId, agent, cwd, path, command, Text(root, "sessionId"));
-        }
-
-        if (string.Equals(harness, ClaudeHarness, StringComparison.Ordinal))
-        {
-            // Claude adds agent_id and agent_type only to a call made inside a subagent.
-            string? agentId = Text(root, "agent_id");
-            string? tool = Text(root, "tool_name");
-            if (agentId is null || SquadAgentOf(Text(root, "agent_type")) is not { } agent || tool is null)
-            {
-                return null;
-            }
-
-            JsonObject? input = ArgumentsOf(root, "tool_input");
-            string? path = input is null
-                ? null
-                : tool switch
-                {
-                    "Edit" or "Write" or "MultiEdit" => NodeText(input, "file_path"),
-                    "NotebookEdit" => NodeText(input, "notebook_path"),
-                    _ => null,
-                };
-            string? command = tool is "Bash" && input is not null ? NodeText(input, "command") : null;
-            return new ToolCall(harness, agentId, agent, cwd, path, command, Text(root, "session_id"));
-        }
-
-        return null;
-    }
-
-    internal static ArbiterSquadAgent? SquadAgentOf(string? type) =>
-        type is not null
-        && !string.Equals(type, "conductor", StringComparison.OrdinalIgnoreCase)
-        && ArbiterSquadCatalog.LoadEmbedded().Agents.TryGetValue(type, out ArbiterSquadAgent? agent)
-            ? agent
-            : null;
 
     /// <summary>The refusal an exhausted budget answers with.</summary>
     internal static string ExhaustedRefusal(bool seat, bool writesSeatFile, int calls, TimeSpan elapsed, int maxCalls, int minutes)
@@ -493,40 +409,6 @@ internal static class WorkerGuardRules
                 ["permissionDecision"] = "deny",
                 ["permissionDecisionReason"] = reason,
             }.ToJsonString();
-
-    internal static JsonObject? ArgumentsOf(JsonElement root, string name)
-    {
-        if (!root.TryGetProperty(name, out JsonElement value))
-        {
-            return null;
-        }
-
-        try
-        {
-            return value.ValueKind switch
-            {
-                JsonValueKind.Object => JsonNode.Parse(value.GetRawText()) as JsonObject,
-                JsonValueKind.String => JsonNode.Parse(value.GetString() ?? string.Empty) as JsonObject,
-                _ => null,
-            };
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    internal static string? Text(JsonElement element, string name) =>
-        element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String
-        && value.GetString() is { Length: > 0 } text
-            ? text
-            : null;
-
-    internal static string? NodeText(JsonObject node, string name) =>
-        node.TryGetPropertyValue(name, out JsonNode? value) && value is JsonValue scalar
-        && scalar.TryGetValue(out string? text) && !string.IsNullOrWhiteSpace(text)
-            ? text
-            : null;
 
     internal static string OneLine(string message) =>
         message.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\n', ' ').Replace('\r', ' ');

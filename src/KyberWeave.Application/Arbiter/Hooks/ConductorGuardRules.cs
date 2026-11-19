@@ -1,4 +1,3 @@
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Arbiter;
@@ -7,7 +6,7 @@ using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Arbiter.Hooks;
 
-/// <summary>The conductor guard's pure half: which tools the conductor may call, how a hook event is read, and the documents it answers with.</summary>
+/// <summary>The conductor guard's pure half: which tools the conductor may call, and the documents it answers with.</summary>
 internal static partial class ConductorGuardRules
 {
     /// <summary>The workflow explanation appended to every model-facing message.</summary>
@@ -62,7 +61,7 @@ internal static partial class ConductorGuardRules
     internal static readonly string[] ContractExtensions = [".md", ".json", ".yml", ".yaml"];
 
     /// <summary>Whether the call is permitted by its name alone: the conductor's own tools, the docs and Arbiter servers, and the allowed server.</summary>
-    internal static bool IsPermittedByName(ToolCall call, string? allowedMcpServer) =>
+    internal static bool IsPermittedByName(ConductorToolCall call, string? allowedMcpServer) =>
         PermittedTools.Contains(call.Name)
         || DocsServerPrefixes.Any(prefix => call.Name.StartsWith(prefix, StringComparison.Ordinal))
         || ArbiterToolNames.Contains(call.Name)
@@ -84,18 +83,17 @@ internal static partial class ConductorGuardRules
     /// The specialist a <c>task</c> call dispatches to when it writes project files and is not the run-start dispatch itself,
     /// so a run must be live for it (<c>KW-ARB-RUN-001</c>); null when no run-start check applies to the call.
     /// </summary>
-    internal static string? RunStartTargetOf(ToolCall call)
+    internal static string? RunStartTargetOf(ConductorToolCall call)
     {
         if (!string.Equals(call.Name, "task", StringComparison.Ordinal)
-            || call.Arguments is not { } arguments
-            || !TryGetText(arguments, "agent_type", out string? target)
+            || call.AgentType is not { } target
             || !ArbiterSquadCatalog.LoadEmbedded().Agents.TryGetValue(target, out ArbiterSquadAgent? agent)
             || !RunWriterProfiles.IsWriter(agent.CapabilityProfile))
         {
             return null;
         }
 
-        string prompt = TryGetText(arguments, "prompt", out string? text) ? text : string.Empty;
+        string prompt = call.Prompt ?? string.Empty;
         return string.Equals(
                 TriggerClassifier.PlannerMarkerFor(prompt, HeaderBlock.Parse(prompt).Headers),
                 "RUN-START",
@@ -109,68 +107,58 @@ internal static partial class ConductorGuardRules
     /// call, and calls decided by name or by the conductor's one shell grammar. A <c>view</c> of a path and a dispatch of a
     /// file-writing specialist need a read, so they are left to the guard.
     /// </summary>
-    /// <param name="stdin">The hook event as JSON.</param>
+    /// <param name="hookEvent">The typed event the adapter read.</param>
     /// <param name="allowedMcpServer">An MCP server whose tools the conductor may call, or null.</param>
     /// <param name="answer">The document to write, or null to write nothing.</param>
-    /// <returns>True when <paramref name="answer"/> is the whole decision; false when the guard must read, and when the event is unreadable, so the guard reports it.</returns>
-    internal static bool TryDecideWithoutReads(string stdin, string? allowedMcpServer, out string? answer)
+    /// <returns>True when <paramref name="answer"/> is the whole decision; false when the guard must read.</returns>
+    internal static bool TryDecideWithoutReads(ConductorGuardEvent hookEvent, string? allowedMcpServer, out string? answer)
     {
+        ArgumentNullException.ThrowIfNull(hookEvent);
         answer = null;
-        try
+        if (hookEvent.Calls.Count == 0)
         {
-            using JsonDocument document = JsonDocument.Parse(stdin);
-            JsonElement root = document.RootElement;
-            List<ToolCall> calls = ReadCalls(root);
-            if (calls.Count == 0)
+            answer = hookEvent.TransformedPrompt is { } prompt
+                ? new JsonObject { ["modifiedTransformedPrompt"] = $"{prompt}\n\n{WorkflowReminder}" }.ToJsonString()
+                : Deny("The conductor guard found no tool name in this event, so it was denied.");
+            return true;
+        }
+
+        if (hookEvent.IsWorkerCall)
+        {
+            return true;
+        }
+
+        foreach (ConductorToolCall call in hookEvent.Calls)
+        {
+            if (IsPermittedByName(call, allowedMcpServer))
             {
-                answer = TryGetText(root, "transformedPrompt", out string? prompt)
-                    ? new JsonObject { ["modifiedTransformedPrompt"] = $"{prompt}\n\n{WorkflowReminder}" }.ToJsonString()
-                    : Deny("The conductor guard found no tool name in this event, so it was denied.");
-                return true;
+                continue;
             }
 
-            if (IsWorkerCall(root))
+            if (!call.HasArguments)
             {
-                return true;
-            }
-
-            foreach (ToolCall call in calls)
-            {
-                if (IsPermittedByName(call, allowedMcpServer))
-                {
-                    continue;
-                }
-
-                if (call.Arguments is not { } arguments)
-                {
-                    answer = Deny($"{DenyReason} Blocked tool: {call.Name}.");
-                    return true;
-                }
-
-                switch (call.Name)
-                {
-                    case "view":
-                        return false;
-                    case "bash" or "powershell":
-                        if (TryGetText(arguments, "command", out string? command) && RunStartCommand().IsMatch(command))
-                        {
-                            continue;
-                        }
-
-                        break;
-                }
-
                 answer = Deny($"{DenyReason} Blocked tool: {call.Name}.");
                 return true;
             }
 
-            return !calls.Any(call => RunStartTargetOf(call) is not null);
+            switch (call.Name)
+            {
+                case "view":
+                    return false;
+                case "bash" or "powershell":
+                    if (call.Command is { } command && RunStartCommand().IsMatch(command))
+                    {
+                        continue;
+                    }
+
+                    break;
+            }
+
+            answer = Deny($"{DenyReason} Blocked tool: {call.Name}.");
+            return true;
         }
-        catch (Exception)
-        {
-            answer = null;
-            return false;
-        }
+
+        return !hookEvent.Calls.Any(call => RunStartTargetOf(call) is not null);
     }
 
     /// <summary>The directory's full path with forward slashes and exactly one trailing slash.</summary>
@@ -180,86 +168,6 @@ internal static partial class ConductorGuardRules
         $"{Normalize(Path.GetFullPath(directory, baseDirectory)).TrimEnd('/')}/";
 
     internal static string Normalize(string path) => path.Replace('\\', '/');
-
-    internal static List<ToolCall> ReadCalls(JsonElement root)
-    {
-        List<ToolCall> calls = [];
-        if (root.TryGetProperty("toolCalls", out JsonElement batch) && batch.ValueKind == JsonValueKind.Array)
-        {
-            foreach (JsonElement call in batch.EnumerateArray())
-            {
-                calls.Add(new ToolCall(
-                    TryGetText(call, "name", out string? name) ? name : string.Empty,
-                    ArgumentsOf(call, "args")));
-            }
-
-            return calls;
-        }
-
-        if (TryGetText(root, "toolName", out string? toolName))
-        {
-            calls.Add(new ToolCall(toolName, ArgumentsOf(root, "toolArgs")));
-        }
-        else if (TryGetText(root, "tool_name", out string? snakeName))
-        {
-            calls.Add(new ToolCall(snakeName, ArgumentsOf(root, "tool_input")));
-        }
-
-        return calls;
-    }
-
-    /// <summary>Copilot sends tool arguments either as an object or as a JSON string.</summary>
-    internal static JsonElement? ArgumentsOf(JsonElement parent, string property)
-    {
-        if (!parent.TryGetProperty(property, out JsonElement arguments))
-        {
-            return null;
-        }
-
-        if (arguments.ValueKind != JsonValueKind.String)
-        {
-            return arguments;
-        }
-
-        using JsonDocument parsed = JsonDocument.Parse(arguments.GetString() ?? string.Empty);
-        return parsed.RootElement.Clone();
-    }
-
-    /// <summary>
-    /// A worker's tool call, by the runtime's own subagent fields. Copilot omits all three on a root
-    /// call, writes them at the top level where tool arguments cannot reach, and in Copilot CLI
-    /// 1.0.109 never sends a worker's call to the conductor's hooks at all. Requiring the full set,
-    /// and a type other than the conductor, keeps a stray id from opening the guard.
-    /// </summary>
-    internal static bool IsWorkerCall(JsonElement root)
-    {
-        bool camel = TryGetText(root, "agentId", out _)
-            && TryGetText(root, "parentAgentId", out _)
-            && TryGetText(root, "agentType", out string? camelType)
-            && !IsConductor(camelType);
-        bool snake = TryGetText(root, "agent_id", out _)
-            && TryGetText(root, "parent_agent_id", out _)
-            && TryGetText(root, "agent_type", out string? snakeType)
-            && !IsConductor(snakeType);
-        return camel || snake;
-
-        static bool IsConductor(string type) => string.Equals(type, "conductor", StringComparison.OrdinalIgnoreCase);
-    }
-
-    internal static bool TryGetText(JsonElement parent, string property, out string text)
-    {
-        if (parent.ValueKind == JsonValueKind.Object
-            && parent.TryGetProperty(property, out JsonElement value)
-            && value.ValueKind == JsonValueKind.String
-            && value.GetString() is { Length: > 0 } found)
-        {
-            text = found;
-            return true;
-        }
-
-        text = string.Empty;
-        return false;
-    }
 
     internal static string OneLine(string message) =>
         message.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\n', ' ').Replace('\r', ' ');
@@ -285,5 +193,5 @@ internal static partial class ConductorGuardRules
         RegexOptions.CultureInvariant)]
     internal static partial Regex RunStartCommand();
 
-    internal sealed record ToolCall(string Name, JsonElement? Arguments);
+
 }

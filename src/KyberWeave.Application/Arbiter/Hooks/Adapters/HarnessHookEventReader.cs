@@ -54,6 +54,28 @@ public static class HarnessHookEventReader
 
     private static HookEvent CopilotCli(string harness, JsonElement payload, string? renderedCaller)
     {
+        // Copilot CLI 1.x sends a pre-tool-use event as a `toolCalls` batch; older and non-batched events carry
+        // `toolName` with `toolArgs`. Both are the same event to the Arbiter, so the first call is read.
+        if (payload.TryGetProperty("toolCalls", out JsonElement batch)
+            && batch.ValueKind == JsonValueKind.Array
+            && batch.GetArrayLength() > 0
+            && batch[0].ValueKind == JsonValueKind.Object)
+        {
+            JsonElement first = batch[0];
+            JsonElement callArgs = ArgumentsOf(first, "args");
+            return new HookEvent(
+                harness,
+                Cwd: Text(payload, "cwd"),
+                WorkspaceRoot: Workspace(payload),
+                AgentId: Text(payload, "agentId") ?? Text(payload, "agent_id"),
+                AgentType: Text(payload, "agentType") ?? Text(payload, "agent_type") ?? renderedCaller,
+                ToolName: Text(first, "name"),
+                CallId: Text(first, "id") ?? Text(payload, "toolCallId"),
+                SessionId: Text(payload, "sessionId"),
+                Prompt: ArgText(callArgs, "prompt"),
+                Arguments: callArgs);
+        }
+
         JsonElement args = ArgumentsOf(payload, "toolArgs");
         return new HookEvent(
             harness,
@@ -99,7 +121,7 @@ public static class HarnessHookEventReader
 
         if (value.ValueKind == JsonValueKind.Object)
         {
-            return value;
+            return value.Clone();
         }
 
         return value.ValueKind == JsonValueKind.String

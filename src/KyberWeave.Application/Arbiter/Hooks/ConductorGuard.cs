@@ -1,4 +1,3 @@
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -26,12 +25,15 @@ namespace KyberWeave.Arbiter.Hooks;
 /// <param name="hostConfig">Loads the repository's configuration, for its planning directories.</param>
 /// <param name="links">Finds symbolic links on a path the conductor is asked to read.</param>
 /// <param name="process">The operator's home and Copilot's home variable.</param>
+/// <param name="runContexts">Resolves the repository and its worktrees once per event; null reads them from the event's
+/// own directory, which is the behaviour of a guard built without the resolver.</param>
 public sealed class ConductorGuard(
     IGitRepositoryFacts git,
     IRunStateStore runStates,
     IHostConfigLoader hostConfig,
     IFileLinkProbe links,
-    IProcessEnvironment process) : IConductorGuard
+    IProcessEnvironment process,
+    IHookRunContextResolver? runContexts = null) : IConductorGuard
 {
     /// <summary>The workflow explanation appended to every model-facing message.</summary>
     public const string WorkflowReminder = ConductorGuardRules.WorkflowReminder;
@@ -57,9 +59,9 @@ public sealed class ConductorGuard(
         string? answer;
         try
         {
-            using JsonDocument document = JsonDocument.Parse(stdin);
+            ConductorGuardEvent hookEvent = ConductorHookEventReader.Read(stdin);
             answer = Decide(
-                document.RootElement,
+                hookEvent,
                 allowedMcpServer,
                 copilotHome ?? ResolveCopilotHome(),
                 homeDirectory ?? process.HomeDirectory,
@@ -89,7 +91,18 @@ public sealed class ConductorGuard(
         ArgumentNullException.ThrowIfNull(stdin);
         ArgumentNullException.ThrowIfNull(stdout);
         ArgumentNullException.ThrowIfNull(log);
-        if (!ConductorGuardRules.TryDecideWithoutReads(stdin, allowedMcpServer, out string? answer))
+        ConductorGuardEvent hookEvent;
+        try
+        {
+            hookEvent = ConductorHookEventReader.Read(stdin);
+        }
+        catch (Exception)
+        {
+            exitCode = 0;
+            return false;
+        }
+
+        if (!ConductorGuardRules.TryDecideWithoutReads(hookEvent, allowedMcpServer, out string? answer))
         {
             exitCode = 0;
             return false;
@@ -129,31 +142,39 @@ public sealed class ConductorGuard(
         }
     }
 
-    private string? Decide(JsonElement root, string? allowedMcpServer, string copilotHome, string home, TextWriter log)
+    private string? Decide(
+        ConductorGuardEvent hookEvent,
+        string? allowedMcpServer,
+        string copilotHome,
+        string home,
+        TextWriter log)
     {
-        List<ConductorGuardRules.ToolCall> calls = ConductorGuardRules.ReadCalls(root);
-        if (calls.Count == 0)
+        if (hookEvent.Calls.Count == 0)
         {
-            return ConductorGuardRules.TryGetText(root, "transformedPrompt", out string? prompt)
+            return hookEvent.TransformedPrompt is { } prompt
                 ? new JsonObject { ["modifiedTransformedPrompt"] = $"{prompt}\n\n{ConductorGuardRules.WorkflowReminder}" }.ToJsonString()
                 : ConductorGuardRules.Deny("The conductor guard found no tool name in this event, so it was denied.");
         }
 
-        if (ConductorGuardRules.IsWorkerCall(root))
+        if (hookEvent.IsWorkerCall)
         {
             return null;
         }
 
-        string? cwd = ConductorGuardRules.TryGetText(root, "cwd", out string? directory) ? directory : null;
-        ConductorGuardRules.ToolCall? denied = calls.Find(call => !IsPermitted(call, cwd, allowedMcpServer, copilotHome, home));
+        HookRunContext? context = ResolveContext(hookEvent.Cwd, home);
+        IReadOnlyList<string> roots = context?.Worktrees ?? [];
+        string? cwd = hookEvent.Cwd;
+
+        ConductorToolCall? denied = hookEvent.Calls.FirstOrDefault(
+            call => !IsPermitted(call, cwd, roots, allowedMcpServer, copilotHome, home));
         if (denied is not null)
         {
             return ConductorGuardRules.Deny($"{ConductorGuardRules.DenyReason} Blocked tool: {denied.Name}.");
         }
 
-        foreach (ConductorGuardRules.ToolCall call in calls)
+        foreach (ConductorToolCall call in hookEvent.Calls)
         {
-            if (RunStartRefusal(call, cwd, home, log) is { } refusal)
+            if (RunStartRefusal(call, cwd, context, home, log) is { } refusal)
             {
                 return ConductorGuardRules.Deny(refusal);
             }
@@ -163,19 +184,54 @@ public sealed class ConductorGuard(
     }
 
     /// <summary>
+    /// The invocation's run context, so the repository and its worktrees are resolved once and the same way the
+    /// dispatch hooks resolve them. A resolver that cannot answer leaves the event's own directory in charge.
+    /// </summary>
+    private HookRunContext? ResolveContext(string? cwd, string home)
+    {
+        if (runContexts is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return runContexts.Resolve(new HookRunContextRequest(
+                "copilot-cli",
+                WorkspaceRoot: null,
+                EventCwd: cwd,
+                ProcessDirectory: process.CurrentDirectory,
+                AgentWorktree: null,
+                Prompt: null,
+                home));
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// The conductor-side half of <c>KW-ARB-RUN-001</c>. This hook is scoped to the conductor, so it knows
     /// the caller even where the harness payload names none (a Copilot CLI root agent). A dispatch of a
     /// specialist that writes project files is refused while no run is live for the repository; evidence
     /// that cannot be read allows and is logged.
     /// </summary>
-    private string? RunStartRefusal(ConductorGuardRules.ToolCall call, string? cwd, string home, TextWriter log)
+    private string? RunStartRefusal(
+        ConductorToolCall call,
+        string? cwd,
+        HookRunContext? context,
+        string home,
+        TextWriter log)
     {
         if (ConductorGuardRules.RunStartTargetOf(call) is not { } target)
         {
             return null;
         }
 
-        bool? started = cwd is null ? null : RunStarted(cwd, home);
+        bool? started = (context?.CommonDirectory ?? cwd) is { } repository
+            ? RunStarted(repository, home)
+            : null;
         if (started is null)
         {
             TryLog(log, $"conductor guard could not read whether a run was started for '{cwd}'; the dispatch to {target} continues.");
@@ -188,15 +244,15 @@ public sealed class ConductorGuard(
               $"with no branch of its own. Next: {RunWriterProfiles.Remedy}";
     }
 
-    /// <summary>Whether a run is live for the repository <paramref name="workingDirectory"/> belongs to; null when git cannot name the repository or the records cannot be read.</summary>
-    private bool? RunStarted(string workingDirectory, string home)
+    /// <summary>Whether a run is live for the repository; null when git cannot name it or the records cannot be read.</summary>
+    private bool? RunStarted(string repositoryOrDirectory, string home)
     {
-        if (string.IsNullOrWhiteSpace(workingDirectory) || string.IsNullOrWhiteSpace(home))
+        if (string.IsNullOrWhiteSpace(repositoryOrDirectory) || string.IsNullOrWhiteSpace(home))
         {
             return null;
         }
 
-        string? repository = git.GetCommonDirectory(workingDirectory);
+        string? repository = runContexts is null ? git.GetCommonDirectory(repositoryOrDirectory) : repositoryOrDirectory;
         return repository is null ? null : runStates.HasLiveRun(home, repository);
     }
 
@@ -205,22 +261,28 @@ public sealed class ConductorGuard(
             ? configured
             : Path.Combine(process.HomeDirectory, ".copilot");
 
-    private bool IsPermitted(ConductorGuardRules.ToolCall call, string? cwd, string? allowedMcpServer, string copilotHome, string home)
+    private bool IsPermitted(
+        ConductorToolCall call,
+        string? cwd,
+        IReadOnlyList<string> roots,
+        string? allowedMcpServer,
+        string copilotHome,
+        string home)
     {
         if (ConductorGuardRules.IsPermittedByName(call, allowedMcpServer))
         {
             return true;
         }
 
-        if (call.Arguments is not { } arguments)
+        if (!call.HasArguments)
         {
             return false;
         }
 
         return call.Name switch
         {
-            "view" => ConductorGuardRules.TryGetText(arguments, "path", out string? path) && IsContractPath(path, cwd, copilotHome, home),
-            "bash" or "powershell" => ConductorGuardRules.TryGetText(arguments, "command", out string? command) && ConductorGuardRules.RunStartCommand().IsMatch(command),
+            "view" => call.Path is { } path && IsContractPath(path, cwd, roots, copilotHome, home),
+            "bash" or "powershell" => call.Command is { } command && ConductorGuardRules.RunStartCommand().IsMatch(command),
             _ => false,
         };
     }
@@ -232,7 +294,12 @@ public sealed class ConductorGuard(
     /// a <c>.md</c> or <c>.json</c> file under a <c>plans</c>, <c>specs</c> or <c>todo</c> directory, such as a plan's
     /// <c>.tasks.yml</c>. Reading is all <c>view</c> does.
     /// </summary>
-    private bool IsContractPath(string path, string? cwd, string copilotHome, string home)
+    private bool IsContractPath(
+        string path,
+        string? cwd,
+        IReadOnlyList<string> roots,
+        string copilotHome,
+        string home)
     {
         if (cwd is null && !Path.IsPathRooted(path))
         {
@@ -264,9 +331,9 @@ public sealed class ConductorGuard(
             return IsContractUnder(Prefix(cwd), fullPath);
         }
 
-        // Started only for a path outside the working directory: git names the repository's other worktrees, so a
-        // directory that merely looks like one is never trusted. The deepest match wins, for a nested worktree.
-        string? worktree = ListWorktreesOrNone(cwd)
+        // Started only for a path outside the working directory: the run context lists this repository's own
+        // worktrees, so a directory that merely looks like one is never trusted. The deepest match wins.
+        string? worktree = (roots.Count > 0 ? roots : ListWorktreesOrNone(cwd))
             .Select(Prefix)
             .Where(root => fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(root => root.Length)

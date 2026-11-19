@@ -44,6 +44,8 @@ code-refs:
   - HookRunContextResolver
   - HookRunContext
   - HookEvent
+  - HarnessHookEventReader
+  - ArbiterRuleAdvisory
   - TextExcerpts
   - ArbiterHookTimeout
 ---
@@ -299,11 +301,12 @@ One service now answers those questions once per hook invocation.
   them: a missing task file warns instead of stopping the dispatch.
 
 - **Advisory rules are marked in the rule data.** A rule is **advisory** when every answer it can give
-  maps to the trigger family's proceed effect — `allow`, `keep` or `spawn` — so no answer can gate.
-  `ArbiterRule.Advisory` computes it from the rule's own effects, and `arbiter validate` reports the
-  set. `KW-ARB-OWNER-002` is advisory by construction; `KW-ARB-MODE-002` is advisory as it ships,
-  because every answer allows and only a host's `effects` override makes `no-failing-run` escalate.
-  Marking changes no rule's effect.
+  maps to the trigger family's proceed effect — `allow`, `keep`, `spawn` or `applies` — so no answer can
+  gate. `ArbiterRuleAdvisory.IsAdvisory` computes it from the rule's own effects, and `arbiter rules`
+  lists it in its `Gates` column. `KW-ARB-OWNER-002` is advisory by construction; `KW-ARB-MODE-002` is
+  advisory as it ships, because every answer allows and only a host's `effects` override makes
+  `no-failing-run` escalate. Marking changes no rule's effect: an advisory rule is still evaluated,
+  logged and recorded.
 
 ## The rules
 

@@ -102,6 +102,42 @@ public sealed class ArbiterDefaultRulesTests
         Assert.All(newIds, id => Assert.True(Shipped(id).Shadow, id));
     }
 
+    /// <summary>
+    /// Two shipped rules can never gate: <c>OWNER-002</c> every answer allows by design, and <c>MODE-002</c> ships
+    /// with every answer allowing so only a host override makes a missing failing run escalate. Marking them advisory
+    /// changes no effect; it stops the rule set from reading as if either one could refuse a dispatch.
+    /// </summary>
+    [Fact]
+    public void TheAdvisoryRulesAreExactlyTheOnesThatCannotGate()
+    {
+        string[] advisory = [.. ArbiterConfigDefaults.Product.Rules
+            .Where(ArbiterRuleAdvisory.IsAdvisory)
+            .Select(rule => rule.Id)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)];
+
+        Assert.Equal(["KW-ARB-MODE-002", "KW-ARB-OWNER-002"], advisory);
+    }
+
+    /// <summary>
+    /// A host that makes an advisory rule gate by changing an effect is no longer advisory: the property is read from
+    /// the effects, so there is no second declaration to fall out of step.
+    /// </summary>
+    [Fact]
+    public void ChangingAnAdvisoryRuleSEffectMakesItGate()
+    {
+        ArbiterRule mode = Shipped("KW-ARB-MODE-002");
+        ArbiterRule gating = mode with
+        {
+            Effects = new Dictionary<string, string>(mode.Effects, StringComparer.Ordinal)
+            {
+                ["no-failing-run"] = RuleEffects.Escalate,
+            },
+        };
+
+        Assert.False(ArbiterRuleAdvisory.IsAdvisory(gating));
+    }
+
     [Fact]
     public void ShippedRules_ValidateWithZeroErrors()
     {
