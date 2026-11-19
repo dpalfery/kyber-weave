@@ -20,6 +20,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="KyberDash.Application.Tests" />
+    <InternalsVisibleTo Include="KyberDash.Presentation.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\KyberDash.Application\KyberDash.Application.csproj" />
     <ProjectReference Include="..\KyberDash.Contracts\KyberDash.Contracts.csproj" />
     <ProjectReference Include="..\KyberDash.Core\KyberDash.Core.csproj" />
