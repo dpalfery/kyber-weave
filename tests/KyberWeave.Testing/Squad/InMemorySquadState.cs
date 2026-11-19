@@ -35,7 +35,6 @@ public sealed class InMemorySquadState
     /// The home directory to anchor the state on, for a test whose command already names one; beneath
     /// <paramref name="applicationDataDirectory"/> when null.
     /// </param>
-    /// </param>
     public InMemorySquadState(
         InProcessLeaseHost? leaseHost = null,
         ILease? storeLease = null,
