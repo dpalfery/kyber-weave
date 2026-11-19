@@ -97,6 +97,22 @@ markup — a path containing brackets otherwise corrupts the render or throws.
 
 ## Testing
 
+### Design for unit tests: interface first
+
+Every C# class is written so a unit test can exercise all of its behaviour in memory. That is a
+design rule, not a testing one: a class that does work takes its collaborators as interfaces
+through its constructor, and every resource outside the process is reached through a seam — an
+interface in the Contracts project, its one adapter in the Data or Kernel layer, its one fake in the
+test support project. [`docs/reference/seams.md`](../../reference/seams.md) is the register of
+every seam, and [ADR 0089](../../adr/0089-every-behaviour-is-testable-through-a-seam.md) is the
+decision behind it.
+
+So the default test for new behaviour is an in-memory unit test against the interface, in the
+project's unit test project. Integration tests are the exception: they prove an adapter against
+the real resource, live in the integration project and run in CI. When the only way to test a
+behaviour is through a real disk, process or network, the seam is missing — add it, then write the
+unit test.
+
 ### Tests
 
 Test authorship follows `<test-coding-standard>`. Language-level C# in test files follows
