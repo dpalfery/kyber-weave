@@ -29,7 +29,7 @@ public sealed class SquadShippedModelProfileContentTests
     [InlineData("architect", "devin", "claude-opus-5-5-high")]
     [InlineData("deep-planning", "claude", "opus")]
     [InlineData("deep-planning", "codex", "gpt-6.1-sol")]
-    [InlineData("deep-planning", "copilot", "Claude Opus 5.5 (copilot)")]
+    [InlineData("deep-planning", "copilot", "GPT-6.2 Sol (copilot)")]
     [InlineData("deep-planning", "cursor", "claude-sonnet-5-5[effort=high]")]
     [InlineData("deep-planning", "kilo", "zai-coding-plan/glm-5.3")]
     [InlineData("deep-planning", "opencode", "zai-coding-plan/glm-5.3")]
