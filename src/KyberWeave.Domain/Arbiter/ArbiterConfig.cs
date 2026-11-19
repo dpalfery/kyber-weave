@@ -89,8 +89,9 @@ public sealed record ArbiterCommentTriageConfig(IReadOnlyList<string> BotLogins)
 /// <param name="Minutes">Wall-clock minutes from the dispatch's first tool call.</param>
 /// <param name="ToolCalls">Tool calls the dispatch may make.</param>
 /// <param name="CallMinutes">
-/// Minutes between two consecutive tool calls of the dispatch past which the earlier call is taken to have hung:
-/// the guard sees only the start of each call, so the gap is the earlier call's run time plus the model's own time.
+/// Minutes between two consecutive tool calls of the dispatch, where the earlier call started a process, past which
+/// that call is taken to have hung: the guard sees only the start of each call, so the gap is the earlier call's run
+/// time plus the model's own time. A call that starts no process (a read) cannot hang and is never judged.
 /// </param>
 public sealed record ArbiterDispatchBudgetConfig(int Minutes, int ToolCalls, int CallMinutes = 5)
 {
