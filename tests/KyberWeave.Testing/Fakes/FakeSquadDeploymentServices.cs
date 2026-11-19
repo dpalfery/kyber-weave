@@ -251,6 +251,7 @@ public sealed class FakeSquadGlobalRootResolver : ISquadGlobalRootResolver
     /// <param name="home">The directory each target's root sits under.</param>
     public FakeSquadGlobalRootResolver(string home)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(home);
         _home = home;
     }
 
@@ -263,11 +264,18 @@ public sealed class FakeSquadGlobalRootResolver : ISquadGlobalRootResolver
     }
 
     /// <inheritdoc />
-    public string ResolveGlobalRoot(SquadTarget target) => _roots is not null
-        ? _roots.TryGetValue(target, out string? root)
-            ? root
-            : throw new ArgumentOutOfRangeException(nameof(target), target, "No root mapped for target.")
-        : Path.Combine(_home, "." + SquadTargetCatalog.GetToken(target));
+    public string ResolveGlobalRoot(SquadTarget target)
+    {
+        if (_roots is not null)
+        {
+            return _roots.TryGetValue(target, out string? root)
+                ? root
+                : throw new ArgumentOutOfRangeException(nameof(target), target, "No root mapped for target.");
+        }
+
+        string home = _home ?? throw new InvalidOperationException("This resolver holds no home directory.");
+        return Path.Combine(home, "." + SquadTargetCatalog.GetToken(target));
+    }
 
     /// <inheritdoc />
     public string? HomeDirectory => _home;
