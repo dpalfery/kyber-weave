@@ -60,7 +60,13 @@ public static class SquadRenderedFileCount
                          agent.Invocation == SquadInvocation.Primary && !sharedIdentities.Contains(agent.Name)))
             {
                 string fallbackProfileId = agent.Fallback;
-                SquadFallbackProfile profile = source.FallbackProfiles.Profiles[fallbackProfileId];
+                if (!source.FallbackProfiles.Profiles.TryGetValue(fallbackProfileId, out SquadFallbackProfile? profile))
+                {
+                    throw new InvalidOperationException(
+                        $"Agent '{agent.Name}' names fallback profile '{fallbackProfileId}', " +
+                        "which the loaded Squad source does not hold.");
+                }
+
                 if (profile.NoPrimaryAgent == "skill")
                     // Add 1 for the SKILL.md and agent.Resources.Count for the resources
                     entryPointAddition += 1 + agent.Resources.Count;
