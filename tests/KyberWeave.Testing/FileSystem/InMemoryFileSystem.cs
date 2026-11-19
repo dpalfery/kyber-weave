@@ -479,7 +479,8 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
         Enter(nameof(MoveDirectory), sourcePath, destinationPath);
         Node source = Resolve(sourcePath, followFinal: false)
             ?? throw new DirectoryNotFoundException($"Could not find a part of the path '{sourcePath}'.");
-        if (!source.IsDirectory || source.LinkTarget is not null)
+        // A directory link moves as the link itself, which is what the operating system does with a rename.
+        if (!source.IsDirectory || (source.LinkTarget is not null && !source.LinkNamesDirectory))
         {
             throw new IOException($"The source '{sourcePath}' is not a directory.");
         }

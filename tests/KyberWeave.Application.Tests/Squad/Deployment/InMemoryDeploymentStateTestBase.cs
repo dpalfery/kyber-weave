@@ -18,7 +18,7 @@ namespace KyberWeave.Application.Tests.Squad.Deployment;
 /// lease host and clock per test, and a scope per tree a case works in. Every root derives from
 /// <see cref="InMemoryFileSystem.Root"/>, so a case runs unchanged on every platform.
 /// </summary>
-public abstract class InMemoryDeploymentStateTestBase : SquadStateDocumentFixtures
+public abstract partial class InMemoryDeploymentStateTestBase : SquadStateDocumentFixtures
 {
     private static int _next;
 

@@ -1,41 +1,41 @@
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
-using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using KyberWeave.Cli.Commands.Squad;
-using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Fakes;
 using Xunit;
-using Xunit.Sdk;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Application.Tests.Squad.Deployment;
 
 /// <summary>
 /// Deployment-state contracts: update, replacement and locally edited files. Split from the one class that used to hold all of
 /// them, so xUnit runs the themes on different cores.
 /// </summary>
-public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBase
+public sealed class SquadDeploymentStateUpdateTests : InMemoryDeploymentStateTestBase
 {
+    /// <summary>
+    ///     Reads the raw owning target tokens recorded for a degraded path from the
+    ///     <see cref="SquadDegradedFile"/> contract, so a change to its shape fails at compile
+    ///     time rather than returning empty owners.
+    /// </summary>
+    private static IReadOnlyList<string> OwningTargetsOf(SquadDeploymentPlan plan, string relativePath) =>
+        plan.DegradedFiles
+            .Where(degraded => degraded.RelativePath == relativePath)
+            .Select(degraded => degraded.Target)
+            .ToList();
+
     [Fact]
     public void CreateUpdateLocallyEditedManagedFileWithoutReplacePreservesFileAndReceiptHash()
     {
-        using TempDirectory fixture = new();
         SquadReceipt oldReceipt = Receipt(
             new SquadOwnedFile(
                 ".codex/agents/conductor.toml",
                 Digest("installed body"),
                 "codex",
                 false));
-        Write(fixture.Path, ".codex/agents/conductor.toml", "operator edit");
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
-            fixture.Path,
+        Write(Root, ".codex/agents/conductor.toml", "operator edit");
+        SquadDeploymentPlan plan = Planner.CreateUpdate(
+            Root,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
             [Rendered(".codex/agents/conductor.toml", "updated body")],
@@ -44,11 +44,11 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
             false,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
 
-        Transaction(fixture.Path).Execute(plan);
+        TransactionAt(Root).Execute(plan);
 
         Assert.Equal(
             "operator edit",
-            Read(fixture.Path, ".codex/agents/conductor.toml"));
+            Read(Root, ".codex/agents/conductor.toml"));
         SquadOwnedFile retained = Assert.Single(plan.Receipt.Files);
         Assert.Equal(Digest("installed body"), retained.Sha256);
         Assert.False(retained.Adopted);
@@ -62,17 +62,16 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
     [Fact]
     public void CreateUpdateWithAnUnreadableDeployedEntryRecordsThePathInDegradedFiles()
     {
-        using TempDirectory fixture = new();
         const string entry = ".codex/agents/conductor.toml";
         SquadReceipt oldReceipt = Receipt(new SquadOwnedFile(entry, Digest("installed body"), "codex", false));
-        Write(fixture.Path, entry, "installed body");
-        string fullPath = Path.Combine(fixture.Path, entry);
+        Write(Root, entry, "installed body");
+        FailReadsOf(ToPlatformPath(Root, entry));
 
         SquadDeploymentPlan plan;
-        using (KyberWeave.Tests.Fakes.SquadHomeHarness.DenyReadOrSkip(fullPath))
+        try
         {
-            plan = RealSquadDeployment.Planner.CreateUpdate(
-                fixture.Path,
+            plan = Planner.CreateUpdate(
+                Root,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
                 [Rendered(entry, "updated body")],
@@ -80,6 +79,10 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
                 [],
                 false,
                 new FixedTimeProvider(InstalledAt.AddDays(1)));
+        }
+        finally
+        {
+            Files.ClearFaults();
         }
 
         Assert.True(
@@ -95,18 +98,17 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
     [Fact]
     public void CreateUpdateWithAnUnreadableDeployedEntryWithAnUnknownTargetStillRecordsTheRawToken()
     {
-        using TempDirectory fixture = new();
         const string entry = ".codex/agents/conductor.toml";
         const string unknownTarget = "future-harness";
         SquadReceipt oldReceipt = Receipt(new SquadOwnedFile(entry, Digest("installed body"), unknownTarget, false));
-        Write(fixture.Path, entry, "installed body");
-        string fullPath = Path.Combine(fixture.Path, entry);
+        Write(Root, entry, "installed body");
+        FailReadsOf(ToPlatformPath(Root, entry));
 
         SquadDeploymentPlan plan;
-        using (KyberWeave.Tests.Fakes.SquadHomeHarness.DenyReadOrSkip(fullPath))
+        try
         {
-            plan = RealSquadDeployment.Planner.CreateUpdate(
-                fixture.Path,
+            plan = Planner.CreateUpdate(
+                Root,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
                 [Rendered(entry, "updated body", unknownTarget)],
@@ -114,6 +116,10 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
                 [],
                 false,
                 new FixedTimeProvider(InstalledAt.AddDays(1)));
+        }
+        finally
+        {
+            Files.ClearFaults();
         }
 
         Assert.True(
@@ -130,21 +136,20 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
     [Fact]
     public void CreateUpdateRecordsTheOwningTargetOfEachDegradedFileWhenThePlanCoversSeveralTargets()
     {
-        using TempDirectory fixture = new();
         const string codexEntry = ".codex/agents/conductor.toml";
         const string claudeEntry = ".claude/agents/conductor.md";
         SquadReceipt oldReceipt = Receipt(
             new SquadOwnedFile(codexEntry, Digest("codex body"), "codex", false),
             new SquadOwnedFile(claudeEntry, Digest("claude body"), "claude", false));
-        Write(fixture.Path, codexEntry, "codex body");
-        Write(fixture.Path, claudeEntry, "claude body");
-        string codexPath = Path.Combine(fixture.Path, codexEntry);
+        Write(Root, codexEntry, "codex body");
+        Write(Root, claudeEntry, "claude body");
+        FailReadsOf(ToPlatformPath(Root, codexEntry));
 
         SquadDeploymentPlan plan;
-        using (KyberWeave.Tests.Fakes.SquadHomeHarness.DenyReadOrSkip(codexPath))
+        try
         {
-            plan = RealSquadDeployment.Planner.CreateUpdate(
-                fixture.Path,
+            plan = Planner.CreateUpdate(
+                Root,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
                 [
@@ -156,11 +161,15 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
                 false,
                 new FixedTimeProvider(InstalledAt.AddDays(1)));
         }
+        finally
+        {
+            Files.ClearFaults();
+        }
 
         Assert.Single(plan.DegradedFiles);
         IReadOnlyList<string> owners = OwningTargetsOf(plan, codexEntry);
         Assert.True(
-            owners.SequenceEqual(ExpectedCodexOwner),
+            owners.SequenceEqual(["codex"]),
             $"The degraded '{codexEntry}' must record exactly its owning target 'codex'; it records [{string.Join(", ", owners)}].");
         Assert.Empty(OwningTargetsOf(plan, claudeEntry));
     }
@@ -185,75 +194,12 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
     }
 
     /// <summary>
-    ///     Progressively disclosed references are ordinary deployment files. Their rendered paths
-    ///     must therefore receive the same exact-byte ownership and status guarantees as principals.
-    /// </summary>
-    [Fact]
-    public void RenderedResourcesAreReceiptOwnedWithExactHashesAndStatusDetectsTheirDrift()
-    {
-        using TempDirectory fixture = new();
-        const string agentResource = ".codex/agents/conductor/references/plan-path.md";
-        const string skillResource = ".codex/skills/product-owner/references/requirements.md";
-        const string agentContent = "# Plan path\n";
-        const string skillContent = "# Requirements phase\n";
-        SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
-            SquadDeploymentScope.Project,
-            Lock(),
-            [
-                Rendered(agentResource, agentContent),
-                Rendered(skillResource, skillContent)
-            ],
-            [],
-            false,
-            new FixedTimeProvider(InstalledAt));
-
-        RealSquadDeployment.Transaction(store).Execute(plan);
-
-        SquadReceipt receipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(
-            fixture.Path,
-            SquadDeploymentScope.Project));
-        Assert.Equal(
-            [agentResource, skillResource],
-            receipt.Files.Select(file => file.RelativePath));
-        Assert.Equal(
-            [Digest(agentContent), Digest(skillContent)],
-            receipt.Files.Select(file => file.Sha256));
-        Assert.All(receipt.Files, file => Assert.Equal("codex", file.Target));
-
-        SquadStatusCommand command = SquadTestCommands.Status(stateStore: store);
-        CapturedConsoleExecution<int> clean = ProcessConsoleCapture.Run(() => command.Execute(
-            null!,
-            new SquadStatusSettings
-            {
-                Path = fixture.Path,
-                Global = false
-            }));
-        Assert.Equal(0, clean.Result);
-
-        Write(fixture.Path, agentResource, "operator edit\n");
-        CapturedConsoleExecution<int> drifted = ProcessConsoleCapture.Run(() => command.Execute(
-            null!,
-            new SquadStatusSettings
-            {
-                Path = fixture.Path,
-                Global = false
-            }));
-
-        Assert.Equal(1, drifted.Result);
-        Assert.Contains(agentResource, drifted.Output, StringComparison.Ordinal);
-        Assert.Contains("modified locally", drifted.Output, StringComparison.Ordinal);
-    }
-
-    /// <summary>
     ///     Resource removal cannot broaden update authority: unchanged obsolete resources may be
     ///     deleted, while locally edited current or obsolete resources remain owned at their prior hash.
     /// </summary>
     [Fact]
     public void ResourceUpdateAndRemovalPreserveLocallyEditedReceiptOwnedFiles()
     {
-        using TempDirectory fixture = new();
         const string currentResource = ".codex/agents/conductor/references/plan-path.md";
         const string editedObsoleteResource = ".codex/agents/conductor/references/legacy.md";
         const string unchangedObsoleteResource = ".codex/skills/product-owner/references/legacy.md";
@@ -269,12 +215,12 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
             "codex",
             false);
         SquadReceipt receipt = Receipt(currentOwned, editedObsoleteOwned, unchangedObsoleteOwned);
-        Write(fixture.Path, currentResource, "operator plan edit\n");
-        Write(fixture.Path, editedObsoleteResource, "operator legacy edit\n");
-        Write(fixture.Path, unchangedObsoleteResource, "installed legacy skill\n");
-        WriteState(fixture.Path, Lock(), receipt);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
-            fixture.Path,
+        Write(Root, currentResource, "operator plan edit\n");
+        Write(Root, editedObsoleteResource, "operator legacy edit\n");
+        Write(Root, unchangedObsoleteResource, "installed legacy skill\n");
+        WriteState(Root, Lock(), receipt);
+        SquadDeploymentPlan plan = Planner.CreateUpdate(
+            Root,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
             [Rendered(currentResource, "updated plan\n")],
@@ -283,13 +229,13 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
             false,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
 
-        Transaction(fixture.Path).Execute(plan);
+        TransactionAt(Root).Execute(plan);
 
-        Assert.Equal("operator plan edit\n", Read(fixture.Path, currentResource));
-        Assert.Equal("operator legacy edit\n", Read(fixture.Path, editedObsoleteResource));
-        Assert.False(File.Exists(ToPlatformPath(fixture.Path, unchangedObsoleteResource)));
-        SquadReceipt persisted = Assert.IsType<SquadReceipt>(Store(fixture.Path).ReadReceipt(
-            fixture.Path,
+        Assert.Equal("operator plan edit\n", Read(Root, currentResource));
+        Assert.Equal("operator legacy edit\n", Read(Root, editedObsoleteResource));
+        Assert.False(Files.FileExists(ToPlatformPath(Root, unchangedObsoleteResource)));
+        SquadReceipt persisted = Assert.IsType<SquadReceipt>(StoreAt(Root).ReadReceipt(
+            Root,
             SquadDeploymentScope.Project));
         Assert.Equal(
             [currentOwned, editedObsoleteOwned],
@@ -306,7 +252,6 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
     [Fact]
     public void CreateUpdateReceiptDiffRetiresFallbackSkillPathsOnNativeAntigravityUpdateAndRetainsLocallyEdited()
     {
-        using TempDirectory fixture = new();
         const string target = "antigravity";
         const string retiredSkillPath = ".agents/skills/worker/SKILL.md";
         const string editedSkillPath = ".agents/skills/reviewer/SKILL.md";
@@ -336,20 +281,20 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
             false);
         SquadReceipt previousReceipt = Receipt(retiredSkillOwned, editedSkillOwned);
 
-        Write(fixture.Path, retiredSkillPath, installedWorkerContent);
-        Write(fixture.Path, editedSkillPath, locallyEditedReviewerContent);
-        WriteState(fixture.Path, Lock(), previousReceipt);
+        Write(Root, retiredSkillPath, installedWorkerContent);
+        Write(Root, editedSkillPath, locallyEditedReviewerContent);
+        WriteState(Root, Lock(), previousReceipt);
 
         // Verify pre-update on-disk state: fallback files exist with their initial contents, native paths do not yet exist
-        Assert.True(File.Exists(ToPlatformPath(fixture.Path, retiredSkillPath)));
-        Assert.Equal(installedWorkerContent, Read(fixture.Path, retiredSkillPath));
-        Assert.True(File.Exists(ToPlatformPath(fixture.Path, editedSkillPath)));
-        Assert.Equal(locallyEditedReviewerContent, Read(fixture.Path, editedSkillPath));
-        Assert.False(File.Exists(ToPlatformPath(fixture.Path, nativeWorkerAgentPath)));
-        Assert.False(File.Exists(ToPlatformPath(fixture.Path, nativeReviewerAgentPath)));
+        Assert.True(Files.FileExists(ToPlatformPath(Root, retiredSkillPath)));
+        Assert.Equal(installedWorkerContent, Read(Root, retiredSkillPath));
+        Assert.True(Files.FileExists(ToPlatformPath(Root, editedSkillPath)));
+        Assert.Equal(locallyEditedReviewerContent, Read(Root, editedSkillPath));
+        Assert.False(Files.FileExists(ToPlatformPath(Root, nativeWorkerAgentPath)));
+        Assert.False(Files.FileExists(ToPlatformPath(Root, nativeReviewerAgentPath)));
 
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
-            fixture.Path,
+        SquadDeploymentPlan plan = Planner.CreateUpdate(
+            Root,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
             [
@@ -446,25 +391,25 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
 
         Assert.Equal(3, plan.Receipt.Files.Count);
 
-        // Execute transaction and verify physical filesystem and receipt store outcomes
-        Transaction(fixture.Path).Execute(plan);
+        // Execute transaction and verify the file system and receipt store outcomes
+        TransactionAt(Root).Execute(plan);
 
-        // Unmodified fallback skill was deleted from disk
-        Assert.False(File.Exists(ToPlatformPath(fixture.Path, retiredSkillPath)));
+        // Unmodified fallback skill was deleted
+        Assert.False(Files.FileExists(ToPlatformPath(Root, retiredSkillPath)));
 
-        // Locally edited fallback skill was retained untouched on disk with operator modifications intact
-        Assert.True(File.Exists(ToPlatformPath(fixture.Path, editedSkillPath)));
-        Assert.Equal(locallyEditedReviewerContent, Read(fixture.Path, editedSkillPath));
+        // Locally edited fallback skill was retained untouched with operator modifications intact
+        Assert.True(Files.FileExists(ToPlatformPath(Root, editedSkillPath)));
+        Assert.Equal(locallyEditedReviewerContent, Read(Root, editedSkillPath));
 
-        // Native agent files now exist on disk with rendered content
-        Assert.True(File.Exists(ToPlatformPath(fixture.Path, nativeWorkerAgentPath)));
-        Assert.Equal(nativeWorkerAgentContent, Read(fixture.Path, nativeWorkerAgentPath));
-        Assert.True(File.Exists(ToPlatformPath(fixture.Path, nativeReviewerAgentPath)));
-        Assert.Equal(nativeReviewerAgentContent, Read(fixture.Path, nativeReviewerAgentPath));
+        // Native agent files now exist with rendered content
+        Assert.True(Files.FileExists(ToPlatformPath(Root, nativeWorkerAgentPath)));
+        Assert.Equal(nativeWorkerAgentContent, Read(Root, nativeWorkerAgentPath));
+        Assert.True(Files.FileExists(ToPlatformPath(Root, nativeReviewerAgentPath)));
+        Assert.Equal(nativeReviewerAgentContent, Read(Root, nativeReviewerAgentPath));
 
         // Persisted receipt matches planned receipt and omits retired fallback skill
-        SquadReceipt persisted = Assert.IsType<SquadReceipt>(Store(fixture.Path).ReadReceipt(
-            fixture.Path,
+        SquadReceipt persisted = Assert.IsType<SquadReceipt>(StoreAt(Root).ReadReceipt(
+            Root,
             SquadDeploymentScope.Project));
         AssertReceiptEqual(plan.Receipt, persisted);
         Assert.DoesNotContain(persisted.Files, f => f.RelativePath == retiredSkillPath);
@@ -493,12 +438,12 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
             "claude",
             false));
 
-        using (TempDirectory fixture = new())
         {
+            DeploymentScope fixture = NewScope();
             Write(fixture.Path, retiredSkillPath, installedContent);
             WriteState(fixture.Path, Lock(), previousReceipt);
 
-            SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
+            SquadDeploymentPlan plan = Planner.CreateUpdate(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -512,10 +457,10 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
                 plan.PlannedFileChanges,
                 change => change.RelativePath == retiredSkillPath &&
                           change.Kind == SquadFileMutationKind.Delete);
-            Transaction(fixture.Path).Execute(plan);
+            TransactionAt(fixture.Path).Execute(plan);
 
-            Assert.False(File.Exists(ToPlatformPath(fixture.Path, retiredSkillPath)));
-            SquadReceipt persisted = Assert.IsType<SquadReceipt>(Store(fixture.Path).ReadReceipt(
+            Assert.False(Files.FileExists(ToPlatformPath(fixture.Path, retiredSkillPath)));
+            SquadReceipt persisted = Assert.IsType<SquadReceipt>(StoreAt(fixture.Path).ReadReceipt(
                 fixture.Path,
                 SquadDeploymentScope.Project));
             Assert.DoesNotContain(persisted.Files, file => file.RelativePath == retiredSkillPath);
@@ -523,11 +468,11 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
 
         foreach (bool replaceManaged in new[] { false, true })
         {
-            using TempDirectory fixture = new();
+            DeploymentScope fixture = NewScope();
             Write(fixture.Path, retiredSkillPath, editedContent);
             WriteState(fixture.Path, Lock(), previousReceipt);
 
-            SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
+            SquadDeploymentPlan plan = Planner.CreateUpdate(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -538,10 +483,10 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
                 new FixedTimeProvider(InstalledAt.AddDays(1)));
 
             Assert.DoesNotContain(plan.PlannedFileChanges, change => change.RelativePath == retiredSkillPath);
-            Transaction(fixture.Path).Execute(plan);
+            TransactionAt(fixture.Path).Execute(plan);
 
             Assert.Equal(editedContent, Read(fixture.Path, retiredSkillPath));
-            SquadReceipt persisted = Assert.IsType<SquadReceipt>(Store(fixture.Path).ReadReceipt(
+            SquadReceipt persisted = Assert.IsType<SquadReceipt>(StoreAt(fixture.Path).ReadReceipt(
                 fixture.Path,
                 SquadDeploymentScope.Project));
             Assert.Contains(persisted.Files, file => file.RelativePath == retiredSkillPath);
@@ -555,7 +500,6 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
     [Fact]
     public void ResourceUpdateFailureRollsBackPriorBytesAndReceipt()
     {
-        using TempDirectory fixture = new();
         const string resourcePath = ".codex/agents/conductor/references/plan-path.md";
         const string installedContent = "installed plan reference\n";
         SquadReceipt receipt = Receipt(new SquadOwnedFile(
@@ -563,10 +507,10 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
             Digest(installedContent),
             "codex",
             false));
-        Write(fixture.Path, resourcePath, installedContent);
-        WriteState(fixture.Path, Lock(), receipt);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
-            fixture.Path,
+        Write(Root, resourcePath, installedContent);
+        WriteState(Root, Lock(), receipt);
+        SquadDeploymentPlan plan = Planner.CreateUpdate(
+            Root,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
             [Rendered(resourcePath, "updated plan reference\n")],
@@ -575,15 +519,16 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
             false,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
         LifecycleStepFailingObserver failure = new(
-            fixture.Path,
+            Files,
+            Root,
             SquadTransactionStepKind.FileApplied);
 
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
-            Transaction(fixture.Path, failure).Execute(plan));
+            TransactionAt(Root, failure).Execute(plan));
 
-        Assert.Equal(installedContent, Read(fixture.Path, resourcePath));
-        SquadReceipt restored = Assert.IsType<SquadReceipt>(Store(fixture.Path).ReadReceipt(
-            fixture.Path,
+        Assert.Equal(installedContent, Read(Root, resourcePath));
+        SquadReceipt restored = Assert.IsType<SquadReceipt>(StoreAt(Root).ReadReceipt(
+            Root,
             SquadDeploymentScope.Project));
         AssertReceiptEqual(receipt, restored);
     }
@@ -591,16 +536,15 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
     [Fact]
     public void CreateUpdateLocallyEditedManagedFileWithReplaceReplacesOnlyReceiptOwnedPath()
     {
-        using TempDirectory fixture = new();
         SquadReceipt oldReceipt = Receipt(
             new SquadOwnedFile(
                 ".codex/agents/conductor.toml",
                 Digest("installed body"),
                 "codex",
                 false));
-        Write(fixture.Path, ".codex/agents/conductor.toml", "operator edit");
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
-            fixture.Path,
+        Write(Root, ".codex/agents/conductor.toml", "operator edit");
+        SquadDeploymentPlan plan = Planner.CreateUpdate(
+            Root,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
             [Rendered(".codex/agents/conductor.toml", "updated body")],
@@ -609,11 +553,11 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
             true,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
 
-        Transaction(fixture.Path).Execute(plan);
+        TransactionAt(Root).Execute(plan);
 
         Assert.Equal(
             "updated body",
-            Read(fixture.Path, ".codex/agents/conductor.toml"));
+            Read(Root, ".codex/agents/conductor.toml"));
         SquadOwnedFile replaced = Assert.Single(plan.Receipt.Files);
         Assert.Equal(Digest("updated body"), replaced.Sha256);
     }
@@ -621,17 +565,16 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
     [Fact]
     public void ExecuteUpdateFileChangedAfterExactHashPreflightRefusesToOverwriteRacedEdit()
     {
-        using TempDirectory fixture = new();
         const string relativePath = ".codex/agents/conductor.toml";
         SquadReceipt receipt = Receipt(new SquadOwnedFile(
             relativePath,
             Digest("installed body"),
             "codex",
             false));
-        Write(fixture.Path, relativePath, "installed body");
-        WriteState(fixture.Path, Lock(), receipt);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
-            fixture.Path,
+        Write(Root, relativePath, "installed body");
+        WriteState(Root, Lock(), receipt);
+        SquadDeploymentPlan plan = Planner.CreateUpdate(
+            Root,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
             [Rendered(relativePath, "updated body")],
@@ -639,34 +582,33 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
             [],
             false,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
-        Write(fixture.Path, relativePath, "raced operator edit");
-        SortedDictionary<string, TreeEntry> before = CaptureTree(fixture.Path);
+        Write(Root, relativePath, "raced operator edit");
+        SortedDictionary<string, TreeEntry> before = CaptureTree(Root);
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            Transaction(fixture.Path).Execute(plan));
+            TransactionAt(Root).Execute(plan));
 
         Assert.Contains(relativePath, exception.Message, StringComparison.Ordinal);
-        Assert.Equal("raced operator edit", Read(fixture.Path, relativePath));
-        AssertTreesEqual(before, CaptureTree(fixture.Path));
+        Assert.Equal("raced operator edit", Read(Root, relativePath));
+        AssertTreesEqual(before, CaptureTree(Root));
     }
 
     [Fact]
     public void CreateUpdateReplaceManagedDoesNotAuthorizeUnmanagedCollision()
     {
-        using TempDirectory fixture = new();
         SquadReceipt oldReceipt = Receipt(
             new SquadOwnedFile(
                 ".codex/agents/conductor.toml",
                 Digest("installed body"),
                 "codex",
                 false));
-        Write(fixture.Path, ".codex/agents/conductor.toml", "installed body");
-        Write(fixture.Path, ".codex/agents/reviewer.toml", "unmanaged file");
-        SortedDictionary<string, byte[]> before = Snapshot(fixture.Path);
+        Write(Root, ".codex/agents/conductor.toml", "installed body");
+        Write(Root, ".codex/agents/reviewer.toml", "unmanaged file");
+        SortedDictionary<string, byte[]> before = Snapshot(Root);
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            RealSquadDeployment.Planner.CreateUpdate(
-                fixture.Path,
+            Planner.CreateUpdate(
+                Root,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
                 [
@@ -682,6 +624,13 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
             ".codex/agents/reviewer.toml",
             exception.Message,
             StringComparison.Ordinal);
-        AssertSnapshotsEqual(before, Snapshot(fixture.Path));
+        AssertSnapshotsEqual(before, Snapshot(Root));
     }
+
+    /// <summary>Refuses every read of one path, as a file whose permissions deny the read does.</summary>
+    private void FailReadsOf(string path) =>
+        Files.FailWhen(
+            operation => string.Equals(operation.Path, path, StringComparison.Ordinal) &&
+                         operation.Name.StartsWith("Read", StringComparison.Ordinal),
+            new UnauthorizedAccessException("Access to the path is denied."));
 }

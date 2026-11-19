@@ -1,7 +1,7 @@
 using System.Runtime.ExceptionServices;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests.Fakes;
 
 /// <summary>
 ///     Runs a transaction a test blocks mid-step, and waits for it to arrive at that step.

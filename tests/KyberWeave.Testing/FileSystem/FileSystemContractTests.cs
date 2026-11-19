@@ -775,6 +775,24 @@ public abstract class FileSystemContractTests : IDisposable
     }
 
     [Fact]
+    public void MoveDirectoryMovesADirectoryLinkAsALinkWithoutFollowingIt()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string target = At(root, "canonical");
+        files.CreateDirectory(target);
+        _ = WriteFile(files, target, "conductor.toml", "conductor");
+        string source = At(root, "linked");
+        files.CreateDirectoryLink(source, target);
+        string destination = At(root, "claimed");
+
+        files.MoveDirectory(source, destination);
+
+        Assert.False(files.DirectoryExists(source));
+        Assert.NotNull(files.GetLinkTarget(destination));
+        Assert.Equal("conductor", files.ReadAllText(At(destination, "conductor.toml")));
+    }
+
+    [Fact]
     public void MoveDirectoryRefusesAnOccupiedDestination()
     {
         IWritableFileSystem files = Starting(out string root);
