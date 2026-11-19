@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using KyberDash.Application;
+using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Services;
 using KyberDash.Domain;
 using Xunit;
@@ -132,7 +133,7 @@ public class CanonAnalysisTests
     public void TokenCache_MemoizesAndPersistsAboveMinLengthThreshold()
     {
         Assert.Equal(512, CanonTokenCache.MinCachedTextLength);
-        FakeCanonStoreRepository store = new();
+        InMemoryRelationalStore store = new();
 
         int delegateCalls = 0;
         long CountingApprox(string text)
@@ -165,6 +166,8 @@ public class CanonAnalysisTests
 
         counter.Flush();
         Assert.Equal(computed, store.GetCachedTokenCount(expectedKey));
+        Assert.Equal(1, store.CountRows("token_cache"));
+        Assert.Equal(1, store.CountRows("token_cache_model"));
 
         int secondDelegateCalls = 0;
         CachedTokenCounter persistedReader = new(

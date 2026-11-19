@@ -29,6 +29,25 @@ public static class ServiceCollectionExtensions
             new SqliteCircuitBreaker(
                 provider.GetService<DashOptions>()?.CircuitBreaker ?? resolved.CircuitBreaker));
 
+        services.TryAddSingleton<SqliteRelationalStore>(provider =>
+        {
+            DashOptions? current = provider.GetService<DashOptions>();
+            string databasePath = CanonDbPath.Resolve(current?.DatabasePath, null, null);
+            return new SqliteRelationalStore(databasePath, provider.GetRequiredService<ICircuitBreaker>());
+        });
+
+        services.TryAddSingleton<IRelationalStoreWriter>(provider =>
+            provider.GetRequiredService<SqliteRelationalStore>());
+
+        services.TryAddSingleton<IRelationalStoreReader>(provider =>
+            provider.GetRequiredService<SqliteRelationalStore>());
+
+        services.TryAddSingleton<IProjectionStore>(provider =>
+            provider.GetRequiredService<SqliteRelationalStore>());
+
+        services.TryAddSingleton<IOperationalStore>(provider =>
+            provider.GetRequiredService<SqliteRelationalStore>());
+
         services.TryAddSingleton<ICanonStoreRepository>(provider =>
         {
             DashOptions? current = provider.GetService<DashOptions>();
@@ -39,10 +58,10 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ITranscriptReaderRepository>(_ => new TranscriptReaderRepository());
 
         services.TryAddSingleton<IPricingRepository>(provider =>
-            new PricingRepository(provider.GetRequiredService<ICanonStoreRepository>()));
+            new PricingRepository(provider.GetRequiredService<IOperationalStore>()));
 
         services.TryAddSingleton<ISettingsRepository>(provider =>
-            new SettingsRepository(provider.GetRequiredService<ICanonStoreRepository>()));
+            new SettingsRepository(provider.GetRequiredService<IOperationalStore>()));
 
         services.TryAddSingleton<IServerStateRepository>(provider =>
             new ServerStateRepository(provider.GetService<DashOptions>()?.StateDirectory));
