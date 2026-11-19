@@ -12,14 +12,17 @@ last-reviewed: 2026-11-19
 
 ## Interface first, unit tested
 
-The seam register ([`docs/reference/seams.md`](../../reference/seams.md)) and the `AGENTS.md`
-"Seams" section are the authority for which seams exist and where their adapters and fakes live.
+The seam register ([`docs/reference/seams.md`](../../reference/seams.md)) is the authority for
+which seams exist and where each adapter and fake lives; where `AGENTS.md`'s "Seams" summary is
+narrower, the register wins.
 
 - Write the interface before the class. A class that does work depends on interfaces, not on a
   concrete service that touches an outside resource; the sealed framework types the register lists
   as exceptions may be used directly.
-- Every outside resource the register names — the file system, processes, the network, the clock,
-  the environment, the credential store and the like — is reached only through its seam: one
+- Every outside resource — the disk, a child process, the environment, the console, the clock,
+  identifiers (`Guid.NewGuid`, `Random`), a cross-process lease, an embedded resource,
+  configuration, the network, the credential store and shipped content — is reached only through
+  its seam, as the register lists it: one
   interface, its adapters where the resource lives, and its fake in the shared test support
   project. Only an adapter, or a composition root wiring one at startup, touches the resource.
 - New behaviour ships with an in-memory unit test written against the interface.

@@ -28,7 +28,9 @@ holds no business logic of its own.
 ### Data from the server
 
 - Server data comes through TanStack Query (`useQuery`/`useMutation`) over the shared API client.
-  Nothing calls `fetch` outside that client: not a component, hook, effect, utility or event handler.
+  All network access goes through that client: nothing else calls `fetch`, `axios`,
+  `XMLHttpRequest`, `WebSocket` or `EventSource` — not a component, hook, effect, utility or event
+  handler. A live channel (SignalR, WebSocket) is wrapped by a client module the same way.
 - Every query-backed view renders four distinct states: loading, error, empty and data. A value that
   has not loaded, or failed to load, is never shown as `0`, `—` or a default, and measured zero,
   derived value and missing data look different (the TypeScript standard's "Output and display").
@@ -59,15 +61,17 @@ holds no business logic of its own.
 
 ### Rendering cost
 
-- Memoize (`React.memo`, `useMemo`, `useCallback`) only where the React DevTools Profiler shows a
-  component re-rendering with unchanged props and that render is measurably slow; say so in the
-  change. Otherwise do not memoize.
+- Memoize (`React.memo`, `useMemo`, `useCallback`) only with a React DevTools Profiler measurement:
+  record the commit duration before and after in the change. Memoize a component that re-renders
+  with unchanged props, or a computation (a sort or filter over a large list) that the Profiler shows
+  repeating on every render. Otherwise do not memoize.
 - Heavy transforms do not run in the render path; do them on the server or in a query `select`.
 
 ### Styling
 
 - Tailwind utility classes, composed with `clsx` and `tailwind-merge`. An inline `style` object is
-  only for a value computed at runtime (a measured width, a chart position).
+  only for a value the theme cannot express: one computed at runtime (a measured width, a chart
+  position) or provided by the server (a status colour, passed as a CSS variable).
 - Colours, spacing and fonts come from the Tailwind theme (`@theme` tokens in the app's stylesheet);
   do not hardcode a value the theme defines.
 - Charts use Recharts; icons use `lucide-react`.
@@ -83,18 +87,22 @@ requirement, not a polish step.
 ESLint decides formatting and the mechanical rules; code that fails it is not merged. No commented-out
 blocks, and no `console` calls in merged code except `console.error` for an error that is also shown
 to the user. No direct DOM access of any kind (`document.querySelector`, `getElementById`,
-`getElementsBy…`, or a ref used to query the DOM); a ref is only for moving focus where accessibility
-requires it. A new dependency states what it does, why the existing stack cannot, and who maintains it.
+`getElementsBy…`, or a ref used to look up nodes React renders). A ref may move focus, measure an
+element (`getBoundingClientRect`, `ResizeObserver`) or observe it (`IntersectionObserver`); browser
+APIs outside React's tree (`matchMedia`, `document.title`) are reached from an effect. A new dependency states what it does, why the existing stack cannot, and who maintains it.
 
 ## Testing
 
 - Components and hooks are tested in memory with Vitest and Testing Library, rendering over fixtures
-  and mocked query results. Assert what the user sees, by role and text, not implementation details.
+  and mocked query results. A fixture or mock satisfies the API client's response schema: build it
+  through the client's validator or a shared factory, so a mock cannot drift from what production
+  accepts. Assert what the user sees, by role and text, not implementation details.
 - Each data state (loading, error, empty, data) of a query-backed view has a test. Hold the response
   back to assert loading; never assert a transient state after it may have passed.
 - A mock one test needs is set up inside that test, never in shared setup.
 - Playwright end-to-end tests are the exception, for behaviour that needs the real browser and
-  server: keyboard and focus flows and navigation across views.
+  server, for example keyboard and focus flows, navigation across views, clipboard, downloads and
+  printing.
 
 ## Commands
 
