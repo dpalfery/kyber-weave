@@ -243,13 +243,21 @@ public sealed partial class StandardsFolderMigration
                 VerifyStillWritable(agentsTarget);
             }
         }
-        catch
+        catch (Exception original)
         {
             // A failure part way through — a write that fails, not a target refused at planning —
             // would otherwise leave some standards moved and the registry block stale. Undo the
-            // writes newest-first so the repository is exactly as it was.
-            RollBack(undo);
-            throw;
+            // writes in reverse so the repository is exactly as it was.
+            List<string> failed = RollBack(undo);
+            if (failed.Count == 0)
+            {
+                throw;
+            }
+
+            throw new IOException(
+                $"{original.Message} Undoing the writes made before the failure also failed: " +
+                string.Join("; ", failed) + ".",
+                original);
         }
 
         return new StandardsFolderMigrationResult(
@@ -383,7 +391,12 @@ public sealed partial class StandardsFolderMigration
                     string reshapeTarget = RequireWritable(change.To);
                     string reshapeBefore = _files.ReadAllText(reshapeTarget);
                     _files.WriteAllTextAtomic(reshapeTarget, reshapedText);
-                    undo?.Add(() => _files.WriteAllTextAtomic(reshapeTarget, reshapeBefore));
+                    undo?.Add(() =>
+                    {
+                        string undoPath = RequireWritable(change.To);
+                        _files.WriteAllTextAtomic(undoPath, reshapeBefore);
+                        VerifyStillWritable(undoPath);
+                    });
                     VerifyStillWritable(reshapeTarget);
                     applied.Add(change);
                     break;
@@ -439,8 +452,10 @@ public sealed partial class StandardsFolderMigration
 
     /// <summary>Undoes a failed run's writes in the reverse order they were made.</summary>
     /// <param name="undo">Each write's inverse, in the order the writes happened.</param>
-    private static void RollBack(List<Action> undo)
+    /// <returns>One line per undo that itself failed, so the caller can report them with the original error.</returns>
+    private static List<string> RollBack(List<Action> undo)
     {
+        List<string> failed = [];
         for (int index = undo.Count - 1; index >= 0; index--)
         {
             try
@@ -449,10 +464,13 @@ public sealed partial class StandardsFolderMigration
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                // The original failure is the one the caller must see, so nothing an undo raises —
-                // including a type the forward path never expected — may replace it.
+                // The original failure is still the one worth leading with, but an undo that fails
+                // is reported beside it rather than swallowed.
+                failed.Add($"{exception.GetType().Name}: {exception.Message}");
             }
         }
+
+        return failed;
     }
 
     /// <summary>
