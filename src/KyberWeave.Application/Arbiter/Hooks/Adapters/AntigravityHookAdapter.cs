@@ -414,6 +414,12 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
             dispatches.Add(ReadDispatch(subagent));
         }
 
+        // A flat Prompt beside a Subagents array is a dispatch too: judging only the list would let it through.
+        if (args.TryGetProperty("Prompt", out _))
+        {
+            dispatches.Add(ReadDispatch(args));
+        }
+
         return dispatches;
     }
 
@@ -434,39 +440,6 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
         }
 
         return new Dispatch(target, prompt);
-    }
-
-    /// <summary>Every prompt the event carries, read leniently: anything unreadable is simply absent.</summary>
-    private static IEnumerable<string> PromptsOf(JsonElement payload)
-    {
-        if (!payload.TryGetProperty("toolCall", out JsonElement toolCall)
-            || toolCall.ValueKind != JsonValueKind.Object
-            || !toolCall.TryGetProperty("args", out JsonElement args)
-            || args.ValueKind != JsonValueKind.Object)
-        {
-            yield break;
-        }
-
-        if (args.TryGetProperty("Subagents", out JsonElement subagents))
-        {
-            if (subagents.ValueKind != JsonValueKind.Array)
-            {
-                yield break;
-            }
-
-            foreach (JsonElement subagent in subagents.EnumerateArray())
-            {
-                if (GetString(subagent, "Prompt") is { } listed)
-                {
-                    yield return listed;
-                }
-            }
-        }
-
-        if (GetString(args, "Prompt") is { } flat)
-        {
-            yield return flat;
-        }
     }
 
     private static bool IsMarked(string prompt) => HeaderBlock.Parse(prompt).IsMarked;
