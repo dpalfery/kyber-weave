@@ -65,6 +65,10 @@ Notes.
 - An adapter is thin: it translates the call and holds no decision the logic should make. Where an
   adapter does hold policy (the file-system adapter's skip list, the process adapter's missing-
   executable mapping), that is noted below rather than hidden.
+- The fake follows the adapter, and a divergence is a contract case: moving a directory that is a
+  symbolic link moves the link rather than its target on both, proved by
+  `MoveDirectoryMovesADirectoryLinkAsALinkWithoutFollowingIt` in the shared file-system contract
+  suite.
 
 ## The adapter register
 
