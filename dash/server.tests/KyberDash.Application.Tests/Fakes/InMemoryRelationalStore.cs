@@ -619,6 +619,54 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
+    public SessionAggregateView? GetSessionAggregate(string sessionKey, IModelPricingLookup? pricing = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            return BuildSessionAggregateView(state, sessionKey, pricing);
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<SessionAggregateView> ListSessionAggregates(string? harnessId = null, IModelPricingLookup? pricing = null)
+    {
+        lock (syncRoot)
+        {
+            TableMetadata sessionMeta = GetTableMetadata("session");
+            List<SessionAggregateView> results = [];
+            foreach (object?[] row in state.GetRows("session"))
+            {
+                if (harnessId is not null && !string.Equals(GetString(sessionMeta, row, "harness_id"), harnessId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                string key = GetString(sessionMeta, row, "session_id");
+                SessionAggregateView? aggregate = BuildSessionAggregateView(state, key, pricing);
+                if (aggregate is not null)
+                {
+                    results.Add(aggregate);
+                }
+            }
+
+            return results;
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            return BuildSessionTurnSummaries(state, sessionKey, pricing);
+        }
+    }
+
+    /// <inheritdoc />
     public StoredSessionProjection? GetSessionProjection(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -4778,6 +4826,1186 @@ public class InMemoryRelationalStore :
         }
 
         return new StoredFieldsView(sessionKey, tableEntries);
+    }
+
+    private static IReadOnlyList<ReadTimeTurnSummary> BuildSessionTurnSummaries(
+        StoreState currentState,
+        string sessionKey,
+        IModelPricingLookup? pricing)
+    {
+        object?[]? sessionRow = FindRowByKey(currentState, "session", [("session_id", sessionKey)]);
+        List<CollectedRecord> records = CollectSessionRecords(currentState, sessionKey);
+        if (sessionRow is null && records.Count == 0)
+        {
+            return [];
+        }
+
+        string harnessId = sessionRow is not null
+            ? GetString(GetTableMetadata("session"), sessionRow, "harness_id")
+            : records[0].HarnessId;
+
+        List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntries(currentState, sessionKey, records);
+        List<ReadTimeTurnSummary> summaries = new(turnEntries.Count);
+        foreach ((int position, CollectedRecord turnRecord) in turnEntries)
+        {
+            summaries.Add(BuildTurnSummary(turnRecord, position, harnessId, pricing, out _, out _));
+        }
+
+        return summaries;
+    }
+
+    private static SessionAggregateView? BuildSessionAggregateView(
+        StoreState currentState,
+        string sessionKey,
+        IModelPricingLookup? pricing)
+    {
+        object?[]? sessionRow = FindRowByKey(currentState, "session", [("session_id", sessionKey)]);
+        if (sessionRow is null)
+        {
+            return null;
+        }
+
+        string harnessId = GetString(GetTableMetadata("session"), sessionRow, "harness_id");
+        List<CollectedRecord> records = CollectSessionRecords(currentState, sessionKey);
+        HashSet<string> sessionSpanIds = new(StringComparer.Ordinal);
+        Dictionary<string, CollectedRecord> recordsBySpanId = new(records.Count, StringComparer.Ordinal);
+        foreach (CollectedRecord record in records)
+        {
+            _ = sessionSpanIds.Add(record.RecordId);
+            recordsBySpanId[record.RecordId] = record;
+        }
+
+        StoredSessionProjection? projection = GetSessionProjectionFromState(currentState, sessionKey);
+        List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntries(currentState, sessionKey, records);
+
+        List<ReadTimeTurnSummary> turnSummaries = new(turnEntries.Count);
+        List<CostBlock> turnPublishedBlocks = new(turnEntries.Count);
+        List<CostBlock> valuedTurnPublishedBlocks = [];
+        List<CostBlock> valuedTurnHarnessBlocks = [];
+        List<string> models = [];
+        HashSet<string> seenModels = new(StringComparer.Ordinal);
+        long totalInput = 0;
+        bool hasInput = false;
+        long totalOutput = 0;
+        bool hasOutput = false;
+        long totalCacheRead = 0;
+        bool hasCacheRead = false;
+        long totalCacheCreation = 0;
+        bool hasCacheCreation = false;
+        int cacheCreationTurns = 0;
+        List<ReadTimeTurnReconciliation> reconciliation = new(turnEntries.Count);
+
+        foreach ((int position, CollectedRecord turnRecord) in turnEntries)
+        {
+            ReadTimeTurnSummary turnSummary = BuildTurnSummary(
+                turnRecord,
+                position,
+                harnessId,
+                pricing,
+                out CostBlock publishedBlock,
+                out CostBlock? harnessBlock);
+
+            turnSummaries.Add(turnSummary);
+            turnPublishedBlocks.Add(publishedBlock);
+            if (publishedBlock.Value is double pv && double.IsFinite(pv))
+            {
+                valuedTurnPublishedBlocks.Add(publishedBlock);
+            }
+
+            if (harnessBlock is not null && harnessBlock.Value is double hv && double.IsFinite(hv))
+            {
+                valuedTurnHarnessBlocks.Add(harnessBlock);
+            }
+
+            if (!string.IsNullOrEmpty(turnRecord.Model) && seenModels.Add(turnRecord.Model))
+            {
+                models.Add(turnRecord.Model);
+            }
+
+            if (turnSummary.InputTokens.HasValue)
+            {
+                totalInput += turnSummary.InputTokens.Value;
+                hasInput = true;
+            }
+
+            if (turnSummary.OutputTokens.HasValue)
+            {
+                totalOutput += turnSummary.OutputTokens.Value;
+                hasOutput = true;
+            }
+
+            if (turnSummary.CacheReadTokens.HasValue)
+            {
+                totalCacheRead += turnSummary.CacheReadTokens.Value;
+                hasCacheRead = true;
+            }
+
+            if (turnSummary.CacheCreationTokens.HasValue)
+            {
+                totalCacheCreation += turnSummary.CacheCreationTokens.Value;
+                hasCacheCreation = true;
+                if (turnSummary.CacheCreationTokens.Value > 0)
+                {
+                    cacheCreationTurns++;
+                }
+            }
+
+            bool? inputMatch = turnRecord.ReportedInputTokens.HasValue && turnSummary.InputTokens.HasValue
+                ? turnRecord.ReportedInputTokens.Value == turnSummary.InputTokens.Value
+                : null;
+            bool? outputMatch = turnRecord.ReportedOutputTokens.HasValue && turnSummary.OutputTokens.HasValue
+                ? turnRecord.ReportedOutputTokens.Value == turnSummary.OutputTokens.Value
+                : null;
+            reconciliation.Add(new ReadTimeTurnReconciliation(
+                turnRecord.RecordId,
+                turnRecord.ReportedInputTokens,
+                turnSummary.InputTokens,
+                inputMatch,
+                turnRecord.ReportedOutputTokens,
+                turnSummary.OutputTokens,
+                outputMatch));
+        }
+
+        List<CollectedRecord> rootRecords =
+        [
+            .. records
+                .Where(r => r.ParentRecordId is null ||
+                            string.Equals(r.ParentRecordId, r.RecordId, StringComparison.Ordinal) ||
+                            !sessionSpanIds.Contains(r.ParentRecordId))
+                .OrderBy(static r => r.StartedAt)
+                .ThenBy(static r => r.RecordId, StringComparer.Ordinal),
+        ];
+
+        bool hasNesting = records.Any(r =>
+            r.ParentRecordId is not null &&
+            !string.Equals(r.ParentRecordId, r.RecordId, StringComparison.Ordinal) &&
+            sessionSpanIds.Contains(r.ParentRecordId));
+
+        IReadOnlyList<CollectedRecord> durationCandidates = hasNesting ? rootRecords : records;
+        long totalDuration = 0;
+        bool hasDuration = false;
+        foreach (CollectedRecord candidate in durationCandidates)
+        {
+            long? ms = ComputeRecordDurationMs(candidate);
+            if (ms.HasValue)
+            {
+                totalDuration += ms.Value;
+                hasDuration = true;
+            }
+        }
+
+        List<Problem> extraProblems = [];
+
+        List<CostBlock> reportedRecordBlocks = [];
+        foreach (CollectedRecord record in records)
+        {
+            if (record.ReportedCost is null)
+            {
+                continue;
+            }
+
+            IReadOnlyDictionary<string, double>? byModel = !string.IsNullOrEmpty(record.Model)
+                ? new Dictionary<string, double>(StringComparer.Ordinal) { [record.Model] = record.ReportedCost.Amount }
+                : null;
+            reportedRecordBlocks.Add(new CostBlock(
+                CostBasis.Harness,
+                CostStatus.Priced,
+                record.ReportedCost.Amount,
+                record.ReportedCost.Currency,
+                byModel));
+        }
+
+        ReadTimeCostSummary? sessionReportedCost = reportedRecordBlocks.Count > 0
+            ? AggregateCostBlocks(reportedRecordBlocks, CostBasis.Harness, extraProblems)
+            : null;
+
+        ReadTimeCostSummary sessionPublishedCost = turnPublishedBlocks.Count > 0
+            ? AggregateCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
+            : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
+
+        ReadTimeCostBasisMismatch? basisMismatch = null;
+        if (valuedTurnHarnessBlocks.Count > 0 && valuedTurnPublishedBlocks.Count > 0)
+        {
+            List<CostBlock> combined = [.. valuedTurnHarnessBlocks, .. valuedTurnPublishedBlocks];
+            CostTotalResult mismatchTotal = CanonPricing.SumCosts(combined);
+            CostBasisMismatch? domainMismatch = CanonPricing.CostBasisMismatchOf(combined, mismatchTotal);
+            if (domainMismatch is not null)
+            {
+                List<ReadTimeBasisTotal> totalsByBasis =
+                [
+                    .. domainMismatch.TotalsByBasis
+                        .OrderBy(static kv => kv.Key, StringComparer.Ordinal)
+                        .Select(static kv => new ReadTimeBasisTotal(kv.Key, kv.Value)),
+                ];
+                basisMismatch = new ReadTimeCostBasisMismatch(
+                    domainMismatch.Code,
+                    domainMismatch.Message,
+                    domainMismatch.Bases,
+                    totalsByBasis);
+            }
+
+            if (mismatchTotal.Problem is not null)
+            {
+                extraProblems.Add(mismatchTotal.Problem);
+            }
+        }
+
+        long? nullableTotalInput = hasInput ? totalInput : null;
+        long? nullableTotalOutput = hasOutput ? totalOutput : null;
+        long? nullableTotalCacheRead = hasCacheRead ? totalCacheRead : null;
+        long? nullableTotalCacheCreation = hasCacheCreation ? totalCacheCreation : null;
+
+        double? cacheHitRatio = nullableTotalInput is > 0 && nullableTotalCacheRead.HasValue
+            ? (double)nullableTotalCacheRead.Value / nullableTotalInput.Value
+            : null;
+        int? cacheCreationCoverage = nullableTotalInput is > 0 && nullableTotalCacheCreation.HasValue && turnEntries.Count > 0
+            ? cacheCreationTurns
+            : null;
+
+        // Tool calls and tool definitions aggregation.
+        int toolCallTotal = 0;
+        List<string> toolsInvoked = [];
+        HashSet<string> seenInvokedTools = new(StringComparer.Ordinal);
+        Dictionary<string, int> invCounts = new(StringComparer.Ordinal);
+        Dictionary<string, int> errCounts = new(StringComparer.Ordinal);
+
+        foreach (CollectedRecord record in records)
+        {
+            if (record.Tool is null)
+            {
+                continue;
+            }
+
+            toolCallTotal++;
+            string toolName = record.Tool.ToolName;
+            if (seenInvokedTools.Add(toolName))
+            {
+                toolsInvoked.Add(toolName);
+            }
+
+            invCounts[toolName] = invCounts.GetValueOrDefault(toolName) + 1;
+            if (record.Status == RecordStatus.Error ||
+                record.Tool.Succeeded == false ||
+                record.Tool.Error is not null)
+            {
+                errCounts[toolName] = errCounts.GetValueOrDefault(toolName) + 1;
+            }
+        }
+
+        int? toolCalls = toolCallTotal > 0 ? toolCallTotal : null;
+
+        List<string> toolsOffered = [];
+        HashSet<string> seenOfferedTools = new(StringComparer.Ordinal);
+        Dictionary<string, (long SchemaTokens, string? Server, HashSet<string> SpanIds)> defStats = new(StringComparer.Ordinal);
+        int toolDefinitionRowCount = 0;
+
+        foreach (CollectedRecord record in records)
+        {
+            foreach (CollectedToolDefinition def in record.ToolDefinitions)
+            {
+                toolDefinitionRowCount++;
+                if (seenOfferedTools.Add(def.ToolName))
+                {
+                    toolsOffered.Add(def.ToolName);
+                }
+
+                if (!defStats.TryGetValue(def.ToolName, out (long SchemaTokens, string? Server, HashSet<string> SpanIds) existing))
+                {
+                    HashSet<string> spanSet = new(StringComparer.Ordinal) { record.RecordId };
+                    defStats[def.ToolName] = (def.SchemaTokens, def.Server, spanSet);
+                }
+                else
+                {
+                    _ = existing.SpanIds.Add(record.RecordId);
+                    defStats[def.ToolName] = (
+                        existing.SchemaTokens,
+                        existing.Server ?? def.Server,
+                        existing.SpanIds);
+                }
+            }
+        }
+
+        bool hasToolDefinitions = toolDefinitionRowCount > 0;
+        List<ReadTimeSessionToolSummary> tools = BuildSessionToolSummaries(
+            projection,
+            turnEntries.Count,
+            defStats,
+            toolsInvoked,
+            invCounts,
+            errCounts);
+        List<ReadTimeSessionServerSummary> servers = BuildSessionServerSummaries(projection, tools);
+
+        IReadOnlyList<string> requestSpanIds = projection is not null && projection.RequestSpanIds.Count > 0
+            ? projection.RequestSpanIds
+            : [.. rootRecords.Select(static r => r.RecordId)];
+        int requestCount = requestSpanIds.Count;
+        List<ReadTimeSessionRequestSummary> requests = BuildRequestSummaries(requestSpanIds, records, recordsBySpanId, turnEntries);
+
+        ReadTimeSessionCoverage coverage = new(
+            SchemaMeasurable: projection?.Schema is not null,
+            ContextMeasurable: projection?.Context is not null);
+
+        List<Problem> problems = CollectSessionProblems(currentState, sessionKey, sessionSpanIds);
+        problems.AddRange(extraProblems);
+
+        List<SubagentSession> subagents = BuildSubagentSummaries(projection, records, recordsBySpanId);
+        ReadTimeAuxiliarySummary auxiliary = BuildAuxiliarySummary(projection, records, recordsBySpanId, harnessId, pricing, problems);
+
+        ReadTimeContextBucketSummary? firstContextBucket = null;
+        ReadTimeContextBucketSummary? lastContextBucket = null;
+        if (projection?.Context?.Turns is { Count: > 0 } contextTurns)
+        {
+            List<StoredSessionContextTurn> orderedContext = [.. contextTurns.OrderBy(static t => t.Position)];
+            firstContextBucket = BuildContextBucketSummary(orderedContext[0], turnEntries);
+            lastContextBucket = BuildContextBucketSummary(orderedContext[^1], turnEntries);
+        }
+
+        UnusedSchemaRange? unusedRange = ResolveUnusedRange(projection, harnessId, models, pricing);
+
+        return new SessionAggregateView(
+            SessionKey: sessionKey,
+            HarnessId: harnessId,
+            TurnCount: turnEntries.Count,
+            RequestCount: requestCount,
+            TotalInput: nullableTotalInput,
+            TotalOutput: nullableTotalOutput,
+            TotalCacheRead: nullableTotalCacheRead,
+            TotalCacheCreation: nullableTotalCacheCreation,
+            DurationMs: hasDuration ? totalDuration : null,
+            Models: models,
+            ReportedCost: sessionReportedCost,
+            PublishedCost: sessionPublishedCost,
+            CostBasisMismatch: basisMismatch,
+            CacheHitRatio: cacheHitRatio,
+            CacheCreationCoverage: cacheCreationCoverage,
+            ToolCalls: toolCalls,
+            ToolsInvoked: toolsInvoked,
+            HasToolDefinitions: hasToolDefinitions,
+            ToolsOffered: toolsOffered,
+            Tools: tools,
+            Servers: servers,
+            Requests: requests,
+            Coverage: coverage,
+            Problems: problems,
+            Reconciliation: reconciliation,
+            Subagents: subagents,
+            Auxiliary: auxiliary,
+            FirstContextBucket: firstContextBucket,
+            LastContextBucket: lastContextBucket,
+            UnusedRange: unusedRange);
+    }
+
+    private static StoredSessionProjection? GetSessionProjectionFromState(StoreState currentState, string sessionId)
+    {
+        object?[]? row = FindRowByKey(currentState, "session_projection", [("session_id", sessionId)]);
+        return row is null ? null : MaterializeSessionProjection(currentState, row);
+    }
+
+    private static List<CollectedRecord> CollectSessionRecords(StoreState currentState, string sessionKey)
+    {
+        HashSet<string> sessionSpans = ResolveSessionSpanIds(currentState, sessionKey);
+        if (sessionSpans.Count == 0)
+        {
+            return [];
+        }
+
+        TableMetadata recordMeta = GetTableMetadata("record");
+        List<CollectedRecord> records = [];
+        foreach (object?[] row in currentState.GetRows("record"))
+        {
+            if (sessionSpans.Contains(GetString(recordMeta, row, "span_id")))
+            {
+                records.Add(MaterializeRecord(currentState, row));
+            }
+        }
+
+        return records;
+    }
+
+    private static List<(int Position, CollectedRecord Record)> ResolveSessionTurnEntries(
+        StoreState currentState,
+        string sessionKey,
+        IReadOnlyList<CollectedRecord> records)
+    {
+        Dictionary<string, CollectedRecord> bySpan = new(records.Count, StringComparer.Ordinal);
+        foreach (CollectedRecord record in records)
+        {
+            bySpan[record.RecordId] = record;
+        }
+
+        List<StoredSessionTurn> projectedTurns = MaterializeSessionTurns(currentState, sessionKey);
+        if (projectedTurns.Count > 0)
+        {
+            List<(int Position, CollectedRecord Record)> resolved = new(projectedTurns.Count);
+            foreach (StoredSessionTurn turn in projectedTurns)
+            {
+                if (bySpan.TryGetValue(turn.SpanId, out CollectedRecord? record))
+                {
+                    resolved.Add((turn.Position, record));
+                }
+            }
+
+            return resolved;
+        }
+
+        List<CollectedRecord> llmRecords =
+        [
+            .. records
+                .Where(static r => r.Op == RecordOp.LlmInvoke)
+                .OrderBy(static r => r.StartedAt)
+                .ThenBy(static r => r.RecordId, StringComparer.Ordinal),
+        ];
+
+        List<(int Position, CollectedRecord Record)> fallback = new(llmRecords.Count);
+        for (int index = 0; index < llmRecords.Count; index++)
+        {
+            fallback.Add((index, llmRecords[index]));
+        }
+
+        return fallback;
+    }
+
+    private static ReadTimeTurnSummary BuildTurnSummary(
+        CollectedRecord record,
+        int position,
+        string harnessId,
+        IModelPricingLookup? pricing,
+        out CostBlock publishedBlock,
+        out CostBlock? harnessBlock)
+    {
+        long? freshInput = TryFindTokenCount(record.Tokens, TokenClass.Input);
+        long? cacheRead = TryFindTokenCount(record.Tokens, TokenClass.CacheRead);
+        long? cacheCreation = TryFindTokenCount(record.Tokens, TokenClass.CacheWrite);
+        long? output = TryFindTokenCount(record.Tokens, TokenClass.Output);
+        long? reasoning = TryFindTokenCount(record.Tokens, TokenClass.Reasoning);
+
+        long? inputTokens = freshInput.HasValue || cacheRead.HasValue || cacheCreation.HasValue
+            ? (freshInput ?? 0L) + (cacheRead ?? 0L) + (cacheCreation ?? 0L)
+            : null;
+
+        long? durationMs = ComputeRecordDurationMs(record);
+
+        ReadTimeCostSummary? reportedCost = null;
+        harnessBlock = null;
+        if (record.ReportedCost is not null)
+        {
+            IReadOnlyDictionary<string, double>? byModel = !string.IsNullOrEmpty(record.Model)
+                ? new Dictionary<string, double>(StringComparer.Ordinal) { [record.Model] = record.ReportedCost.Amount }
+                : null;
+            harnessBlock = new CostBlock(
+                CostBasis.Harness,
+                CostStatus.Priced,
+                record.ReportedCost.Amount,
+                record.ReportedCost.Currency,
+                byModel);
+            reportedCost = ToReadTimeCostSummary(harnessBlock);
+        }
+
+        TokenUsage usage = new(
+            FreshInput: freshInput ?? 0L,
+            CacheRead: cacheRead ?? 0L,
+            CacheCreation: cacheCreation ?? 0L,
+            Output: output ?? 0L,
+            ReportedInput: record.ReportedInputTokens ?? inputTokens ?? 0L,
+            ReportedOutput: record.ReportedOutputTokens ?? output ?? 0L,
+            Reasoning: reasoning);
+
+        publishedBlock = CanonPricing.PriceTurn(usage, record.Model, harnessId, pricing, existing: null);
+
+        return new ReadTimeTurnSummary(
+            Position: position,
+            SpanId: record.RecordId,
+            TimestampUtc: FormatTimestamp(record.StartedAt),
+            Model: record.Model,
+            InputTokens: inputTokens,
+            OutputTokens: output,
+            FreshInputTokens: freshInput,
+            CacheReadTokens: cacheRead,
+            CacheCreationTokens: cacheCreation,
+            ReasoningTokens: reasoning,
+            DurationMs: durationMs,
+            ReportedCost: reportedCost,
+            PublishedCost: ToReadTimeCostSummary(publishedBlock));
+    }
+
+    private static long? TryFindTokenCount(IReadOnlyList<CollectedTokenCount> tokens, TokenClass tokenClass)
+    {
+        foreach (CollectedTokenCount entry in tokens)
+        {
+            if (entry.TokenClass == tokenClass)
+            {
+                return entry.Count;
+            }
+        }
+
+        return null;
+    }
+
+    private static long? ComputeRecordDurationMs(CollectedRecord record)
+    {
+        if (record.EndedAt.HasValue)
+        {
+            return Math.Max(0L, (long)Math.Round((record.EndedAt.Value - record.StartedAt).TotalMilliseconds));
+        }
+
+        return record.ReportedDurationMs;
+    }
+
+    private static ReadTimeCostSummary ToReadTimeCostSummary(CostBlock block)
+    {
+        List<ReadTimeModelCost> byModel = block.ByModel is null
+            ? []
+            :
+            [
+                .. block.ByModel
+                    .OrderBy(static kv => kv.Key, StringComparer.Ordinal)
+                    .Select(static kv => new ReadTimeModelCost(kv.Key, kv.Value)),
+            ];
+
+        return new ReadTimeCostSummary(block.Basis, block.Status, block.Value, block.Currency, byModel);
+    }
+
+    private static ReadTimeCostSummary AggregateCostBlocks(
+        IReadOnlyList<CostBlock> blocks,
+        CostBasis fallbackBasis,
+        List<Problem> problems)
+    {
+        CostTotalResult result = CanonPricing.SumCosts(blocks);
+        if (result.Ok && result.Total is not null)
+        {
+            return ToReadTimeCostSummary(result.Total);
+        }
+
+        if (result.Problem is not null)
+        {
+            problems.Add(result.Problem);
+        }
+
+        return new ReadTimeCostSummary(fallbackBasis, CostStatus.Partial, null, null, []);
+    }
+
+    private static List<ReadTimeSessionToolSummary> BuildSessionToolSummaries(
+        StoredSessionProjection? projection,
+        int turnCount,
+        IReadOnlyDictionary<string, (long SchemaTokens, string? Server, HashSet<string> SpanIds)> defStats,
+        IReadOnlyList<string> toolsInvoked,
+        IReadOnlyDictionary<string, int> invCounts,
+        IReadOnlyDictionary<string, int> errCounts)
+    {
+        List<ReadTimeSessionToolSummary> result = [];
+        HashSet<string> seenNames = new(StringComparer.Ordinal);
+
+        if (projection?.Schema is not null)
+        {
+            foreach (StoredSchemaRankedTool ranked in projection.Schema.RankedTools)
+            {
+                _ = seenNames.Add(ranked.ToolName);
+                bool hasDef = defStats.TryGetValue(ranked.ToolName, out (long SchemaTokens, string? Server, HashSet<string> SpanIds) def);
+                long schemaTokens = hasDef ? def.SchemaTokens : 0L;
+                string? server = ranked.ServerName ?? (hasDef ? def.Server : null);
+                int invocations = invCounts.GetValueOrDefault(ranked.ToolName);
+                int errors = errCounts.GetValueOrDefault(ranked.ToolName);
+                int turnsResident = hasDef && schemaTokens > 0 && ranked.CostTokens >= schemaTokens
+                    ? (int)Math.Min(int.MaxValue, Math.Max(def.SpanIds.Count, ranked.CostTokens / schemaTokens))
+                    : (turnCount > 0 ? turnCount : (hasDef ? def.SpanIds.Count : 0));
+                result.Add(new ReadTimeSessionToolSummary(
+                    Name: ranked.ToolName,
+                    Server: server,
+                    SchemaTokens: schemaTokens,
+                    Invocations: invocations,
+                    TurnsResident: turnsResident,
+                    Errors: errors,
+                    TotalSchemaCost: ranked.CostTokens,
+                    Invoked: ranked.Invoked || invocations > 0));
+            }
+        }
+
+        List<ReadTimeSessionToolSummary> remainingDefinitions = [];
+        foreach (KeyValuePair<string, (long SchemaTokens, string? Server, HashSet<string> SpanIds)> kv in defStats)
+        {
+            if (!seenNames.Add(kv.Key))
+            {
+                continue;
+            }
+
+            int turnsResident = turnCount > 0 ? turnCount : kv.Value.SpanIds.Count;
+            long totalSchemaCost = kv.Value.SchemaTokens * turnsResident;
+            int invocations = invCounts.GetValueOrDefault(kv.Key);
+            int errors = errCounts.GetValueOrDefault(kv.Key);
+            remainingDefinitions.Add(new ReadTimeSessionToolSummary(
+                Name: kv.Key,
+                Server: kv.Value.Server,
+                SchemaTokens: kv.Value.SchemaTokens,
+                Invocations: invocations,
+                TurnsResident: turnsResident,
+                Errors: errors,
+                TotalSchemaCost: totalSchemaCost,
+                Invoked: invocations > 0));
+        }
+
+        remainingDefinitions.Sort(static (left, right) =>
+        {
+            int cmp = right.TotalSchemaCost.CompareTo(left.TotalSchemaCost);
+            return cmp != 0 ? cmp : string.CompareOrdinal(left.Name, right.Name);
+        });
+        result.AddRange(remainingDefinitions);
+
+        foreach (string invokedName in toolsInvoked)
+        {
+            if (!seenNames.Add(invokedName))
+            {
+                continue;
+            }
+
+            result.Add(new ReadTimeSessionToolSummary(
+                Name: invokedName,
+                Server: null,
+                SchemaTokens: 0L,
+                Invocations: invCounts.GetValueOrDefault(invokedName),
+                TurnsResident: 0,
+                Errors: errCounts.GetValueOrDefault(invokedName),
+                TotalSchemaCost: 0L,
+                Invoked: true));
+        }
+
+        return result;
+    }
+
+    private static List<ReadTimeSessionServerSummary> BuildSessionServerSummaries(
+        StoredSessionProjection? projection,
+        IReadOnlyList<ReadTimeSessionToolSummary> tools)
+    {
+        List<string> orderedServers = [];
+        HashSet<string> seenServers = new(StringComparer.Ordinal);
+
+        if (projection?.Schema is not null)
+        {
+            foreach (StoredSchemaServerTokens server in projection.Schema.Servers)
+            {
+                if (seenServers.Add(server.ServerName))
+                {
+                    orderedServers.Add(server.ServerName);
+                }
+            }
+        }
+
+        Dictionary<string, long> remainingByCost = new(StringComparer.Ordinal);
+        foreach (ReadTimeSessionToolSummary tool in tools)
+        {
+            if (tool.Server is null || seenServers.Contains(tool.Server))
+            {
+                continue;
+            }
+
+            remainingByCost[tool.Server] = remainingByCost.GetValueOrDefault(tool.Server) + tool.TotalSchemaCost;
+        }
+
+        foreach (KeyValuePair<string, long> pair in remainingByCost
+            .OrderByDescending(static kv => kv.Value)
+            .ThenBy(static kv => kv.Key, StringComparer.Ordinal))
+        {
+            if (seenServers.Add(pair.Key))
+            {
+                orderedServers.Add(pair.Key);
+            }
+        }
+
+        List<ReadTimeSessionServerSummary> summaries = new(orderedServers.Count);
+        foreach (string server in orderedServers)
+        {
+            int toolCount = 0;
+            long schemaTokens = 0;
+            int invocations = 0;
+            int unusedTools = 0;
+            long unusedCost = 0;
+
+            foreach (ReadTimeSessionToolSummary tool in tools)
+            {
+                if (!string.Equals(tool.Server, server, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                toolCount++;
+                schemaTokens += tool.SchemaTokens;
+                invocations += tool.Invocations;
+                if (!tool.Invoked)
+                {
+                    unusedTools++;
+                    unusedCost += tool.TotalSchemaCost;
+                }
+            }
+
+            summaries.Add(new ReadTimeSessionServerSummary(
+                Server: server,
+                IsMcp: true,
+                Tools: toolCount,
+                SchemaTokens: schemaTokens,
+                Invocations: invocations,
+                UnusedTools: unusedTools,
+                UnusedCost: unusedCost));
+        }
+
+        return summaries;
+    }
+
+    private static List<ReadTimeSessionRequestSummary> BuildRequestSummaries(
+        IReadOnlyList<string> requestSpanIds,
+        IReadOnlyList<CollectedRecord> records,
+        IReadOnlyDictionary<string, CollectedRecord> recordsBySpanId,
+        IReadOnlyList<(int Position, CollectedRecord Record)> turnEntries)
+    {
+        List<ReadTimeSessionRequestSummary> summaries = new(requestSpanIds.Count);
+        foreach (string requestSpanId in requestSpanIds)
+        {
+            HashSet<string> subtree = CollectDescendantSpanIds(requestSpanId, records);
+            List<CollectedRecord> ownedTurns = [];
+            foreach ((int _, CollectedRecord turnRecord) in turnEntries)
+            {
+                if (subtree.Contains(turnRecord.RecordId))
+                {
+                    ownedTurns.Add(turnRecord);
+                }
+            }
+
+            CollectedRecord? requestRecord = recordsBySpanId.GetValueOrDefault(requestSpanId);
+            string? model = requestRecord?.Model;
+            if (string.IsNullOrEmpty(model))
+            {
+                foreach (CollectedRecord ownedTurn in ownedTurns)
+                {
+                    if (!string.IsNullOrEmpty(ownedTurn.Model))
+                    {
+                        model = ownedTurn.Model;
+                        break;
+                    }
+                }
+            }
+
+            string timestampUtc = requestRecord is not null
+                ? FormatTimestamp(requestRecord.StartedAt)
+                : (ownedTurns.Count > 0 ? FormatTimestamp(ownedTurns[0].StartedAt) : string.Empty);
+
+            string? promptPreview = ExtractPromptPreview(requestRecord, ownedTurns);
+            summaries.Add(new ReadTimeSessionRequestSummary(
+                RequestSpanId: requestSpanId,
+                TimestampUtc: timestampUtc,
+                Turns: ownedTurns.Count,
+                Model: model,
+                PromptPreview: promptPreview));
+        }
+
+        return summaries;
+    }
+
+    private static HashSet<string> CollectDescendantSpanIds(string rootSpanId, IReadOnlyList<CollectedRecord> records)
+    {
+        Dictionary<string, List<string>> childrenByParent = new(StringComparer.Ordinal);
+        foreach (CollectedRecord record in records)
+        {
+            if (string.IsNullOrEmpty(record.ParentRecordId))
+            {
+                continue;
+            }
+
+            if (!childrenByParent.TryGetValue(record.ParentRecordId, out List<string>? children))
+            {
+                children = [];
+                childrenByParent[record.ParentRecordId] = children;
+            }
+
+            children.Add(record.RecordId);
+        }
+
+        HashSet<string> visited = new(StringComparer.Ordinal) { rootSpanId };
+        Queue<string> pending = new();
+        pending.Enqueue(rootSpanId);
+
+        while (pending.Count > 0)
+        {
+            string current = pending.Dequeue();
+            if (!childrenByParent.TryGetValue(current, out List<string>? children))
+            {
+                continue;
+            }
+
+            foreach (string child in children)
+            {
+                if (visited.Add(child))
+                {
+                    pending.Enqueue(child);
+                }
+            }
+        }
+
+        return visited;
+    }
+
+    private static string? ExtractPromptPreview(
+        CollectedRecord? requestRecord,
+        IReadOnlyList<CollectedRecord> ownedTurns)
+    {
+        if (requestRecord is not null && HasPromptBucketParts(requestRecord.Parts))
+        {
+            return ExtractPromptPreviewFromParts(requestRecord.Parts);
+        }
+
+        foreach (CollectedRecord ownedTurn in ownedTurns)
+        {
+            if (HasPromptBucketParts(ownedTurn.Parts))
+            {
+                return ExtractPromptPreviewFromParts(ownedTurn.Parts);
+            }
+        }
+
+        return null;
+    }
+
+    private static bool HasPromptBucketParts(IReadOnlyList<CollectedContentPart> parts)
+    {
+        foreach (CollectedContentPart part in parts)
+        {
+            if (part.Bucket is ContentBucket.UserPrompt or ContentBucket.UserMessage or ContentBucket.ConversationHistory)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string? ExtractPromptPreviewFromParts(IReadOnlyList<CollectedContentPart> parts)
+    {
+        ContentBucket[] priorityBuckets =
+        [
+            ContentBucket.UserPrompt,
+            ContentBucket.UserMessage,
+            ContentBucket.ConversationHistory,
+        ];
+
+        foreach (ContentBucket targetBucket in priorityBuckets)
+        {
+            foreach (CollectedContentPart part in parts)
+            {
+                if (part.Bucket != targetBucket)
+                {
+                    continue;
+                }
+
+                if (part.PlainText is null)
+                {
+                    return null;
+                }
+
+                string trimmed = part.PlainText.Trim();
+                if (trimmed.Length == 0)
+                {
+                    continue;
+                }
+
+                return TruncateSurrogateSafe(trimmed, 200);
+            }
+        }
+
+        return null;
+    }
+
+    private static string TruncateSurrogateSafe(string text, int maxLength)
+    {
+        if (text.Length <= maxLength)
+        {
+            return text;
+        }
+
+        int cut = maxLength;
+        if (cut > 0 && char.IsHighSurrogate(text[cut - 1]))
+        {
+            cut--;
+        }
+
+        return text[..cut];
+    }
+
+    private static List<Problem> CollectSessionProblems(
+        StoreState currentState,
+        string sessionKey,
+        HashSet<string> sessionSpanIds)
+    {
+        HashSet<long> problemIds = [];
+
+        TableMetadata probSessMeta = GetTableMetadata("ingest_problem_session");
+        foreach (object?[] row in currentState.GetRows("ingest_problem_session"))
+        {
+            if (string.Equals(GetString(probSessMeta, row, "session_id"), sessionKey, StringComparison.Ordinal))
+            {
+                _ = problemIds.Add(GetInt64(probSessMeta, row, "problem_id"));
+            }
+        }
+
+        TableMetadata probSpanMeta = GetTableMetadata("ingest_problem_span");
+        foreach (object?[] row in currentState.GetRows("ingest_problem_span"))
+        {
+            if (sessionSpanIds.Contains(GetString(probSpanMeta, row, "span_id")))
+            {
+                _ = problemIds.Add(GetInt64(probSpanMeta, row, "problem_id"));
+            }
+        }
+
+        if (problemIds.Count == 0)
+        {
+            return [];
+        }
+
+        TableMetadata probMeta = GetTableMetadata("ingest_problem");
+        List<Problem> problems = [];
+        foreach (object?[] row in currentState.GetRows("ingest_problem")
+            .OrderBy(r => GetInt64(probMeta, r, "problem_id")))
+        {
+            long problemId = GetInt64(probMeta, row, "problem_id");
+            if (!problemIds.Contains(problemId))
+            {
+                continue;
+            }
+
+            string severityRaw = GetString(probMeta, row, "severity");
+            ProblemSeverity severity = ParseAggregateProblemSeverity(severityRaw);
+            string code = GetString(probMeta, row, "code");
+            string message = GetString(probMeta, row, "message");
+            string? location = ReadOptionalSingleString(currentState, "ingest_problem_location", "problem_id", problemId, "location")
+                ?? ReadOptionalSingleString(currentState, "ingest_problem_span", "problem_id", problemId, "span_id");
+            string? stack = ReadOptionalSingleString(currentState, "ingest_problem_stack", "problem_id", problemId, "stack");
+
+            problems.Add(new Problem(severity, code, message, location, stack));
+        }
+
+        return problems;
+    }
+
+    private static ProblemSeverity ParseAggregateProblemSeverity(string value)
+    {
+        if (string.Equals(value, "error", StringComparison.OrdinalIgnoreCase))
+        {
+            return ProblemSeverity.Error;
+        }
+
+        if (string.Equals(value, "warning", StringComparison.OrdinalIgnoreCase))
+        {
+            return ProblemSeverity.Warning;
+        }
+
+        throw new InvalidOperationException($"Unrecognized ingest_problem.severity value '{value}'.");
+    }
+
+    private static List<SubagentSession> BuildSubagentSummaries(
+        StoredSessionProjection? projection,
+        IReadOnlyList<CollectedRecord> records,
+        IReadOnlyDictionary<string, CollectedRecord> recordsBySpanId)
+    {
+        if (projection is not null)
+        {
+            if (projection.TimelineSubagentSpanIds is null || projection.TimelineSubagentSpanIds.Count == 0)
+            {
+                return [];
+            }
+
+            List<SubagentSession> projected = new(projection.TimelineSubagentSpanIds.Count);
+            foreach (string spanId in projection.TimelineSubagentSpanIds)
+            {
+                if (recordsBySpanId.TryGetValue(spanId, out CollectedRecord? record))
+                {
+                    projected.Add(new SubagentSession(
+                        SpanId: record.RecordId,
+                        ParentSpanId: record.Agent?.SpawningCallId ?? record.ParentRecordId,
+                        Name: record.Agent?.AgentName ?? record.Name));
+                }
+            }
+
+            return projected;
+        }
+
+        return
+        [
+            .. records
+                .Where(static r => r.Op == RecordOp.AgentInvoke)
+                .OrderBy(static r => r.StartedAt)
+                .ThenBy(static r => r.RecordId, StringComparer.Ordinal)
+                .Select(static r => new SubagentSession(
+                    SpanId: r.RecordId,
+                    ParentSpanId: r.Agent?.SpawningCallId ?? r.ParentRecordId,
+                    Name: r.Agent?.AgentName ?? r.Name)),
+        ];
+    }
+
+    private static ReadTimeAuxiliarySummary BuildAuxiliarySummary(
+        StoredSessionProjection? projection,
+        IReadOnlyList<CollectedRecord> records,
+        IReadOnlyDictionary<string, CollectedRecord> recordsBySpanId,
+        string harnessId,
+        IModelPricingLookup? pricing,
+        List<Problem> problems)
+    {
+        List<string> spanIds;
+        if (projection is not null)
+        {
+            spanIds = projection.TimelineAuxiliarySpanIds is { Count: > 0 }
+                ? [.. projection.TimelineAuxiliarySpanIds]
+                : [];
+        }
+        else
+        {
+            spanIds =
+            [
+                .. records
+                    .Where(static r => IsAuxiliaryRecord(r))
+                    .OrderBy(static r => r.StartedAt)
+                    .ThenBy(static r => r.RecordId, StringComparer.Ordinal)
+                    .Select(static r => r.RecordId),
+            ];
+        }
+
+        List<CostBlock> reportedBlocks = [];
+        List<CostBlock> publishedBlocks = [];
+        foreach (string spanId in spanIds)
+        {
+            if (!recordsBySpanId.TryGetValue(spanId, out CollectedRecord? record))
+            {
+                continue;
+            }
+
+            if (record.ReportedCost is not null)
+            {
+                IReadOnlyDictionary<string, double>? byModel = !string.IsNullOrEmpty(record.Model)
+                    ? new Dictionary<string, double>(StringComparer.Ordinal) { [record.Model] = record.ReportedCost.Amount }
+                    : null;
+                reportedBlocks.Add(new CostBlock(
+                    CostBasis.Harness,
+                    CostStatus.Priced,
+                    record.ReportedCost.Amount,
+                    record.ReportedCost.Currency,
+                    byModel));
+            }
+
+            long? freshInput = TryFindTokenCount(record.Tokens, TokenClass.Input);
+            long? cacheRead = TryFindTokenCount(record.Tokens, TokenClass.CacheRead);
+            long? cacheCreation = TryFindTokenCount(record.Tokens, TokenClass.CacheWrite);
+            long? output = TryFindTokenCount(record.Tokens, TokenClass.Output);
+            long? reasoning = TryFindTokenCount(record.Tokens, TokenClass.Reasoning);
+            long? inputTokens = freshInput.HasValue || cacheRead.HasValue || cacheCreation.HasValue
+                ? (freshInput ?? 0L) + (cacheRead ?? 0L) + (cacheCreation ?? 0L)
+                : null;
+            TokenUsage usage = new(
+                FreshInput: freshInput ?? 0L,
+                CacheRead: cacheRead ?? 0L,
+                CacheCreation: cacheCreation ?? 0L,
+                Output: output ?? 0L,
+                ReportedInput: record.ReportedInputTokens ?? inputTokens ?? 0L,
+                ReportedOutput: record.ReportedOutputTokens ?? output ?? 0L,
+                Reasoning: reasoning);
+
+            publishedBlocks.Add(CanonPricing.PriceTurn(usage, record.Model, harnessId, pricing, existing: null));
+        }
+
+        ReadTimeCostSummary? reportedCost = reportedBlocks.Count > 0
+            ? AggregateCostBlocks(reportedBlocks, CostBasis.Harness, problems)
+            : null;
+        ReadTimeCostSummary publishedCost = publishedBlocks.Count > 0
+            ? AggregateCostBlocks(publishedBlocks, CostBasis.Published, problems)
+            : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
+
+        return new ReadTimeAuxiliarySummary(spanIds, reportedCost, publishedCost);
+    }
+
+    private static bool IsAuxiliaryRecord(CollectedRecord record)
+    {
+        string trimmed = record.Name.Trim();
+        if (string.Equals(trimmed, "title", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Contains("xtabprovider", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        string? agentName = record.Agent?.AgentName;
+        return !string.IsNullOrEmpty(agentName) &&
+               (string.Equals(agentName.Trim(), "title", StringComparison.OrdinalIgnoreCase) ||
+                agentName.Contains("xtabprovider", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static ReadTimeContextBucketSummary BuildContextBucketSummary(
+        StoredSessionContextTurn contextTurn,
+        IReadOnlyList<(int Position, CollectedRecord Record)> turnEntries)
+    {
+        long? reportedInput = null;
+        foreach ((int position, CollectedRecord record) in turnEntries)
+        {
+            if (position == contextTurn.Position)
+            {
+                reportedInput = record.ReportedInputTokens;
+                break;
+            }
+        }
+
+        List<ReadTimeContextBucketTokens> buckets =
+        [
+            .. contextTurn.Buckets.Select(static b => new ReadTimeContextBucketTokens(b.Bucket, b.Tokens)),
+        ];
+
+        return new ReadTimeContextBucketSummary(buckets, reportedInput);
+    }
+
+    private static UnusedSchemaRange? ResolveUnusedRange(
+        StoredSessionProjection? projection,
+        string harnessId,
+        IReadOnlyList<string> models,
+        IModelPricingLookup? pricing)
+    {
+        if (projection?.Schema?.UnusedTokenResidencies is not long residencies)
+        {
+            return null;
+        }
+
+        string? primaryModel = models.Count > 0 ? models[0] : null;
+        if (!string.IsNullOrEmpty(primaryModel))
+        {
+            if (CanonPricing.IsCopilotHarness(harnessId))
+            {
+                if (CanonPricing.CopilotCreditsTable.PublishedRates is not null &&
+                    CanonPricing.CopilotCreditsTable.PublishedRates.TryGetValue(primaryModel, out TableRate? tableRate) &&
+                    tableRate.Billed)
+                {
+                    RateTier? firstTier = tableRate.Tiers is { Count: > 0 } ? tableRate.Tiers[0] : null;
+                    double freshRate = firstTier?.InputRate ?? tableRate.InputRate;
+                    double cacheReadRate = (firstTier?.CacheReadRate ?? tableRate.CacheReadRate) ?? freshRate;
+                    if (freshRate > 0 || cacheReadRate > 0)
+                    {
+                        double cacheBound = (residencies * cacheReadRate) / CanonPricing.TokensPerMillion;
+                        double freshBound = (residencies * freshRate) / CanonPricing.TokensPerMillion;
+                        return new UnusedSchemaRange(
+                            TokenResidencies: residencies,
+                            Floor: Math.Min(cacheBound, freshBound),
+                            Ceiling: Math.Max(cacheBound, freshBound),
+                            Currency: CanonPricing.CopilotCreditsTable.Currency ?? "USD");
+                    }
+                }
+            }
+            else if (CanonPricing.IsPublishedTableHarness(harnessId) && !CanonPricing.IsFlatRateModel(primaryModel))
+            {
+                ModelCosts? costs = CanonPricing.GetModelCosts(primaryModel, pricing);
+                if (costs is not null && (costs.InputCostPerToken > 0 || costs.CacheReadCostPerToken > 0))
+                {
+                    double cacheRate = costs.CacheReadCostPerToken > 0 ? costs.CacheReadCostPerToken : costs.InputCostPerToken;
+                    double freshRate = costs.InputCostPerToken > 0 ? costs.InputCostPerToken : costs.CacheReadCostPerToken;
+                    double cacheBound = residencies * cacheRate;
+                    double freshBound = residencies * freshRate;
+                    return new UnusedSchemaRange(
+                        TokenResidencies: residencies,
+                        Floor: Math.Min(cacheBound, freshBound),
+                        Ceiling: Math.Max(cacheBound, freshBound),
+                        Currency: "USD");
+                }
+            }
+        }
+
+        return new UnusedSchemaRange(residencies, 0, residencies, null);
     }
 
     private static SessionScope ResolveSessionScope(StoreState currentState, string sessionKey)

@@ -124,12 +124,35 @@ public class StoreInterfaceShapeTests
                 nameof(IRelationalStoreReader.RecordSignals),
                 nameof(IRelationalStoreReader.Sessions),
                 nameof(IRelationalStoreReader.StoredFields),
+                nameof(IRelationalStoreReader.GetSessionAggregate),
+                nameof(IRelationalStoreReader.ListSessionAggregates),
+                nameof(IRelationalStoreReader.SessionTurnSummaries),
             ]);
 
         MethodInfo? storedFields = typeof(IRelationalStoreReader).GetMethod(nameof(IRelationalStoreReader.StoredFields));
         Assert.NotNull(storedFields);
         Assert.Equal(typeof(StoredFieldsView), storedFields.ReturnType);
         Assert.Equal([typeof(string)], storedFields.GetParameters().Select(static p => p.ParameterType).ToArray());
+
+        MethodInfo? getSessionAggregate = typeof(IRelationalStoreReader).GetMethod(nameof(IRelationalStoreReader.GetSessionAggregate));
+        Assert.NotNull(getSessionAggregate);
+        Assert.Equal(typeof(SessionAggregateView), getSessionAggregate.ReturnType);
+        Assert.Equal([typeof(string), typeof(IModelPricingLookup)], getSessionAggregate.GetParameters().Select(static p => p.ParameterType).ToArray());
+
+        MethodInfo? listSessionAggregates = typeof(IRelationalStoreReader).GetMethod(nameof(IRelationalStoreReader.ListSessionAggregates));
+        Assert.NotNull(listSessionAggregates);
+        Assert.Equal(typeof(IReadOnlyList<SessionAggregateView>), listSessionAggregates.ReturnType);
+        Assert.Equal([typeof(string), typeof(IModelPricingLookup)], listSessionAggregates.GetParameters().Select(static p => p.ParameterType).ToArray());
+
+        MethodInfo? sessionTurnSummaries = typeof(IRelationalStoreReader).GetMethod(nameof(IRelationalStoreReader.SessionTurnSummaries));
+        Assert.NotNull(sessionTurnSummaries);
+        Assert.Equal(typeof(IReadOnlyList<ReadTimeTurnSummary>), sessionTurnSummaries.ReturnType);
+        Assert.Equal([typeof(string), typeof(IModelPricingLookup)], sessionTurnSummaries.GetParameters().Select(static p => p.ParameterType).ToArray());
+
+        Assert.True(typeof(IModelPricingLookup).IsInterface);
+        Assert.True(typeof(IModelPricingLookup).IsPublic);
+        Assert.True(typeof(IModelPricingLookup).IsAssignableFrom(typeof(PricingTables)));
+        Assert.False(typeof(PricingTables).IsSealed);
 
         AssertHasMethods(
             typeof(IProjectionStore),

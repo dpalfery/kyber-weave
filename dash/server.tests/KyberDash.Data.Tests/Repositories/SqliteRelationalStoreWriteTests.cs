@@ -34,6 +34,7 @@ public class SqliteRelationalStoreWriteTests
         Assert.True(storeType.IsPublic);
         Assert.False(storeType.IsSealed);
         Assert.True(typeof(IRelationalStoreWriter).IsAssignableFrom(storeType));
+        Assert.True(typeof(IRelationalStoreReader).IsAssignableFrom(storeType));
         Assert.True(typeof(IProjectionStore).IsAssignableFrom(storeType));
     }
 
@@ -550,29 +551,6 @@ public class SqliteRelationalStoreWriteTests
 
         Assert.Empty(store.ExecutedSql);
         Assert.False(Directory.Exists(rootDir));
-    }
-
-    [Fact]
-    public void ProjectionStoreReadMethods_ThrowNotImplementedExceptionInT7()
-    {
-        string rootDir = NewNonExistentRoot();
-        string dbPath = Path.Combine(rootDir, "canon.db");
-        RecordingSqliteRelationalStore store = new(dbPath, new SqliteCircuitBreaker());
-
-        Assert.Throws<NotImplementedException>(() => store.GetSessionProjection("s1"));
-        Assert.Throws<NotImplementedException>(() => store.ListSessionProjections());
-        Assert.Throws<NotImplementedException>(() => store.GetSessionTurns("s1"));
-        Assert.Throws<NotImplementedException>(() => store.GetRun("r1"));
-        Assert.Throws<NotImplementedException>(() => store.ListRuns());
-        Assert.Throws<NotImplementedException>(() => store.GetExecution("e1"));
-        Assert.Throws<NotImplementedException>(() => store.ListExecutionsForRun("r1"));
-        Assert.Throws<NotImplementedException>(() => store.ListExecutionsByHarness("claude-code"));
-        Assert.Throws<NotImplementedException>(() => store.GetHarnessRollup("claude-code"));
-        Assert.Throws<NotImplementedException>(() => store.ListHarnessRollups());
-        Assert.Throws<NotImplementedException>(() => store.GetFinding("f1"));
-        Assert.Throws<NotImplementedException>(() => store.ListFindings());
-        Assert.Throws<NotImplementedException>(() => store.GetPrediction("p1"));
-        Assert.Throws<NotImplementedException>(() => store.ListPredictions());
     }
 
     private static string NewNonExistentRoot() =>

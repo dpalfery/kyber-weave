@@ -194,15 +194,6 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         ExecuteTransaction(body.ToString());
     }
 
-    /// <inheritdoc />
-    public StoredSessionProjection? GetSessionProjection(string sessionId) =>
-        throw new NotImplementedException("Relational projection read queries are implemented separately.");
-
-    /// <inheritdoc />
-    public IReadOnlyList<StoredSessionProjection> ListSessionProjections(string? harnessId = null) =>
-        throw new NotImplementedException("Relational projection read queries are implemented separately.");
-
-    /// <inheritdoc />
     public void ReplaceSessionProjection(StoredSessionProjection projection)
     {
         ArgumentNullException.ThrowIfNull(projection);
@@ -240,11 +231,6 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         ExecuteTransaction($"DELETE FROM session_projection WHERE session_id = {sessionIdExpr};\n");
     }
 
-    /// <inheritdoc />
-    public IReadOnlyList<StoredSessionTurn> GetSessionTurns(string sessionId) =>
-        throw new NotImplementedException("Relational projection read queries are implemented separately.");
-
-    /// <inheritdoc />
     public void ReplaceSessionTurns(string sessionId, IEnumerable<StoredSessionTurn> turns)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -273,15 +259,6 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         ExecuteTransaction(body.ToString());
     }
 
-    /// <inheritdoc />
-    public StoredRun? GetRun(string runId) =>
-        throw new NotImplementedException("Relational projection read queries are implemented separately.");
-
-    /// <inheritdoc />
-    public IReadOnlyList<StoredRun> ListRuns(string? harnessId = null) =>
-        throw new NotImplementedException("Relational projection read queries are implemented separately.");
-
-    /// <inheritdoc />
     public void ReplaceRuns(IEnumerable<StoredRun> runs)
     {
         ArgumentNullException.ThrowIfNull(runs);
@@ -312,19 +289,6 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         ExecuteTransaction($"DELETE FROM run WHERE run_id = {runIdExpr};\n");
     }
 
-    /// <inheritdoc />
-    public StoredExecution? GetExecution(string executionId) =>
-        throw new NotImplementedException("Relational projection read queries are implemented separately.");
-
-    /// <inheritdoc />
-    public IReadOnlyList<StoredExecution> ListExecutionsForRun(string runId) =>
-        throw new NotImplementedException("Relational projection read queries are implemented separately.");
-
-    /// <inheritdoc />
-    public IReadOnlyList<StoredExecution> ListExecutionsByHarness(string harnessId) =>
-        throw new NotImplementedException("Relational projection read queries are implemented separately.");
-
-    /// <inheritdoc />
     public void ReplaceExecutions(IEnumerable<StoredExecution> executions)
     {
         ArgumentNullException.ThrowIfNull(executions);
@@ -397,15 +361,6 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         ExecuteTransaction($"DELETE FROM execution WHERE run_id = {runIdExpr};\n");
     }
 
-    /// <inheritdoc />
-    public StoredHarnessRollup? GetHarnessRollup(string harnessId) =>
-        throw new NotImplementedException("Relational projection read queries are implemented separately.");
-
-    /// <inheritdoc />
-    public IReadOnlyList<StoredHarnessRollup> ListHarnessRollups() =>
-        throw new NotImplementedException("Relational projection read queries are implemented separately.");
-
-    /// <inheritdoc />
     public void ReplaceHarnessRollups(IEnumerable<StoredHarnessRollup> rollups)
     {
         ArgumentNullException.ThrowIfNull(rollups);
@@ -436,15 +391,6 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         ExecuteTransaction($"DELETE FROM harness_rollup WHERE harness_id = {harnessIdExpr};\n");
     }
 
-    /// <inheritdoc />
-    public StoredFinding? GetFinding(string findingId) =>
-        throw new NotImplementedException("Relational projection read queries are implemented separately.");
-
-    /// <inheritdoc />
-    public IReadOnlyList<StoredFinding> ListFindings(string? runId = null, string? sessionId = null) =>
-        throw new NotImplementedException("Relational projection read queries are implemented separately.");
-
-    /// <inheritdoc />
     public void ReplaceFindings(IEnumerable<StoredFinding> findings)
     {
         ArgumentNullException.ThrowIfNull(findings);
@@ -476,15 +422,6 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
             $"DELETE FROM finding WHERE finding_id IN (SELECT finding_id FROM finding_session WHERE session_id = {sessionIdExpr});\n");
     }
 
-    /// <inheritdoc />
-    public StoredPrediction? GetPrediction(string predictionId) =>
-        throw new NotImplementedException("Relational projection read queries are implemented separately.");
-
-    /// <inheritdoc />
-    public IReadOnlyList<StoredPrediction> ListPredictions(string? runId = null, string? findingId = null) =>
-        throw new NotImplementedException("Relational projection read queries are implemented separately.");
-
-    /// <inheritdoc />
     public void ReplacePrediction(StoredPrediction prediction)
     {
         ArgumentNullException.ThrowIfNull(prediction);
