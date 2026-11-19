@@ -147,7 +147,7 @@ public static partial class DispatchPromptInsertion
         if (!expansion.Built || string.IsNullOrWhiteSpace(expansion.Prompt))
         {
             return new DispatchInsertion(
-                DispatchInsertionKind.Stopped,
+                expansion.MissingInput ? DispatchInsertionKind.Warned : DispatchInsertionKind.Stopped,
                 string.Empty,
                 string.IsNullOrWhiteSpace(expansion.Refusal) ? Why(headers) : expansion.Refusal);
         }

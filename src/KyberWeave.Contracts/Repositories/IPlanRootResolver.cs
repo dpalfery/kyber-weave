@@ -13,4 +13,22 @@ public interface IPlanRootResolver
     /// <param name="prompt">The dispatch prompt, headers included when it still has them.</param>
     /// <param name="listWorktrees">Lists the repository's worktrees; <c>GitFacts.ListWorktrees</c> in production.</param>
     string Resolve(string hookRoot, string prompt, Func<string, IReadOnlyList<string>>? listWorktrees = null);
+
+    /// <summary>
+    /// The root to read a dispatch's plan, task file and prompt against when its headers are already parsed:
+    /// <paramref name="hookRoot"/> when the plan exists there or nothing better resolves, otherwise the one
+    /// worktree that holds the plan. The same choice <see cref="Resolve"/> makes, without re-parsing a prompt.
+    /// </summary>
+    /// <param name="hookRoot">The repository root the hook resolved from its working directory.</param>
+    /// <param name="planFile">The dispatch's <c>PLAN_FILE</c> value, or null when it names no plan.</param>
+    /// <param name="text">
+    /// The dispatch text, for the worktree it names when the dispatch carries no plan header; null when there is
+    /// none to read.
+    /// </param>
+    /// <param name="listWorktrees">Lists the repository's worktrees; <c>GitFacts.ListWorktrees</c> in production.</param>
+    string ResolvePlanRoot(
+        string hookRoot,
+        string? planFile,
+        string? text,
+        Func<string, IReadOnlyList<string>>? listWorktrees = null);
 }

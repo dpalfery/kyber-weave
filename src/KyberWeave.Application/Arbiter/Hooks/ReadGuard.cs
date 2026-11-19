@@ -87,11 +87,21 @@ public static partial class ReadGuard
     /// normalisation relative to <paramref name="repoRoot"/>; shell commands match by
     /// substring. The reason names Req 25.
     /// </summary>
+    /// <param name="toolName">The read tool's name.</param>
+    /// <param name="toolInput">The call's arguments.</param>
+    /// <param name="repoRoot">The root a relative path resolves against, and that an absolute path is judged from.</param>
+    /// <param name="protectedDirs">The planning directories the guard protects, repository-relative.</param>
+    /// <param name="repositoryRoots">
+    /// The repository's other worktrees, when the run context resolved them. An absolute path inside one of them is
+    /// judged by its path there, so a worker's read of the run's plan cannot escape the guard by naming the worktree.
+    /// A path outside every root is left alone: the guard protects planning paths, it does not sandbox reads.
+    /// </param>
     public static ReadGuardResult Check(
         string toolName,
         JsonElement toolInput,
         string repoRoot,
-        IReadOnlyList<string> protectedDirs)
+        IReadOnlyList<string> protectedDirs,
+        IReadOnlyList<string>? repositoryRoots = null)
     {
         ArgumentNullException.ThrowIfNull(toolName);
         ArgumentNullException.ThrowIfNull(repoRoot);
@@ -170,7 +180,7 @@ public static partial class ReadGuard
             return ReadGuardResult.Allow;
         }
 
-        string? relative = ToRepoRelative(value, repoRoot);
+        string? relative = ToRepoRelative(value, repoRoot, repositoryRoots);
         if (relative is null)
         {
             return ReadGuardResult.Allow;
@@ -218,21 +228,42 @@ public static partial class ReadGuard
         return NormalizeLexically(literal) ?? string.Empty;
     }
 
-    private static string? ToRepoRelative(string value, string repoRoot)
+    private static string? ToRepoRelative(string value, string repoRoot, IReadOnlyList<string>? repositoryRoots)
     {
         string forward = value.Replace('\\', '/');
-        if (Path.IsPathFullyQualified(forward))
+        if (!Path.IsPathFullyQualified(forward))
         {
-            string relative = Path.GetRelativePath(repoRoot, forward).Replace('\\', '/');
-            if (relative.StartsWith("..", StringComparison.Ordinal))
-            {
-                return null;
-            }
-
-            return NormalizeLexically(relative);
+            return NormalizeLexically(forward);
         }
 
-        return NormalizeLexically(forward);
+        foreach (string root in Roots(repoRoot, repositoryRoots))
+        {
+            string relative = Path.GetRelativePath(root, forward).Replace('\\', '/');
+            if (!relative.StartsWith("..", StringComparison.Ordinal))
+            {
+                return NormalizeLexically(relative);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The root first, then each other worktree, each once.</summary>
+    private static IEnumerable<string> Roots(string repoRoot, IReadOnlyList<string>? repositoryRoots)
+    {
+        yield return repoRoot;
+        if (repositoryRoots is null)
+        {
+            yield break;
+        }
+
+        foreach (string root in repositoryRoots)
+        {
+            if (!string.Equals(root, repoRoot, StringComparison.Ordinal))
+            {
+                yield return root;
+            }
+        }
     }
 
     /// <summary>

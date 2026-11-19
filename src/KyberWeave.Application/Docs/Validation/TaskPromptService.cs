@@ -124,7 +124,8 @@ public sealed class TaskPromptService(
         }
 
         return TaskPromptResult.NotBuilt(
-            "No prompt: " + PlanTaskAgentPick.TieredDeveloperRefusal(named, entry?.Difficulty, failedAttempts));
+            "No prompt: " + PlanTaskAgentPick.TieredDeveloperRefusal(named, entry?.Difficulty, failedAttempts),
+            TaskPromptRefusalKind.Finding);
     }
 
     /// <summary>The tier's position on the ladder, or -1 when the name is not a developer tier.</summary>
@@ -167,12 +168,17 @@ public sealed class TaskPromptService(
             }
 
             // The task file is checked against its plan before anything is read from it, so a stale file never
-            // becomes half a prompt.
+            // becomes half a prompt. The refusal names the path it tried, because a conductor run reads the plan
+            // from its worktree and a reader needs to see which one was checked.
             PlanTaskFileOutcome outcome = tasks.Run(root, config, plan, PlanTaskFileMode.Check);
             if (outcome.File is null || outcome.Report.HasErrors)
             {
+                string taskFile = Path.Combine(
+                    root,
+                    PlanTaskFileRules.TaskFilePathFor(plan, PlanTaskFileRules.IsSpecTaskListPath(plan))
+                        .Replace('/', Path.DirectorySeparatorChar));
                 return TaskPromptResult.NotBuilt(
-                    $"No prompt: the task file for {plan} is missing or does not match the plan. Run " +
+                    $"No prompt: the task file for {plan} is missing or does not match the plan; tried '{taskFile}'. Run " +
                     $"'kyber-weave docs tasks {plan} --write', then build the prompt again.");
             }
 
@@ -181,7 +187,7 @@ public sealed class TaskPromptService(
             {
                 string ids = string.Join(", ", (outcome.File.Tasks ?? []).Select(task => task.Id));
                 return TaskPromptResult.NotBuilt(
-                    $"No prompt: '{taskId}' names no one task in {plan}. Its tasks are: {ids}.");
+                    $"No prompt: '{taskId}' names no one task in {plan} ('{outcome.TaskFilePath}'). Its tasks are: {ids}.");
             }
 
             // There is one roster, so the file's recorded value selects nothing here: the validator reports a
@@ -202,7 +208,8 @@ public sealed class TaskPromptService(
             {
                 return TaskPromptResult.NotBuilt(
                     $"No prompt: the prior-results file '{priorPath}' is outside this run's scratch area. " +
-                    $"Write it under {ScratchFolder} in the checkout, name it relative to that folder, or leave it out.");
+                    $"Write it under {ScratchFolder} in the checkout, name it relative to that folder, or leave it out.",
+                    TaskPromptRefusalKind.Finding);
             }
 
             try
@@ -355,7 +362,8 @@ public sealed class TaskPromptService(
         {
             return TaskPromptResult.NotBuilt(
                 $"No prompt: '{taskId}' does not make a task folder under {ScratchFolder}. Dispatch a task id with a " +
-                "letter or digit in it.");
+                "letter or digit in it.",
+                TaskPromptRefusalKind.Finding);
         }
 
         string relative = $"{ScratchFolder}/{slug}/{PromptFileName}";
@@ -374,9 +382,12 @@ public sealed class TaskPromptService(
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {
+            // The file is the whole delivery on a harness that cannot rewrite the dispatch, so a write that fails
+            // is a positive finding about the dispatch: the worker would otherwise start with only the short line.
             return TaskPromptResult.NotBuilt(
                 $"No prompt: the prompt file '{relative}' could not be written ({ex.Message}). Check that " +
-                $"{ScratchFolder} is writable, then build the prompt again.");
+                $"{ScratchFolder} is writable, then build the prompt again.",
+                TaskPromptRefusalKind.Finding);
         }
     }
 

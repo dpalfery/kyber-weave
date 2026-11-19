@@ -70,10 +70,10 @@ internal static class DocsPorts
     }
 
     /// <summary>The standards migration over the physical seams, for a test that runs it on a temporary checkout.</summary>
-    internal static StandardsFolderMigration StandardsMigration(string repoRoot, OntologyConfig ontology)
+    internal static StandardsFolderMigration StandardsMigration(string repoRoot, KyberWeaveConfig config)
     {
         IWritableFileSystem files = new PhysicalFileSystem();
         return new StandardsFolderMigration(
-            files, repoRoot, ontology, new PhysicalPathResolver(files), Environment, new SystemIdGenerator());
+            files, repoRoot, config, new PhysicalPathResolver(files), Environment, new SystemIdGenerator());
     }
 }

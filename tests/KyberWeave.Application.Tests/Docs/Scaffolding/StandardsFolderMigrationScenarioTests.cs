@@ -16,11 +16,11 @@ public class StandardsFolderMigrationScenarioTests
 {
     private readonly MemoryDocsHost _host = new();
 
-    private static readonly OntologyConfig Declared = new()
+    private static readonly KyberWeaveConfig Declared = KyberWeaveConfigDefaults.Product.WithOntology(new()
     {
         Technologies = ["csharp"],
         Roles = ["reviewer"]
-    };
+    });
 
     private const string LegacyCsharp = """
         ---
@@ -492,6 +492,101 @@ public class StandardsFolderMigrationScenarioTests
             Migration(_host.Repo).Run());
 
         Assert.Contains("csharp.standards.md", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A write that fails after the standard was renamed moves that rename back, so a failed run
+    /// leaves no partially migrated folder behind for the next check to report.
+    /// </summary>
+    [Fact]
+    public void AFailureWhileWritingAStubRestoresTheStandardItAlreadyMoved()
+    {
+        string folder = Path.Combine(_host.Repo, "6-Docs", "standards", "csharp");
+        _host.Files.CreateDirectory(folder);
+        string legacy = Path.Combine(folder, "README.md");
+        _host.Files.WriteAllText(legacy, LegacyCsharp);
+        _host.Files.FailWhen(
+            operation => operation.Path?.Contains("csharp.rules.md", StringComparison.Ordinal) == true
+                && operation.Name.StartsWith("OpenWrite", StringComparison.Ordinal),
+            new IOException("The disk is full."));
+
+        Assert.Throws<IOException>(() => Migration(_host.Repo).Run());
+
+        Assert.True(_host.Files.FileExists(legacy), "the renamed standard must be moved back");
+        Assert.False(_host.Files.FileExists(StandardPath(_host.Repo, "csharp")));
+        Assert.False(_host.Files.FileExists(Path.Combine(folder, "csharp.rules.md")));
+    }
+
+    /// <summary>
+    /// A failure after a reshape and every stub write restores the reshaped standard's original
+    /// text, removes the stubs, and leaves the registry block exactly as it was.
+    /// </summary>
+    [Fact]
+    public void AFailureAtTheRegistryWriteRestoresTheReshapeAndTheStubs()
+    {
+        string agents = Path.Combine(_host.Repo, "AGENTS.md");
+        string originalAgents =
+            "<!-- KYBER_WEAVE_CONFIG_REG_START -->\n" +
+            "- **<csharp-coding-standard>**: `6-Docs/standards/csharp/README.md`\n" +
+            "<!-- KYBER_WEAVE_CONFIG_REG_END -->\n";
+        _host.Files.WriteAllText(agents, originalAgents);
+        string folder = Path.Combine(_host.Repo, "6-Docs", "standards", "csharp");
+        _host.Files.CreateDirectory(folder);
+        string legacy = Path.Combine(folder, "README.md");
+        _host.Files.WriteAllText(legacy, LegacyCsharpWithOwnHeadings);
+        _host.Files.FailWhen(
+            operation => operation.Name == "WriteAllTextAtomic"
+                && operation.Path?.EndsWith("AGENTS.md", StringComparison.Ordinal) == true,
+            new IOException("The disk is full."));
+
+        Assert.Throws<IOException>(() => Migration(_host.Repo).Run());
+
+        Assert.Equal(LegacyCsharpWithOwnHeadings, _host.Files.ReadAllText(legacy));
+        Assert.False(_host.Files.FileExists(StandardPath(_host.Repo, "csharp")));
+        Assert.Equal(
+            ["README.md"],
+            _host.Files.EnumerateFiles(folder, "*", recursive: false)
+                .Select(Path.GetFileName)
+                .Order(StringComparer.Ordinal)
+                .ToArray());
+        Assert.Equal(originalAgents, _host.Files.ReadAllText(agents));
+    }
+
+    /// <summary>
+    /// The registry block is re-rendered in place, so an <c>AGENTS.md</c> kept as a symbolic
+    /// link is refused rather than rewritten at its target, and the refusal happens before a
+    /// single standard moves.
+    /// </summary>
+    [Fact]
+    public void AnAgentsFileKeptAsASymbolicLinkIsRefusedBeforeAnyStandardMoves()
+    {
+        string shared = Path.Combine(_host.Repo, "shared", "agents.md");
+        _host.Files.CreateDirectory(Path.GetDirectoryName(shared)!);
+        _host.Files.WriteAllText(
+            shared,
+            "<!-- KYBER_WEAVE_CONFIG_REG_START -->\n" +
+            "- **<csharp-coding-standard>**: `6-Docs/standards/csharp/README.md`\n" +
+            "<!-- KYBER_WEAVE_CONFIG_REG_END -->\n");
+        _host.Files.CreateFileLink(Path.Combine(_host.Repo, "AGENTS.md"), shared);
+        string folder = Path.Combine(_host.Repo, "6-Docs", "standards", "csharp");
+        _host.Files.CreateDirectory(folder);
+        _host.Files.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharp);
+
+        IOException error = Assert.Throws<IOException>(() => Migration(_host.Repo).Run());
+
+        Assert.Contains("symbolic link", error.Message, StringComparison.Ordinal);
+        Assert.True(_host.Files.FileExists(Path.Combine(folder, "README.md")));
+
+        // The refusal precedes every write: no prefixed standard and no stub was added beside the
+        // legacy file, which is what proves the check is not merely early in one folder's plan.
+        Assert.Equal(
+            ["README.md"],
+            _host.Files.EnumerateFiles(folder, "*", recursive: false)
+                .Select(Path.GetFileName)
+                .Order(StringComparer.Ordinal)
+                .ToArray());
+        Assert.Contains(
+            "README.md", _host.Files.ReadAllText(shared), StringComparison.Ordinal);
     }
 
     private static IReadOnlyList<string> LevelTwoHeadings(string text) =>

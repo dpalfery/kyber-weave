@@ -3,6 +3,7 @@ using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad.Brief;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Briefs;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
@@ -67,6 +68,8 @@ public sealed class SquadBriefCommandTests
 
     private sealed class RefusingBuilder(string refusal) : ISquadBriefBuilder
     {
+        public string? ResolveAutonomy(string repositoryRoot, string? given, KyberWeaveConfig config) => null;
+
         public bool TryBuild(SquadBriefRequest request, out BriefResult? result, out string error)
         {
             result = null;
@@ -83,6 +86,8 @@ public sealed class SquadBriefCommandTests
 
     private sealed class BuildingBuilder(BriefResult built) : ISquadBriefBuilder
     {
+        public string? ResolveAutonomy(string repositoryRoot, string? given, KyberWeaveConfig config) => null;
+
         public bool TryBuild(SquadBriefRequest request, out BriefResult? result, out string error)
         {
             result = built;

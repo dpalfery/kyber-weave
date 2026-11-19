@@ -53,14 +53,13 @@ internal static class DocsCommandComposition
         try
         {
             ontology = loaded.WithDocsRoots(settings.DocsRoots);
-            config = new KyberWeaveConfig
-            {
-                Ontology = ontology,
-                Harness = config.Harness,
-                DocsAnalysis = config.DocsAnalysis.ResolveFor(ontology),
-                Squad = config.Squad,
-                Arbiter = Core.Arbiter.ArbiterConfigDefaults.Product
-            };
+
+            // Only the roots change. Rebuilding the config by hand would silently reset every
+            // setting the object does not name — the review policy, MCP grants, the tool-failure
+            // and worktree settings, the roster, the prompt budget, the Arbiter and the registry.
+            config = config
+                .WithOntology(ontology)
+                .WithDocsAnalysis(config.DocsAnalysis.ResolveFor(ontology));
             return true;
         }
         catch (ArgumentException ex)

@@ -5,7 +5,7 @@ Use this path when the user supplies a specification or selects one from the dir
 ## Route by persisted state
 
 - **Ready:** begin the task artifact immediately under its recorded `development-mode`.
-- **Partial or Draft:** invoke `product-owner` for the earliest incomplete or reopened phase. Pass the feature identity, exact artifact paths, current approval state, selected development mode, and only the user feedback relevant to that phase.
+- **Partial or Draft:** invoke `product-owner` for the earliest incomplete or reopened phase. Pass the feature identity, exact artifact paths, current approval state, selected development mode, and the user feedback for that phase verbatim — never your summary of it.
 - **Completed, Superseded, or archived:** do not execute it. Ask the user for an active artifact or use intake.
 
 ## Configuration and its generated registry

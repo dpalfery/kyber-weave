@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using KyberDash.Application;
 using KyberDash.Contracts.Services;
 using KyberDash.Core.Exceptions;
 using KyberDash.Domain;
@@ -757,11 +758,7 @@ public static class DashEndpointMappings
     {
         ArgumentNullException.ThrowIfNull(analytics);
         return await Task.Run<IResult>(
-            () =>
-            {
-                AnalyticsExecutionResult result = analytics.Execute("status", null);
-                return DashHttp.NoStoreJson(result.StatusCode, result.Envelope);
-            },
+            () => AnalyticsResult("status", analytics, request: null),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -769,11 +766,7 @@ public static class DashEndpointMappings
     {
         ArgumentNullException.ThrowIfNull(analytics);
         return await Task.Run<IResult>(
-            () =>
-            {
-                AnalyticsExecutionResult result = analytics.Execute("catalog", null);
-                return DashHttp.NoStoreJson(result.StatusCode, result.Envelope);
-            },
+            () => AnalyticsResult("catalog", analytics, request: null),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -801,12 +794,26 @@ public static class DashEndpointMappings
         }
 
         return await Task.Run<IResult>(
-            () =>
-            {
-                AnalyticsExecutionResult result = analytics.Execute(operation, body);
-                return DashHttp.NoStoreJson(result.StatusCode, result.Envelope);
-            },
+            () => AnalyticsResult(operation, analytics, body),
             cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Runs one analytics operation and shapes the answer. A service that throws is answered as a
+    /// JSON error envelope with HTTP 500: an empty 500 leaves the caller nothing to report.
+    /// </summary>
+    private static IResult AnalyticsResult(string operation, IAnalyticsService analytics, JsonElement? request)
+    {
+        try
+        {
+            AnalyticsExecutionResult result = analytics.Execute(operation, request);
+            return DashHttp.NoStoreJson(result.StatusCode, result.Envelope);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            AnalyticsExecutionResult failure = AnalyticsService.Failure(operation, ex);
+            return DashHttp.NoStoreJson(failure.StatusCode, failure.Envelope);
+        }
     }
 
     private static async Task<IResult> ServeSpaAsync(

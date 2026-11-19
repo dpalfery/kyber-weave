@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -77,12 +78,19 @@ public static class Composition
                 return 1;
             }
 
+            string? stdinText = null;
             try
             {
-                string stdinText = await stdin.ReadToEndAsync().ConfigureAwait(false);
-                if (commandFactory is null && HookFastPath.IsPassThrough(harness, caller, stdinText))
+                stdinText = await stdin.ReadToEndAsync().ConfigureAwait(false);
+                if (commandFactory is null && HookFastPath.TryPassThrough(harness, caller, stdinText, out string? allow))
                 {
-                    // Nothing to decide: no container, no configuration, no engine.
+                    // Nothing to decide: no container, no configuration, no engine. A harness that has no silent
+                    // allow (Antigravity) still gets its allow document.
+                    if (allow is not null)
+                    {
+                        await stdout.WriteAsync(allow).ConfigureAwait(false);
+                    }
+
                     return 0;
                 }
 
@@ -93,7 +101,7 @@ public static class Composition
             {
                 // Fail open: the stdin read or the host construction broke before the host's own
                 // catch existed. The failure is logged and the dispatch continues (ADR 0072).
-                return await FailOpenAsync(harness, ex, stdout, stderr).ConfigureAwait(false);
+                return await FailOpenAsync(harness, ex, stdinText, stdout, stderr).ConfigureAwait(false);
             }
         }
 
@@ -196,6 +204,35 @@ public static class Composition
         return 1;
     }
 
+    /// <summary>The largest hook payload the fail-open path parses, in characters.</summary>
+    private const int MaxPayloadCharacters = 1_048_576;
+
+    /// <summary>Parses the hook payload when it is JSON, leaving <paramref name="payload"/> unset otherwise.</summary>
+    /// <param name="text">The raw stdin text, or null when the read failed.</param>
+    /// <param name="payload">The cloned root element when the text parses.</param>
+    /// <returns>True when the text is a JSON payload.</returns>
+    private static bool TryParsePayload(string? text, out JsonElement payload)
+    {
+        payload = default;
+
+        // The fail-open path must not parse an unbounded host payload either.
+        if (string.IsNullOrWhiteSpace(text) || text.Length > MaxPayloadCharacters)
+        {
+            return false;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(text);
+            payload = document.RootElement.Clone();
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// Lets the dispatch continue after a fault before <see cref="HookCommand"/> ran: logs
     /// <c>KW-ARB-HOOK-001</c> to stderr and writes the harness's allow document when it has
@@ -204,6 +241,7 @@ public static class Composition
     private static async Task<int> FailOpenAsync(
         string harness,
         Exception fault,
+        string? stdinText,
         TextWriter stdout,
         TextWriter stderr)
     {
@@ -211,7 +249,12 @@ public static class Composition
         string? allow = null;
         try
         {
-            allow = HarnessAdapterRegistry.DisabledAllowDocumentOf(harness);
+            // The event decides which allow shape is legal: Antigravity answers a post-tool event
+            // with {} and a pre-tool event with a decision. When the payload is unreadable, fall
+            // back to the harness's single allow document.
+            allow = TryParsePayload(stdinText, out JsonElement payload)
+                ? HarnessAdapterRegistry.AllowDocumentOf(harness, payload)
+                : HarnessAdapterRegistry.DisabledAllowDocumentOf(harness);
         }
         catch (Exception)
         {

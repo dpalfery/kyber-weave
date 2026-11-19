@@ -16,6 +16,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="KyberDash.Data.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <EmbeddedResource Include="Pricing\litellm-snapshot.json" LogicalName="KyberDash.Data.Pricing.litellm-snapshot.json" />
     <EmbeddedResource Include="Pricing\pricing-fallback.json" LogicalName="KyberDash.Data.Pricing.pricing-fallback.json" />
   </ItemGroup>

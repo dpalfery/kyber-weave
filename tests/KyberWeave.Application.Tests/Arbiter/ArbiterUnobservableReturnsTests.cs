@@ -217,8 +217,8 @@ public sealed class ArbiterUnobservableReturnsTests : IDisposable
             "antigravity", null, AntigravityPayload(_host.RepoRoot, DispatchPrompt), stdout, log);
 
         Assert.Equal(0, exit);
-        // Antigravity's documented allow document: the empty object, never 'allow'.
-        Assert.Equal("{}", stdout.ToString().Trim());
+        // Antigravity needs a decision on a pre-tool answer: {} reads as a denial, so the allow is explicit.
+        Assert.Equal("{\"decision\":\"allow\"}", stdout.ToString().Trim());
         // The skip is logged: the decision record carries the shipped answer.
         string decisions = string.Join("\n", _host.State.Log.LinesOf(_host.ArbiterDirectory, "decisions.jsonl"));
         Assert.Contains("KW-ARB-READY-001", decisions, StringComparison.Ordinal);

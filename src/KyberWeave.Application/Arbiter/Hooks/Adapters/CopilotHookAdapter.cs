@@ -166,8 +166,31 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             };
         }
 
-        if (!string.Equals(GetString(payload, "toolName"), "task", StringComparison.Ordinal)
-            || payload.TryGetProperty("toolResult", out _))
+        if (CliCalls(payload).Count > 1)
+        {
+            // A batch is one event for several calls. The insertion-only path must find the marked dispatch anywhere
+            // in it: reading the first call alone answered null for a turn that read a file and then dispatched.
+            foreach (JsonElement call in CliCalls(payload))
+            {
+                string? document = RenderCliCallInsertion(CliCallPayload(payload, call), context);
+                if (document is not null)
+                {
+                    return document;
+                }
+            }
+
+            return null;
+        }
+
+        return RenderCliCallInsertion(payload, context);
+    }
+
+    /// <summary>The prompt insertion for one CLI call, or null when the call needs none.</summary>
+    private static string? RenderCliCallInsertion(JsonElement payload, HookContext context)
+    {
+        if (!string.Equals(CliToolName(payload), "task", StringComparison.Ordinal)
+            || payload.TryGetProperty("toolResult", out _)
+            || (FirstCliCall(payload) is { } batchCall && batchCall.TryGetProperty("result", out _)))
         {
             return null;
         }
@@ -190,13 +213,14 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         string? target,
         string prompt,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        string? deliveredPrompt = null)
     {
         if (_engine is IContextualHookDecisionEngine contextual)
         {
             return contextual.DecidePreDispatch(
                 harness, caller, target, prompt, config, context,
-                GetString(payload, "tool_use_id"), sessionId: null);
+                CliCallId(payload), sessionId: null, dispatchModel: null, deliveredPrompt: deliveredPrompt);
         }
 
         return _engine.DecidePreDispatch(caller, target, prompt, config);
@@ -216,7 +240,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         {
             return contextual.DecidePostDispatch(
                 harness, caller, target, prompt, toolOutput, config, context,
-                GetString(payload, "tool_use_id"), sessionId: null);
+                CliCallId(payload), sessionId: null);
         }
 
         return _engine.DecidePostDispatch(caller, target, toolOutput, config);
@@ -230,6 +254,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         payload.ValueKind == JsonValueKind.Object
         && !payload.TryGetProperty("toolName", out _)
         && !payload.TryGetProperty("hook_event_name", out _)
+        && !payload.TryGetProperty("toolCalls", out _)
         && !string.IsNullOrWhiteSpace(GetString(payload, "agentId"));
 
     private string HandleSubagentStop(JsonElement payload, KyberWeaveConfig config, HookContext context)
@@ -411,7 +436,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         JsonElement input = RequireToolInput(payload);
         IReadOnlyList<string> dirs = ReadGuard.ProtectedDirectories(config);
         string? toolName = tool ?? "<unknown>";
-        ContentGuardResult verdict = CheckContent(toolName, input, RepoRootOf(payload, context.RepoRoot), dirs);
+        ContentGuardResult verdict = CheckContent(toolName, input, GuardRoot(payload, context), dirs, context.RunContext?.Worktrees);
         return verdict.Allowed
             ? string.Empty
             : RenderLocalPreDeny(verdict.Reason ?? "Denied by the Read guard (Req 25.2, Req 25.4).");
@@ -476,20 +501,67 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             : GetString(payload, "agentType") is { Length: > 0 } camel ? camel
             : GetString(payload, "agent_type") is { Length: > 0 } snake ? snake
             : "unidentified";
+
+        // One hook event can carry several calls (a turn that started parallel workers, or a review council's lens
+        // fan-out). Each call is its own dispatch, so each is decided and recorded on its own: a pre event per call is
+        // what its return can pair with, and a batch read as one would leave every call but the first unpaired.
+        IReadOnlyList<JsonElement> calls = CliCalls(payload);
+        if (calls.Count > 1)
+        {
+            string firstDocument = string.Empty;
+            foreach (JsonElement call in calls)
+            {
+                JsonElement single = CliCallPayload(payload, call);
+                if (IsCliPassThrough(single))
+                {
+                    continue;
+                }
+
+                string document = HandleCliCall(single, caller, config, context);
+                if (document.Contains("\"permissionDecision\":\"deny\"", StringComparison.Ordinal))
+                {
+                    // Fail closed: one call the rules refuse refuses the batch, as a refused single call would.
+                    return document;
+                }
+
+                if (firstDocument.Length == 0)
+                {
+                    firstDocument = document;
+                }
+            }
+
+            return firstDocument;
+        }
+
+        return HandleCliCall(payload, caller, config, context);
+    }
+
+    private string HandleCliCall(JsonElement payload, string caller, KyberWeaveConfig config, HookContext context)
+    {
         JsonObject args = ParseCliArgs(payload);
         string? target = GetNodeString(args, "agent_type");
         string prompt = GetNodeString(args, "prompt")
             ?? throw new InvalidOperationException(
                 "Malformed Copilot CLI hook event: toolArgs carry no prompt.");
-        bool isPost = payload.TryGetProperty("toolResult", out _);
+        bool isPost = payload.TryGetProperty("toolResult", out _)
+            || (FirstCliCall(payload) is { } call && call.TryGetProperty("result", out _));
 
         if (!isPost)
         {
-            HookOutcome outcome = DecidePre(
-                _harnessToken, payload, caller, target, prompt, config, context);
-
-            // The rules judge the short dispatch first; the prompt is inserted only for a dispatch they allowed.
+            // The rules judge the short dispatch; the insertion is computed first because the ledger pairs the return
+            // with the prompt the worker runs, and an inserted packet replaces the dispatch the post event carries.
             DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+            HookOutcome outcome = DecidePre(
+                _harnessToken,
+                payload,
+                caller,
+                target,
+                prompt,
+                config,
+                context,
+                insertion.Kind == DispatchInsertionKind.Inserted ? insertion.Text : null);
+
+            // The prompt is inserted only for a dispatch the rules allowed.
             if (outcome.Kind == HookOutcomeKind.Deny)
             {
                 return RenderCliDeny(
@@ -548,7 +620,9 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
                 && GetString(payload, "sessionId") is { Length: > 0 } sessionId)
             {
                 background.TrackBackgroundDispatch(
-                    new BackgroundDispatch(_harnessToken, sessionId, agentId, caller, target, prompt), context);
+                    new BackgroundDispatch(
+                        _harnessToken, sessionId, agentId, caller, target, prompt, CliCallId(payload)),
+                    context);
             }
             else
             {
@@ -616,7 +690,23 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 
     private static bool IsCliPassThrough(JsonElement payload)
     {
-        string? toolName = GetString(payload, "toolName");
+        // A batch passes through only when no call in it is a marked dispatch: reading the first call alone would let
+        // a turn whose first call is a `view` or a `bash` drop every task dispatch beside it.
+        IReadOnlyList<JsonElement> calls = CliCalls(payload);
+        if (calls.Count > 1)
+        {
+            foreach (JsonElement call in calls)
+            {
+                if (!IsCliPassThrough(CliCallPayload(payload, call)))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        string? toolName = CliToolName(payload);
         if (!string.Equals(toolName, "task", StringComparison.Ordinal))
         {
             return true;
@@ -659,17 +749,95 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             return CopilotSchema.Local;
         }
 
-        if (payload.TryGetProperty("toolName", out _))
+        if (payload.TryGetProperty("toolName", out _) || HasCliCall(payload))
         {
             return CopilotSchema.Cli;
         }
 
         throw new InvalidOperationException(
-            "Malformed Copilot hook event: neither hook_event_name (Local schema) nor toolName (CLI schema) is present.");
+            "Malformed Copilot hook event: neither hook_event_name (Local schema) nor toolName or toolCalls (CLI schema) is present.");
     }
 
     private static bool IsLocalDispatchTool(string? tool) =>
         string.Equals(tool, "runSubagent", StringComparison.Ordinal);
+
+    /// <summary>Whether the payload carries a Copilot CLI 1.x <c>toolCalls</c> batch.</summary>
+    private static bool HasCliCall(JsonElement payload) => FirstCliCall(payload) is not null;
+
+    /// <summary>
+    /// Every call of a Copilot CLI <c>toolCalls</c> batch, or the one call of the older single-call shape. The whole
+    /// event is one hook invocation, so a turn that started several workers arrives here as one payload and every
+    /// call in it is a dispatch of its own.
+    /// </summary>
+    private static IReadOnlyList<JsonElement> CliCalls(JsonElement payload)
+    {
+        if (payload.ValueKind == JsonValueKind.Object
+            && payload.TryGetProperty("toolCalls", out JsonElement batch)
+            && batch.ValueKind == JsonValueKind.Array)
+        {
+            List<JsonElement> calls = [.. batch.EnumerateArray().Where(call => call.ValueKind == JsonValueKind.Object)];
+            if (calls.Count > 0)
+            {
+                return calls;
+            }
+        }
+
+        return [payload];
+    }
+
+    /// <summary>One call of a batch, as the single-call payload the rest of the adapter reads.</summary>
+    private static JsonElement CliCallPayload(JsonElement payload, JsonElement call)
+    {
+        JsonObject single = new()
+        {
+            ["sessionId"] = GetString(payload, "sessionId"),
+            ["cwd"] = GetString(payload, "cwd"),
+            ["toolName"] = GetString(call, "name"),
+            ["toolCallId"] = GetString(call, "id") ?? GetString(payload, "toolCallId"),
+        };
+        if (call.TryGetProperty("args", out JsonElement args))
+        {
+            single["toolArgs"] = JsonNode.Parse(args.GetRawText());
+        }
+
+        if (call.TryGetProperty("result", out JsonElement result))
+        {
+            single["toolResult"] = result.ValueKind == JsonValueKind.Object
+                ? JsonNode.Parse(result.GetRawText())
+                : new JsonObject { ["textResultForLlm"] = result.ValueKind == JsonValueKind.String ? result.GetString() : result.GetRawText() };
+        }
+
+        return JsonSerializer.SerializeToElement(single);
+    }
+
+    /// <summary>
+    /// The harness's id for this tool call: <c>toolCallId</c> on a single-call event, the call's own <c>id</c> in a
+    /// batch, and <c>tool_use_id</c> on the VS Code schema. It is the exact half of the pair key.
+    /// </summary>
+    private static string? CliCallId(JsonElement payload) =>
+        GetString(payload, "toolCallId")
+        ?? GetString(payload, "tool_use_id")
+        ?? (FirstCliCall(payload) is { } call ? GetString(call, "id") : null);
+
+    /// <summary>The first call of a CLI <c>toolCalls</c> batch, or null for the older single-call shape.</summary>
+    private static JsonElement? FirstCliCall(JsonElement payload)
+    {
+        if (payload.ValueKind == JsonValueKind.Object
+            && payload.TryGetProperty("toolCalls", out JsonElement batch)
+            && batch.ValueKind == JsonValueKind.Array
+            && batch.GetArrayLength() > 0
+            && batch[0].ValueKind == JsonValueKind.Object)
+        {
+            return batch[0];
+        }
+
+        return null;
+    }
+
+    /// <summary>The tool name of a CLI event, whether it carries one call or a batch.</summary>
+    private static string? CliToolName(JsonElement payload) =>
+        GetString(payload, "toolName")
+        ?? (FirstCliCall(payload) is { } call ? GetString(call, "name") : null);
 
     private static JsonElement RequireToolInput(JsonElement payload)
     {
@@ -722,7 +890,14 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 
     private static JsonObject? TryParseCliArgs(JsonElement payload)
     {
-        if (!payload.TryGetProperty("toolArgs", out JsonElement toolArgs))
+        // Copilot CLI 1.x reports a pre-tool-use event as a `toolCalls` batch, each call carrying its own `args`.
+        // Older events carry one `toolArgs`. Both are the same dispatch to every caller below.
+        JsonElement toolArgs = payload.TryGetProperty("toolArgs", out JsonElement single)
+            ? single
+            : FirstCliCall(payload) is { } call && call.TryGetProperty("args", out JsonElement callArgs)
+                ? callArgs
+                : default;
+        if (toolArgs.ValueKind == JsonValueKind.Undefined)
         {
             return null;
         }
@@ -754,11 +929,19 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         public static ContentGuardResult Allow { get; } = new(true, null);
     }
 
+    /// <summary>
+    /// The root the content-keyed Read guard judges a path against: the run context's worktree when the invocation
+    /// resolved one, so a worker's read in the run worktree is judged there rather than in the session's checkout.
+    /// </summary>
+    private static string GuardRoot(JsonElement payload, HookContext context) =>
+        context.RunContext?.Worktree ?? RepoRootOf(payload, context.RepoRoot);
+
     private static ContentGuardResult CheckContent(
         string toolName,
         JsonElement toolInput,
         string repoRoot,
-        IReadOnlyList<string> protectedDirs)
+        IReadOnlyList<string> protectedDirs,
+        IReadOnlyList<string>? repositoryRoots)
     {
         if (protectedDirs.Count == 0)
         {
@@ -772,7 +955,8 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             {
                 // Shell commands match by substring; path-valued inputs resolve
                 // after normalisation relative to the repository root.
-                if (forward.Contains(dir, StringComparison.Ordinal) || ResolvesInside(forward, repoRoot, dir))
+                if (forward.Contains(dir, StringComparison.Ordinal)
+                    || ResolvesInside(forward, repoRoot, repositoryRoots, dir))
                 {
                     return new ContentGuardResult(
                         false,
@@ -821,25 +1005,32 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         }
     }
 
-    private static bool ResolvesInside(string forward, string repoRoot, string dir)
+    private static bool ResolvesInside(
+        string forward,
+        string repoRoot,
+        IReadOnlyList<string>? repositoryRoots,
+        string dir)
     {
         string? relative = Path.IsPathFullyQualified(forward)
-            ? ToRepoRelative(forward, repoRoot)
+            ? ToRepoRelative(forward, repoRoot, repositoryRoots)
             : NormalizeLexically(forward);
         return relative is not null
             && (string.Equals(relative, dir, StringComparison.Ordinal)
                 || relative.StartsWith(dir + "/", StringComparison.Ordinal));
     }
 
-    private static string? ToRepoRelative(string forward, string repoRoot)
+    private static string? ToRepoRelative(string forward, string repoRoot, IReadOnlyList<string>? repositoryRoots)
     {
-        string relative = Path.GetRelativePath(repoRoot, forward).Replace('\\', '/');
-        if (relative.StartsWith("..", StringComparison.Ordinal))
+        foreach (string root in new[] { repoRoot }.Concat(repositoryRoots ?? []))
         {
-            return null;
+            string relative = Path.GetRelativePath(root, forward).Replace('\\', '/');
+            if (!relative.StartsWith("..", StringComparison.Ordinal))
+            {
+                return NormalizeLexically(relative);
+            }
         }
 
-        return NormalizeLexically(relative);
+        return null;
     }
 
     private static string? NormalizeLexically(string path)

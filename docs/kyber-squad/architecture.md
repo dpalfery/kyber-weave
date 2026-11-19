@@ -1567,6 +1567,39 @@ trip — the same four rules still arrive, once — and that limit is recorded r
 harness behaviours the block depends on, and which of them this tree can establish, are in
 [the capability matrix](requirements.md#harness-behaviour-the-product-relies-on).
 
+### The request, the trace, and the check
+
+Three rules govern what a planner is given and what an agent does with a check finding. They were
+learned from run 11 of the Copilot CLI conductor loop, where each of them cost a wasted round or a
+stalled closeout. They are stated once here; each agent body implements its own rule and a content
+test pins it.
+
+1. **A dispatch forwards the request; it never restates it.** Every dispatch that carries a user
+   request — to `architect`, `product-owner`, or an intake, assessment or defect-investigation agent —
+   carries the user's words verbatim, plus only the routing facts the specialist cannot know: worktree,
+   branch, base, revision, the plan or specification file, `autonomy` and `development-mode`. The
+   conductor adds no summary, no paraphrase and no "the user requests …" prose. A summary is an
+   interpretation the conductor is not qualified to make: the run-11 conductor reduced "rounded square
+   badge, positioned to the left of the label" to "rounded icon badges", and the plan came back for a
+   revision round once the original was read.
+
+2. **Every explicit requirement is traced before `PLAN_READY`.** `architect` maps each instruction the
+   request states to the plan section that covers it, in a `## Request trace` table. A requirement that
+   conflicts with a repository rule is recorded as a `## Decisions` row with a recommended resolution
+   and its reason; the user's explicit requirement is the recommended winner unless keeping it would
+   break security or a hard repository ban. Nothing is reconciled silently: run 11 met "validate that
+   database values reach the display" against a test standard that mocks every Playwright API call, and
+   quietly replaced the requested proof with two mocked halves.
+
+3. **A check finding is fixed, not escalated.** An agent that runs a check — `docs-dev` on
+   `docs validate` and `docs drift`, `architect` on the same gates, a developer on its task gate —
+   fixes every finding it can, warning or error, including one the document carried before its change,
+   then re-runs the check and repeats until it is clean. The goal is a pull request that passes, not a
+   report that names the failures. `BLOCKED` is for a finding outside the agent's authority, and then
+   it names the finding, why it cannot fix it, and who can; a docs command it is allowed to run, it
+   runs. Run 11's `docs-dev` refused to commit over 15 warnings with no errors, and an otherwise
+   perfect pull request waited on a person.
+
 ---
 
 ## 9. Conductor execution circuit-breaker

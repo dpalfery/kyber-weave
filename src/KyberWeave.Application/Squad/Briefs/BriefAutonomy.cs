@@ -32,7 +32,10 @@ public static partial class BriefAutonomy
         return fromConfig is not null ? (fromConfig, "configuration") : ("supervised", "default");
     }
 
-    private static string? Normalize(string? value)
+    /// <summary>Reads an autonomy value the way the conductor does: trimmed, case-insensitive.</summary>
+    /// <param name="value">The value to read, or null.</param>
+    /// <returns><c>supervised</c> or <c>autonomous</c>, or null when the value is neither.</returns>
+    public static string? Normalize(string? value)
     {
         string? trimmed = value?.Trim();
         if (string.Equals(trimmed, "supervised", StringComparison.OrdinalIgnoreCase))

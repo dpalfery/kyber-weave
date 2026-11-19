@@ -48,6 +48,33 @@ public sealed class PlanRootResolverTests
         Assert.Equal(HookRoot, root);
     }
 
+    /// <summary>
+    /// The dispatch hook already parsed the headers when it asks for the prompt's root, so the plan file arrives as a
+    /// value rather than inside a prompt: the worktree that holds it still wins.
+    /// </summary>
+    [Fact]
+    public void ResolvePlanRoot_APlanHeaderOnlyTheWorktreeHolds_ReturnsThatWorktree()
+    {
+        WritePlan(Worktree, "# Plan\n");
+
+        string root = Resolver().ResolvePlanRoot(HookRoot, "docs/plans/task.md", null, _ => [HookRoot, Worktree]);
+
+        Assert.Equal(Worktree, root);
+    }
+
+    /// <summary>
+    /// No plan header and a body naming no worktree cannot resolve anything, so the hook's own checkout stands.
+    /// </summary>
+    [Fact]
+    public void ResolvePlanRoot_NoPlanHeaderAndNoWorktreeInTheText_KeepsTheHookRoot()
+    {
+        WritePlan(Worktree, "# Plan\n");
+
+        string root = Resolver().ResolvePlanRoot(HookRoot, null, "Write the tests.", _ => [HookRoot, Worktree]);
+
+        Assert.Equal(HookRoot, root);
+    }
+
     [Fact]
     public void Resolve_TwoWorktreesHoldThePlan_ReturnsTheCopyWrittenLast()
     {
@@ -68,6 +95,21 @@ public sealed class PlanRootResolverTests
         string root = Resolver().Resolve(HookRoot, $"Worktree: {OtherWorktree}\n\nWrite the tests.", _ => [HookRoot, Worktree, OtherWorktree]);
 
         Assert.Equal(OtherWorktree, root);
+    }
+
+    /// <summary>
+    /// A stripped return names the worktree only by its path, and a worktree need not live in a directory whose name
+    /// says "worktree" (a checkout beside the repository, or a temporary directory). The cheap gate on the word must
+    /// not answer before the paths in the body are read.
+    /// </summary>
+    [Fact]
+    public void Resolve_NoPlanAndTheTextNamesAWorktreeWhosePathSaysNoWorktree_ReturnsThatWorktree()
+    {
+        const string beside = "/repo-fix";
+        _files.CreateDirectory(beside);
+        string root = Resolver().Resolve(HookRoot, $"Your files are in {beside}\n\nDone.", _ => [HookRoot, beside]);
+
+        Assert.Equal(beside, root);
     }
 
     [Fact]

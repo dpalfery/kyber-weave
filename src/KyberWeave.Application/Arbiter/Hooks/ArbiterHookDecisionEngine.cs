@@ -61,6 +61,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     private readonly IProcessEnvironment _process;
     private readonly IBackgroundDispatchStore _background;
     private readonly IIdGenerator _ids;
+    private readonly ReviewSeatRecorder _seats;
 
     /// <summary>
     /// Creates an engine over the ports it decides through. Every factory is injectable so tests run the real
@@ -78,6 +79,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// <param name="process">The process the engine reads its home, directory and environment variables from.</param>
     /// <param name="background">Keeps the background dispatches whose turns are still to return.</param>
     /// <param name="ids">Builds the decision id for a hook decision that has none of its own.</param>
+    /// <param name="seats">Saves a review lens return as its seat file.</param>
     /// <param name="providerFactory">Replaces the provider the configuration names.</param>
     /// <param name="gitFactsFactory">Replaces the git facts.</param>
     /// <param name="planReaderFactory">Replaces the plan reader.</param>
@@ -98,6 +100,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         IProcessEnvironment process,
         IBackgroundDispatchStore background,
         IIdGenerator ids,
+        ReviewSeatRecorder seats,
         Func<KyberWeaveConfig, IArbiterProvider>? providerFactory = null,
         Func<string, IArbiterGitFacts>? gitFactsFactory = null,
         Func<string, IArbiterPlanReader>? planReaderFactory = null,
@@ -120,6 +123,8 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         _background = background;
         ArgumentNullException.ThrowIfNull(ids);
         _ids = ids;
+        ArgumentNullException.ThrowIfNull(seats);
+        _seats = seats;
         _evaluators = evaluators;
         _state = state;
         _providers = providers;
@@ -194,6 +199,30 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     }
 
     /// <inheritdoc/>
+    public HookOutcome DecidePreDispatch(
+        string harness,
+        string caller,
+        string? target,
+        string prompt,
+        KyberWeaveConfig config,
+        HookContext context,
+        string? toolCallId,
+        string? sessionId,
+        string? dispatchModel,
+        string? deliveredPrompt)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(harness);
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(prompt);
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(context);
+
+        return Decide(
+            harness, caller, target, prompt, null, isPost: false, config, context, toolCallId, sessionId, dispatchModel,
+            deliveredPrompt: deliveredPrompt);
+    }
+
+    /// <inheritdoc/>
     public HookOutcome DecidePostDispatch(
         string harness,
         string caller,
@@ -226,27 +255,35 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
 
         // The pre event of this dispatch was appended a moment ago, so the newest one still open is its own: an
         // older one with the same prompt is a dispatch that was refused, or one another agent already answers.
+        // The harness's call id is exact and survives a prompt the hook rewrote; the digest covers a harness that
+        // gives no id, and is taken over the prompt the worker actually runs.
         HashSet<string> taken = events
             .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
             .Select(e => e.PreId!)
             .Concat(_background.ForSession(arbiterDirectory, dispatch.SessionId).Select(record => record.PreId))
             .ToHashSet(StringComparer.Ordinal);
-        string? preId = digest is null
+        List<ArbiterLedgerEvent> pres = [.. events.Where(e =>
+            e.Phase == ArbiterLedgerPhases.Pre
+            && string.Equals(e.Harness, dispatch.Harness, StringComparison.Ordinal)
+            && !taken.Contains(e.Id))];
+        ArbiterLedgerEvent? pre = dispatch.CallId is { Length: > 0 } callId
+            ? pres.LastOrDefault(e => string.Equals(e.CallId, callId, StringComparison.Ordinal))
+            : null;
+        pre ??= digest is null
             ? null
-            : events.LastOrDefault(e => e.Phase == ArbiterLedgerPhases.Pre
-                && string.Equals(e.Harness, dispatch.Harness, StringComparison.Ordinal)
-                && string.Equals(e.PairDigest, digest, StringComparison.Ordinal)
-                && !taken.Contains(e.Id))?.Id;
-        if (preId is null)
+            : pres.LastOrDefault(e => string.Equals(e.PairDigest, digest, StringComparison.Ordinal));
+        if (pre is null)
         {
             context.Log.WriteLine(
-                $"Arbiter: background agent '{dispatch.AgentId}' has no dispatch on the ledger; its returns are not recorded.");
+                $"Arbiter: background agent '{dispatch.AgentId}' has no dispatch on the ledger; its returns are not recorded. " +
+                $"Pairing keys compared: call-id '{dispatch.CallId ?? "(none)"}', " +
+                $"digest '{digest ?? "(none)"}' against {pres.Count} unpaired pre event(s) of '{dispatch.Harness}'.");
             return;
         }
 
-        _background.Save(arbiterDirectory, new BackgroundDispatchRecord(dispatch, preId));
+        _background.Save(arbiterDirectory, new BackgroundDispatchRecord(dispatch, pre.Id));
         context.Log.WriteLine(
-            $"Arbiter: background agent '{dispatch.AgentId}' started for dispatch {preId}; each finished turn is recorded as its return.");
+            $"Arbiter: background agent '{dispatch.AgentId}' started for dispatch {pre.Id}; each finished turn is recorded as its return.");
     }
 
     /// <inheritdoc/>
@@ -324,8 +361,14 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         string? toolCallId,
         string? sessionId,
         string? dispatchModel = null,
-        string? preId = null)
+        string? preId = null,
+        string? deliveredPrompt = null)
     {
+        if (isPost && toolOutput is not null)
+        {
+            RecordReviewSeat(prompt, toolOutput, context);
+        }
+
         string? resolved = string.IsNullOrWhiteSpace(caller) || IsUnidentified(caller) ? null : caller;
 
         // A serve event arrives with no harness hook: the whole event is the MCP
@@ -357,9 +400,10 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         try
         {
             // The plan, its task file and the git facts are read in the worktree that holds the plan, which in a
-            // conductor run is often not the checkout the hook runs in. The ledger stays with the hook's directory
-            // so a dispatch and its return still pair.
-            string evaluationRoot = _planRoots.Resolve(repoRoot, prompt);
+            // conductor run is often not the checkout the hook runs in. The invocation resolved that worktree once
+            // through the run-context resolver; the resolver call here is the fallback for a caller outside the hook.
+            // The ledger stays with the hook's directory so a dispatch and its return still pair.
+            string evaluationRoot = EvaluationRootFor(context, repoRoot, prompt, _planRoots);
             if (!string.Equals(evaluationRoot, repoRoot, StringComparison.Ordinal))
             {
                 context.Log.WriteLine($"Arbiter: evaluating against worktree '{evaluationRoot}', which holds the dispatch's plan.");
@@ -389,6 +433,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                 AssertedCaller = asserted ? resolved : null,
                 Target = target,
                 Prompt = prompt,
+                DeliveredPrompt = deliveredPrompt,
                 ToolCallId = toolCallId,
                 PreId = preId,
                 Session = sessionId,
@@ -404,7 +449,15 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                 ev, effective,
                 new ArbiterEvaluatorOptions(Source: ArbiterSources.Hook, ConfirmModelWrite: context.ConfirmModelWrite))
                 .GetAwaiter().GetResult();
-            return MapResult(result, harness, resolved, prompt, effective, arbiterDirectory, context, toolOutput, isPost);
+            if (isPost)
+            {
+                LogUnpairedReturn(result, ev, arbiterDirectory, context);
+            }
+
+            HookOutcome mapped = MapResult(result, harness, resolved, prompt, effective, arbiterDirectory, context, toolOutput, isPost);
+            return isPost
+                ? WithAutonomousPlanNote(mapped, result, target, toolOutput, toolCallId, preId is null, arbiterDirectory, context)
+                : mapped;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -418,6 +471,176 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             owned?.Dispose();
         }
     }
+
+    /// <summary>
+    /// Attaches the autonomous plan-approval note to the architect's <c>PLAN_READY</c> return in an autonomous run.
+    /// The note is advisory: a return the rules blocked keeps its own text, and a failure to build the note is
+    /// logged and the outcome returned as it was.
+    /// </summary>
+    /// <param name="outcome">What the rules decided for the return.</param>
+    /// <param name="result">The evaluation's result.</param>
+    /// <param name="target">The dispatch's target.</param>
+    /// <param name="toolOutput">The return's text.</param>
+    /// <param name="toolCallId">The harness's call id for the return, or null.</param>
+    /// <param name="checkRepeat">Whether an earlier recording of the same return suppresses the note; a background turn is already deduplicated by its text.</param>
+    /// <param name="arbiterDirectory">Where the ledger is kept.</param>
+    /// <param name="context">The invocation's context, which carries the run.</param>
+    private HookOutcome WithAutonomousPlanNote(
+        HookOutcome outcome,
+        ArbiterEvaluationResult result,
+        string? target,
+        string? toolOutput,
+        string? toolCallId,
+        bool checkRepeat,
+        string arbiterDirectory,
+        HookContext context)
+    {
+        try
+        {
+            if (outcome.Kind is not (HookOutcomeKind.PassThrough or HookOutcomeKind.Allow or HookOutcomeKind.AllowWithNote or HookOutcomeKind.PostAnnotation)
+                || !AutonomousPlanNudge.Applies(result, target, toolOutput, context.RunContext?.ActiveRun))
+            {
+                return outcome;
+            }
+
+            if (checkRepeat)
+            {
+                IReadOnlyList<ArbiterLedgerEvent> events = _state.OpenLedger(arbiterDirectory).ReadAll();
+                ArbiterLedgerEvent? current = events.FirstOrDefault(e => string.Equals(e.Id, result.LedgerId, StringComparison.Ordinal));
+                if (AutonomousPlanNudge.AlreadyNudged(events, current, toolCallId))
+                {
+                    return outcome;
+                }
+            }
+
+            string note = string.IsNullOrWhiteSpace(outcome.Reason) ? AutonomousPlanNudge.Note : outcome.Reason + "\n\n" + AutonomousPlanNudge.Note;
+            return outcome with { Kind = HookOutcomeKind.PostAnnotation, Reason = note };
+        }
+        catch (Exception exception) when (exception is IOException
+                                              or UnauthorizedAccessException
+                                              or (ArgumentException and not ArgumentNullException)
+                                              or InvalidDataException
+                                              or System.Text.Json.JsonException
+                                              or NotSupportedException
+                                              or System.Security.SecurityException)
+        {
+            context.Log.WriteLine($"Arbiter: the autonomous plan-approval note was not built ({exception.GetType().Name}: {OneLine(exception.Message)}).");
+            return outcome;
+        }
+    }
+
+    /// <summary>
+    /// Saves a review lens return as its seat file before any rule runs. A failure is logged and never blocks the
+    /// dispatch: the reviewer sees the missing seat and re-sends it.
+    /// </summary>
+    private void RecordReviewSeat(string prompt, string toolOutput, HookContext context)
+    {
+        try
+        {
+            _seats.Record(prompt, toolOutput, context);
+        }
+        catch (Exception exception) when (exception is IOException
+                                              or UnauthorizedAccessException
+                                              or System.Text.Json.JsonException
+                                              or InvalidDataException
+                                              or NotSupportedException
+                                              or System.Security.SecurityException
+                                              or (ArgumentException and not ArgumentNullException))
+        {
+            // A refused or failed save never blocks the dispatch: a file-system, path or security
+            // failure is expected here. A programming error — a null argument, an invalid
+            // operation, a bad cast — is not a save failure and must surface.
+            context.Log.WriteLine($"Arbiter: a review seat was not saved ({exception.GetType().Name}: {OneLine(exception.Message)}).");
+        }
+    }
+
+    /// <summary>
+    /// Says why a return paired with no dispatch, once: an unpaired return is a post event that will never mark a
+    /// task complete or release its dispatch's files, and the line names the keys that were compared.
+    /// </summary>
+    private void LogUnpairedReturn(
+        ArbiterEvaluationResult result, ArbiterEvent ev, string arbiterDirectory, HookContext context)
+    {
+        if (string.IsNullOrEmpty(result.LedgerId))
+        {
+            return;
+        }
+
+        IReadOnlyList<ArbiterLedgerEvent> events = _state.OpenLedger(arbiterDirectory).ReadAll();
+        ArbiterLedgerEvent? post = events.FirstOrDefault(e => string.Equals(e.Id, result.LedgerId, StringComparison.Ordinal));
+        if (post is null || post.PreId is not null)
+        {
+            return;
+        }
+
+        int candidates = events.Count(e =>
+            e.Phase == ArbiterLedgerPhases.Pre
+            && string.Equals(e.Harness, ev.Harness, StringComparison.Ordinal));
+        context.Log.WriteLine(
+            $"Arbiter: the return of '{(ev.Target is { Length: > 0 } target ? target : ev.Caller ?? "unknown")}' paired with no dispatch. " +
+            $"Pairing keys compared: call-id '{post.CallId ?? "(none)"}', digest '{post.PairDigest ?? "(none)"}' " +
+            $"against {candidates} pre event(s) of '{ev.Harness}'.");
+    }
+
+    /// <summary>
+    /// The worktree this dispatch is judged in: the plan, its task file and the git facts are read there. One hook
+    /// invocation resolves one run context from the event, which is right for a single dispatch; a batch's other calls
+    /// carry their own plans, and a plan that lives in another worktree of this repository is read there.
+    /// </summary>
+    /// <param name="context">The invocation's context.</param>
+    /// <param name="repoRoot">The repository root configuration and the ledger are read under.</param>
+    /// <param name="prompt">This dispatch's own prompt.</param>
+    /// <param name="planRoots">Finds the worktree that holds a dispatch's plan.</param>
+    internal static string EvaluationRootFor(
+        HookContext context, string repoRoot, string prompt, IPlanRootResolver planRoots)
+    {
+        HookRunContext? run = context.RunContext;
+        if (run is null)
+        {
+            return planRoots.Resolve(repoRoot, prompt);
+        }
+
+        // The run context was resolved from one event, which is this dispatch's own for a single call. A batch's other
+        // calls name their own plan, and the worktree that holds it is where the plan, its task file and the git facts
+        // are read. Resolving from the context's worktree keeps that worktree when it holds the plan, and picks any
+        // other worktree of this repository when only that one does — the repository's checkout included, because a
+        // plan that lives nowhere else is still judged where it is.
+        string? plan = PlanFileFor(prompt);
+        if (plan is null
+            || (run.PlanFile is { } anchored && SamePlan(anchored, plan)))
+        {
+            return run.Worktree;
+        }
+
+        string chosen = planRoots.ResolvePlanRoot(run.Worktree, plan, prompt, _ => run.Worktrees);
+        return run.Worktrees.Any(worktree => SamePath(worktree, chosen))
+            ? chosen
+            : run.Worktree;
+    }
+
+    /// <summary>The plan a dispatch names: its routing header, else the <c>PLAN_FILE</c> line of an escalation envelope.</summary>
+    private static string? PlanFileFor(string prompt)
+    {
+        if (HeaderBlock.Parse(prompt).RawValues.TryGetValue("PLAN_FILE", out string? named)
+            && !string.IsNullOrWhiteSpace(named))
+        {
+            return named.Trim();
+        }
+
+        return ArbiterLedgerQueries.EnvelopePlan(prompt);
+    }
+
+    private static bool SamePlan(string left, string right) =>
+        string.Equals(NormalizePlan(left), NormalizePlan(right), StringComparison.Ordinal);
+
+    private static string NormalizePlan(string path) =>
+        path.Trim().Replace('\\', '/').TrimStart('.', '/');
+
+    private static bool SamePath(string left, string right) =>
+        string.Equals(
+            left.TrimEnd('/', '\\'),
+            right.TrimEnd('/', '\\'),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     private HookOutcome MapResult(
         ArbiterEvaluationResult result,

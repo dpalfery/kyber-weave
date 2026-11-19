@@ -49,6 +49,25 @@ public sealed class RunStartCommandConsoleTests
     }
 
     [Fact]
+    public void Execute_TheAutonomyTheRunResolvesToIsHandedToTheStart()
+    {
+        _briefs.ResolvedAutonomy = "autonomous";
+
+        Run(Valid(new RunStartSettings { Brief = true, Autonomy = "autonomous" }));
+
+        Assert.Equal("autonomous", Assert.Single(_starts.Requests).Autonomy);
+        Assert.Equal("autonomous", _briefs.GivenAutonomy);
+    }
+
+    [Fact]
+    public void Execute_ARunWithNoAutonomySetIsStartedWithNone()
+    {
+        Run(Valid(new RunStartSettings()));
+
+        Assert.Null(Assert.Single(_starts.Requests).Autonomy);
+    }
+
+    [Fact]
     public void Execute_OutsideARepository_FailsNamingTheCurrentDirectoryFromTheEnvironment()
     {
         _runners.Root = null;
@@ -285,6 +304,16 @@ public sealed class RunStartCommandConsoleTests
     private sealed class StubBriefs : ISquadBriefBuilder
     {
         public string? BuildError { get; set; }
+
+        public string? ResolvedAutonomy { get; set; }
+
+        public string? GivenAutonomy { get; private set; }
+
+        public string? ResolveAutonomy(string repositoryRoot, string? given, KyberWeaveConfig config)
+        {
+            GivenAutonomy = given;
+            return ResolvedAutonomy;
+        }
 
         public bool TryBuild(SquadBriefRequest request, out BriefResult? result, out string refusal)
         {

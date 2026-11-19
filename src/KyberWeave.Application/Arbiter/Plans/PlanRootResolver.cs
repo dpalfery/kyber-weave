@@ -36,19 +36,39 @@ public sealed class PlanRootResolver(
     {
         ArgumentNullException.ThrowIfNull(hookRoot);
         ArgumentNullException.ThrowIfNull(prompt);
-        listWorktrees ??= root => git.ListWorktrees(root);
 
         HeaderBlock block = HeaderBlock.Parse(prompt);
         string? planFile = block.Headers.TryGetValue("PLAN_FILE", out string? valid)
             ? valid
             : block.RawValues.TryGetValue("PLAN_FILE", out string? raw) ? raw : null;
+        return ResolvePlanRoot(hookRoot, planFile, prompt, listWorktrees);
+    }
+
+    /// <summary>
+    /// The root to read a dispatch's plan, task file and prompt against when its headers are already parsed.
+    /// </summary>
+    /// <param name="hookRoot">The repository root the hook resolved from its working directory.</param>
+    /// <param name="planFile">The dispatch's <c>PLAN_FILE</c> value, or null when it names no plan.</param>
+    /// <param name="text">The dispatch text, for the worktree it names when no plan is named; null for none.</param>
+    /// <param name="listWorktrees">Lists the repository's worktrees; the git adapter in production.</param>
+    public string ResolvePlanRoot(
+        string hookRoot,
+        string? planFile,
+        string? text,
+        Func<string, IReadOnlyList<string>>? listWorktrees = null)
+    {
+        ArgumentNullException.ThrowIfNull(hookRoot);
+        listWorktrees ??= root => git.ListWorktrees(root);
+        text ??= string.Empty;
+
         if (planFile is not null && Holds(hookRoot, planFile))
         {
             return hookRoot;
         }
 
-        // Without a plan the only signal is a worktree path in the text; skip the git call when none can be there.
-        if (planFile is null && !prompt.Contains("worktree", StringComparison.OrdinalIgnoreCase))
+        // Without a plan the only signal is a path in the text; skip the git call when the text holds neither a path
+        // nor the word, because a worktree need not live in a directory named after it.
+        if (planFile is null && !text.Contains("worktree", StringComparison.OrdinalIgnoreCase) && !HoldsAPath(text))
         {
             return hookRoot;
         }
@@ -73,7 +93,7 @@ public sealed class PlanRootResolver(
         if (planFile is null)
         {
             // A return whose headers were stripped: the worktree its body names, when exactly one is named.
-            List<string> named = [.. others.Where(worktree => Names(prompt, worktree))];
+            List<string> named = [.. others.Where(worktree => Names(text, worktree))];
             return named.Count == 1 ? named[0] : hookRoot;
         }
 
@@ -88,7 +108,7 @@ public sealed class PlanRootResolver(
             return holding[0];
         }
 
-        List<string> namedHolding = [.. holding.Where(worktree => Names(prompt, worktree))];
+        List<string> namedHolding = [.. holding.Where(worktree => Names(text, worktree))];
         if (namedHolding.Count == 1)
         {
             return namedHolding[0];
@@ -146,12 +166,22 @@ public sealed class PlanRootResolver(
         }
 
         string? identity = GitFileOf(worktree);
-        return identity is not null && text
-            .Split([' ', '\t', '\n', '\r', '`', '"', '\'', '(', ')'], StringSplitOptions.RemoveEmptyEntries)
-            .Select(token => token.TrimEnd('.', ',', ';', ':'))
-            .Where(token => Path.IsPathRooted(token))
-            .Any(token => string.Equals(GitFileOf(token), identity, StringComparison.Ordinal));
+        return identity is not null
+            && Tokens(text).Any(token => Path.IsPathRooted(token)
+                && string.Equals(GitFileOf(token), identity, StringComparison.Ordinal));
     }
+
+    /// <summary>
+    /// Whether the text carries a token that could name a worktree: a rooted path. The word "worktree" alone is not
+    /// the signal — a checkout beside the repository, or one in a temporary directory, is named by its path only —
+    /// so this is what decides whether the worktree list is worth the git call.
+    /// </summary>
+    private static bool HoldsAPath(string text) => Tokens(text).Any(Path.IsPathRooted);
+
+    /// <summary>The words of a return's body, trimmed of the punctuation a sentence leaves on a path.</summary>
+    private static IEnumerable<string> Tokens(string text) =>
+        text.Split([' ', '\t', '\n', '\r', '`', '"', '\'', '(', ')'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(token => token.TrimEnd('.', ',', ';', ':'));
 
     /// <summary>A linked worktree's <c>.git</c> file names its private git directory, which identifies it.</summary>
     private string? GitFileOf(string directory)

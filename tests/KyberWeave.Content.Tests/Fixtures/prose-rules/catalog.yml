@@ -1725,7 +1725,7 @@ rules:
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
   - id: docs-dev-shell-commands
-    statement: docs-dev runs only a closed list of commands, the plan closeout command, a specification's archival git mv and git rm of its task file, docs validate, docs drift, a task-file rewrite after it made the task file stale, targeted documentation tests and a commit of its own documentation edits, and nothing else.
+    statement: docs-dev runs only a closed list of commands, the plan closeout command, a specification's archival git mv and git rm of its task file, docs validate, docs drift, the standards migration that clears the standards warning period, a task-file rewrite after it made the task file stale, targeted documentation tests and a commit of its own documentation edits, and nothing else.
     stated-in:
       - path: products/kyber-squad/agents/docs-dev.md
         section: Commands you run
@@ -2235,4 +2235,38 @@ rules:
       - products/kyber-squad/agents/code-reviewer.md
     controls:
       - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: dispatch-forwards-the-request-verbatim
+    statement: A dispatch that carries a user request forwards the request verbatim with only the routing facts the specialist cannot know, never a summary or paraphrase of it.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor.md
+        section: What a dispatch carries
+      - path: products/kyber-squad/agents/conductor/references/intake-path.md
+        section: Assessment
+      - path: products/kyber-squad/agents/conductor/references/spec-path.md
+        section: Route by persisted state
+      - path: docs/kyber-squad/architecture.md
+        section: The request, the trace, and the check
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: plan-traces-every-request-instruction
+    statement: Before PLAN_READY the plan carries a request trace row for every explicit instruction, and an instruction that conflicts with a repository rule is a decisions row with a recommended resolution rather than a silent reconciliation.
+    stated-in:
+      - path: products/kyber-squad/agents/architect/references/plan-authoring.md
+        section: The request's explicit instructions
+      - path: docs/kyber-squad/architecture.md
+        section: The request, the trace, and the check
+    controls:
+      - products/kyber-squad/skills/product-owner/references/spec-authoring.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: a-check-finding-is-fixed-not-blocked
+    statement: An agent that runs a check fixes every finding it can, including a warning or a pre-existing one, and re-runs the check until it is clean; BLOCKED is reserved for a finding outside its authority and names the finding, why it cannot be fixed and who can fix it.
+    stated-in:
+      - path: products/kyber-squad/agents/docs-dev.md
+        section: Plan closeout
+      - path: docs/kyber-squad/architecture.md
+        section: The request, the trace, and the check
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
       - products/kyber-squad/agents/conductor/references/autonomy.md

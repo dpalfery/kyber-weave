@@ -309,6 +309,38 @@ public static class ArbiterLedgerQueries
         return returns;
     }
 
+    /// <summary>
+    /// The plan an escalation envelope names, or null for a prompt that is not one. An escalation dispatch answers a
+    /// ledger event, so its prompt opens with <c>STATUS: ARBITER_ESCALATION</c> rather than a routing header block and
+    /// carries its plan on a <c>PLAN_FILE:</c> body line. The plan it names is what the planner's attestation answers.
+    /// </summary>
+    /// <param name="prompt">The dispatch prompt, as the caller wrote it.</param>
+    public static string? EnvelopePlan(string? prompt)
+    {
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            return null;
+        }
+
+        string[] lines = prompt.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        if (!string.Equals(lines[0].Trim(), "STATUS: ARBITER_ESCALATION", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        foreach (string line in lines)
+        {
+            const string prefix = "PLAN_FILE:";
+            if (line.TrimStart().StartsWith(prefix, StringComparison.Ordinal))
+            {
+                string plan = line.Trim()[prefix.Length..].Trim();
+                return plan.Length > 0 ? plan : null;
+            }
+        }
+
+        return null;
+    }
+
     private static bool SamePlan(string left, string right) =>
         string.Equals(NormalizePlan(left), NormalizePlan(right), StringComparison.Ordinal);
 

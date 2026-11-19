@@ -1425,8 +1425,8 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             Target = first.Target,
             Caller = first.Caller,
             CallerSource = first.CallerSource,
-            Headers = BuildHeaders(first),
-            PairDigest = ArbiterLedgerQueries.PairDigest(ev.Target, ev.Prompt),
+            Headers = BuildHeaders(first, ev.Prompt),
+            PairDigest = ArbiterLedgerQueries.PairDigest(ev.Target, ev.DeliveredPrompt ?? ev.Prompt),
             PreId = phase == ArbiterLedgerPhases.Post ? ev.PreId : null,
             TaskFiles = taskFiles,
             ModelProfile = modelProfile,
@@ -1435,7 +1435,8 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             Returns = phase == ArbiterLedgerPhases.Post
                 ? ReturnMarkerParser.Parse(
                     ev.ToolOutput,
-                    readAttestations: string.Equals(first.Trigger, "delegate.planner.returned", StringComparison.Ordinal))
+                    readAttestations: string.Equals(first.Trigger, "delegate.planner.returned", StringComparison.Ordinal)
+                        || string.Equals(first.TargetClass, "planner", StringComparison.Ordinal))
                 : null,
         };
         return ledgerEvent;
@@ -1528,13 +1529,17 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         return (agent?.Profile, agent?.Token, source);
     }
 
-    private static ArbiterLedgerHeaders? BuildHeaders(TriggerClassification classification)
+    private static ArbiterLedgerHeaders? BuildHeaders(TriggerClassification classification, string prompt)
     {
         classification.Headers.TryGetValue("PLAN_FILE", out string? planFile);
         classification.Headers.TryGetValue("TASK", out string? task);
         classification.Headers.TryGetValue("LENS", out string? lens);
         classification.Headers.TryGetValue("REFUTE", out string? refute);
         classification.Headers.TryGetValue("TECHNOLOGY", out string? technology);
+        // An escalation dispatch answers a ledger event and opens with STATUS: ARBITER_ESCALATION, so it has no
+        // routing header block; the plan it serves is the PLAN_FILE line inside the envelope. Without it the
+        // planner's attestation of that plan's tasks could not be scoped to it (see the architecture's return pairing).
+        planFile ??= ArbiterLedgerQueries.EnvelopePlan(prompt);
         if (planFile is null && task is null && lens is null && refute is null && technology is null)
         {
             return null;

@@ -35,6 +35,7 @@ public sealed class HookCommand : IArbiterHookHost
     private readonly IProcessEnvironment _environment;
     private readonly Func<string> _newDecisionId;
     private readonly ITaskPromptServiceFactory? _promptFactory;
+    private readonly IHookRunContextResolver? _runContexts;
 
     /// <summary>
     /// Creates a host over an adapter registry and the ports it decides through. The configuration loader is a port so
@@ -49,6 +50,8 @@ public sealed class HookCommand : IArbiterHookHost
     /// <param name="newDecisionId">Builds a decision id; null uses <paramref name="ids"/>.</param>
     /// <param name="prompts">Builds the task prompt a dispatch's identity line is replaced with; null installs no
     /// prompt service, so no dispatch is expanded.</param>
+    /// <param name="runContexts">Resolves the repository, the active run and the worktree holding the dispatch's plan,
+    /// once per invocation; null reads every dispatch from the payload's own directory.</param>
     public HookCommand(
         HarnessAdapterRegistry registry,
         IArbiterHostConfig hostConfig,
@@ -57,7 +60,8 @@ public sealed class HookCommand : IArbiterHookHost
         IProcessEnvironment environment,
         IIdGenerator ids,
         Func<string>? newDecisionId = null,
-        ITaskPromptServiceFactory? prompts = null)
+        ITaskPromptServiceFactory? prompts = null,
+        IHookRunContextResolver? runContexts = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(hostConfig);
@@ -72,6 +76,7 @@ public sealed class HookCommand : IArbiterHookHost
         _environment = environment;
         _newDecisionId = newDecisionId ?? (() => ids.NewGuid().ToString("N"));
         _promptFactory = prompts;
+        _runContexts = runContexts;
     }
 
     /// <summary>
@@ -108,12 +113,13 @@ public sealed class HookCommand : IArbiterHookHost
             return 1;
         }
 
+        JsonElement payload = default;
         try
         {
-            JsonElement payload = ParsePayload(stdin);
+            payload = ParsePayload(stdin);
             if (adapter.IsPassThrough(payload, caller))
             {
-                return 0;
+                return WriteDisabledAllow(adapter, payload, stdout);
             }
 
             string? unconfigured = adapter.AnswerWithoutConfig(payload, caller);
@@ -123,8 +129,10 @@ public sealed class HookCommand : IArbiterHookHost
                 return 0;
             }
 
-            string repoRoot = RepoRootOf(adapter, payload);
             string home = _hostConfig.ResolveHomeDirectory(homeDirectory);
+            HookEvent hookEvent = HarnessHookEventReader.Read(adapter.HarnessToken, payload, caller);
+            HookRunContext? runContext = ResolveRunContext(hookEvent, home, log);
+            string repoRoot = runContext?.RepositoryRoot ?? FallbackRoot(hookEvent);
             KyberWeaveConfig config;
             HookScope evaluationScope = scope;
             if (scope == HookScope.Global)
@@ -139,7 +147,7 @@ public sealed class HookCommand : IArbiterHookHost
                         adapter,
                         payload,
                         caller,
-                        NewContext(adapter, repoRoot, home, HookScope.Project, projectConfig!, log),
+                        NewContext(adapter, repoRoot, runContext, home, HookScope.Project, projectConfig!, log),
                         stdout);
                 }
 
@@ -150,12 +158,12 @@ public sealed class HookCommand : IArbiterHookHost
                         log.WriteLine(
                             $"Arbiter global scope: deferred-to-project ({adapter.HarnessToken}: no per-dispatch probe; " +
                             $"the project's own {adapter.HarnessToken} hooks decide).");
-                        return WriteDisabledAllow(adapter, stdout);
+                        return WriteDisabledAllow(adapter, payload, stdout);
                     }
 
                     if (!TakeUserLevelDispatch(adapter, payload, repoRoot, home, log))
                     {
-                        return WriteDisabledAllow(adapter, stdout);
+                        return WriteDisabledAllow(adapter, payload, stdout);
                     }
 
                     log.WriteLine(EvaluatingUnderProjectLine);
@@ -183,13 +191,13 @@ public sealed class HookCommand : IArbiterHookHost
                     adapter,
                     payload,
                     caller,
-                    NewContext(adapter, repoRoot, home, evaluationScope, config, log),
+                    NewContext(adapter, repoRoot, runContext, home, evaluationScope, config, log),
                     stdout);
             }
 
             if (scope == HookScope.Project && TryYieldToGlobalClaim(adapter, payload, repoRoot, log))
             {
-                return WriteDisabledAllow(adapter, stdout);
+                return WriteDisabledAllow(adapter, payload, stdout);
             }
 
             HookContext context = new(
@@ -200,7 +208,8 @@ public sealed class HookCommand : IArbiterHookHost
                 home,
                 evaluationScope,
                 adapter.ModelOverride,
-                BuildDispatchPrompt: PromptExpander(repoRoot, config));
+                BuildDispatchPrompt: PromptExpander(runContext, repoRoot, config, log),
+                RunContext: runContext);
             string output = adapter.Handle(payload, stdin, caller, config, context);
             if (output.Length > 0)
             {
@@ -216,7 +225,7 @@ public sealed class HookCommand : IArbiterHookHost
             log.WriteLine(
                 $"{FailClosedCode}: hook host failed ({_newDecisionId()}) on '{harness}': {OneLine(ex.Message)}. " +
                 "The dispatch continues without an Arbiter decision.");
-            return WriteDisabledAllow(adapter, stdout);
+            return WriteDisabledAllow(adapter, payload, stdout);
         }
     }
 
@@ -245,17 +254,42 @@ public sealed class HookCommand : IArbiterHookHost
         return payload;
     }
 
-    // The adapter's own payload root wins: Antigravity carries the workspace in
-    // workspacePaths[0] ([F10]) and has no cwd, so without this the configuration
-    // loads from the process directory. The payload's cwd is the Claude-family
-    // fallback, and the process directory is the last resort.
-    private string RepoRootOf(IHarnessHookAdapter adapter, JsonElement payload) =>
-        adapter.RepoRootOf(payload)
-        ?? (payload.TryGetProperty("cwd", out JsonElement cwd)
-            && cwd.ValueKind == JsonValueKind.String
-            && !string.IsNullOrWhiteSpace(cwd.GetString())
-                ? cwd.GetString()!
-                : _environment.CurrentDirectory);
+    /// <summary>The typed event's own directory wins: the adapter's workspace root, else its cwd, else the process directory.</summary>
+    private string FallbackRoot(HookEvent hookEvent) =>
+        hookEvent.WorkspaceRoot
+        ?? hookEvent.Cwd
+        ?? _environment.CurrentDirectory;
+
+    /// <summary>
+    /// Resolves the invocation's run context once. A resolver that cannot answer, or one that is not installed, leaves
+    /// the host reading the payload's own directory, which is the behaviour of a harness with no run record.
+    /// </summary>
+    private HookRunContext? ResolveRunContext(HookEvent hookEvent, string home, TextWriter log)
+    {
+        if (_runContexts is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return _runContexts.Resolve(new HookRunContextRequest(
+                hookEvent.Harness,
+                hookEvent.WorkspaceRoot,
+                hookEvent.Cwd,
+                _environment.CurrentDirectory,
+                AgentWorktree: null,
+                hookEvent.Prompt,
+                home));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
+        {
+            log.WriteLine(
+                $"{FailClosedCode}: the run context could not be resolved ({OneLine(ex.Message)}); " +
+                $"reading paths from '{FallbackRoot(hookEvent)}'.");
+            return null;
+        }
+    }
 
     /// <summary>
     /// Decides whether the user-level hook evaluates a Claude dispatch for a project that enables the
@@ -385,9 +419,9 @@ public sealed class HookCommand : IArbiterHookHost
         Unavailable,
     }
 
-    private static int WriteDisabledAllow(IHarnessHookAdapter adapter, TextWriter stdout)
+    private static int WriteDisabledAllow(IHarnessHookAdapter adapter, JsonElement payload, TextWriter stdout)
     {
-        string? disabledAllow = adapter.DisabledAllowDocument;
+        string? disabledAllow = adapter.AllowDocument(payload);
         if (disabledAllow is not null)
         {
             stdout.Write(disabledAllow);
@@ -400,6 +434,7 @@ public sealed class HookCommand : IArbiterHookHost
     private HookContext NewContext(
         IHarnessHookAdapter adapter,
         string repoRoot,
+        HookRunContext? runContext,
         string home,
         HookScope scope,
         KyberWeaveConfig config,
@@ -412,27 +447,42 @@ public sealed class HookCommand : IArbiterHookHost
             home,
             scope,
             adapter.ModelOverride,
-            BuildDispatchPrompt: PromptExpander(repoRoot, config));
+            BuildDispatchPrompt: PromptExpander(runContext, repoRoot, config, log),
+            RunContext: runContext);
 
     /// <summary>The prompt builder this host passes to the adapters, or null when no prompt service was installed.</summary>
     /// <remarks>
-    /// The service is built once per hook process and reads the checkout's documentation, so it is created on the
-    /// first dispatch that needs it rather than for every event.
+    /// The service is built once per root and reads that checkout's documentation, so it is created on the first
+    /// dispatch that needs it rather than for every event. The root is the worktree the invocation's run context
+    /// chose — the one that holds the dispatch's plan — so a conductor run whose plan lives in its run worktree builds
+    /// the prompt from that worktree rather than from the checkout the harness session started in. A refusal caused by
+    /// an absent or unreadable input warns and the dispatch continues; only a positive finding stops it.
     /// </remarks>
-    private Func<DispatchPromptQuery, DispatchPromptExpansion>? PromptExpander(string repoRoot, KyberWeaveConfig config)
+    private Func<DispatchPromptQuery, DispatchPromptExpansion>? PromptExpander(
+        HookRunContext? runContext,
+        string repoRoot,
+        KyberWeaveConfig config,
+        TextWriter log)
     {
         if (_promptFactory is null)
         {
             return null;
         }
 
-        ITaskPromptService? service = null;
+        Dictionary<string, ITaskPromptService> services = new(StringComparer.Ordinal);
         return query =>
         {
-            service ??= _promptFactory.ForRepository(repoRoot, config);
+            string root = runContext is null || _runContexts is null
+                ? repoRoot
+                : _runContexts.SelectPlan(runContext, query.PlanFile, query.RetryText).Worktree;
+            if (!services.TryGetValue(root, out ITaskPromptService? service))
+            {
+                services[root] = service = _promptFactory.ForRepository(root, config);
+            }
+
             TaskPromptResult result = service.Build(
                 new TaskPromptRequest(
-                    repoRoot,
+                    root,
                     query.TaskId,
                     query.PlanFile,
                     Agent: null,
@@ -441,7 +491,16 @@ public sealed class HookCommand : IArbiterHookHost
                     query.FailedAttempts,
                     RetryText: query.RetryText),
                 config);
-            return new DispatchPromptExpansion(result.Built, result.Prompt, result.Refusal);
+
+            bool missingInput = result.RefusalKind == TaskPromptRefusalKind.MissingInput;
+            if (missingInput)
+            {
+                // An input the hook could not read is not a finding against the work: the dispatch continues
+                // unexpanded, and the log names the reason and the path that was tried.
+                log.WriteLine($"Arbiter: {OneLine(result.Refusal ?? "no task prompt could be built")} The dispatch continues unexpanded.");
+            }
+
+            return new DispatchPromptExpansion(result.Built, result.Prompt, result.Refusal, missingInput);
         };
     }
 
@@ -463,7 +522,7 @@ public sealed class HookCommand : IArbiterHookHost
             return 0;
         }
 
-        return WriteDisabledAllow(adapter, stdout);
+        return WriteDisabledAllow(adapter, payload, stdout);
     }
 
     private static string OneLine(string message) =>

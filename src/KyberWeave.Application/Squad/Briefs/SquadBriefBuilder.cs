@@ -30,6 +30,18 @@ public sealed class SquadBriefBuilder(
     private const string AmbiguousPlan = "KW-DOC-PLANREF-001";
 
     /// <inheritdoc />
+    public string? ResolveAutonomy(string repositoryRoot, string? given, KyberWeaveConfig config)
+    {
+        if (!Accepts("autonomy", given, out string refusal))
+        {
+            throw new ArgumentException(refusal, nameof(given));
+        }
+
+        (string value, string source) = BriefAutonomy.Resolve(given, ReadRootAgents(repositoryRoot), config?.ConfigReg.Autonomy);
+        return string.Equals(source, "default", StringComparison.Ordinal) ? null : value;
+    }
+
+    /// <inheritdoc />
     public bool TryBuild(SquadBriefRequest request, out BriefResult? result, out string refusal)
     {
         result = null;
@@ -122,7 +134,16 @@ public sealed class SquadBriefBuilder(
     private static bool Accepts(string fact, string? value, out string error)
     {
         error = string.Empty;
-        if (value is null || BriefFacts.Vocabulary[fact].Contains(value, StringComparer.Ordinal))
+        if (value is null)
+        {
+            return true;
+        }
+
+        // Autonomy is read the way every other path reads it: trimmed and case-insensitive.
+        // Comparing the raw text here refused a value the resolver accepts.
+        if (string.Equals(fact, "autonomy", StringComparison.Ordinal)
+            ? BriefAutonomy.Normalize(value) is not null
+            : BriefFacts.Vocabulary[fact].Contains(value, StringComparer.Ordinal))
         {
             return true;
         }

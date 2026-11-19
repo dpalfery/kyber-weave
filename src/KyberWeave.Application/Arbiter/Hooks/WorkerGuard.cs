@@ -81,13 +81,13 @@ public sealed class WorkerGuard(
         try
         {
             string home = homeDirectory ?? process.HomeDirectory;
-            if (WorkerGuardRules.TurnEndOf(harness, stdin) is { } ended)
+            if (WorkerGuardEventReader.TurnEndOf(harness, stdin) is { } ended)
             {
                 EndTurn(harness, ended, home);
                 return 0;
             }
 
-            WorkerGuardRules.ToolCall? call = WorkerGuardRules.Read(harness, stdin);
+            WorkerGuardRules.ToolCall? call = WorkerGuardEventReader.Read(harness, stdin);
             if (call is null)
             {
                 return 0;

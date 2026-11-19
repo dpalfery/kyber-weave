@@ -54,6 +54,14 @@ public interface IHarnessHookAdapter
     string? DisabledAllowDocument => null;
 
     /// <summary>
+    /// The document that allows this particular event, for a harness whose allow differs by event (Antigravity
+    /// answers a pre-tool event with a decision and a post-tool event with <c>{}</c>). Defaults to
+    /// <see cref="DisabledAllowDocument"/>. Must not touch configuration.
+    /// </summary>
+    /// <param name="payload">The harness event, or the default element when it could not be parsed.</param>
+    string? AllowDocument(JsonElement payload) => DisabledAllowDocument;
+
+    /// <summary>
     /// The question that finds the hook sources which would also fire for this payload, or null when the payload is
     /// not a sub-agent dispatch or the harness has no per-dispatch probe. The user-level hook asks the coverage reader
     /// with it to decide whether a project hook already covers the dispatch. Must not touch configuration.

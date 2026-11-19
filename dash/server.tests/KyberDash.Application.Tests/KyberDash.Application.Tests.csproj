@@ -26,6 +26,7 @@
     <ProjectReference Include="..\..\server\KyberDash.Contracts\KyberDash.Contracts.csproj" />
     <ProjectReference Include="..\..\server\KyberDash.Core\KyberDash.Core.csproj" />
     <ProjectReference Include="..\..\server\KyberDash.Domain\KyberDash.Domain.csproj" />
+    <ProjectReference Include="..\..\server\KyberDash.Mcp\KyberDash.Mcp.csproj" />
   </ItemGroup>
 
 </Project>

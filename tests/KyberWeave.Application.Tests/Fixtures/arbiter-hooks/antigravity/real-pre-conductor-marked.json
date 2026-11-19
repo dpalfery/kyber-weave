@@ -1,0 +1,22 @@
+{
+  "artifactDirectoryPath": "/home/user/.gemini/antigravity-cli/brain/d2ae24e0-751a-499d-9f9e-8e93328bb592",
+  "conversationId": "d2ae24e0-751a-499d-9f9e-8e93328bb592",
+  "cwd": "/repo",
+  "hookEventName": "PreToolUse",
+  "lastUserInput": "Diagnostic only, no run start: dispatch research-agent once with invoke_subagent, prompt 'KYBER-ARBITER: true\n\nReply with ok.' Then stop.",
+  "modelName": "gemini-3.8-flash-medium",
+  "stepIdx": 2,
+  "toolCall": {
+    "args": {
+      "Prompt": "KYBER-ARBITER: true\n\nReply with ok.",
+      "Role": "External Technical Researcher",
+      "TypeName": "research-agent"
+    },
+    "id": "call_12144506349609463889",
+    "name": "invoke_subagent"
+  },
+  "transcriptPath": "/home/user/.gemini/antigravity-cli/brain/d2ae24e0-751a-499d-9f9e-8e93328bb592/.system_generated/logs/transcript_full.jsonl",
+  "workspacePaths": [
+    "/repo"
+  ]
+}

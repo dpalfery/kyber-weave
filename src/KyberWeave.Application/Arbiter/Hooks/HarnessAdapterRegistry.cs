@@ -1,3 +1,4 @@
+using System.Text.Json;
 using KyberWeave.Arbiter.Hooks.Adapters;
 
 namespace KyberWeave.Arbiter.Hooks;
@@ -50,6 +51,22 @@ public sealed class HarnessAdapterRegistry
         HarnessAdapterRegistry registry = CreateDefault(UnavailableDecisionEngine.Instance, UnavailableDecisionEngine.Instance);
         return registry.TryGet(token, out IHarnessHookAdapter? adapter) && adapter is not null
             ? adapter.DisabledAllowDocument
+            : null;
+    }
+
+    /// <summary>
+    /// The document that allows one particular event, found without a decision engine: the fail-open path asks it
+    /// when the payload is readable, so a harness whose allow differs by event answers with the right shape.
+    /// </summary>
+    /// <param name="token">The harness token.</param>
+    /// <param name="payload">The parsed hook event.</param>
+    /// <returns>The document, or null when the harness has none or is not served.</returns>
+    public static string? AllowDocumentOf(string token, JsonElement payload)
+    {
+        ArgumentNullException.ThrowIfNull(token);
+        HarnessAdapterRegistry registry = CreateDefault(UnavailableDecisionEngine.Instance, UnavailableDecisionEngine.Instance);
+        return registry.TryGet(token, out IHarnessHookAdapter? adapter) && adapter is not null
+            ? adapter.AllowDocument(payload)
             : null;
     }
 

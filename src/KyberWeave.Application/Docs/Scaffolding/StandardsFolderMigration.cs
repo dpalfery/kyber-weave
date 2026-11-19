@@ -36,10 +36,15 @@ public sealed record StandardSectionMove(string Standard, string Heading, string
 /// <param name="Changes">Repository-relative paths, in the order they are applied.</param>
 /// <param name="DryRun">True when the caller asked for the plan only.</param>
 /// <param name="Moves">The authored sections a reshape placed under a required heading.</param>
+/// <param name="ConfigRegRefreshed">
+/// True when the root <c>AGENTS.md</c> registry block was re-rendered because the migration
+/// made it stale; in a dry run, true when it would have been.
+/// </param>
 public sealed record StandardsFolderMigrationResult(
     IReadOnlyList<StandardsFolderChange> Changes,
     bool DryRun,
-    IReadOnlyList<StandardSectionMove> Moves);
+    IReadOnlyList<StandardSectionMove> Moves,
+    bool ConfigRegRefreshed = false);
 
 /// <summary>
 /// Renames a host's standards files to their prefixed names and writes the four files a
@@ -53,24 +58,42 @@ public sealed record StandardsFolderMigrationResult(
 /// A missing file is written as a stub whose frontmatter states which scope it belongs to and
 /// whose frontmatter's owner is copied from the folder's standard, so the corpus stays within
 /// its catalog vocabulary. Running it twice changes nothing.
+///
+/// The rename also moves what each <c>&lt;technology&gt;-coding-standard</c> registry property
+/// names, so the same run re-renders the generated block in the root <c>AGENTS.md</c>. Without
+/// that, one command would leave the repository invalid: the block would publish paths the
+/// rename removed, and only <c>docs init</c> would clear the finding.
 /// </remarks>
 public sealed partial class StandardsFolderMigration
 {
     /// <summary>The command a caller runs to reach this migration.</summary>
     public const string Command = DocsLayout.MigrateStandardsCommand;
 
+    /// <summary>
+    /// The key under which an exception thrown by <see cref="Run"/> carries, in its <c>Data</c>, the undo steps that
+    /// themselves failed while the run was rolled back. Absent when the rollback was complete.
+    /// </summary>
+    public const string RollbackFailuresKey = "kyber-weave.standards-migration.rollback-failures";
+
+    /// <summary>The one file the configuration registry is rendered into.</summary>
+    private const string AgentsFilePath = "AGENTS.md";
+
     private readonly IWritableFileSystem _files;
     private readonly IPathResolver _paths;
     private readonly IProcessEnvironment _environment;
     private readonly IIdGenerator _ids;
-    private readonly OntologyConfig _config;
+    private readonly KyberWeaveConfig _config;
+    private readonly OntologyConfig _ontology;
     private readonly string _repoRoot;
     private readonly TimeProvider _time;
 
     /// <summary>Creates the migration over the seams it reads and writes through.</summary>
     /// <param name="files">Reads and writes the repository's files.</param>
     /// <param name="repoRoot">The repository whose standards folders are migrated.</param>
-    /// <param name="config">The ontology that declares the technologies and roles.</param>
+    /// <param name="config">
+    /// The host configuration: its ontology declares the technologies and roles, and its
+    /// registry settings render the block this type refreshes.
+    /// </param>
     /// <param name="paths">Turns the repository root into a full path and checks a write's containment.</param>
     /// <param name="environment">Supplies the base directory a relative root is resolved against.</param>
     /// <param name="ids">Names the temporary file a stub is written through.</param>
@@ -78,7 +101,7 @@ public sealed partial class StandardsFolderMigration
     public StandardsFolderMigration(
         IWritableFileSystem files,
         string repoRoot,
-        OntologyConfig config,
+        KyberWeaveConfig config,
         IPathResolver paths,
         IProcessEnvironment environment,
         IIdGenerator ids,
@@ -93,6 +116,7 @@ public sealed partial class StandardsFolderMigration
         _files = files;
         _repoRoot = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
         _config = config;
+        _ontology = config.Ontology;
         _paths = paths;
         _environment = environment;
         _ids = ids;
@@ -103,14 +127,27 @@ public sealed partial class StandardsFolderMigration
     public IReadOnlyList<StandardsFolderChange> Plan() => Run(dryRun: true).Changes;
 
     /// <summary>Plans and, unless <paramref name="dryRun"/>, writes the migration.</summary>
+    /// <remarks>
+    /// The registry block is rendered, and its write refused, before the first standards write.
+    /// An unreadable, unclosed or linked <c>AGENTS.md</c> is then a refusal that leaves the
+    /// repository as it was, rather than a failure reported after the standards moved.
+    /// </remarks>
     public StandardsFolderMigrationResult Run(bool dryRun = false)
     {
         List<StandardsFolderChange> changes = [];
         List<StandardSectionMove> moves = [];
+        string? refreshedAgents = PlanConfigRegRefresh();
 
+        // A dry run reaches the same refusal a real run does: the registry block's target is
+        // checked in both modes, and only the write is skipped when previewing.
+        string? agentsTarget = refreshedAgents is not null
+            ? RequireWritable(AgentsFilePath)
+            : null;
+
+        List<FolderWork> work = [];
         foreach (string scope in Scopes())
         {
-            foreach (string docsRoot in _config.DocsRoots)
+            foreach (string docsRoot in _ontology.DocsRoots)
             {
                 string folder = $"{docsRoot}/{DocsLayout.Standards}/{scope}";
                 if (!_files.DirectoryExists(Absolute(folder))) continue;
@@ -172,34 +209,143 @@ public sealed partial class StandardsFolderMigration
                         new StandardSectionMove(standard, move.Heading, move.Under)));
                 }
 
+                work.Add(new FolderWork(scope, owner, reshapedText, planned, plannedMoves));
+            }
+        }
+
+        // Every target the run would write is checked before the first write, so a refusal — a
+        // link, a path outside the repository — leaves no standards moved and no stale registry
+        // block behind. A dry run checks the same targets: it writes nothing, and previewing a
+        // plan the real run would refuse is a false answer.
+        foreach (FolderWork item in work)
+        {
+            RequireWritableTargets(item.Planned, item.ReshapedText);
+        }
+
+        List<Action> undo = [];
+        try
+        {
+            foreach (FolderWork item in work)
+            {
                 // Only what the migration actually did is reported: a change whose target another
                 // actor created between planning and applying is skipped, and claiming it would
                 // tell the operator about a write that never happened.
                 List<StandardsFolderChange> applied = dryRun
-                    ? planned
-                    : Apply(planned, scope, owner, reshapedText);
+                    ? [.. item.Planned]
+                    : Apply(item.Planned, item.Scope, item.Owner, item.ReshapedText, undo);
 
                 changes.AddRange(applied);
                 if (applied.Any(change => change.Kind == StandardsFolderChangeKind.Reshape))
                 {
-                    moves.AddRange(plannedMoves);
+                    moves.AddRange(item.Moves);
                 }
             }
+
+            if (!dryRun && agentsTarget is not null && refreshedAgents is not null)
+            {
+                string? agentsBefore = ReadOrNull(AgentsFilePath);
+                _files.WriteAllTextAtomic(agentsTarget, refreshedAgents);
+                undo.Add(() => RestoreAgents(agentsTarget, agentsBefore));
+                VerifyStillWritable(agentsTarget);
+            }
+        }
+        catch (Exception original)
+        {
+            // A failure part way through — a write that fails, not a target refused at planning —
+            // would otherwise leave some standards moved and the registry block stale. Undo the
+            // writes in reverse so the repository is exactly as it was.
+            List<string> failed = RollBack(undo);
+            if (failed.Count > 0)
+            {
+                // The original keeps its type, so a caller that handles it still does and a cancellation
+                // stays a cancellation. Undo failures ride along on it, for the caller to report beside it.
+                original.Data[RollbackFailuresKey] = string.Join("; ", failed);
+            }
+
+            throw;
         }
 
-        return new StandardsFolderMigrationResult(changes, dryRun, moves);
+        return new StandardsFolderMigrationResult(
+            changes, dryRun, moves, ConfigRegRefreshed: refreshedAgents is not null);
+    }
+
+    /// <summary>
+    /// The root <c>AGENTS.md</c> with its generated registry block re-rendered, or null when
+    /// the file has no block to refresh or the block already matches configuration.
+    /// </summary>
+    /// <remarks>
+    /// Only the region between the markers is rewritten, and only where the repository already
+    /// has one: a standards migration does not hand a registry to a repository that never
+    /// adopted one, which is the same line <c>docs validate</c> draws. Everything outside the
+    /// markers, and <c>.kyber-weave/kyber-weave.yml</c> itself, is left alone.
+    /// </remarks>
+    private string? PlanConfigRegRefresh()
+    {
+        string existing = ReadOrNull(AgentsFilePath) ?? string.Empty;
+        if (!ConfigRegMarkdown.ContainsBlock(existing)) return null;
+
+        string block = ConfigRegMarkdown.Render(
+            _config.ConfigReg.Resolve(_ontology), _config.ConfigReg.Autonomy);
+        string updated = ConfigRegMarkdown.Splice(existing, block);
+
+        return string.Equals(existing, updated, StringComparison.Ordinal) ? null : updated;
+    }
+
+    /// <summary>One standards folder's plan, held until every folder's targets are checked.</summary>
+    /// <param name="Scope">The technology or role scope.</param>
+    /// <param name="Owner">The owner the stubs copy, or null.</param>
+    /// <param name="ReshapedText">The reshaped standard, or null when it needs no reshape.</param>
+    /// <param name="Planned">The changes the folder needs.</param>
+    /// <param name="Moves">The sections a reshape places under required headings.</param>
+    private sealed record FolderWork(
+        string Scope,
+        string? Owner,
+        string? ReshapedText,
+        List<StandardsFolderChange> Planned,
+        List<StandardSectionMove> Moves);
+
+    /// <summary>Checks every target a folder's plan would write, without writing anything.</summary>
+    /// <param name="planned">The folder's planned changes.</param>
+    /// <param name="reshapedText">The reshaped standard, or null when the plan has no reshape.</param>
+    private void RequireWritableTargets(
+        IReadOnlyList<StandardsFolderChange> planned,
+        string? reshapedText)
+    {
+        foreach (StandardsFolderChange change in planned)
+        {
+            switch (change.Kind)
+            {
+                case StandardsFolderChangeKind.Rename:
+                    RequireWritable(change.From);
+                    RequireWritable(change.To);
+                    break;
+                case StandardsFolderChangeKind.Add:
+                    RequireWritable(change.To);
+                    break;
+                case StandardsFolderChangeKind.Reshape when reshapedText is not null:
+                    RequireWritable(change.To);
+                    break;
+            }
+        }
     }
 
     /// <summary>
     /// Applies the planned changes for one folder, answering the changes it actually made.
-    /// Called per folder so a failure leaves the nodes before it complete and rerunnable: every
-    /// write is a create, and a rename whose target already exists is skipped rather than reported.
+    /// Called per folder so a failure can be undone newest-first by the caller: every write is a
+    /// create, and a rename whose target already exists is skipped rather than reported.
     /// </summary>
+    /// <param name="planned">The folder's planned changes.</param>
+    /// <param name="scope">The technology or role scope.</param>
+    /// <param name="owner">The owner the stubs copy, or null.</param>
+    /// <param name="reshapedText">The reshaped standard, or null when the plan has no reshape.</param>
+    /// <param name="undo">Receives each write's inverse, for the caller to run if a later folder fails.</param>
+    /// <returns>The changes actually made.</returns>
     internal List<StandardsFolderChange> Apply(
         IReadOnlyList<StandardsFolderChange> planned,
         string scope,
         string? owner,
-        string? reshapedText)
+        string? reshapedText,
+        List<Action>? undo = null)
     {
         List<StandardsFolderChange> applied = [];
         HashSet<string> skippedRenames = new(StringComparer.Ordinal);
@@ -216,6 +362,7 @@ public sealed partial class StandardsFolderMigration
                     }
 
                     applied.Add(change);
+                    undo?.Add(() => MoveBack(change.To, change.From));
                     break;
 
                 case StandardsFolderChangeKind.Add:
@@ -232,7 +379,12 @@ public sealed partial class StandardsFolderMigration
                     string content = kind == "arbiter"
                         ? ArbiterRulesStub(scope)
                         : Stub(scope, kind, owner);
-                    if (TryCreateNew(target, new UTF8Encoding(false).GetBytes(content))) applied.Add(change);
+                    if (TryCreateNew(target, new UTF8Encoding(false).GetBytes(content)))
+                    {
+                        applied.Add(change);
+                        undo?.Add(() => DeleteIfPresent(change.To));
+                    }
+
                     break;
 
                 case StandardsFolderChangeKind.Reshape:
@@ -242,7 +394,14 @@ public sealed partial class StandardsFolderMigration
                     if (reshapedText is null || skippedRenames.Contains(change.To)) break;
 
                     string reshapeTarget = RequireWritable(change.To);
+                    string reshapeBefore = _files.ReadAllText(reshapeTarget);
                     _files.WriteAllTextAtomic(reshapeTarget, reshapedText);
+                    undo?.Add(() =>
+                    {
+                        string undoPath = RequireWritable(change.To);
+                        _files.WriteAllTextAtomic(undoPath, reshapeBefore);
+                        VerifyStillWritable(undoPath);
+                    });
                     VerifyStillWritable(reshapeTarget);
                     applied.Add(change);
                     break;
@@ -250,6 +409,73 @@ public sealed partial class StandardsFolderMigration
         }
 
         return applied;
+    }
+
+    /// <summary>Moves a renamed standard back to the name it had before a failed run.</summary>
+    /// <param name="from">The relative path the rename produced.</param>
+    /// <param name="to">The relative path the standard had before.</param>
+    private void MoveBack(string from, string to)
+    {
+        // The same containment and link checks the forward write made: an undo is still a write.
+        string source = RequireWritable(from);
+        string target = RequireWritable(to);
+        if (_files.FileExists(source) && !_files.FileExists(target))
+        {
+            _files.MoveFile(source, target, overwrite: false);
+        }
+    }
+
+    /// <summary>Deletes a stub a failed run wrote.</summary>
+    /// <param name="relativePath">The stub's repository-relative path.</param>
+    private void DeleteIfPresent(string relativePath)
+    {
+        string path = RequireWritable(relativePath);
+        if (_files.FileExists(path))
+        {
+            _files.DeleteFile(path);
+        }
+    }
+
+    /// <summary>Puts the root <c>AGENTS.md</c> back as it was before a failed run.</summary>
+    /// <param name="path">The file's absolute path.</param>
+    /// <param name="previous">Its text before the run, or null when it did not exist.</param>
+    private void RestoreAgents(string path, string? previous)
+    {
+        RequireWritable(path, path);
+        if (previous is null)
+        {
+            if (_files.FileExists(path))
+            {
+                _files.DeleteFile(path);
+            }
+
+            return;
+        }
+
+        _files.WriteAllTextAtomic(path, previous);
+    }
+
+    /// <summary>Undoes a failed run's writes in the reverse order they were made.</summary>
+    /// <param name="undo">Each write's inverse, in the order the writes happened.</param>
+    /// <returns>One line per undo that itself failed, so the caller can report them with the original error.</returns>
+    private static List<string> RollBack(List<Action> undo)
+    {
+        List<string> failed = [];
+        for (int index = undo.Count - 1; index >= 0; index--)
+        {
+            try
+            {
+                undo[index]();
+            }
+            catch (Exception exception)
+            {
+                // Rollback is best effort: every undo runs even when an earlier one failed, and a
+                // failure is reported beside the original error rather than swallowed.
+                failed.Add($"{exception.GetType().Name}: {exception.Message}");
+            }
+        }
+
+        return failed;
     }
 
     /// <summary>
@@ -342,7 +568,7 @@ public sealed partial class StandardsFolderMigration
     }
 
     private IEnumerable<string> Scopes() =>
-        _config.Technologies.Concat(_config.Roles).Distinct(StringComparer.Ordinal);
+        _ontology.Technologies.Concat(_ontology.Roles).Distinct(StringComparer.Ordinal);
 
     private string Stub(string scope, string kind, string? owner)
     {
@@ -354,7 +580,7 @@ public sealed partial class StandardsFolderMigration
             "rules" => "rule",
             _ => "skill"
         };
-        string scopeKey = _config.Roles.Contains(scope, StringComparer.Ordinal)
+        string scopeKey = _ontology.Roles.Contains(scope, StringComparer.Ordinal)
             ? "role"
             : "technology";
         string title = kind == "standard" ? $"{scope} standard" : $"{scope} {kind}";

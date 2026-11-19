@@ -54,6 +54,26 @@ public sealed class GateReportFactsOverSeamsTests
         return path;
     }
 
+    /// <summary>
+    /// Run 14: a worker wrote "TASK_GATE: PASS, agent=..." and the comma made the claim read as "PASS,", so a passing
+    /// report was judged to disagree and the run stalled. Punctuation or emphasis around the status word is not part of it.
+    /// </summary>
+    [Theory]
+    [InlineData("TASK_GATE: PASS, agent=csharp-dev gates=1 failed=none skipped=0 report={0} runs=3")]
+    [InlineData("TASK_GATE: **PASS** report={0}")]
+    [InlineData("TASK_GATE: PASS; report={0}")]
+    [InlineData("TASK_GATE: `PASS` report={0}")]
+    [InlineData("TASK_GATE: PASS \u2014 agent=csharp-dev report={0}")]
+    [InlineData("TASK_GATE: PASS\u2014 report={0}")]
+    [InlineData("TASK_GATE: \u201cPASS\u201d report={0}")]
+    [InlineData("TASK_GATE: <PASS> report={0}")]
+    public void APassClaimWithPunctuationAroundTheStatusAgreesWithAPassingReport(string format)
+    {
+        string path = Write(ReportPath, Passing());
+
+        Assert.True(Facts().Agrees(string.Format(System.Globalization.CultureInfo.InvariantCulture, format, path), Root));
+    }
+
     [Fact]
     public void ARelativeRepositoryRootResolvesAgainstTheInjectedCurrentDirectory()
     {
