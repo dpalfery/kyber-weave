@@ -188,7 +188,9 @@ Claude Code ingests from two paths: the local JSONL transcript reader (`Transcri
 
 ## codex
 
-Codex ingests from two paths: the local rollout JSONL transcript reader (`TranscriptReaderRepository.ReadCodexTurns` / `ReadCodexEnvelopes` producing `SourceRecordEnvelope`, `ParsedProviderCall`, `ReaderTurn`, and `ContentPart`) and the OTLP collector/adapter (`CodexAdapter` over `OtlpSpan`, `OtlpLog`, `OtlpMetric`, and `RawSpan`).
+Codex ingests from two paths: the local rollout JSONL transcript reader (`TranscriptReaderRepository.ReadCodexTurns` / `ReadCodexEnvelopes` producing `SourceRecordEnvelope`, `ParsedProviderCall`, `ReaderTurn`, and `ContentPart`, plus `CodexRolloutMapper` over `CodexRolloutDocument`, `CodexRolloutTurn`, `CodexRolloutToolCall`, `CodexRolloutToolResult`, `CodexRolloutMessage`, and `CodexRolloutUsage` mapping directly to `CollectedBatch`) and the OTLP collector/adapter (`CodexAdapter` over `OtlpSpan`, `OtlpLog`, `OtlpMetric`, and `RawSpan`).
+
+For rollout tool invocation pairing, `CodexRolloutMapper` correlates `function_call` and `custom_tool_call` items with `function_call_output` and `custom_tool_call_output` items by `call_id` (falling back to `id`) into child `tool.invoke` `CollectedRecord`s, measuring all payloads via `ToolContentMeasurer` so JSON `arguments`/`input` retain only byte/character measurements and canonical SHA-256 fingerprints while plain-text `custom_tool_call.input` payloads are preserved (bounded to 64 KiB).
 
 | Native type | Property | Disposition | Target mapping | Reason |
 |---|---|---|---|---|
@@ -257,10 +259,10 @@ Codex ingests from two paths: the local rollout JSONL transcript reader (`Transc
 | `ReaderTurn` | `ToolCalls` | mapped | nested: ReaderToolCall | Synthesized from `function_call` and `custom_tool_call` items. |
 | `ReaderTurn` | `ToolResults` | mapped | nested: ReaderToolResult | Synthesized from `function_call_output` and `custom_tool_call_output` items. |
 | `ReaderTurn` | `ToolsOffered` | dropped | — | Bare offered tool names lack schema token counts and MCP server attribution required by `tool_definition`. |
-| `ReaderToolCall` | `Id` | mapped | `tool_call.call_id` | Extracted from `call_id` or `id`. |
-| `ReaderToolCall` | `Name` | mapped | `tool_call.tool_name` | Tool name from rollout item. |
-| `ReaderToolCall` | `Arguments` | mapped | `tool_call_input_size.utf8_bytes`, `tool_call_input_size.characters`, `tool_call_input_fingerprint.sha256`, `tool_call_input_text.text` | Measured via `ToolContentMeasurer`; JSON object/array plain text withheld. |
-| `ReaderToolCall` | `RawArgumentsString` | mapped | `tool_call_input_size.utf8_bytes`, `tool_call_input_size.characters`, `tool_call_input_fingerprint.sha256`, `tool_call_input_text.text`, `tool_call_input_truncation.original_utf8_bytes` | Measured via `ToolContentMeasurer` from `arguments` or `input` string. |
+| `ReaderToolCall` | `Id` | mapped | `tool_call.call_id` | Extracted from `call_id` with `id` fallback (`CodexRolloutToolCall.CallId`). |
+| `ReaderToolCall` | `Name` | mapped | `tool_call.tool_name` | Tool name from `function_call` or `custom_tool_call` rollout item (`CodexRolloutToolCall.ToolName`). |
+| `ReaderToolCall` | `Arguments` | mapped | `tool_call_input_size.utf8_bytes`, `tool_call_input_size.characters`, `tool_call_input_fingerprint.sha256`, `tool_call_input_text.text` | Measured via `ToolContentMeasurer`; JSON object/array arguments retain measurements and SHA-256 fingerprint only (`PlainText` withheld). |
+| `ReaderToolCall` | `RawArgumentsString` | mapped | `tool_call_input_size.utf8_bytes`, `tool_call_input_size.characters`, `tool_call_input_fingerprint.sha256`, `tool_call_input_text.text`, `tool_call_input_truncation.original_utf8_bytes` | Measured via `ToolContentMeasurer` from `function_call.arguments` (JSON withheld) or `custom_tool_call.input` (plain-text preserved up to 64 KiB). |
 | `ReaderToolCall` | `Timestamp` | mapped | `record.started_at_utc` | Rollout entry timestamp on child `tool.invoke` span. |
 | `ReaderToolCall` | `DurationMs` | mapped | `record_reported_duration.duration_ms` | Reported tool duration in milliseconds. |
 | `ReaderToolResult` | `ToolCallId` | mapped | `tool_call.call_id` | Pairs result to its `ReaderToolCall`. |
