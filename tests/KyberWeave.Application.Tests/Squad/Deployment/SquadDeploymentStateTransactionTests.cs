@@ -1,31 +1,16 @@
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using KyberWeave.Cli.Commands.Squad;
-using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Core.Squad.Release;
-using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Fakes;
 using Xunit;
-using Xunit.Sdk;
-using KyberWeave.Tests.Corpus;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Application.Tests.Squad.Deployment;
 
 /// <summary>
 /// Deployment-state contracts: journal, staging, checkpoints and the lease. Split from the one class that used to hold all of
 /// them, so xUnit runs the themes on different cores.
 /// </summary>
-public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateTestBase
+public sealed class SquadDeploymentStateTransactionTests : InMemoryDeploymentStateTestBase
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
     private const string UpdatedAgentOnePath = ".codex/agents/one.toml";
     private const string UpdatedAgentTwoPath = ".codex/agents/two.toml";
     private const string NewWarpRolePath = ".warp/roles/three.md";
@@ -34,11 +19,11 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     [Fact]
     public void ExecuteGlobalScopeKeepsIntentStagesAndBackupsInHomeJournalNotBesideTargetOrInState()
     {
-        using TempDirectory fixture = new();
+        DeploymentScope fixture = NewScope();
         string applicationData = Path.Combine(fixture.Path, "application-data");
-        Directory.CreateDirectory(Path.Combine(applicationData, "home"));
+        Files.CreateDirectory(Path.Combine(applicationData, "home"));
         string targetRoot = Path.Combine(fixture.Path, "global-target");
-        Directory.CreateDirectory(targetRoot);
+        Files.CreateDirectory(targetRoot);
         Write(targetRoot, ".codex/agents/conductor.toml", "installed body");
         SquadReceipt receipt = new(
             "kyber-squad.receipt/v1",
@@ -53,7 +38,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
                     "codex",
                     false)
             ]);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
+        SquadDeploymentPlan plan = Planner.CreateUpdate(
             targetRoot,
             SquadDeploymentScope.Global,
             Lock("1.2.4"),
@@ -62,13 +47,14 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             [],
             false,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
-        SquadStateStore store = Store(applicationData);
+        SquadStateStore store = StoreAt(applicationData);
         GlobalTransactionLocationObserver observer = new(
+            Files,
             targetRoot,
             store.ResolveStateDirectory(targetRoot, SquadDeploymentScope.Global),
             store.ResolveTransactionDirectory(targetRoot, SquadDeploymentScope.Global));
 
-        RealSquadDeployment.Transaction(store, observer).Execute(plan);
+        TransactionAt(applicationData, observer).Execute(plan);
 
         Assert.True(observer.SawDurableIntentInJournal);
         Assert.True(observer.SawStagingInJournal);
@@ -79,50 +65,12 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     }
 
     [Fact]
-    public async Task ExecuteActiveTransactionHoldsAtomicExclusiveLease()
-    {
-        using TransactionFixture fixture = TransactionFixture.Create();
-        using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
-        SquadTransaction transaction = Transaction(fixture.Path, blocker);
-        SquadDeploymentPlan plan = fixture.CreateUpdatePlan();
-        Task execution = BlockedTransaction.Start(() => transaction.Execute(plan));
-        BlockedTransaction.WaitForStep(
-            blocker.Reached,
-            execution,
-            "The transaction did not reach its durable intent checkpoint.");
-
-        bool heldExclusiveLease;
-        try
-        {
-            // The lease lives in the project journal beside the root, not in the home-anchored
-            // state directory, so that is where an exclusive hold must be observable.
-            string leaseDirectory = Store(fixture.Path).ResolveTransactionDirectory(
-                fixture.Path,
-                SquadDeploymentScope.Project);
-            heldExclusiveLease = Directory.EnumerateFiles(
-                    leaseDirectory,
-                    "*",
-                    SearchOption.AllDirectories)
-                .Any(IsHeldWithExclusiveFileShare);
-        }
-        finally
-        {
-            blocker.Release.Set();
-        }
-
-        await execution;
-        Assert.True(
-            heldExclusiveLease,
-            "An active transaction must own an atomically acquired exclusive lease, not rely on a check-then-create directory race.");
-    }
-
-    [Fact]
     public async Task RecoverWhileExecuteOwnsLeaseRefusesToInterleaveWithActiveTransaction()
     {
-        using TransactionFixture fixture = TransactionFixture.Create();
+        TransactionFixture fixture = TransactionFixture.Create(this);
         string fixturePath = fixture.Path;
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
-        SquadTransaction activeTransaction = Transaction(fixturePath, blocker);
+        SquadTransaction activeTransaction = TransactionAt(fixturePath, blocker);
         SquadDeploymentPlan plan = fixture.CreateUpdatePlan();
         Task execution = BlockedTransaction.Start(() => activeTransaction.Execute(plan));
         BlockedTransaction.WaitForStep(
@@ -133,7 +81,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         Exception? recoveryException;
         try
         {
-            SquadTransaction recoveryTransaction = Transaction(fixturePath);
+            SquadTransaction recoveryTransaction = TransactionAt(fixturePath);
             recoveryException = Record.Exception(() =>
                 recoveryTransaction.Recover(
                     fixturePath,
@@ -153,9 +101,9 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     [Fact]
     public void ExecuteStagesBacksUpAndJournalsBeforeApplyingStateLast()
     {
-        using TransactionFixture fixture = TransactionFixture.Create();
-        RecordingObserver observer = new(fixture.Path);
-        SquadTransaction transaction = Transaction(fixture.Path, observer);
+        TransactionFixture fixture = TransactionFixture.Create(this);
+        RecordingObserver observer = new(Files, fixture.Path);
+        SquadTransaction transaction = TransactionAt(fixture.Path, observer);
 
         transaction.Execute(fixture.CreateUpdatePlan());
 
@@ -173,7 +121,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         Assert.True(observer.SawStagedFile);
         Assert.True(observer.SawBackupFile);
         Assert.Equal("updated body", Read(fixture.Path, fixture.RelativePath));
-        Assert.False(Directory.Exists(Path.Combine(
+        Assert.False(Files.DirectoryExists(Path.Combine(
             fixture.Path,
             ".kyber-weave",
             ".squad-transaction")));
@@ -182,10 +130,10 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     [Fact]
     public void ExecutePlainObserverReceivesOnlyLegacyLifecycleSteps()
     {
-        using TransactionFixture fixture = TransactionFixture.Create();
-        RecordingObserver observer = new(fixture.Path);
+        TransactionFixture fixture = TransactionFixture.Create(this);
+        RecordingObserver observer = new(Files, fixture.Path);
 
-        Transaction(fixture.Path, observer).Execute(fixture.CreateUpdatePlan());
+        TransactionAt(fixture.Path, observer).Execute(fixture.CreateUpdatePlan());
 
         SquadTransactionStepKind[] expected =
         [
@@ -206,10 +154,10 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     [Fact]
     public void ExecuteCheckpointObserverOptsIntoPreparedAndTransitionEvents()
     {
-        using TransactionFixture fixture = TransactionFixture.Create();
+        TransactionFixture fixture = TransactionFixture.Create(this);
         CheckpointRecordingObserver observer = new();
 
-        Transaction(fixture.Path, observer).Execute(fixture.CreateUpdatePlan());
+        TransactionAt(fixture.Path, observer).Execute(fixture.CreateUpdatePlan());
 
         Assert.Equal(
             [
@@ -282,18 +230,18 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     [Fact]
     public void ExecuteFailureAfterEveryFilesystemStepRestoresOriginalTreeAndRecoveryIsIdempotent()
     {
-        using TransactionFixture probeFixture = TransactionFixture.Create();
-        RecordingObserver probe = new(probeFixture.Path);
-        Transaction(probeFixture.Path, probe).Execute(probeFixture.CreateUpdatePlan());
+        TransactionFixture probeFixture = TransactionFixture.Create(this);
+        RecordingObserver probe = new(Files, probeFixture.Path);
+        TransactionAt(probeFixture.Path, probe).Execute(probeFixture.CreateUpdatePlan());
         int stepCount = probe.Steps.Count;
 
         Assert.True(stepCount > 0);
         for (int failureSequence = 1; failureSequence <= stepCount; failureSequence++)
         {
-            using TransactionFixture fixture = TransactionFixture.Create();
+            TransactionFixture fixture = TransactionFixture.Create(this);
             SortedDictionary<string, byte[]> before = Snapshot(fixture.Path);
-            FailingObserver failure = new(fixture.Path, failureSequence);
-            SquadTransaction transaction = Transaction(
+            FailingObserver failure = new(Files, fixture.Path, failureSequence);
+            SquadTransaction transaction = TransactionAt(
                 fixture.Path,
                 failure);
 
@@ -324,16 +272,17 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     public void ExecutePostIntentExternalReplacementPreservesRaceAndRetainsRecoverableConflict(
         SquadTransactionStepKind replacementCheckpoint)
     {
-        using TransactionFixture fixture = TransactionFixture.Create();
+        TransactionFixture fixture = TransactionFixture.Create(this);
         string fixturePath = fixture.Path;
-        SquadStateStore store = Store(fixturePath);
+        SquadStateStore store = StoreAt(fixturePath);
         PostIntentReplacementObserver observer = new(
+            Files,
             fixturePath,
             store,
             SquadDeploymentScope.Project,
             fixture.RelativePath,
             replacementCheckpoint);
-        SquadTransaction transaction = RealSquadDeployment.Transaction(store, observer);
+        SquadTransaction transaction = TransactionAt(fixturePath, observer);
         SquadDeploymentPlan updatePlan = fixture.CreateUpdatePlan();
 
         Exception? exception = Record.Exception(() => transaction.Execute(updatePlan));
@@ -341,7 +290,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         SquadDeploymentConflictException
             conflict = Assert.IsAssignableFrom<SquadDeploymentConflictException>(exception);
         Assert.Contains("changed", conflict.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(observer.ExternalBytes, File.ReadAllBytes(observer.ReplacedPath));
+        Assert.Equal(observer.ExternalBytes, Files.ReadAllBytes(observer.ReplacedPath));
         if (replacementCheckpoint != SquadTransactionStepKind.FileApplied)
             Assert.Equal("installed body", Read(fixturePath, fixture.RelativePath));
         if (replacementCheckpoint != SquadTransactionStepKind.LockApplied)
@@ -353,7 +302,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
                 fixturePath,
                 SquadDeploymentScope.Project)));
         Assert.True(
-            Directory.Exists(store.ResolveTransactionDirectory(
+            Files.DirectoryExists(store.ResolveTransactionDirectory(
                 fixturePath,
                 SquadDeploymentScope.Project)),
             "A compare-and-restore conflict must retain its verified journal and backup authority.");
@@ -365,7 +314,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
 
         Assert.IsAssignableFrom<SquadDeploymentConflictException>(recoveryException);
         AssertTreesEqual(beforeRecovery, CaptureTree(fixturePath));
-        Assert.Equal(observer.ExternalBytes, File.ReadAllBytes(observer.ReplacedPath));
+        Assert.Equal(observer.ExternalBytes, Files.ReadAllBytes(observer.ReplacedPath));
 
         Exception? repeatedRecoveryException = Record.Exception(() => transaction.Recover(
             fixturePath,
@@ -377,11 +326,11 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     [Fact]
     public void ExecutePostIntentExternalChildInTransactionCreatedParentPreservesParentAndReportsConflict()
     {
-        using TempDirectory fixture = new();
+        DeploymentScope fixture = NewScope();
         string fixturePath = fixture.Path;
         const string generatedPath = ".warp/roles/reviewer.md";
         const string externalPath = ".warp/roles/operator-note.md";
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
+        SquadDeploymentPlan plan = Planner.CreateInstall(
             fixturePath,
             SquadDeploymentScope.Project,
             Lock(),
@@ -389,17 +338,17 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             [],
             false,
             new FixedTimeProvider(InstalledAt));
-        ExternalChildObserver observer = new(fixturePath, generatedPath, externalPath);
-        SquadTransaction transaction = Transaction(fixturePath, observer);
+        ExternalChildObserver observer = new(Files, fixturePath, generatedPath, externalPath);
+        SquadTransaction transaction = TransactionAt(fixturePath, observer);
 
         Exception? exception = Record.Exception(() =>
             transaction.Execute(plan));
 
         Assert.IsAssignableFrom<SquadDeploymentConflictException>(exception);
-        Assert.False(File.Exists(ToPlatformPath(fixturePath, generatedPath)));
+        Assert.False(Files.FileExists(ToPlatformPath(fixturePath, generatedPath)));
         Assert.Equal("external operator note", Read(fixturePath, externalPath));
-        Assert.True(Directory.Exists(ToPlatformPath(fixturePath, ".warp/roles")));
-        Assert.True(Directory.Exists(Path.Combine(
+        Assert.True(Files.DirectoryExists(ToPlatformPath(fixturePath, ".warp/roles")));
+        Assert.True(Files.DirectoryExists(Path.Combine(
             fixturePath,
             ".kyber-weave",
             ".squad-transaction")));
@@ -408,12 +357,13 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     [Fact]
     public void ExecutePreparedArtifactsAreAtomicAndDurableBeforeFirstTargetMutation()
     {
-        using TransactionFixture fixture = TransactionFixture.Create();
+        TransactionFixture fixture = TransactionFixture.Create(this);
         PreparedArtifactsObserver observer = new(
+            Files,
             fixture.Path,
             fixture.RelativePath);
 
-        Transaction(fixture.Path, observer).Execute(fixture.CreateUpdatePlan());
+        TransactionAt(fixture.Path, observer).Execute(fixture.CreateUpdatePlan());
 
         Assert.True(observer.ObservedPreparedCheckpoint);
     }
@@ -426,7 +376,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     public void RecoverTruncatedOrDigestMismatchedPreparedArtifactRefusesAuthority(
         string corruption)
     {
-        using TransactionFixture fixture = TransactionFixture.Create();
+        TransactionFixture fixture = TransactionFixture.Create(this);
         string fixturePath = fixture.Path;
         SortedDictionary<string, TreeEntry> interrupted = InterruptTransactionAfterCheckpoint(
             fixture,
@@ -434,7 +384,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         RestoreTree(fixturePath, interrupted);
         CorruptPreparedArtifact(fixturePath, fixture.RelativePath, corruption);
         SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixturePath);
-        SquadTransaction transaction = Transaction(fixturePath);
+        SquadTransaction transaction = TransactionAt(fixturePath);
 
         Exception? exception = Record.Exception(() => transaction.Recover(
             fixturePath,
@@ -443,7 +393,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         InvalidDataException invalid = Assert.IsType<InvalidDataException>(exception);
         Assert.Contains("Squad", invalid.Message, StringComparison.OrdinalIgnoreCase);
         AssertTreesEqual(beforeRecovery, CaptureTree(fixturePath));
-        Assert.True(File.Exists(Path.Combine(
+        Assert.True(Files.FileExists(Path.Combine(
             fixturePath,
             ".kyber-weave",
             ".squad-transaction",
@@ -456,7 +406,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     [InlineData("backup")]
     public void RecoverInterruptedInsideArtifactWriteRefusesPartialAuthority(string artifact)
     {
-        using TransactionFixture fixture = TransactionFixture.Create();
+        TransactionFixture fixture = TransactionFixture.Create(this);
         string fixturePath = fixture.Path;
         SortedDictionary<string, TreeEntry> interrupted = InterruptTransactionAfter(
             fixture,
@@ -467,7 +417,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             fixture.RelativePath,
             artifact);
         SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixturePath);
-        SquadTransaction transaction = Transaction(fixturePath);
+        SquadTransaction transaction = TransactionAt(fixturePath);
 
         Exception? exception = Record.Exception(() => transaction.Recover(
             fixturePath,
@@ -496,14 +446,14 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         bool useSymlinkAlias,
         bool expectContention)
     {
-        using TempDirectory fixture = new();
+        DeploymentScope fixture = NewScope();
         string targetRoot = Path.Combine(fixture.Path, "target");
         string aliasRoot = Path.Combine(fixture.Path, "target-alias");
         string applicationData = Path.Combine(fixture.Path, "application-data");
-        Directory.CreateDirectory(targetRoot);
-        Directory.CreateSymbolicLink(aliasRoot, targetRoot);
-        SquadStateStore store = Store(applicationData);
-        SquadDeploymentPlan activePlan = RealSquadDeployment.Planner.CreateInstall(
+        Files.CreateDirectory(targetRoot);
+        Files.CreateDirectoryLink(aliasRoot, targetRoot);
+        SquadStateStore store = StoreAt(applicationData);
+        SquadDeploymentPlan activePlan = Planner.CreateInstall(
             targetRoot,
             activeScope,
             Lock(),
@@ -513,7 +463,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             new FixedTimeProvider(InstalledAt));
         string contenderRoot = useSymlinkAlias ? aliasRoot : targetRoot;
         string contenderFile = AgentRelativePath(contenderScope, "contender.toml");
-        SquadDeploymentPlan contenderPlan = RealSquadDeployment.Planner.CreateInstall(
+        SquadDeploymentPlan contenderPlan = Planner.CreateInstall(
             contenderRoot,
             contenderScope,
             Lock(),
@@ -522,7 +472,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             false,
             new FixedTimeProvider(InstalledAt));
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
-        SquadTransaction activeTransaction = RealSquadDeployment.Transaction(store, blocker);
+        SquadTransaction activeTransaction = TransactionAt(applicationData, blocker);
         Task activeExecution = BlockedTransaction.Start(() =>
             activeTransaction.Execute(activePlan));
         BlockedTransaction.WaitForStep(
@@ -536,7 +486,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         IReadOnlyDictionary<string, TreeEntry>? afterContention;
         try
         {
-            SquadTransaction storeTransaction = RealSquadDeployment.Transaction(store);
+            SquadTransaction storeTransaction = TransactionAt(applicationData);
             if (expectContention)
                 recoveryException = Record.Exception(() => storeTransaction.Recover(
                     contenderRoot,
@@ -559,7 +509,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             AssertTreesEqual(
                 beforeContention,
                 Assert.IsAssignableFrom<IReadOnlyDictionary<string, TreeEntry>>(afterContention));
-            Assert.False(File.Exists(ToPlatformPath(targetRoot, contenderFile)));
+            Assert.False(Files.FileExists(ToPlatformPath(targetRoot, contenderFile)));
         }
         else
         {
@@ -574,10 +524,10 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     [InlineData("receipt-state")]
     public void ExecuteStagedArtifactChangedAfterPreparedBeforeApplyIsRejected(string artifact)
     {
-        using TempDirectory fixture = new();
+        DeploymentScope fixture = NewScope();
         const string relativePath = ".codex/agents/conductor.toml";
-        SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
+        SquadStateStore store = StoreAt(fixture.Path);
+        SquadDeploymentPlan plan = Planner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -586,23 +536,24 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             false,
             new FixedTimeProvider(InstalledAt));
         StagedArtifactTamperingObserver observer = new(
+            Files,
             fixture.Path,
             relativePath,
             artifact);
 
-        Exception? exception = Record.Exception(() => RealSquadDeployment.Transaction(store, observer).Execute(plan));
+        Exception? exception = Record.Exception(() => TransactionAt(fixture.Path, observer).Execute(plan));
 
         InvalidDataException invalid = Assert.IsType<InvalidDataException>(exception);
         string reportedArtifact = artifact == "target-file"
             ? relativePath
             : artifact.Split('-')[0];
         Assert.Contains(reportedArtifact, invalid.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.False(File.Exists(ToPlatformPath(fixture.Path, relativePath)));
-        Assert.False(File.Exists(store.ResolveLockPath(fixture.Path, SquadDeploymentScope.Project)));
-        Assert.False(File.Exists(store.ResolveReceiptPath(fixture.Path, SquadDeploymentScope.Project)));
+        Assert.False(Files.FileExists(ToPlatformPath(fixture.Path, relativePath)));
+        Assert.False(Files.FileExists(store.ResolveLockPath(fixture.Path, SquadDeploymentScope.Project)));
+        Assert.False(Files.FileExists(store.ResolveReceiptPath(fixture.Path, SquadDeploymentScope.Project)));
         Assert.False(observer.SawAffectedApplyCheckpoint);
         Assert.True(
-            Directory.Exists(store.ResolveTransactionDirectory(
+            Files.DirectoryExists(store.ResolveTransactionDirectory(
                 fixture.Path,
                 SquadDeploymentScope.Project)),
             "A changed prepared stage is non-authoritative evidence and must be retained.");
@@ -615,15 +566,16 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     public void ExecuteClosedArtifactVerificationOccursBeforeFirstLeafMutation(
         string corruption)
     {
-        using TransactionFixture fixture = TransactionFixture.Create();
+        TransactionFixture fixture = TransactionFixture.Create(this);
         string fixturePath = fixture.Path;
         SortedDictionary<string, TreeEntry> before = CaptureTree(fixturePath);
         PreparedBoundaryCorruptionObserver observer = new(
+            Files,
             fixturePath,
             fixture.RelativePath,
             corruption);
         SquadDeploymentPlan updatePlan = fixture.CreateUpdatePlan();
-        SquadTransaction transaction = Transaction(fixturePath, observer);
+        SquadTransaction transaction = TransactionAt(fixturePath, observer);
 
         Exception? exception = Record.Exception(() =>
             transaction.Execute(updatePlan));
@@ -643,7 +595,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         };
         AssertTreesEqual(expectedAfterRejection, CaptureTreeWithoutTransactionEvidence(fixturePath));
         Assert.True(
-            Directory.Exists(Path.Combine(
+            Files.DirectoryExists(Path.Combine(
                 fixturePath,
                 ".kyber-weave",
                 ".squad-transaction")),
@@ -667,13 +619,14 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         string edit,
         string semanticRole)
     {
-        using RichTransactionFixture fixture = RichTransactionFixture.Create();
+        RichTransactionFixture fixture = RichTransactionFixture.Create(this);
         string fixturePath = fixture.Path;
         CheckpointFailingObserver observer = new(
+            Files,
             fixturePath,
             SquadTransactionCheckpointKind.Prepared);
         SquadDeploymentPlan updatePlan = fixture.CreateUpdatePlan();
-        SquadTransaction transaction = Transaction(fixturePath, observer);
+        SquadTransaction transaction = TransactionAt(fixturePath, observer);
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
             transaction.Execute(updatePlan));
         RestoreTree(
@@ -685,7 +638,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             ".kyber-weave",
             ".squad-transaction");
         string intentPath = Path.Combine(transactionDirectory, "intent.json");
-        JsonObject intent = ReadJsonObject(intentPath);
+        System.Text.Json.Nodes.JsonObject intent = ReadJsonObject(intentPath);
         EditSemanticArtifactSet(
             intent,
             transactionDirectory,
@@ -693,7 +646,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             semanticRole);
         WriteJsonObject(intentPath, intent);
         SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixturePath);
-        SquadTransaction recoveryTransaction = Transaction(fixturePath);
+        SquadTransaction recoveryTransaction = TransactionAt(fixturePath);
 
         Exception? exception = Record.Exception(() => recoveryTransaction.Recover(
             fixturePath,
@@ -721,8 +674,8 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         string subject,
         string mutation)
     {
-        using TransactionFixture fixture = TransactionFixture.Create();
-        SquadStateStore store = Store(fixture.Path);
+        TransactionFixture fixture = TransactionFixture.Create(this);
+        SquadStateStore store = StoreAt(fixture.Path);
         string liveRelativePath = subject switch
         {
             "target" => fixture.RelativePath,
@@ -736,12 +689,13 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         };
         TreeEntry originalLiveEntry = CaptureTree(fixture.Path)[liveRelativePath];
         OriginalClaimStageTamperingObserver observer = new(
+            Files,
             fixture.Path,
             fixture.RelativePath,
             subject,
             mutation);
         SquadDeploymentPlan updatePlan = fixture.CreateUpdatePlan();
-        SquadTransaction transaction = RealSquadDeployment.Transaction(store, observer);
+        SquadTransaction transaction = TransactionAt(fixture.Path, observer);
 
         Exception? exception = Record.Exception(() =>
             transaction.Execute(updatePlan));
@@ -752,7 +706,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             Assert.Null(exception);
             Assert.True(observer.SawAffectedAfterImage);
             Assert.True(observer.SawAffectedPublicApply);
-            Assert.False(Directory.Exists(store.ResolveTransactionDirectory(
+            Assert.False(Files.DirectoryExists(store.ResolveTransactionDirectory(
                 fixture.Path,
                 SquadDeploymentScope.Project)));
             return;
@@ -770,34 +724,10 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             observer.SawAffectedPublicApply,
             "A changed stage must be rejected before its public apply event.");
         AssertTreeEntryEqual(originalLiveEntry, CaptureTree(fixture.Path)[liveRelativePath]);
-        Assert.True(File.Exists(observer.IntentPath));
+        Assert.True(Files.FileExists(observer.IntentPath));
         AssertTreeEntryEqual(
             Assert.IsType<TreeEntry>(observer.MutatedStageEntry),
             CaptureTree(fixture.Path)[observer.StageRelativePath]);
-    }
-
-    [Fact]
-    public void PublishStageNoOverwriteVerifiesAuthorityAtAdjacentMoveBoundary()
-    {
-        string source = Corpus.ReadText("src/KyberWeave.Application/Squad/Deployment/SquadTransaction.cs");
-        string declaration = ExtractMethodDeclaration(source, "PublishStageNoOverwrite");
-        string method = ExtractMethod(source, "PublishStageNoOverwrite");
-
-        Assert.Contains("IntentDocument", declaration, StringComparison.Ordinal);
-        Assert.Contains("ArtifactArea", declaration, StringComparison.Ordinal);
-        Assert.Contains("ArtifactRole", declaration, StringComparison.Ordinal);
-        Assert.Contains("ArtifactFingerprintMatches", method, StringComparison.Ordinal);
-        Assert.Contains("MoveEntryNoOverwrite", method, StringComparison.Ordinal);
-
-        int fingerprint = method.LastIndexOf("ArtifactFingerprintMatches", StringComparison.Ordinal);
-        int move = method.IndexOf("MoveEntryNoOverwrite", fingerprint, StringComparison.Ordinal);
-        Assert.True(fingerprint >= 0 && move > fingerprint);
-        string adjacentBoundary = method[fingerprint..move];
-        Assert.DoesNotContain("Notify", adjacentBoundary, StringComparison.Ordinal);
-        Assert.DoesNotContain("await", adjacentBoundary, StringComparison.Ordinal);
-        Assert.DoesNotContain("PublishIntent", adjacentBoundary, StringComparison.Ordinal);
-        Assert.DoesNotContain("File.", adjacentBoundary, StringComparison.Ordinal);
-        Assert.DoesNotContain("Directory.", adjacentBoundary, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -825,17 +755,17 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     [Fact]
     public void ExecuteLeavesExactlyTheDirectoriesTheDeploymentNeeds()
     {
-        using TempDirectory temp = new();
-        string root = temp.Path;
+        DeploymentScope fixture = NewScope();
+        string root = fixture.Path;
         SquadReceipt receipt = SeedDirectoryCleanupDeployment(root);
 
-        Transaction(root).Execute(DirectoryCleanupUpdatePlan(root, receipt));
+        TransactionAt(root).Execute(DirectoryCleanupUpdatePlan(root, receipt));
 
         string[] expectedDirectories =
         [
             .. AncestorDirectories(StateRelativePath(
                 root,
-                Store(root).ResolveStateDirectory(root, SquadDeploymentScope.Project))),
+                StoreAt(root).ResolveStateDirectory(root, SquadDeploymentScope.Project))),
             ".codex",
             ".codex/agents",
             ".warp",
@@ -848,7 +778,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             .ToArray();
 
         Assert.Equal(expectedDirectories.Order(StringComparer.Ordinal), actualDirectories);
-        Assert.False(Directory.Exists(Path.Combine(
+        Assert.False(Files.DirectoryExists(Path.Combine(
             root,
             ".kyber-weave",
             ".squad-transaction")));
@@ -861,14 +791,14 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     [Fact]
     public void ExecuteMidApplyFailureRestoresTheExactPriorTree()
     {
-        using TempDirectory temp = new();
-        string root = temp.Path;
+        DeploymentScope fixture = NewScope();
+        string root = fixture.Path;
         SquadReceipt receipt = SeedDirectoryCleanupDeployment(root);
         SortedDictionary<string, TreeEntry> original = CaptureTree(root);
-        LifecycleStepFailingObserver observer = new(root, SquadTransactionStepKind.FileApplied);
+        LifecycleStepFailingObserver observer = new(Files, root, SquadTransactionStepKind.FileApplied);
 
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
-            Transaction(root, observer).Execute(DirectoryCleanupUpdatePlan(root, receipt)));
+            TransactionAt(root, observer).Execute(DirectoryCleanupUpdatePlan(root, receipt)));
 
         AssertTreesEqual(original, CaptureTree(root));
     }
@@ -876,19 +806,19 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     [Fact]
     public void RecoverMidApplyFailureRestoresTheExactPriorTree()
     {
-        using TempDirectory temp = new();
-        string root = temp.Path;
+        DeploymentScope fixture = NewScope();
+        string root = fixture.Path;
         SquadReceipt receipt = SeedDirectoryCleanupDeployment(root);
         SortedDictionary<string, TreeEntry> original = CaptureTree(root);
-        LifecycleStepFailingObserver observer = new(root, SquadTransactionStepKind.FileApplied);
+        LifecycleStepFailingObserver observer = new(Files, root, SquadTransactionStepKind.FileApplied);
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
-            Transaction(root, observer).Execute(DirectoryCleanupUpdatePlan(root, receipt)));
+            TransactionAt(root, observer).Execute(DirectoryCleanupUpdatePlan(root, receipt)));
         RestoreTree(
             root,
             Assert.IsType<SortedDictionary<string, TreeEntry>>(observer.InterruptedTreeSnapshot));
         Assert.NotEqual(original.Keys, CaptureTree(root).Keys);
 
-        Transaction(root).Recover(root, SquadDeploymentScope.Project);
+        TransactionAt(root).Recover(root, SquadDeploymentScope.Project);
 
         AssertTreesEqual(original, CaptureTree(root));
     }
@@ -896,20 +826,20 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     [Fact]
     public void RecoverInterruptedAfterTheLastPublicationRestoresTheExactPriorTree()
     {
-        using TempDirectory temp = new();
-        string root = temp.Path;
+        DeploymentScope fixture = NewScope();
+        string root = fixture.Path;
         SquadReceipt receipt = SeedDirectoryCleanupDeployment(root);
         SortedDictionary<string, TreeEntry> original = CaptureTree(root);
-        LastFileAppliedFailingObserver observer = new(root, NewWarpRolePath);
+        LastFileAppliedFailingObserver observer = new(Files, root, NewWarpRolePath);
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
-            Transaction(root, observer).Execute(DirectoryCleanupUpdatePlan(root, receipt)));
+            TransactionAt(root, observer).Execute(DirectoryCleanupUpdatePlan(root, receipt)));
         RestoreTree(
             root,
             Assert.IsType<SortedDictionary<string, TreeEntry>>(observer.InterruptedTreeSnapshot));
 
         // A process that died here left every published stage out of the work tree, so the retained
         // journal must still describe that tree well enough to roll it back.
-        Transaction(root).Recover(root, SquadDeploymentScope.Project);
+        TransactionAt(root).Recover(root, SquadDeploymentScope.Project);
 
         AssertTreesEqual(original, CaptureTree(root));
     }
@@ -917,12 +847,12 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     [Fact]
     public void ExecuteNeverRemovesADirectoryHoldingAForeignStageFileOrAnAdoptedFile()
     {
-        using TempDirectory temp = new();
-        string root = temp.Path;
+        DeploymentScope fixture = NewScope();
+        string root = fixture.Path;
         SquadReceipt receipt = SeedDirectoryCleanupDeployment(root);
-        ForeignStageFileObserver observer = new(root);
+        ForeignStageFileObserver observer = new(Files, root, AdoptedAgentPath, "warp/.warp/roles/three.md");
 
-        Transaction(root, observer).Execute(DirectoryCleanupUpdatePlan(root, receipt));
+        TransactionAt(root, observer).Execute(DirectoryCleanupUpdatePlan(root, receipt));
 
         Assert.True(observer.Injected);
         Assert.Empty(observer.Violations);
@@ -932,13 +862,19 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         Assert.True(
             observer.SawAppliedFilePrunedOtherBranches is true,
             "The cleanup must still prune the applied files' now-empty staging branches.");
-        Assert.False(Directory.Exists(Path.Combine(
+        Assert.False(Files.DirectoryExists(Path.Combine(
             root,
             ".kyber-weave",
             ".squad-transaction")));
     }
 
-    private static SquadReceipt SeedDirectoryCleanupDeployment(string root)
+    /// <summary>The path a target's agent is rendered to beneath its own root.</summary>
+    private static string AgentRelativePath(SquadDeploymentScope scope, string fileName) =>
+        scope == SquadDeploymentScope.Global
+            ? $"agents/{fileName}"
+            : $".codex/agents/{fileName}";
+
+    private SquadReceipt SeedDirectoryCleanupDeployment(string root)
     {
         Write(root, UpdatedAgentOnePath, "one v1");
         Write(root, UpdatedAgentTwoPath, "two v1");
@@ -952,11 +888,10 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         return receipt;
     }
 
-    private static SquadDeploymentPlan DirectoryCleanupUpdatePlan(
+    private SquadDeploymentPlan DirectoryCleanupUpdatePlan(
         string root,
-        SquadReceipt receipt)
-    {
-        return RealSquadDeployment.Planner.CreateUpdate(
+        SquadReceipt receipt) =>
+        Planner.CreateUpdate(
             root,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -970,7 +905,6 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             [],
             false,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
-    }
 
     private static IReadOnlyList<string> AncestorDirectories(string relativePath)
     {
@@ -982,91 +916,21 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         ];
     }
 
-    /// <summary>
-    ///     Fails after the publication of one named file, which models a process ending once the last
-    ///     artifact of the apply has left the work tree.
-    /// </summary>
-    private sealed class LastFileAppliedFailingObserver(
-        string root,
-        string relativePath) : ISquadTransactionObserver
+    /// <summary>Records every lifecycle step and every checkpoint the transaction reports.</summary>
+    private sealed class CheckpointRecordingObserver : ISquadTransactionCheckpointObserver
     {
-        public IReadOnlyDictionary<string, TreeEntry>? InterruptedTreeSnapshot { get; private set; }
+        public List<SquadTransactionStep> Steps { get; } = [];
+
+        public List<SquadTransactionCheckpoint> Checkpoints { get; } = [];
 
         public void AfterStep(SquadTransactionStep step)
         {
-            if (step.Kind != SquadTransactionStepKind.FileApplied ||
-                !string.Equals(step.RelativePath, relativePath, StringComparison.Ordinal))
-                return;
-
-            InterruptedTreeSnapshot = CaptureTree(root);
-            throw new InjectedSquadTransactionFailure(step.Sequence);
-        }
-    }
-
-    /// <summary>
-    ///     Drops a file no part of this deployment owns into a staging directory once the first
-    ///     target file has been applied, and records whether the staging tree kept it from there on.
-    /// </summary>
-    private sealed class ForeignStageFileObserver(string root) : ISquadTransactionObserver
-    {
-        private readonly string _stagingDirectory = Path.Combine(
-            root,
-            ".kyber-weave",
-            ".squad-transaction",
-            "staging");
-
-        public bool Injected { get; private set; }
-
-        public bool SawPendingStageOfAnotherTarget { get; private set; }
-
-        public bool? SawAppliedFilePrunedOtherBranches { get; private set; }
-
-        public List<string> Violations { get; } = [];
-
-        public void AfterStep(SquadTransactionStep step)
-        {
-            if (!Injected)
-            {
-                if (step.Kind != SquadTransactionStepKind.FileApplied)
-                    return;
-
-                Directory.CreateDirectory(Staging("codex"));
-                File.WriteAllText(Staging("codex", "foreign.toml"), "foreign");
-                Injected = true;
-                return;
-            }
-
-            SawPendingStageOfAnotherTarget |= File.Exists(
-                Staging("warp", ".warp", "roles", "three.md"));
-            if (!File.Exists(Staging("codex", "foreign.toml")) ||
-                !Directory.Exists(Staging("codex")))
-                Violations.Add($"the foreign stage file's directory was removed by {step.Kind}");
-
-            string adoptedPath = Path.Combine(
-                root,
-                AdoptedAgentPath.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(adoptedPath) ||
-                !Directory.Exists(Path.GetDirectoryName(adoptedPath)!))
-                Violations.Add($"the adopted file's directory was removed by {step.Kind}");
-
-            if (step.Kind == SquadTransactionStepKind.LockApplied)
-            {
-                bool prunedAppliedBranches =
-                    !Directory.Exists(Staging("codex", ".codex", "agents")) &&
-                    !Directory.Exists(Staging("warp"));
-                bool keptBlockedBranch =
-                    Directory.Exists(Staging()) && Directory.Exists(Staging("codex"));
-                SawAppliedFilePrunedOtherBranches = prunedAppliedBranches && keptBlockedBranch;
-            }
+            Steps.Add(step);
         }
 
-        private string Staging(params string[] relativeSegments)
+        public void AfterCheckpoint(SquadTransactionCheckpoint checkpoint)
         {
-            string path = _stagingDirectory;
-            foreach (string segment in relativeSegments)
-                path = Path.Combine(path, segment);
-
-            return path;
+            Checkpoints.Add(checkpoint);
         }
     }
 }

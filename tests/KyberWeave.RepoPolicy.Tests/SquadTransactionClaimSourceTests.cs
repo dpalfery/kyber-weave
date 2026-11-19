@@ -30,6 +30,30 @@ public sealed class SquadTransactionClaimSourceTests
         Assert.DoesNotContain("Notify(", ExtractMethod(source, "PublishStageNoOverwrite"), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void PublishStageNoOverwriteVerifiesAuthorityAtAdjacentMoveBoundary()
+    {
+        string source = Corpus.ReadText("src/KyberWeave.Application/Squad/Deployment/SquadTransaction.cs");
+        string declaration = ExtractMethodDeclaration(source, "PublishStageNoOverwrite");
+        string method = ExtractMethod(source, "PublishStageNoOverwrite");
+
+        Assert.Contains("IntentDocument", declaration, StringComparison.Ordinal);
+        Assert.Contains("ArtifactArea", declaration, StringComparison.Ordinal);
+        Assert.Contains("ArtifactRole", declaration, StringComparison.Ordinal);
+        Assert.Contains("ArtifactFingerprintMatches", method, StringComparison.Ordinal);
+        Assert.Contains("MoveEntryNoOverwrite", method, StringComparison.Ordinal);
+
+        int fingerprint = method.LastIndexOf("ArtifactFingerprintMatches", StringComparison.Ordinal);
+        int move = method.IndexOf("MoveEntryNoOverwrite", fingerprint, StringComparison.Ordinal);
+        Assert.True(fingerprint >= 0 && move > fingerprint);
+        string adjacentBoundary = method[fingerprint..move];
+        Assert.DoesNotContain("Notify", adjacentBoundary, StringComparison.Ordinal);
+        Assert.DoesNotContain("await", adjacentBoundary, StringComparison.Ordinal);
+        Assert.DoesNotContain("PublishIntent", adjacentBoundary, StringComparison.Ordinal);
+        Assert.DoesNotContain("File.", adjacentBoundary, StringComparison.Ordinal);
+        Assert.DoesNotContain("Directory.", adjacentBoundary, StringComparison.Ordinal);
+    }
+
     private static string ExtractMethodDeclaration(string source, string methodName)
     {
         int searchFrom = 0;
