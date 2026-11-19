@@ -1588,8 +1588,8 @@ test pins it.
    conflicts with a repository rule is recorded as a `## Decisions` row with a recommended resolution
    and its reason; the user's explicit requirement is the recommended winner unless keeping it would
    break security or a hard repository ban. Nothing is reconciled silently: run 11 met "validate that
-   database values reach the display" against a test standard that mocks every Playwright API call and
-   split it into two mocked halves without recording the conflict as a decision for the owner.
+   database values reach the display" against a test standard that mocks every Playwright API call, and
+   quietly replaced the requested proof with two mocked halves.
 
 3. **A check finding is fixed, not escalated.** An agent that runs a check — `docs-dev` on
    `docs validate` and `docs drift`, `architect` on the same gates, a developer on its task gate —
