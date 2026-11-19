@@ -1082,6 +1082,10 @@ packet, and neither worker's return was ever recorded.
 | Background (`mode: "background"`) | the `task` call before it runs | `subagentStop` at the end of each of the agent's turns, not the launch result | the stored pre event: the hook remembers it by call id, else digest, under `background/` |
 | Batched / parallel | **each** `task` call of a `toolCalls` array, one pre event per call | one `postToolUse` per call | each call's own id, so siblings cannot claim each other's pre event |
 | Lens fan-out | each `lens.spawn` dispatch in the turn's batch | each lens's `subagentStop` or post | as batched: one pre event per lens |
+
+A batch is answered with one document, which can carry one inserted prompt, so only the first dispatch that
+needs one is expanded; every dispatch call in the batch is nevertheless judged and recorded, and one refusal
+refuses the batch.
 | `serve` (MCP fallback) | the asserted dispatch | the asserted return, which names its own `pre-id` | the asserted `pre-id`, else as above |
 
 The sites that pair, all through `ArbiterLedgerQueries`:
