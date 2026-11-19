@@ -11,7 +11,7 @@ namespace KyberWeave.Tests.Corpus;
 /// </remarks>
 public sealed class CheckoutCorpusSource : ICorpusSource
 {
-    private readonly IFileSystem _files;
+    private readonly IWritableFileSystem _files;
 
     /// <summary>Gets the corpus of the checkout this test process runs from.</summary>
     public static ICorpusSource Checkout { get; } = new CheckoutCorpusSource(KyberWeaveTestPaths.ToolRoot, new PhysicalFileSystem());
@@ -19,7 +19,7 @@ public sealed class CheckoutCorpusSource : ICorpusSource
     /// <summary>Creates a corpus over one checkout.</summary>
     /// <param name="root">The repository root's absolute path.</param>
     /// <param name="files">The file system to read it through.</param>
-    public CheckoutCorpusSource(string root, IFileSystem files)
+    public CheckoutCorpusSource(string root, IWritableFileSystem files)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         Root = Path.GetFullPath(root);
@@ -45,6 +45,13 @@ public sealed class CheckoutCorpusSource : ICorpusSource
 
     /// <inheritdoc />
     public byte[] ReadBytes(string relativePath) => _files.ReadAllBytes(ResolveFile(relativePath));
+
+    /// <inheritdoc />
+    public string? LinkTarget(string relativePath)
+    {
+        string path = CorpusPath.Resolve(Root, CorpusPath.Normalize(relativePath));
+        return _files.GetFinalLinkTarget(path);
+    }
 
     /// <summary>Resolves a readable file, raising the seam's one "no such file" error for anything else.</summary>
     /// <param name="relativePath">The file's path relative to <see cref="Root"/>.</param>
