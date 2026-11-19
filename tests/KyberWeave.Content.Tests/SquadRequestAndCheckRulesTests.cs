@@ -64,14 +64,19 @@ public sealed class SquadRequestAndCheckRulesTests
     ///     contract cannot reintroduce a filtered or summarised request.
     /// </summary>
     [Theory]
-    [InlineData(IntakePath, "Assessment")]
-    [InlineData(SpecPath, "Route by persisted state")]
-    public void EveryPathThatCarriesAUserRequestForwardsItVerbatim(string path, string heading)
+    [InlineData(IntakePath, "Assessment", "verbatim, never your summary of it")]
+    [InlineData(SpecPath, "Route by persisted state", "verbatim — never your summary of it")]
+    [InlineData(PlanPathPath, "Route by lifecycle", "send the exact `PLAN_FILE` to `architect`")]
+    public void EveryPathThatCarriesAUserRequestForwardsItUnfiltered(
+        string path,
+        string heading,
+        string forwardingRule)
     {
         string section = Section(path, heading);
 
-        Assert.Contains("verbatim", section, StringComparison.Ordinal);
-        Assert.Contains("never your summary", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(forwardingRule, section, StringComparison.Ordinal);
+        Assert.DoesNotContain("summarize", section, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("summarise", section, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
