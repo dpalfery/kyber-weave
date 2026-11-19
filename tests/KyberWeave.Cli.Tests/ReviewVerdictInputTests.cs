@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using KyberWeave.Cli;
 using KyberWeave.Core.Review;
 using Xunit;
 using static KyberWeave.Tests.ReviewDiagnosticAssert;
@@ -622,6 +621,6 @@ public sealed class ReviewVerdictInputTests : IDisposable
     private CapturedConsoleExecution<int> Verdict(params string[] options)
     {
         string[] arguments = ["review", "verdict", _repo, .. options, "--format", "json"];
-        return ProcessConsoleCapture.Run(() => CliApplication.Create(_services.Register).Run(arguments));
+        return _services.Run(CommandAppFixture.ReviewVerdict(_services.Register, _services.Ansi), arguments);
     }
 }
