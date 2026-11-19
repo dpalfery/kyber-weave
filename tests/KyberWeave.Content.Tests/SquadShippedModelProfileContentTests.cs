@@ -21,7 +21,7 @@ public sealed class SquadShippedModelProfileContentTests
     [Theory]
     [InlineData("architect", "claude", "opus")]
     [InlineData("architect", "codex", "gpt-6.1-sol")]
-    [InlineData("architect", "copilot", "Claude Opus 5.5 (copilot)")]
+    [InlineData("architect", "copilot", "GPT-6.2 Sol (copilot)")]
     [InlineData("architect", "cursor", "claude-sonnet-5-5[effort=high]")]
     [InlineData("architect", "kilo", "zai-coding-plan/glm-5.3")]
     [InlineData("architect", "opencode", "zai-coding-plan/glm-5.3")]
