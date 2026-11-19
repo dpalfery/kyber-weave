@@ -398,8 +398,9 @@ public sealed partial class StandardsFolderMigration
     /// <param name="to">The relative path the standard had before.</param>
     private void MoveBack(string from, string to)
     {
-        string source = Absolute(from);
-        string target = Absolute(to);
+        // The same containment and link checks the forward write made: an undo is still a write.
+        string source = RequireWritable(from);
+        string target = RequireWritable(to);
         if (_files.FileExists(source) && !_files.FileExists(target))
         {
             _files.MoveFile(source, target, overwrite: false);
@@ -410,7 +411,7 @@ public sealed partial class StandardsFolderMigration
     /// <param name="relativePath">The stub's repository-relative path.</param>
     private void DeleteIfPresent(string relativePath)
     {
-        string path = Absolute(relativePath);
+        string path = RequireWritable(relativePath);
         if (_files.FileExists(path))
         {
             _files.DeleteFile(path);
@@ -422,6 +423,7 @@ public sealed partial class StandardsFolderMigration
     /// <param name="previous">Its text before the run, or null when it did not exist.</param>
     private void RestoreAgents(string path, string? previous)
     {
+        RequireWritable(path, path);
         if (previous is null)
         {
             if (_files.FileExists(path))
@@ -435,7 +437,7 @@ public sealed partial class StandardsFolderMigration
         _files.WriteAllTextAtomic(path, previous);
     }
 
-    /// <summary>Undoes a failed run's writes newest-first, unless the last one is undone first.</summary>
+    /// <summary>Undoes a failed run's writes in the reverse order they were made.</summary>
     /// <param name="undo">Each write's inverse, in the order the writes happened.</param>
     private static void RollBack(List<Action> undo)
     {
@@ -445,13 +447,10 @@ public sealed partial class StandardsFolderMigration
             {
                 undo[index]();
             }
-            catch (Exception exception) when (exception is IOException
-                                                  or UnauthorizedAccessException
-                                                  or ArgumentException
-                                                  or InvalidOperationException)
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                // The original failure is the one the caller must see; a rollback that also fails
-                // leaves at most the state the failure already produced.
+                // The original failure is the one the caller must see, so nothing an undo raises —
+                // including a type the forward path never expected — may replace it.
             }
         }
     }
