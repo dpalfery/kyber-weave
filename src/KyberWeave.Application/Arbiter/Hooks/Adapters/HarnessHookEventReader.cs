@@ -125,9 +125,30 @@ public static class HarnessHookEventReader
         }
 
         return value.ValueKind == JsonValueKind.String
-            && JsonNode.Parse(value.GetString() ?? string.Empty) is JsonObject parsed
+            && TryParseObject(value.GetString()) is { } parsed
                 ? JsonSerializer.SerializeToElement(parsed)
                 : default;
+    }
+
+    /// <summary>
+    /// The arguments a harness sent as a JSON string, or null when the string is empty or not a JSON object: a
+    /// malformed argument string is missing input, which reads as no arguments rather than failing the hook.
+    /// </summary>
+    private static JsonObject? TryParseObject(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonNode.Parse(text) as JsonObject;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static string? ArgText(JsonElement arguments, string name) =>

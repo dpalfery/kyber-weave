@@ -138,6 +138,21 @@ public sealed class HarnessHookEventReaderTests
         Assert.Equal("/repo", hookEvent.Cwd);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("not json")]
+    [InlineData("{\"agent_type\":")]
+    public void ToolArgsThatAreNotJson_ReadAsNoArguments(string toolArgs)
+    {
+        string payload = JsonSerializer.Serialize(new { sessionId = "s1", cwd = "/repo", toolName = "task", toolArgs });
+
+        HookEvent hookEvent = Read("copilot-cli", payload);
+
+        Assert.Equal("/repo", hookEvent.Cwd);
+        Assert.Null(hookEvent.Prompt);
+        Assert.Equal(JsonValueKind.Undefined, hookEvent.Arguments.ValueKind);
+    }
+
     private static HookEvent Read(string harness, string payload, string? renderedCaller = null)
     {
         using JsonDocument document = JsonDocument.Parse(payload);
