@@ -267,7 +267,7 @@ public sealed class FakeSquadGlobalRootResolver : ISquadGlobalRootResolver
         ? _roots.TryGetValue(target, out string? root)
             ? root
             : throw new ArgumentOutOfRangeException(nameof(target), target, "No root mapped for target.")
-        : _home + "/." + SquadTargetCatalog.GetToken(target);
+        : Path.Combine(_home, "." + SquadTargetCatalog.GetToken(target));
 
     /// <inheritdoc />
     public string? HomeDirectory => _home;
