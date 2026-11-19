@@ -166,8 +166,9 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             };
         }
 
-        if (!string.Equals(GetString(payload, "toolName"), "task", StringComparison.Ordinal)
-            || payload.TryGetProperty("toolResult", out _))
+        if (!string.Equals(CliToolName(payload), "task", StringComparison.Ordinal)
+            || payload.TryGetProperty("toolResult", out _)
+            || (FirstCliCall(payload) is { } batchCall && batchCall.TryGetProperty("result", out _)))
         {
             return null;
         }
@@ -230,6 +231,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         payload.ValueKind == JsonValueKind.Object
         && !payload.TryGetProperty("toolName", out _)
         && !payload.TryGetProperty("hook_event_name", out _)
+        && !payload.TryGetProperty("toolCalls", out _)
         && !string.IsNullOrWhiteSpace(GetString(payload, "agentId"));
 
     private string HandleSubagentStop(JsonElement payload, KyberWeaveConfig config, HookContext context)
@@ -481,7 +483,8 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         string prompt = GetNodeString(args, "prompt")
             ?? throw new InvalidOperationException(
                 "Malformed Copilot CLI hook event: toolArgs carry no prompt.");
-        bool isPost = payload.TryGetProperty("toolResult", out _);
+        bool isPost = payload.TryGetProperty("toolResult", out _)
+            || (FirstCliCall(payload) is { } call && call.TryGetProperty("result", out _));
 
         if (!isPost)
         {
@@ -616,7 +619,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 
     private static bool IsCliPassThrough(JsonElement payload)
     {
-        string? toolName = GetString(payload, "toolName");
+        string? toolName = CliToolName(payload);
         if (!string.Equals(toolName, "task", StringComparison.Ordinal))
         {
             return true;
@@ -659,17 +662,40 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             return CopilotSchema.Local;
         }
 
-        if (payload.TryGetProperty("toolName", out _))
+        if (payload.TryGetProperty("toolName", out _) || HasCliCall(payload))
         {
             return CopilotSchema.Cli;
         }
 
         throw new InvalidOperationException(
-            "Malformed Copilot hook event: neither hook_event_name (Local schema) nor toolName (CLI schema) is present.");
+            "Malformed Copilot hook event: neither hook_event_name (Local schema) nor toolName or toolCalls (CLI schema) is present.");
     }
 
     private static bool IsLocalDispatchTool(string? tool) =>
         string.Equals(tool, "runSubagent", StringComparison.Ordinal);
+
+    /// <summary>Whether the payload carries a Copilot CLI 1.x <c>toolCalls</c> batch.</summary>
+    private static bool HasCliCall(JsonElement payload) => FirstCliCall(payload) is not null;
+
+    /// <summary>The first call of a CLI <c>toolCalls</c> batch, or null for the older single-call shape.</summary>
+    private static JsonElement? FirstCliCall(JsonElement payload)
+    {
+        if (payload.ValueKind == JsonValueKind.Object
+            && payload.TryGetProperty("toolCalls", out JsonElement batch)
+            && batch.ValueKind == JsonValueKind.Array
+            && batch.GetArrayLength() > 0
+            && batch[0].ValueKind == JsonValueKind.Object)
+        {
+            return batch[0];
+        }
+
+        return null;
+    }
+
+    /// <summary>The tool name of a CLI event, whether it carries one call or a batch.</summary>
+    private static string? CliToolName(JsonElement payload) =>
+        GetString(payload, "toolName")
+        ?? (FirstCliCall(payload) is { } call ? GetString(call, "name") : null);
 
     private static JsonElement RequireToolInput(JsonElement payload)
     {
@@ -722,7 +748,14 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 
     private static JsonObject? TryParseCliArgs(JsonElement payload)
     {
-        if (!payload.TryGetProperty("toolArgs", out JsonElement toolArgs))
+        // Copilot CLI 1.x reports a pre-tool-use event as a `toolCalls` batch, each call carrying its own `args`.
+        // Older events carry one `toolArgs`. Both are the same dispatch to every caller below.
+        JsonElement toolArgs = payload.TryGetProperty("toolArgs", out JsonElement single)
+            ? single
+            : FirstCliCall(payload) is { } call && call.TryGetProperty("args", out JsonElement callArgs)
+                ? callArgs
+                : default;
+        if (toolArgs.ValueKind == JsonValueKind.Undefined)
         {
             return null;
         }

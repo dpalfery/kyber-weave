@@ -97,6 +97,44 @@ public sealed class CopilotHookAdapterTests
         return (exit, stdout.ToString(), log.ToString());
     }
 
+    /// <summary>
+    /// Copilot CLI 1.x reports a pre-tool-use event as a `toolCalls` batch with neither `hook_event_name` nor
+    /// `toolName`. The adapter must classify the dispatch from the batch rather than throw, which the host would
+    /// answer with an allow and no rule evaluation.
+    /// </summary>
+    [Fact]
+    public void Cli_PreDispatch_ToolCallsBatch_IsEvaluatedAndDenied()
+    {
+        const string stdin =
+            """
+            {
+              "sessionId": "805cfa95-b5df-4e3f-8044-3cad0179d3a6",
+              "cwd": "/Users/dave/git/personal/factory/hotshot-logistics-demo",
+              "toolCalls": [
+                {
+                  "id": "call_Ts325c8Tu1vdpBpB2jp8ZcpF",
+                  "name": "task",
+                  "args": {
+                    "agent_type": "dev-medium",
+                    "name": "dashboard-plan",
+                    "prompt": "KYBER-ARBITER: true\nTASK: T1\n\nDo the work."
+                  }
+                }
+              ]
+            }
+            """;
+        const string envelope = "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate\nANSWER: adds-work (step 0)";
+        ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
+
+        (int exit, string stdout, string log) = Run(CopilotHookAdapter.CliToken, stdin, "conductor", engine);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(1, engine.PreCalls);
+        Assert.Equal("dev-medium", engine.SeenPreTarget);
+        Assert.Contains("\"permissionDecision\":\"deny\"", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("KW-ARB-HOOK-001", log, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Local_PreDispatch_Deny_WritesLocalDenyShape()
     {
