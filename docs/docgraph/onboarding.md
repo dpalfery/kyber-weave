@@ -61,12 +61,12 @@ have is left byte-for-byte unchanged and reported. The four role folders (`condu
 
 An existing host that holds each standard as `README.md` is not blocked: for two minor releases
 `docs validate` reports the old name and a standard whose headings are not the six as warnings, each
-naming the two commands. `kyber-weave docs standards migrate` renames the files, adds any of the four
-a folder lacks, and reshapes a standard whose headings are not the six — each authored section
+naming the command. `kyber-weave docs standards migrate` renames the files, adds any of the four
+a folder lacks, reshapes a standard whose headings are not the six — each authored section
 becomes a `###` under the heading it best fits, every move is printed, and no authored text is
-dropped. `docs init` then regenerates the Config Reg block, whose entries may still name the legacy
-files. A standard already under the six headings is left byte for byte alone, and a second run
-changes nothing.
+dropped — and re-renders the Config Reg block, whose entries named the legacy files. That one run
+clears the warning period. A standard already under the six headings is left byte for byte alone,
+and a second run changes nothing.
 
 ### Review gates
 

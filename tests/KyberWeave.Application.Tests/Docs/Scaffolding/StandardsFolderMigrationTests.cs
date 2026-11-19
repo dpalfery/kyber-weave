@@ -74,11 +74,11 @@ public sealed class StandardsFolderMigrationTests
         Run `dotnet build`.
         """;
 
-    private static readonly OntologyConfig Declared = new()
+    private static readonly KyberWeaveConfig Declared = KyberWeaveConfigDefaults.Product.WithOntology(new()
     {
         Technologies = ["csharp"],
         Roles = ["reviewer"]
-    };
+    });
 
     private readonly InMemoryFileSystem _disk = new();
     private readonly FakePathResolver _paths;
@@ -89,7 +89,7 @@ public sealed class StandardsFolderMigrationTests
     private StandardsFolderMigration Migration(string repoRoot = "repo") =>
         Migration(repoRoot, Declared);
 
-    private StandardsFolderMigration Migration(string repoRoot, OntologyConfig config) =>
+    private StandardsFolderMigration Migration(string repoRoot, KyberWeaveConfig config) =>
         new(_disk, repoRoot, config, _paths, _environment, new FakeIdGenerator());
 
     /// <summary>A path seam that records every path a caller resolves, delegating the answer.</summary>
@@ -172,11 +172,12 @@ public sealed class StandardsFolderMigrationTests
     [Fact]
     public void ItResolvesAFolderThroughADotSegmentBeforeReadingIt()
     {
-        OntologyConfig config = new()
+        OntologyConfig ontology = new()
         {
             DocsRoots = ["6-Docs/../6-Docs"],
             Technologies = ["csharp"]
         };
+        KyberWeaveConfig config = KyberWeaveConfigDefaults.Product.WithOntology(ontology);
         _disk.CreateDirectory(Folder);
         _disk.WriteAllText($"{Folder}/README.md", LegacyStandard);
 

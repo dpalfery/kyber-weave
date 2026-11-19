@@ -18,8 +18,9 @@ public sealed class DocsStandardsMigrateSettings : DocsSettings
 }
 
 /// <summary>
-/// Renames each legacy standards <c>README.md</c> to the folder-prefixed standard and writes
-/// the four files a technology or role folder holds.
+/// Renames each legacy standards <c>README.md</c> to the folder-prefixed standard, writes
+/// the four files a technology or role folder holds, and re-renders the Config Reg block
+/// those renames make stale, so one run leaves the repository valid.
 /// </summary>
 public sealed class DocsStandardsMigrateCommand(
     IKyberWeaveConfigRepository configs,
@@ -36,17 +37,25 @@ public sealed class DocsStandardsMigrateCommand(
         CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
-        if (!DocsCommandComposition.TryResolveConfig(configs, settings, report, out _, out OntologyConfig ontology))
+        if (!DocsCommandComposition.TryResolveConfig(
+                configs, settings, report, out KyberWeaveConfig config, out _))
         {
             CommandHelpers.Finish(console, report, settings, "docs standards migrate", "Folder");
             return 1;
         }
 
-        StandardsFolderMigration migration = new(files, settings.Path, ontology, paths, environment, ids);
+        StandardsFolderMigration migration = new(files, settings.Path, config, paths, environment, ids);
         StandardsFolderMigrationResult result;
         try
         {
             result = migration.Run(settings.DryRun);
+        }
+        catch (InvalidDataException exception)
+        {
+            console.MarkupLine(
+                "[red]The Config Reg block in AGENTS.md could not be refreshed, so nothing was " +
+                "migrated.[/] " + Markup.Escape(exception.Message));
+            return 1;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -56,7 +65,7 @@ public sealed class DocsStandardsMigrateCommand(
             return 1;
         }
 
-        if (result.Changes.Count == 0)
+        if (result.Changes.Count == 0 && !result.ConfigRegRefreshed)
         {
             console.MarkupLine(
                 "[green]Nothing to migrate.[/] Every standards folder already has its four " +
@@ -93,6 +102,12 @@ public sealed class DocsStandardsMigrateCommand(
             console.MarkupLine(
                 $"  [green]moved[/] '{Markup.Escape(move.Heading)}' under " +
                 $"'## {Markup.Escape(move.Under)}' in {Markup.Escape(move.Standard)}");
+        }
+
+        if (result.ConfigRegRefreshed)
+        {
+            console.MarkupLine(
+                "  [green]refreshed[/] AGENTS.md (the generated Config Reg block only)");
         }
 
         if (settings.DryRun)

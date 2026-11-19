@@ -104,6 +104,38 @@ public class DocsStandardsMigrateCommandTests
         Assert.Contains("could not be read or written", _host.Output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The migration renames the standard a registry property names, so the command reports the
+    /// block it re-rendered rather than leaving the operator to run <c>docs init</c> afterwards.
+    /// Only the generated region changes; hand-authored text around it stays byte for byte.
+    /// </summary>
+    [Fact]
+    public void TheCommandRefreshesTheRegistryBlockTheRenameMakesStale()
+    {
+        const string staleAgents = """
+            # Working in this repository
+
+            Hand-authored text stays.
+
+            <!-- KYBER_WEAVE_CONFIG_REG_START -->
+            ## Repository Configuration & Paths Registry (Config Reg)
+
+            - **<csharp-coding-standard>**: `6-Docs/standards/csharp/README.md`
+            <!-- KYBER_WEAVE_CONFIG_REG_END -->
+            """;
+        _host.WriteInRepo(".kyber-weave/kyber-weave.yml", DeclaredConfig);
+        _host.WriteInRepo("6-Docs/standards/csharp/README.md", LegacyCsharp);
+        _host.WriteInRepo("AGENTS.md", staleAgents);
+
+        int exit = Run();
+
+        Assert.Equal(0, exit);
+        Assert.Contains("refreshed AGENTS.md", _host.Output, StringComparison.Ordinal);
+        string agents = _host.Files.ReadAllText(_host.InRepo("AGENTS.md"));
+        Assert.Contains("`6-Docs/standards/csharp/csharp.standards.md`", agents, StringComparison.Ordinal);
+        Assert.Contains("Hand-authored text stays.", agents, StringComparison.Ordinal);
+    }
+
     private int Run() =>
         CommandAppFixture
             .DocsStandardsMigrate(_host.Register, _host.Console)

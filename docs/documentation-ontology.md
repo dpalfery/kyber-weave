@@ -146,7 +146,7 @@ what it is and whose it is.
 name one parent it `builds-on` (React on TypeScript, Tauri on Rust), and a task in the child then
 receives the parent's rules and skills too. A folder whose standard is still `README.md` keeps
 working for at least two minor releases: every finding the rename would raise is a warning naming
-`kyber-weave docs standards migrate` and then `kyber-weave docs init`, so an un-upgraded host still
+`kyber-weave docs standards migrate`, which clears them in one run, so an un-upgraded host still
 runs. The file names, checks and migration are in
 [Coding standards](../standards/README.md) and the
 [governance gates](docgraph/governance.md).

@@ -36,10 +36,15 @@ public sealed record StandardSectionMove(string Standard, string Heading, string
 /// <param name="Changes">Repository-relative paths, in the order they are applied.</param>
 /// <param name="DryRun">True when the caller asked for the plan only.</param>
 /// <param name="Moves">The authored sections a reshape placed under a required heading.</param>
+/// <param name="ConfigRegRefreshed">
+/// True when the root <c>AGENTS.md</c> registry block was re-rendered because the migration
+/// made it stale; in a dry run, true when it would have been.
+/// </param>
 public sealed record StandardsFolderMigrationResult(
     IReadOnlyList<StandardsFolderChange> Changes,
     bool DryRun,
-    IReadOnlyList<StandardSectionMove> Moves);
+    IReadOnlyList<StandardSectionMove> Moves,
+    bool ConfigRegRefreshed = false);
 
 /// <summary>
 /// Renames a host's standards files to their prefixed names and writes the four files a
@@ -53,24 +58,36 @@ public sealed record StandardsFolderMigrationResult(
 /// A missing file is written as a stub whose frontmatter states which scope it belongs to and
 /// whose frontmatter's owner is copied from the folder's standard, so the corpus stays within
 /// its catalog vocabulary. Running it twice changes nothing.
+///
+/// The rename also moves what each <c>&lt;technology&gt;-coding-standard</c> registry property
+/// names, so the same run re-renders the generated block in the root <c>AGENTS.md</c>. Without
+/// that, one command would leave the repository invalid: the block would publish paths the
+/// rename removed, and only <c>docs init</c> would clear the finding.
 /// </remarks>
 public sealed partial class StandardsFolderMigration
 {
     /// <summary>The command a caller runs to reach this migration.</summary>
     public const string Command = DocsLayout.MigrateStandardsCommand;
 
+    /// <summary>The one file the configuration registry is rendered into.</summary>
+    private const string AgentsFilePath = "AGENTS.md";
+
     private readonly IWritableFileSystem _files;
     private readonly IPathResolver _paths;
     private readonly IProcessEnvironment _environment;
     private readonly IIdGenerator _ids;
-    private readonly OntologyConfig _config;
+    private readonly KyberWeaveConfig _config;
+    private readonly OntologyConfig _ontology;
     private readonly string _repoRoot;
     private readonly TimeProvider _time;
 
     /// <summary>Creates the migration over the seams it reads and writes through.</summary>
     /// <param name="files">Reads and writes the repository's files.</param>
     /// <param name="repoRoot">The repository whose standards folders are migrated.</param>
-    /// <param name="config">The ontology that declares the technologies and roles.</param>
+    /// <param name="config">
+    /// The host configuration: its ontology declares the technologies and roles, and its
+    /// registry settings render the block this type refreshes.
+    /// </param>
     /// <param name="paths">Turns the repository root into a full path and checks a write's containment.</param>
     /// <param name="environment">Supplies the base directory a relative root is resolved against.</param>
     /// <param name="ids">Names the temporary file a stub is written through.</param>
@@ -78,7 +95,7 @@ public sealed partial class StandardsFolderMigration
     public StandardsFolderMigration(
         IWritableFileSystem files,
         string repoRoot,
-        OntologyConfig config,
+        KyberWeaveConfig config,
         IPathResolver paths,
         IProcessEnvironment environment,
         IIdGenerator ids,
@@ -93,6 +110,7 @@ public sealed partial class StandardsFolderMigration
         _files = files;
         _repoRoot = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
         _config = config;
+        _ontology = config.Ontology;
         _paths = paths;
         _environment = environment;
         _ids = ids;
@@ -103,14 +121,23 @@ public sealed partial class StandardsFolderMigration
     public IReadOnlyList<StandardsFolderChange> Plan() => Run(dryRun: true).Changes;
 
     /// <summary>Plans and, unless <paramref name="dryRun"/>, writes the migration.</summary>
+    /// <remarks>
+    /// The registry block is rendered, and its write refused, before the first standards write.
+    /// An unreadable, unclosed or linked <c>AGENTS.md</c> is then a refusal that leaves the
+    /// repository as it was, rather than a failure reported after the standards moved.
+    /// </remarks>
     public StandardsFolderMigrationResult Run(bool dryRun = false)
     {
         List<StandardsFolderChange> changes = [];
         List<StandardSectionMove> moves = [];
+        string? refreshedAgents = PlanConfigRegRefresh();
+        string? agentsTarget = refreshedAgents is not null && !dryRun
+            ? RequireWritable(AgentsFilePath)
+            : null;
 
         foreach (string scope in Scopes())
         {
-            foreach (string docsRoot in _config.DocsRoots)
+            foreach (string docsRoot in _ontology.DocsRoots)
             {
                 string folder = $"{docsRoot}/{DocsLayout.Standards}/{scope}";
                 if (!_files.DirectoryExists(Absolute(folder))) continue;
@@ -187,7 +214,36 @@ public sealed partial class StandardsFolderMigration
             }
         }
 
-        return new StandardsFolderMigrationResult(changes, dryRun, moves);
+        if (agentsTarget is not null && refreshedAgents is not null)
+        {
+            _files.WriteAllTextAtomic(agentsTarget, refreshedAgents);
+            VerifyStillWritable(agentsTarget);
+        }
+
+        return new StandardsFolderMigrationResult(
+            changes, dryRun, moves, ConfigRegRefreshed: refreshedAgents is not null);
+    }
+
+    /// <summary>
+    /// The root <c>AGENTS.md</c> with its generated registry block re-rendered, or null when
+    /// the file has no block to refresh or the block already matches configuration.
+    /// </summary>
+    /// <remarks>
+    /// Only the region between the markers is rewritten, and only where the repository already
+    /// has one: a standards migration does not hand a registry to a repository that never
+    /// adopted one, which is the same line <c>docs validate</c> draws. Everything outside the
+    /// markers, and <c>.kyber-weave/kyber-weave.yml</c> itself, is left alone.
+    /// </remarks>
+    private string? PlanConfigRegRefresh()
+    {
+        string existing = ReadOrNull(AgentsFilePath) ?? string.Empty;
+        if (!ConfigRegMarkdown.ContainsBlock(existing)) return null;
+
+        string block = ConfigRegMarkdown.Render(
+            _config.ConfigReg.Resolve(_ontology), _config.ConfigReg.Autonomy);
+        string updated = ConfigRegMarkdown.Splice(existing, block);
+
+        return string.Equals(existing, updated, StringComparison.Ordinal) ? null : updated;
     }
 
     /// <summary>
@@ -342,7 +398,7 @@ public sealed partial class StandardsFolderMigration
     }
 
     private IEnumerable<string> Scopes() =>
-        _config.Technologies.Concat(_config.Roles).Distinct(StringComparer.Ordinal);
+        _ontology.Technologies.Concat(_ontology.Roles).Distinct(StringComparer.Ordinal);
 
     private string Stub(string scope, string kind, string? owner)
     {
@@ -354,7 +410,7 @@ public sealed partial class StandardsFolderMigration
             "rules" => "rule",
             _ => "skill"
         };
-        string scopeKey = _config.Roles.Contains(scope, StringComparer.Ordinal)
+        string scopeKey = _ontology.Roles.Contains(scope, StringComparer.Ordinal)
             ? "role"
             : "technology";
         string title = kind == "standard" ? $"{scope} standard" : $"{scope} {kind}";

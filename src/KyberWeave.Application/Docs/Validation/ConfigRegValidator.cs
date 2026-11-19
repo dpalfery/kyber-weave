@@ -265,8 +265,8 @@ public sealed partial class ConfigRegValidator
             $"{string.Join(", ", upgradeScopes)} as README.md: the project has not run the " +
             "standards migration, so this is the warning period, not a configuration fault.",
             Subject, AgentsFilePath,
-            $"Run '{DocsLayout.MigrateStandardsCommand}', then 'kyber-weave docs init', to rename " +
-            "the standards and regenerate this block."));
+            $"Run '{DocsLayout.MigrateStandardsCommand}', which renames the standards and " +
+            "re-renders this block."));
     }
 
     private void ReportContradiction(DiagnosticReport report) =>

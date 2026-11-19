@@ -59,6 +59,10 @@ internal static class DocsCommandComposition
                 Harness = config.Harness,
                 DocsAnalysis = config.DocsAnalysis.ResolveFor(ontology),
                 Squad = config.Squad,
+                // The registry is host state, not a docs-root setting: dropping it here would
+                // re-render a command's Config Reg block from product defaults and delete the
+                // entries the host wrote.
+                ConfigReg = config.ConfigReg,
                 Arbiter = Core.Arbiter.ArbiterConfigDefaults.Product
             };
             return true;

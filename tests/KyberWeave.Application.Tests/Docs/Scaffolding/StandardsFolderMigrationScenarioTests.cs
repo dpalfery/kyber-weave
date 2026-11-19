@@ -16,11 +16,11 @@ public class StandardsFolderMigrationScenarioTests
 {
     private readonly MemoryDocsHost _host = new();
 
-    private static readonly OntologyConfig Declared = new()
+    private static readonly KyberWeaveConfig Declared = KyberWeaveConfigDefaults.Product.WithOntology(new()
     {
         Technologies = ["csharp"],
         Roles = ["reviewer"]
-    };
+    });
 
     private const string LegacyCsharp = """
         ---
@@ -492,6 +492,34 @@ public class StandardsFolderMigrationScenarioTests
             Migration(_host.Repo).Run());
 
         Assert.Contains("csharp.standards.md", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The registry block is re-rendered in place, so an <c>AGENTS.md</c> kept as a symbolic
+    /// link is refused rather than rewritten at its target, and the refusal happens before a
+    /// single standard moves.
+    /// </summary>
+    [Fact]
+    public void AnAgentsFileKeptAsASymbolicLinkIsRefusedBeforeAnyStandardMoves()
+    {
+        string shared = Path.Combine(_host.Repo, "shared", "agents.md");
+        _host.Files.CreateDirectory(Path.GetDirectoryName(shared)!);
+        _host.Files.WriteAllText(
+            shared,
+            "<!-- KYBER_WEAVE_CONFIG_REG_START -->\n" +
+            "- **<csharp-coding-standard>**: `6-Docs/standards/csharp/README.md`\n" +
+            "<!-- KYBER_WEAVE_CONFIG_REG_END -->\n");
+        _host.Files.CreateFileLink(Path.Combine(_host.Repo, "AGENTS.md"), shared);
+        string folder = Path.Combine(_host.Repo, "6-Docs", "standards", "csharp");
+        _host.Files.CreateDirectory(folder);
+        _host.Files.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharp);
+
+        IOException error = Assert.Throws<IOException>(() => Migration(_host.Repo).Run());
+
+        Assert.Contains("symbolic link", error.Message, StringComparison.Ordinal);
+        Assert.True(_host.Files.FileExists(Path.Combine(folder, "README.md")));
+        Assert.Contains(
+            "README.md", _host.Files.ReadAllText(shared), StringComparison.Ordinal);
     }
 
     private static IReadOnlyList<string> LevelTwoHeadings(string text) =>
