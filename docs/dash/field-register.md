@@ -516,6 +516,53 @@ Copilot ingests over OTLP through `CopilotAdapter` (`OtlpSpan`, `OtlpLog`, `Otlp
 | `RawSpan` | `Kind` | mapped | `record.kind` | Normalized OTLP span kind. |
 | `RawSpan` | `Timestamp` | mapped | `record.started_at_utc`, `quarantined_span_timestamp.timestamp_utc` | Optional ISO start timestamp. |
 
+## copilot-cli
+
+Copilot CLI ingests local `~/.copilot/session-state/<id>/events.jsonl` session journals via `CopilotCliJournalReader` and `CopilotCliMapper` into `CollectedBatch` (`CopilotCliJournalDocument`, `CopilotCliJournalEvent`, `CopilotCliContextInfo`, `CopilotCliToolRequest`, `CopilotCliJournalProblem`). Draft `pending-session:*` journals are skipped, and every `assistant.message` emits an `llm.invoke` record even when `outputTokens` is absent (omitting the `TokenClass.Output` row rather than synthesizing zero).
+
+| Native type | Property | Disposition | Target mapping | Reason |
+|---|---|---|---|---|
+| `CopilotCliJournalDocument` | `SessionId` | mapped | `session.session_id`, `session.native_session_id`, `record_session_link.session_key` | Native session id from `session.start` or parent directory name. |
+| `CopilotCliJournalDocument` | `IsPendingSession` | dropped | — | Draft-session filter flag causing `pending-session:*` journals to be skipped without persistence. |
+| `CopilotCliJournalDocument` | `InitialModel` | mapped | `record_model.model_id` | Initial model from `session.start` (`selectedModel`/`model`), active until `session.model_change`. |
+| `CopilotCliJournalDocument` | `CopilotVersion` | dropped | — | Copilot CLI version string from `session.start` has no column on `session` or `record` in `RelationalSchemaCatalog`. |
+| `CopilotCliJournalDocument` | `Title` | mapped | `session_title.title` | Optional session title extracted from session events. |
+| `CopilotCliJournalDocument` | `InitialContext` | mapped | nested: CopilotCliContextInfo | Initial workspace snapshot from `session.start`. |
+| `CopilotCliJournalDocument` | `Events` | mapped | nested: CopilotCliJournalEvent | Ordered journal events processed by `CopilotCliMapper`. |
+| `CopilotCliJournalDocument` | `ParseProblems` | mapped | nested: CopilotCliJournalProblem | Non-fatal line-level JSONL parse diagnostics emitted as `ingest_problem` rows. |
+| `CopilotCliJournalEvent` | `LineNumber` | mapped | `record.span_id`, `ingest_problem_location.location` | 1-based JSONL line number used for deterministic span disambiguation and diagnostic locators. |
+| `CopilotCliJournalEvent` | `EventType` | mapped | `record.op`, `record.name` | Discriminates `session.start`, `system.message`, `user.message`, `assistant.reasoning`, `assistant.message` (`llm.invoke`), `session.model_change`, and context changes. |
+| `CopilotCliJournalEvent` | `EventId` | mapped | `record.span_id` | Fallback native event identifier when `MessageId` is absent. |
+| `CopilotCliJournalEvent` | `ParentId` | dropped | — | Journal event parent UUID links raw JSONL events rather than normalized `record_parent` span relationships. |
+| `CopilotCliJournalEvent` | `Timestamp` | mapped | `record.started_at_utc` | ISO-8601 UTC event timestamp. |
+| `CopilotCliJournalEvent` | `AgentId` | mapped | `record_agent_instance.agent_instance_id` | Subagent identifier isolating subagent prompts, reasoning, and messages from the root agent. |
+| `CopilotCliJournalEvent` | `SessionId` | mapped | `session.native_session_id`, `record_session_link.session_key` | Native session identifier carried on `session.start` or journal events. |
+| `CopilotCliJournalEvent` | `MessageId` | mapped | `record.span_id` | Primary native anchor for deterministic `synth:copilot-cli:<session>:<messageId>` record identity. |
+| `CopilotCliJournalEvent` | `Content` | mapped | `content_part.bucket`, `content_part.position`, `content_part_text.part_text`, `content_part_withheld.utf8_bytes`, `content_part_role.role_name`, `content_part_truncation.original_utf8_bytes` | Measured via `ToolContentMeasurer` into `system_prompt`, `user_message`, `reasoning`, or `conversation_history` parts (JSON documents withheld). |
+| `CopilotCliJournalEvent` | `ReasoningText` | mapped | `content_part_text.part_text`, `content_part_withheld.utf8_bytes` | Inline reasoning payload mapped to `reasoning` bucket (`role = assistant`). |
+| `CopilotCliJournalEvent` | `Model` | mapped | `record_model.model_id` | Model identifier updated on `session.start`/`session.model_change` or overridden per `assistant.message`. |
+| `CopilotCliJournalEvent` | `PreviousModel` | dropped | — | Transition metadata on `session.model_change`; only the active `Model` is stored on `record_model`. |
+| `CopilotCliJournalEvent` | `InputTokens` | mapped | `record_token_count.token_count` | Fresh input token count when reported (`token_class = input`). |
+| `CopilotCliJournalEvent` | `OutputTokens` | mapped | `record_token_count.token_count` | Output token count when present (`token_class = output`); omitted on Copilot CLI 1.0.81+ leaving no `output` token row. |
+| `CopilotCliJournalEvent` | `CacheReadTokens` | mapped | `record_token_count.token_count` | Cache-read token count when reported (`token_class = cache_read`). |
+| `CopilotCliJournalEvent` | `CacheWriteTokens` | mapped | `record_token_count.token_count` | Cache-write token count when reported (`token_class = cache_write`). |
+| `CopilotCliJournalEvent` | `ReasoningTokens` | mapped | `record_token_count.token_count` | Reasoning token count when reported (`token_class = reasoning`). |
+| `CopilotCliJournalEvent` | `DurationMs` | mapped | `record_reported_duration.duration_ms`, `record_end.ended_at_utc` | Non-negative duration in milliseconds when reported; derives `record_end`. |
+| `CopilotCliJournalEvent` | `DeclaredContextWindow` | mapped | `record_declared_context_window.declared_context_window` | Explicit context window limit declared on session/context events. |
+| `CopilotCliJournalEvent` | `Title` | mapped | `session_title.title` | Session title update carried on session/info events. |
+| `CopilotCliJournalEvent` | `Context` | mapped | nested: CopilotCliContextInfo | Workspace context snapshot carried on `session.start` or context-change events. |
+| `CopilotCliJournalEvent` | `ToolRequests` | mapped | nested: CopilotCliToolRequest | Extracts invoked skills into `record_skill_invocation` (`tool.invoke` child spans remain deferred). |
+| `CopilotCliContextInfo` | `WorkingDirectory` | mapped | `session_workspace.working_directory` | Active working directory (`cwd`) merged across context-change events. |
+| `CopilotCliContextInfo` | `Repository` | mapped | `session_repository.repo_name` | Active repository name (`repository`, falling back to `GitRoot` folder name). |
+| `CopilotCliContextInfo` | `Branch` | mapped | `session_branch.branch_name` | Active git branch merged across context-change events. |
+| `CopilotCliContextInfo` | `GitRoot` | mapped | `session_repository.repo_name` | Supplies repository folder name fallback when `Repository` is absent. |
+| `CopilotCliToolRequest` | `ToolCallId` | dropped | — | Child `tool.invoke` emission from `toolRequests` is deferred under `copilot-cli-tool-invocations-per-message`. |
+| `CopilotCliToolRequest` | `Name` | dropped | — | Filter predicate (`name == "skill"`) gating `SkillName` extraction; general tool invocations are deferred. |
+| `CopilotCliToolRequest` | `SkillName` | mapped | `record_skill_invocation.skill_name` | Invoked skill identifier extracted from `skill` tool requests. |
+| `CopilotCliJournalProblem` | `LineNumber` | mapped | `ingest_problem_location.location`, `ingest_problem.problem_key` | 1-based line number appended to problem key and locator. |
+| `CopilotCliJournalProblem` | `Code` | mapped | `ingest_problem.code` | Diagnostic code (`COPILOT_CLI_MALFORMED_LINE`). |
+| `CopilotCliJournalProblem` | `Message` | mapped | `ingest_problem.message` | Sanitized parse failure message. |
+
 ## antigravity
 
 Antigravity ingests over OTLP through `AntigravityAdapter` (`OtlpSpan`, `OtlpLog`, `OtlpMetric`, `RawSpan`), claiming spans carrying `gen_ai.agent.name = "antigravity"` ahead of `GeminiAdapter`, converting inclusive counts, and mapping `gemini.usage.thoughts_tokens` to reasoning tokens while leaving `cache_creation` unexported.
