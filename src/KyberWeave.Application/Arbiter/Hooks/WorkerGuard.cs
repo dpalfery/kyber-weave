@@ -274,7 +274,8 @@ public sealed class WorkerGuard(
     /// <summary>
     /// Counts this call against the subagent's budget and refuses it once the count or the elapsed time is past
     /// the limit. The first call writes the header (start time and limits); every call appends one timestamped
-    /// line, so parallel hook processes never lose a count.
+    /// line, marked with whether the call started a process, so parallel hook processes never lose a count. The
+    /// per-call limit judges a call that started a process (a shell command) only, because only such a call can hang.
     /// </summary>
     /// <remarks>
     /// A harness may resume the same subagent for a rework, under the same id. Where the harness reports the end
@@ -304,8 +305,12 @@ public sealed class WorkerGuard(
         }
 
         // The guard sees only the start of each call, so the gap since the previous one is how long that call (and
-        // the model's turn after it) ran. Read before this call's line is appended.
-        DateTimeOffset? previousCall = earlier.Length > 1 && WorkerGuardRules.Window.Read(earlier) is { } before ? before.LastCall : null;
+        // the model's turn after it) ran. Only a call that started a process can hang, so the per-call limit is judged
+        // on that call's marker. Read before this call's line is appended.
+        (DateTimeOffset? previousCall, bool previousStartedProcess) =
+            earlier.Length > 1 && WorkerGuardRules.Window.Read(earlier) is { } before
+                ? (before.LastCall, before.LastCallStartedProcess)
+                : ((DateTimeOffset?)null, false);
 
         if (!budgets.Exists(home, key))
         {
@@ -319,7 +324,7 @@ public sealed class WorkerGuard(
             budgets.TryCreate(home, key, WorkerGuardRules.HeaderLine(now, budget, call.Agent.Name));
         }
 
-        budgets.Append(home, key, WorkerGuardRules.CallLine(now));
+        budgets.Append(home, key, WorkerGuardRules.CallLine(now, startedProcess: call.Command is not null));
 
         string[] lines = budgets.ReadLines(home, key);
         if (WorkerGuardRules.Window.Read(lines) is not { } window)
@@ -330,7 +335,7 @@ public sealed class WorkerGuard(
         TimeSpan elapsed = now - window.Start;
         if (!window.IsOver(now))
         {
-            return previousCall is { } previous && now - previous > TimeSpan.FromMinutes(window.CallMinutes)
+            return previousCall is { } previous && previousStartedProcess && now - previous > TimeSpan.FromMinutes(window.CallMinutes)
                 ? WorkerGuardRules.StalledCallRefusal(now - previous, window.CallMinutes)
                 : null;
         }

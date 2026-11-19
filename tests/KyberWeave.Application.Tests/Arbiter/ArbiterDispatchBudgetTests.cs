@@ -150,6 +150,36 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     }
 
     [Fact]
+    public void StalledCall_AllowsALongGapAfterACallThatStartedNoProcess()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 1000, CallMinutes: 5);
+
+        // A read returns at once, so a gap after it is the model's own turn: no process of the worker's can be hung.
+        Assert.Empty(Guard("copilot-cli", CopilotView("dev-medium", "agent-1"), Start, budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(6), budget));
+    }
+
+    [Fact]
+    public void StalledCall_StillDeniesAfterABareTimestampFromABudgetFileWrittenBeforeTheMarker()
+    {
+        string directory = Path.Combine(_host.HomeDirectory, ".kyber-weave", "arbiter", "budgets");
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 1000, CallMinutes: 5);
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start, budget));
+
+        // Rewrite the file as an older build left it: the header, then a call line with a bare timestamp.
+        string file = Assert.Single(_host.Files.EnumerateFiles(directory, "*", recursive: false));
+        string[] lines = [.. _host.Files.ReadLines(file)];
+        Assert.EndsWith(" p", lines[^1], StringComparison.Ordinal);
+        _host.Files.WriteAllText(file, string.Join("\n", [lines[0], lines[^1].Split(' ')[0]]) + "\n");
+
+        string answer = Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(6), budget);
+
+        using JsonDocument document = JsonDocument.Parse(answer);
+        Assert.Equal("deny", document.RootElement.GetProperty("permissionDecision").GetString());
+        Assert.Contains("NOT VERIFIED:", document.RootElement.GetProperty("permissionDecisionReason").GetString()!, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void StalledCall_DeniesOnClaudeToo()
     {
         ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 1000, CallMinutes: 5);
@@ -306,6 +336,17 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
         agentType,
         toolName = "bash",
         toolArgs = JsonSerializer.Serialize(new { command = "dotnet test" }),
+    });
+
+    /// <summary>A read through Copilot CLI's file tool: a call that starts no process.</summary>
+    private string CopilotView(string agentType, string agentId) => JsonSerializer.Serialize(new
+    {
+        cwd = _host.HomeDirectory,
+        agentId,
+        parentAgentId = "root",
+        agentType,
+        toolName = "view",
+        toolArgs = JsonSerializer.Serialize(new { path = Path.Combine(_host.HomeDirectory, "docs", "README.md") }),
     });
 
     /// <summary>A Copilot CLI <c>subagentStop</c> event, trimmed from a live run: it ends one turn of the agent.</summary>

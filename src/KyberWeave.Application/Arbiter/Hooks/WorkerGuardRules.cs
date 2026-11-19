@@ -16,6 +16,15 @@ internal static class WorkerGuardRules
     /// <summary>The rule id an exhausted budget is refused under.</summary>
     internal const string BudgetRuleId = "KW-ARB-BUDGET-001";
 
+    /// <summary>The marker a call line carries when the call started a process: the only kind of call that can hang.</summary>
+    internal const string ProcessCallMarker = "p";
+
+    /// <summary>
+    /// The marker a call line carries when the call started no process. An older file's bare timestamp means a process
+    /// call, so a call that starts none must say so for the per-call limit to tell the two apart.
+    /// </summary>
+    internal const string NoProcessCallMarker = "n";
+
     /// <summary>The trigger a sub-agent's own command call raises, so a technology's rules can allow-list its forms.</summary>
     internal const string CommandTrigger = "worker.command";
 
@@ -338,8 +347,9 @@ internal static class WorkerGuardRules
         string.Join(' ', command.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
     /// <summary>
-    /// The one-time deny after a call that ran past the per-call limit. The denied call is counted like any other, so
-    /// the retry that follows comes right after it and is allowed.
+    /// The one-time deny after a call that started a process and ran past the per-call limit. A call that starts no
+    /// process (a read) cannot hang, so the limit never judges it. The denied call is counted like any other, so the
+    /// retry that follows comes right after it and is allowed.
     /// </summary>
     internal static string StalledCallRefusal(TimeSpan gap, int limit) =>
         $"{BudgetRuleId}: your previous tool call ran for about {(int)gap.TotalMinutes} minutes, past the {limit}-minute " +
@@ -389,9 +399,11 @@ internal static class WorkerGuardRules
             CultureInfo.InvariantCulture,
             $"{now.ToUnixTimeMilliseconds()} {budget.Minutes} {budget.ToolCalls} {agentName} {budget.CallMinutes}\n");
 
-    /// <summary>The line a call appends to a budget file.</summary>
-    internal static string CallLine(DateTimeOffset now) =>
-        string.Create(CultureInfo.InvariantCulture, $"{now.ToUnixTimeMilliseconds()}\n");
+    /// <summary>The line a call appends to a budget file: its timestamp and whether the call started a process.</summary>
+    internal static string CallLine(DateTimeOffset now, bool startedProcess) =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"{now.ToUnixTimeMilliseconds()} {(startedProcess ? ProcessCallMarker : NoProcessCallMarker)}\n");
 
     internal static string Deny(string harness, string reason) =>
         string.Equals(harness, ClaudeHarness, StringComparison.Ordinal)
@@ -413,8 +425,18 @@ internal static class WorkerGuardRules
     internal static string OneLine(string message) =>
         message.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\n', ' ').Replace('\r', ' ');
 
-    /// <summary>One budget window as its file records it: the header, then one timestamp per call.</summary>
-    internal sealed record Window(DateTimeOffset Start, int Minutes, int MaxCalls, int Calls, DateTimeOffset LastCall, int CallMinutes)
+    /// <summary>
+    /// One budget window as its file records it: the header, then one line per call holding its timestamp and a marker
+    /// that says whether the call started a process.
+    /// </summary>
+    internal sealed record Window(
+        DateTimeOffset Start,
+        int Minutes,
+        int MaxCalls,
+        int Calls,
+        DateTimeOffset LastCall,
+        int CallMinutes,
+        bool LastCallStartedProcess)
     {
         public bool IsOver(DateTimeOffset at) => Calls > MaxCalls || at - Start > TimeSpan.FromMinutes(Minutes);
 
@@ -437,10 +459,11 @@ internal static class WorkerGuardRules
                     : ArbiterDispatchBudgetConfig.Defaults.CallMinutes;
 
             long lastMs = startMs;
-            if (lines.Length > 1
-                && long.TryParse(lines[^1], NumberStyles.Integer, CultureInfo.InvariantCulture, out long parsed))
+            bool lastStartedProcess = true;
+            if (lines.Length > 1 && TryReadCall(lines[^1], out long parsed, out bool startedProcess))
             {
                 lastMs = parsed;
+                lastStartedProcess = startedProcess;
             }
 
             return new Window(
@@ -449,7 +472,21 @@ internal static class WorkerGuardRules
                 maxCalls,
                 lines.Length - 1,
                 DateTimeOffset.FromUnixTimeMilliseconds(lastMs),
-                callMinutes);
+                callMinutes,
+                lastStartedProcess);
+        }
+
+        /// <summary>
+        /// Reads one call line into its timestamp and whether the call started a process. A line written before the
+        /// marker existed carries a bare timestamp: it counts as a process call, which is how that file was judged then.
+        /// </summary>
+        private static bool TryReadCall(string line, out long milliseconds, out bool startedProcess)
+        {
+            string[] fields = line.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            milliseconds = 0;
+            startedProcess = fields.Length < 2 || !string.Equals(fields[1], NoProcessCallMarker, StringComparison.Ordinal);
+            return fields.Length > 0
+                && long.TryParse(fields[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out milliseconds);
         }
     }
 
