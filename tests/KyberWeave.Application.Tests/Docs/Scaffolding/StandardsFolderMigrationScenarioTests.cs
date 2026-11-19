@@ -518,6 +518,15 @@ public class StandardsFolderMigrationScenarioTests
 
         Assert.Contains("symbolic link", error.Message, StringComparison.Ordinal);
         Assert.True(_host.Files.FileExists(Path.Combine(folder, "README.md")));
+
+        // The refusal precedes every write: no prefixed standard and no stub was added beside the
+        // legacy file, which is what proves the check is not merely early in one folder's plan.
+        Assert.Equal(
+            ["README.md"],
+            _host.Files.EnumerateFiles(folder, "*", recursive: false)
+                .Select(Path.GetFileName)
+                .Order(StringComparer.Ordinal)
+                .ToArray());
         Assert.Contains(
             "README.md", _host.Files.ReadAllText(shared), StringComparison.Ordinal);
     }
