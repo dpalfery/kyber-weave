@@ -238,6 +238,70 @@ a session id can outlive a run, a branch name and a worktree path can be reused,
 changes when the plan is revised inside one run. A dispatch evaluated where no run is recorded is
 counted as before, against the whole ledger.
 
+## The run context
+
+A hook is handed a harness payload and nothing else, and the payload's `cwd` is the directory the
+harness session started in — not necessarily the worktree the work belongs to. A conductor run starts
+in the operator's checkout while `kyber-weave run start` puts the run in a worktree of the same
+repository, so a plan, its task file and the git facts live in a different directory from the one the
+payload names. Reading paths at each call site is what made those places disagree: seven sites each
+parsed the payload and resolved repository paths on their own, and a layout change broke every one.
+
+One service now answers those questions once per hook invocation.
+
+- **`IHookRunContextResolver`** (`KyberWeave.Contracts`) with `HookRunContextResolver`
+  (`KyberWeave.Application`) resolves, over the existing seams — `IFileSystem`, `IPathResolver`,
+  `IProcessEnvironment`, `IGitRepositoryFacts`, `IPlanFileResolver`, `IRunStateStore` and
+  `IPlanRootResolver` — one **`HookRunContext`**:
+  - `RepositoryRoot`: the directory configuration, the claim store and the ledger are read under.
+  - `CommonDirectory`: git's common directory for that repository, which identifies the repository
+    across its worktrees.
+  - `ActiveRun`: the record `kyber-weave run start` wrote for this repository, when one is live.
+  - `Worktree`: the working tree the plan, its task file and the git facts are read from.
+  - `PlanFile`, `PlanPath`, `TaskFile`: the dispatch's plan and the task file beside it, when both
+    resolve inside the worktree.
+  - `Worktrees`: every worktree of this repository, already checked to belong to it.
+  - `Source`: which candidate chose `Worktree`, and `Notes`: the precise reason for each candidate
+    that was refused and each path that was tried.
+
+- **Resolution order** is fixed and documented, and each candidate must belong to this repository or
+  one of its own git worktrees. A candidate that does not is refused with its reason and the next is
+  tried; it is never silently trusted.
+  1. **The worktree the event names** — a path in the dispatch prompt, packet or agent cwd that is a
+     worktree of this repository and holds the dispatch's plan.
+  2. **The active run** — the live record `run start` wrote for this repository, when its worktree is
+     still a worktree of this repository.
+  3. **The payload cwd**, then the process directory when the payload carries none.
+
+  The repository anchor itself is the adapter's workspace root, else the payload cwd, else the
+  process directory, accepted only when git names its common directory. `Worktree` is chosen among
+  the validated candidates by the existing `IPlanRootResolver` rule: the anchor when it holds the
+  plan, else the worktree that holds it, with the worktree the dispatch names winning over the newest
+  plan when several do.
+
+- **Adapters are the only readers of raw harness JSON.** `IHarnessHookAdapter.Describe` turns one
+  payload into a typed `HookEvent`: cwd, agent identity and type, tool name and arguments, session and
+  call ids, and the dispatch prompt when the event carries one. The plugin shim's envelope
+  (`PluginEnvelope`) and the conductor guard's Copilot payload are read by the same kind of adapter.
+  Guards, rules and the hook host consume the typed event and the run context; none of them parses
+  `cwd`, `agent_id` or `tool_input` again.
+
+- **Missing input never blocks on its own.** A plan, task file, run record or receipt that is absent or
+  unreadable is an input the Arbiter could not read, not a finding: the guard or rule *escalates* (or
+  warns, where the harness has no escalation channel) with the precise reason and the path it tried,
+  and the dispatch continues. Only a positive finding — a machine fact or a confident model answer
+  that names a violation — blocks. Security checks stay fail-closed: a path that escapes the
+  repository or its worktrees, a plan outside them, and a credential failure are still refusals.
+  Each guard and rule applies the same policy, and the prompt guard's "no prompt" refusal is one of
+  them: a missing task file warns instead of stopping the dispatch.
+
+- **Advisory rules are marked in the rule data.** A rule is **advisory** when every answer it can give
+  maps to the trigger family's proceed effect — `allow`, `keep` or `spawn` — so no answer can gate.
+  `ArbiterRule.Advisory` computes it from the rule's own effects, and `arbiter validate` reports the
+  set. `KW-ARB-OWNER-002` is advisory by construction; `KW-ARB-MODE-002` is advisory as it ships,
+  because every answer allows and only a host's `effects` override makes `no-failing-run` escalate.
+  Marking changes no rule's effect.
+
 ## The rules
 
 Thirty-six rules ship with permanent `KW-ARB-*` ids, in three role files — the `conductor` file
