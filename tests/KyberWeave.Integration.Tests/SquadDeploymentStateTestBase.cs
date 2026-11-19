@@ -272,79 +272,6 @@ public abstract class SquadDeploymentStateTestBase : SquadStateDocumentFixtures
         }
     }
 
-
-    internal static void AssertCreatedDirectoryAuthorityIsCanonical(JsonArray createdDirectories)
-    {
-        int previousDepth = int.MaxValue;
-        HashSet<string> identities = new(StringComparer.Ordinal);
-        foreach (JsonNode? node in createdDirectories)
-        {
-            JsonObject authority = Assert.IsType<JsonObject>(node);
-            string area = Assert.IsAssignableFrom<JsonValue>(authority["area"]).GetValue<string>();
-            string path = Assert.IsAssignableFrom<JsonValue>(authority["path"]).GetValue<string>();
-            Assert.False(string.IsNullOrWhiteSpace(area));
-            Assert.False(Path.IsPathRooted(path));
-            Assert.DoesNotContain("..", path.Split('/'), StringComparer.Ordinal);
-            Assert.True(identities.Add($"{area}:{path}"));
-            int depth = path.Count(character => character == '/');
-            Assert.True(
-                depth <= previousDepth,
-                "Created-directory authority must be serialized deepest first.");
-            previousDepth = depth;
-        }
-    }
-
-    internal static void CorruptCreatedDirectoryAuthority(
-        JsonObject intent,
-        JsonArray createdDirectories,
-        string fixtureRoot,
-        string corruption)
-    {
-        JsonObject first = Assert.IsType<JsonObject>(createdDirectories[0]);
-        switch (corruption)
-        {
-            case "wrong-area":
-                first["area"] = "outside";
-                break;
-            case "non-ancestor":
-                first["path"] = "unrelated/not-an-ancestor";
-                break;
-            case "duplicate":
-                createdDirectories.Add(first.DeepClone());
-                break;
-            case "unordered":
-                Assert.True(createdDirectories.Count > 1);
-                JsonObject last = Assert.IsType<JsonObject>(createdDirectories[^1]);
-                createdDirectories.RemoveAt(createdDirectories.Count - 1);
-                createdDirectories.Insert(0, last);
-                break;
-            case "absolute":
-                first["path"] = Path.Combine(fixtureRoot, "absolute");
-                break;
-            case "traversal":
-                first["path"] = "../escape";
-                break;
-            case "sibling":
-                first["path"] = "beside-target";
-                break;
-            case "outside-root":
-                first["path"] = Path.GetFullPath(Path.Combine(fixtureRoot, "..", "outside"));
-                break;
-            case "legacy-count":
-                intent["missingJournalDirectoryCount"] = 1;
-                break;
-            case "negative-count":
-                intent["missingJournalDirectoryCount"] = -1;
-                break;
-            case "maximum-count":
-                intent["missingJournalDirectoryCount"] = int.MaxValue;
-
-                break;
-            default:
-                throw new ArgumentOutOfRangeException(nameof(corruption), corruption, null);
-        }
-    }
-
     internal static string ReplaceJsonStringPropertyWithNumber(
         string json,
         string propertyName,
@@ -782,19 +709,6 @@ public abstract class SquadDeploymentStateTestBase : SquadStateDocumentFixtures
         byte[]? Content,
         string? LinkTarget);
 
-
-    internal sealed class FakeGlobalRootResolver(IReadOnlyDictionary<SquadTarget, string> roots)
-        : ISquadGlobalRootResolver
-    {
-        public string ResolveGlobalRoot(SquadTarget target)
-        {
-            return roots.TryGetValue(target, out string? root)
-                ? root
-                : throw new ArgumentOutOfRangeException(nameof(target), target, "No root mapped for target.");
-        }
-    }
-
-
     internal sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow()
@@ -827,23 +741,6 @@ public abstract class SquadDeploymentStateTestBase : SquadStateDocumentFixtures
         }
     }
 
-    internal sealed class FailingObserver(string root, int failureSequence) : ISquadTransactionObserver
-    {
-        public IReadOnlyDictionary<string, byte[]>? InterruptedSnapshot { get; private set; }
-
-        public IReadOnlyDictionary<string, TreeEntry>? InterruptedTreeSnapshot { get; private set; }
-
-        public void AfterStep(SquadTransactionStep step)
-        {
-            if (step.Sequence == failureSequence)
-            {
-                InterruptedSnapshot = Snapshot(root);
-                InterruptedTreeSnapshot = CaptureTree(root);
-                throw new InjectedSquadTransactionFailure(step.Sequence);
-            }
-        }
-    }
-
     internal sealed class CheckpointFailingObserver(
         string root,
         SquadTransactionCheckpointKind checkpoint) : ISquadTransactionCheckpointObserver
@@ -861,38 +758,6 @@ public abstract class SquadDeploymentStateTestBase : SquadStateDocumentFixtures
 
             InterruptedTreeSnapshot = CaptureTree(root);
             throw new InjectedSquadTransactionFailure(value.Sequence);
-        }
-    }
-
-    internal sealed class RecordingObserver(string root) : ISquadTransactionObserver
-    {
-        private readonly string _transactionDirectory = Path.Combine(
-            root,
-            ".kyber-weave",
-            ".squad-transaction");
-
-        public List<SquadTransactionStep> Steps { get; } = [];
-
-        public bool SawIntentJournal { get; private set; }
-
-        public bool SawStagedFile { get; private set; }
-
-        public bool SawBackupFile { get; private set; }
-
-        public void AfterStep(SquadTransactionStep step)
-        {
-            Steps.Add(step);
-            SawIntentJournal |= File.Exists(Path.Combine(_transactionDirectory, "intent.json"));
-            SawStagedFile |= Directory.Exists(Path.Combine(_transactionDirectory, "staging")) &&
-                             Directory.EnumerateFiles(
-                                 Path.Combine(_transactionDirectory, "staging"),
-                                 "*",
-                                 SearchOption.AllDirectories).Any();
-            SawBackupFile |= Directory.Exists(Path.Combine(_transactionDirectory, "backups")) &&
-                             Directory.EnumerateFiles(
-                                 Path.Combine(_transactionDirectory, "backups"),
-                                 "*",
-                                 SearchOption.AllDirectories).Any();
         }
     }
 

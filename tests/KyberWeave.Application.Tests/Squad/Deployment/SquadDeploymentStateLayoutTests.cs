@@ -996,19 +996,6 @@ public sealed class SquadDeploymentStateLayoutTests : InMemoryDeploymentStateTes
         Assert.Equal(SquadReceiptLayout.SingleRoot, plan.Receipt.Layout);
     }
 
-    /// <summary>Builds a global install plan over the in-memory planner.</summary>
-    /// <param name="targetRoot">The target root.</param>
-    /// <returns>The plan.</returns>
-    private SquadDeploymentPlan CreateGlobalInstallPlan(string targetRoot) =>
-        Planner.CreateInstall(
-            targetRoot,
-            SquadDeploymentScope.Global,
-            Lock(),
-            [Rendered(".codex/agents/conductor.toml", "global conductor")],
-            [],
-            false,
-            new FixedTimeProvider(InstalledAt));
-
     /// <summary>Runs one global install and returns how many durable steps it reported.</summary>
     /// <returns>The step count.</returns>
     private int ProbeGlobalInstallStepCount()

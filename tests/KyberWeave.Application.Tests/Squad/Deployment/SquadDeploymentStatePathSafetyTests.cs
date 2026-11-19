@@ -525,17 +525,4 @@ public sealed class SquadDeploymentStatePathSafetyTests : InMemoryDeploymentStat
                 new FixedTimeProvider(InstalledAt)));
         AssertTreesEqual(outsideBefore, CaptureTree(state.Files, lowerRoot));
     }
-
-    /// <summary>Builds a global install plan over the in-memory planner.</summary>
-    /// <param name="targetRoot">The target root.</param>
-    /// <returns>The plan.</returns>
-    private SquadDeploymentPlan CreateGlobalInstallPlan(string targetRoot) =>
-        Planner.CreateInstall(
-            targetRoot,
-            SquadDeploymentScope.Global,
-            Lock(),
-            [Rendered(".codex/agents/conductor.toml", "global conductor")],
-            [],
-            false,
-            new FixedTimeProvider(InstalledAt));
 }
