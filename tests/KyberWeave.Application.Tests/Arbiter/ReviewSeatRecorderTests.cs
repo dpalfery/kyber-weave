@@ -157,16 +157,35 @@ public sealed class ReviewSeatRecorderTests : IDisposable
         Assert.False(_host.Files.FileExists(Seat()));
     }
 
-    /// <summary>An oversize host payload is refused rather than parsed and appended to a seat file.</summary>
+    /// <summary>
+    /// An oversize host payload is refused rather than parsed and appended to a seat file. The
+    /// payload is a JSON result so removing the bound would parse it and write the file.
+    /// </summary>
     [Fact]
     public void AnOversizeResultWritesNothing()
     {
         (HookContext context, _) = Context();
-        string oversize = new string('x', 262_145);
 
-        _ = Sync(Prompt(Packet()), oversize, context);
+        _ = Sync(Prompt(Packet()), CopilotResult(new string('x', 262_145)), context);
 
         Assert.False(_host.Files.FileExists(Seat()));
+    }
+
+    /// <summary>
+    /// A reply that follows a single newline in an earlier reply is a different reply: only a
+    /// blank-line-separated entry counts as already held.
+    /// </summary>
+    [Fact]
+    public void AReplyAfterASingleNewlineInAnEarlierReplyIsAppended()
+    {
+        (HookContext context, _) = Context();
+        const string First = "line1\nline2";
+        const string Second = "line2";
+
+        _ = Sync(Prompt(Packet()), CopilotResult(First), context);
+        _ = Sync(Prompt(Packet()), CopilotResult(Second), context);
+
+        Assert.Equal(First + "\n\n" + Second, _host.Files.ReadAllText(Seat()));
     }
 
     /// <summary>An empty reply writes nothing.</summary>

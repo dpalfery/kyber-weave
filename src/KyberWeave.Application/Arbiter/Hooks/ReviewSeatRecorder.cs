@@ -84,7 +84,7 @@ public sealed partial class ReviewSeatRecorder(IWritableFileSystem files, IPathR
 
             text = existing.Length == 0
                 ? reply
-                : existing + (existing.EndsWith('\n') ? "\n" : "\n\n") + reply;
+                : existing.TrimEnd('\n') + "\n\n" + reply;
         }
 
         files.CreateDirectory(seatsFolder);
@@ -92,23 +92,23 @@ public sealed partial class ReviewSeatRecorder(IWritableFileSystem files, IPathR
         context.Log.WriteLine($"Arbiter: review seat '{lens}' saved to '{seatFile}'.");
     }
 
-    /// <summary>The largest host-supplied tool result this recorder parses.</summary>
-    private const int MaxToolOutputChars = 262_144;
+    /// <summary>The largest host-supplied tool result, in characters, this recorder parses.</summary>
+    private const int MaxToolOutputCharacters = 262_144;
 
     /// <summary>The reply inside a tool result: the Copilot CLI result text, the text blocks of a content list, or plain text.</summary>
     /// <param name="toolOutput">The raw tool result.</param>
     /// <returns>The reply, or null when the result holds none.</returns>
     internal static string? ReplyText(string toolOutput)
     {
-        string trimmed = toolOutput.TrimStart();
-        if (trimmed.Length == 0)
+        // A host-supplied payload is bounded before it is scanned or parsed, so an oversize
+        // result is refused rather than copied into a seat file that then grows without limit.
+        if (toolOutput.Length > MaxToolOutputCharacters)
         {
             return null;
         }
 
-        // A host-supplied payload is parsed only up to a bound, so an oversize result is refused
-        // rather than parsed into a seat file that then grows without limit.
-        if (toolOutput.Length > MaxToolOutputChars)
+        string trimmed = toolOutput.TrimStart();
+        if (trimmed.Length == 0)
         {
             return null;
         }
@@ -185,8 +185,7 @@ public sealed partial class ReviewSeatRecorder(IWritableFileSystem files, IPathR
     /// <returns>True when saving it again would repeat an entry the file already holds.</returns>
     private static bool AlreadyHolds(string existing, string reply) =>
         string.Equals(existing, reply, StringComparison.Ordinal)
-        || existing.EndsWith("\n\n" + reply, StringComparison.Ordinal)
-        || existing.EndsWith("\n" + reply, StringComparison.Ordinal);
+        || existing.EndsWith("\n\n" + reply, StringComparison.Ordinal);
 
     private bool InsideRunRoots(string folder, HookContext context)
     {
