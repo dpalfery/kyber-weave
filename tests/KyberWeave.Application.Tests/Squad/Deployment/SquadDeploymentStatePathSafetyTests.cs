@@ -268,6 +268,264 @@ public sealed class SquadDeploymentStatePathSafetyTests : InMemoryDeploymentStat
         Assert.Equal(Path.Combine(canonicalExisting, "new", "deeper", "leaf.md"), canonical);
     }
 
+    /// <summary>
+    ///     The in-memory twin of the real-symlink install case: a directory link in the target tree that leaves
+    ///     the root stops the plan before anything is written on the other side.
+    /// </summary>
+    [Fact]
+    public void CreateInstallThroughDirectoryLinkLeavingTheRootIsRejectedInMemory()
+    {
+        DeploymentScope workspace = NewScope();
+        string targetRoot = NewDirectory(Path.Combine(workspace.Path, "target"));
+        string outside = NewDirectory(Path.Combine(workspace.Path, "outside"));
+        string codex = NewDirectory(Path.Combine(targetRoot, ".codex"));
+        Files.CreateDirectoryLink(
+            Path.Combine(codex, "agents"),
+            Path.GetRelativePath(codex, outside));
+
+        SquadPathContainmentException exception = Assert.Throws<SquadPathContainmentException>(() =>
+            Planner.CreateInstall(
+                targetRoot,
+                SquadDeploymentScope.Project,
+                Lock(),
+                [Rendered(".codex/agents/conductor.toml", "escape")],
+                [],
+                false,
+                new FixedTimeProvider(InstalledAt)));
+
+        Assert.Contains(".codex/agents/conductor.toml", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(CaptureTree(outside));
+    }
+
+    /// <summary>
+    ///     The in-memory twin of the real-symlink uninstall case: a directory link in the target tree that leaves
+    ///     the root stops the plan before anything outside it is deleted.
+    /// </summary>
+    [Fact]
+    public void CreateUninstallThroughDirectoryLinkLeavingTheRootIsRejectedInMemory()
+    {
+        DeploymentScope workspace = NewScope();
+        string targetRoot = NewDirectory(Path.Combine(workspace.Path, "target"));
+        string outside = NewDirectory(Path.Combine(workspace.Path, "outside"));
+        string codex = NewDirectory(Path.Combine(targetRoot, ".codex"));
+        Files.CreateDirectoryLink(
+            Path.Combine(codex, "agents"),
+            Path.GetRelativePath(codex, outside));
+        SquadReceipt receipt = Receipt(
+            new SquadOwnedFile(
+                ".codex/agents/conductor.toml",
+                Digest("outside"),
+                "codex",
+                false));
+
+        SquadPathContainmentException exception = Assert.Throws<SquadPathContainmentException>(() =>
+            Planner.CreateUninstall(
+                targetRoot,
+                SquadDeploymentScope.Project,
+                receipt));
+
+        Assert.Contains(".codex/agents/conductor.toml", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(CaptureTree(outside));
+    }
+
+    /// <summary>
+    ///     The in-memory twin of the on-disk spelling case: the resolved identity carries the spelling the
+    ///     entry was created with, and a case-distinct name is a distinct root.
+    /// </summary>
+    [Fact]
+    public void ResolvePhysicalRootUsesTheCreatedSpellingInMemory()
+    {
+        string actualRoot = NewDirectory(Path.Combine(Root, "ActualSpelling"));
+        string caseVariant = NewDirectory(Path.Combine(Root, "actualspelling"));
+        SquadPhysicalRootIdentity actualIdentity =
+            SquadPhysicalRootIdentities.Resolve(actualRoot, Semantics);
+        SquadPhysicalRootIdentity distinctIdentity =
+            SquadPhysicalRootIdentities.Resolve(caseVariant, Semantics);
+
+        Assert.Equal("ActualSpelling", Path.GetFileName(actualIdentity.PhysicalPath));
+        Assert.NotEqual(actualIdentity.PhysicalPath, distinctIdentity.PhysicalPath);
+        Assert.NotEqual(actualIdentity.Key, distinctIdentity.Key);
+    }
+
+    /// <summary>
+    ///     The in-memory twin of the home-store symlink escape case: a link planted inside the home store that
+    ///     leads out of it stops every home-store resolution it sits on.
+    /// </summary>
+    [Fact]
+    public void ResolveHomeStoreDirectoryLinksThatLeaveTheHomeAreRejectedInMemory()
+    {
+        const string canaryRelativePath = "outside-canary.txt";
+        (string Label, string LinkRelativePath, bool JournalOnPath)[] plants =
+        [
+            ("kyber-weave", ".kyber-weave", true),
+            ("squad", Path.Combine(".kyber-weave", "squad"), false)
+        ];
+
+        foreach ((string label, string linkRelativePath, bool journalOnPath) in plants)
+        {
+            DeploymentScope workspace = NewScope();
+            string project = NewDirectory(Path.Combine(workspace.Path, "home-escape-project"));
+            string applicationData = Path.Combine(workspace.Path, $"home-escape-{label}");
+            string home = NewDirectory(Path.Combine(applicationData, "home"));
+            string outside = NewDirectory(Path.Combine(workspace.Path, $"home-outside-{label}"));
+            string linkPath = Path.Combine(home, linkRelativePath);
+            string linkParent = Path.GetDirectoryName(linkPath)!;
+            Files.CreateDirectory(linkParent);
+            Write(outside, canaryRelativePath, "outside canary");
+            SortedDictionary<string, TreeEntry> outsideBefore = CaptureTree(outside);
+            Files.CreateDirectoryLink(
+                linkPath,
+                Path.GetRelativePath(linkParent, outside));
+
+            SquadStateStore store = StoreAt(applicationData);
+            Assert.Throws<SquadPathContainmentException>(() =>
+                store.ResolveReceiptPath(project, SquadDeploymentScope.Project));
+            Assert.Throws<SquadPathContainmentException>(() =>
+                store.ResolveLockPath(project, SquadDeploymentScope.Project));
+            Assert.Throws<SquadPathContainmentException>(() =>
+                store.ResolveReceiptPath(project, SquadDeploymentScope.Global));
+            Assert.Throws<SquadPathContainmentException>(() =>
+                store.ResolveLockPath(project, SquadDeploymentScope.Global));
+            if (journalOnPath)
+                Assert.Throws<SquadPathContainmentException>(() =>
+                    store.ResolveTransactionDirectory(project, SquadDeploymentScope.Global));
+
+            AssertTreesEqual(outsideBefore, CaptureTree(outside));
+        }
+    }
+
+    /// <summary>
+    ///     The in-memory twin of the middle-segment case: a case-insensitive volume converges on the created
+    ///     spelling, and a case-sensitive one keeps the caller's spelling for the segment that names nothing.
+    /// </summary>
+    [Fact]
+    public void CanonicalizeUsesTheCreatedSpellingOfAMiddleSegmentInMemory()
+    {
+        string onDiskMiddle = NewDirectory(Path.Combine(Root, "MiddleSegment"));
+        Files.WriteAllText(Path.Combine(onDiskMiddle, "leaf.md"), "leaf");
+        string variantPath = Path.Combine(Root, "middlesegment", "leaf.md");
+
+        string caseSensitive = Semantics.Canonicalize(variantPath);
+
+        Assert.Equal(
+            Path.Combine(Semantics.Canonicalize(Root), "middlesegment", "leaf.md"),
+            caseSensitive);
+
+        InMemorySquadState insensitive = NewState(caseSensitive: false);
+        string insensitiveMiddle = Path.Combine(insensitive.Files.Root, "MiddleSegment");
+        insensitive.Files.CreateDirectory(insensitiveMiddle);
+        insensitive.Files.WriteAllText(Path.Combine(insensitiveMiddle, "leaf.md"), "leaf");
+
+        string converged = insensitive.Semantics.Canonicalize(
+            Path.Combine(insensitive.Files.Root, "middlesegment", "leaf.md"));
+
+        Assert.Equal(
+            Path.Combine(insensitive.Semantics.Canonicalize(insensitive.Files.Root), "MiddleSegment", "leaf.md"),
+            converged);
+    }
+
+    /// <summary>
+    ///     The in-memory twin of the symlinked-segment case: a link inside the root is followed for the
+    ///     canonical spelling and honoured by containment, so one pointing outside cannot carry a path in.
+    /// </summary>
+    [Fact]
+    public void CanonicalizeFollowsADirectoryLinkAndContainmentHonoursItInMemory()
+    {
+        DeploymentScope workspace = NewScope();
+        DeploymentScope outsideScope = NewScope();
+        string realDirectory = NewDirectory(Path.Combine(workspace.Path, "real"));
+        Files.WriteAllText(Path.Combine(realDirectory, "leaf.md"), "leaf");
+        string insideLink = Path.Combine(workspace.Path, "inside-link");
+        Files.CreateDirectoryLink(
+            insideLink,
+            Path.GetRelativePath(workspace.Path, realDirectory));
+        string outside = outsideScope.Path;
+        Files.WriteAllText(Path.Combine(outside, "leaf.md"), "outside");
+        string outsideLink = Path.Combine(workspace.Path, "outside-link");
+        Files.CreateDirectoryLink(
+            outsideLink,
+            Path.GetRelativePath(workspace.Path, outside));
+        string canonicalRealLeaf =
+            Path.Combine(Semantics.Canonicalize(realDirectory), "leaf.md");
+
+        Assert.Equal(
+            canonicalRealLeaf,
+            Semantics.Canonicalize(Path.Combine(insideLink, "leaf.md")));
+        Assert.True(Semantics.IsWithin(workspace.Path, Path.Combine(insideLink, "leaf.md")));
+        Assert.False(Semantics.IsWithin(workspace.Path, Path.Combine(outsideLink, "leaf.md")));
+    }
+
+    /// <summary>
+    ///     The in-memory twin of the replaced-intermediate-directory case: replacing a directory with a link
+    ///     between two checks changes the second answer.
+    /// </summary>
+    [Fact]
+    public void ContainmentRefusesADirectoryLinkThatReplacedAnIntermediateDirectoryInMemory()
+    {
+        DeploymentScope workspace = NewScope();
+        DeploymentScope outsideScope = NewScope();
+        string middle = NewDirectory(Path.Combine(workspace.Path, "middle"));
+        string leaf = Path.Combine(middle, "leaf.md");
+        Files.WriteAllText(leaf, "leaf");
+        string outside = outsideScope.Path;
+        Files.WriteAllText(Path.Combine(outside, "leaf.md"), "outside");
+
+        Assert.True(Semantics.IsWithin(workspace.Path, leaf));
+
+        Files.DeleteTreeNoFollow(middle);
+        Files.CreateDirectoryLink(
+            middle,
+            Path.GetRelativePath(workspace.Path, outside));
+
+        Assert.False(Semantics.IsWithin(workspace.Path, leaf));
+        Assert.Equal(
+            Path.Combine(Semantics.Canonicalize(outside), "leaf.md"),
+            Semantics.Canonicalize(leaf));
+    }
+
+    /// <summary>
+    ///     The in-memory twin of the Windows per-directory case probe: a directory whose names are
+    ///     case-sensitive keeps two sibling roots distinct, so a link from one into the other escapes it.
+    /// </summary>
+    [Fact]
+    public void ResolveCaseDistinctSiblingsAndTheirLinkEscapeOnACaseSensitiveDirectoryInMemory()
+    {
+        InMemorySquadState state = NewState(caseSensitive: false);
+        string parent = Path.Combine(state.Files.Root, "case-sensitive-parent");
+        state.Files.CreateDirectory(parent, caseSensitiveNames: true);
+        string upperRoot = Path.Combine(parent, "Root");
+        string lowerRoot = Path.Combine(parent, "root");
+        state.Files.CreateDirectory(upperRoot);
+        state.Files.CreateDirectory(lowerRoot);
+
+        Assert.NotEqual(
+            state.Semantics.Canonicalize(upperRoot),
+            state.Semantics.Canonicalize(lowerRoot));
+
+        const string canaryRelativePath = "outside-canary.txt";
+        state.Files.WriteAllText(Path.Combine(lowerRoot, canaryRelativePath), "outside canary");
+        SortedDictionary<string, TreeEntry> outsideBefore = CaptureTree(state.Files, lowerRoot);
+        state.Files.CreateDirectoryLink(
+            Path.Combine(upperRoot, "escape"),
+            Path.Combine("..", Path.GetFileName(lowerRoot)));
+
+        Assert.Throws<SquadPathContainmentException>(() =>
+            SquadPathPolicy.ResolveFile(
+                upperRoot,
+                $"escape/{canaryRelativePath}",
+                state.Semantics));
+        Assert.Throws<SquadPathContainmentException>(() =>
+            state.Planner.CreateInstall(
+                upperRoot,
+                SquadDeploymentScope.Project,
+                Lock(),
+                [Rendered("escape/generated.md", "must remain contained")],
+                [],
+                false,
+                new FixedTimeProvider(InstalledAt)));
+        AssertTreesEqual(outsideBefore, CaptureTree(state.Files, lowerRoot));
+    }
+
     /// <summary>Builds a global install plan over the in-memory planner.</summary>
     /// <param name="targetRoot">The target root.</param>
     /// <returns>The plan.</returns>
