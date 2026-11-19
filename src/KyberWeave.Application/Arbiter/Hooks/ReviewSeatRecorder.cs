@@ -72,10 +72,11 @@ public sealed partial class ReviewSeatRecorder(IWritableFileSystem files, IPathR
             return;
         }
 
+        reply = reply.Replace("\r\n", "\n", StringComparison.Ordinal);
         string text = reply;
         if (files.FileExists(seatFile))
         {
-            string existing = files.ReadAllText(seatFile);
+            string existing = files.ReadAllText(seatFile).Replace("\r\n", "\n", StringComparison.Ordinal);
             if (AlreadyHolds(existing, reply))
             {
                 context.Log.WriteLine($"Arbiter: review seat '{lens}' already holds this reply; not appended again.");
