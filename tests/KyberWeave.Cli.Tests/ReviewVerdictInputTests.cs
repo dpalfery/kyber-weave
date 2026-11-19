@@ -1,18 +1,17 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using KyberWeave.Cli.Commands.Review;
+using KyberWeave.Cli;
 using KyberWeave.Core.Review;
-using Spectre.Console.Cli;
 using Xunit;
 using static KyberWeave.Tests.ReviewDiagnosticAssert;
-using static KyberWeave.Tests.ReviewVerdictInputCases;
+using static KyberWeave.Tests.ReviewInputDocuments;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 /// The verdict command's input documents, as a reviewer hands them in: empty operands, empty files, and documents whose
 /// fields or entries are null or absent. Each is refused or dropped with a diagnostic that names the input, never a crash,
-/// and never accepted with a null identity. Runs in process against a temporary repository.
+/// and never accepted with a null identity. Runs in process over the in-memory file system and fakes.
 /// </summary>
 public sealed class ReviewVerdictInputTests : IDisposable
 {
@@ -21,22 +20,25 @@ public sealed class ReviewVerdictInputTests : IDisposable
     private const string CitedLine = "KW-REVIEW-043";
     private const int Refused = 1;
 
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryReviewServices _services = new();
     private readonly string _repo;
+    private readonly string _inputs;
 
     public ReviewVerdictInputTests()
     {
-        _repo = Path.Combine(_temp.Path, "repo");
-        Directory.CreateDirectory(Path.Combine(_repo, ".kyber-weave"));
-        File.WriteAllText(
+        _repo = Path.Combine(_services.Root, "repo");
+        _services.Files.CreateDirectory(Path.Combine(_repo, ".kyber-weave"));
+        _services.Files.WriteAllText(
             Path.Combine(_repo, ".kyber-weave", "kyber-weave.yml"),
             "ontology:\n  docs-root: docs\nreview:\n  policy:\n    strictness: balanced\n");
+        _inputs = Path.Combine(_services.Root, "inputs");
+        _services.Files.CreateDirectory(_inputs);
     }
 
-    /// <summary>Deletes the temporary repository.</summary>
+    /// <summary>Releases the in-memory services.</summary>
     public void Dispose()
     {
-        _temp.Dispose();
+        _services.Dispose();
     }
 
     // -----------------------------------------------------------------------------------------
@@ -270,14 +272,14 @@ public sealed class ReviewVerdictInputTests : IDisposable
         string field, string value, string severity, int confidence, string verdictStart)
     {
         string findings = Write("findings.json", FindingsDocument(findings: FindingJson(field, value)));
-        string report = Path.Combine(_temp.Path, "report.json");
+        string report = Path.Combine(_inputs, "report.json");
 
         CapturedConsoleExecution<int> run = Verdict("--findings", findings, "--out", report);
 
         Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
         Assert.Contains(MessagesWithCode(run.Output, "KW-REVIEW-024"), message =>
             message.StartsWith(verdictStart, StringComparison.Ordinal));
-        using JsonDocument written = JsonDocument.Parse(File.ReadAllText(report));
+        using JsonDocument written = JsonDocument.Parse(_services.Files.ReadAllText(report));
         JsonElement finding = written.RootElement.GetProperty("findings")[0];
         Assert.Equal("correctness/off-by-one", finding.GetProperty("id").GetString());
         Assert.Equal(severity, finding.GetProperty("severity").GetString(), ignoreCase: true);
@@ -310,19 +312,8 @@ public sealed class ReviewVerdictInputTests : IDisposable
     // or the null walk visits is run in lowercase, PascalCase and UPPERCASE spellings.
     // -----------------------------------------------------------------------------------------
 
-    public static TheoryData<string, string> KnownGateLists()
-    {
-        TheoryData<string, string> data = [];
-        foreach (string kind in Spellings)
-            foreach (string key in new[] { "gates", "coverageReports" })
-                data.Add(key, kind);
-        return data;
-    }
-
-    private static readonly string[] Spellings = ["lower", "Pascal", "UPPER"];
-
     [Theory]
-    [MemberData(nameof(RangeSpellings), MemberType = typeof(ReviewVerdictInputCases))]
+    [MemberData(nameof(ReviewInputDocuments.RangeSpellings), MemberType = typeof(ReviewInputDocuments))]
     public void AnOutOfRangeFindingIsRefusedWhateverTheCaseOfTheListAndFieldKeys(
         string listKind, string fieldKind, string field, string rawValue)
     {
@@ -339,7 +330,7 @@ public sealed class ReviewVerdictInputTests : IDisposable
     }
 
     [Theory]
-    [MemberData(nameof(KnownFindingsLists), MemberType = typeof(ReviewVerdictInputCases))]
+    [MemberData(nameof(ReviewInputDocuments.KnownFindingsLists), MemberType = typeof(ReviewInputDocuments))]
     public void ANullElementInAKnownFindingsListIsRefusedWhateverTheCaseOfItsKey(string key, string kind)
     {
         string findings = Write("findings.json", FindingsObject(key, kind, new JsonArray("a", null)));
@@ -352,7 +343,7 @@ public sealed class ReviewVerdictInputTests : IDisposable
     }
 
     [Theory]
-    [MemberData(nameof(KnownGateLists))]
+    [MemberData(nameof(ReviewInputDocuments.KnownGateLists), MemberType = typeof(ReviewInputDocuments))]
     public void ANullElementInAKnownGateListIsRefusedWhateverTheCaseOfItsKey(string key, string kind)
     {
         string findings = WriteFindingDocument("id", "correctness/off-by-one");
@@ -383,12 +374,12 @@ public sealed class ReviewVerdictInputTests : IDisposable
         JsonObject document = JsonNode.Parse(FindingsObject("findings", kind, new JsonArray(finding)))!.AsObject();
         document[Spell("extra", kind)] = new JsonArray(1, null);
         string findings = Write("findings.json", document.ToJsonString());
-        string report = Path.Combine(_temp.Path, "report.json");
+        string report = Path.Combine(_inputs, "report.json");
 
         CapturedConsoleExecution<int> run = Verdict("--findings", findings, "--out", report);
 
         Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
-        using JsonDocument written = JsonDocument.Parse(File.ReadAllText(report));
+        using JsonDocument written = JsonDocument.Parse(_services.Files.ReadAllText(report));
         Assert.Equal(1, written.RootElement.GetProperty("findings").GetArrayLength());
     }
 
@@ -397,39 +388,8 @@ public sealed class ReviewVerdictInputTests : IDisposable
     // is an accident of order. Refused naming the file, the object's JSON path and both spellings.
     // -----------------------------------------------------------------------------------------
 
-    public static TheoryData<string, string, string, string> DuplicateGateKeys() => new()
-    {
-        { "gate-document", "$", "gates", "GATES" },
-        { "gate-result", "$.gates[0]", "id", "ID" },
-        { "coverage-report", "$.coverageReports[0]", "path", "Path" },
-        { "coverage-result", "$.coverageReports[0].coverage", "fileLinePercent", "FILELINEPERCENT" }
-    };
-
-    internal static string DuplicateGateDocument(string caseName)
-    {
-        JsonObject gate = new() { ["id"] = "build", ["blocking"] = true, ["exitCode"] = 0, ["summary"] = "ok" };
-        JsonObject result = new() { ["fileLinePercent"] = 80, ["classLinePercent"] = 80 };
-        JsonObject report = new() { ["path"] = "a.xml", ["coverage"] = result };
-        JsonObject document = new()
-        {
-            ["schema"] = "kyber-weave.review-gates/v1",
-            ["gates"] = new JsonArray(gate),
-            ["coverageReports"] = new JsonArray(report)
-        };
-        switch (caseName)
-        {
-            case "gate-document": document["GATES"] = new JsonArray(); break;
-            case "gate-result": gate["ID"] = "other"; break;
-            case "coverage-report": report["Path"] = "b.xml"; break;
-            case "coverage-result": result["FILELINEPERCENT"] = 10; break;
-            default: throw new ArgumentOutOfRangeException(nameof(caseName), caseName, null);
-        }
-
-        return document.ToJsonString();
-    }
-
     [Theory]
-    [MemberData(nameof(DuplicateFindingsKeys), MemberType = typeof(ReviewVerdictInputCases))]
+    [MemberData(nameof(ReviewInputDocuments.DuplicateFindingsKeys), MemberType = typeof(ReviewInputDocuments))]
     public void ATwoSpellingObjectInAFindingsDocumentIsRefusedNamingTheFilePathAndBothSpellings(
         string caseName, string path, string first, string second)
     {
@@ -441,7 +401,7 @@ public sealed class ReviewVerdictInputTests : IDisposable
     }
 
     [Theory]
-    [MemberData(nameof(DuplicateGateKeys))]
+    [MemberData(nameof(ReviewInputDocuments.DuplicateGateKeys), MemberType = typeof(ReviewInputDocuments))]
     public void ATwoSpellingObjectInAGateReportIsRefusedNamingTheFilePathAndBothSpellings(
         string caseName, string path, string first, string second)
     {
@@ -480,12 +440,12 @@ public sealed class ReviewVerdictInputTests : IDisposable
         gate.Remove("GATES");
         gate["meta"] = JsonNode.Parse("{\"x\":1,\"X\":2}");
         string gates = Write("gates.json", gate.ToJsonString());
-        string report = Path.Combine(_temp.Path, "report.json");
+        string report = Path.Combine(_inputs, "report.json");
 
         CapturedConsoleExecution<int> run = Verdict("--findings", findings, "--gates", gates, "--out", report);
 
         Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
-        using JsonDocument written = JsonDocument.Parse(File.ReadAllText(report));
+        using JsonDocument written = JsonDocument.Parse(_services.Files.ReadAllText(report));
         Assert.Equal(1, written.RootElement.GetProperty("findings").GetArrayLength());
     }
 
@@ -503,13 +463,13 @@ public sealed class ReviewVerdictInputTests : IDisposable
             ["schema"] = "kyber-weave.review-gates/v1",
             ["gates"] = new JsonArray(SpellKeys(gate, kind))
         }, kind).ToJsonString());
-        string report = Path.Combine(_temp.Path, "report.json");
+        string report = Path.Combine(_inputs, "report.json");
 
         CapturedConsoleExecution<int> run = Verdict("--findings", findings, "--gates", gates, "--out", report);
 
         Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
         Assert.NotEmpty(MessagesWithCode(run.Output, "KW-REVIEW-024"));
-        using JsonDocument written = JsonDocument.Parse(File.ReadAllText(report));
+        using JsonDocument written = JsonDocument.Parse(_services.Files.ReadAllText(report));
         Assert.Equal(
             "correctness/off-by-one",
             written.RootElement.GetProperty("findings")[0].GetProperty("id").GetString());
@@ -523,12 +483,12 @@ public sealed class ReviewVerdictInputTests : IDisposable
     public void ASeverityNameInAnyCaseIsStillRead(string severity)
     {
         string findings = Write("findings.json", SpelledFindingsDocument("lower", severity));
-        string report = Path.Combine(_temp.Path, "report.json");
+        string report = Path.Combine(_inputs, "report.json");
 
         CapturedConsoleExecution<int> run = Verdict("--findings", findings, "--out", report);
 
         Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
-        using JsonDocument written = JsonDocument.Parse(File.ReadAllText(report));
+        using JsonDocument written = JsonDocument.Parse(_services.Files.ReadAllText(report));
         Assert.Equal(1, written.RootElement.GetProperty("findings").GetArrayLength());
     }
 
@@ -546,12 +506,12 @@ public sealed class ReviewVerdictInputTests : IDisposable
         finding.Remove("failureScenario");
         finding[key] = "It breaks on the last element.";
         string findings = Write("findings.json", FindingsObject("findings", "lower", new JsonArray(finding)));
-        string report = Path.Combine(_temp.Path, "report.json");
+        string report = Path.Combine(_inputs, "report.json");
 
         CapturedConsoleExecution<int> run = Verdict("--findings", findings, "--out", report);
 
         Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
-        using JsonDocument written = JsonDocument.Parse(File.ReadAllText(report));
+        using JsonDocument written = JsonDocument.Parse(_services.Files.ReadAllText(report));
         Assert.Equal(
             "It breaks on the last element.",
             written.RootElement.GetProperty("findings")[0].GetProperty("failureScenario").GetString());
@@ -565,12 +525,12 @@ public sealed class ReviewVerdictInputTests : IDisposable
     public void DictionaryKeysDifferingOnlyInCaseAreAcceptedAndKept()
     {
         string findings = Write("findings.json", FindingsDocument("\"pathLineCounts\":{\"src/a.cs\":1,\"SRC/A.CS\":2}"));
-        string report = Path.Combine(_temp.Path, "report.json");
+        string report = Path.Combine(_inputs, "report.json");
 
         CapturedConsoleExecution<int> run = Verdict("--findings", findings, "--out", report);
 
         Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
-        using JsonDocument written = JsonDocument.Parse(File.ReadAllText(report));
+        using JsonDocument written = JsonDocument.Parse(_services.Files.ReadAllText(report));
         Assert.Equal(2, written.RootElement.GetProperty("pathLineCounts").EnumerateObject().Count());
     }
 
@@ -587,31 +547,6 @@ public sealed class ReviewVerdictInputTests : IDisposable
 
         Assert.Equal(0, run.Result);
         Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
-    }
-
-    private static void RenameKey(JsonObject node, string from, string to)
-    {
-        JsonNode? value = node[from];
-        node.Remove(from);
-        node[to] = value;
-    }
-
-    /// <summary>
-    /// A findings document as JSON text whose <paramref name="key"/> holds <paramref name="value"/> under the spelling
-    /// <paramref name="kind"/> names; the other required members are present in their document spelling.
-    /// </summary>
-    private static string FindingsObject(string key, string kind, JsonNode value)
-    {
-        JsonObject document = new()
-        {
-            ["schema"] = "kyber-weave.review-findings/v1",
-            ["findings"] = new JsonArray(),
-            ["changedPaths"] = new JsonArray(),
-            ["changedLines"] = 0
-        };
-        document.Remove(key);
-        document[Spell(key, kind)] = value;
-        return document.ToJsonString();
     }
 
     // -----------------------------------------------------------------------------------------
@@ -648,22 +583,6 @@ public sealed class ReviewVerdictInputTests : IDisposable
     // Harness.
     // -----------------------------------------------------------------------------------------
 
-    /// <summary>One otherwise-valid finding as JSON text, with <paramref name="field"/> set to the raw JSON <paramref name="rawValue"/>.</summary>
-    private static string FindingJson(string field, string rawValue) => FindingObject(field, rawValue).ToJsonString();
-
-    /// <summary>
-    /// A findings document as JSON text. <paramref name="member"/> is one extra raw top-level member, or a replacement list for
-    /// a known one; <paramref name="findings"/> is the raw JSON of the single finding the document holds, or none.
-    /// </summary>
-    private static string FindingsDocument(string? member = null, string? findings = null)
-    {
-        string list = findings is null ? "[]" : "[" + findings + "]";
-        string known = member is not null && member.StartsWith("\"findings\":", StringComparison.Ordinal) ? string.Empty : $"\"findings\":{list},";
-        string changed = member is not null && member.StartsWith("\"changedPaths\":", StringComparison.Ordinal) ? string.Empty : "\"changedPaths\":[],";
-        return "{\"schema\":\"kyber-weave.review-findings/v1\"," + known + changed + "\"changedLines\":0" +
-               (member is null ? string.Empty : "," + member) + "}";
-    }
-
     /// <summary>A findings document holding one otherwise-valid finding, with one field replaced by <paramref name="value"/>.</summary>
     private string WriteFindingDocument(string field, string? value)
     {
@@ -695,30 +614,14 @@ public sealed class ReviewVerdictInputTests : IDisposable
 
     private string Write(string name, string content)
     {
-        string path = Path.Combine(_temp.Path, name);
-        File.WriteAllText(path, content);
+        string path = Path.Combine(_inputs, name);
+        _services.Files.WriteAllText(path, content);
         return path;
     }
 
     private CapturedConsoleExecution<int> Verdict(params string[] options)
     {
-        List<string> arguments = ["review", "verdict", _repo, .. options, "--format", "json"];
-        return ProcessConsoleCapture.Run(() => CreateApp().Run([.. arguments]));
-    }
-
-    private static CommandApp CreateApp()
-    {
-        CommandApp app = new(ReviewTestServices.Registrar());
-        app.Configure(config =>
-        {
-            config.SetApplicationName("kyber-weave");
-            config.AddBranch("review", review =>
-            {
-                review.SetDescription("Run the declared review gates and compute the review verdict.");
-                review.AddCommand<ReviewVerdictCommand>("verdict")
-                    .WithDescription(ReviewVerdictCommand.Description);
-            });
-        });
-        return app;
+        string[] arguments = ["review", "verdict", _repo, .. options, "--format", "json"];
+        return ProcessConsoleCapture.Run(() => CliApplication.Create(_services.Register).Run(arguments));
     }
 }
