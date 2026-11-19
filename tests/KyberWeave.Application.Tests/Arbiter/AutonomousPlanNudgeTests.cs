@@ -128,6 +128,41 @@ public sealed class AutonomousPlanNudgeTests : IDisposable
     }
 
     [Fact]
+    public void ADuplicateReturnWithoutACallIdIsFoundByItsPreDispatch()
+    {
+        // A harness that reports no tool-call id leaves CallId null on the ledger event, so the
+        // repeat is recognised by the pre event both returns were matched to.
+        ArbiterLedgerEvent earlier = PostEvent("post-1", callId: "call-1", preId: "pre-1");
+        ArbiterLedgerEvent current = PostEvent("post-2", callId: null, preId: "pre-1");
+
+        Assert.True(AutonomousPlanNudge.AlreadyNudged([earlier, current], current, callId: null));
+    }
+
+    [Fact]
+    public void AReturnFromADifferentPreDispatchIsStillNudged()
+    {
+        ArbiterLedgerEvent earlier = PostEvent("post-1", callId: "call-1", preId: "pre-1");
+        ArbiterLedgerEvent current = PostEvent("post-2", callId: null, preId: "pre-2");
+
+        Assert.False(AutonomousPlanNudge.AlreadyNudged([earlier, current], current, callId: null));
+    }
+
+    private static ArbiterLedgerEvent PostEvent(string id, string? callId, string? preId) => new(
+        id,
+        DateTimeOffset.UnixEpoch,
+        "hook",
+        Harness,
+        "s1",
+        ArbiterLedgerPhases.Post)
+    {
+        CallId = callId,
+        PreId = preId,
+        Target = "architect",
+        Trigger = AutonomousPlanNudge.Trigger,
+        Returns = new ArbiterReturnMarkers(PlannerStatus: "PLAN_READY"),
+    };
+
+    [Fact]
     public void ABackgroundPlanReadyReturnHandsTheNoteOverOnTheNextDispatch()
     {
         ArbiterHookDecisionEngine engine = Engine();
