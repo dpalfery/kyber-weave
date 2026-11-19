@@ -537,11 +537,13 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                                               or UnauthorizedAccessException
                                               or System.Text.Json.JsonException
                                               or InvalidDataException
-                                              or InvalidOperationException
-                                              or NotSupportedException)
+                                              or NotSupportedException
+                                              or System.Security.SecurityException
+                                              or (ArgumentException and not ArgumentNullException))
         {
-            // A refused or failed save never blocks the dispatch. A programming error — a null
-            // argument, a bad cast — is not a save failure and must surface.
+            // A refused or failed save never blocks the dispatch: a file-system, path or security
+            // failure is expected here. A programming error — a null argument, an invalid
+            // operation, a bad cast — is not a save failure and must surface.
             context.Log.WriteLine($"Arbiter: a review seat was not saved ({exception.GetType().Name}: {OneLine(exception.Message)}).");
         }
     }
