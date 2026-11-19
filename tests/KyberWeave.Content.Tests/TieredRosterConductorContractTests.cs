@@ -205,13 +205,17 @@ public sealed class TieredRosterConductorContractTests
         string architect = Read(ArchitectPath);
         string planAuthoring = Read("products/kyber-squad/agents/architect/references/plan-authoring.md");
 
-        Assert.Contains("does not stop the plan", architect, StringComparison.Ordinal);
-        Assert.Contains("does not stop the plan", planAuthoring, StringComparison.Ordinal);
-        Assert.Contains("errors and warnings alike", architect, StringComparison.Ordinal);
-        Assert.Contains(
-            "`docs-dev` clears it at closeout with `kyber-weave docs standards migrate`",
-            architect,
-            StringComparison.Ordinal);
+        // Both prompts carry the same rule, so one of them cannot drift while the other stays right.
+        foreach (string prompt in new[] { architect, planAuthoring })
+        {
+            Assert.Contains("does not stop the plan", prompt, StringComparison.Ordinal);
+            Assert.Contains("errors and warnings alike", prompt, StringComparison.Ordinal);
+            Assert.Contains(
+                "`docs-dev` clears it at closeout with `kyber-weave docs standards migrate`",
+                prompt,
+                StringComparison.Ordinal);
+            Assert.Contains("the only findings left are the standards warning period", prompt, StringComparison.Ordinal);
+        }
     }
 
     /// <summary>The callers that send work to the live-platform agent list its tiered replacement too.</summary>
