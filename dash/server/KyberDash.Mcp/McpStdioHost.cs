@@ -416,9 +416,20 @@ public partial class McpStdioHost
     private static string Snippet(string body)
     {
         string collapsed = string.Join(' ', body.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-        return collapsed.Length <= MaxSnippetChars
-            ? collapsed
-            : string.Concat(collapsed.AsSpan(0, MaxSnippetChars), "…");
+        if (collapsed.Length <= MaxSnippetChars)
+        {
+            return collapsed;
+        }
+
+        // A cut that lands after a high surrogate would emit half a character; drop it so the
+        // diagnostic stays valid text.
+        int length = MaxSnippetChars;
+        if (char.IsHighSurrogate(collapsed[length - 1]))
+        {
+            length--;
+        }
+
+        return string.Concat(collapsed.AsSpan(0, length), "…");
     }
 
     /// <summary>Parses a reply that is expected to be a contract envelope, or reports why it is not.</summary>
