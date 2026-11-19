@@ -73,6 +73,45 @@ public sealed class PortableContentTests
             "coding standards instead:" + Environment.NewLine + string.Join(Environment.NewLine, offenders));
     }
 
+    /// <summary>
+    /// A portable file's symbolic link must resolve inside its own portable root. A host installs only that
+    /// root, so a link to a file this repository keeps elsewhere would read content the host never receives.
+    /// </summary>
+    /// <remarks>
+    /// The checkout ships no link under either portable root, so the rule is proven over a corpus that does:
+    /// the fixture carries one link that stays inside its root and one that leaves it for a documentation
+    /// file this repository does not ship. Both halves run here; the checkout must report no escaping link.
+    /// </remarks>
+    [Fact]
+    public void NoPortableFileLinkEscapesItsRoot()
+    {
+        InMemoryCorpusSource fixture = new InMemoryCorpusSource(caseSensitive: true)
+            .Add("products/kyber-squad/agents/conductor.md", "---\nschema: kyber-squad.agent/v1\n---\n")
+            .Add("docs/maintainers.md", "A document the portable roots must not reach.\n")
+            .AddFileLink(
+                "products/kyber-squad/agents/inside.md",
+                "products/kyber-squad/agents/conductor.md")
+            .AddFileLink(
+                "products/kyber-squad/agents/escapes.md",
+                "docs/maintainers.md");
+
+        Assert.Equal(["products/kyber-squad/agents/escapes.md"], EscapingLinks(fixture));
+        Assert.Empty(EscapingLinks(Corpus));
+    }
+
+    /// <summary>Every file under a portable root whose symbolic link resolves outside that root.</summary>
+    private static IEnumerable<string> EscapingLinks(ICorpusSource corpus) =>
+        PortableRoots
+            .SelectMany(root => corpus.EnumerateFiles(root).Select(file => (Root: root, File: file)))
+            .Where(entry => corpus.LinkTarget(entry.File) is { } target && !IsInside(corpus, entry.Root, target))
+            .Select(entry => entry.File);
+
+    /// <summary>Gets whether an absolute path stays under one portable root of a corpus.</summary>
+    private static bool IsInside(ICorpusSource corpus, string root, string path) =>
+        path.StartsWith(
+            Path.GetFullPath(Path.Combine(corpus.Root, root)) + Path.DirectorySeparatorChar,
+            StringComparison.Ordinal);
+
     /// <summary>Every file under one portable root, as a path relative to the corpus root.</summary>
     private static IEnumerable<string> Files(string root) => Corpus.EnumerateFiles(root);
 

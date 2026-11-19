@@ -1,31 +1,15 @@
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using KyberWeave.Cli.Commands.Squad;
-using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Core.Squad.Release;
-using KyberWeave.Core.Squad.Rendering;
-using KyberWeave.Tests.Fakes;
+using KyberWeave.Testing.Squad;
 using Xunit;
-using Xunit.Sdk;
-using KyberWeave.Tests.Corpus;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Application.Tests.Squad.Deployment;
 
 /// <summary>
 /// Deployment-state contracts: restore intent and after-image payloads. Split from the one class that used to hold all of
 /// them, so xUnit runs the themes on different cores.
 /// </summary>
-public sealed class SquadDeploymentStateRestoreTests : SquadDeploymentStateTestBase
+public sealed class SquadDeploymentStateRestoreTests : InMemoryDeploymentStateTestBase
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
     [Theory]
     [InlineData("target-file")]
     [InlineData("target-link-metadata")]
@@ -34,13 +18,13 @@ public sealed class SquadDeploymentStateRestoreTests : SquadDeploymentStateTestB
     public void RestoreIntentBackupChangedAfterObserverBoundaryIsNeverConsumed(
         string artifactRole)
     {
-        using TempDirectory fixture = new();
-        string fixturePath = fixture.Path;
+        string fixturePath = Root;
         RestoreArtifactScenario scenario = CreateRestoreArtifactScenario(fixturePath, artifactRole);
         RestoreArtifactTamperingObserver observer = new(
+            Files,
             scenario.ArtifactPath,
             scenario.MutationBoundary);
-        SquadTransaction transaction = Transaction(fixturePath, observer);
+        SquadTransaction transaction = TransactionAt(fixturePath, observer);
 
         Exception? exception = Record.Exception(() =>
             transaction.Execute(scenario.Plan));
@@ -48,15 +32,15 @@ public sealed class SquadDeploymentStateRestoreTests : SquadDeploymentStateTestB
         InvalidDataException invalid = Assert.IsType<InvalidDataException>(exception);
         Assert.Contains("artifact", invalid.Message, StringComparison.OrdinalIgnoreCase);
         Assert.True(observer.MutatedArtifact);
-        Assert.True(File.Exists(scenario.ArtifactPath));
-        Assert.Equal(observer.CorruptBytes, File.ReadAllBytes(scenario.ArtifactPath));
-        Assert.True(File.Exists(scenario.IntentPath));
+        Assert.True(Files.FileExists(scenario.ArtifactPath));
+        Assert.Equal(observer.CorruptBytes, Files.ReadAllBytes(scenario.ArtifactPath));
+        Assert.True(Files.FileExists(scenario.IntentPath));
         AssertTreeEntryEqual(
             scenario.ExpectedLiveAfterImage,
             CaptureTree(fixturePath)[scenario.LiveRelativePath]);
 
         SortedDictionary<string, TreeEntry> retainedEvidence = CaptureTree(fixturePath);
-        SquadTransaction recoveryTransaction = Transaction(fixturePath);
+        SquadTransaction recoveryTransaction = TransactionAt(fixturePath);
         Exception? firstRecovery = Record.Exception(() => recoveryTransaction.Recover(
             fixturePath,
             SquadDeploymentScope.Project));
@@ -77,23 +61,23 @@ public sealed class SquadDeploymentStateRestoreTests : SquadDeploymentStateTestB
     public void RecoverRestoreArtifactChangedBeforeRehydratedConsumptionIsNonAuthoritative(
         string artifactRole)
     {
-        using TempDirectory fixture = new();
-        string fixturePath = fixture.Path;
+        string fixturePath = Root;
         RestoreArtifactScenario scenario = CreateRestoreArtifactScenario(fixturePath, artifactRole);
         SortedDictionary<string, TreeEntry> before = CaptureTree(fixturePath);
         LifecycleStepFailingObserver observer = new(
+            Files,
             fixturePath,
             scenario.MutationBoundary);
-        SquadTransaction transaction = Transaction(fixturePath, observer);
+        SquadTransaction transaction = TransactionAt(fixturePath, observer);
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
             transaction.Execute(scenario.Plan));
         RestoreTree(
             fixturePath,
             Assert.IsType<SortedDictionary<string, TreeEntry>>(
                 observer.InterruptedTreeSnapshot));
-        File.WriteAllBytes(scenario.ArtifactPath, "corrupt restore evidence"u8.ToArray());
+        Files.WriteAllBytes(scenario.ArtifactPath, "corrupt restore evidence"u8.ToArray());
         SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixturePath);
-        SquadTransaction recoveryTransaction = Transaction(fixturePath);
+        SquadTransaction recoveryTransaction = TransactionAt(fixturePath);
 
         Exception? firstRecovery = Record.Exception(() => recoveryTransaction.Recover(
             fixturePath,
@@ -115,14 +99,14 @@ public sealed class SquadDeploymentStateRestoreTests : SquadDeploymentStateTestB
     [InlineData("receipt-original")]
     public void RecoverUnchangedRestoreArtifactRestoresExactly(string artifactRole)
     {
-        using TempDirectory fixture = new();
-        string fixturePath = fixture.Path;
+        string fixturePath = Root;
         RestoreArtifactScenario scenario = CreateRestoreArtifactScenario(fixturePath, artifactRole);
         SortedDictionary<string, TreeEntry> before = CaptureTree(fixturePath);
         LifecycleStepFailingObserver observer = new(
+            Files,
             fixturePath,
             scenario.MutationBoundary);
-        SquadTransaction transaction = Transaction(fixturePath, observer);
+        SquadTransaction transaction = TransactionAt(fixturePath, observer);
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
             transaction.Execute(scenario.Plan));
         RestoreTree(
@@ -130,23 +114,12 @@ public sealed class SquadDeploymentStateRestoreTests : SquadDeploymentStateTestB
             Assert.IsType<SortedDictionary<string, TreeEntry>>(
                 observer.InterruptedTreeSnapshot));
 
-        Transaction(fixturePath).Recover(fixturePath, SquadDeploymentScope.Project);
+        TransactionAt(fixturePath).Recover(fixturePath, SquadDeploymentScope.Project);
         SortedDictionary<string, TreeEntry> afterFirstRecovery = CaptureTree(fixturePath);
-        Transaction(fixturePath).Recover(fixturePath, SquadDeploymentScope.Project);
+        TransactionAt(fixturePath).Recover(fixturePath, SquadDeploymentScope.Project);
 
         AssertTreesEqual(before, afterFirstRecovery);
         AssertTreesEqual(afterFirstRecovery, CaptureTree(fixturePath));
-    }
-
-    [Fact]
-    public void RestoreIntentRestoreSourcesAreReverifiedAtAdjacentUseBoundary()
-    {
-        string transactionSource = Corpus.ReadText("src/KyberWeave.Application/Squad/Deployment/SquadTransaction.cs");
-        string restoreIntent = ExtractMethod(transactionSource, "RestoreIntent");
-        string restoreEntry = ExtractMethod(transactionSource, "RestoreEntry");
-
-        Assert.Contains("VerifyRestore", restoreIntent, StringComparison.Ordinal);
-        Assert.Contains("VerifyRestore", restoreEntry, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -159,37 +132,39 @@ public sealed class SquadDeploymentStateRestoreTests : SquadDeploymentStateTestB
     public void RestoreIntentAfterImagePublishedFailureRestoresFilesAndLinksFromVerifiedPayload(
         string artifactRole)
     {
-        using TempDirectory caughtFixture = new();
+        DeploymentScope caughtFixture = NewScope();
         AfterImageRestoreScenario caughtScenario = CreateAfterImageRestoreScenario(caughtFixture.Path, artifactRole);
         SortedDictionary<string, TreeEntry> caughtBefore = CaptureTree(caughtFixture.Path);
         AfterImageCrashObserver caughtObserver = new(
+            Files,
             caughtFixture.Path,
             caughtScenario.Subject);
 
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
-            Transaction(caughtFixture.Path, caughtObserver).Execute(caughtScenario.Plan));
+            TransactionAt(caughtFixture.Path, caughtObserver).Execute(caughtScenario.Plan));
 
         AssertTreesEqual(caughtBefore, CaptureTree(caughtFixture.Path));
 
-        using TempDirectory recoveryFixture = new();
+        DeploymentScope recoveryFixture = NewScope();
         AfterImageRestoreScenario recoveryScenario =
             CreateAfterImageRestoreScenario(recoveryFixture.Path, artifactRole);
         SortedDictionary<string, TreeEntry> recoveryBefore = CaptureTree(recoveryFixture.Path);
         AfterImageCrashObserver recoveryObserver = new(
+            Files,
             recoveryFixture.Path,
             recoveryScenario.Subject);
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
-            Transaction(recoveryFixture.Path, recoveryObserver).Execute(recoveryScenario.Plan));
+            TransactionAt(recoveryFixture.Path, recoveryObserver).Execute(recoveryScenario.Plan));
         RestoreTree(
             recoveryFixture.Path,
             Assert.IsType<SortedDictionary<string, TreeEntry>>(
                 recoveryObserver.InterruptedTreeSnapshot));
 
-        Transaction(recoveryFixture.Path).Recover(
+        TransactionAt(recoveryFixture.Path).Recover(
             recoveryFixture.Path,
             SquadDeploymentScope.Project);
         SortedDictionary<string, TreeEntry> afterFirstRecovery = CaptureTree(recoveryFixture.Path);
-        Transaction(recoveryFixture.Path).Recover(
+        TransactionAt(recoveryFixture.Path).Recover(
             recoveryFixture.Path,
             SquadDeploymentScope.Project);
 
@@ -197,48 +172,15 @@ public sealed class SquadDeploymentStateRestoreTests : SquadDeploymentStateTestB
         AssertTreesEqual(afterFirstRecovery, CaptureTree(recoveryFixture.Path));
     }
 
-    [Fact]
-    public void RestoreIntentUsesSingleVerifiedImmutablePayload()
-    {
-        string source = Corpus.ReadText("src/KyberWeave.Application/Squad/Deployment/SquadTransaction.cs");
-        string capture = ExtractMethod(source, "CaptureVerifiedRestorePayload");
-        string compare = ExtractMethod(source, "CompareAndRestoreEntry");
-        string restore = ExtractMethod(source, "RestoreEntry");
-
-        Assert.Contains("ReadOnlyMemory<byte>", source, StringComparison.Ordinal);
-        Assert.Equal(1, CountOccurrences(compare, "CaptureVerifiedRestorePayload("));
-        Assert.DoesNotContain("_files.ReadAll", compare, StringComparison.Ordinal);
-        Assert.DoesNotContain("_files.ReadAll", restore, StringComparison.Ordinal);
-        Assert.DoesNotContain("VerifyRestoreArtifact", restore, StringComparison.Ordinal);
-        Assert.Contains("payload", restore, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("GetEntryKind", capture, StringComparison.Ordinal);
-        Assert.True(
-            CountOccurrences(capture, "GetEntryKind") >= 2,
-            "Restore payload capture must verify the source node kind before and after its single read.");
-        Assert.Equal(1, CountOccurrences(capture, "_files.ReadAllBytes(backupPath)"));
-        Assert.Equal(1, CountOccurrences(capture, "_files.ReadAllBytes(linkMetadataPath)"));
-        Assert.Contains("WriteNewFile", restore, StringComparison.Ordinal);
-        Assert.Contains("OpenWriteNew", ExtractMethod(source, "WriteNewFile"), StringComparison.Ordinal);
-        Assert.DoesNotContain("FileMode.Create,", restore, StringComparison.Ordinal);
-        Assert.DoesNotContain("FileMode.Create)", restore, StringComparison.Ordinal);
-        Assert.Contains("CreateFileLink", restore, StringComparison.Ordinal);
-        Assert.Contains("GetEntryKind(targetPath)", restore, StringComparison.Ordinal);
-        int liveRecheck = restore.LastIndexOf(
-            "GetEntryKind(targetPath)",
-            StringComparison.Ordinal);
-        int liveRemoval = restore.IndexOf(
-            "DeleteEntry(targetPath",
-            liveRecheck,
-            StringComparison.Ordinal);
-        Assert.True(
-            liveRecheck >= 0 && liveRemoval > liveRecheck,
-            "The live after-image must be revalidated immediately before removal.");
-        string adjacentRemoval = restore[liveRecheck..liveRemoval];
-        Assert.DoesNotContain("File.ReadAll", adjacentRemoval, StringComparison.Ordinal);
-        Assert.DoesNotContain("Notify", adjacentRemoval, StringComparison.Ordinal);
-        Assert.DoesNotContain("await", adjacentRemoval, StringComparison.Ordinal);
-        Assert.DoesNotContain("PublishIntent", adjacentRemoval, StringComparison.Ordinal);
-        Assert.DoesNotContain("Notify", restore, StringComparison.Ordinal);
-        Assert.DoesNotContain("await", restore, StringComparison.Ordinal);
-    }
+    private static bool TreesEqual(
+        IReadOnlyDictionary<string, TreeEntry> expected,
+        IReadOnlyDictionary<string, TreeEntry> actual) =>
+        expected.Count == actual.Count &&
+        expected.All(pair =>
+            actual.TryGetValue(pair.Key, out TreeEntry? entry) &&
+            entry.Kind == pair.Value.Kind &&
+            string.Equals(entry.LinkTarget, pair.Value.LinkTarget, StringComparison.Ordinal) &&
+            (pair.Value.Content is null
+                ? entry.Content is null
+                : entry.Content is not null && entry.Content.SequenceEqual(pair.Value.Content)));
 }

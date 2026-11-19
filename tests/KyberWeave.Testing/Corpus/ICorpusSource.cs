@@ -52,6 +52,20 @@ public interface ICorpusSource
     /// <exception cref="FileNotFoundException">The corpus holds no file at the path.</exception>
     byte[] ReadBytes(string relativePath);
 
+    /// <summary>Gets the absolute path a file's symbolic link resolves to.</summary>
+    /// <param name="relativePath">The file's path relative to <see cref="Root"/>, with forward slashes.</param>
+    /// <returns>
+    /// The link's final target, absolute and on the host's own spelling, so a caller can compare it with
+    /// <see cref="Root"/>; null when the path is not a symbolic link, is missing, or its link cannot be followed
+    /// to an existing target.
+    /// </returns>
+    /// <exception cref="ArgumentException">The path is rooted or climbs above the root.</exception>
+    /// <remarks>
+    /// A corpus read follows a link, so this is the only way a scan can tell that a file it listed is one and
+    /// where it leads. The target is the final one, with every hop resolved; nothing behind it is opened.
+    /// </remarks>
+    string? LinkTarget(string relativePath);
+
     /// <summary>Lists the files under a directory, as paths relative to <see cref="Root"/> with forward slashes.</summary>
     /// <param name="relativeDirectory">
     /// The directory's path relative to <see cref="Root"/>, with forward slashes; the empty string names the root

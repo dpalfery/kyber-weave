@@ -2,7 +2,6 @@ using KyberWeave.Testing.Squad;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using Xunit;
-using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -13,17 +12,12 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class PlatformReaderProfileTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
-
-    private static readonly Lazy<SquadSource> Source = new(() => RealSquadServices.Load(ProductRoot));
+    private static SquadSource Source => CanonicalSquadTree.SharedSource;
 
     [Fact]
     public void TheProfileAllowsReadingSearchNetworkingAndCommandExecution()
     {
-        SquadCapabilityProfile profile = Source.Value.CapabilityProfiles.Profiles["platform-reader"];
+        SquadCapabilityProfile profile = Source.CapabilityProfiles.Profiles["platform-reader"];
 
         Assert.Equal(SquadPermissionDecision.Allow, profile.Permissions["filesystem.read"]);
         Assert.Equal(SquadPermissionDecision.Allow, profile.Permissions["filesystem.search"]);
@@ -34,7 +28,7 @@ public sealed class PlatformReaderProfileTests
     [Fact]
     public void TheProfileDeniesWritingPublishingAndDelegation()
     {
-        SquadCapabilityProfile profile = Source.Value.CapabilityProfiles.Profiles["platform-reader"];
+        SquadCapabilityProfile profile = Source.CapabilityProfiles.Profiles["platform-reader"];
 
         Assert.Equal(SquadPermissionDecision.Deny, profile.Permissions["filesystem.write"]);
         Assert.Equal(SquadPermissionDecision.Deny, profile.Permissions["network.publish"]);
@@ -49,17 +43,17 @@ public sealed class PlatformReaderProfileTests
     [Fact]
     public void EveryDeclaredCapabilityHasADecision()
     {
-        SquadCapabilityProfile profile = Source.Value.CapabilityProfiles.Profiles["platform-reader"];
+        SquadCapabilityProfile profile = Source.CapabilityProfiles.Profiles["platform-reader"];
 
         Assert.Equal(
-            Source.Value.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal),
+            Source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal),
             profile.Permissions.Keys.Order(StringComparer.Ordinal));
     }
 
     [Fact]
     public void TheProfileIsSharedAndNeedsNoTargetEnvelope()
     {
-        SquadCapabilityProfile profile = Source.Value.CapabilityProfiles.Profiles["platform-reader"];
+        SquadCapabilityProfile profile = Source.CapabilityProfiles.Profiles["platform-reader"];
 
         Assert.Null(profile.Target);
     }

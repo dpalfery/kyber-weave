@@ -272,7 +272,8 @@ internal static class SquadTestCommands
         bool isInteractive = false,
         Func<string, bool>? readAnswer = null,
         IKyberWeaveConfigRepository? configs = null,
-        KyberDashCapturePluginStep? capturePluginStep = null)
+        KyberDashCapturePluginStep? capturePluginStep = null,
+        ISquadProjectPicker? picker = null)
     {
         SquadConsole console = output ?? CapturedSquadConsole();
         return new SquadUpdateCommand(
@@ -289,7 +290,7 @@ internal static class SquadTestCommands
             state.Environment,
             new SquadCommandRoots(state.Files, state.Paths, state.Environment, console),
             configs ?? new FakeKyberWeaveConfigRepository(),
-            null,
+            picker,
             capturePluginStep);
     }
 

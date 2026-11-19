@@ -46,6 +46,13 @@ public sealed class CheckoutCorpusSource : ICorpusSource
     /// <inheritdoc />
     public byte[] ReadBytes(string relativePath) => _files.ReadAllBytes(ResolveFile(relativePath));
 
+    /// <inheritdoc />
+    public string? LinkTarget(string relativePath)
+    {
+        string path = CorpusPath.Resolve(Root, CorpusPath.Normalize(relativePath));
+        return _files.GetFinalLinkTarget(path);
+    }
+
     /// <summary>Resolves a readable file, raising the seam's one "no such file" error for anything else.</summary>
     /// <param name="relativePath">The file's path relative to <see cref="Root"/>.</param>
     /// <returns>The absolute path.</returns>
