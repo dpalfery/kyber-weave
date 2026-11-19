@@ -13,10 +13,8 @@ impact-components: [KyberDash]
 
 **Status:** Draft, 2026-11-18. Requirements approved; design revised at design review (AP-D1,
 AP-D2) and approved for specification drafting only (AP-D3); tasks written. **Not approved for
-execution.** Three blockers are open. **BL-1:** OTLP-only history cannot be re-ingested, and the
-owner must resolve that before the deletion is implemented. **BL-2:** the 17 harness ids in today's
-store are unproven, which blocks release acceptance. **BL-3:** `windsurf` and `aider` have no
-evidenced format. Autonomy: autonomous.
+execution.** The three blockers are resolved by the owner (BL-1: OTLP-only history loss accepted;
+BL-2: the 17 harness ids recorded; BL-3: `windsurf` and `aider` excluded). Autonomy: autonomous.
 Development mode for the later implementation:
 test-first. This run writes the specification only and implements nothing.
 
@@ -26,8 +24,8 @@ collector into one set of typed DTOs in the repository layer; no column holds JS
 harness may not report lives in a child table whose missing row means "not reported"; and the
 analytics path reads only that schema. Nothing is migrated: the existing database is deleted, no
 legacy copy is kept, and every harness's history is re-ingested from its own files (OD-7). History
-that reached the store only over OTLP has no harness file behind it, so it cannot be re-ingested.
-That conflict is the open blocker BL-1, and the owner must decide it. This run deletes nothing.
+that reached the store only over OTLP has no harness file behind it and is lost; the owner accepted
+that (BL-1). This run deletes nothing.
 
 The redesign fixes two known faults: every KyberDash MCP analytics call answers HTTP 500 with an
 empty body on the real store, and Copilot CLI sessions are stored with `llm.invoke` records only.
@@ -37,11 +35,11 @@ empty body on the real store, and Copilot CLI sessions are stored with `llm.invo
 The permanent decision table is in [requirements](requirements.md#decisions): the owner's nine
 decisions (OD-1 to OD-9), the decisions taken autonomously while writing the requirements
 (RQ-1 to RQ-12), the requirements approval (AP-R), the two design-review revisions (AP-D1, AP-D2),
-the design approval for drafting (AP-D3) and the **open blockers BL-1, BL-2 and BL-3**. The design's
+the design approval for drafting (AP-D3) and the blockers BL-1, BL-2 and BL-3, resolved by the owner. The design's
 own decisions, DD-1 to DD-17, are in [design](design.md#design-decisions). Low-confidence: DD-6,
 DD-8, DD-10 and DD-11. Medium: DD-3 (closed defined-field list; no JSON document kept in any form),
 DD-13, DD-14, DD-15, DD-16 (no evidenced harness excluded) and DD-17 (Codex `local_shell_call` and
-OTLP tool events). DD-9 holds OD-7 as the owner stated it and records BL-1.
+OTLP tool events). DD-9 holds OD-7 as the owner stated it.
 
 ## Design harvest
 

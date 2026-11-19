@@ -18,9 +18,9 @@ component: KyberDash
 
 | Blocker | What it is | What it blocks | What it does not block | Resolved by |
 |---|---|---|---|---|
-| **BL-1** | OD-7 deletes the database and says every harness's history is re-ingested. History that reached the store only over OTLP has no harness file, so it cannot be re-ingested (requirements, BL-1; design, "Blocker BL-1") | Gate 0.1, and through it task 16.2 (the deleting schema-version bump), closeout 18.1 and every destructive rollout | Every other task: they run against in-memory fakes and delete nothing | An owner decision recorded in the decisions table. The options are listed there; none is chosen here |
-| **BL-2** | Which 17 harness ids the owner's store holds is unproven; the code gives candidates only | Gate 0.2, and through it task 16.2, closeout 18.1 and every destructive rollout | Development: tasks 1.1 to 16.4 except 10.11, 10.12 and 16.2. Tasks 6.1 to 10.10 cover every candidate | One proof route from design, "Closing the 17-id gap", accepted by the owner. The owner's own list is optional; no agent, test or code reads the store for it |
-| **BL-3** | `windsurf` and `aider` have no evidenced history format | Gate 0.3, and through it tasks 10.11, 10.12 and 16.2, closeout 18.1 and every destructive rollout | Their discovery entries, which report `SOURCE_FORMAT_UNEVIDENCED` (task 5.1) | Public format evidence accepted by the owner, or the owner's authorisation to exclude. The specification grants neither |
+| **BL-1** | OTLP-only history cannot be re-ingested | Nothing: the owner accepted the loss | — | Resolved by the owner, 2026-11-18 (requirements, BL-1) |
+| **BL-2** | Which 17 harness ids the owner's store holds | Nothing: the ids are recorded | — | Resolved by the owner, 2026-11-18 (requirements, BL-2) |
+| **BL-3** | `windsurf` and `aider` have no history format | Nothing: both are excluded | — | Resolved by the owner, 2026-11-18 (requirements, BL-3) |
 
 The blockers are **not work an agent can do**. Each is resolved only by the owner, recorded in the
 decisions table of [requirements](requirements.md#decisions) with the status `RESOLVED BY OWNER`.
@@ -74,7 +74,7 @@ tasks depend on it.
 These tasks hold work back until the owner has decided. They write no code. A worker must not
 author their resolution; if the command fails, the task is reported `BLOCKED` and stays open.
 
-- [ ] 0.1 Gate: the owner has resolved BL-1
+- [x] 0.1 Gate: the owner has resolved BL-1
   Difficulty: easy
   Role: owner
   Depends on: none
@@ -85,7 +85,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
   - No agent, specification or conductor chooses among the BL-1 options, and none records loss
     as accepted on the owner's behalf.
   - _Requirements: 7.1, 7.6_
-- [ ] 0.2 Gate: the owner has resolved BL-2
+- [x] 0.2 Gate: the owner has resolved BL-2
   Difficulty: easy
   Role: owner
   Depends on: none
@@ -95,7 +95,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
   Acceptance criteria: the BL-2 row records the proof route that named the harness ids and the status `RESOLVED BY OWNER`; the command passes. If it fails, report `BLOCKED` and change nothing.
   - No agent, test or code reads the owner's store to resolve it.
   - _Requirements: 6.5, 11.1_
-- [ ] 0.3 Gate: the owner has resolved BL-3
+- [x] 0.3 Gate: the owner has resolved BL-3
   Difficulty: easy
   Role: owner
   Depends on: none
@@ -472,27 +472,6 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~ClineMapper`
   Acceptance criteria: `cline` and `cline-cli` fixtures each give the records their deleted provider produced, under their own harness ids.
   - _Requirements: 1.2, 6.2, 11.1, 11.2_
-- [ ] 10.11 Establish a Windsurf source
-  Difficulty: hard
-  Technology: csharp
-  Depends on: 5.1, 0.3
-  Capabilities: public-format research, then a C# file reader into typed DTOs, with xUnit tests
-  Files: `dash/server/KyberDash.Data/Harnesses/Windsurf/WindsurfMapper.cs`, `dash/server.tests/KyberDash.Data.Tests/Harnesses/WindsurfMapperTests.cs`, `docs/dash/field-register.md`
-  Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~WindsurfMapper`
-  Acceptance criteria: either a public format document is cited and the mapper passes fixtures built from it, or the task stops with `SOURCE_FORMAT_UNEVIDENCED` still reported and the gap reported to the owner, with no reader invented and the harness not dropped.
-  - First step: look for a public format document for Windsurf's local history. Read no private
-    file.
-  - _Requirements: 6.2, 8.1, 11.2_
-- [ ] 10.12 Establish an Aider source
-  Difficulty: hard
-  Technology: csharp
-  Depends on: 5.1, 0.3
-  Capabilities: public-format research, then a C# file reader into typed DTOs, with xUnit tests
-  Files: `dash/server/KyberDash.Data/Harnesses/Aider/AiderMapper.cs`, `dash/server.tests/KyberDash.Data.Tests/Harnesses/AiderMapperTests.cs`, `docs/dash/field-register.md`
-  Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~AiderMapper`
-  Acceptance criteria: the same as 10.11, for Aider.
-  - _Requirements: 6.2, 8.1, 11.2_
-
 ### 11. Projections
 
 - [ ] 11.1 Rewrite the session projector over the reader
@@ -694,7 +673,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
 
 - [ ] 18.1 Specification closeout
   Difficulty: easy
-  Depends on: 0.1, 0.2, 0.3, 10.11, 10.12, 14.2, 16.2, 17.1, 17.2
+  Depends on: 0.1, 0.2, 0.3, 14.2, 16.2, 17.1, 17.2
   Capabilities: documentation harvest and specification archiving, assigned to `docs-dev`
   Files: `docs/specs/kyberdash-relational-store/README.md`, `docs/specs/README.md`
   Command: `kyber-weave docs validate`

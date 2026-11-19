@@ -105,14 +105,14 @@ was read.
 | DD-6 | Only harness-reported cost is stored, in `record_reported_cost(amount, currency)`. Published-rate cost is computed by analytics (RQ-3). Copilot's `cost` multiplier and nano-AIU are not currency and are dropped with that reason. | Store a computed cost with a basis flag. | OD-3 and RQ-3. | low — RQ-3 |
 | DD-7 | Copilot CLI is read from `events.jsonl` using only the event types and fields GitHub documents (table in [Copilot CLI mapping](#copilot-cli-mapping)). A field that is not documented and not seen in the deleted reader is not mapped. | Port the deleted TypeScript reader as it was. | The deleted reader dropped tool and agent records and skipped messages without `outputTokens`. Documented shapes are the authority. | medium |
 | DD-8 | The parent of a Copilot CLI `agent.invoke` record is the `tool.invoke` named by `subagent.started.toolCallId`. The sub-agent's own records link to it through `record_agent_instance` **only** if a fixture built from documented shapes proves that the envelope `agentId` joins `subagent.started`. Until then the records keep their `agentId` and have no parent link. | Link by time window. | Requirement 8.4: no inferred links. | low |
-| DD-9 | OD-7 stands as the owner stated it: the existing database is **deleted** (`canon.db`, `-wal`, `-shm`), unread, and every harness's history is re-ingested from its own files. No legacy database is kept, and nothing is migrated. History that reached the store only over OTLP has no harness file behind it, so it cannot be re-ingested. This conflicts with "every harness's history is re-ingested", and the specification does not resolve the conflict on the owner's behalf. It is recorded as the **unresolved implementation blocker BL-1**: the task that ships the deleting schema-version bump cannot start until the owner resolves BL-1. This run deletes nothing. | (a) Set the old store aside, renamed, until the owner confirms. Rejected at design review: it overrides OD-7. (b) Migrate the OTLP-only rows. Forbidden by OD-7. (c) Ship the deletion and accept the loss silently. Rejected: it would accept data loss for the owner. | An owner decision is not overridden autonomously, and a factual conflict inside it is raised, not settled. | high (owner, OD-7); BL-1 open |
+| DD-9 | OD-7 stands as the owner stated it: the existing database is **deleted** (`canon.db`, `-wal`, `-shm`), unread, and every harness's history is re-ingested from its own files. No legacy database is kept, and nothing is migrated. History that reached the store only over OTLP has no harness file behind it and is lost; the owner accepted that loss (BL-1). | (a) Set the old store aside, renamed, until the owner confirms. Rejected at design review: it overrides OD-7. (b) Migrate the OTLP-only rows. Forbidden by OD-7. (c) Ship the deletion and accept the loss silently. Rejected: it would accept data loss for the owner. | An owner decision is not overridden autonomously, and a factual conflict inside it is raised, not settled. | high (owner, OD-7); BL-1 open |
 | DD-10 | OTLP logs (`pending_logs`, `quarantined_logs`, `enriched_logs`) are removed. The C# engine stores logs but never correlates them. A future log mapper would map each log to collector DTOs on receipt, and a log it cannot map is counted in `ingest_problem`. | Keep the log tables with typed columns. | No reader uses the stored logs today, and keeping them typed would mean inventing their fields. | low — RQ-9 |
 | DD-11 | Adapter SQL is tested by overriding `ExecuteSqliteCore` in a test subclass that records statements and returns canned tab-separated, hex-encoded output. No database file is opened. | Contract suite against a real SQLite file (ADR 0089). | OD-9 forbids it; the conflict is recorded in RQ-8. | low — RQ-8 |
 | DD-12 | The collector DTOs and the native types live in `KyberDash.Data` (the repository layer, OD-1). The store interfaces live in `KyberDash.Contracts`. The analytics service depends only on the reader interface. | DTOs in `KyberDash.Domain`. | OD-1 names the repository layer. | high (owner) |
 | DD-13 | Projection tables store only analysis outputs that cannot be got by a plain aggregate over record rows. That means context pressure per turn, schema ranking, timeline sub-agent and auxiliary marks, run grouping, execution linkage, rollup metrics, findings and predictions. Plain aggregates are computed at read time by `IRelationalStoreReader` queries: token totals, counts, model lists, tools offered and invoked, request lists, reconciliation, per-tool invocation counts and priced cost. | Store every field of today's `payload` dictionary. | Requirement 3.4 allows derived values only in projection tables. Storing aggregates that are also derivable from projection columns creates transitive dependencies. RQ-3 forbids stored priced cost. | medium |
 | DD-14 | A projection's analysis verdict "not measurable, because …" is stored as a reason row in a table of its own, exclusive with the measured row (for example `session_context` versus `session_context_unmeasurable`). A harness value that was simply not reported has no row at all (OD-3). | Recompute every reason at read time. | A verdict is an output of the projector, not a harness value, and some reasons depend on analysis state that is not stored. Harness facts still follow "absence means not reported". | medium |
 | DD-15 | Tool definitions are mapped to `tool_definition(record_id, position, tool_name, schema_tokens)` plus an optional server row. Tokens are counted once, at ingest, with the existing token counter. The definition text, which is a JSON schema, is dropped (DD-3). | Keep the definition text. | It is a JSON document (OD-2). Schema cost and the dormant-tool-schema detector need only the name, server and token size. | medium |
-| DD-16 | **No evidenced harness is excluded without the owner's authorisation.** Every harness that had a reader before `fc80ddf9` gets a C# reader and mapper under the same contract. Each is ported test-first from the deleted TypeScript provider's evidenced shapes (`fc80ddf9^:dash/src/providers/*`). A field the deleted provider did not read, and that no public format document shows, is not mapped. A harness with no evidenced format (`windsurf`, `aider`, or any unknown id) still gets typed coverage. Discovery reports it with a `SOURCE_FORMAT_UNEVIDENCED` problem row, never as silent zero. Its reader task waits on format evidence (BL-3) and is not dropped. | Port only the readers the owner's list names. Rejected at design approval: it excludes evidenced harnesses without the owner's authorisation. | The approval requires coverage "rather than excluding them". Port cost is bounded by the deleted providers, which exist in git history. | medium |
+| DD-16 | **No evidenced harness is excluded without the owner's authorisation.** Every harness that had a reader before `fc80ddf9` gets a C# reader and mapper under the same contract. Each is ported test-first from the deleted TypeScript provider's evidenced shapes (`fc80ddf9^:dash/src/providers/*`). A field the deleted provider did not read, and that no public format document shows, is not mapped. A harness with no evidenced format (any unknown id) still gets typed coverage; `windsurf` and `aider` are excluded by the owner (BL-3). Discovery reports it with a `SOURCE_FORMAT_UNEVIDENCED` problem row, never as silent zero. Its reader task waits on format evidence and is not dropped. | Port only the readers the owner's list names. Rejected at design approval: it excludes evidenced harnesses without the owner's authorisation. | The approval requires coverage "rather than excluding them". Port cost is bounded by the deleted providers, which exist in git history. | medium |
 | DD-17 | **Codex tool handling covers both paths.** (a) Files: `local_shell_call` and `local_shell_call_output` are mapped to `tool.invoke` with `tool_name = local_shell`. `action` is a JSON object, so only input size and fingerprint are kept (DD-3). `status` maps to `tool_call_outcome` (`completed` means success, `incomplete` means failure, `in_progress` means no row). `output` is kept as result text when it is plain text. The shape is taken from OpenAI's API reference "Local shell". (b) OTLP: the Codex `codex.tool_result` log event is mapped on receipt to a `tool.invoke` record. Only the attributes that Codex's own published telemetry documentation names are used (tool name, call id, success, duration); the documentation is cited in the field register. The arguments and output excerpt are dropped, as a JSON document or tool-specific text (OD-6). This replaces "#210 deferred". | Keep Codex OTLP tool data dropped. Rejected at design approval: it excludes evidenced support without the owner's authorisation. | Both shapes are publicly documented. (b) uses the log mapper DD-10 already foresees, without storing logs. | medium — (b) needs the authoritative `openai/codex` telemetry document confirmed in its first test-first step; secondary sources only so far |
 
 ## Architecture
@@ -599,7 +599,6 @@ pretends otherwise. The ids are those `NormalizeHarnessName` returns.
 | `droid` | OTLP plugin | OTLP live; file source `~/.factory/sessions` to port (DD-9) | yes (`factory.turn`) | yes (`factory.tool`) | yes (`factory.session`) | as sent / `internal` | `CanonAdapters.cs` 1369–1400 |
 | `pi` | OTLP adapter | OTLP live; `pi.ts` to port (DD-9) | yes | when spans carry `gen_ai.tool.name` | no evidence | as sent | `CanonAdapters.cs` 877–933 |
 | `cursor`, `kilo-shared-runtime`, `kilo-vscode-legacy`, `commandcode`, `devin`, `warp`, `kimi-code`, `roo-code`, `cline`, `cline-cli` | none | C# port of the deleted provider (DD-16), under the same mapper contract and test-first | only what the deleted provider produced (usage-bearing calls) | only where the deleted provider extracted tools (for example `commandcode` `tool_use`) | no evidence | `internal` | `fc80ddf9^:dash/src/providers/*`; telemetry inventory lines 56–73 |
-| `windsurf`, `aider` | name normalization only | discovery reports `SOURCE_FORMAT_UNEVIDENCED`; reader waits on format evidence (DD-16, BL-3) | — | — | — | — | `CanonPricing.cs` 720–778; telemetry inventory lines 979–985 |
 | `gemini` | attribution only | never stored | — | — | — | — | `IsExcludedHarnessIdentity` |
 
 Together the fixtures cover every op (`llm.invoke` from all; `tool.invoke` from Claude, Codex files,
@@ -635,49 +634,18 @@ after the old store is deleted (OD-7).
 | `droid` | OTLP plugin; TypeScript `~/.factory/sessions` reader deleted | sessions only after a port | port-dependent; OTLP part unrecoverable |
 | `pi` | OTLP adapter; TypeScript provider deleted | only after a port | port-dependent |
 | `cursor`, `kilo-shared-runtime`, `kilo-vscode-legacy`, `commandcode`, `devin`, `warp`, `kimi-code`, `roo-code`, `cline`, `cline-cli` | TypeScript providers only (deleted at `fc80ddf9`) | only after a port, for native files that still exist | port-dependent |
-| `windsurf`, `aider` | name normalization only; marked unsupported in the inventory cache matrix (lines 979–985) | nothing until a format is evidenced (BL-3) | no source evidenced |
 | `gemini` | attribution only; excluded from storage | never stored | none |
 | any other id | passed through lowercased by `NormalizeHarnessName` | unknown | unknown |
 
-#### Blocker BL-1 — OTLP-only history versus "every harness's history is re-ingested"
+#### Resolved blockers BL-1, BL-2 and BL-3
 
-**The fact.** Spans that reached `canon.db` only over OTLP have no harness file behind them. That
-covers all OpenCode history, Copilot Chat, Copilot JetBrains, Copilot agent mode, and the OTLP-only
-parts of Claude, Codex, Antigravity and Droid. A re-ingest from harness files cannot rebuild these
-spans. OD-7 deletes the database, and nothing is migrated. So those spans cannot survive OD-7.
+The owner resolved all three on 2026-11-18 (requirements, decisions table):
 
-**The conflict.** OD-7 also says "every harness's history is re-ingested". For OTLP-only history,
-both clauses of OD-7 cannot hold at once. Only the owner can decide between them. This specification
-does not:
-
-- keep a legacy database, rename it or set it aside (that would override OD-7's deletion);
-- migrate any row (forbidden by OD-7);
-- claim that a source can recover this history when none can;
-- accept the loss on the owner's behalf.
-
-**What is blocked.** Only the implementation task that ships the deleting schema-version bump. Every
-other task (schema catalog, DTOs, mappers, the Copilot CLI reader, analytics, the stored-fields view)
-can be built and unit-tested against the in-memory fake without deleting anything. The tasks list
-marks the deletion task "blocked on BL-1".
-
-**What unblocks it.** An owner decision recorded in the decision table. The specification lists the
-options without choosing one: accept the named loss explicitly; supply a recoverable source for it;
-or amend OD-7.
-
-#### Blockers BL-2 and BL-3
-
-**BL-2: the 17-id evidence gap.** Development is not blocked, because the fixtures cover every
-candidate. What is blocked is **release acceptance**: the claim that re-ingest covers "every
-harness in today's store". That claim cannot be made until one proof route in [Closing the 17-id
-gap](#closing-the-17-id-gap) has named the ids. An id that proves to be outside the candidate list
-gets a reader task before release, or an owner decision to exclude it.
-
-**BL-3: no evidenced format for `windsurf` or `aider`.** No reader, deleted provider or public
-format document in the evidence describes where either harness keeps history. Their reader tasks
-start with a format-evidence step that uses public documentation only. If no format is found,
-the task stops and reports. It does not invent a reader, and it does not drop the harness. The
-harness stays visible through `SOURCE_FORMAT_UNEVIDENCED` until the owner either authorises its
-exclusion or names a source.
+- **BL-1:** OTLP-only history is lost when the database is deleted, and that is accepted. Nothing
+  tries to recover it, warns about it or keeps a legacy copy.
+- **BL-2:** the store holds 17 harness ids, recorded in the BL-2 row. Re-ingest acceptance is
+  measured against that list.
+- **BL-3:** `windsurf` and `aider` are excluded. Neither gets a reader, a mapper or a fixture.
 
 #### Closing the 17-id gap
 
