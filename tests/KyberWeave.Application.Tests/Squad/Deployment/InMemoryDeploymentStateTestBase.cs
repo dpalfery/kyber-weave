@@ -90,6 +90,38 @@ public abstract class InMemoryDeploymentStateTestBase : SquadStateDocumentFixtur
         return new DeploymentScope(path);
     }
 
+    /// <summary>Creates a directory of its own on this test's file system and returns its path.</summary>
+    /// <param name="path">The directory.</param>
+    /// <returns>The same path, so a case can create and name a root in one expression.</returns>
+    internal string NewDirectory(string path)
+    {
+        Files.CreateDirectory(path);
+        return path;
+    }
+
+    /// <summary>Builds a separate state over a new in-memory file system with the case rule a case names.</summary>
+    /// <param name="caseSensitive">True for Linux name rules; false for the case-insensitive, case-preserving APFS and NTFS behaviour.</param>
+    /// <returns>The state, with its home beneath its own root.</returns>
+    internal static InMemorySquadState NewState(bool caseSensitive)
+    {
+        InMemoryFileSystem files = new(caseSensitive: caseSensitive);
+        return new InMemorySquadState(stateRoot: Path.Combine(files.Root, "state"), files: files);
+    }
+
+    /// <summary>Asserts two spellings name one location through the path seam.</summary>
+    /// <param name="expected">The expected location.</param>
+    /// <param name="actual">The actual location.</param>
+    internal void AssertSameLocation(string expected, string actual) =>
+        Assert.Equal(Semantics.Canonicalize(expected), Semantics.Canonicalize(actual));
+
+    /// <summary>Asserts a deployment was refused because another deployment of the same root holds its lease.</summary>
+    /// <param name="exception">The exception the deployment raised, or null when it ran.</param>
+    internal static void AssertActiveLeaseConflict(Exception? exception)
+    {
+        InvalidOperationException conflict = Assert.IsAssignableFrom<InvalidOperationException>(exception);
+        Assert.Contains("active", conflict.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>Gets the state store anchored on a directory, with its home beneath it.</summary>
     /// <param name="applicationData">The application-data directory; the home sits beneath it as the product's does.</param>
     /// <returns>The store.</returns>
@@ -867,6 +899,28 @@ public abstract class InMemoryDeploymentStateTestBase : SquadStateDocumentFixtur
             files.WriteAllBytes(artifactPath, CorruptBytes);
             MutatedArtifact = true;
             throw new InjectedSquadTransactionFailure(step.Sequence);
+        }
+    }
+
+    /// <summary>Stops the run at the first checkpoint of one kind, capturing the tree the process leaves behind.</summary>
+    internal sealed class CheckpointFailingObserver(
+        InMemoryFileSystem files,
+        string root,
+        SquadTransactionCheckpointKind checkpoint) : ISquadTransactionCheckpointObserver
+    {
+        public IReadOnlyDictionary<string, TreeEntry>? InterruptedTreeSnapshot { get; private set; }
+
+        public void AfterStep(SquadTransactionStep step)
+        {
+        }
+
+        public void AfterCheckpoint(SquadTransactionCheckpoint value)
+        {
+            if (value.Kind != checkpoint)
+                return;
+
+            InterruptedTreeSnapshot = CaptureTree(files, root);
+            throw new InjectedSquadTransactionFailure(value.Sequence);
         }
     }
 

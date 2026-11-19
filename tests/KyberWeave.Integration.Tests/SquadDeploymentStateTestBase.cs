@@ -850,77 +850,6 @@ public abstract class SquadDeploymentStateTestBase : SquadStateDocumentFixtures
         }
     }
 
-    internal static void AssertCreatedDirectoryAuthorityIsCanonical(JsonArray createdDirectories)
-    {
-        int previousDepth = int.MaxValue;
-        HashSet<string> identities = new(StringComparer.Ordinal);
-        foreach (JsonNode? node in createdDirectories)
-        {
-            JsonObject authority = Assert.IsType<JsonObject>(node);
-            string area = Assert.IsAssignableFrom<JsonValue>(authority["area"]).GetValue<string>();
-            string path = Assert.IsAssignableFrom<JsonValue>(authority["path"]).GetValue<string>();
-            Assert.False(string.IsNullOrWhiteSpace(area));
-            Assert.False(Path.IsPathRooted(path));
-            Assert.DoesNotContain("..", path.Split('/'), StringComparer.Ordinal);
-            Assert.True(identities.Add($"{area}:{path}"));
-            int depth = path.Count(character => character == '/');
-            Assert.True(
-                depth <= previousDepth,
-                "Created-directory authority must be serialized deepest first.");
-            previousDepth = depth;
-        }
-    }
-
-    internal static void CorruptCreatedDirectoryAuthority(
-        JsonObject intent,
-        JsonArray createdDirectories,
-        string fixtureRoot,
-        string corruption)
-    {
-        JsonObject first = Assert.IsType<JsonObject>(createdDirectories[0]);
-        switch (corruption)
-        {
-            case "wrong-area":
-                first["area"] = "outside";
-                break;
-            case "non-ancestor":
-                first["path"] = "unrelated/not-an-ancestor";
-                break;
-            case "duplicate":
-                createdDirectories.Add(first.DeepClone());
-                break;
-            case "unordered":
-                Assert.True(createdDirectories.Count > 1);
-                JsonObject last = Assert.IsType<JsonObject>(createdDirectories[^1]);
-                createdDirectories.RemoveAt(createdDirectories.Count - 1);
-                createdDirectories.Insert(0, last);
-                break;
-            case "absolute":
-                first["path"] = Path.Combine(fixtureRoot, "absolute");
-                break;
-            case "traversal":
-                first["path"] = "../escape";
-                break;
-            case "sibling":
-                first["path"] = "beside-target";
-                break;
-            case "outside-root":
-                first["path"] = Path.GetFullPath(Path.Combine(fixtureRoot, "..", "outside"));
-                break;
-            case "legacy-count":
-                intent["missingJournalDirectoryCount"] = 1;
-                break;
-            case "negative-count":
-                intent["missingJournalDirectoryCount"] = -1;
-                break;
-            case "maximum-count":
-                intent["missingJournalDirectoryCount"] = int.MaxValue;
-                break;
-            default:
-                throw new ArgumentOutOfRangeException(nameof(corruption), corruption, null);
-        }
-    }
-
     internal static string ReplaceJsonStringPropertyWithNumber(
         string json,
         string propertyName,
@@ -1141,18 +1070,6 @@ public abstract class SquadDeploymentStateTestBase : SquadStateDocumentFixtures
             [],
             false,
             new FixedTimeProvider(InstalledAt));
-    }
-
-    internal static int ProbeGlobalInstallStepCount()
-    {
-        using TempDirectory fixture = new();
-        string targetRoot = Path.Combine(fixture.Path, "target");
-        Directory.CreateDirectory(targetRoot);
-        RecordingObserver observer = new(targetRoot);
-        RealSquadDeployment.Transaction(
-            Store(Path.Combine(fixture.Path, "application-data")),
-            observer).Execute(CreateGlobalInstallPlan(targetRoot));
-        return observer.Steps.Count;
     }
 
     internal static void AssertActiveLeaseConflict(Exception? exception)
@@ -1498,17 +1415,6 @@ public abstract class SquadDeploymentStateTestBase : SquadStateDocumentFixtures
         SquadDeploymentPlan Plan,
         string Subject,
         string LiveRelativePath);
-
-    internal sealed class FakeGlobalRootResolver(IReadOnlyDictionary<SquadTarget, string> roots)
-        : ISquadGlobalRootResolver
-    {
-        public string ResolveGlobalRoot(SquadTarget target)
-        {
-            return roots.TryGetValue(target, out string? root)
-                ? root
-                : throw new ArgumentOutOfRangeException(nameof(target), target, "No root mapped for target.");
-        }
-    }
 
     internal sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
     {
