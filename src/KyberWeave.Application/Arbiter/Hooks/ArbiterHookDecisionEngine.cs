@@ -521,7 +521,8 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                                               or (ArgumentException and not ArgumentNullException)
                                               or InvalidDataException
                                               or System.Text.Json.JsonException
-                                              or NotSupportedException)
+                                              or NotSupportedException
+                                              or System.Security.SecurityException)
         {
             context.Log.WriteLine($"Arbiter: the autonomous plan-approval note was not built ({exception.GetType().Name}: {OneLine(exception.Message)}).");
             return outcome;
