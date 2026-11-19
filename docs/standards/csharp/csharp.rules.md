@@ -12,18 +12,23 @@ last-reviewed: 2026-11-19
 
 ## Interface first, unit tested
 
-- Write the interface before the class. A class that does work depends on interfaces, never on a
-  concrete service, so a unit test can hand it a fake.
-- Everything outside the process — the file system, processes, the network, the clock, the
-  environment, the database, the credential store, shipped content — is reached only through a
-  seam: an interface in the Contracts project, one adapter in the Data or Kernel layer, and one fake
-  in the test support project. No other code touches the resource directly.
-- New behaviour ships with an in-memory unit test written against the interface. A test that
-  needs a real disk, process or network is not a unit test.
-- Code you can only test through a real resource is a design gap. Add or widen the seam and write
-  the unit test against it; do not add a slow test to cover the gap.
-- An integration test is the exception: it proves one adapter against the real resource, lives in
-  the integration test project, and runs in CI, never in a developer's task gate.
+The seam register ([`docs/reference/seams.md`](../../reference/seams.md)) and the `AGENTS.md`
+"Seams" section are the authority for which seams exist and where their adapters and fakes live.
+
+- Write the interface before the class. A class that does work depends on interfaces, not on a
+  concrete service that touches an outside resource; the sealed framework types the register lists
+  as exceptions may be used directly.
+- Every outside resource the register names — the file system, processes, the network, the clock,
+  the environment, the credential store and the like — is reached only through its seam: one
+  interface, its adapters where the resource lives, and its fake in the shared test support
+  project. Only an adapter, or a composition root wiring one at startup, touches the resource.
+- New behaviour ships with an in-memory unit test written against the interface.
+- Code you can only test through a real resource is a design gap: add or widen the seam and
+  write the unit test against it, rather than a slow test.
+- There are three kinds of test. A unit test runs in memory. An integration test proves an adapter,
+  or a whole flow, against the real resource (real disk, real program); it runs in CI and never in a
+  developer's task gate or the review council's gates. A content test reads shipped content through
+  the corpus seam and runs with the unit tests. `AGENTS.md` names the project for each.
 - The Domain project holds data only. Logic goes in Application.
 
 ## Build and analyzers
