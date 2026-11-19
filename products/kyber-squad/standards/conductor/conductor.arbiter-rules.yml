@@ -335,6 +335,8 @@ rules:
   # task is; an answer retargets to that difficulty's profile only when the classifier is at
   # least 0.8 sure, and below the floor the answer is undecidable and the dispatch keeps its model.
   # Mode off disables the rule, shadow records it without effect, and enforce lets it gate.
+  # The criteria were reworded (PR 653) to rate decisions rather than size and have not been re-tuned:
+  # tuned-for and the 0.8 floor describe the earlier wording. Re-tune before setting the mode to enforce.
   - id: KW-ARB-DIFFICULTY-001
     trigger: delegate.model
     question: "How hard is this task: easy, standard or hard?"

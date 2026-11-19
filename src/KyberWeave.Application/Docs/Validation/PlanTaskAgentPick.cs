@@ -291,6 +291,7 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     };
 
     /// <summary>The difficulty rule, with the shipped rule's question, answers and criteria, asked beside the pick.</summary>
+    /// <remarks>The criteria rate decisions rather than size and have not been re-tuned since that rewording: the confidence floor was set on the earlier wording.</remarks>
     private static ArbiterRule DifficultyRuleFor(string taskId, string key) => new(
         DifficultyPrefix + taskId,
         "docs.tasks",

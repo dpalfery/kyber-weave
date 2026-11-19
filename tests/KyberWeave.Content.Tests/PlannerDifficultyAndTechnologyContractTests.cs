@@ -42,7 +42,11 @@ public sealed class PlannerDifficultyAndTechnologyContractTests
         Assert.Contains("the plan leaves open", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("no pattern to copy", text, StringComparison.OrdinalIgnoreCase);
         // Size is not difficulty: a rating that rose with the file count sent routine work to the dearest tier.
-        Assert.Contains("never raises the rating", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("does not by itself raise the rating", text, StringComparison.OrdinalIgnoreCase);
+        // The tie-break and its exception: guess low where a failure is caught, high where a wrong result can pass.
+        Assert.Contains("pick the lower", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("moves the task one tier up", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("pick the higher", text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
