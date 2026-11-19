@@ -2,7 +2,6 @@ using KyberWeave.Testing.Squad;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
-using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -14,12 +13,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class DeveloperAgentContentTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
-
-    private static readonly Lazy<SquadSource> Source = new(() => RealSquadServices.Load(ProductRoot));
+    private static SquadSource Source => CanonicalSquadTree.SharedSource;
 
     private static readonly string[] DeveloperAgents = ["dev-easy", "dev-medium", "dev-hard"];
 
@@ -100,7 +94,7 @@ public sealed class DeveloperAgentContentTests
     ];
 
     private static SquadAgent Agent(string name) =>
-        Assert.Single(Source.Value.Agents, agent => agent.Name == name);
+        Assert.Single(Source.Agents, agent => agent.Name == name);
 
     [Theory]
     [InlineData("dev-easy")]
@@ -108,7 +102,7 @@ public sealed class DeveloperAgentContentTests
     [InlineData("dev-hard")]
     public void TheAgentUsesTheWorkerProfileAndTheSharedWorkerTools(string name)
     {
-        SquadSource source = Source.Value;
+        SquadSource source = Source;
         SquadAgent agent = Agent(name);
         SquadAgent csharpDev = Agent("dev-medium");
 
@@ -200,7 +194,7 @@ public sealed class DeveloperAgentContentTests
     [Fact]
     public void EveryAgentThatExistedBeforeIsStillPresent()
     {
-        HashSet<string> present = Source.Value.Agents
+        HashSet<string> present = Source.Agents
             .Select(agent => agent.Name)
             .ToHashSet(StringComparer.Ordinal);
 
@@ -213,7 +207,7 @@ public sealed class DeveloperAgentContentTests
     [Fact]
     public void TheFullBundleCarriesTheThreeAgents()
     {
-        IReadOnlyList<string> bundleAgents = Source.Value.Bundle.AgentNames;
+        IReadOnlyList<string> bundleAgents = Source.Bundle.AgentNames;
 
         foreach (string name in DeveloperAgents)
         {

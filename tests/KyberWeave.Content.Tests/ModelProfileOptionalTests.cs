@@ -8,7 +8,6 @@ using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
-using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -18,12 +17,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ModelProfileOptionalTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
-
-    private static readonly Lazy<SquadSource> Source = new(() => RealSquadServices.Load(ProductRoot));
+    private static SquadSource Source => CanonicalSquadTree.SharedSource;
 
     private static readonly Regex ModelKey = new(
         @"^\s*""?model""?\s*[:=]", RegexOptions.Multiline | RegexOptions.CultureInvariant);
@@ -31,7 +25,7 @@ public sealed class ModelProfileOptionalTests
     [Fact]
     public void DevHardExistsAndOrchestrationIsGone()
     {
-        IReadOnlyDictionary<string, SquadModelProfile> profiles = Source.Value.ModelProfiles.Profiles;
+        IReadOnlyDictionary<string, SquadModelProfile> profiles = Source.ModelProfiles.Profiles;
 
         Assert.True(profiles.ContainsKey("dev-hard"));
         Assert.False(profiles.ContainsKey("orchestration"));
@@ -40,7 +34,7 @@ public sealed class ModelProfileOptionalTests
     [Fact]
     public void DevHardHasARowForEveryHarnessAndRunsAStrongerModelThanTheTierBelowIt()
     {
-        IReadOnlyDictionary<string, SquadModelProfile> profiles = Source.Value.ModelProfiles.Profiles;
+        IReadOnlyDictionary<string, SquadModelProfile> profiles = Source.ModelProfiles.Profiles;
         SquadModelProfile devHard = profiles["dev-hard"];
         SquadModelProfile architect = profiles["architect"];
         SquadModelProfile general = profiles["general"];
@@ -61,7 +55,7 @@ public sealed class ModelProfileOptionalTests
     [Fact]
     public void TheConductorHasNoModelProfileAndEveryOtherAgentKeepsItsOwn()
     {
-        SquadSource source = Source.Value;
+        SquadSource source = Source;
         SquadAgent conductor = source.Agents.Single(agent => agent.Name == "conductor");
 
         Assert.True(string.IsNullOrWhiteSpace(conductor.ModelProfile));
@@ -79,7 +73,7 @@ public sealed class ModelProfileOptionalTests
     [Fact]
     public void TheConductorResolvesNoModelOnAnyHarness()
     {
-        SquadSource source = Source.Value;
+        SquadSource source = Source;
         SquadAgent conductor = source.Agents.Single(agent => agent.Name == "conductor");
 
         foreach (string harness in conductor.ModelProfile.Length == 0
