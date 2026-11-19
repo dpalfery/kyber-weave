@@ -382,9 +382,12 @@ public sealed class TaskPromptService(
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {
+            // The file is the whole delivery on a harness that cannot rewrite the dispatch, so a write that fails
+            // is a positive finding about the dispatch: the worker would otherwise start with only the short line.
             return TaskPromptResult.NotBuilt(
                 $"No prompt: the prompt file '{relative}' could not be written ({ex.Message}). Check that " +
-                $"{ScratchFolder} is writable, then build the prompt again.");
+                $"{ScratchFolder} is writable, then build the prompt again.",
+                TaskPromptRefusalKind.Finding);
         }
     }
 
