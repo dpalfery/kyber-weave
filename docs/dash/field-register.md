@@ -538,7 +538,7 @@ Copilot CLI ingests local `~/.copilot/session-state/<id>/events.jsonl` session j
 | `CopilotCliJournalDocument` | `Events` | mapped | nested: CopilotCliJournalEvent | Ordered journal events processed by `CopilotCliMapper`. |
 | `CopilotCliJournalDocument` | `ParseProblems` | mapped | nested: CopilotCliJournalProblem | Non-fatal line-level JSONL parse diagnostics emitted as `ingest_problem` rows. |
 | `CopilotCliJournalEvent` | `LineNumber` | mapped | `record.span_id`, `ingest_problem_location.location` | 1-based JSONL line number used for deterministic span disambiguation and diagnostic locators. |
-| `CopilotCliJournalEvent` | `EventType` | mapped | `record.op`, `record.name` | Discriminates `session.start`, `system.message`, `user.message`, `assistant.reasoning`, `assistant.message` (`llm.invoke`), `session.model_change`, and context changes. |
+| `CopilotCliJournalEvent` | `EventType` | mapped | `record.op`, `record.name`, `tool_call_outcome.succeeded`, `record_end.ended_at_utc`, `record_skill_invocation.skill_name` | Discriminates `session.start`, `system.message`, `user.message`, `assistant.reasoning`, `assistant.message` (`llm.invoke`), `tool.execution_start`, `tool.execution_complete` (`tool.invoke` with optional `record_end` and `tool_call_outcome`), `skill.invoked` (`record_skill_invocation`), `session.model_change`, and context changes. |
 | `CopilotCliJournalEvent` | `EventId` | mapped | `record.span_id` | Fallback native event identifier when `MessageId` is absent. |
 | `CopilotCliJournalEvent` | `ParentId` | dropped | — | Journal event parent UUID links raw JSONL events rather than normalized `record_parent` span relationships. |
 | `CopilotCliJournalEvent` | `Timestamp` | mapped | `record.started_at_utc` | ISO-8601 UTC event timestamp. |
@@ -558,14 +558,14 @@ Copilot CLI ingests local `~/.copilot/session-state/<id>/events.jsonl` session j
 | `CopilotCliJournalEvent` | `DeclaredContextWindow` | mapped | `record_declared_context_window.declared_context_window` | Explicit context window limit declared on session/context events. |
 | `CopilotCliJournalEvent` | `Title` | mapped | `session_title.title` | Session title update carried on session/info events. |
 | `CopilotCliJournalEvent` | `Context` | mapped | nested: CopilotCliContextInfo | Workspace context snapshot carried on `session.start` or context-change events. |
-| `CopilotCliJournalEvent` | `ToolRequests` | mapped | nested: CopilotCliToolRequest | Extracts invoked skills into `record_skill_invocation` (`tool.invoke` child spans remain deferred). |
+| `CopilotCliJournalEvent` | `ToolRequests` | mapped | nested: CopilotCliToolRequest | Correlates `toolRequests[]` with `tool.execution_start` and `tool.execution_complete` into child `tool.invoke` spans parented to the requesting `llm.invoke` (with JSON-document results retaining `tool_call_result_size` only, incomplete tools omitting `record_end` and `tool_call_outcome`, and MCP metadata populating `tool_call_mcp`) and extracts invoked skills into `record_skill_invocation`. |
 | `CopilotCliContextInfo` | `WorkingDirectory` | mapped | `session_workspace.working_directory` | Active working directory (`cwd`) merged across context-change events. |
 | `CopilotCliContextInfo` | `Repository` | mapped | `session_repository.repo_name` | Active repository name (`repository`, falling back to `GitRoot` folder name). |
 | `CopilotCliContextInfo` | `Branch` | mapped | `session_branch.branch_name` | Active git branch merged across context-change events. |
 | `CopilotCliContextInfo` | `GitRoot` | mapped | `session_repository.repo_name` | Supplies repository folder name fallback when `Repository` is absent. |
-| `CopilotCliToolRequest` | `ToolCallId` | dropped | — | Child `tool.invoke` emission from `toolRequests` is deferred under `copilot-cli-tool-invocations-per-message`. |
-| `CopilotCliToolRequest` | `Name` | dropped | — | Filter predicate (`name == "skill"`) gating `SkillName` extraction; general tool invocations are deferred. |
-| `CopilotCliToolRequest` | `SkillName` | mapped | `record_skill_invocation.skill_name` | Invoked skill identifier extracted from `skill` tool requests. |
+| `CopilotCliToolRequest` | `ToolCallId` | mapped | `tool_call.call_id`, `record_parent.parent_span_id` | Correlates `toolRequests[]` with `tool.execution_start` and `tool.execution_complete` into child `tool.invoke` spans linked to the requesting `assistant.message`. |
+| `CopilotCliToolRequest` | `Name` | mapped | `tool_call.tool_name`, `record.name`, `tool_call_mcp.server_name`, `tool_call_mcp.server_tool_name` | Invoked tool name on `tool_call` and `tool.invoke` record (with `mcp__<server>__<tool>` or explicit MCP metadata populating `tool_call_mcp`; `skill` requests also populate `record_skill_invocation`). |
+| `CopilotCliToolRequest` | `SkillName` | mapped | `record_skill_invocation.skill_name` | Invoked skill identifier extracted from `skill` tool requests and `skill.invoked` events (deduplicated per `llm.invoke` record). |
 | `CopilotCliJournalProblem` | `LineNumber` | mapped | `ingest_problem_location.location`, `ingest_problem.problem_key` | 1-based line number appended to problem key and locator. |
 | `CopilotCliJournalProblem` | `Code` | mapped | `ingest_problem.code` | Diagnostic code (`COPILOT_CLI_MALFORMED_LINE`). |
 | `CopilotCliJournalProblem` | `Message` | mapped | `ingest_problem.message` | Sanitized parse failure message. |

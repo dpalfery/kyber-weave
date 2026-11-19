@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Domain;
@@ -167,7 +168,12 @@ public class CopilotCliMapper : IHarnessMapper
         Dictionary<string, List<string>> pendingUserMessages = new(StringComparer.Ordinal);
         Dictionary<string, List<string>> pendingReasonings = new(StringComparer.Ordinal);
 
-        List<CollectedRecord> records = [];
+        CopilotCliToolTelemetry toolTelemetry = ParseToolTelemetry(unit.RawText);
+
+        List<AssistantMessageEntry> messageEntries = [];
+        Dictionary<string, AssistantMessageEntry> messageByEventId = new(StringComparer.Ordinal);
+        Dictionary<string, AssistantMessageEntry> messageByMessageId = new(StringComparer.Ordinal);
+        Dictionary<string, AssistantMessageEntry> messageByToolCallId = new(StringComparer.Ordinal);
         HashSet<string> seenRecordIds = new(StringComparer.Ordinal);
 
         foreach (CopilotCliJournalEvent evt in document.Events)
@@ -328,7 +334,7 @@ public class CopilotCliMapper : IHarnessMapper
                 ? evt.DeclaredContextWindow.Value
                 : sessionDeclaredContextWindow;
 
-            records.Add(new CollectedRecord(
+            CollectedRecord llmRecord = new(
                 RecordId: recordId,
                 HarnessId: HarnessId,
                 Op: RecordOp.LlmInvoke,
@@ -356,8 +362,57 @@ public class CopilotCliMapper : IHarnessMapper
                     CorrectionRule: correctionRule,
                     DeclaredContextWindow: recordContextWindow),
                 ReportedInputTokens: null,
-                ReportedOutputTokens: null));
+                ReportedOutputTokens: null);
+
+            IReadOnlyList<ParsedToolRequest> requestsForLine = toolTelemetry.ToolRequestsByLine.TryGetValue(evt.LineNumber, out List<ParsedToolRequest>? parsedRequests)
+                ? parsedRequests
+                : [];
+
+            AssistantMessageEntry entry = new(
+                LineNumber: evt.LineNumber,
+                EventId: SafeOptionalText(evt.EventId),
+                MessageId: SafeOptionalText(evt.MessageId),
+                AgentKey: agentKey,
+                Record: llmRecord,
+                ToolRequests: requestsForLine,
+                SkillsInvoked: [.. skillsInvoked],
+                SeenSkills: new HashSet<string>(skillsInvoked, StringComparer.Ordinal));
+
+            messageEntries.Add(entry);
+            if (entry.EventId is not null)
+            {
+                messageByEventId.TryAdd(entry.EventId, entry);
+            }
+
+            if (entry.MessageId is not null)
+            {
+                messageByMessageId.TryAdd(entry.MessageId, entry);
+            }
+
+            foreach (ParsedToolRequest request in requestsForLine)
+            {
+                if (!string.IsNullOrEmpty(request.ToolCallId))
+                {
+                    messageByToolCallId.TryAdd(request.ToolCallId, entry);
+                }
+            }
         }
+
+        AttachSkillInvocations(
+            toolTelemetry,
+            messageEntries,
+            messageByEventId,
+            messageByMessageId,
+            messageByToolCallId);
+
+        List<CollectedRecord> records = BuildCorrelatedRecords(
+            sessionId,
+            HarnessId,
+            toolTelemetry,
+            messageEntries,
+            messageByEventId,
+            messageByMessageId,
+            seenRecordIds);
 
         List<CollectedSession> sessions = [];
         if (records.Count > 0 || document.Events.Count > 0)
@@ -646,4 +701,1056 @@ public class CopilotCliMapper : IHarnessMapper
         string trimmed = value.Trim();
         return JsonDocumentText.IsDocument(trimmed) ? null : trimmed;
     }
+
+    private static string SafeToolErrorMessage(string? rawMessage)
+    {
+        string? safe = SafeOptionalText(rawMessage);
+        return safe ?? "Tool execution failed.";
+    }
+
+    private static CopilotCliToolTelemetry ParseToolTelemetry(string rawText)
+    {
+        Dictionary<int, List<ParsedToolRequest>> toolRequestsByLine = [];
+        List<ParsedToolStart> toolStarts = [];
+        Dictionary<string, ParsedToolStart> startByCallId = new(StringComparer.Ordinal);
+        Dictionary<string, string> startEventIdToCallId = new(StringComparer.Ordinal);
+        List<ParsedToolComplete> toolCompletes = [];
+        Dictionary<string, ParsedToolComplete> completeByCallId = new(StringComparer.Ordinal);
+        List<ParsedSkillInvoked> skillInvocations = [];
+
+        using StringReader reader = new(rawText);
+        string? line;
+        int lineNumber = 0;
+
+        while ((line = reader.ReadLine()) is not null)
+        {
+            lineNumber++;
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            JsonDocument document;
+            try
+            {
+                document = JsonDocument.Parse(line);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            using (document)
+            {
+                if (document.RootElement.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                JsonElement root = document.RootElement;
+                string? eventType = ReadJsonString(root, "type");
+                if (string.IsNullOrWhiteSpace(eventType))
+                {
+                    continue;
+                }
+
+                JsonElement data = root.TryGetProperty("data", out JsonElement dataEl) && dataEl.ValueKind == JsonValueKind.Object
+                    ? dataEl
+                    : root;
+
+                string? rawAgentId = ReadJsonString(root, "agentId") ?? ReadJsonString(data, "agentId");
+                string agentKey = string.IsNullOrWhiteSpace(rawAgentId) ? RootAgentKey : rawAgentId.Trim();
+                string normalizedType = eventType.Trim();
+
+                if (string.Equals(normalizedType, "assistant.message", StringComparison.Ordinal))
+                {
+                    List<ParsedToolRequest> requests = ParseLineToolRequests(data);
+                    if (requests.Count > 0)
+                    {
+                        toolRequestsByLine[lineNumber] = requests;
+                    }
+
+                    continue;
+                }
+
+                if (string.Equals(normalizedType, "tool.execution_start", StringComparison.Ordinal))
+                {
+                    string? eventId = SafeOptionalText(ReadJsonString(root, "id"));
+                    string? parentId = SafeOptionalText(ReadJsonString(root, "parentId") ?? ReadJsonString(data, "parentId"));
+                    string? messageId = SafeOptionalText(ReadJsonString(data, "messageId"));
+                    string? toolCallId = SafeOptionalText(
+                        ReadJsonString(data, "toolCallId")
+                        ?? ReadJsonString(data, "callId")
+                        ?? ReadJsonString(data, "id")
+                        ?? ReadJsonString(root, "toolCallId"));
+                    string? toolName = SafeOptionalText(ReadJsonString(data, "toolName") ?? ReadJsonString(data, "name"));
+                    string? mcpServerName = SafeOptionalText(ReadMcpServerName(data));
+                    string? mcpToolName = SafeOptionalText(ReadMcpToolName(data));
+                    string? timestamp = ReadJsonString(root, "timestamp")
+                        ?? ReadJsonString(data, "startTime")
+                        ?? ReadJsonString(data, "timestamp");
+                    ToolContentMeasurement? inputMeasurement = MeasureToolInput(data);
+
+                    ParsedToolStart start = new(
+                        LineNumber: lineNumber,
+                        EventId: eventId,
+                        ParentId: parentId,
+                        MessageId: messageId,
+                        AgentKey: agentKey,
+                        ToolCallId: toolCallId,
+                        ToolName: toolName,
+                        McpServerName: mcpServerName,
+                        McpToolName: mcpToolName,
+                        Timestamp: timestamp,
+                        InputMeasurement: inputMeasurement);
+
+                    toolStarts.Add(start);
+                    if (toolCallId is not null)
+                    {
+                        _ = startByCallId.TryAdd(toolCallId, start);
+                        if (eventId is not null)
+                        {
+                            _ = startEventIdToCallId.TryAdd(eventId, toolCallId);
+                        }
+                    }
+
+                    continue;
+                }
+
+                if (string.Equals(normalizedType, "tool.execution_complete", StringComparison.Ordinal))
+                {
+                    string? eventId = SafeOptionalText(ReadJsonString(root, "id"));
+                    string? parentId = SafeOptionalText(ReadJsonString(root, "parentId") ?? ReadJsonString(data, "parentId"));
+                    string? messageId = SafeOptionalText(ReadJsonString(data, "messageId"));
+                    string? toolCallId = SafeOptionalText(
+                        ReadJsonString(data, "toolCallId")
+                        ?? ReadJsonString(data, "callId")
+                        ?? ReadJsonString(data, "id")
+                        ?? ReadJsonString(root, "toolCallId"));
+                    string? toolName = SafeOptionalText(ReadJsonString(data, "toolName") ?? ReadJsonString(data, "name"));
+                    string? mcpServerName = SafeOptionalText(ReadMcpServerName(data));
+                    string? mcpToolName = SafeOptionalText(ReadMcpToolName(data));
+                    string? timestamp = ReadJsonString(root, "timestamp")
+                        ?? ReadJsonString(data, "endTime")
+                        ?? ReadJsonString(data, "timestamp");
+                    long? durationMs = ReadOptionalNonNegativeLong(data, "durationMs")
+                        ?? ReadOptionalNonNegativeLong(data, "duration_ms");
+                    long? exitCode = ReadOptionalLong(data, "exitCode")
+                        ?? ReadOptionalLong(data, "exit_code")
+                        ?? ReadOptionalLongFromNested(data, "result", "exitCode");
+                    ToolContentMeasurement? resultMeasurement = MeasureToolResult(data);
+                    (bool succeeded, string? errorMessage, string? errorCode) = ParseCompletionOutcome(data, resultMeasurement);
+
+                    ParsedToolComplete complete = new(
+                        LineNumber: lineNumber,
+                        EventId: eventId,
+                        ParentId: parentId,
+                        MessageId: messageId,
+                        AgentKey: agentKey,
+                        ToolCallId: toolCallId,
+                        ToolName: toolName,
+                        McpServerName: mcpServerName,
+                        McpToolName: mcpToolName,
+                        Timestamp: timestamp,
+                        DurationMs: durationMs,
+                        Succeeded: succeeded,
+                        ResultMeasurement: resultMeasurement,
+                        ErrorMessage: errorMessage,
+                        ErrorCode: errorCode,
+                        ExitCode: exitCode);
+
+                    toolCompletes.Add(complete);
+                    if (toolCallId is not null)
+                    {
+                        _ = completeByCallId.TryAdd(toolCallId, complete);
+                    }
+
+                    continue;
+                }
+
+                if (string.Equals(normalizedType, "skill.invoked", StringComparison.Ordinal))
+                {
+                    string? skillName = SafeOptionalText(
+                        ReadJsonString(data, "skillName")
+                        ?? ReadJsonString(data, "skill")
+                        ?? ReadJsonString(data, "name")
+                        ?? ReadJsonString(root, "skillName")
+                        ?? ReadJsonString(root, "skill")
+                        ?? ReadJsonString(root, "name"));
+
+                    if (skillName is null)
+                    {
+                        continue;
+                    }
+
+                    string? toolCallId = SafeOptionalText(ReadJsonString(data, "toolCallId") ?? ReadJsonString(data, "callId"));
+                    string? messageId = SafeOptionalText(ReadJsonString(data, "messageId"));
+                    string? parentId = SafeOptionalText(ReadJsonString(root, "parentId") ?? ReadJsonString(data, "parentId"));
+
+                    skillInvocations.Add(new ParsedSkillInvoked(
+                        LineNumber: lineNumber,
+                        SkillName: skillName,
+                        ToolCallId: toolCallId,
+                        MessageId: messageId,
+                        ParentId: parentId,
+                        AgentKey: agentKey));
+                }
+            }
+        }
+
+        return new CopilotCliToolTelemetry(
+            ToolRequestsByLine: toolRequestsByLine,
+            ToolStarts: toolStarts,
+            StartByCallId: startByCallId,
+            StartEventIdToCallId: startEventIdToCallId,
+            ToolCompletes: toolCompletes,
+            CompleteByCallId: completeByCallId,
+            SkillInvocations: skillInvocations);
+    }
+
+    private static List<ParsedToolRequest> ParseLineToolRequests(JsonElement data)
+    {
+        if (!data.TryGetProperty("toolRequests", out JsonElement requestsEl) || requestsEl.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        List<ParsedToolRequest> requests = [];
+        int order = 0;
+        foreach (JsonElement item in requestsEl.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            string? toolCallId = SafeOptionalText(
+                ReadJsonString(item, "toolCallId")
+                ?? ReadJsonString(item, "id")
+                ?? ReadJsonString(item, "callId"));
+            string? name = SafeOptionalText(ReadJsonString(item, "name"));
+            string? type = SafeOptionalText(ReadJsonString(item, "type"));
+            string? mcpServerName = SafeOptionalText(ReadMcpServerName(item));
+            string? mcpToolName = SafeOptionalText(ReadMcpToolName(item));
+            ToolContentMeasurement? inputMeasurement = MeasureToolInput(item);
+
+            requests.Add(new ParsedToolRequest(
+                RequestOrder: order++,
+                ToolCallId: toolCallId,
+                Name: name,
+                Type: type,
+                McpServerName: mcpServerName,
+                McpToolName: mcpToolName,
+                InputMeasurement: inputMeasurement));
+        }
+
+        return requests;
+    }
+
+    private static void AttachSkillInvocations(
+        CopilotCliToolTelemetry telemetry,
+        List<AssistantMessageEntry> messageEntries,
+        Dictionary<string, AssistantMessageEntry> messageByEventId,
+        Dictionary<string, AssistantMessageEntry> messageByMessageId,
+        Dictionary<string, AssistantMessageEntry> messageByToolCallId)
+    {
+        if (telemetry.SkillInvocations.Count == 0 || messageEntries.Count == 0)
+        {
+            return;
+        }
+
+        foreach (ParsedSkillInvoked skill in telemetry.SkillInvocations)
+        {
+            AssistantMessageEntry? target = ResolveParentMessage(
+                lineNumber: skill.LineNumber,
+                agentKey: skill.AgentKey,
+                toolCallId: skill.ToolCallId,
+                messageId: skill.MessageId,
+                parentId: skill.ParentId,
+                telemetry: telemetry,
+                messageEntries: messageEntries,
+                messageByEventId: messageByEventId,
+                messageByMessageId: messageByMessageId,
+                messageByToolCallId: messageByToolCallId);
+
+            if (target is not null && target.SeenSkills.Add(skill.SkillName))
+            {
+                target.SkillsInvoked.Add(skill.SkillName);
+            }
+        }
+    }
+
+    private static List<CollectedRecord> BuildCorrelatedRecords(
+        string sessionId,
+        string harnessId,
+        CopilotCliToolTelemetry telemetry,
+        List<AssistantMessageEntry> messageEntries,
+        Dictionary<string, AssistantMessageEntry> messageByEventId,
+        Dictionary<string, AssistantMessageEntry> messageByMessageId,
+        HashSet<string> seenRecordIds)
+    {
+        List<CollectedRecord> records = [];
+        HashSet<string> consumedCallIds = new(StringComparer.Ordinal);
+        Dictionary<int, List<CollectedRecord>> extraToolsByMessageLine = [];
+
+        foreach (AssistantMessageEntry entry in messageEntries)
+        {
+            CollectedRecord finalizedLlm = entry.SkillsInvoked.Count == entry.Record.SkillsInvoked.Count
+                ? entry.Record
+                : entry.Record with { SkillsInvoked = [.. entry.SkillsInvoked] };
+            records.Add(finalizedLlm);
+
+            for (int i = 0; i < entry.ToolRequests.Count; i++)
+            {
+                ParsedToolRequest request = entry.ToolRequests[i];
+                ParsedToolStart? start = null;
+                ParsedToolComplete? complete = null;
+
+                if (!string.IsNullOrEmpty(request.ToolCallId))
+                {
+                    _ = telemetry.StartByCallId.TryGetValue(request.ToolCallId, out start);
+                    _ = telemetry.CompleteByCallId.TryGetValue(request.ToolCallId, out complete);
+                }
+
+                // Emit tool.invoke only when execution started or completed, matching Copilot CLI
+                // execution telemetry and avoiding fabricated tool records for unstarted requests.
+                if (start is null && complete is null)
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(request.ToolCallId))
+                {
+                    _ = consumedCallIds.Add(request.ToolCallId);
+                }
+
+                records.Add(BuildToolInvokeRecord(
+                    parentRecord: finalizedLlm,
+                    parentLineNumber: entry.LineNumber,
+                    toolIndex: i,
+                    sessionId: sessionId,
+                    harnessId: harnessId,
+                    request: request,
+                    start: start,
+                    complete: complete,
+                    seenRecordIds: seenRecordIds));
+            }
+        }
+
+        if (messageEntries.Count > 0)
+        {
+            int fallbackIndex = 0;
+            foreach (ParsedToolStart start in telemetry.ToolStarts)
+            {
+                if (!string.IsNullOrEmpty(start.ToolCallId) && !consumedCallIds.Add(start.ToolCallId))
+                {
+                    continue;
+                }
+
+                ParsedToolComplete? complete = !string.IsNullOrEmpty(start.ToolCallId)
+                    && telemetry.CompleteByCallId.TryGetValue(start.ToolCallId, out ParsedToolComplete? matchedComplete)
+                    ? matchedComplete
+                    : null;
+
+                AssistantMessageEntry? parent = ResolveParentMessage(
+                    lineNumber: start.LineNumber,
+                    agentKey: start.AgentKey,
+                    toolCallId: start.ToolCallId,
+                    messageId: start.MessageId,
+                    parentId: start.ParentId,
+                    telemetry: telemetry,
+                    messageEntries: messageEntries,
+                    messageByEventId: messageByEventId,
+                    messageByMessageId: messageByMessageId,
+                    messageByToolCallId: null);
+
+                if (parent is null)
+                {
+                    continue;
+                }
+
+                CollectedRecord orphanTool = BuildToolInvokeRecord(
+                    parentRecord: parent.Record,
+                    parentLineNumber: parent.LineNumber,
+                    toolIndex: parent.ToolRequests.Count + fallbackIndex++,
+                    sessionId: sessionId,
+                    harnessId: harnessId,
+                    request: null,
+                    start: start,
+                    complete: complete,
+                    seenRecordIds: seenRecordIds);
+
+                AddExtraTool(extraToolsByMessageLine, parent.LineNumber, orphanTool);
+            }
+
+            foreach (ParsedToolComplete complete in telemetry.ToolCompletes)
+            {
+                if (!string.IsNullOrEmpty(complete.ToolCallId) && !consumedCallIds.Add(complete.ToolCallId))
+                {
+                    continue;
+                }
+
+                AssistantMessageEntry? parent = ResolveParentMessage(
+                    lineNumber: complete.LineNumber,
+                    agentKey: complete.AgentKey,
+                    toolCallId: complete.ToolCallId,
+                    messageId: complete.MessageId,
+                    parentId: complete.ParentId,
+                    telemetry: telemetry,
+                    messageEntries: messageEntries,
+                    messageByEventId: messageByEventId,
+                    messageByMessageId: messageByMessageId,
+                    messageByToolCallId: null);
+
+                if (parent is null)
+                {
+                    continue;
+                }
+
+                CollectedRecord completeOnlyTool = BuildToolInvokeRecord(
+                    parentRecord: parent.Record,
+                    parentLineNumber: parent.LineNumber,
+                    toolIndex: parent.ToolRequests.Count + fallbackIndex++,
+                    sessionId: sessionId,
+                    harnessId: harnessId,
+                    request: null,
+                    start: null,
+                    complete: complete,
+                    seenRecordIds: seenRecordIds);
+
+                AddExtraTool(extraToolsByMessageLine, parent.LineNumber, completeOnlyTool);
+            }
+        }
+
+        if (extraToolsByMessageLine.Count == 0)
+        {
+            return records;
+        }
+
+        List<CollectedRecord> merged = new(records.Count + extraToolsByMessageLine.Values.Sum(static l => l.Count));
+        Dictionary<string, int> parentLineByRecordId = messageEntries.ToDictionary(
+            static e => e.Record.RecordId,
+            static e => e.LineNumber,
+            StringComparer.Ordinal);
+
+        for (int i = 0; i < records.Count; i++)
+        {
+            CollectedRecord current = records[i];
+            merged.Add(current);
+
+            if (current.Op == RecordOp.LlmInvoke
+                && parentLineByRecordId.TryGetValue(current.RecordId, out int parentLine)
+                && extraToolsByMessageLine.TryGetValue(parentLine, out List<CollectedRecord>? extras))
+            {
+                bool hasRequestChildren = i + 1 < records.Count
+                    && records[i + 1].Op == RecordOp.ToolInvoke
+                    && string.Equals(records[i + 1].ParentRecordId, current.RecordId, StringComparison.Ordinal);
+
+                if (!hasRequestChildren)
+                {
+                    merged.AddRange(extras);
+                }
+            }
+            else if (current.Op == RecordOp.ToolInvoke && current.ParentRecordId is not null)
+            {
+                bool isLastChildForParent = i + 1 >= records.Count
+                    || records[i + 1].Op != RecordOp.ToolInvoke
+                    || !string.Equals(records[i + 1].ParentRecordId, current.ParentRecordId, StringComparison.Ordinal);
+
+                if (isLastChildForParent
+                    && parentLineByRecordId.TryGetValue(current.ParentRecordId, out int ownerLine)
+                    && extraToolsByMessageLine.TryGetValue(ownerLine, out List<CollectedRecord>? ownerExtras))
+                {
+                    merged.AddRange(ownerExtras);
+                }
+            }
+        }
+
+        return merged;
+    }
+
+    private static void AddExtraTool(
+        Dictionary<int, List<CollectedRecord>> map,
+        int parentLineNumber,
+        CollectedRecord record)
+    {
+        if (!map.TryGetValue(parentLineNumber, out List<CollectedRecord>? list))
+        {
+            list = [];
+            map[parentLineNumber] = list;
+        }
+
+        list.Add(record);
+    }
+
+    private static AssistantMessageEntry? ResolveParentMessage(
+        int lineNumber,
+        string agentKey,
+        string? toolCallId,
+        string? messageId,
+        string? parentId,
+        CopilotCliToolTelemetry telemetry,
+        List<AssistantMessageEntry> messageEntries,
+        Dictionary<string, AssistantMessageEntry> messageByEventId,
+        Dictionary<string, AssistantMessageEntry> messageByMessageId,
+        Dictionary<string, AssistantMessageEntry>? messageByToolCallId)
+    {
+        if (toolCallId is not null
+            && messageByToolCallId is not null
+            && messageByToolCallId.TryGetValue(toolCallId, out AssistantMessageEntry? byCallId))
+        {
+            return byCallId;
+        }
+
+        if (messageId is not null && messageByMessageId.TryGetValue(messageId, out AssistantMessageEntry? byMsgId))
+        {
+            return byMsgId;
+        }
+
+        if (parentId is not null)
+        {
+            if (messageByEventId.TryGetValue(parentId, out AssistantMessageEntry? byEventId))
+            {
+                return byEventId;
+            }
+
+            if (messageByMessageId.TryGetValue(parentId, out AssistantMessageEntry? byParentMsgId))
+            {
+                return byParentMsgId;
+            }
+
+            if (messageByToolCallId is not null
+                && telemetry.StartEventIdToCallId.TryGetValue(parentId, out string? linkedCallId)
+                && messageByToolCallId.TryGetValue(linkedCallId, out AssistantMessageEntry? byStartCallId))
+            {
+                return byStartCallId;
+            }
+        }
+
+        AssistantMessageEntry? nearestPrecedingSameAgent = null;
+        AssistantMessageEntry? nearestFollowingSameAgent = null;
+        foreach (AssistantMessageEntry candidate in messageEntries)
+        {
+            if (!string.Equals(candidate.AgentKey, agentKey, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (candidate.LineNumber < lineNumber)
+            {
+                nearestPrecedingSameAgent = candidate;
+            }
+            else if (nearestFollowingSameAgent is null)
+            {
+                nearestFollowingSameAgent = candidate;
+            }
+        }
+
+        return nearestPrecedingSameAgent ?? nearestFollowingSameAgent;
+    }
+
+    private static CollectedRecord BuildToolInvokeRecord(
+        CollectedRecord parentRecord,
+        int parentLineNumber,
+        int toolIndex,
+        string sessionId,
+        string harnessId,
+        ParsedToolRequest? request,
+        ParsedToolStart? start,
+        ParsedToolComplete? complete,
+        HashSet<string> seenRecordIds)
+    {
+        string safeCallId = SafeOptionalText(request?.ToolCallId ?? start?.ToolCallId ?? complete?.ToolCallId)
+            ?? string.Create(CultureInfo.InvariantCulture, $"call-{parentLineNumber}-{toolIndex}");
+        string safeToolName = SafeOptionalText(request?.Name ?? start?.ToolName ?? complete?.ToolName) ?? "tool";
+
+        (string? mcpServerName, string? mcpToolName) = ResolveMcpAttribution(safeToolName, request, start, complete);
+
+        ToolContentMeasurement? inputMeasurement = request?.InputMeasurement ?? start?.InputMeasurement;
+        CollectedToolContent? inputContent = inputMeasurement?.ToToolContent(includeFingerprint: true);
+
+        string childRecordId = BuildUniqueToolRecordId(
+            parentRecord.RecordId,
+            safeCallId,
+            safeToolName,
+            inputMeasurement,
+            seenRecordIds);
+
+        DateTimeOffset startedAt = TryParseUtcTimestamp(start?.Timestamp, out DateTimeOffset parsedStart)
+            ? parsedStart
+            : parentRecord.StartedAt;
+
+        DateTimeOffset? endedAt = null;
+        long? durationMs = null;
+        if (complete is not null)
+        {
+            bool hasEndTimestamp = TryParseUtcTimestamp(complete.Timestamp, out DateTimeOffset parsedEnd);
+            if (complete.DurationMs is >= 0)
+            {
+                durationMs = complete.DurationMs.Value;
+            }
+            else if (hasEndTimestamp && parsedEnd >= startedAt)
+            {
+                durationMs = (long)Math.Round((parsedEnd - startedAt).TotalMilliseconds);
+            }
+
+            if (hasEndTimestamp && parsedEnd >= startedAt)
+            {
+                endedAt = parsedEnd;
+            }
+            else if (durationMs is >= 0)
+            {
+                endedAt = startedAt.AddMilliseconds(durationMs.Value);
+            }
+        }
+
+        RecordStatus status = complete is null
+            ? RecordStatus.Unset
+            : complete.Succeeded
+                ? RecordStatus.Ok
+                : RecordStatus.Error;
+
+        CollectedToolContent? resultContent = null;
+        List<CollectedContentPart> parts = [];
+        if (complete?.ResultMeasurement is { } resultMeasurement)
+        {
+            resultContent = resultMeasurement.ToToolContent(includeFingerprint: false);
+
+            string? plainText = resultMeasurement.IsDocument ? null : resultMeasurement.PlainText;
+            CollectedWithheldText? withheld = resultMeasurement.IsDocument ? resultMeasurement.ToWithheldText() : null;
+            long? originalBytes = resultMeasurement.IsDocument ? null : resultMeasurement.OriginalUtf8BytesWhenTruncated;
+
+            parts.Add(new CollectedContentPart(
+                Position: 0,
+                Bucket: ContentBucket.ToolResultContent,
+                PlainText: plainText,
+                Withheld: withheld,
+                ReportedTokens: null,
+                Server: mcpServerName,
+                Role: "tool",
+                Resident: null,
+                OriginalUtf8BytesWhenTruncated: originalBytes));
+        }
+
+        bool? succeeded = complete is null ? null : complete.Succeeded;
+        CollectedError? error = complete is { Succeeded: false }
+            ? new CollectedError(SafeToolErrorMessage(complete.ErrorMessage), complete.ErrorCode)
+            : null;
+        string? signalErrorMessage = error?.Message;
+
+        string? agentInstanceId = SafeOptionalText(
+            start is { AgentKey.Length: > 0 } ? start.AgentKey :
+            complete is { AgentKey.Length: > 0 } ? complete.AgentKey :
+            null) ?? parentRecord.AgentInstanceId;
+
+        CollectedToolCall collectedTool = new(
+            CallId: safeCallId,
+            ToolName: safeToolName,
+            McpServerName: mcpServerName,
+            McpToolName: mcpToolName,
+            Input: inputContent,
+            Result: resultContent,
+            Succeeded: succeeded,
+            Error: error,
+            ExitCode: complete?.ExitCode);
+
+        return new CollectedRecord(
+            RecordId: childRecordId,
+            HarnessId: harnessId,
+            Op: RecordOp.ToolInvoke,
+            Kind: RecordKind.Internal,
+            Name: safeToolName,
+            StartedAt: startedAt,
+            Status: status,
+            SessionKey: sessionId,
+            ParentRecordId: parentRecord.RecordId,
+            TraceId: parentRecord.TraceId,
+            Model: null,
+            EndedAt: endedAt,
+            ReportedDurationMs: durationMs,
+            Tokens: [],
+            ReportedCost: null,
+            Parts: parts,
+            Tool: collectedTool,
+            Agent: null,
+            SkillsInvoked: [],
+            AgentInstanceId: agentInstanceId,
+            ToolDefinitions: [],
+            Signals: new CollectedRecordSignals(signalErrorMessage, null, null, null));
+    }
+
+    private static (string? ServerName, string? ToolName) ResolveMcpAttribution(
+        string safeToolName,
+        ParsedToolRequest? request,
+        ParsedToolStart? start,
+        ParsedToolComplete? complete)
+    {
+        string? mcpServer = request?.McpServerName ?? start?.McpServerName ?? complete?.McpServerName;
+        string? mcpTool = request?.McpToolName ?? start?.McpToolName ?? complete?.McpToolName;
+
+        if (mcpServer is null && mcpTool is null && safeToolName.StartsWith("mcp__", StringComparison.Ordinal))
+        {
+            int separatorIndex = safeToolName.IndexOf("__", 5, StringComparison.Ordinal);
+            if (separatorIndex > 5 && separatorIndex + 2 < safeToolName.Length)
+            {
+                mcpServer = SafeOptionalText(safeToolName[5..separatorIndex]);
+                mcpTool = SafeOptionalText(safeToolName[(separatorIndex + 2)..]);
+            }
+        }
+        else if (mcpServer is null
+            && mcpTool is null
+            && string.Equals(request?.Type, "mcp", StringComparison.OrdinalIgnoreCase))
+        {
+            int doubleUnderscore = safeToolName.IndexOf("__", StringComparison.Ordinal);
+            if (doubleUnderscore > 0 && doubleUnderscore + 2 < safeToolName.Length)
+            {
+                mcpServer = SafeOptionalText(safeToolName[..doubleUnderscore]);
+                mcpTool = SafeOptionalText(safeToolName[(doubleUnderscore + 2)..]);
+            }
+            else
+            {
+                int sep = safeToolName.IndexOfAny(['/', ':']);
+                if (sep > 0 && sep + 1 < safeToolName.Length)
+                {
+                    mcpServer = SafeOptionalText(safeToolName[..sep]);
+                    mcpTool = SafeOptionalText(safeToolName[(sep + 1)..]);
+                }
+            }
+        }
+
+        if (mcpServer is not null && mcpTool is null)
+        {
+            mcpTool = DeriveMcpToolName(safeToolName, mcpServer);
+        }
+        else if (mcpServer is null && mcpTool is not null)
+        {
+            mcpTool = null;
+        }
+
+        return (mcpServer, mcpTool);
+    }
+
+    private static string DeriveMcpToolName(string safeToolName, string mcpServer)
+    {
+        string[] prefixes =
+        [
+            $"{mcpServer}-",
+            $"{mcpServer}_",
+            $"{mcpServer}/",
+            $"{mcpServer}:",
+            $"{mcpServer.Replace('-', '_')}-",
+            $"{mcpServer.Replace('-', '_')}_",
+        ];
+
+        foreach (string prefix in prefixes)
+        {
+            if (safeToolName.StartsWith(prefix, StringComparison.Ordinal) && safeToolName.Length > prefix.Length)
+            {
+                return safeToolName[prefix.Length..];
+            }
+        }
+
+        return safeToolName;
+    }
+
+    private static string BuildUniqueToolRecordId(
+        string parentRecordId,
+        string safeCallId,
+        string safeToolName,
+        ToolContentMeasurement? inputMeasurement,
+        HashSet<string> seenRecordIds)
+    {
+        string hashInput = string.Create(
+            CultureInfo.InvariantCulture,
+            $"{safeCallId}:{safeToolName}:{inputMeasurement?.Sha256Fingerprint ?? string.Empty}");
+        byte[] hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(hashInput));
+        string toolHash = Convert.ToHexStringLower(hashBytes)[..12];
+        string candidate = string.Create(CultureInfo.InvariantCulture, $"{parentRecordId}-t{toolHash}");
+
+        if (seenRecordIds.Add(candidate))
+        {
+            return candidate;
+        }
+
+        int suffix = 2;
+        while (true)
+        {
+            string disambiguated = string.Create(CultureInfo.InvariantCulture, $"{candidate}:{suffix}");
+            if (seenRecordIds.Add(disambiguated))
+            {
+                return disambiguated;
+            }
+
+            suffix++;
+        }
+    }
+
+    private static ToolContentMeasurement? MeasureToolInput(JsonElement container)
+    {
+        if (!TryGetNonNullProperty(container, "arguments", out JsonElement inputEl)
+            && !TryGetNonNullProperty(container, "input", out inputEl))
+        {
+            return null;
+        }
+
+        return ToolContentMeasurer.Measure(inputEl);
+    }
+
+    private static ToolContentMeasurement? MeasureToolResult(JsonElement data)
+    {
+        if (!TryGetNonNullProperty(data, "result", out JsonElement resultEl)
+            && !TryGetNonNullProperty(data, "output", out resultEl))
+        {
+            return null;
+        }
+
+        if (resultEl.ValueKind == JsonValueKind.Object)
+        {
+            if (TryGetNonNullProperty(resultEl, "content", out JsonElement contentEl))
+            {
+                return ToolContentMeasurer.Measure(contentEl);
+            }
+
+            if (TryGetNonNullProperty(resultEl, "detailedContent", out JsonElement detailedEl))
+            {
+                return ToolContentMeasurer.Measure(detailedEl);
+            }
+
+            if (TryGetNonNullProperty(resultEl, "text", out JsonElement textEl))
+            {
+                return ToolContentMeasurer.Measure(textEl);
+            }
+
+            if (TryGetNonNullProperty(resultEl, "output", out JsonElement nestedOutputEl))
+            {
+                return ToolContentMeasurer.Measure(nestedOutputEl);
+            }
+        }
+
+        return ToolContentMeasurer.Measure(resultEl);
+    }
+
+    private static (bool Succeeded, string? ErrorMessage, string? ErrorCode) ParseCompletionOutcome(
+        JsonElement data,
+        ToolContentMeasurement? resultMeasurement)
+    {
+        bool? explicitSuccess = ReadOptionalBool(data, "success");
+        bool? explicitIsError = ReadOptionalBool(data, "isError") ?? ReadOptionalBool(data, "is_error");
+        bool hasErrorProperty = TryGetNonNullProperty(data, "error", out JsonElement errorEl);
+
+        bool succeeded = explicitSuccess
+            ?? (explicitIsError.HasValue ? !explicitIsError.Value : !hasErrorProperty);
+
+        if (succeeded)
+        {
+            return (true, null, null);
+        }
+
+        string? errorMessage = null;
+        string? errorCode = null;
+        if (hasErrorProperty)
+        {
+            if (errorEl.ValueKind == JsonValueKind.Object)
+            {
+                errorMessage = SafeOptionalText(ReadJsonString(errorEl, "message") ?? ReadJsonString(errorEl, "error"));
+                errorCode = SafeOptionalText(ReadJsonString(errorEl, "code") ?? ReadJsonString(errorEl, "type"));
+            }
+            else if (errorEl.ValueKind == JsonValueKind.String)
+            {
+                errorMessage = SafeOptionalText(errorEl.GetString());
+            }
+        }
+
+        if (errorMessage is null && resultMeasurement is { IsDocument: false })
+        {
+            errorMessage = SafeOptionalText(resultMeasurement.PlainText);
+        }
+
+        return (false, errorMessage ?? "Tool execution failed.", errorCode);
+    }
+
+    private static bool TryGetNonNullProperty(JsonElement element, string propertyName, out JsonElement value)
+    {
+        if (element.TryGetProperty(propertyName, out value)
+            && value.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null))
+        {
+            return true;
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static string? ReadMcpServerName(JsonElement container)
+    {
+        string? direct = ReadJsonString(container, "mcpServerName")
+            ?? ReadJsonString(container, "serverName")
+            ?? ReadJsonString(container, "mcp_server_name")
+            ?? ReadJsonString(container, "server");
+        if (direct is not null)
+        {
+            return direct;
+        }
+
+        if (container.TryGetProperty("mcp", out JsonElement mcpEl) && mcpEl.ValueKind == JsonValueKind.Object)
+        {
+            return ReadJsonString(mcpEl, "serverName") ?? ReadJsonString(mcpEl, "server");
+        }
+
+        return null;
+    }
+
+    private static string? ReadMcpToolName(JsonElement container)
+    {
+        string? direct = ReadJsonString(container, "mcpToolName")
+            ?? ReadJsonString(container, "serverToolName")
+            ?? ReadJsonString(container, "mcp_tool_name");
+        if (direct is not null)
+        {
+            return direct;
+        }
+
+        if (container.TryGetProperty("mcp", out JsonElement mcpEl) && mcpEl.ValueKind == JsonValueKind.Object)
+        {
+            return ReadJsonString(mcpEl, "toolName") ?? ReadJsonString(mcpEl, "name");
+        }
+
+        return null;
+    }
+
+    private static string? ReadJsonString(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out JsonElement property) || property.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        string? value = property.GetString();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private static bool? ReadOptionalBool(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out JsonElement property))
+        {
+            return null;
+        }
+
+        return property.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => null,
+        };
+    }
+
+    private static long? ReadOptionalLong(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out JsonElement property) || property.ValueKind != JsonValueKind.Number)
+        {
+            return null;
+        }
+
+        return property.TryGetInt64(out long value) ? value : null;
+    }
+
+    private static long? ReadOptionalNonNegativeLong(JsonElement element, string propertyName)
+    {
+        long? value = ReadOptionalLong(element, propertyName);
+        return value is >= 0 ? value : null;
+    }
+
+    private static long? ReadOptionalLongFromNested(JsonElement element, string nestedProperty, string propertyName)
+    {
+        if (!element.TryGetProperty(nestedProperty, out JsonElement nested) || nested.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return ReadOptionalLong(nested, propertyName);
+    }
+
+    private static bool TryParseUtcTimestamp(string? rawTimestamp, out DateTimeOffset parsed)
+    {
+        if (!string.IsNullOrWhiteSpace(rawTimestamp)
+            && DateTimeOffset.TryParse(
+                rawTimestamp,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind | DateTimeStyles.AssumeUniversal,
+                out DateTimeOffset value))
+        {
+            parsed = value.ToUniversalTime();
+            return true;
+        }
+
+        parsed = default;
+        return false;
+    }
+
+    private record ParsedToolRequest(
+        int RequestOrder,
+        string? ToolCallId,
+        string? Name,
+        string? Type,
+        string? McpServerName,
+        string? McpToolName,
+        ToolContentMeasurement? InputMeasurement);
+
+    private record ParsedToolStart(
+        int LineNumber,
+        string? EventId,
+        string? ParentId,
+        string? MessageId,
+        string AgentKey,
+        string? ToolCallId,
+        string? ToolName,
+        string? McpServerName,
+        string? McpToolName,
+        string? Timestamp,
+        ToolContentMeasurement? InputMeasurement);
+
+    private record ParsedToolComplete(
+        int LineNumber,
+        string? EventId,
+        string? ParentId,
+        string? MessageId,
+        string AgentKey,
+        string? ToolCallId,
+        string? ToolName,
+        string? McpServerName,
+        string? McpToolName,
+        string? Timestamp,
+        long? DurationMs,
+        bool Succeeded,
+        ToolContentMeasurement? ResultMeasurement,
+        string? ErrorMessage,
+        string? ErrorCode,
+        long? ExitCode);
+
+    private record ParsedSkillInvoked(
+        int LineNumber,
+        string SkillName,
+        string? ToolCallId,
+        string? MessageId,
+        string? ParentId,
+        string AgentKey);
+
+    private record CopilotCliToolTelemetry(
+        Dictionary<int, List<ParsedToolRequest>> ToolRequestsByLine,
+        List<ParsedToolStart> ToolStarts,
+        Dictionary<string, ParsedToolStart> StartByCallId,
+        Dictionary<string, string> StartEventIdToCallId,
+        List<ParsedToolComplete> ToolCompletes,
+        Dictionary<string, ParsedToolComplete> CompleteByCallId,
+        List<ParsedSkillInvoked> SkillInvocations);
+
+    private record AssistantMessageEntry(
+        int LineNumber,
+        string? EventId,
+        string? MessageId,
+        string AgentKey,
+        CollectedRecord Record,
+        IReadOnlyList<ParsedToolRequest> ToolRequests,
+        List<string> SkillsInvoked,
+        HashSet<string> SeenSkills);
 }
