@@ -23,7 +23,7 @@ public enum LegacyTableDisposition
 /// <param name="Disposition">Whether the table is replaced by normalized tables or explicitly removed.</param>
 /// <param name="ReplacementTables">Normalized target tables in <see cref="RelationalSchemaCatalog"/>; empty when removed.</param>
 /// <param name="RemovedDetails">Documented reasons for removed tables or columns.</param>
-public sealed record LegacyTableReplacementEntry(
+public record LegacyTableReplacementEntry(
     string LegacyTableName,
     LegacyTableDisposition Disposition,
     IReadOnlyList<string> ReplacementTables,

@@ -124,6 +124,11 @@ public record CollectedSource(
     string Locator);
 
 /// <summary>Top-level static collector output batch for a single <see cref="CollectedSource"/>.</summary>
+/// <remarks>
+/// Placed in <c>KyberDash.Domain</c> while preserving <c>namespace KyberDash.Data.Collector;</c>
+/// (Decision D11) so <c>KyberDash.Contracts</c> can reference collector DTOs without depending
+/// on <c>KyberDash.Data</c>.
+/// </remarks>
 /// <param name="Source">Source metadata for the batch.</param>
 /// <param name="Sessions">Sessions observed or updated in this batch.</param>
 /// <param name="Records">Telemetry records emitted in this batch.</param>
