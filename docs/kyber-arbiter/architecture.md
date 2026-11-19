@@ -1085,7 +1085,8 @@ packet, and neither worker's return was ever recorded.
 
 A batch is answered with one document, which can carry one inserted prompt, so only the first dispatch that
 needs one is expanded; every dispatch call in the batch is nevertheless judged and recorded, and one refusal
-refuses the batch.
+refuses the batch. Each call is judged in the worktree that holds **its own** plan: the invocation resolves one
+run context, and a sibling whose plan lives in another worktree of the repository is read there.
 | `serve` (MCP fallback) | the asserted dispatch | the asserted return, which names its own `pre-id` | the asserted `pre-id`, else as above |
 
 The sites that pair, all through `ArbiterLedgerQueries`:
