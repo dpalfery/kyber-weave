@@ -61,6 +61,28 @@ public sealed class ArbiterBatchEvaluationRootTests
                 context, Repo, $"KYBER-ARBITER: true\nPLAN_FILE: docs/plans/gone.md\nTASK: T2\n\nTask T2.", roots));
     }
 
+    /// <summary>
+    /// A sibling whose plan lives only in the repository's checkout is judged there. The checkout is a worktree of
+    /// this repository like any other, and judging the call in the run's worktree instead reads a plan that is not
+    /// there — so its task file, its readiness facts and its git facts are all somebody else's absence.
+    /// </summary>
+    [Fact]
+    public void ASiblingDispatchWhosePlanOnlyTheCheckoutHoldsIsJudgedInTheCheckout()
+    {
+        const string planC = "docs/plans/c.md";
+        HookContext context = Context(worktree: WorktreeA, planFile: PlanA);
+        PlanRoots roots = new(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [PlanA] = WorktreeA,
+            [planC] = Repo,
+        });
+
+        Assert.Equal(
+            Repo,
+            ArbiterHookDecisionEngine.EvaluationRootFor(
+                context, Repo, $"KYBER-ARBITER: true\nPLAN_FILE: {planC}\nTASK: T3\n\nTask T3.", roots));
+    }
+
     private static HookContext Context(string worktree, string planFile) =>
         new(
             Repo,

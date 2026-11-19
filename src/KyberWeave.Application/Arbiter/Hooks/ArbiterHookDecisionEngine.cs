@@ -506,9 +506,10 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         }
 
         // The run context was resolved from one event, which is this dispatch's own for a single call. A batch's other
-        // calls name their own plan; a plan held by another worktree of this repository is read there, because the
-        // plan, its task file and the git facts all belong to the worktree that holds it. Anything else keeps the
-        // context's worktree, so a plan that resolves nowhere reads where the invocation's evidence put the work.
+        // calls name their own plan, and the worktree that holds it is where the plan, its task file and the git facts
+        // are read. Resolving from the context's worktree keeps that worktree when it holds the plan, and picks any
+        // other worktree of this repository when only that one does — the repository's checkout included, because a
+        // plan that lives nowhere else is still judged where it is.
         string? plan = PlanFileFor(prompt);
         if (plan is null
             || (run.PlanFile is { } anchored && SamePlan(anchored, plan)))
@@ -516,8 +517,8 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             return run.Worktree;
         }
 
-        string chosen = planRoots.ResolvePlanRoot(repoRoot, plan, prompt, _ => run.Worktrees);
-        return !SamePath(chosen, repoRoot) && run.Worktrees.Any(worktree => SamePath(worktree, chosen))
+        string chosen = planRoots.ResolvePlanRoot(run.Worktree, plan, prompt, _ => run.Worktrees);
+        return run.Worktrees.Any(worktree => SamePath(worktree, chosen))
             ? chosen
             : run.Worktree;
     }
