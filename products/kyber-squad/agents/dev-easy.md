@@ -1,7 +1,7 @@
 ---
 schema: kyber-squad.agent/v1
 name: dev-easy
-description: "Implements application code and its tests in any technology, for a task rated easy: one file, or a change whose shape the standard already prescribes. Use only when the host's worker roster is tiered. Do not use for documentation-only work or for pushing, publishing and pipelines."
+description: "Implements application code and its tests in any technology, for a task rated easy: every change is stated in the plan and an existing pattern covers it. Use only when the host's worker roster is tiered. Do not use for documentation-only work or for pushing, publishing and pipelines."
 invocation: subagent
 model-profile: fast
 capability-profile: worker

@@ -38,9 +38,11 @@ public sealed class PlannerDifficultyAndTechnologyContractTests
     {
         string text = Corpus.ReadText(relativePath);
 
-        Assert.Contains("small, local change", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("several files", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("spans layers", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("an existing pattern covers it", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("the plan leaves open", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no pattern to copy", text, StringComparison.OrdinalIgnoreCase);
+        // Size is not difficulty: a rating that rose with the file count sent routine work to the dearest tier.
+        Assert.Contains("never raises the rating", text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]

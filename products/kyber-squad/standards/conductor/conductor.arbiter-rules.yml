@@ -343,9 +343,9 @@ rules:
       type: choice
       state: { task: plan.task.text, files: plan.task.files, file-kinds: plan.task.file-kinds }
       criteria:
-        easy: A small, local change with one obvious path.
-        standard: A change with several files or a non-obvious path, but no cross-cutting risk.
-        hard: A change that spans layers, alters contracts, or needs careful design.
+        easy: Every change is stated in the task and an existing pattern covers it, in however many files.
+        standard: The worker makes design choices the task leaves open, in code that has patterns to follow.
+        hard: There is no pattern to copy, a wrong choice breaks other callers, or the work involves concurrency, security or a data migration.
       confidence-at-least: 0.8
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
     effects: { easy: retarget, standard: retarget, hard: retarget }
