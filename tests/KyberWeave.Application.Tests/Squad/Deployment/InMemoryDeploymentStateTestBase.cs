@@ -105,7 +105,7 @@ public abstract class InMemoryDeploymentStateTestBase : SquadStateDocumentFixtur
     internal static InMemorySquadState NewState(bool caseSensitive)
     {
         InMemoryFileSystem files = new(caseSensitive: caseSensitive);
-        return new InMemorySquadState(stateRoot: Path.Combine(files.Root, "state"), files: files);
+        return new InMemorySquadState(stateRoot: Path.Combine(files.Root, "state"), existingFiles: files);
     }
 
     /// <summary>Asserts two spellings name one location through the path seam.</summary>
