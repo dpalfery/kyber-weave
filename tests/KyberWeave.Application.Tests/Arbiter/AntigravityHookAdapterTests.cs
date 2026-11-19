@@ -170,7 +170,24 @@ public sealed class AntigravityHookAdapterTests : IDisposable
         Assert.Equal("dev-medium", engine.SeenPre[0].Target);
         Assert.StartsWith("KYBER-ARBITER: true", engine.SeenPre[0].Prompt, StringComparison.Ordinal);
         Assert.Equal("docs-dev", engine.SeenPre[1].Target);
-        Assert.EndsWith("Document the adapter.", engine.SeenPre[1].Prompt, StringComparison.Ordinal);
+        Assert.Equal("KYBER-ARBITER: true\n\nDocument the adapter.", engine.SeenPre[1].Prompt);
+    }
+
+    [Fact]
+    public void PreInvoke_EmptyPrompt_AllowsAndLogs()
+    {
+        ContextualEngine engine = new();
+        JsonObject root = JsonNode.Parse(Payload("PreToolUse", "invoke_subagent", _host.RepoRoot))!.AsObject();
+        JsonObject subagent = root["toolCall"]!["args"]!["Subagents"]![0]!.AsObject();
+        subagent["Prompt"] = string.Empty;
+
+        (int exit, string stdout, string log) = Run(root.ToJsonString(), null, engine);
+
+        // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
+        Assert.Equal(0, exit);
+        Assert.Equal(AllowDocument, stdout);
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
+        Assert.Empty(engine.SeenPre);
     }
 
     [Fact]

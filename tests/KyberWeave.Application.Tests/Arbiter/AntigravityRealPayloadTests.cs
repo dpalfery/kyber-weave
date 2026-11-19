@@ -34,7 +34,7 @@ public sealed class AntigravityRealPayloadTests : IDisposable
     {
         public List<(string? Target, string Prompt, string? CallId)> Pre { get; } = [];
 
-        public List<(string? Target, string? CallId)> Post { get; } = [];
+        public List<(string? Target, string? ToolOutput, string? CallId)> Post { get; } = [];
 
         public HookOutcome DecidePreDispatch(string caller, string? target, string prompt, KyberWeaveConfig config) =>
             new(HookOutcomeKind.Allow);
@@ -54,7 +54,7 @@ public sealed class AntigravityRealPayloadTests : IDisposable
             string harness, string caller, string? target, string prompt, string toolOutput, KyberWeaveConfig config,
             HookContext context, string? toolCallId = null, string? sessionId = null)
         {
-            Post.Add((target, toolCallId));
+            Post.Add((target, toolOutput, toolCallId));
             return new HookOutcome(HookOutcomeKind.Allow);
         }
     }
@@ -83,7 +83,16 @@ public sealed class AntigravityRealPayloadTests : IDisposable
         return (stdout.ToString(), log.ToString());
     }
 
-    private static string WithRepo(string json, string repo) => json.Replace("\"/repo\"", $"\"{repo.Replace("\\", "\\\\", StringComparison.Ordinal)}\"", StringComparison.Ordinal);
+    private static string WithRepo(string json, string repo)
+    {
+        const string Placeholder = "\"/repo\"";
+        if (!json.Contains(Placeholder, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"The fixture carries no {Placeholder} placeholder to replace.");
+        }
+
+        return json.Replace(Placeholder, JsonSerializer.Serialize(repo), StringComparison.Ordinal);
+    }
 
     private static string Reshape(string json, Action<JsonObject> edit)
     {
@@ -221,9 +230,10 @@ public sealed class AntigravityRealPayloadTests : IDisposable
     {
         string stdin = Reshape(Fixture("real-pre-conductor-marked.json"), root => root["toolCall"]!.AsObject().Remove("args"));
 
-        (string stdout, _) = Run(stdin, new RecordingEngine());
+        (string stdout, string log) = Run(stdin, new RecordingEngine());
 
         Assert.Equal(Allow, stdout);
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -273,7 +283,9 @@ public sealed class AntigravityRealPayloadTests : IDisposable
         Reshape(preFixture, root =>
         {
             root["hookEventName"] = "PostToolUse";
-            root["toolCall"]!["result"] = "ok";
+
+            // HandlePost reads the return from the payload, not from the tool call's args.
+            root["result"] = "ok";
             edit?.Invoke(root);
         });
 
@@ -285,8 +297,9 @@ public sealed class AntigravityRealPayloadTests : IDisposable
         (string stdout, _) = Run(RealPost(Fixture("real-pre-conductor-marked.json")), engine);
 
         Assert.Equal("{}", stdout);
-        (string? target, string? callId) = Assert.Single(engine.Post);
+        (string? target, string? toolOutput, string? callId) = Assert.Single(engine.Post);
         Assert.Equal("research-agent", target);
+        Assert.Equal("ok", toolOutput);
         Assert.Equal("call_12144506349609463889", callId);
     }
 

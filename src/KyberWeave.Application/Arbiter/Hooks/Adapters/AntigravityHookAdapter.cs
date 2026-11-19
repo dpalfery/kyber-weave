@@ -39,6 +39,9 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
 
     private const string DispatchTool = "invoke_subagent";
 
+    /// <summary>The longest tool-call id the adapter accepts from the payload; a longer one falls back to the step key.</summary>
+    private const int MaxCallIdCharacters = 256;
+
     private readonly IHookDecisionEngine _engine;
 
     /// <summary>Creates an adapter over the hook decision engine.</summary>
@@ -76,9 +79,21 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
     public bool IsPassThrough(JsonElement payload, string? renderedCaller)
     {
         _ = renderedCaller;
-        return IsKnownEvent(EventNameOf(payload))
-            && IsDispatchTool(ToolNameOf(payload))
-            && !PromptsOf(payload).Any(IsMarked);
+        if (!IsKnownEvent(EventNameOf(payload)) || !IsDispatchTool(ToolNameOf(payload)))
+        {
+            return false;
+        }
+
+        try
+        {
+            // The same strict reader the decided path uses: a malformed dispatch is not the
+            // standard agent's, so it must be decided rather than passed through.
+            return MarkedDispatchesOf(payload).Count == 0;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     /// <inheritdoc/>
@@ -302,7 +317,7 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
 
         // The return is recorded only: a post event has no way to deliver a note, so
         // any note the engine produces goes to the diagnostics sink.
-        string toolOutput = GetString(payload, "error") ?? GetString(payload, "result") ?? string.Empty;
+        string toolOutput = FirstNonEmpty(GetString(payload, "error"), GetString(payload, "result"));
         foreach (Dispatch dispatch in dispatches)
         {
             HookOutcome outcome = DecidePost(caller, dispatch, callId, sessionId, toolOutput, config, scoped);
@@ -446,8 +461,6 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
                     yield return listed;
                 }
             }
-
-            yield break;
         }
 
         if (GetString(args, "Prompt") is { } flat)
@@ -458,8 +471,19 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
 
     private static bool IsMarked(string prompt) => HeaderBlock.Parse(prompt).IsMarked;
 
-    private static string? EventNameOf(JsonElement payload) =>
-        GetString(payload, "hookEventName") ?? GetString(payload, "hook_event_name");
+    private static string? EventNameOf(JsonElement payload)
+    {
+        string? camel = GetString(payload, "hookEventName");
+        string? snake = GetString(payload, "hook_event_name");
+        if (camel is not null && snake is not null && !string.Equals(camel, snake, StringComparison.Ordinal))
+        {
+            // Two names that disagree cannot say which event this is; treating either as
+            // authoritative would let a post event masquerade as a pre event, so it is unknown.
+            return null;
+        }
+
+        return camel ?? snake;
+    }
 
     private static bool IsKnownEvent(string? eventName) =>
         string.Equals(eventName, "PreToolUse", StringComparison.Ordinal)
@@ -468,7 +492,9 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
     private static string CallIdOf(JsonElement payload)
     {
         if (payload.TryGetProperty("toolCall", out JsonElement call)
-            && GetString(call, "id") is { Length: > 0 } toolCallId)
+            && GetString(call, "id") is { } toolCallId
+            && !string.IsNullOrWhiteSpace(toolCallId)
+            && toolCallId.Length <= MaxCallIdCharacters)
         {
             return toolCallId;
         }
@@ -526,6 +552,12 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
             ["decision"] = "deny",
             ["reason"] = reason,
         }.ToJsonString();
+
+    /// <summary>The first value that carries text, so an empty <c>error</c> never hides a non-empty <c>result</c>.</summary>
+    /// <param name="values">The candidate values, in priority order.</param>
+    /// <returns>The first non-blank value, or an empty string.</returns>
+    private static string FirstNonEmpty(params string?[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
 
     private static string RenderAllow() =>
         new JsonObject { ["decision"] = "allow" }.ToJsonString();
