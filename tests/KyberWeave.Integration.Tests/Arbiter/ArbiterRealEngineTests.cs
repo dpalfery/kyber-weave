@@ -128,7 +128,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
             ArbiterTestServices.Registry(engine),
             ArbiterTestServices.LoadHostConfig,
             () => "decision-test-1",
-            runContexts: runContexts);
+            runContexts: runContexts ?? ArbiterTestServices.Get<IHookRunContextResolver>());
     }
 
     /// <summary>A run-context resolver that faults, standing in for a collaborator the hook cannot build or reach.</summary>

@@ -161,7 +161,13 @@ public sealed class ConductorGuard(
             return null;
         }
 
-        HookRunContext? context = ResolveContext(hookEvent.Cwd, home);
+        // The run context costs two git calls and a run-record read, and the guard runs on every conductor tool call.
+        // Only a path the conductor may read, or a dispatch that must have a live run, needs it; a call decided by
+        // its tool name is answered without reading anything, as it was before the run context existed.
+        bool needsContext = hookEvent.Calls.Any(call =>
+            string.Equals(call.Name, "view", StringComparison.Ordinal)
+            || ConductorGuardRules.RunStartTargetOf(call) is not null);
+        HookRunContext? context = needsContext ? ResolveContext(hookEvent.Cwd, home) : null;
         IReadOnlyList<string> roots = context?.Worktrees ?? [];
         string? cwd = hookEvent.Cwd;
 

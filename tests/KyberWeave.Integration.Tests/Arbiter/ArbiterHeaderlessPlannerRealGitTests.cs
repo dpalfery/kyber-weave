@@ -2,6 +2,7 @@ using System.Text.Json;
 using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
@@ -78,7 +79,11 @@ public sealed class ArbiterHeaderlessPlannerRealGitTests : IDisposable
     private string Run(string stdin, IArbiterProvider? provider = null)
     {
         ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(providerFactory: _ => provider ?? new NoneProvider(), homeDirectory: () => _home.Path);
-        HookCommand command = ArbiterTestServices.Command(ArbiterTestServices.Registry(engine), ArbiterTestServices.LoadHostConfig, () => "cli-1");
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
+            ArbiterTestServices.LoadHostConfig,
+            () => "cli-1",
+            runContexts: ArbiterTestServices.Get<IHookRunContextResolver>());
         using StringWriter stdout = new();
         using StringWriter log = new();
 
