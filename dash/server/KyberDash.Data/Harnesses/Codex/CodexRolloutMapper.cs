@@ -9,20 +9,24 @@ using KyberDash.Domain;
 
 namespace KyberDash.Data.Harnesses.Codex;
 
-/// <summary>Native Codex rollout tool invocation extracted from <c>function_call</c> or <c>custom_tool_call</c>.</summary>
+/// <summary>Native Codex rollout tool invocation extracted from <c>function_call</c>, <c>custom_tool_call</c>, or <c>local_shell_call</c>.</summary>
 /// <param name="CallId">Correlation identifier from <c>call_id</c> or fallback <c>id</c>.</param>
 /// <param name="ToolName">Invoked tool name.</param>
-/// <param name="RawInputText">Raw <c>arguments</c> or <c>input</c> text prior to measurement/withholding.</param>
-/// <param name="IsCustomTool">True when the entry originated from <c>custom_tool_call</c>; false for <c>function_call</c>.</param>
+/// <param name="RawInputText">Raw <c>arguments</c>, <c>input</c>, or <c>action</c> text prior to measurement/withholding.</param>
+/// <param name="IsCustomTool">True when the entry originated from <c>custom_tool_call</c>; false for <c>function_call</c> or <c>local_shell_call</c>.</param>
 /// <param name="Timestamp">Optional ISO-8601 rollout entry timestamp.</param>
+/// <param name="Status">Optional call-level status reported on <c>local_shell_call</c> (<c>completed</c>, <c>incomplete</c>, <c>in_progress</c>).</param>
+/// <param name="WithholdInputPlainText">True when input plain text must always be withheld (such as <c>local_shell_call.action</c>), retaining size and fingerprint only.</param>
 public record CodexRolloutToolCall(
     string CallId,
     string ToolName,
     string RawInputText,
     bool IsCustomTool,
-    string? Timestamp);
+    string? Timestamp,
+    string? Status = null,
+    bool WithholdInputPlainText = false);
 
-/// <summary>Native Codex rollout tool execution result extracted from <c>function_call_output</c> or <c>custom_tool_call_output</c>.</summary>
+/// <summary>Native Codex rollout tool execution result extracted from <c>function_call_output</c>, <c>custom_tool_call_output</c>, or <c>local_shell_call_output</c>.</summary>
 /// <param name="CallId">Correlation identifier from <c>call_id</c> or fallback <c>id</c>.</param>
 /// <param name="ToolName">Optional tool name reported alongside the output.</param>
 /// <param name="OutputText">Extracted result text or serialized JSON payload, when present.</param>
@@ -102,9 +106,10 @@ public record CodexRolloutDocument(
     IReadOnlyList<CollectedProblem> Problems);
 
 /// <summary>
-/// Pure <see cref="IHarnessMapper"/> for Codex CLI rollout JSONL files, pairing <c>function_call</c>
-/// and <c>custom_tool_call</c> items with <c>function_call_output</c> and <c>custom_tool_call_output</c>
-/// by <c>call_id</c> (with <c>id</c> fallback) into child <c>tool.invoke</c> <see cref="CollectedRecord"/>s.
+/// Pure <see cref="IHarnessMapper"/> for Codex CLI rollout JSONL files, pairing <c>function_call</c>,
+/// <c>custom_tool_call</c>, and <c>local_shell_call</c> items with <c>function_call_output</c>,
+/// <c>custom_tool_call_output</c>, and <c>local_shell_call_output</c> by <c>call_id</c> (with <c>id</c> fallback)
+/// into child <c>tool.invoke</c> <see cref="CollectedRecord"/>s.
 /// </summary>
 public class CodexRolloutMapper : IHarnessMapper
 {
@@ -112,6 +117,8 @@ public class CodexRolloutMapper : IHarnessMapper
     private const string MalformedJsonCode = "MALFORMED_JSON_LINE";
     private const string UnknownEventTypeCode = "UNKNOWN_EVENT_TYPE";
     private const string DefaultToolErrorMessage = "Tool execution failed.";
+    private const string IncompleteLocalShellErrorMessage = "Local shell call incomplete.";
+    private const string LocalShellToolName = "local_shell";
 
     /// <inheritdoc />
     public string HarnessId => TranscriptReaderRepository.CodexHarnessId;
@@ -450,7 +457,37 @@ public class CodexRolloutMapper : IHarnessMapper
                     turnTimestamp ??= entryTimestamp;
                     dirty = true;
                 }
-                else if (itemType is "function_call_output" or "custom_tool_call_output")
+                else if (string.Equals(itemType, "local_shell_call", StringComparison.Ordinal))
+                {
+                    string callId = ReadString(payload, "call_id") ?? ReadString(payload, "id") ?? string.Empty;
+                    string rawAction = ReadStringOrRawJson(payload, "action") ?? "{}";
+                    string? rawStatus = ReadString(payload, "status");
+                    string? normalizedStatus = NormalizeLocalShellStatus(rawStatus);
+                    if (rawStatus is not null && normalizedStatus is null)
+                    {
+                        string safeStatus = SafeEventTypeLabel(rawStatus);
+                        problems.Add(new CollectedProblem(
+                            ProblemKey: string.Create(CultureInfo.InvariantCulture, $"unknown-local-shell-status:{unit.Unit.SourceKey}:{lineNumber}"),
+                            Severity: "warning",
+                            Code: UnknownEventTypeCode,
+                            Message: string.Create(CultureInfo.InvariantCulture, $"Skipped unrecognized local_shell_call status '{safeStatus}' at line {lineNumber}."),
+                            Location: unit.Unit.SourceKey,
+                            HarnessId: harnessId,
+                            TimestampUtc: importedAtText));
+                    }
+
+                    pendingCalls.Add(new CodexRolloutToolCall(
+                        CallId: callId,
+                        ToolName: LocalShellToolName,
+                        RawInputText: rawAction,
+                        IsCustomTool: false,
+                        Timestamp: entryTimestamp,
+                        Status: normalizedStatus,
+                        WithholdInputPlainText: true));
+                    turnTimestamp ??= entryTimestamp;
+                    dirty = true;
+                }
+                else if (itemType is "function_call_output" or "custom_tool_call_output" or "local_shell_call_output")
                 {
                     string callId = ReadString(payload, "call_id") ?? ReadString(payload, "id") ?? string.Empty;
                     string? toolName = ReadString(payload, "name");
@@ -462,6 +499,7 @@ public class CodexRolloutMapper : IHarnessMapper
                     bool isError = ReadBool(payload, "is_error") == true
                         || string.Equals(statusText, "error", StringComparison.OrdinalIgnoreCase)
                         || string.Equals(statusText, "failed", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(statusText, "incomplete", StringComparison.OrdinalIgnoreCase)
                         || (toolExitCode.HasValue && toolExitCode.Value != 0);
 
                     if (!string.IsNullOrEmpty(callId))
@@ -656,14 +694,12 @@ public class CodexRolloutMapper : IHarnessMapper
             }
         }
 
-        RecordStatus status = matchedResult is null
-            ? RecordStatus.Unset
-            : matchedResult.IsError
-                ? RecordStatus.Error
-                : RecordStatus.Ok;
+        (RecordStatus status, bool? succeeded, string? errorMessage) = ResolveToolOutcome(toolCall, matchedResult);
 
         ToolContentMeasurement inputMeasurement = ToolContentMeasurer.Measure(toolCall.RawInputText);
-        CollectedToolContent inputContent = inputMeasurement.ToToolContent(includeFingerprint: true);
+        CollectedToolContent inputContent = toolCall.WithholdInputPlainText
+            ? inputMeasurement.ToToolContent(includeFingerprint: true) with { PlainText = null, OriginalUtf8BytesWhenTruncated = null }
+            : inputMeasurement.ToToolContent(includeFingerprint: true);
 
         CollectedToolContent? resultContent = null;
         List<CollectedContentPart> parts = [];
@@ -688,10 +724,6 @@ public class CodexRolloutMapper : IHarnessMapper
                 OriginalUtf8BytesWhenTruncated: originalBytes));
         }
 
-        bool? succeeded = matchedResult is null ? null : !matchedResult.IsError;
-        string? errorMessage = matchedResult is { IsError: true }
-            ? SafeErrorMessage(matchedResult.OutputText)
-            : null;
         CollectedError? error = errorMessage is not null ? new CollectedError(errorMessage, null) : null;
 
         CollectedToolCall collectedTool = new(
@@ -942,6 +974,71 @@ public class CodexRolloutMapper : IHarnessMapper
         return string.Equals(normalized, "codex", StringComparison.Ordinal)
             ? TranscriptReaderRepository.CodexHarnessId
             : normalized;
+    }
+
+    private static string? NormalizeLocalShellStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return null;
+        }
+
+        if (string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return "completed";
+        }
+
+        if (string.Equals(status, "incomplete", StringComparison.OrdinalIgnoreCase))
+        {
+            return "incomplete";
+        }
+
+        if (string.Equals(status, "in_progress", StringComparison.OrdinalIgnoreCase))
+        {
+            return "in_progress";
+        }
+
+        return null;
+    }
+
+    private static (RecordStatus Status, bool? Succeeded, string? ErrorMessage) ResolveToolOutcome(
+        CodexRolloutToolCall toolCall,
+        CodexRolloutToolResult? matchedResult)
+    {
+        if (string.Equals(toolCall.Status, "in_progress", StringComparison.Ordinal))
+        {
+            return (RecordStatus.Unset, null, null);
+        }
+
+        if (string.Equals(toolCall.Status, "incomplete", StringComparison.Ordinal))
+        {
+            string message = matchedResult?.OutputText is not null
+                ? SafeErrorMessage(matchedResult.OutputText)
+                : IncompleteLocalShellErrorMessage;
+            return (RecordStatus.Error, false, message);
+        }
+
+        if (string.Equals(toolCall.Status, "completed", StringComparison.Ordinal))
+        {
+            if (matchedResult is { IsError: true })
+            {
+                return (RecordStatus.Error, false, SafeErrorMessage(matchedResult.OutputText));
+            }
+
+            return (RecordStatus.Ok, true, null);
+        }
+
+        if (matchedResult is null)
+        {
+            return (RecordStatus.Unset, null, null);
+        }
+
+        if (matchedResult.IsError)
+        {
+            return (RecordStatus.Error, false, SafeErrorMessage(matchedResult.OutputText));
+        }
+
+        return (RecordStatus.Ok, true, null);
     }
 
     private static bool IsKnownTopLevelEntryType(string? entryType) =>
