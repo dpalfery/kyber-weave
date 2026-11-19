@@ -45,7 +45,7 @@ public sealed class SquadRequestAndCheckRulesTests
     {
         string dispatch = Section(ConductorPath, "What a dispatch carries");
 
-        Assert.Contains("verbatim", dispatch, StringComparison.Ordinal);
+        Assert.Contains("carries the user's request verbatim", dispatch, StringComparison.Ordinal);
         Assert.Contains("Do not summarize, paraphrase, shorten", dispatch, StringComparison.Ordinal);
         Assert.Contains("routing facts", dispatch, StringComparison.Ordinal);
 
