@@ -141,10 +141,13 @@ public sealed class SquadRequestAndCheckRulesTests
 
         Assert.True(repeating.Length == 0, "Retired warning rule still present: " + string.Join("; ", repeating));
         Assert.Contains("Never undo it", Corpus.ReadText(PlanPathPath), StringComparison.Ordinal);
-        Assert.Contains(
-            "every file `kyber-weave docs standards migrate` changed",
-            Corpus.ReadText(DocsDevPath),
-            StringComparison.Ordinal);
+
+        // The commit rule is bounded to the migration's own output: the standards files and the
+        // registry block, never every path the tool printed.
+        string docsDev = Corpus.ReadText(DocsDevPath);
+        Assert.Contains("only the standards files and the root `AGENTS.md`", docsDev, StringComparison.Ordinal);
+        Assert.Contains("never another file", docsDev, StringComparison.Ordinal);
+        Assert.DoesNotContain("every file `kyber-weave docs standards migrate` changed", docsDev, StringComparison.Ordinal);
     }
 
     /// <summary>
