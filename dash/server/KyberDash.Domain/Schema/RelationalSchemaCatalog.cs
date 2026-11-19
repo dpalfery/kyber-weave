@@ -103,7 +103,8 @@ public record TableDefinition(
 
 /// <summary>
 /// Single authoritative catalog of normalized relational tables for KyberDash telemetry records,
-/// content parts, tool definitions, tool calls, agent invocations, sessions, and turns.
+/// content parts, tool definitions, tool calls, agent invocations, sessions, projections, runs,
+/// executions, rollups, findings, predictions, and operational/store-state entities.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -112,11 +113,12 @@ public record TableDefinition(
 /// rather than nullable columns, and ordered collections carry an explicit <c>position</c> integer.
 /// </para>
 /// <para>
-/// Self-referential or cross-entity links whose target span or session can arrive out of order (such
-/// as <c>record_parent.parent_span_id</c>, <c>record_session_link.session_key</c>,
-/// <c>session_parent.parent_session_id</c>, and <c>agent_invocation_parent_tool_call.parent_tool_span_id</c>)
+/// Cross-entity links whose target can arrive out of order or survive target rebuilds (such as
+/// <c>record_parent.parent_span_id</c>, <c>record_session_link.session_key</c>,
+/// <c>session_projection_parent.parent_session_id</c>, <c>agent_invocation_spawn.spawning_record_id</c>,
+/// <c>finding_run.run_id</c>, <c>finding_session.session_id</c>, and <c>prediction.finding_id</c>)
 /// store indexed scalar identifiers without a parent-row foreign key so child-first OTLP batches and
-/// pre-projection records never fail insertion under <c>PRAGMA foreign_keys = ON</c>.
+/// projection rebuilds never fail under <c>PRAGMA foreign_keys = ON</c>.
 /// </para>
 /// </remarks>
 public static partial class RelationalSchemaCatalog
@@ -164,7 +166,7 @@ public static partial class RelationalSchemaCatalog
         if (CatalogByName.TryGetValue(tableName, out TableDefinition? table))
             return table;
 
-        string? nearest = FindNearestTableName(tableName);
+        string? nearest = FindNearestName(tableName, CatalogTables.Select(static table => table.Name));
         string hint = nearest is null
             ? "Inspect RelationalSchemaCatalog.Tables for declared table names."
             : $"Did you mean '{nearest}'?";
@@ -485,11 +487,11 @@ public static partial class RelationalSchemaCatalog
         }
     }
 
-    private static string? FindNearestTableName(string candidate)
+    internal static string? FindNearestName(string candidate, IEnumerable<string> candidates)
     {
         string? best = null;
         int bestDistance = int.MaxValue;
-        foreach (string name in CatalogTables.Select(static table => table.Name))
+        foreach (string name in candidates)
         {
             int distance = LevenshteinDistance(candidate, name);
             if (distance < bestDistance)
@@ -537,7 +539,11 @@ public static partial class RelationalSchemaCatalog
         AddToolCallTables(definitions);
         AddAgentInvocationTables(definitions);
         AddSessionTables(definitions);
-        AddSessionTurnTables(definitions);
+        AddSessionProjectionTables(definitions);
+        AddRunAndExecutionTables(definitions);
+        AddRollupFindingAndPredictionTables(definitions);
+        AddStoreStateAndSettingTables(definitions);
+        AddOperationalAndCatalogTables(definitions);
         return ValidateAndOrderCatalog(definitions);
     }
 
@@ -545,18 +551,10 @@ public static partial class RelationalSchemaCatalog
     {
         tables.Add(new TableDefinition(
             Name: "harness",
-            Columns:
-            [
-                NonEmptyText("harness_id"),
-                NonEmptyText("survey_family"),
-                NonEmptyText("display_label"),
-            ],
+            Columns: [NonEmptyText("harness_id")],
             PrimaryKeyColumns: ["harness_id"],
             ForeignKeys: [],
-            Indexes:
-            [
-                Idx("harness_by_family", "survey_family"),
-            ]));
+            Indexes: []));
 
         tables.Add(new TableDefinition(
             Name: "source",
@@ -564,21 +562,14 @@ public static partial class RelationalSchemaCatalog
             [
                 NonEmptyText("source_id"),
                 NonEmptyText("harness_id"),
-                NonEmptyText("source_key"),
-                NonEmptyText("provider_id"),
-                NonEmptyText("parser_id"),
-                NonEmptyText("parser_contract_version"),
-                NonEmptyText("format"),
-                NonEmptyText("source_root_label"),
+                EnumText("source_kind", "'file', 'otlp'"),
+                NonEmptyText("locator"),
             ],
             PrimaryKeyColumns: ["source_id"],
-            ForeignKeys:
-            [
-                Fk("harness_id", "harness", "harness_id"),
-            ],
+            ForeignKeys: [Fk("harness_id", "harness", "harness_id")],
             Indexes:
             [
-                UniqueIdx("source_by_harness_key", "harness_id", "source_key"),
+                UniqueIdx("source_by_harness_kind_locator", "harness_id", "source_kind", "locator"),
                 Idx("source_by_harness", "harness_id"),
             ]));
     }
@@ -590,34 +581,33 @@ public static partial class RelationalSchemaCatalog
             Columns:
             [
                 NonEmptyText("span_id"),
-                NonEmptyText("harness_id"),
                 NonEmptyText("source_id"),
-                NonEmptyText("name"),
+                NonEmptyText("harness_id"),
                 EnumText("op", "'llm.invoke', 'tool.invoke', 'agent.invoke', 'unspecified'"),
                 EnumText("kind", "'unspecified', 'internal', 'server', 'client', 'producer', 'consumer'"),
-                NonEmptyText("timestamp_utc"),
-                NonNegInt("duration_ms"),
+                NonEmptyText("name"),
+                NonEmptyText("started_at_utc"),
                 EnumText("status", "'unset', 'ok', 'error', 'unspecified'"),
             ],
             PrimaryKeyColumns: ["span_id"],
             ForeignKeys:
             [
-                Fk("harness_id", "harness", "harness_id"),
                 Fk("source_id", "source", "source_id"),
+                Fk("harness_id", "harness", "harness_id"),
             ],
             Indexes:
             [
-                Idx("record_by_harness_time", "harness_id", "timestamp_utc"),
+                Idx("record_by_harness_started", "harness_id", "started_at_utc"),
                 Idx("record_by_source", "source_id"),
-                Idx("record_by_timestamp", "timestamp_utc"),
+                Idx("record_by_started", "started_at_utc"),
                 Idx("record_by_op", "op"),
             ]));
 
         tables.Add(RecordSingleText(
-            "record_trace",
-            "trace_id",
+            "record_session_link",
+            "session_key",
             nonEmpty: true,
-            Idx("record_trace_by_trace_id", "trace_id")));
+            Idx("record_session_link_by_session_key", "session_key")));
 
         tables.Add(RecordSingleText(
             "record_parent",
@@ -626,198 +616,65 @@ public static partial class RelationalSchemaCatalog
             Idx("record_parent_by_parent_span", "parent_span_id")));
 
         tables.Add(RecordSingleText(
-            "record_session_link",
-            "session_key",
+            "record_trace",
+            "trace_id",
             nonEmpty: true,
-            Idx("record_session_link_by_session_key", "session_key")));
-
-        tables.Add(new TableDefinition(
-            Name: "record_tokens",
-            Columns:
-            [
-                NonEmptyText("span_id"),
-                NonNegInt("fresh_input"),
-                NonNegInt("cache_read"),
-                NonNegInt("cache_creation"),
-                NonNegInt("output"),
-                NonNegInt("reported_input"),
-                NonNegInt("reported_output"),
-            ],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "record", "span_id")],
-            Indexes: []));
-
-        tables.Add(RecordSingleInt("record_reasoning_tokens", "reasoning", nonNegative: true));
-
-        tables.Add(new TableDefinition(
-            Name: "record_cost",
-            Columns:
-            [
-                NonEmptyText("span_id"),
-                EnumText("basis", "'unknown', 'published', 'harness'"),
-                EnumText("status", "'priced', 'partial', 'no_rate', 'out_of_scope', 'not_billed'"),
-            ],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "record", "span_id")],
-            Indexes: []));
-
-        tables.Add(RecordSingleReal("record_cost_value", "cost_amount"));
-        tables.Add(RecordSingleText("record_cost_currency", "currency", nonEmpty: true));
-
-        tables.Add(new TableDefinition(
-            Name: "record_cost_by_model",
-            Columns:
-            [
-                NonEmptyText("span_id"),
-                PositionCol(),
-                NonEmptyText("model_id"),
-                RealCol("cost_amount"),
-            ],
-            PrimaryKeyColumns: ["span_id", "position"],
-            ForeignKeys: [Fk("span_id", "record", "span_id")],
-            Indexes: [UniqueIdx("record_cost_by_model_unique_model", "span_id", "model_id")],
-            IsRepeatedItem: true));
+            Idx("record_trace_by_trace_id", "trace_id")));
 
         tables.Add(RecordSingleText(
             "record_model",
             "model_id",
             nonEmpty: true,
             Idx("record_model_by_model_id", "model_id")));
-        tables.Add(RecordSingleText("record_provider", "provider_id", nonEmpty: true));
-        tables.Add(RecordSinglePositiveInt("record_context_window", "context_window"));
-        tables.Add(RecordSinglePositiveInt("record_declared_context_window", "declared_context_window"));
+
+        tables.Add(RecordSingleText("record_end", "ended_at_utc", nonEmpty: true));
+        tables.Add(RecordSingleNonNegInt("record_reported_duration", "duration_ms"));
 
         tables.Add(new TableDefinition(
-            Name: "record_provenance",
+            Name: "record_token_count",
             Columns:
             [
                 NonEmptyText("span_id"),
-                NonEmptyText("harness_id"),
-                NonEmptyText("source_id"),
-                NonEmptyText("native_record_id"),
-                TextCol("source_revision"),
-                TextCol("parser_contract_version"),
-                NonEmptyText("imported_at_utc"),
-                TextCol("location_token"),
+                EnumText("token_class", "'input', 'cache_read', 'cache_write', 'output', 'reasoning'"),
+                NonNegInt("token_count"),
             ],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys:
-            [
-                Fk("span_id", "record", "span_id"),
-                Fk("harness_id", "harness", "harness_id"),
-                Fk("source_id", "source", "source_id"),
-            ],
-            Indexes:
-            [
-                Idx("record_provenance_by_source", "harness_id", "source_id"),
-                Idx("record_provenance_by_native", "harness_id", "native_record_id"),
-            ]));
-
-        tables.Add(new TableDefinition(
-            Name: "record_provenance_native_session",
-            Columns: [NonEmptyText("span_id"), NonEmptyText("native_session_id")],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "record_provenance", "span_id")],
-            Indexes: [Idx("record_provenance_native_session_by_id", "native_session_id")]));
-
-        tables.Add(new TableDefinition(
-            Name: "record_provenance_digest",
-            Columns: [NonEmptyText("span_id"), NonEmptyText("record_digest")],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "record_provenance", "span_id")],
+            PrimaryKeyColumns: ["span_id", "token_class"],
+            ForeignKeys: [Fk("span_id", "record", "span_id")],
             Indexes: []));
 
         tables.Add(new TableDefinition(
-            Name: "record_provenance_parser",
-            Columns: [NonEmptyText("span_id"), NonEmptyText("format"), NonEmptyText("parser_id")],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "record_provenance", "span_id")],
+            Name: "record_reported_total",
+            Columns:
+            [
+                NonEmptyText("span_id"),
+                EnumText("direction", "'input', 'output'"),
+                NonNegInt("token_count"),
+            ],
+            PrimaryKeyColumns: ["span_id", "direction"],
+            ForeignKeys: [Fk("span_id", "record", "span_id")],
+            Indexes: []));
+
+        tables.Add(SingleChild("record_reported_cost", "span_id", "record", [NonNegReal("amount"), NonEmptyText("currency")]));
+
+        tables.Add(new TableDefinition(
+            Name: "record_skill_invocation",
+            Columns: [NonEmptyText("span_id"), NonEmptyText("skill_name")],
+            PrimaryKeyColumns: ["span_id", "skill_name"],
+            ForeignKeys: [Fk("span_id", "record", "span_id")],
             Indexes: []));
 
         tables.Add(RecordSingleText(
-            "record_deduplication",
-            "deduplication_key",
+            "record_agent_instance",
+            "agent_instance_id",
             nonEmpty: true,
-            Idx("record_deduplication_by_key", "deduplication_key")));
-        tables.Add(RecordSingleText("record_turn_identity", "turn_id", nonEmpty: true));
-        tables.Add(RecordSingleText("record_native_identity", "record_identity", nonEmpty: true));
-        tables.Add(RecordSingleText("record_initiator", "initiator", nonEmpty: true));
-        tables.Add(RecordSingleText("record_session_label", "session_label", nonEmpty: true));
-        tables.Add(RecordSingleText("record_termination", "termination_reason", nonEmpty: true));
-        tables.Add(RecordSingleInt("record_exit_code", "exit_code", nonNegative: false));
-        tables.Add(RecordSingleBool("record_correction", "is_correction"));
+            Idx("record_agent_instance_by_id", "agent_instance_id")));
 
-        tables.Add(new TableDefinition(
-            Name: "record_correction_rule",
-            Columns: [NonEmptyText("span_id"), NonEmptyText("correction_rule")],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "record_correction", "span_id")],
-            Indexes: []));
+        tables.Add(RecordSingleText("record_error", "message", nonEmpty: true));
+        tables.Add(RecordSingleNonNegInt("record_edit_failure", "failure_count"));
 
-        tables.Add(RecordSingleInt("record_active_duration", "active_duration_ms", nonNegative: true));
-        tables.Add(RecordSingleInt("record_web_search_requests", "request_count", nonNegative: true));
-
-        tables.Add(new TableDefinition(
-            Name: "record_measurability",
-            Columns:
-            [
-                NonEmptyText("span_id"),
-                PositionCol(),
-                NonEmptyText("metric_key"),
-                EnumText("availability", "'measured', 'derived', 'not_measurable'"),
-            ],
-            PrimaryKeyColumns: ["span_id", "position"],
-            ForeignKeys: [Fk("span_id", "record", "span_id")],
-            Indexes: [UniqueIdx("record_measurability_by_metric", "span_id", "metric_key")],
-            IsRepeatedItem: true));
-
-        tables.Add(new TableDefinition(
-            Name: "record_measurability_reason",
-            Columns: [NonEmptyText("span_id"), PositionCol(), NonEmptyText("reason")],
-            PrimaryKeyColumns: ["span_id", "position"],
-            ForeignKeys: [CompositeFk(["span_id", "position"], "record_measurability", ["span_id", "position"])],
-            Indexes: []));
-
-        tables.Add(new TableDefinition(
-            Name: "record_content_bucket",
-            Columns:
-            [
-                NonEmptyText("span_id"),
-                PositionCol(),
-                EnumText(
-                    "bucket_key",
-                    "'system_prompt', 'tool_definitions', 'tool_definition', 'instruction_context', 'conversation_history', 'tool_result_content', 'user_prompt'"),
-                TextCol("content_text"),
-            ],
-            PrimaryKeyColumns: ["span_id", "position"],
-            ForeignKeys: [Fk("span_id", "record", "span_id")],
-            Indexes: [UniqueIdx("record_content_bucket_by_key", "span_id", "bucket_key")],
-            IsRepeatedItem: true));
-
-        tables.Add(RecordRepeatedText("record_skill_invoked", "skill_name", nonEmpty: true));
-        tables.Add(RecordSingleBool("record_skill_listing", "is_initial"));
-
-        tables.Add(new TableDefinition(
-            Name: "record_skill_listed",
-            Columns: [NonEmptyText("span_id"), PositionCol(), NonEmptyText("skill_name")],
-            PrimaryKeyColumns: ["span_id", "position"],
-            ForeignKeys: [Fk("span_id", "record_skill_listing", "span_id")],
-            Indexes: [],
-            IsRepeatedItem: true));
-
-        tables.Add(new TableDefinition(
-            Name: "record_skill_listed_description",
-            Columns: [NonEmptyText("span_id"), PositionCol(), TextCol("description_text")],
-            PrimaryKeyColumns: ["span_id", "position"],
-            ForeignKeys: [CompositeFk(["span_id", "position"], "record_skill_listed", ["span_id", "position"])],
-            Indexes: []));
-
-        tables.Add(RecordRepeatedText("record_bash_command", "command_text", nonEmpty: false));
-        tables.Add(RecordRepeatedText("record_tool_sequence_entry", "tool_name", nonEmpty: true));
-        tables.Add(RecordRepeatedText("record_offered_tool", "tool_name", nonEmpty: true));
-        tables.Add(RecordSingleText("record_repo", "repo_name", nonEmpty: true));
-        tables.Add(RecordSingleText("record_branch", "branch_name", nonEmpty: true));
-        tables.Add(RecordSingleText("record_agent_attribute", "agent_name", nonEmpty: true));
+        tables.Add(SingleChild("record_correction", "span_id", "record", []));
+        tables.Add(SingleChild("record_correction_rule", "span_id", "record_correction", [NonEmptyText("correction_rule")]));
+        tables.Add(SingleChild("record_declared_context_window", "span_id", "record", [PosInt("declared_context_window")]));
     }
 
     private static void AddContentPartTables(List<TableDefinition> tables)
@@ -829,20 +686,25 @@ public static partial class RelationalSchemaCatalog
                 NonEmptyText("span_id"),
                 PositionCol(),
                 EnumText(
-                    "part_kind",
-                    "'system_prompt', 'tool_definitions', 'tool_definition', 'instruction_context', 'conversation_history', 'tool_result_content', 'user_prompt'"),
-                TextCol("part_text"),
+                    "bucket",
+                    "'system_prompt', 'tool_definitions', 'tool_definition', 'instruction_context', 'conversation_history', 'tool_result_content', 'user_prompt', 'user_message', 'reasoning'"),
             ],
             PrimaryKeyColumns: ["span_id", "position"],
             ForeignKeys: [Fk("span_id", "record", "span_id")],
-            Indexes: [Idx("content_part_by_kind", "span_id", "part_kind")],
+            Indexes: [Idx("content_part_by_bucket", "span_id", "bucket")],
             IsRepeatedItem: true));
 
-        tables.Add(ContentPartExtension("content_part_tokens", NonNegInt("token_count")));
+        tables.Add(ContentPartExtension("content_part_text", TextCol("part_text")));
+        tables.Add(ContentPartExtension(
+            "content_part_withheld",
+            NonNegInt("utf8_bytes"),
+            NonNegInt("characters"),
+            NonNegInt("measured_tokens")));
+        tables.Add(ContentPartExtension("content_part_reported_tokens", NonNegInt("token_count")));
         tables.Add(ContentPartExtension("content_part_server", NonEmptyText("server_name")));
         tables.Add(ContentPartExtension("content_part_role", NonEmptyText("role_name")));
-        tables.Add(ContentPartExtension("content_part_resident", BoolInt("is_resident")));
-        tables.Add(ContentPartExtension("content_part_truncated", BoolInt("is_truncated")));
+        tables.Add(ContentPartExtension("content_part_residency", BoolInt("is_resident")));
+        tables.Add(ContentPartExtension("content_part_truncation", NonNegInt("original_utf8_bytes")));
     }
 
     private static void AddToolDefinitionTables(List<TableDefinition> tables)
@@ -854,17 +716,20 @@ public static partial class RelationalSchemaCatalog
                 NonEmptyText("span_id"),
                 PositionCol(),
                 NonEmptyText("tool_name"),
-                TextCol("definition_text"),
-                BoolInt("is_resident"),
+                NonNegInt("schema_tokens"),
             ],
             PrimaryKeyColumns: ["span_id", "position"],
             ForeignKeys: [Fk("span_id", "record", "span_id")],
             Indexes: [Idx("tool_definition_by_name", "tool_name")],
             IsRepeatedItem: true));
 
-        tables.Add(ToolDefinitionExtension("tool_definition_server", NonEmptyText("server_name")));
-        tables.Add(ToolDefinitionExtension("tool_definition_tokens", NonNegInt("token_count")));
-        tables.Add(ToolDefinitionExtension("tool_definition_description", TextCol("description_text")));
+        tables.Add(new TableDefinition(
+            Name: "tool_definition_server",
+            Columns: [NonEmptyText("span_id"), PositionCol(), NonEmptyText("server_name")],
+            PrimaryKeyColumns: ["span_id", "position"],
+            ForeignKeys: [CompositeFk(["span_id", "position"], "tool_definition", ["span_id", "position"])],
+            Indexes: [],
+            IsRepeatedItem: true));
     }
 
     private static void AddToolCallTables(List<TableDefinition> tables)
@@ -874,10 +739,8 @@ public static partial class RelationalSchemaCatalog
             Columns:
             [
                 NonEmptyText("span_id"),
-                PositionCol(),
                 TextCol("call_id"),
                 NonEmptyText("tool_name"),
-                EnumText("status", "'unset', 'ok', 'error'"),
             ],
             PrimaryKeyColumns: ["span_id"],
             ForeignKeys: [Fk("span_id", "record", "span_id")],
@@ -885,114 +748,43 @@ public static partial class RelationalSchemaCatalog
             [
                 Idx("tool_call_by_call_id", "call_id"),
                 Idx("tool_call_by_name", "tool_name"),
-                Idx("tool_call_by_status", "status"),
-            ],
-            IsRepeatedItem: true));
+            ]));
 
-        tables.Add(new TableDefinition(
-            Name: "tool_call_parent",
-            Columns: [NonEmptyText("span_id"), NonEmptyText("parent_span_id")],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "tool_call", "span_id")],
-            Indexes: [Idx("tool_call_parent_by_parent", "parent_span_id")]));
-
-        tables.Add(new TableDefinition(
-            Name: "tool_call_arguments",
-            Columns:
-            [
-                NonEmptyText("span_id"),
-                TextCol("arguments_text"),
-                NonNegInt("arguments_bytes"),
-                BoolInt("is_truncated"),
-            ],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "tool_call", "span_id")],
-            Indexes: []));
-
-        tables.Add(new TableDefinition(
-            Name: "tool_call_arguments_hash",
-            Columns: [NonEmptyText("span_id"), NonEmptyText("arguments_hash")],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "tool_call", "span_id")],
-            Indexes: [Idx("tool_call_arguments_hash_by_hash", "arguments_hash")]));
-
-        tables.Add(new TableDefinition(
-            Name: "tool_call_result",
-            Columns:
-            [
-                NonEmptyText("span_id"),
-                TextCol("result_text"),
-                NonNegInt("result_bytes"),
-                BoolInt("is_error"),
-                BoolInt("is_truncated"),
-            ],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "tool_call", "span_id")],
-            Indexes: []));
-
-        tables.Add(new TableDefinition(
-            Name: "tool_call_timing",
-            Columns:
-            [
-                NonEmptyText("span_id"),
-                NonEmptyText("started_at_utc"),
-                NonNegInt("duration_ms"),
-                EnumText("duration_source", "'measured', 'derived'"),
-            ],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "tool_call", "span_id")],
-            Indexes: []));
-
-        tables.Add(new TableDefinition(
-            Name: "tool_call_completed_at",
-            Columns: [NonEmptyText("span_id"), NonEmptyText("completed_at_utc")],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "tool_call", "span_id")],
-            Indexes: []));
+        tables.Add(ToolCallExtension("tool_call_mcp", [NonEmptyText("server_name"), NonEmptyText("server_tool_name")]));
+        tables.Add(ToolCallExtension("tool_call_input_size", [NonNegInt("utf8_bytes"), NonNegInt("characters")]));
+        tables.Add(ToolCallExtension(
+            "tool_call_input_fingerprint",
+            [CheckedText("sha256", "length(sha256) = 64")],
+            Idx("tool_call_input_fingerprint_by_sha256", "sha256")));
+        tables.Add(ToolCallExtension("tool_call_input_text", [TextCol("text")]));
+        tables.Add(ToolCallExtension("tool_call_input_truncation", [NonNegInt("original_utf8_bytes")]));
+        tables.Add(ToolCallExtension("tool_call_result_size", [NonNegInt("utf8_bytes"), NonNegInt("characters")]));
+        tables.Add(ToolCallExtension("tool_call_result_text", [TextCol("text")]));
+        tables.Add(ToolCallExtension("tool_call_result_truncation", [NonNegInt("original_utf8_bytes")]));
+        tables.Add(ToolCallExtension("tool_call_outcome", [BoolInt("succeeded")]));
+        tables.Add(ToolCallExtension("tool_call_error", [NonEmptyText("message")]));
+        tables.Add(SingleChild("tool_call_error_code", "span_id", "tool_call_error", [NonEmptyText("code")]));
+        tables.Add(ToolCallExtension("tool_call_exit_code", [IntCol("exit_code")]));
     }
 
     private static void AddAgentInvocationTables(List<TableDefinition> tables)
     {
         tables.Add(new TableDefinition(
             Name: "agent_invocation",
-            Columns:
-            [
-                NonEmptyText("span_id"),
-                PositionCol(),
-                NonEmptyText("agent_name"),
-            ],
+            Columns: [NonEmptyText("span_id"), NonEmptyText("agent_name")],
             PrimaryKeyColumns: ["span_id"],
             ForeignKeys: [Fk("span_id", "record", "span_id")],
-            Indexes: [Idx("agent_invocation_by_name", "agent_name")],
-            IsRepeatedItem: true));
+            Indexes: [Idx("agent_invocation_by_name", "agent_name")]));
 
-        tables.Add(new TableDefinition(
-            Name: "agent_invocation_agent_id",
-            Columns: [NonEmptyText("span_id"), NonEmptyText("native_agent_id")],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "agent_invocation", "span_id")],
-            Indexes: []));
+        tables.Add(SingleChild(
+            "agent_invocation_spawn",
+            "span_id",
+            "agent_invocation",
+            [NonEmptyText("spawning_record_id")],
+            Idx("agent_invocation_spawn_by_record", "spawning_record_id")));
 
-        tables.Add(new TableDefinition(
-            Name: "agent_invocation_parent_tool_call",
-            Columns: [NonEmptyText("span_id"), NonEmptyText("parent_tool_span_id")],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "agent_invocation", "span_id")],
-            Indexes: [Idx("agent_invocation_by_parent_tool", "parent_tool_span_id")]));
-
-        tables.Add(new TableDefinition(
-            Name: "agent_invocation_target_session",
-            Columns: [NonEmptyText("span_id"), NonEmptyText("target_session_key")],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "agent_invocation", "span_id")],
-            Indexes: [Idx("agent_invocation_by_target_session", "target_session_key")]));
-
-        tables.Add(new TableDefinition(
-            Name: "agent_invocation_description",
-            Columns: [NonEmptyText("span_id"), TextCol("description_text")],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "agent_invocation", "span_id")],
-            Indexes: []));
+        tables.Add(SingleChild("agent_invocation_outcome", "span_id", "agent_invocation", [BoolInt("succeeded")]));
+        tables.Add(SingleChild("agent_invocation_error", "span_id", "agent_invocation", [NonEmptyText("message")]));
     }
 
     private static void AddSessionTables(List<TableDefinition> tables)
@@ -1003,276 +795,62 @@ public static partial class RelationalSchemaCatalog
             [
                 NonEmptyText("session_id"),
                 NonEmptyText("harness_id"),
-                BoolInt("is_subagent"),
-                NonNegInt("span_count"),
-                NonNegInt("turn_count"),
-                NonNegInt("request_count"),
-                NonNegInt("duration_ms"),
-                NonNegInt("problems_count"),
-                EnumText("sync_status", "'pending', 'synced', 'settled', 'error'"),
+                NonEmptyText("native_session_id"),
             ],
             PrimaryKeyColumns: ["session_id"],
             ForeignKeys: [Fk("harness_id", "harness", "harness_id")],
-            Indexes: [Idx("session_by_harness", "harness_id")]));
-
-        tables.Add(SessionSingleText("session_label", "label", nonEmpty: true));
-
-        tables.Add(new TableDefinition(
-            Name: "session_parent",
-            Columns:
-            [
-                NonEmptyText("session_id"),
-                NonEmptyText("parent_session_id"),
-                BoolInt("included_in_parent"),
-            ],
-            PrimaryKeyColumns: ["session_id"],
-            ForeignKeys: [Fk("session_id", "session", "session_id")],
-            Indexes: [Idx("session_parent_by_parent", "parent_session_id")]));
-
-        tables.Add(SessionSingleText("session_agent", "agent_name", nonEmpty: true));
-        tables.Add(SessionSingleText("session_repository", "repo_name", nonEmpty: true));
-        tables.Add(SessionSingleText("session_branch", "branch_name", nonEmpty: true));
-
-        tables.Add(new TableDefinition(
-            Name: "session_started",
-            Columns: [NonEmptyText("session_id"), NonEmptyText("started_at_utc")],
-            PrimaryKeyColumns: ["session_id"],
-            ForeignKeys: [Fk("session_id", "session", "session_id")],
             Indexes:
             [
-                new IndexDefinition(
-                    "session_started_by_started_desc",
-                    [new IndexColumnDefinition("started_at_utc", IndexSortDirection.Descending)]),
+                Idx("session_by_harness", "harness_id"),
+                Idx("session_by_harness_native", "harness_id", "native_session_id"),
             ]));
 
-        tables.Add(SessionSingleText("session_ended", "ended_at_utc", nonEmpty: true));
-        tables.Add(SessionSingleText("session_sync_state", "synced_at_utc", nonEmpty: true));
-        tables.Add(SessionSingleText("session_settled", "settled_at_utc", nonEmpty: true));
+        tables.Add(SingleChild("session_workspace", "session_id", "session", [NonEmptyText("working_directory")]));
+        tables.Add(SingleChild("session_repository", "session_id", "session", [NonEmptyText("repo_name")]));
+        tables.Add(SingleChild("session_branch", "session_id", "session", [NonEmptyText("branch_name")]));
+        tables.Add(SingleChild("session_title", "session_id", "session", [NonEmptyText("title")]));
 
         tables.Add(new TableDefinition(
-            Name: "session_transcript",
+            Name: "session_model_usage",
             Columns:
             [
                 NonEmptyText("session_id"),
-                NonEmptyText("transcript_path"),
-                NonNegInt("transcript_offset"),
+                NonNegInt("snapshot_position"),
+                NonEmptyText("model_id"),
+                EnumText("token_class", "'input', 'cache_read', 'cache_write', 'output', 'reasoning'"),
+                NonNegInt("token_count"),
             ],
-            PrimaryKeyColumns: ["session_id"],
+            PrimaryKeyColumns: ["session_id", "snapshot_position", "model_id", "token_class"],
             ForeignKeys: [Fk("session_id", "session", "session_id")],
             Indexes: []));
+    }
 
-        tables.Add(SessionSingleNonNegInt("session_total_input", "total_input"));
-        tables.Add(SessionSingleNonNegInt("session_total_output", "total_output"));
-        tables.Add(SessionSingleNonNegInt("session_total_cache_read", "total_cache_read"));
-        tables.Add(SessionSingleNonNegInt("session_total_cache_creation", "total_cache_creation"));
-
+    private static void AddSessionProjectionTables(List<TableDefinition> tables)
+    {
         tables.Add(new TableDefinition(
-            Name: "session_cache_hit_ratio",
+            Name: "session_projection",
             Columns:
             [
                 NonEmptyText("session_id"),
-                new ColumnDefinition("cache_hit_ratio", SqliteColumnType.SqliteReal, IsNotNull: true, CheckConstraint: "cache_hit_ratio >= 0.0"),
+                NonEmptyText("label"),
+                BoolInt("is_subagent"),
+                NonNegInt("span_count"),
+                NonEmptyText("started_at_utc"),
+                NonEmptyText("ended_at_utc"),
             ],
             PrimaryKeyColumns: ["session_id"],
             ForeignKeys: [Fk("session_id", "session", "session_id")],
-            Indexes: []));
+            Indexes: [DescIdx("session_projection_by_started_desc", "started_at_utc")]));
 
-        tables.Add(SessionSingleNonNegInt("session_cache_creation_coverage", "turns_with_cache_creation"));
-        tables.Add(SessionSingleNonNegInt("session_tool_call_count", "tool_call_count"));
+        tables.Add(SingleChild(
+            "session_projection_parent",
+            "session_id",
+            "session_projection",
+            [NonEmptyText("parent_session_id")],
+            Idx("session_projection_parent_by_parent", "parent_session_id")));
 
-        tables.Add(new TableDefinition(
-            Name: "session_cost",
-            Columns:
-            [
-                NonEmptyText("session_id"),
-                EnumText("basis", "'unknown', 'published', 'harness'"),
-                EnumText("status", "'priced', 'partial', 'no_rate', 'out_of_scope', 'not_billed'"),
-            ],
-            PrimaryKeyColumns: ["session_id"],
-            ForeignKeys: [Fk("session_id", "session", "session_id")],
-            Indexes: []));
-
-        tables.Add(new TableDefinition(
-            Name: "session_cost_amount",
-            Columns: [NonEmptyText("session_id"), RealCol("cost_amount"), NonEmptyText("currency")],
-            PrimaryKeyColumns: ["session_id"],
-            ForeignKeys: [Fk("session_id", "session_cost", "session_id")],
-            Indexes: []));
-
-        tables.Add(new TableDefinition(
-            Name: "session_cost_basis_mismatch",
-            Columns: [NonEmptyText("session_id"), NonEmptyText("mismatch_code"), NonEmptyText("mismatch_message")],
-            PrimaryKeyColumns: ["session_id"],
-            ForeignKeys: [Fk("session_id", "session", "session_id")],
-            Indexes: []));
-
-        tables.Add(new TableDefinition(
-            Name: "session_cost_basis_mismatch_basis",
-            Columns:
-            [
-                NonEmptyText("session_id"),
-                PositionCol(),
-                EnumText("basis", "'unknown', 'published', 'harness'"),
-            ],
-            PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [Fk("session_id", "session_cost_basis_mismatch", "session_id")],
-            Indexes: [],
-            IsRepeatedItem: true));
-
-        tables.Add(new TableDefinition(
-            Name: "session_cost_basis_mismatch_total",
-            Columns: [NonEmptyText("session_id"), PositionCol(), RealCol("basis_total")],
-            PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [CompositeFk(["session_id", "position"], "session_cost_basis_mismatch_basis", ["session_id", "position"])],
-            Indexes: []));
-
-        tables.Add(new TableDefinition(
-            Name: "session_auxiliary_cost",
-            Columns:
-            [
-                NonEmptyText("session_id"),
-                EnumText("basis", "'unknown', 'published', 'harness'"),
-                EnumText("status", "'priced', 'partial', 'no_rate', 'out_of_scope', 'not_billed'"),
-            ],
-            PrimaryKeyColumns: ["session_id"],
-            ForeignKeys: [Fk("session_id", "session", "session_id")],
-            Indexes: []));
-
-        tables.Add(new TableDefinition(
-            Name: "session_auxiliary_cost_amount",
-            Columns: [NonEmptyText("session_id"), RealCol("cost_amount"), NonEmptyText("currency")],
-            PrimaryKeyColumns: ["session_id"],
-            ForeignKeys: [Fk("session_id", "session_auxiliary_cost", "session_id")],
-            Indexes: []));
-
-        tables.Add(SessionRepeatedText("session_model", "model_id"));
-        tables.Add(SessionRepeatedText("session_tool_invoked", "tool_name"));
-        tables.Add(SessionRepeatedText("session_tool_offered", "tool_name"));
-
-        tables.Add(new TableDefinition(
-            Name: "session_context_summary",
-            Columns:
-            [
-                NonEmptyText("session_id"),
-                BoolInt("is_measurable"),
-                new ColumnDefinition("context_limit", SqliteColumnType.SqliteInteger, IsNotNull: true, CheckConstraint: "context_limit > 0"),
-                NonNegInt("analyzed_turn_count"),
-                IntCol("residual_total"),
-                BoolInt("derived_counts"),
-                RealCol("fresh_jump_factor"),
-                RealCol("accumulation_rate"),
-            ],
-            PrimaryKeyColumns: ["session_id"],
-            ForeignKeys: [Fk("session_id", "session", "session_id")],
-            Indexes: []));
-
-        tables.Add(new TableDefinition(
-            Name: "session_context_limit_source",
-            Columns: [NonEmptyText("session_id"), NonEmptyText("limit_source")],
-            PrimaryKeyColumns: ["session_id"],
-            ForeignKeys: [Fk("session_id", "session_context_summary", "session_id")],
-            Indexes: []));
-
-        tables.Add(new TableDefinition(
-            Name: "session_context_unmeasurable_reason",
-            Columns: [NonEmptyText("session_id"), NonEmptyText("reason")],
-            PrimaryKeyColumns: ["session_id"],
-            ForeignKeys: [Fk("session_id", "session_context_summary", "session_id")],
-            Indexes: []));
-
-        tables.Add(new TableDefinition(
-            Name: "session_context_observed_part",
-            Columns: [NonEmptyText("session_id"), PositionCol(), NonEmptyText("part_kind")],
-            PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [Fk("session_id", "session_context_summary", "session_id")],
-            Indexes: [],
-            IsRepeatedItem: true));
-
-        tables.Add(new TableDefinition(
-            Name: "session_context_flagged_turn",
-            Columns: [NonEmptyText("session_id"), PositionCol(), NonNegInt("turn_index")],
-            PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [Fk("session_id", "session_context_summary", "session_id")],
-            Indexes: [],
-            IsRepeatedItem: true));
-
-        tables.Add(new TableDefinition(
-            Name: "session_tool_summary",
-            Columns:
-            [
-                NonEmptyText("session_id"),
-                PositionCol(),
-                NonEmptyText("tool_name"),
-                NonNegInt("schema_tokens"),
-                NonNegInt("invocations"),
-                NonNegInt("turns_resident"),
-                NonNegInt("errors"),
-                NonNegInt("total_schema_cost"),
-            ],
-            PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [Fk("session_id", "session", "session_id")],
-            Indexes: [],
-            IsRepeatedItem: true));
-
-        tables.Add(new TableDefinition(
-            Name: "session_tool_summary_server",
-            Columns: [NonEmptyText("session_id"), PositionCol(), NonEmptyText("server_name")],
-            PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [CompositeFk(["session_id", "position"], "session_tool_summary", ["session_id", "position"])],
-            Indexes: []));
-
-        tables.Add(new TableDefinition(
-            Name: "session_mcp_server",
-            Columns:
-            [
-                NonEmptyText("session_id"),
-                PositionCol(),
-                NonEmptyText("server_name"),
-                BoolInt("is_mcp"),
-                NonNegInt("tool_count"),
-                NonNegInt("schema_tokens"),
-                NonNegInt("invocations"),
-                NonNegInt("unused_tools"),
-                NonNegInt("unused_cost"),
-            ],
-            PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [Fk("session_id", "session", "session_id")],
-            Indexes: [],
-            IsRepeatedItem: true));
-
-        tables.Add(new TableDefinition(
-            Name: "session_schema_analysis",
-            Columns:
-            [
-                NonEmptyText("session_id"),
-                BoolInt("is_measurable"),
-                NonNegInt("invocation_count"),
-                NonNegInt("turns_analyzed"),
-            ],
-            PrimaryKeyColumns: ["session_id"],
-            ForeignKeys: [Fk("session_id", "session", "session_id")],
-            Indexes: []));
-
-        tables.Add(new TableDefinition(
-            Name: "session_schema_unmeasurable_reason",
-            Columns: [NonEmptyText("session_id"), NonEmptyText("reason")],
-            PrimaryKeyColumns: ["session_id"],
-            ForeignKeys: [Fk("session_id", "session_schema_analysis", "session_id")],
-            Indexes: []));
-
-        tables.Add(new TableDefinition(
-            Name: "session_schema_unused_range",
-            Columns: [NonEmptyText("session_id"), RealCol("lower_cost"), RealCol("upper_cost")],
-            PrimaryKeyColumns: ["session_id"],
-            ForeignKeys: [Fk("session_id", "session_schema_analysis", "session_id")],
-            Indexes: []));
-
-        tables.Add(new TableDefinition(
-            Name: "session_schema_unused_range_currency",
-            Columns: [NonEmptyText("session_id"), NonEmptyText("currency")],
-            PrimaryKeyColumns: ["session_id"],
-            ForeignKeys: [Fk("session_id", "session_schema_unused_range", "session_id")],
-            Indexes: []));
+        tables.Add(SingleChild("session_projection_agent", "session_id", "session_projection", [NonEmptyText("agent_name")]));
+        tables.Add(SingleChild("session_projection_included_in_parent", "session_id", "session_projection", []));
 
         tables.Add(new TableDefinition(
             Name: "session_request",
@@ -1281,184 +859,631 @@ public static partial class RelationalSchemaCatalog
                 NonEmptyText("session_id"),
                 PositionCol(),
                 NonEmptyText("request_span_id"),
-                NonEmptyText("timestamp_utc"),
-                NonNegInt("turn_count"),
             ],
             PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [Fk("session_id", "session", "session_id")],
+            ForeignKeys: [Fk("session_id", "session_projection", "session_id")],
             Indexes: [],
             IsRepeatedItem: true));
 
-        tables.Add(new TableDefinition(
-            Name: "session_request_model",
-            Columns: [NonEmptyText("session_id"), PositionCol(), NonEmptyText("model_id")],
-            PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [CompositeFk(["session_id", "position"], "session_request", ["session_id", "position"])],
-            Indexes: []));
-
-        tables.Add(new TableDefinition(
-            Name: "session_request_prompt",
-            Columns: [NonEmptyText("session_id"), PositionCol(), TextCol("prompt_preview")],
-            PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [CompositeFk(["session_id", "position"], "session_request", ["session_id", "position"])],
-            Indexes: []));
-
-        tables.Add(new TableDefinition(
-            Name: "session_reconciliation",
-            Columns:
-            [
-                NonEmptyText("session_id"),
-                PositionCol(),
-                NonEmptyText("request_span_id"),
-                IntCol("root_input"),
-                IntCol("sum_chat_input"),
-                BoolInt("input_match"),
-                IntCol("root_output"),
-                IntCol("sum_chat_output"),
-                BoolInt("output_match"),
-            ],
-            PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [Fk("session_id", "session", "session_id")],
-            Indexes: [],
-            IsRepeatedItem: true));
-
-        tables.Add(new TableDefinition(
-            Name: "session_subagent",
-            Columns:
-            [
-                NonEmptyText("session_id"),
-                PositionCol(),
-                NonEmptyText("subagent_span_id"),
-                NonEmptyText("subagent_name"),
-            ],
-            PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [Fk("session_id", "session", "session_id")],
-            Indexes: [],
-            IsRepeatedItem: true));
-
-        tables.Add(new TableDefinition(
-            Name: "session_subagent_parent",
-            Columns: [NonEmptyText("session_id"), PositionCol(), NonEmptyText("parent_span_id")],
-            PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [CompositeFk(["session_id", "position"], "session_subagent", ["session_id", "position"])],
-            Indexes: []));
-
-        tables.Add(new TableDefinition(
-            Name: "session_measurability",
-            Columns:
-            [
-                NonEmptyText("session_id"),
-                PositionCol(),
-                NonEmptyText("metric_key"),
-                EnumText("availability", "'measured', 'derived', 'not_measurable'"),
-            ],
-            PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [Fk("session_id", "session", "session_id")],
-            Indexes: [UniqueIdx("session_measurability_by_metric", "session_id", "metric_key")],
-            IsRepeatedItem: true));
-
-        tables.Add(new TableDefinition(
-            Name: "session_measurability_reason",
-            Columns: [NonEmptyText("session_id"), PositionCol(), NonEmptyText("reason")],
-            PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [CompositeFk(["session_id", "position"], "session_measurability", ["session_id", "position"])],
-            Indexes: []));
-    }
-
-    private static void AddSessionTurnTables(List<TableDefinition> tables)
-    {
         tables.Add(new TableDefinition(
             Name: "session_turn",
             Columns:
             [
                 NonEmptyText("session_id"),
                 PositionCol(),
-                NonEmptyText("timestamp_utc"),
-                NonNegInt("input_tokens"),
-                NonNegInt("output_tokens"),
-                NonNegInt("fresh_input"),
-                NonNegInt("cache_read"),
-                NonNegInt("cache_creation"),
+                NonEmptyText("span_id"),
             ],
             PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [Fk("session_id", "session", "session_id")],
-            Indexes: [Idx("session_turn_by_session", "session_id", "position")],
+            ForeignKeys: [Fk("session_id", "session_projection", "session_id")],
+            Indexes: [Idx("session_turn_by_span", "span_id")],
             IsRepeatedItem: true));
 
-        tables.Add(new TableDefinition(
-            Name: "session_turn_span",
-            Columns: [NonEmptyText("session_id"), PositionCol(), NonEmptyText("span_id")],
-            PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [CompositeFk(["session_id", "position"], "session_turn", ["session_id", "position"])],
-            Indexes: [Idx("session_turn_span_by_span", "span_id")]));
+        tables.Add(SingleChild(
+            "session_context",
+            "session_id",
+            "session_projection",
+            [
+                PosInt("context_limit"),
+                NonEmptyText("context_limit_source"),
+                IntCol("residual_total"),
+                RealCol("fresh_jump_factor"),
+                RealCol("accumulation_rate"),
+            ]));
 
-        tables.Add(SessionTurnExtension("session_turn_model", NonEmptyText("model_id")));
-        tables.Add(SessionTurnExtension("session_turn_reasoning", NonNegInt("reasoning_tokens")));
+        tables.Add(SingleChild(
+            "session_context_unmeasurable",
+            "session_id",
+            "session_projection",
+            [NonEmptyText("reason")]));
 
         tables.Add(new TableDefinition(
-            Name: "session_turn_pressure",
+            Name: "session_context_observed_part",
+            Columns: [NonEmptyText("session_id"), NonEmptyText("bucket")],
+            PrimaryKeyColumns: ["session_id", "bucket"],
+            ForeignKeys: [Fk("session_id", "session_context", "session_id")],
+            Indexes: []));
+
+        tables.Add(new TableDefinition(
+            Name: "session_context_derived_count",
+            Columns: [NonEmptyText("session_id"), NonEmptyText("counter"), NonNegInt("count")],
+            PrimaryKeyColumns: ["session_id", "counter"],
+            ForeignKeys: [Fk("session_id", "session_context", "session_id")],
+            Indexes: []));
+
+        tables.Add(new TableDefinition(
+            Name: "session_context_flagged_turn",
+            Columns: [NonEmptyText("session_id"), NonNegInt("turn_index")],
+            PrimaryKeyColumns: ["session_id", "turn_index"],
+            ForeignKeys: [Fk("session_id", "session_context", "session_id")],
+            Indexes: []));
+
+        tables.Add(new TableDefinition(
+            Name: "session_context_turn",
             Columns:
             [
                 NonEmptyText("session_id"),
                 PositionCol(),
-                NonNegInt("builtin_tool_definition_tokens"),
-                NonNegInt("stripped_instruction_count"),
-                NonNegInt("stripped_instruction_tokens"),
+                NonNegInt("input_tokens"),
                 NonNegInt("bucketed_tokens"),
                 IntCol("residual_tokens"),
                 NonEmptyText("residual_attribution"),
-                IntCol("headroom"),
-                RealCol("pressure"),
-                IntCol("accumulation_rate"),
+                NonNegInt("builtin_tool_definition_tokens"),
+                NonNegInt("fresh_input"),
             ],
             PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [CompositeFk(["session_id", "position"], "session_turn", ["session_id", "position"])],
+            ForeignKeys: [Fk("session_id", "session_context", "session_id")],
+            Indexes: [],
+            IsRepeatedItem: true));
+
+        tables.Add(SessionContextTurnExtension("session_context_turn_headroom", IntCol("headroom"), RealCol("pressure")));
+        tables.Add(SessionContextTurnExtension("session_context_turn_accumulation", RealCol("rate")));
+
+        tables.Add(new TableDefinition(
+            Name: "session_context_turn_bucket",
+            Columns:
+            [
+                NonEmptyText("session_id"),
+                PositionCol(),
+                NonEmptyText("bucket"),
+                NonNegInt("tokens"),
+            ],
+            PrimaryKeyColumns: ["session_id", "position", "bucket"],
+            ForeignKeys: [CompositeFk(["session_id", "position"], "session_context_turn", ["session_id", "position"])],
             Indexes: []));
 
         tables.Add(new TableDefinition(
-            Name: "session_turn_bucket",
-            Columns:
-            [
-                NonEmptyText("session_id"),
-                new ColumnDefinition("turn_position", SqliteColumnType.SqliteInteger, IsNotNull: true, CheckConstraint: "turn_position >= 0"),
-                PositionCol(),
-                NonEmptyText("bucket_key"),
-                NonNegInt("token_count"),
-            ],
-            PrimaryKeyColumns: ["session_id", "turn_position", "position"],
-            ForeignKeys: [CompositeFk(["session_id", "turn_position"], "session_turn", ["session_id", "position"])],
-            Indexes: [UniqueIdx("session_turn_bucket_by_key", "session_id", "turn_position", "bucket_key")],
-            IsRepeatedItem: true));
-
-        tables.Add(new TableDefinition(
-            Name: "session_turn_tool_server",
-            Columns:
-            [
-                NonEmptyText("session_id"),
-                new ColumnDefinition("turn_position", SqliteColumnType.SqliteInteger, IsNotNull: true, CheckConstraint: "turn_position >= 0"),
-                PositionCol(),
-                NonEmptyText("server_name"),
-                NonNegInt("token_count"),
-            ],
-            PrimaryKeyColumns: ["session_id", "turn_position", "position"],
-            ForeignKeys: [CompositeFk(["session_id", "turn_position"], "session_turn", ["session_id", "position"])],
-            Indexes: [UniqueIdx("session_turn_tool_server_by_server", "session_id", "turn_position", "server_name")],
-            IsRepeatedItem: true));
-
-        tables.Add(new TableDefinition(
-            Name: "session_turn_fresh_jump",
+            Name: "session_context_turn_server_definitions",
             Columns:
             [
                 NonEmptyText("session_id"),
                 PositionCol(),
-                NonNegInt("previous_fresh_input"),
-                RealCol("jump_factor"),
+                NonEmptyText("server"),
+                NonNegInt("tokens"),
             ],
-            PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [CompositeFk(["session_id", "position"], "session_turn", ["session_id", "position"])],
+            PrimaryKeyColumns: ["session_id", "position", "server"],
+            ForeignKeys: [CompositeFk(["session_id", "position"], "session_context_turn", ["session_id", "position"])],
             Indexes: []));
 
-        tables.Add(SessionTurnExtension("session_turn_non_resident_tools", NonNegInt("non_resident_count")));
+        tables.Add(SessionContextTurnExtension(
+            "session_context_turn_stripped_instructions",
+            NonNegInt("block_count"),
+            NonNegInt("tokens")));
+        tables.Add(SessionContextTurnExtension(
+            "session_context_turn_fresh_jump",
+            NonNegInt("previous_fresh_input"),
+            RealCol("factor")));
+        tables.Add(SessionContextTurnExtension("session_context_turn_non_resident", NonNegInt("tokens")));
+
+        tables.Add(SingleChild(
+            "session_schema",
+            "session_id",
+            "session_projection",
+            [NonNegInt("invocation_count"), NonNegInt("turn_count")]));
+
+        tables.Add(SingleChild(
+            "session_schema_unmeasurable",
+            "session_id",
+            "session_projection",
+            [NonEmptyText("reason")]));
+
+        tables.Add(new TableDefinition(
+            Name: "session_schema_ranked_tool",
+            Columns:
+            [
+                NonEmptyText("session_id"),
+                PositionCol(),
+                NonEmptyText("tool_name"),
+                NonNegInt("cost_tokens"),
+                BoolInt("invoked"),
+            ],
+            PrimaryKeyColumns: ["session_id", "position"],
+            ForeignKeys: [Fk("session_id", "session_schema", "session_id")],
+            Indexes: [],
+            IsRepeatedItem: true));
+
+        tables.Add(new TableDefinition(
+            Name: "session_schema_ranked_tool_server",
+            Columns: [NonEmptyText("session_id"), PositionCol(), NonEmptyText("server_name")],
+            PrimaryKeyColumns: ["session_id", "position"],
+            ForeignKeys: [CompositeFk(["session_id", "position"], "session_schema_ranked_tool", ["session_id", "position"])],
+            Indexes: [],
+            IsRepeatedItem: true));
+
+        tables.Add(new TableDefinition(
+            Name: "session_schema_server",
+            Columns: [NonEmptyText("session_id"), NonEmptyText("server_name"), NonNegInt("tokens")],
+            PrimaryKeyColumns: ["session_id", "server_name"],
+            ForeignKeys: [Fk("session_id", "session_schema", "session_id")],
+            Indexes: []));
+
+        tables.Add(SingleChild("session_schema_unused", "session_id", "session_schema", [NonNegInt("token_residencies")]));
+
+        tables.Add(new TableDefinition(
+            Name: "session_timeline_subagent",
+            Columns: [NonEmptyText("session_id"), NonEmptyText("span_id")],
+            PrimaryKeyColumns: ["session_id", "span_id"],
+            ForeignKeys: [Fk("session_id", "session_projection", "session_id")],
+            Indexes: []));
+
+        tables.Add(new TableDefinition(
+            Name: "session_timeline_auxiliary",
+            Columns: [NonEmptyText("session_id"), NonEmptyText("span_id")],
+            PrimaryKeyColumns: ["session_id", "span_id"],
+            ForeignKeys: [Fk("session_id", "session_projection", "session_id")],
+            Indexes: []));
+    }
+
+    private static void AddRunAndExecutionTables(List<TableDefinition> tables)
+    {
+        tables.Add(new TableDefinition(
+            Name: "run",
+            Columns:
+            [
+                NonEmptyText("run_id"),
+                NonEmptyText("harness_id"),
+                EnumText("grouping_basis", "'explicit', 'derived'"),
+                EnumText("grouping_rule", "'explicit_run_id', 'session_fallback'"),
+                NonNegInt("execution_count"),
+            ],
+            PrimaryKeyColumns: ["run_id"],
+            ForeignKeys: [Fk("harness_id", "harness", "harness_id")],
+            Indexes: [Idx("run_by_harness", "harness_id")]));
+
+        tables.Add(SingleChild("run_label", "run_id", "run", [NonEmptyText("label")]));
+        tables.Add(SingleChild("run_working_directory", "run_id", "run", [NonEmptyText("working_directory")]));
+        tables.Add(SingleChild("run_bounds", "run_id", "run", [NonEmptyText("started_at_utc"), NonEmptyText("ended_at_utc")]));
+
+        tables.Add(new TableDefinition(
+            Name: "execution",
+            Columns:
+            [
+                NonEmptyText("execution_id"),
+                NonEmptyText("run_id"),
+                NonEmptyText("harness_id"),
+                BoolInt("is_root"),
+            ],
+            PrimaryKeyColumns: ["execution_id"],
+            ForeignKeys:
+            [
+                Fk("run_id", "run", "run_id"),
+                Fk("harness_id", "harness", "harness_id"),
+            ],
+            Indexes: [Idx("execution_by_run", "run_id")]));
+
+        tables.Add(new TableDefinition(
+            Name: "execution_session",
+            Columns: [NonEmptyText("execution_id"), NonEmptyText("session_id")],
+            PrimaryKeyColumns: ["execution_id"],
+            ForeignKeys:
+            [
+                Fk("execution_id", "execution", "execution_id"),
+                Fk("session_id", "session", "session_id"),
+            ],
+            Indexes: [Idx("execution_session_by_session", "session_id")]));
+
+        tables.Add(new TableDefinition(
+            Name: "execution_parent",
+            Columns: [NonEmptyText("execution_id"), NonEmptyText("parent_execution_id")],
+            PrimaryKeyColumns: ["execution_id"],
+            ForeignKeys:
+            [
+                Fk("execution_id", "execution", "execution_id"),
+                Fk("parent_execution_id", "execution", "execution_id"),
+            ],
+            Indexes: [Idx("execution_parent_by_parent", "parent_execution_id")]));
+
+        tables.Add(SingleChild("execution_agent", "execution_id", "execution", [NonEmptyText("agent_name")]));
+        tables.Add(SingleChild("execution_bounds", "execution_id", "execution", [NonEmptyText("started_at_utc"), NonEmptyText("ended_at_utc")]));
+    }
+
+    private static void AddRollupFindingAndPredictionTables(List<TableDefinition> tables)
+    {
+        tables.Add(SingleChild(
+            "harness_rollup",
+            "harness_id",
+            "harness",
+            [
+                NonNegInt("session_count"),
+                NonNegInt("run_count"),
+                NonNegInt("execution_count"),
+                NonNegInt("unknown_window_sessions"),
+                NonNegInt("window_sessions_total"),
+            ]));
+
+        tables.Add(new TableDefinition(
+            Name: "harness_rollup_metric",
+            Columns:
+            [
+                NonEmptyText("harness_id"),
+                EnumText(
+                    "metric",
+                    "'context_pressure_median', 'context_pressure_p95', 'cache_hit_rate', 'tool_yield', 'delegation_overhead'"),
+                RealCol("value"),
+                EnumText("basis", "'measured', 'derived'"),
+            ],
+            PrimaryKeyColumns: ["harness_id", "metric"],
+            ForeignKeys: [Fk("harness_id", "harness_rollup", "harness_id")],
+            Indexes: []));
+
+        tables.Add(new TableDefinition(
+            Name: "finding",
+            Columns:
+            [
+                NonEmptyText("finding_id"),
+                NonEmptyText("detector_id"),
+                NonEmptyText("title"),
+                NonEmptyText("mechanism"),
+                NonEmptyText("confidence"),
+                NonEmptyText("recommendation"),
+                NonEmptyText("outcome_risk_caveat"),
+                RealCol("rank_score"),
+            ],
+            PrimaryKeyColumns: ["finding_id"],
+            ForeignKeys: [],
+            Indexes:
+            [
+                Idx("finding_by_detector", "detector_id"),
+                DescIdx("finding_by_rank_score_desc", "rank_score"),
+            ]));
+
+        tables.Add(SingleChild("finding_estimated_waste", "finding_id", "finding", [NonNegInt("tokens")]));
+        tables.Add(SingleChild("finding_error_bar", "finding_id", "finding", [RealCol("lower"), RealCol("upper")]));
+
+        tables.Add(new TableDefinition(
+            Name: "finding_evidence_link",
+            Columns:
+            [
+                NonEmptyText("finding_id"),
+                PositionCol(),
+                NonEmptyText("span_id"),
+                IntCol("turn_index"),
+                TextCol("description"),
+            ],
+            PrimaryKeyColumns: ["finding_id", "position"],
+            ForeignKeys: [Fk("finding_id", "finding", "finding_id")],
+            Indexes: [],
+            IsRepeatedItem: true));
+
+        tables.Add(SingleChild("finding_run", "finding_id", "finding", [NonEmptyText("run_id")], Idx("finding_run_by_run", "run_id")));
+        tables.Add(SingleChild("finding_session", "finding_id", "finding", [NonEmptyText("session_id")], Idx("finding_session_by_session", "session_id")));
+        tables.Add(SingleChild("finding_measurement_class", "finding_id", "finding", [NonEmptyText("measurement_class")]));
+        tables.Add(SingleChild("finding_confidence_basis", "finding_id", "finding", [NonEmptyText("confidence_basis")]));
+        tables.Add(SingleChild("finding_what_would_raise_it", "finding_id", "finding", [NonEmptyText("text")]));
+        tables.Add(SingleChild(
+            "finding_compaction_hazard",
+            "finding_id",
+            "finding",
+            [PosInt("context_limit"), NonEmptyText("context_limit_source")]));
+
+        tables.Add(new TableDefinition(
+            Name: "prediction",
+            Columns:
+            [
+                NonEmptyText("prediction_id"),
+                NonEmptyText("finding_id"),
+                NonEmptyText("run_id"),
+                NonNegInt("predicted_waste_tokens"),
+                RealCol("confidence"),
+                NonEmptyText("confidence_tier"),
+                NonEmptyText("created_at_utc"),
+            ],
+            PrimaryKeyColumns: ["prediction_id"],
+            ForeignKeys: [],
+            Indexes:
+            [
+                Idx("prediction_by_finding", "finding_id"),
+                Idx("prediction_by_run", "run_id"),
+                Idx("prediction_by_created_at", "created_at_utc"),
+            ]));
+
+        tables.Add(SingleChild("prediction_comparison", "prediction_id", "prediction", [NonEmptyText("comparison_run_id")]));
+        tables.Add(SingleChild("prediction_observed_delta", "prediction_id", "prediction", [IntCol("tokens")]));
+        tables.Add(SingleChild("prediction_calibration", "prediction_id", "prediction", [RealCol("score")]));
+    }
+
+    private static void AddStoreStateAndSettingTables(List<TableDefinition> tables)
+    {
+        tables.Add(SingletonTable("store_state", PosInt("schema_version"), PosInt("detector_version")));
+        tables.Add(SingletonTable("store_write_marker", NonNegInt("records_write_seq")));
+        tables.Add(SingletonTable("store_clean_stamp", NonEmptyText("last_clean_at_utc")));
+        tables.Add(SingletonTable("projection_state", IntCol("projection_schema_version"), NonNegInt("records_marker")));
+        tables.Add(SingletonTable("projection_dirty_range", NonNegInt("from_seq"), NonNegInt("to_seq")));
+        tables.Add(SingletonTable("content_retention", PosInt("retention_days")));
+        tables.Add(SingletonTable("content_purge_mark", NonEmptyText("purged_through_utc")));
+        tables.Add(SingletonTable("context_window_catalog_state", NonEmptyText("status")));
+        tables.Add(SingletonTable("operator_setting_folder_import", BoolInt("scheduled")));
+        tables.Add(SingletonTable("operator_setting_jobs", BoolInt("paused")));
+        tables.Add(SingletonTable("operator_setting_refresh_cadence", CheckedInt("minutes", "minutes >= 1 AND minutes <= 1440")));
+        tables.Add(SingletonTable("operator_setting_receiver", BoolInt("hosted")));
+        tables.Add(SingletonTable("operator_setting_dashboard", CheckedInt("port", "port >= 1 AND port <= 65535")));
+
+        tables.Add(new TableDefinition(
+            Name: "projection_dirty_session",
+            Columns: [NonEmptyText("session_id")],
+            PrimaryKeyColumns: ["session_id"],
+            ForeignKeys: [],
+            Indexes: []));
+
+        tables.Add(new TableDefinition(
+            Name: "session_key_alias",
+            Columns: [NonEmptyText("alias_key"), NonEmptyText("session_id")],
+            PrimaryKeyColumns: ["alias_key"],
+            ForeignKeys: [],
+            Indexes: [Idx("session_key_alias_by_session", "session_id")]));
+    }
+
+    private static void AddOperationalAndCatalogTables(List<TableDefinition> tables)
+    {
+        tables.Add(new TableDefinition(
+            Name: "quarantined_span",
+            Columns: [NonEmptyText("span_id"), NonEmptyText("reason")],
+            PrimaryKeyColumns: ["span_id"],
+            ForeignKeys: [],
+            Indexes: []));
+
+        tables.Add(new TableDefinition(
+            Name: "quarantined_span_namespace",
+            Columns: [NonEmptyText("span_id"), NonEmptyText("namespace_name")],
+            PrimaryKeyColumns: ["span_id", "namespace_name"],
+            ForeignKeys: [Fk("span_id", "quarantined_span", "span_id")],
+            Indexes: []));
+
+        tables.Add(SingleChild("quarantined_span_source", "span_id", "quarantined_span", [NonEmptyText("source")]));
+        tables.Add(SingleChild("quarantined_span_name", "span_id", "quarantined_span", [NonEmptyText("name")]));
+        tables.Add(SingleChild("quarantined_span_timestamp", "span_id", "quarantined_span", [NonEmptyText("timestamp_utc")]));
+        tables.Add(SingleChild(
+            "quarantined_span_harness",
+            "span_id",
+            "quarantined_span",
+            [NonEmptyText("harness_id")],
+            Idx("quarantined_span_harness_by_harness", "harness_id")));
+
+        tables.Add(new TableDefinition(
+            Name: "ingest_problem",
+            Columns:
+            [
+                IntCol("problem_id"),
+                NonEmptyText("problem_key"),
+                NonEmptyText("severity"),
+                NonEmptyText("code"),
+                NonEmptyText("message"),
+            ],
+            PrimaryKeyColumns: ["problem_id"],
+            ForeignKeys: [],
+            Indexes: [UniqueIdx("ingest_problem_by_key", "problem_key")]));
+
+        tables.Add(SingleChild(
+            "ingest_problem_span",
+            "problem_id",
+            "ingest_problem",
+            [NonEmptyText("span_id")],
+            Idx("ingest_problem_span_by_span", "span_id")));
+        tables.Add(SingleChild("ingest_problem_location", "problem_id", "ingest_problem", [NonEmptyText("location")]));
+        tables.Add(SingleChild("ingest_problem_session", "problem_id", "ingest_problem", [NonEmptyText("session_id")]));
+        tables.Add(SingleChild(
+            "ingest_problem_harness",
+            "problem_id",
+            "ingest_problem",
+            [NonEmptyText("harness_id")],
+            Idx("ingest_problem_harness_by_harness", "harness_id")));
+        tables.Add(SingleChild("ingest_problem_timestamp", "problem_id", "ingest_problem", [NonEmptyText("timestamp_utc")]));
+        tables.Add(SingleChild("ingest_problem_stack", "problem_id", "ingest_problem", [NonEmptyText("stack")]));
+
+        tables.Add(new TableDefinition(
+            Name: "ingest_log",
+            Columns:
+            [
+                IntCol("ingest_id"),
+                NonEmptyText("source"),
+                NonNegInt("record_count"),
+                NonEmptyText("timestamp_utc"),
+            ],
+            PrimaryKeyColumns: ["ingest_id"],
+            ForeignKeys: [],
+            Indexes:
+            [
+                Idx("ingest_log_by_source", "source"),
+                Idx("ingest_log_by_timestamp", "timestamp_utc"),
+            ]));
+
+        tables.Add(new TableDefinition(
+            Name: "token_cache",
+            Columns: [NonEmptyText("hash"), NonNegInt("token_count")],
+            PrimaryKeyColumns: ["hash"],
+            ForeignKeys: [],
+            Indexes: []));
+
+        tables.Add(SingleChild("token_cache_model", "hash", "token_cache", [NonEmptyText("model_id")]));
+
+        tables.Add(new TableDefinition(
+            Name: "model_context_window_catalog",
+            Columns:
+            [
+                NonEmptyText("lookup_id"),
+                NonEmptyText("canonical_model_id"),
+                PosInt("context_window"),
+                NonEmptyText("vendor"),
+                NonEmptyText("documentation_url"),
+                NonEmptyText("retrieved_at_utc"),
+            ],
+            PrimaryKeyColumns: ["lookup_id"],
+            ForeignKeys: [],
+            Indexes: [Idx("model_context_window_catalog_by_vendor", "vendor")]));
+
+        tables.Add(SingleChild(
+            "model_context_window_source_revision",
+            "lookup_id",
+            "model_context_window_catalog",
+            [NonEmptyText("source_revision")]));
+
+        tables.Add(new TableDefinition(
+            Name: "model_context_window_catalog_vendor",
+            Columns: [NonEmptyText("vendor"), NonEmptyText("status")],
+            PrimaryKeyColumns: ["vendor"],
+            ForeignKeys: [],
+            Indexes: []));
+
+        tables.Add(SingleChild(
+            "model_context_window_catalog_vendor_refresh",
+            "vendor",
+            "model_context_window_catalog_vendor",
+            [NonEmptyText("last_refresh_at_utc")]));
+        tables.Add(SingleChild(
+            "model_context_window_catalog_vendor_error",
+            "vendor",
+            "model_context_window_catalog_vendor",
+            [NonEmptyText("last_error")]));
+
+        tables.Add(new TableDefinition(
+            Name: "metric_point",
+            Columns:
+            [
+                IntCol("point_id"),
+                NonEmptyText("point_key"),
+                NonEmptyText("name"),
+                NonEmptyText("kind"),
+            ],
+            PrimaryKeyColumns: ["point_id"],
+            ForeignKeys: [],
+            Indexes:
+            [
+                UniqueIdx("metric_point_by_key", "point_key"),
+                Idx("metric_point_by_name", "name"),
+            ]));
+
+        tables.Add(MetricPointChild("metric_point_unit", NonEmptyText("unit")));
+        tables.Add(MetricPointChild("metric_point_temporality", IntCol("aggregation_temporality")));
+        tables.Add(MetricPointChild("metric_point_time", NonEmptyText("time_unix_nano")));
+        tables.Add(MetricPointChild("metric_point_start_time", NonEmptyText("start_time_unix_nano")));
+        tables.Add(MetricPointChild("metric_point_timestamp", NonEmptyText("timestamp_utc")));
+        tables.Add(MetricPointChild("metric_point_value", RealCol("value")));
+        tables.Add(MetricPointChild("metric_point_count", IntCol("point_count")));
+        tables.Add(MetricPointChild("metric_point_sum", RealCol("point_sum")));
+        tables.Add(MetricPointChild("metric_point_source", NonEmptyText("source")));
+
+        tables.Add(new TableDefinition(
+            Name: "source_checkpoint",
+            Columns:
+            [
+                NonEmptyText("harness_id"),
+                NonEmptyText("source_key"),
+                NonEmptyText("provider_id"),
+                NonEmptyText("parser_id"),
+                NonEmptyText("parser_contract_version"),
+                NonEmptyText("format"),
+                TextCol("source_root_label"),
+                TextCol("revision_token"),
+                NonEmptyText("covered_from_utc"),
+                NonEmptyText("covered_through_utc"),
+                NonEmptyText("last_attempt_utc"),
+                NonEmptyText("last_status"),
+                NonNegInt("unit_count"),
+                NonNegInt("record_count"),
+            ],
+            PrimaryKeyColumns: ["harness_id", "source_key"],
+            ForeignKeys: [],
+            Indexes: [Idx("source_checkpoint_by_harness", "harness_id")]));
+
+        tables.Add(new TableDefinition(
+            Name: "source_checkpoint_success",
+            Columns:
+            [
+                NonEmptyText("harness_id"),
+                NonEmptyText("source_key"),
+                NonEmptyText("last_success_utc"),
+            ],
+            PrimaryKeyColumns: ["harness_id", "source_key"],
+            ForeignKeys: [CompositeFk(["harness_id", "source_key"], "source_checkpoint", ["harness_id", "source_key"])],
+            Indexes: []));
+
+        tables.Add(new TableDefinition(
+            Name: "source_checkpoint_error",
+            Columns:
+            [
+                NonEmptyText("harness_id"),
+                NonEmptyText("source_key"),
+                NonEmptyText("last_error_code"),
+            ],
+            PrimaryKeyColumns: ["harness_id", "source_key"],
+            ForeignKeys: [CompositeFk(["harness_id", "source_key"], "source_checkpoint", ["harness_id", "source_key"])],
+            Indexes: []));
+
+        tables.Add(new TableDefinition(
+            Name: "record_provenance",
+            Columns:
+            [
+                NonEmptyText("span_id"),
+                NonEmptyText("harness_id"),
+                NonEmptyText("source_key"),
+                TextCol("source_revision"),
+                TextCol("parser_version"),
+                NonEmptyText("imported_at_utc"),
+                TextCol("location_token"),
+            ],
+            PrimaryKeyColumns: ["span_id"],
+            ForeignKeys: [Fk("span_id", "record", "span_id")],
+            Indexes: [Idx("record_provenance_by_source", "harness_id", "source_key")]));
+
+        tables.Add(SingleChild(
+            "record_provenance_native_session",
+            "span_id",
+            "record_provenance",
+            [NonEmptyText("native_session_id")],
+            Idx("record_provenance_native_session_by_id", "native_session_id")));
+
+        tables.Add(SingleChild(
+            "record_provenance_native_record",
+            "span_id",
+            "record_provenance",
+            [NonEmptyText("native_record_id")],
+            Idx("record_provenance_native_record_by_id", "native_record_id")));
+
+        tables.Add(new TableDefinition(
+            Name: "refresh_run",
+            Columns:
+            [
+                NonEmptyText("refresh_run_id"),
+                NonEmptyText("started_at_utc"),
+                NonEmptyText("status"),
+                IntCol("pid"),
+                NonEmptyText("trigger"),
+            ],
+            PrimaryKeyColumns: ["refresh_run_id"],
+            ForeignKeys: [],
+            Indexes:
+            [
+                DescIdx("refresh_run_by_started_at", "started_at_utc"),
+                new IndexDefinition(
+                    "refresh_run_by_status",
+                    [
+                        new IndexColumnDefinition("status"),
+                        new IndexColumnDefinition("started_at_utc", IndexSortDirection.Descending),
+                    ]),
+            ]));
+
+        tables.Add(SingleChild("refresh_run_completion", "refresh_run_id", "refresh_run", [NonEmptyText("completed_at_utc")]));
+        tables.Add(SingleChild("refresh_run_summary", "refresh_run_id", "refresh_run", [NonEmptyText("summary")]));
+        tables.Add(SingleChild("refresh_run_history_window", "refresh_run_id", "refresh_run", [PosInt("history_weeks")]));
     }
 
     private static ColumnDefinition TextCol(string name) =>
@@ -1466,6 +1491,9 @@ public static partial class RelationalSchemaCatalog
 
     private static ColumnDefinition NonEmptyText(string name) =>
         new(name, SqliteColumnType.SqliteText, IsNotNull: true, CheckConstraint: string.Create(CultureInfo.InvariantCulture, $"length({name}) > 0"));
+
+    private static ColumnDefinition CheckedText(string name, string checkConstraint) =>
+        new(name, SqliteColumnType.SqliteText, IsNotNull: true, CheckConstraint: checkConstraint);
 
     private static ColumnDefinition EnumText(string name, string allowedLiterals) =>
         new(name, SqliteColumnType.SqliteText, IsNotNull: true, CheckConstraint: string.Create(CultureInfo.InvariantCulture, $"{name} IN ({allowedLiterals})"));
@@ -1476,14 +1504,26 @@ public static partial class RelationalSchemaCatalog
     private static ColumnDefinition NonNegInt(string name) =>
         new(name, SqliteColumnType.SqliteInteger, IsNotNull: true, CheckConstraint: string.Create(CultureInfo.InvariantCulture, $"{name} >= 0"));
 
+    private static ColumnDefinition PosInt(string name) =>
+        new(name, SqliteColumnType.SqliteInteger, IsNotNull: true, CheckConstraint: string.Create(CultureInfo.InvariantCulture, $"{name} > 0"));
+
+    private static ColumnDefinition CheckedInt(string name, string checkConstraint) =>
+        new(name, SqliteColumnType.SqliteInteger, IsNotNull: true, CheckConstraint: checkConstraint);
+
     private static ColumnDefinition BoolInt(string name) =>
         new(name, SqliteColumnType.SqliteInteger, IsNotNull: true, CheckConstraint: string.Create(CultureInfo.InvariantCulture, $"{name} IN (0, 1)"));
 
     private static ColumnDefinition PositionCol() =>
         NonNegInt("position");
 
+    private static ColumnDefinition SingletonIdCol() =>
+        new("singleton_id", SqliteColumnType.SqliteInteger, IsNotNull: true, CheckConstraint: "singleton_id = 1");
+
     private static ColumnDefinition RealCol(string name) =>
         new(name, SqliteColumnType.SqliteReal, IsNotNull: true);
+
+    private static ColumnDefinition NonNegReal(string name) =>
+        new(name, SqliteColumnType.SqliteReal, IsNotNull: true, CheckConstraint: string.Create(CultureInfo.InvariantCulture, $"{name} >= 0.0"));
 
     private static ForeignKeyDefinition Fk(string column, string referencedTable, string referencedColumn) =>
         new([column], referencedTable, [referencedColumn], ForeignKeyDeleteAction.Cascade);
@@ -1500,105 +1540,66 @@ public static partial class RelationalSchemaCatalog
     private static IndexDefinition UniqueIdx(string name, params string[] columns) =>
         new(name, [.. columns.Select(static col => new IndexColumnDefinition(col))], IsUnique: true);
 
-    private static TableDefinition RecordSingleText(string tableName, string columnName, bool nonEmpty, params IndexDefinition[] indexes) =>
-        new(
+    private static IndexDefinition DescIdx(string name, string column) =>
+        new(name, [new IndexColumnDefinition(column, IndexSortDirection.Descending)], IsUnique: false);
+
+    private static TableDefinition SingleChild(
+        string tableName,
+        string keyColumn,
+        string parentTable,
+        ColumnDefinition[] valueColumns,
+        params IndexDefinition[] indexes)
+    {
+        ColumnDefinition keyDefinition = parentTable is "ingest_problem" or "metric_point"
+            ? IntCol(keyColumn)
+            : NonEmptyText(keyColumn);
+
+        return new TableDefinition(
             Name: tableName,
-            Columns: [NonEmptyText("span_id"), nonEmpty ? NonEmptyText(columnName) : TextCol(columnName)],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "record", "span_id")],
+            Columns: [keyDefinition, .. valueColumns],
+            PrimaryKeyColumns: [keyColumn],
+            ForeignKeys: [Fk(keyColumn, parentTable, keyColumn)],
             Indexes: indexes);
+    }
 
-    private static TableDefinition RecordSingleInt(string tableName, string columnName, bool nonNegative) =>
+    private static TableDefinition SingletonTable(string tableName, params ColumnDefinition[] valueColumns) =>
         new(
             Name: tableName,
-            Columns: [NonEmptyText("span_id"), nonNegative ? NonNegInt(columnName) : IntCol(columnName)],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "record", "span_id")],
+            Columns: [SingletonIdCol(), .. valueColumns],
+            PrimaryKeyColumns: ["singleton_id"],
+            ForeignKeys: [],
             Indexes: []);
 
-    private static TableDefinition RecordSinglePositiveInt(string tableName, string columnName) =>
-        new(
-            Name: tableName,
-            Columns:
-            [
-                NonEmptyText("span_id"),
-                new ColumnDefinition(columnName, SqliteColumnType.SqliteInteger, IsNotNull: true, CheckConstraint: string.Create(CultureInfo.InvariantCulture, $"{columnName} > 0")),
-            ],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "record", "span_id")],
-            Indexes: []);
+    private static TableDefinition RecordSingleText(string tableName, string columnName, bool nonEmpty, params IndexDefinition[] indexes) =>
+        SingleChild(tableName, "span_id", "record", [nonEmpty ? NonEmptyText(columnName) : TextCol(columnName)], indexes);
 
-    private static TableDefinition RecordSingleReal(string tableName, string columnName) =>
-        new(
-            Name: tableName,
-            Columns: [NonEmptyText("span_id"), RealCol(columnName)],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "record", "span_id")],
-            Indexes: []);
+    private static TableDefinition RecordSingleNonNegInt(string tableName, string columnName) =>
+        SingleChild(tableName, "span_id", "record", [NonNegInt(columnName)]);
 
-    private static TableDefinition RecordSingleBool(string tableName, string columnName) =>
+    private static TableDefinition ContentPartExtension(string tableName, params ColumnDefinition[] valueColumns) =>
         new(
             Name: tableName,
-            Columns: [NonEmptyText("span_id"), BoolInt(columnName)],
-            PrimaryKeyColumns: ["span_id"],
-            ForeignKeys: [Fk("span_id", "record", "span_id")],
-            Indexes: []);
-
-    private static TableDefinition RecordRepeatedText(string tableName, string columnName, bool nonEmpty) =>
-        new(
-            Name: tableName,
-            Columns: [NonEmptyText("span_id"), PositionCol(), nonEmpty ? NonEmptyText(columnName) : TextCol(columnName)],
-            PrimaryKeyColumns: ["span_id", "position"],
-            ForeignKeys: [Fk("span_id", "record", "span_id")],
-            Indexes: [],
-            IsRepeatedItem: true);
-
-    private static TableDefinition ContentPartExtension(string tableName, ColumnDefinition valueColumn) =>
-        new(
-            Name: tableName,
-            Columns: [NonEmptyText("span_id"), PositionCol(), valueColumn],
+            Columns: [NonEmptyText("span_id"), PositionCol(), .. valueColumns],
             PrimaryKeyColumns: ["span_id", "position"],
             ForeignKeys: [CompositeFk(["span_id", "position"], "content_part", ["span_id", "position"])],
-            Indexes: []);
-
-    private static TableDefinition ToolDefinitionExtension(string tableName, ColumnDefinition valueColumn) =>
-        new(
-            Name: tableName,
-            Columns: [NonEmptyText("span_id"), PositionCol(), valueColumn],
-            PrimaryKeyColumns: ["span_id", "position"],
-            ForeignKeys: [CompositeFk(["span_id", "position"], "tool_definition", ["span_id", "position"])],
-            Indexes: []);
-
-    private static TableDefinition SessionSingleText(string tableName, string columnName, bool nonEmpty) =>
-        new(
-            Name: tableName,
-            Columns: [NonEmptyText("session_id"), nonEmpty ? NonEmptyText(columnName) : TextCol(columnName)],
-            PrimaryKeyColumns: ["session_id"],
-            ForeignKeys: [Fk("session_id", "session", "session_id")],
-            Indexes: []);
-
-    private static TableDefinition SessionSingleNonNegInt(string tableName, string columnName) =>
-        new(
-            Name: tableName,
-            Columns: [NonEmptyText("session_id"), NonNegInt(columnName)],
-            PrimaryKeyColumns: ["session_id"],
-            ForeignKeys: [Fk("session_id", "session", "session_id")],
-            Indexes: []);
-
-    private static TableDefinition SessionRepeatedText(string tableName, string columnName) =>
-        new(
-            Name: tableName,
-            Columns: [NonEmptyText("session_id"), PositionCol(), NonEmptyText(columnName)],
-            PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [Fk("session_id", "session", "session_id")],
             Indexes: [],
             IsRepeatedItem: true);
 
-    private static TableDefinition SessionTurnExtension(string tableName, ColumnDefinition valueColumn) =>
+    private static TableDefinition ToolCallExtension(
+        string tableName,
+        ColumnDefinition[] valueColumns,
+        params IndexDefinition[] indexes) =>
+        SingleChild(tableName, "span_id", "tool_call", valueColumns, indexes);
+
+    private static TableDefinition SessionContextTurnExtension(string tableName, params ColumnDefinition[] valueColumns) =>
         new(
             Name: tableName,
-            Columns: [NonEmptyText("session_id"), PositionCol(), valueColumn],
+            Columns: [NonEmptyText("session_id"), PositionCol(), .. valueColumns],
             PrimaryKeyColumns: ["session_id", "position"],
-            ForeignKeys: [CompositeFk(["session_id", "position"], "session_turn", ["session_id", "position"])],
-            Indexes: []);
+            ForeignKeys: [CompositeFk(["session_id", "position"], "session_context_turn", ["session_id", "position"])],
+            Indexes: [],
+            IsRepeatedItem: true);
+
+    private static TableDefinition MetricPointChild(string tableName, ColumnDefinition valueColumn) =>
+        SingleChild(tableName, "point_id", "metric_point", [valueColumn]);
 }
