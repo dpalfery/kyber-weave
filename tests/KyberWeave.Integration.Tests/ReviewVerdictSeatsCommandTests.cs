@@ -626,13 +626,13 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
     /// under any spelling of the list key and of the field key.
     /// </summary>
     [Theory]
-    [MemberData(nameof(ReviewVerdictInputTests.RangeSpellings), MemberType = typeof(ReviewVerdictInputTests))]
+    [MemberData(nameof(ReviewVerdictInputCases.RangeSpellings), MemberType = typeof(ReviewVerdictInputCases))]
     public void AnOutOfRangePriorFindingIsRefusedWhateverTheCaseOfTheListAndFieldKeys(
         string listKind, string fieldKind, string field, string rawValue)
     {
         JsonObject finding = PriorFinding();
         finding.Remove(field);
-        finding[ReviewVerdictInputTests.Spell(field, fieldKind)] = JsonNode.Parse(rawValue);
+        finding[ReviewVerdictInputCases.Spell(field, fieldKind)] = JsonNode.Parse(rawValue);
         WritePrior("findings", listKind, new JsonArray(finding));
         WriteSeat("correctness", NoFindingsSeat("correctness"));
 
@@ -646,7 +646,7 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
     }
 
     [Theory]
-    [MemberData(nameof(ReviewVerdictInputTests.KnownFindingsLists), MemberType = typeof(ReviewVerdictInputTests))]
+    [MemberData(nameof(ReviewVerdictInputCases.KnownFindingsLists), MemberType = typeof(ReviewVerdictInputCases))]
     public void ANullElementInAKnownPriorListIsRefusedWhateverTheCaseOfItsKey(string key, string kind)
     {
         WritePrior(key, kind, new JsonArray("a", null));
@@ -657,7 +657,7 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
 
         Assert.Equal(1, run.Result);
         AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
-        AssertDiagnostic(run.Output, UnreadableInput, "Error", $"$.{ReviewVerdictInputTests.Spell(key, kind)}[1]");
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", $"$.{ReviewVerdictInputCases.Spell(key, kind)}[1]");
     }
 
     [Theory]
@@ -669,7 +669,7 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
         WritePrior("findings", kind, new JsonArray());
         string path = Path.Combine(PriorFolder, "findings.json");
         JsonObject document = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
-        document[ReviewVerdictInputTests.Spell("extra", kind)] = new JsonArray(1, null);
+        document[ReviewVerdictInputCases.Spell("extra", kind)] = new JsonArray(1, null);
         File.WriteAllText(path, document.ToJsonString());
         WriteSeat("correctness", NoFindingsSeat("correctness"));
 
@@ -681,18 +681,18 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
     }
 
     [Theory]
-    [MemberData(nameof(ReviewVerdictInputTests.DuplicateFindingsKeys), MemberType = typeof(ReviewVerdictInputTests))]
+    [MemberData(nameof(ReviewVerdictInputCases.DuplicateFindingsKeys), MemberType = typeof(ReviewVerdictInputCases))]
     public void ATwoSpellingObjectInAPriorDocumentIsRefusedNamingTheFilePathAndBothSpellings(
         string caseName, string path, string first, string second)
     {
         Directory.CreateDirectory(PriorFolder);
-        File.WriteAllText(Path.Combine(PriorFolder, "findings.json"), ReviewVerdictInputTests.DuplicateFindingsDocument(caseName));
+        File.WriteAllText(Path.Combine(PriorFolder, "findings.json"), ReviewVerdictInputCases.DuplicateFindingsDocument(caseName));
         WriteSeat("correctness", NoFindingsSeat("correctness"));
 
         CapturedConsoleExecution<int> run = Verdict(
             ["--seats", _seats, "--prior", PriorFolder, .. NotSeatedExcept("correctness")]);
 
-        ReviewVerdictInputTests.AssertRefusedForDuplicate(run, "findings.json", path, first, second);
+        ReviewVerdictInputCases.AssertRefusedForDuplicate(run, "findings.json", path, first, second);
     }
 
     [Fact]
@@ -715,7 +715,7 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
     public void ATwoSpellingObjectInsideAnUnknownPriorPropertyIsTolerated()
     {
         Directory.CreateDirectory(PriorFolder);
-        JsonObject document = JsonNode.Parse(ReviewVerdictInputTests.DuplicateFindingsDocument("coverage-entry"))!.AsObject();
+        JsonObject document = JsonNode.Parse(ReviewVerdictInputCases.DuplicateFindingsDocument("coverage-entry"))!.AsObject();
         document["coverage"] = new JsonArray(new JsonObject
         {
             ["lens"] = "security",
@@ -743,7 +743,7 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
     public void APriorDocumentWrittenInOneSpellingIsStillRead(string kind, string severity)
     {
         Directory.CreateDirectory(PriorFolder);
-        File.WriteAllText(Path.Combine(PriorFolder, "findings.json"), ReviewVerdictInputTests.SpelledFindingsDocument(kind, severity));
+        File.WriteAllText(Path.Combine(PriorFolder, "findings.json"), ReviewVerdictInputCases.SpelledFindingsDocument(kind, severity));
         WriteSeat("correctness", NoFindingsSeat("correctness"));
 
         CapturedConsoleExecution<int> run = Verdict(
@@ -777,7 +777,7 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
             ["changedLines"] = 0
         };
         document.Remove(key);
-        document[ReviewVerdictInputTests.Spell(key, kind)] = value;
+        document[ReviewVerdictInputCases.Spell(key, kind)] = value;
         File.WriteAllText(Path.Combine(PriorFolder, "findings.json"), document.ToJsonString());
     }
 

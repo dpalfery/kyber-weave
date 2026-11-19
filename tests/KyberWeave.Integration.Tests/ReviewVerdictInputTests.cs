@@ -5,6 +5,7 @@ using KyberWeave.Core.Review;
 using Spectre.Console.Cli;
 using Xunit;
 using static KyberWeave.Tests.ReviewDiagnosticAssert;
+using static KyberWeave.Tests.ReviewVerdictInputCases;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -309,25 +310,6 @@ public sealed class ReviewVerdictInputTests : IDisposable
     // or the null walk visits is run in lowercase, PascalCase and UPPERCASE spellings.
     // -----------------------------------------------------------------------------------------
 
-    public static TheoryData<string, string, string, string> RangeSpellings()
-    {
-        TheoryData<string, string, string, string> data = [];
-        foreach (string listKind in Spellings)
-            foreach (string fieldKind in Spellings)
-                foreach ((string field, string value) in new[] { ("severity", "7"), ("confidence", "999") })
-                    data.Add(listKind, fieldKind, field, value);
-        return data;
-    }
-
-    public static TheoryData<string, string> KnownFindingsLists()
-    {
-        TheoryData<string, string> data = [];
-        foreach (string kind in Spellings)
-            foreach (string key in new[] { "findings", "changedPaths", "coverage" })
-                data.Add(key, kind);
-        return data;
-    }
-
     public static TheoryData<string, string> KnownGateLists()
     {
         TheoryData<string, string> data = [];
@@ -340,7 +322,7 @@ public sealed class ReviewVerdictInputTests : IDisposable
     private static readonly string[] Spellings = ["lower", "Pascal", "UPPER"];
 
     [Theory]
-    [MemberData(nameof(RangeSpellings))]
+    [MemberData(nameof(RangeSpellings), MemberType = typeof(ReviewVerdictInputCases))]
     public void AnOutOfRangeFindingIsRefusedWhateverTheCaseOfTheListAndFieldKeys(
         string listKind, string fieldKind, string field, string rawValue)
     {
@@ -357,7 +339,7 @@ public sealed class ReviewVerdictInputTests : IDisposable
     }
 
     [Theory]
-    [MemberData(nameof(KnownFindingsLists))]
+    [MemberData(nameof(KnownFindingsLists), MemberType = typeof(ReviewVerdictInputCases))]
     public void ANullElementInAKnownFindingsListIsRefusedWhateverTheCaseOfItsKey(string key, string kind)
     {
         string findings = Write("findings.json", FindingsObject(key, kind, new JsonArray("a", null)));
@@ -415,19 +397,6 @@ public sealed class ReviewVerdictInputTests : IDisposable
     // is an accident of order. Refused naming the file, the object's JSON path and both spellings.
     // -----------------------------------------------------------------------------------------
 
-    public static TheoryData<string, string, string, string> DuplicateFindingsKeys() => new()
-    {
-        { "document-list", "$", "findings", "FINDINGS" },
-        { "document-scalar", "$", "changedLines", "ChangedLines" },
-        { "finding-severity", "$.findings[0]", "severity", "Severity" },
-        { "finding-snake", "$.findings[0]", "failure_scenario", "FAILURE_SCENARIO" },
-        { "finding-camel", "$.findings[0]", "failureScenario", "FailureScenario" },
-        { "finding-snake-and-camel", "$.findings[0]", "failure_scenario", "failureScenario" },
-        { "finding-snake-and-pascal", "$.findings[0]", "failure_scenario", "FailureScenario" },
-        { "finding-upper-snake-and-camel", "$.findings[0]", "FAILURE_SCENARIO", "failureScenario" },
-        { "coverage-entry", "$.coverage[0]", "lens", "LENS" }
-    };
-
     public static TheoryData<string, string, string, string> DuplicateGateKeys() => new()
     {
         { "gate-document", "$", "gates", "GATES" },
@@ -436,45 +405,6 @@ public sealed class ReviewVerdictInputTests : IDisposable
         { "coverage-result", "$.coverageReports[0].coverage", "fileLinePercent", "FILELINEPERCENT" }
     };
 
-    /// <summary>A valid findings document with one finding and one coverage entry, then one object given a second spelling of a name.</summary>
-    internal static string DuplicateFindingsDocument(string caseName)
-    {
-        JsonObject finding = FindingObject("severity", "\"minor\"");
-        JsonObject coverage = new() { ["lens"] = "correctness", ["outcome"] = "findings", ["reason"] = null };
-        JsonObject document = new()
-        {
-            ["schema"] = "kyber-weave.review-findings/v1",
-            ["findings"] = new JsonArray(finding),
-            ["changedPaths"] = new JsonArray(),
-            ["changedLines"] = 0,
-            ["coverage"] = new JsonArray(coverage)
-        };
-        switch (caseName)
-        {
-            case "document-list": document["FINDINGS"] = new JsonArray(); break;
-            case "document-scalar": document["ChangedLines"] = 1; break;
-            case "finding-severity": finding["Severity"] = "critical"; break;
-            case "finding-snake":
-                finding.Remove("failureScenario");
-                finding["failure_scenario"] = "a";
-                finding["FAILURE_SCENARIO"] = "b";
-                break;
-            case "finding-camel": finding["FailureScenario"] = "b"; break;
-            case "finding-snake-and-camel": finding["failure_scenario"] = "a"; break;
-            case "finding-snake-and-pascal":
-                finding.Remove("failureScenario");
-                finding["failure_scenario"] = "a";
-                finding["FailureScenario"] = "b";
-                break;
-            case "finding-upper-snake-and-camel": finding["FAILURE_SCENARIO"] = "a"; break;
-            case "coverage-entry": coverage["LENS"] = "security"; break;
-            default: throw new ArgumentOutOfRangeException(nameof(caseName), caseName, null);
-        }
-
-        return document.ToJsonString();
-    }
-
-    /// <summary>A valid gate report with one gate and one coverage report, then one object given a second spelling of a name.</summary>
     internal static string DuplicateGateDocument(string caseName)
     {
         JsonObject gate = new() { ["id"] = "build", ["blocking"] = true, ["exitCode"] = 0, ["summary"] = "ok" };
@@ -499,7 +429,7 @@ public sealed class ReviewVerdictInputTests : IDisposable
     }
 
     [Theory]
-    [MemberData(nameof(DuplicateFindingsKeys))]
+    [MemberData(nameof(DuplicateFindingsKeys), MemberType = typeof(ReviewVerdictInputCases))]
     public void ATwoSpellingObjectInAFindingsDocumentIsRefusedNamingTheFilePathAndBothSpellings(
         string caseName, string path, string first, string second)
     {
@@ -627,42 +557,6 @@ public sealed class ReviewVerdictInputTests : IDisposable
             written.RootElement.GetProperty("findings")[0].GetProperty("failureScenario").GetString());
     }
 
-    internal static string SpelledFindingsDocument(string kind, string severity)
-    {
-        JsonObject finding = FindingObject("severity", JsonValue.Create(severity)!.ToJsonString());
-        JsonObject document = new()
-        {
-            ["schema"] = "kyber-weave.review-findings/v1",
-            ["findings"] = new JsonArray(SpellKeys(finding, kind)),
-            ["changedPaths"] = new JsonArray(),
-            ["changedLines"] = 0
-        };
-        return SpellKeys(document, kind).ToJsonString();
-    }
-
-    /// <summary>The same object with every property name in the spelling <paramref name="kind"/> names (the values are untouched).</summary>
-    internal static JsonObject SpellKeys(JsonObject node, string kind)
-    {
-        JsonObject spelled = [];
-        foreach (KeyValuePair<string, JsonNode?> property in node)
-            spelled[Spell(property.Key, kind)] = property.Value?.DeepClone();
-        return spelled;
-    }
-
-    /// <summary>
-    /// Asserts the one refusal names the file, the object's path and both spellings, each path-qualified
-    /// (<c>$.findings[0].severity</c>), so a message that merely contains <c>$</c> or the file name does not pass.
-    /// </summary>
-    internal static void AssertRefusedForDuplicate(
-        CapturedConsoleExecution<int> run, string file, string path, string first, string second)
-    {
-        Assert.Equal(Refused, run.Result);
-        Assert.Contains(MessagesWithCode(run.Output, UnreadableInput), message =>
-            message.Contains(file, StringComparison.Ordinal)
-            && message.Contains($"{path}.{first}", StringComparison.Ordinal)
-            && message.Contains($"{path}.{second}", StringComparison.Ordinal));
-    }
-
     /// <summary>
     /// Pins what the rule leaves alone. A dictionary's keys are data, not field names, so two that differ only in case are
     /// both kept; and names inside an unknown extension property are not walked, so a collision there is tolerated.
@@ -694,14 +588,6 @@ public sealed class ReviewVerdictInputTests : IDisposable
         Assert.Equal(0, run.Result);
         Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
     }
-
-    /// <summary>The spelling of <paramref name="key"/> a test names: all lowercase, PascalCase, or all uppercase.</summary>
-    internal static string Spell(string key, string kind) => kind switch
-    {
-        "lower" => string.Concat(key.Select(char.ToLowerInvariant)),
-        "Pascal" => char.ToUpperInvariant(key[0]) + key[1..],
-        _ => key.ToUpperInvariant()
-    };
 
     private static void RenameKey(JsonObject node, string from, string to)
     {
@@ -764,27 +650,6 @@ public sealed class ReviewVerdictInputTests : IDisposable
 
     /// <summary>One otherwise-valid finding as JSON text, with <paramref name="field"/> set to the raw JSON <paramref name="rawValue"/>.</summary>
     private static string FindingJson(string field, string rawValue) => FindingObject(field, rawValue).ToJsonString();
-
-    /// <summary>One otherwise-valid finding, with <paramref name="field"/> set to the raw JSON <paramref name="rawValue"/>.</summary>
-    private static JsonObject FindingObject(string field, string rawValue)
-    {
-        JsonObject finding = new()
-        {
-            ["id"] = "correctness/off-by-one",
-            ["lens"] = "correctness",
-            ["severity"] = "major",
-            ["confidence"] = 9,
-            ["file"] = "src/Foo.cs",
-            ["line"] = 12,
-            ["excerpt"] = "if (i < count)",
-            ["claim"] = "The loop bound excludes the final element.",
-            ["evidence"] = "src/Foo.cs:12",
-            ["failureScenario"] = "The last element is never processed.",
-            ["suggestion"] = "Use <= or count + 1."
-        };
-        finding[field] = JsonNode.Parse(rawValue);
-        return finding;
-    }
 
     /// <summary>
     /// A findings document as JSON text. <paramref name="member"/> is one extra raw top-level member, or a replacement list for
