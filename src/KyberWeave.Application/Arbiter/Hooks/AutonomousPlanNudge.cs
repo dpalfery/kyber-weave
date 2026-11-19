@@ -74,9 +74,10 @@ internal static class AutonomousPlanNudge
                 : string.Equals(other.PreId, preId, StringComparison.Ordinal)));
     }
 
-    private static bool IsArchitect(string? target) =>
-        target is { Length: > 0 }
-        && (string.Equals(target, Architect, StringComparison.OrdinalIgnoreCase)
-            || target.EndsWith(":" + Architect, StringComparison.OrdinalIgnoreCase)
-            || target.EndsWith("/" + Architect, StringComparison.OrdinalIgnoreCase));
+    private static bool IsArchitect(string? target)
+    {
+        string name = target?.Trim() ?? string.Empty;
+        int separator = name.LastIndexOfAny([':', '/', '\\']);
+        return string.Equals(separator < 0 ? name : name[(separator + 1)..], Architect, StringComparison.OrdinalIgnoreCase);
+    }
 }
