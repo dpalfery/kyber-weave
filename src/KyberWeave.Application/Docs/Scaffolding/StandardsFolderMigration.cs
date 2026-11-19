@@ -69,6 +69,12 @@ public sealed partial class StandardsFolderMigration
     /// <summary>The command a caller runs to reach this migration.</summary>
     public const string Command = DocsLayout.MigrateStandardsCommand;
 
+    /// <summary>
+    /// The key under which an exception thrown by <see cref="Run"/> carries, in its <c>Data</c>, the undo steps that
+    /// themselves failed while the run was rolled back. Absent when the rollback was complete.
+    /// </summary>
+    public const string RollbackFailuresKey = "kyber-weave.standards-migration.rollback-failures";
+
     /// <summary>The one file the configuration registry is rendered into.</summary>
     private const string AgentsFilePath = "AGENTS.md";
 
@@ -249,15 +255,14 @@ public sealed partial class StandardsFolderMigration
             // would otherwise leave some standards moved and the registry block stale. Undo the
             // writes in reverse so the repository is exactly as it was.
             List<string> failed = RollBack(undo);
-            if (failed.Count == 0)
+            if (failed.Count > 0)
             {
-                throw;
+                // The original keeps its type, so a caller that handles it still does and a cancellation
+                // stays a cancellation. Undo failures ride along on it, for the caller to report beside it.
+                original.Data[RollbackFailuresKey] = string.Join("; ", failed);
             }
 
-            throw new IOException(
-                $"{original.Message} Undoing the writes made before the failure also failed: " +
-                string.Join("; ", failed) + ".",
-                original);
+            throw;
         }
 
         return new StandardsFolderMigrationResult(
@@ -462,10 +467,10 @@ public sealed partial class StandardsFolderMigration
             {
                 undo[index]();
             }
-            catch (Exception exception) when (exception is not OperationCanceledException)
+            catch (Exception exception)
             {
-                // The original failure is still the one worth leading with, but an undo that fails
-                // is reported beside it rather than swallowed.
+                // Rollback is best effort: every undo runs even when an earlier one failed, and a
+                // failure is reported beside the original error rather than swallowed.
                 failed.Add($"{exception.GetType().Name}: {exception.Message}");
             }
         }

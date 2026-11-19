@@ -54,14 +54,14 @@ public sealed class DocsStandardsMigrateCommand(
         {
             console.MarkupLine(
                 "[red]The Config Reg block in AGENTS.md could not be refreshed, so nothing was " +
-                "migrated.[/] " + Markup.Escape(exception.Message));
+                "migrated.[/] " + Markup.Escape(exception.Message + RollbackNote(exception)));
             return 1;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             console.MarkupLine(
                 $"[red]The standards folders could not be read or written, so nothing was migrated.[/] " +
-                Markup.Escape(exception.Message));
+                Markup.Escape(exception.Message + RollbackNote(exception)));
             return 1;
         }
 
@@ -118,4 +118,9 @@ public sealed class DocsStandardsMigrateCommand(
 
         return 0;
     }
+
+    private static string RollbackNote(Exception exception) =>
+        exception.Data[StandardsFolderMigration.RollbackFailuresKey] is string failed
+            ? " Undoing the writes made before the failure also failed: " + failed + "."
+            : string.Empty;
 }
