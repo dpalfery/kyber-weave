@@ -331,7 +331,7 @@ public sealed class SquadDeploymentStateRecoveryTests : InMemoryDeploymentStateT
     /// <returns>The lifecycle service.</returns>
     private SquadLifecycleService LifecycleAt(string root)
     {
-        InMemorySquadState fixtureState = new(stateRoot: root, files: Files);
+        InMemorySquadState fixtureState = new(stateRoot: root, existingFiles: Files);
         using FakeSquadReleaseSource releaseSource = FakeSquadReleaseSource.Failing(
             new NotImplementedException("A recovery test never downloads a release."));
         return SquadTestCommands.InMemoryLifecycle(

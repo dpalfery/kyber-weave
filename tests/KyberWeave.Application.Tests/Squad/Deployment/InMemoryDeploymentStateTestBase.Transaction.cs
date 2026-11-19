@@ -27,14 +27,6 @@ public abstract partial class InMemoryDeploymentStateTestBase
             false,
             new FixedTimeProvider(InstalledAt));
 
-    /// <summary>Asserts a refused transaction names the active lease.</summary>
-    /// <param name="exception">The refusal.</param>
-    internal static void AssertActiveLeaseConflict(Exception? exception)
-    {
-        InvalidOperationException conflict = Assert.IsAssignableFrom<InvalidOperationException>(exception);
-        Assert.Contains("active", conflict.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
     /// <summary>Fails a transaction after one lifecycle step and returns the tree it left behind.</summary>
     /// <param name="fixture">The project fixture.</param>
     /// <param name="checkpoint">The step to fail after.</param>
@@ -104,84 +96,6 @@ public abstract partial class InMemoryDeploymentStateTestBase
                 Assert.IsAssignableFrom<JsonValue>(artifact["nodeKind"]).GetValue<string>()));
             Assert.False(string.IsNullOrWhiteSpace(
                 Assert.IsAssignableFrom<JsonValue>(artifact["lifecycleState"]).GetValue<string>()));
-        }
-    }
-
-    /// <summary>Asserts the created-directory authority is canonical, unique and deepest first.</summary>
-    /// <param name="createdDirectories">The created-directory authority array.</param>
-    internal static void AssertCreatedDirectoryAuthorityIsCanonical(JsonArray createdDirectories)
-    {
-        int previousDepth = int.MaxValue;
-        HashSet<string> identities = new(StringComparer.Ordinal);
-        foreach (JsonNode? node in createdDirectories)
-        {
-            JsonObject authority = Assert.IsType<JsonObject>(node);
-            string area = Assert.IsAssignableFrom<JsonValue>(authority["area"]).GetValue<string>();
-            string path = Assert.IsAssignableFrom<JsonValue>(authority["path"]).GetValue<string>();
-            Assert.False(string.IsNullOrWhiteSpace(area));
-            Assert.False(Path.IsPathRooted(path));
-            Assert.DoesNotContain("..", path.Split('/'), StringComparer.Ordinal);
-            Assert.True(identities.Add($"{area}:{path}"));
-            int depth = path.Count(character => character == '/');
-            Assert.True(
-                depth <= previousDepth,
-                "Created-directory authority must be serialized deepest first.");
-            previousDepth = depth;
-        }
-    }
-
-    /// <summary>Corrupts the created-directory authority of a prepared journal one way.</summary>
-    /// <param name="intent">The journal.</param>
-    /// <param name="createdDirectories">The created-directory authority array.</param>
-    /// <param name="fixtureRoot">The root the journal describes.</param>
-    /// <param name="corruption">The corruption to make.</param>
-    internal static void CorruptCreatedDirectoryAuthority(
-        JsonObject intent,
-        JsonArray createdDirectories,
-        string fixtureRoot,
-        string corruption)
-    {
-        JsonObject first = Assert.IsType<JsonObject>(createdDirectories[0]);
-        switch (corruption)
-        {
-            case "wrong-area":
-                first["area"] = "outside";
-                break;
-            case "non-ancestor":
-                first["path"] = "unrelated/not-an-ancestor";
-                break;
-            case "duplicate":
-                createdDirectories.Add(first.DeepClone());
-                break;
-            case "unordered":
-                Assert.True(createdDirectories.Count > 1);
-                JsonObject last = Assert.IsType<JsonObject>(createdDirectories[^1]);
-                createdDirectories.RemoveAt(createdDirectories.Count - 1);
-                createdDirectories.Insert(0, last);
-                break;
-            case "absolute":
-                first["path"] = Path.Combine(fixtureRoot, "absolute");
-                break;
-            case "traversal":
-                first["path"] = "../escape";
-                break;
-            case "sibling":
-                first["path"] = "beside-target";
-                break;
-            case "outside-root":
-                first["path"] = Path.GetFullPath(Path.Combine(fixtureRoot, "..", "outside"));
-                break;
-            case "legacy-count":
-                intent["missingJournalDirectoryCount"] = 1;
-                break;
-            case "negative-count":
-                intent["missingJournalDirectoryCount"] = -1;
-                break;
-            case "maximum-count":
-                intent["missingJournalDirectoryCount"] = int.MaxValue;
-                break;
-            default:
-                throw new ArgumentOutOfRangeException(nameof(corruption), corruption, null);
         }
     }
 
@@ -665,31 +579,6 @@ public abstract partial class InMemoryDeploymentStateTestBase
 
             Reached.Set();
             Release.Wait();
-        }
-    }
-
-    /// <summary>Stops the run after one checkpoint, capturing the tree the process would leave behind.</summary>
-    internal sealed class CheckpointFailingObserver(
-        InMemoryFileSystem files,
-        string root,
-        SquadTransactionCheckpointKind checkpoint) : ISquadTransactionCheckpointObserver
-    {
-        /// <summary>Gets the tree captured at the failed checkpoint.</summary>
-        public IReadOnlyDictionary<string, TreeEntry>? InterruptedTreeSnapshot { get; private set; }
-
-        /// <inheritdoc />
-        public void AfterStep(SquadTransactionStep step)
-        {
-        }
-
-        /// <inheritdoc />
-        public void AfterCheckpoint(SquadTransactionCheckpoint value)
-        {
-            if (value.Kind != checkpoint)
-                return;
-
-            InterruptedTreeSnapshot = CaptureTree(files, root);
-            throw new InjectedSquadTransactionFailure(value.Sequence);
         }
     }
 
