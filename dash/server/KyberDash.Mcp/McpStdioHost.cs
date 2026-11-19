@@ -28,8 +28,13 @@ public partial class McpStdioHost
     /// <summary>Longest engine reply excerpt copied into a diagnostic message.</summary>
     private const int MaxSnippetChars = 200;
 
-    /// <summary>How long a single forwarded analytics request may take.</summary>
-    public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
+    /// <summary>
+    /// How long a single forwarded analytics request may take. A store holding a few hundred thousand
+    /// records answers one analytics operation in roughly ten seconds, because the operation projects
+    /// and lists sessions; a shorter bound would report a timeout for an answer the engine is still
+    /// producing.
+    /// </summary>
+    public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(60);
 
     private static readonly JsonSerializerOptions CompactJsonOptions = new()
     {
