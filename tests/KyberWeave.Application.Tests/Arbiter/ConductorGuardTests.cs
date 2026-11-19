@@ -337,6 +337,29 @@ public sealed class ConductorGuardTests : IDisposable
         Assert.NotEmpty(RunIn(Cwd, Path.Combine(runs, "..", "secrets.json"), home));
     }
 
+    /// <summary>
+    /// A record names the branch its worktree has checked out, so declaring the records again makes a worktree a test
+    /// had scripted as reused live once more, exactly as a fresh <c>run start</c> does. Seeding only the worktrees the
+    /// dictionary did not already hold left the first declaration in place and the second run invisible.
+    /// </summary>
+    [Fact]
+    public void AReDeclaredRunRecordMakesItsWorktreeLiveAgain()
+    {
+        const string worktree = "/repo-worktree";
+        string repository = "/repo/.git";
+        string home = "/home";
+        FakeRunStateStore runs = new()
+        {
+            Records = [new RunRecord(repository, "opencode/fix/a", worktree, DateTimeOffset.UtcNow)],
+        };
+        runs.MarkWorktreeReused(worktree, "opencode/other/b");
+        Assert.False(runs.HasLiveRun(home, repository));
+
+        runs.Records = [new RunRecord(repository, "opencode/fix/a", worktree, DateTimeOffset.UtcNow.AddMinutes(1))];
+
+        Assert.True(runs.HasLiveRun(home, repository));
+    }
+
     private sealed class NoLinks : IFileLinkProbe
     {
         public bool HasLinkBelow(string root, string fullPath) => false;

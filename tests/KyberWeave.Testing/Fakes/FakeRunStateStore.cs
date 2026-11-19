@@ -18,10 +18,11 @@ internal sealed class FakeRunStateStore : IRunStateStore
         {
             _records = value;
             // A record `run start` wrote names a worktree it created with its own branch checked out, so a record a
-            // test declares is live unless the test scripts the worktree as reused, missing or elsewhere.
+            // test declares is live unless the test scripts the worktree as reused, missing or elsewhere — after the
+            // declaration, because declaring the records again is what a later `run start` does to the fake.
             foreach (RunRecord record in value ?? [])
             {
-                _ = CheckedOutBranches.TryAdd(record.Worktree, record.Branch);
+                CheckedOutBranches[record.Worktree] = record.Branch;
             }
         }
     }
@@ -33,7 +34,8 @@ internal sealed class FakeRunStateStore : IRunStateStore
 
     /// <summary>
     /// The branch each worktree has checked out; a worktree absent here is not on disk. Seeded from
-    /// <see cref="Records"/>, so a record a test declares is live until the test says otherwise.
+    /// <see cref="Records"/>, so a record a test declares is live until the test says otherwise; script a reused or
+    /// missing worktree after declaring the records, since declaring them again re-seeds every worktree they name.
     /// </summary>
     public Dictionary<string, string?> CheckedOutBranches { get; } = new(StringComparer.Ordinal);
 
