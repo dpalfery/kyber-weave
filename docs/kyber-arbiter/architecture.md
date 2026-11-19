@@ -1042,6 +1042,84 @@ TypeSafe directly with `jev-1.13.0` and `jev-1.14.0`. To repeat the runs reporte
 set `KW_ARBITER_CALIBRATE_ENDPOINT` to `https://openrouter.ai/api/v1` and
 `KW_ARBITER_CALIBRATE_MODELS` to `typesafe/jev-1.13,typesafe/jev-1.14`.
 
+## Return pairing and attestation scope
+
+A return is only a fact about a task when the ledger can say which dispatch it answers: the tasks a run
+completed, the files a dispatch holds in flight, and the model a retry steps up from all come from that
+pair. One mechanism answers it for every path — synchronous, background, batched, lens fan-out and
+`serve` — and it fails loudly rather than silently, because an unpaired return looks the same as a
+worker that never reported.
+
+### One key, two tiers
+
+Every dispatch has one **pair key**:
+
+1. **The harness's call id**, when the payload carries one: `tool_use_id` on Claude and Copilot in VS Code,
+   `toolCallId` (and a batch call's own `id`) on Copilot CLI, `call-id` in the plugin envelope. It is exact
+   and survives any rewrite of the prompt.
+2. **The pair digest**, only when the harness gives no call id: SHA-256 of the target and the prompt **as
+   the worker runs it**. That is the prompt after its header block is stripped, and — where the dispatch
+   hook inserts a prompt (`rewrite` in [Dispatch delivery path](#dispatch-delivery-path)) — the inserted
+   text, because that is what the post event carries and what the worker reads.
+
+Pairing takes the first unpaired pre event of the same harness with the same call id; failing that, the
+first unpaired pre event with the same digest, oldest first. Both keys are recorded on the pre event, so a
+harness that gives an id on one side and not the other still pairs by digest.
+
+The digest tier exists for the harnesses whose hook cannot see an id (Factory, Devin, Kilo) and for a
+ledger written before the id was read. It is why the digest is computed over the *delivered* prompt and
+not the dispatch: a post event carries what the harness ran, not what the dispatcher typed. A hook that
+inserts the expanded packet replaces the prompt entirely, and a digest over the un-inserted text could
+never match it. That is the defect a live Copilot CLI run exposed: the conductor started two background
+workers in one turn, the pre events recorded the short dispatch, the post events carried the inserted
+packet, and neither worker's return was ever recorded.
+
+### Every path, and every site that pairs
+
+| Path | What the pre event is | What the return is | How they pair |
+|---|---|---|---|
+| Sync dispatch | the `task`/`Agent` call before it runs | the same call's `postToolUse`, carrying the tool result | call id, else digest |
+| Background (`mode: "background"`) | the `task` call before it runs | `subagentStop` at the end of each of the agent's turns, not the launch result | the stored pre event: the hook remembers it by call id, else digest, under `background/` |
+| Batched / parallel | **each** `task` call of a `toolCalls` array, one pre event per call | one `postToolUse` per call | each call's own id, so siblings cannot claim each other's pre event |
+| Lens fan-out | each `lens.spawn` dispatch in the turn's batch | each lens's `subagentStop` or post | as batched: one pre event per lens |
+| `serve` (MCP fallback) | the asserted dispatch | the asserted return, which names its own `pre-id` | the asserted `pre-id`, else as above |
+
+The sites that pair, all through `ArbiterLedgerQueries`:
+
+- `ArbiterLedgerQueries.MatchPre` — the rule: call id first, then the oldest unpaired digest match. Called
+  inside the append lock by `InFlightLedger.AppendAsync`, so two concurrent returns cannot claim one pre.
+- `ArbiterHookDecisionEngine.TrackBackgroundDispatch` — resolves the pre event of a background launch and
+  stores it with the agent id; it reads the same two tiers.
+- `ArbiterHookDecisionEngine.DecideBackgroundReturn` — looks the stored pre event up by session and agent
+  id, then records the turn's response as its return with that `pre-id`.
+- `ArbiterLedgerQueries.ConcurrentWriters`, `InFlightPaths` and `DispatchTechnology` — read the pair to
+  know what is still in flight.
+
+When no pre event matches, the hook logs one line naming the key it tried: the agent or target, the call
+id, the digest, and how many pre events were already paired. An unpaired return is still recorded as its
+own post event, so `arbiter audit` shows it; it is never attributed to another dispatch, and it never
+marks a task complete.
+
+### Attestation scope
+
+A planner may attest that tasks are complete (`ATTESTED: T1=complete, T2=complete`) when it resolves an
+escalation. The attestation names task ids and no plan, and the escalation dispatch it answers carries no
+routing header block — its prompt opens with `STATUS: ARBITER_ESCALATION`, and the plan is the
+`PLAN_FILE:` line inside that envelope. Scoping the attestation by header block alone dropped it, and the
+readiness rule kept answering `waiting` after the architect had resolved the escalation.
+
+So an attestation is scoped to:
+
+1. the plan on the return's own headers (a normal planner dispatch, which does write `PLAN_FILE:`);
+2. else the plan the escalation envelope names on its `PLAN_FILE:` line, read from the dispatch prompt and
+   recorded on the event with the rest of the headers;
+3. else the run — an attestation with no plan at all counts only for returns of the run being judged.
+
+Only a return whose target class is `planner` (the architect and product-planning profiles) may attest,
+and a task the attestation names still counts only for the plan it is scoped to. A worker, a lens or an
+investigator that writes `ATTESTED:` is ignored, which is the fail-closed behaviour the marker has always
+had.
+
 ## Harness facts
 
 One table covers every harness at project scope. Phase 1 hooks Claude, Copilot in VS Code, Copilot CLI and
