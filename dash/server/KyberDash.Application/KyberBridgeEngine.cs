@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using KyberDash.Contracts.Repositories;
+using KyberDash.Core.Exceptions;
 using KyberDash.Domain;
 
 namespace KyberDash.Application;
@@ -1053,25 +1054,50 @@ public class KyberBridgeEngine
     /// <returns>HTTP status code and versioned analytics envelope.</returns>
     public (int StatusCode, JsonElement Envelope) ExecuteAnalytics(string operation, JsonElement? request)
     {
+        try
+        {
+            return ExecuteAnalyticsCore(operation, request);
+        }
+        catch (Exception ex) when (ex is SqliteExecutionException or CircuitBreakerOpenException or IOException or TimeoutException)
+        {
+            return BuildAnalyticsErrorResult(
+                503,
+                "ANALYTICS_STORE_UNAVAILABLE",
+                ex.Message,
+                "The canonical analytics store is currently unavailable.",
+                "Verify the KyberDash canonical store is accessible and retry.");
+        }
+        catch (Exception ex) when (ex is ArgumentException or DashValidationException)
+        {
+            return BuildAnalyticsErrorResult(
+                400,
+                "ANALYTICS_INVALID_ARGUMENT",
+                ex.Message,
+                "The analytics request contains an invalid argument.",
+                "Check the analytics operation name and request payload and retry.");
+        }
+        catch (Exception ex)
+        {
+            return BuildAnalyticsErrorResult(
+                500,
+                "ANALYTICS_INTERNAL",
+                ex.Message,
+                "An unexpected internal analytics error occurred.",
+                "Inspect KyberDash server logs and retry the analytics request.");
+        }
+    }
+
+    private (int StatusCode, JsonElement Envelope) ExecuteAnalyticsCore(string operation, JsonElement? request)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(operation);
         string trimmedOp = operation.Trim();
         string normalizedOp = AnalyticsOperations.FirstOrDefault(op => string.Equals(op, trimmedOp, StringComparison.OrdinalIgnoreCase))
             ?? trimmedOp;
 
-        string nowIso = clock().UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+        string nowIso = FormatTimestamp(clock());
         uint generation = store.ComputeStoreGeneration();
-        object freshness = new
-        {
-            generatedAt = nowIso,
-            instanceId,
-            projectionGeneration = generation.ToString(CultureInfo.InvariantCulture),
-            storeGeneration = generation,
-        };
-        object defaultScope = new
-        {
-            window = new { from = (string?)null, to = (string?)null },
-            harnesses = Array.Empty<string>(),
-        };
+        object freshness = CreateAnalyticsFreshness(nowIso, generation);
+        object defaultScope = CreateDefaultAnalyticsScope();
 
         if (request.HasValue && request.Value.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null or JsonValueKind.Object))
         {
@@ -1204,6 +1230,49 @@ public class KyberBridgeEngine
             })];
         return (200, BuildAnalyticsEnvelope(defaultScope, new { groups }, new { }, freshness, new { returnedCount = groups.Count, nextCursor = (string?)null }, null, null, null));
     }
+
+    private (int StatusCode, JsonElement Envelope) BuildAnalyticsErrorResult(
+        int statusCode,
+        string errorCode,
+        string? rawMessage,
+        string fallbackMessage,
+        string hint)
+    {
+        DateTimeOffset timestamp;
+        try
+        {
+            timestamp = clock();
+        }
+        catch (Exception)
+        {
+            timestamp = DateTimeOffset.UtcNow;
+        }
+
+        object freshness = CreateAnalyticsFreshness(FormatTimestamp(timestamp), 0u);
+        object defaultScope = CreateDefaultAnalyticsScope();
+        string message = string.IsNullOrWhiteSpace(rawMessage) ? fallbackMessage : rawMessage;
+
+        return (statusCode, BuildAnalyticsEnvelope(defaultScope, null, new { }, freshness, new { }, errorCode, message, hint));
+    }
+
+    private static string FormatTimestamp(DateTimeOffset timestamp) =>
+        timestamp.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+
+    private object CreateAnalyticsFreshness(string generatedAt, uint generation) =>
+        new
+        {
+            generatedAt,
+            instanceId,
+            projectionGeneration = generation.ToString(CultureInfo.InvariantCulture),
+            storeGeneration = generation,
+        };
+
+    private static object CreateDefaultAnalyticsScope() =>
+        new
+        {
+            window = new { from = (string?)null, to = (string?)null },
+            harnesses = Array.Empty<string>(),
+        };
 
     private static JsonElement BuildAnalyticsEnvelope(
         object scope,
