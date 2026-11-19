@@ -266,11 +266,6 @@ public sealed partial class StandardsFolderMigration
         return string.Equals(existing, updated, StringComparison.Ordinal) ? null : updated;
     }
 
-    /// <summary>
-    /// Applies the planned changes for one folder, answering the changes it actually made.
-    /// Called per folder so a failure leaves the nodes before it complete and rerunnable: every
-    /// write is a create, and a rename whose target already exists is skipped rather than reported.
-    /// </summary>
     /// <summary>One standards folder's plan, held until every folder's targets are checked.</summary>
     /// <param name="Scope">The technology or role scope.</param>
     /// <param name="Owner">The owner the stubs copy, or null.</param>
@@ -309,6 +304,16 @@ public sealed partial class StandardsFolderMigration
         }
     }
 
+    /// <summary>
+    /// Applies the planned changes for one folder, answering the changes it actually made.
+    /// Called per folder so a failure can be undone newest-first by the caller: every write is a
+    /// create, and a rename whose target already exists is skipped rather than reported.
+    /// </summary>
+    /// <param name="planned">The folder's planned changes.</param>
+    /// <param name="scope">The technology or role scope.</param>
+    /// <param name="owner">The owner the stubs copy, or null.</param>
+    /// <param name="reshapedText">The reshaped standard, or null when the plan has no reshape.</param>
+    /// <returns>The changes actually made.</returns>
     internal List<StandardsFolderChange> Apply(
         IReadOnlyList<StandardsFolderChange> planned,
         string scope,
