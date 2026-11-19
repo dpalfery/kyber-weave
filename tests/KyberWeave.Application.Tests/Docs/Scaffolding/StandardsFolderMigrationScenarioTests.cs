@@ -518,6 +518,41 @@ public class StandardsFolderMigrationScenarioTests
     }
 
     /// <summary>
+    /// A failure after a reshape and every stub write restores the reshaped standard's original
+    /// text, removes the stubs, and leaves the registry block exactly as it was.
+    /// </summary>
+    [Fact]
+    public void AFailureAtTheRegistryWriteRestoresTheReshapeAndTheStubs()
+    {
+        string agents = Path.Combine(_host.Repo, "AGENTS.md");
+        string originalAgents =
+            "<!-- KYBER_WEAVE_CONFIG_REG_START -->\n" +
+            "- **<csharp-coding-standard>**: `6-Docs/standards/csharp/README.md`\n" +
+            "<!-- KYBER_WEAVE_CONFIG_REG_END -->\n";
+        _host.Files.WriteAllText(agents, originalAgents);
+        string folder = Path.Combine(_host.Repo, "6-Docs", "standards", "csharp");
+        _host.Files.CreateDirectory(folder);
+        string legacy = Path.Combine(folder, "README.md");
+        _host.Files.WriteAllText(legacy, LegacyCsharpWithOwnHeadings);
+        _host.Files.FailWhen(
+            operation => operation.Name == "WriteAllTextAtomic"
+                && operation.Path?.EndsWith("AGENTS.md", StringComparison.Ordinal) == true,
+            new IOException("The disk is full."));
+
+        Assert.Throws<IOException>(() => Migration(_host.Repo).Run());
+
+        Assert.Equal(LegacyCsharpWithOwnHeadings, _host.Files.ReadAllText(legacy));
+        Assert.False(_host.Files.FileExists(StandardPath(_host.Repo, "csharp")));
+        Assert.Equal(
+            ["README.md"],
+            _host.Files.EnumerateFiles(folder, "*", recursive: false)
+                .Select(Path.GetFileName)
+                .Order(StringComparer.Ordinal)
+                .ToArray());
+        Assert.Equal(originalAgents, _host.Files.ReadAllText(agents));
+    }
+
+    /// <summary>
     /// The registry block is re-rendered in place, so an <c>AGENTS.md</c> kept as a symbolic
     /// link is refused rather than rewritten at its target, and the refusal happens before a
     /// single standard moves.
