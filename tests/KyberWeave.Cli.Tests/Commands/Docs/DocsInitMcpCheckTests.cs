@@ -1,19 +1,20 @@
-using KyberWeave.Tests.Configuration;
-
-using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Mcp;
-using KyberWeave.Core.Processes;
-using Spectre.Console;
+using KyberWeave.Tests;
+using KyberWeave.Tests.Fakes;
+using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console.Cli;
+using Spectre.Console.Testing;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Cli.Tests.Commands.Docs;
 
 /// <summary>
 /// The MCP wiring check <c>docs init</c> runs after the skill deploy and before its <c>Next:</c>
@@ -21,23 +22,21 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Every case scaffolds a real repository in a temp folder and drives <c>docs init</c> end to end,
-/// because what is under test is a sequence — scaffold, deploy, check, offer the repair — and the
+/// Every case drives <c>docs init</c> over one in-memory repository: the real command, the real
+/// scaffolder, the real wiring service and the real configuration loader, all over the shared
+/// fakes. What is under test is a sequence — scaffold, deploy, check, offer the repair — and the
 /// failures worth catching are orderings (a question asked after a failed scaffold, an opt-out that
 /// skips less than it claims) rather than one return value.
 /// </para>
 /// <para>
-/// Two process-global resources are involved, and this class owns both. The prompt is two static
-/// seams, which must be reset on dispose or every later test in the process inherits the last
-/// case's answer. The launch binary is resolved against this process's <c>PATH</c>, so a case that
-/// wants a server to look launchable prepends a fake binary directory and restores the previous
-/// value afterwards. The collection therefore disables parallelization: a test rewriting
-/// <c>PATH</c> while another resolves against it would make both reports describe a machine
-/// neither of them arranged.
+/// The two things a case supplies an answer for are the command's own prompt seams, set on the
+/// instance: whether this run may ask, and what the answer is. Nothing here mutates the process —
+/// not the launch path (which the in-memory environment holds), not a static on the command — so the
+/// class runs beside every other one. The real-disk end-to-end of the same command is
+/// <c>DocsInitProvisionEndToEndTests</c> in the integration project.
 /// </para>
 /// </remarks>
-[Collection(DocsInitMcpCheckEnvironmentCollection.Name)]
-public sealed class DocsInitMcpCheckTests : IDisposable
+public sealed class DocsInitMcpCheckTests
 {
     private const string KyberWeaveServer = "kw-docs";
 
@@ -65,30 +64,30 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     private const string LongServerName =
         "kyber-weave-enterprise-documentation-index-server-for-the-monorepo-pipeline-alpha-beta";
 
-    private readonly TempDirectory _temp = new();
+    private readonly Dictionary<string, string?> _variables = new(StringComparer.Ordinal);
 
-    private string? _pathBeforeFakeBinaries;
+    private readonly MemoryDocsHost _host;
+
+    private Func<bool>? _interactiveCheck;
+
+    private Func<IReadOnlyList<McpWiringFix>, bool>? _confirmFix;
+
+    public DocsInitMcpCheckTests()
+    {
+        _host = new MemoryDocsHost(_variables);
+
+        // A redirected console folds at 80 columns, which is what the unfolded-write case asserts
+        // against: the same width the process console the check prints to in a CI run reports.
+        _host.Console.Profile.Width = 80;
+    }
 
     /// <summary>
-    /// Where a case puts the fake launch binaries the check resolves against <c>PATH</c>.
+    /// Where a case puts the fake launch binaries the check resolves against the in-memory
+    /// <c>PATH</c>.
     /// </summary>
-    private string Bin => Path.Combine(_temp.Path, "bin");
+    private string Bin => Path.Combine(_host.Files.Root, "bin");
 
-    public void Dispose()
-    {
-        // A seam left set is inherited by every test the process runs afterwards, and the damage it
-        // does (a prompt answered, a file written) looks nothing like the test that caused it.
-        DocsInitCommand.InteractiveCheckOverride = null;
-        DocsInitCommand.ConfirmFixOverride = null;
-
-        if (_pathBeforeFakeBinaries is not null)
-        {
-            Environment.SetEnvironmentVariable("PATH", _pathBeforeFakeBinaries);
-            _pathBeforeFakeBinaries = null;
-        }
-
-        _temp.Dispose();
-    }
+    private string Output => _host.Output;
 
     /// <summary>
     /// A finding is actionable only if the operator can see which rule raised it and copy the
@@ -98,18 +97,17 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     [Fact]
     public void FindingsPrintTheirRuleIdentifiersAndTheCopyReadyRemedyCommand()
     {
-        string repository = NewRepository();
         PutLaunchBinaryOnPath(McpBinary);
-        Directory.CreateDirectory(Path.Combine(repository, ".cursor"));
+        CreateDirectory(".cursor");
 
-        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+        int exit = RunDocsInit();
 
-        AssertSucceeded(execution);
-        string finding = TheLineContaining(execution.Output, McpWiringInspector.NotWiredCode);
+        AssertSucceeded(exit);
+        string finding = TheLineContaining(Output, McpWiringInspector.NotWiredCode);
         Assert.Contains(Cursor, finding, StringComparison.Ordinal);
         Assert.Contains(CursorConfigRelativePath, finding, StringComparison.Ordinal);
         Assert.Contains(KyberWeaveServer, finding, StringComparison.Ordinal);
-        Assert.Contains(CursorRemedyCommand, execution.Output, StringComparison.Ordinal);
+        Assert.Contains(CursorRemedyCommand, Output, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -120,15 +118,13 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     [Fact]
     public void FindingsDoNotMoveTheExitCode()
     {
-        string repository = NewRepository();
         PutLaunchBinaryOnPath(McpBinary);
-        Directory.CreateDirectory(Path.Combine(repository, ".cursor"));
-        Directory.CreateDirectory(Path.Combine(repository, ".factory"));
+        CreateDirectory(".cursor");
+        CreateDirectory(".factory");
 
         // A required first-party server and a recommended third party one, so the run has both a
         // warning and an information-level gap to report.
         DeclareServers(
-            repository,
             $"""
             {KyberWeaveServer}:
               command: [kyber-weave-mcp, --repo-root, .]
@@ -140,11 +136,11 @@ public sealed class DocsInitMcpCheckTests : IDisposable
               level: recommended
             """);
 
-        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+        int exit = RunDocsInit();
 
-        AssertSucceeded(execution);
-        Assert.Contains(McpWiringInspector.NotWiredCode, execution.Output, StringComparison.Ordinal);
-        Assert.Contains(McpWiringInspector.BinaryAbsentCode, execution.Output, StringComparison.Ordinal);
+        AssertSucceeded(exit);
+        Assert.Contains(McpWiringInspector.NotWiredCode, Output, StringComparison.Ordinal);
+        Assert.Contains(McpWiringInspector.BinaryAbsentCode, Output, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -178,30 +174,48 @@ public sealed class DocsInitMcpCheckTests : IDisposable
 
         // The seams are armed for the tempting answer: a run that reaches either one has skipped
         // less than the flag promises.
-        DocsInitCommand.InteractiveCheckOverride = static () => true;
-        DocsInitCommand.ConfirmFixOverride = _ =>
+        _interactiveCheck = static () => true;
+        _confirmFix = _ =>
         {
             offered = true;
             return true;
         };
 
-        string repository = NewRepository();
         PutLaunchBinaryOnPath(McpBinary);
-        Directory.CreateDirectory(Path.Combine(repository, ".cursor"));
+        CreateDirectory(".cursor");
 
-        CapturedConsoleExecution<int> execution = RunDocsInit(repository, "--no-mcp-check");
-
-        AssertSucceeded(execution);
-        Assert.Contains(
-            OutputLines(execution.Output),
-            line => line.Contains("--no-mcp-check", StringComparison.Ordinal));
-        Assert.DoesNotContain("KW-MCP-WIRE-", execution.Output, StringComparison.Ordinal);
+        // The armed command first: neither seam may be reached.
+        int armed = RunDocsInit(new DocsInitSettings { Path = _host.Repo, NoSkill = true, NoMcpCheck = true });
+        AssertSucceeded(armed);
+        AssertOptOut(Output);
         Assert.False(offered, "The opt-out must skip the check, so the repair must never be offered.");
+
+        // Then the flag on the command line, so the binding is proven as well as the behaviour. Its
+        // console is its own: the app disposes the console it was given when the run ends.
+        TestConsole cliConsole = new() { EmitAnsiSequences = false };
+        cliConsole.Profile.Width = 80;
+        int exit = RunDocsApp(cliConsole, "--no-mcp-check");
+        Assert.True(
+            exit == 0,
+            $"docs init exited {exit}. Output:{Environment.NewLine}{cliConsole.Output}");
+        AssertOptOut(cliConsole.Output);
+    }
+
+    /// <summary>
+    /// What <c>--no-mcp-check</c> promises: it says so, prints no wiring finding, and writes neither
+    /// a harness file nor a receipt.
+    /// </summary>
+    private void AssertOptOut(string output)
+    {
+        Assert.Contains(
+            OutputLines(output),
+            line => line.Contains("--no-mcp-check", StringComparison.Ordinal));
+        Assert.DoesNotContain("KW-MCP-WIRE-", output, StringComparison.Ordinal);
         Assert.False(
-            File.Exists(CursorConfigPath(repository)),
+            FileExists(CursorConfigRelativePath),
             $"{CursorConfigRelativePath} was written despite --no-mcp-check.");
         Assert.False(
-            File.Exists(McpWiringReceipt.PathFor(repository)),
+            FileExists(McpWiringReceipt.RelativePath),
             "A receipt was written despite --no-mcp-check.");
     }
 
@@ -214,28 +228,27 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     public void ARedirectedTerminalNeitherPromptsNorWritesAndLeavesTheManualCommand()
     {
         bool confirmed = false;
-        DocsInitCommand.InteractiveCheckOverride = static () => false;
-        DocsInitCommand.ConfirmFixOverride = _ =>
+        _interactiveCheck = static () => false;
+        _confirmFix = _ =>
         {
             confirmed = true;
             return true;
         };
 
-        string repository = NewRepository();
         PutLaunchBinaryOnPath(McpBinary);
-        Directory.CreateDirectory(Path.Combine(repository, ".cursor"));
+        CreateDirectory(".cursor");
 
-        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+        int exit = RunDocsInit();
 
-        AssertSucceeded(execution);
-        Assert.Contains(McpWiringInspector.NotWiredCode, execution.Output, StringComparison.Ordinal);
-        Assert.Contains(CursorRemedyCommand, execution.Output, StringComparison.Ordinal);
+        AssertSucceeded(exit);
+        Assert.Contains(McpWiringInspector.NotWiredCode, Output, StringComparison.Ordinal);
+        Assert.Contains(CursorRemedyCommand, Output, StringComparison.Ordinal);
         Assert.False(confirmed, "A non-interactive run must not ask the repair question.");
         Assert.False(
-            File.Exists(CursorConfigPath(repository)),
+            FileExists(CursorConfigRelativePath),
             $"{CursorConfigRelativePath} was written by a non-interactive run.");
         Assert.False(
-            File.Exists(McpWiringReceipt.PathFor(repository)),
+            FileExists(McpWiringReceipt.RelativePath),
             "A receipt was written by a non-interactive run.");
     }
 
@@ -248,20 +261,19 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     public void ConfirmingThePromptWritesTheHarnessFileAndRecordsTheReceipt()
     {
         IReadOnlyList<McpWiringFix> offered = [];
-        DocsInitCommand.InteractiveCheckOverride = static () => true;
-        DocsInitCommand.ConfirmFixOverride = fixes =>
+        _interactiveCheck = static () => true;
+        _confirmFix = fixes =>
         {
             offered = fixes;
             return true;
         };
 
-        string repository = NewRepository();
         PutLaunchBinaryOnPath(McpBinary);
-        Directory.CreateDirectory(Path.Combine(repository, ".cursor"));
+        CreateDirectory(".cursor");
 
-        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+        int exit = RunDocsInit();
 
-        AssertSucceeded(execution);
+        AssertSucceeded(exit);
         Assert.NotEmpty(offered);
 
         McpWiringFix fix = Assert.Single(offered);
@@ -272,19 +284,18 @@ public sealed class DocsInitMcpCheckTests : IDisposable
             fix.Create,
             "The fixture has no cursor configuration file, so the repair the question offers creates one.");
 
-        string written = CursorConfigPath(repository);
         Assert.True(
-            File.Exists(written),
-            $"The confirmed repair wrote no {CursorConfigRelativePath}. Output:{Environment.NewLine}{execution.Output}");
-        Assert.Contains(KyberWeaveServer, File.ReadAllText(written), StringComparison.Ordinal);
+            FileExists(CursorConfigRelativePath),
+            $"The confirmed repair wrote no {CursorConfigRelativePath}. Output:{Environment.NewLine}{Output}");
+        Assert.Contains(KyberWeaveServer, ReadFile(CursorConfigRelativePath), StringComparison.Ordinal);
 
         Assert.True(
-            File.Exists(McpWiringReceipt.PathFor(repository)),
+            FileExists(McpWiringReceipt.RelativePath),
             $"The confirmed repair recorded no receipt at {McpWiringReceipt.RelativePath}.");
 
         // R4.2: the run reports what it wrote, per file, and where the receipt is.
-        Assert.Contains(CursorConfigRelativePath, execution.Output, StringComparison.Ordinal);
-        Assert.Contains("mcp-wiring.json", execution.Output, StringComparison.Ordinal);
+        Assert.Contains(CursorConfigRelativePath, Output, StringComparison.Ordinal);
+        Assert.Contains("mcp-wiring.json", Output, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -294,23 +305,22 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     [Fact]
     public void DecliningThePromptWritesNothingAndKeepsTheFindings()
     {
-        DocsInitCommand.InteractiveCheckOverride = static () => true;
-        DocsInitCommand.ConfirmFixOverride = static _ => false;
+        _interactiveCheck = static () => true;
+        _confirmFix = static _ => false;
 
-        string repository = NewRepository();
         PutLaunchBinaryOnPath(McpBinary);
-        Directory.CreateDirectory(Path.Combine(repository, ".cursor"));
+        CreateDirectory(".cursor");
 
-        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+        int exit = RunDocsInit();
 
-        AssertSucceeded(execution);
-        Assert.Contains(McpWiringInspector.NotWiredCode, execution.Output, StringComparison.Ordinal);
-        Assert.Contains(CursorRemedyCommand, execution.Output, StringComparison.Ordinal);
+        AssertSucceeded(exit);
+        Assert.Contains(McpWiringInspector.NotWiredCode, Output, StringComparison.Ordinal);
+        Assert.Contains(CursorRemedyCommand, Output, StringComparison.Ordinal);
         Assert.False(
-            File.Exists(CursorConfigPath(repository)),
+            FileExists(CursorConfigRelativePath),
             $"{CursorConfigRelativePath} was written after the repair was declined.");
         Assert.False(
-            File.Exists(McpWiringReceipt.PathFor(repository)),
+            FileExists(McpWiringReceipt.RelativePath),
             "A receipt was written after the repair was declined.");
     }
 
@@ -343,19 +353,15 @@ public sealed class DocsInitMcpCheckTests : IDisposable
             new("codex", ".codex/config.toml", servers, Create: true)
         ];
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-        {
-            DocsInitCommand.PrintRepairScope(AnsiConsole.Console, fixes);
-            return 0;
-        });
+        DocsInitCommand.PrintRepairScope(_host.Console, fixes);
 
         // The fixture has to be wider than the cap this change removes, or it proves nothing about a
         // scope the operator could not see.
         Assert.True(
-            execution.Output.Length > 512,
-            $"The fixture renders {execution.Output.Length} characters, which the 512-character cap would not have cut.");
+            Output.Length > 512,
+            $"The fixture renders {Output.Length} characters, which the 512-character cap would not have cut.");
 
-        string[] lines = execution.Output.Split(
+        string[] lines = Output.Split(
             Environment.NewLine,
             StringSplitOptions.RemoveEmptyEntries);
 
@@ -373,7 +379,7 @@ public sealed class DocsInitMcpCheckTests : IDisposable
             }
         }
 
-        Assert.DoesNotContain("…", execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("…", Output, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -385,27 +391,26 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     public void AFailedScaffoldNeverReachesThePrompt()
     {
         bool asked = false;
-        DocsInitCommand.InteractiveCheckOverride = static () => true;
-        DocsInitCommand.ConfirmFixOverride = _ =>
+        _interactiveCheck = static () => true;
+        _confirmFix = _ =>
         {
             asked = true;
             return true;
         };
 
-        string repository = NewRepository();
         PutLaunchBinaryOnPath(McpBinary);
-        Directory.CreateDirectory(Path.Combine(repository, ".cursor"));
+        CreateDirectory(".cursor");
 
         // A file where the scaffolder must create its documentation root fails the scaffold on its
         // first write.
-        File.WriteAllText(Path.Combine(repository, "docs"), "not a directory");
+        _host.Files.WriteAllText(InRepo("docs"), "not a directory");
 
-        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+        int exit = RunDocsInit();
 
-        Assert.NotEqual(0, execution.Result);
-        Assert.Contains("Could not scaffold", execution.Output, StringComparison.Ordinal);
+        Assert.NotEqual(0, exit);
+        Assert.Contains("Could not scaffold", Output, StringComparison.Ordinal);
         Assert.False(asked, "A failed scaffold must not reach the repair question.");
-        Assert.DoesNotContain("KW-MCP-WIRE-", execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("KW-MCP-WIRE-", Output, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -416,11 +421,9 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     [Fact]
     public void AnAllWiredTreeIsConfirmedRatherThanWarnedAbout()
     {
-        string repository = NewRepository();
         PutLaunchBinaryOnPath(McpBinary);
-        Directory.CreateDirectory(Path.Combine(repository, ".factory"));
+        CreateDirectory(".factory");
         WriteFile(
-            repository,
             ".factory/mcp.json",
             """
             {
@@ -433,14 +436,14 @@ public sealed class DocsInitMcpCheckTests : IDisposable
             }
             """);
 
-        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+        int exit = RunDocsInit();
 
-        AssertSucceeded(execution);
-        Assert.DoesNotContain(McpWiringInspector.NotWiredCode, execution.Output, StringComparison.Ordinal);
-        Assert.DoesNotContain(McpWiringInspector.CommandDiffersCode, execution.Output, StringComparison.Ordinal);
-        Assert.DoesNotContain(McpWiringInspector.BinaryAbsentCode, execution.Output, StringComparison.Ordinal);
+        AssertSucceeded(exit);
+        Assert.DoesNotContain(McpWiringInspector.NotWiredCode, Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(McpWiringInspector.CommandDiffersCode, Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(McpWiringInspector.BinaryAbsentCode, Output, StringComparison.Ordinal);
         Assert.Contains(
-            OutputLines(execution.Output),
+            OutputLines(Output),
             line => line.Contains("ok", StringComparison.Ordinal)
                 && line.Contains(Factory, StringComparison.Ordinal)
                 && line.Contains(KyberWeaveServer, StringComparison.Ordinal));
@@ -456,11 +459,9 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     [Fact]
     public void TheSectionIsPrintedUnfoldedOnARedirectedConsole()
     {
-        string repository = NewRepository();
         PutLaunchBinaryOnPath(McpBinary);
-        Directory.CreateDirectory(Path.Combine(repository, ".cursor"));
+        CreateDirectory(".cursor");
         DeclareServers(
-            repository,
             $"""
             {LongServerName}:
               command: [kyber-weave-mcp, --repo-root, .]
@@ -468,10 +469,10 @@ public sealed class DocsInitMcpCheckTests : IDisposable
               level: required
             """);
 
-        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+        int exit = RunDocsInit();
 
-        AssertSucceeded(execution);
-        string finding = TheLineContaining(execution.Output, McpWiringInspector.NotWiredCode);
+        AssertSucceeded(exit);
+        string finding = TheLineContaining(Output, McpWiringInspector.NotWiredCode);
         Assert.Contains(LongServerName, finding, StringComparison.Ordinal);
         Assert.True(
             finding.Length > 80,
@@ -486,22 +487,20 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     [Fact]
     public void AMalformedDeclarationFailsAsAConfigurationErrorRatherThanBeingIgnored()
     {
-        string repository = NewRepository();
         PutLaunchBinaryOnPath(McpBinary);
-        Directory.CreateDirectory(Path.Combine(repository, ".cursor"));
+        CreateDirectory(".cursor");
         DeclareServers(
-            repository,
             $"""
             {KyberWeaveServer}:
               command: []
               provenance: first-party
             """);
 
-        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+        int exit = RunDocsInit();
 
-        Assert.NotEqual(0, execution.Result);
-        Assert.Contains(KyberWeaveConfigDiagnosticCodes.LoadError, execution.Output, StringComparison.Ordinal);
-        Assert.DoesNotContain("KW-MCP-WIRE-", execution.Output, StringComparison.Ordinal);
+        Assert.NotEqual(0, exit);
+        Assert.Contains(KyberWeaveConfigDiagnosticCodes.LoadError, Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("KW-MCP-WIRE-", Output, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -518,11 +517,9 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     [Fact]
     public void TheCopilotCodingAgentsSnippetAndWorkflowStepReachTheConsole()
     {
-        string repository = NewRepository();
         PutLaunchBinaryOnPath(McpBinary);
-        Directory.CreateDirectory(Path.Combine(repository, ".factory"));
+        CreateDirectory(".factory");
         WriteFile(
-            repository,
             ".factory/mcp.json",
             """
             {
@@ -535,17 +532,17 @@ public sealed class DocsInitMcpCheckTests : IDisposable
             }
             """);
 
-        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+        int exit = RunDocsInit();
 
-        AssertSucceeded(execution);
+        AssertSucceeded(exit);
 
-        string[] lines = OutputLines(execution.Output);
+        string[] lines = OutputLines(Output);
         int copilot = Array.FindIndex(
             lines,
             line => line.Contains("copilot-coding-agent", StringComparison.Ordinal));
         Assert.True(
             copilot >= 0,
-            $"No output line named the Copilot coding agent. Output:{Environment.NewLine}{execution.Output}");
+            $"No output line named the Copilot coding agent. Output:{Environment.NewLine}{Output}");
 
         // The snippet says which key the entry goes under; the workflow step says which file has to
         // install the server before the agent starts. Both belong to that harness's report, so both
@@ -556,7 +553,7 @@ public sealed class DocsInitMcpCheckTests : IDisposable
         Assert.True(
             snippet > copilot,
             $"The Copilot report never reached the operator: no line after it named the 'mcpServers' "
-                + $"entry it needs. Output:{Environment.NewLine}{execution.Output}");
+                + $"entry it needs. Output:{Environment.NewLine}{Output}");
 
         int workflowStep = Array.FindIndex(
             lines,
@@ -564,7 +561,7 @@ public sealed class DocsInitMcpCheckTests : IDisposable
         Assert.True(
             workflowStep > copilot,
             $"The Copilot report never reached the operator: no line after it named the "
-                + $"copilot-setup-steps.yml workflow step it needs. Output:{Environment.NewLine}{execution.Output}");
+                + $"copilot-setup-steps.yml workflow step it needs. Output:{Environment.NewLine}{Output}");
     }
 
     /// <summary>
@@ -582,12 +579,10 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     [Fact]
     public void AnUndetectableHarnessIsOneInfoLineAndNoAdvice()
     {
-        string repository = NewRepository();
         PutLaunchBinaryOnPath(McpBinary);
 
         // Two declared servers, so a section that printed per server would print twice.
         DeclareServers(
-            repository,
             $"""
             {KyberWeaveServer}:
               command: [kyber-weave-mcp, --repo-root, .]
@@ -599,13 +594,13 @@ public sealed class DocsInitMcpCheckTests : IDisposable
               level: recommended
             """);
 
-        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+        int exit = RunDocsInit();
 
-        AssertSucceeded(execution);
+        AssertSucceeded(exit);
 
         string[] factoryLines =
         [
-            .. OutputLines(execution.Output).Where(line => line.Contains(Factory, StringComparison.Ordinal))
+            .. OutputLines(Output).Where(line => line.Contains(Factory, StringComparison.Ordinal))
         ];
         string line = Assert.Single(factoryLines);
 
@@ -617,23 +612,21 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     /// R4.1: the question offers writes the repair will actually perform. A gap the repair refuses —
     /// here an entry that already exists with a different launch command, which 5.5 forbids the
     /// repair from modifying — must not be offered, because a question is a request for consent to a
-    /// specific write and consent to a refusal is not consent to anything.
+    /// specific write and consent to a refusal is consent to anything.
     /// </summary>
     [Fact]
     public void ThePromptIsNotOfferedForAGapTheRepairWouldRefuse()
     {
         bool offered = false;
-        DocsInitCommand.InteractiveCheckOverride = static () => true;
-        DocsInitCommand.ConfirmFixOverride = _ =>
+        _interactiveCheck = static () => true;
+        _confirmFix = _ =>
         {
             offered = true;
             return true;
         };
 
-        string repository = NewRepository();
         PutLaunchBinaryOnPath(McpBinary);
         WriteFile(
-            repository,
             CursorConfigRelativePath,
             """
             {
@@ -646,10 +639,10 @@ public sealed class DocsInitMcpCheckTests : IDisposable
             }
             """);
 
-        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+        int exit = RunDocsInit();
 
-        AssertSucceeded(execution);
-        Assert.Contains(McpWiringInspector.CommandDiffersCode, execution.Output, StringComparison.Ordinal);
+        AssertSucceeded(exit);
+        Assert.Contains(McpWiringInspector.CommandDiffersCode, Output, StringComparison.Ordinal);
         Assert.False(
             offered,
             "docs init offered a repair for a file the repair refuses to modify (5.5).");
@@ -664,17 +657,15 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     [Fact]
     public void ADeclarationNamingNoServerPrintsNoWiringFindingAndStaysAtExitZero()
     {
-        string repository = NewRepository();
         WriteFile(
-            repository,
             ".kyber-weave/kyber-weave.yml",
             "ontology:\n  docs-root: docs\nmcp:\n");
 
-        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+        int exit = RunDocsInit();
 
-        AssertSucceeded(execution);
-        Assert.DoesNotContain(McpWiringInspector.NotWiredCode, execution.Output, StringComparison.Ordinal);
-        Assert.DoesNotContain(McpWiringInspector.BinaryAbsentCode, execution.Output, StringComparison.Ordinal);
+        AssertSucceeded(exit);
+        Assert.DoesNotContain(McpWiringInspector.NotWiredCode, Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(McpWiringInspector.BinaryAbsentCode, Output, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -692,12 +683,10 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     [Fact]
     public void TheOfferedRepairResolvesARepositoryRelativeCommandAgainstTheRoot()
     {
-        string repository = NewRepository();
-        Directory.CreateDirectory(Path.Combine(repository, ".cursor"));
-        string absolute = McpWiringFixture.WriteExecutable(Bin, "kw-t6-absolute-server");
+        CreateDirectory(".cursor");
+        string absolute = McpWiringFixture.WriteExecutable(_host.Files, Bin, "kw-t6-absolute-server");
 
         DeclareServers(
-            repository,
             $"""
             absolute-server:
               command: ['{absolute}', --repo-root, .]
@@ -708,61 +697,107 @@ public sealed class DocsInitMcpCheckTests : IDisposable
               provenance: third-party
               level: required
             """);
-        McpWiringFixture.WriteExecutable(Path.Combine(repository, "tools"), "serve-mcp");
+        McpWiringFixture.WriteExecutable(_host.Files, InRepo("tools"), "serve-mcp");
 
-        DocsInitCommand.InteractiveCheckOverride = static () => true;
-        DocsInitCommand.ConfirmFixOverride = _ => true;
+        _interactiveCheck = static () => true;
+        _confirmFix = _ => true;
 
-        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+        int exit = RunDocsInit();
 
-        AssertSucceeded(execution);
+        AssertSucceeded(exit);
 
-        string path = CursorConfigPath(repository);
         Assert.True(
-            File.Exists(path),
-            $"the confirmed repair wrote nothing to {path}. Output:{Environment.NewLine}{execution.Output}");
+            FileExists(CursorConfigRelativePath),
+            $"the confirmed repair wrote nothing to {CursorConfigRelativePath}. Output:{Environment.NewLine}{Output}");
 
-        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+        using JsonDocument document = JsonDocument.Parse(ReadFile(CursorConfigRelativePath));
         Assert.True(
             document.RootElement.GetProperty("mcpServers").TryGetProperty("relative-server", out _),
             $"the repair skipped the command that is relative to the repository root. File:"
-                + $"{Environment.NewLine}{File.ReadAllText(path)}");
+                + $"{Environment.NewLine}{ReadFile(CursorConfigRelativePath)}");
     }
 
     /// <summary>
-    /// An empty repository, git-initialized so the check's worktree walk stops at this root instead
-    /// of climbing into the temp directory's ancestors.
+    /// A proven old key is printed as <c>KW-MCP-WIRE-007</c> with the migrate verb, is not offered as a
+    /// wiring fix for the harness that holds it, and does not move <c>docs init</c>'s exit code.
     /// </summary>
-    private string NewRepository()
+    [Fact]
+    public void AProvenOldKeyIsPrintedAsARenameNoticeWithNoWireFixAndTheExitCodeUnchanged()
     {
-        string repository = Path.Combine(_temp.Path, "repo-" + Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(repository);
-        InitializeWorktree(repository);
-        return repository;
+        PutLaunchBinaryOnPath(McpBinary);
+        CreateDirectory(".cursor");
+        DeclareServers(
+            """
+            kw-docs:
+              command: [kyber-weave-mcp, --repo-root, .]
+              provenance: first-party
+              level: required
+            """);
+        WriteFile(
+            CursorConfigRelativePath,
+            """{"mcpServers":{"kyber-weave":{"command":"kyber-weave-mcp","args":["--repo-root","."]}}}""");
+
+        int exit = RunDocsInit();
+
+        AssertSucceeded(exit);
+        string notice = TheLineContaining(Output, "KW-MCP-WIRE-007");
+        Assert.Contains(CursorConfigRelativePath, notice, StringComparison.Ordinal);
+        Assert.Contains("docs mcp-migrate", Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(CursorRemedyCommand, Output, StringComparison.Ordinal);
+
+        // The repair offers no write for cursor: the old key is the reason the wire would be refused, so
+        // the rename notice is the only thing the operator is offered for that file.
+        IServiceProvider services = _host.Services();
+        IMcpWiringService wiring = services.GetRequiredService<IMcpWiringService>();
+        KyberWeaveConfig config = services.GetRequiredService<IKyberWeaveConfigRepository>()
+            .TryLoad(_host.Repo).Config!;
+        McpWiringReport report = wiring.Inspect(_host.Repo, config.Mcp);
+        IReadOnlyList<McpWiringFix> fixes = wiring.Derive(report, _host.Repo);
+        Assert.DoesNotContain(fixes, fix => fix.Harness == Cursor);
     }
 
     /// <summary>
-    /// Puts a fake launch binary at the front of this process's <c>PATH</c>. <c>docs init</c> builds
-    /// its inspector from the environment, so the only way to make a declared server look
-    /// launchable end to end is a real file where a launch would find it. The previous
-    /// <c>PATH</c> is restored on dispose.
+    /// A leftover old key is reported even when the declaration names no server at all: the notice does
+    /// not depend on the inspector, which returns nothing when nothing is declared. The exit code is unchanged.
+    /// </summary>
+    [Fact]
+    public void AnOldKeyStillPrintsTheRenameNoticeWhenNoServerIsDeclared()
+    {
+        PutLaunchBinaryOnPath(McpBinary);
+        CreateDirectory(".cursor");
+        WriteFile(
+            ".kyber-weave/kyber-weave.yml",
+            "ontology:\n  docs-root: docs\nmcp:\n  required-servers: {}\n");
+        WriteFile(
+            CursorConfigRelativePath,
+            """{"mcpServers":{"kyber-weave":{"command":"kyber-weave-mcp","args":["--repo-root","."]}}}""");
+
+        int exit = RunDocsInit();
+
+        AssertSucceeded(exit);
+        TheLineContaining(Output, "KW-MCP-WIRE-007");
+    }
+
+    /// <summary>
+    /// Puts a fake launch binary on the in-memory <c>PATH</c>. The wiring service builds its resolver
+    /// from the injected environment, so the file a launch would find is what makes a declared server
+    /// look launchable.
     /// </summary>
     /// <remarks>
     /// A file, not a process: the resolver is an existence check, and an empty file proves nothing
-    /// was launched. The execute bit is set where the platform has one so the fixture looks like an
-    /// installed binary; on Windows the file carries the extension PATHEXT resolution looks for.
+    /// was launched.
     /// </remarks>
     private void PutLaunchBinaryOnPath(string binaryName)
     {
-        McpWiringFixture.WriteExecutable(Bin, binaryName);
+        McpWiringFixture.WriteExecutable(_host.Files, Bin, binaryName);
+        _variables["PATH"] = Bin;
 
-        _pathBeforeFakeBinaries ??= Environment.GetEnvironmentVariable("PATH");
-        Environment.SetEnvironmentVariable("PATH", Bin + Path.PathSeparator + _pathBeforeFakeBinaries);
-
-        string? resolved = PhysicalLaunchCommands.FromEnvironment().Resolve(binaryName);
+        string? resolved = new EnvironmentLaunchCommandResolverFactory(_host.Files, _host.Paths, _host.Environment)
+            .FromEnvironment(_host.Repo)
+            .Resolve(binaryName);
         Assert.True(
             resolved is not null,
-            $"The fixture's '{binaryName}' is not resolvable on PATH, so this case would prove nothing.");
+            $"The fixture's '{binaryName}' is not resolvable on the in-memory PATH, so this case would prove nothing.");
     }
 
     /// <summary>
@@ -771,7 +806,7 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     /// check reads. <paramref name="serverEntries"/> is indented one level beneath
     /// <c>required-servers</c>.
     /// </summary>
-    private static void DeclareServers(string repository, string serverEntries)
+    private void DeclareServers(string serverEntries)
     {
         StringBuilder yaml = new();
         yaml.AppendLine("ontology:");
@@ -788,120 +823,61 @@ public sealed class DocsInitMcpCheckTests : IDisposable
             yaml.Append("    ").AppendLine(entry);
         }
 
-        WriteFile(repository, ".kyber-weave/kyber-weave.yml", yaml.ToString());
+        WriteFile(".kyber-weave/kyber-weave.yml", yaml.ToString());
     }
 
-    private static void WriteFile(string repository, string relativePath, string content)
+    private void WriteFile(string relativePath, string content) =>
+        McpWiringFixture.WriteText(_host.Files, _host.Repo, relativePath, content);
+
+    private void CreateDirectory(string relativePath) => _host.Files.CreateDirectory(InRepo(relativePath));
+
+    private bool FileExists(string relativePath) => _host.Files.FileExists(InRepo(relativePath));
+
+    private string ReadFile(string relativePath) => _host.Files.ReadAllText(InRepo(relativePath));
+
+    private string InRepo(string relativePath) => _host.InRepo(relativePath);
+
+    private int RunDocsInit(DocsInitSettings? settings = null) =>
+        NewCommand(_host.Services()).Execute(
+            null!,
+            settings ?? new DocsInitSettings { Path = _host.Repo, NoSkill = true },
+            CancellationToken.None);
+
+    /// <summary>
+    /// Runs <c>docs init</c> through the real CLI boundary with the arguments given, which is what
+    /// proves a flag on the command line is bound and reaches the command.
+    /// </summary>
+    private int RunDocsApp(TestConsole console, params string[] extraArguments)
     {
-        string path = Path.Combine(repository, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        string? directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(directory))
-            Directory.CreateDirectory(directory);
-
-        File.WriteAllText(path, content);
-    }
-
-    private static void InitializeWorktree(string repository)
-    {
-        ProcessStartInfo startInfo = new("git")
-        {
-            WorkingDirectory = repository,
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-        startInfo.ArgumentList.Add("init");
-        startInfo.ArgumentList.Add("--quiet");
-
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
-        Assert.True(
-            result.ExitCode == 0,
-            $"git init failed in '{repository}': {result.StandardError}");
-    }
-
-    private static string CursorConfigPath(string repository) =>
-        Path.Combine(repository, ".cursor", "mcp.json");
-
-    private static CapturedConsoleExecution<int> RunDocsInit(
-        string repository,
-        params string[] extraArguments)
-    {
-        List<string> arguments = ["docs", "init", repository, "--no-skill"];
+        List<string> arguments = ["docs", "init", _host.Repo, "--no-skill"];
         arguments.AddRange(extraArguments);
 
-        return ProcessConsoleCapture.Run(() => CommandAppFixture.DocsInit().Run(arguments.ToArray()));
+        return CommandAppFixture.DocsInit(_host.Register, console).Run([.. arguments]);
     }
 
-    private static void AssertSucceeded(CapturedConsoleExecution<int> execution) =>
+    /// <summary>
+    /// The command over the container's in-memory services, with the answers this case supplies for
+    /// the two questions it must be able to answer without a terminal.
+    /// </summary>
+    private DocsInitCommand NewCommand(IServiceProvider provider) => new(
+        provider.GetRequiredService<IMcpWiringService>(),
+        provider.GetRequiredService<IDocsScaffoldingService>(),
+        new FakeRepositoryDoctor(),
+        provider.GetRequiredService<IKyberWeaveConfigRepository>(),
+        _host.Console,
+        provider.GetRequiredService<IFileSystem>(),
+        provider.GetRequiredService<IPathResolver>(),
+        provider.GetRequiredService<IProcessEnvironment>(),
+        provider.GetRequiredService<IBoundedProcessExecutor>())
+    {
+        InteractiveCheck = _interactiveCheck,
+        ConfirmFix = _confirmFix
+    };
+
+    private void AssertSucceeded(int exit) =>
         Assert.True(
-            execution.Result == 0,
-            $"docs init exited {execution.Result}. Output:{Environment.NewLine}{execution.Output}");
-
-    /// <summary>
-    /// A proven old key is printed as <c>KW-MCP-WIRE-007</c> with the migrate verb, is not offered as a
-    /// wiring fix for the harness that holds it, and does not move <c>docs init</c>'s exit code.
-    /// </summary>
-    [Fact]
-    public void AProvenOldKeyIsPrintedAsARenameNoticeWithNoWireFixAndTheExitCodeUnchanged()
-    {
-        string repository = NewRepository();
-        PutLaunchBinaryOnPath(McpBinary);
-        Directory.CreateDirectory(Path.Combine(repository, ".cursor"));
-        DeclareServers(
-            repository,
-            """
-            kw-docs:
-              command: [kyber-weave-mcp, --repo-root, .]
-              provenance: first-party
-              level: required
-            """);
-        WriteFile(
-            repository,
-            CursorConfigRelativePath,
-            """{"mcpServers":{"kyber-weave":{"command":"kyber-weave-mcp","args":["--repo-root","."]}}}""");
-
-        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
-
-        AssertSucceeded(execution);
-        string notice = TheLineContaining(execution.Output, "KW-MCP-WIRE-007");
-        Assert.Contains(CursorConfigRelativePath, notice, StringComparison.Ordinal);
-        Assert.Contains("docs mcp-migrate", execution.Output, StringComparison.Ordinal);
-        Assert.DoesNotContain(CursorRemedyCommand, execution.Output, StringComparison.Ordinal);
-
-        // The repair offers no write for cursor: the old key is the reason the wire would be refused, so
-        // the rename notice is the only thing the operator is offered for that file.
-        KyberWeaveConfig config = ConfigFileReader.Load(repository);
-        McpWiringReport report = McpWiringTestServices.Wiring.Inspect(repository, config.Mcp);
-        IReadOnlyList<McpWiringFix> fixes = McpWiringTestServices.Wiring.Derive(report, repository);
-        Assert.DoesNotContain(fixes, fix => fix.Harness == Cursor);
-    }
-
-    /// <summary>
-    /// A leftover old key is reported even when the declaration names no server at all: the notice does
-    /// not depend on the inspector, which returns nothing when nothing is declared. The exit code is unchanged.
-    /// </summary>
-    [Fact]
-    public void AnOldKeyStillPrintsTheRenameNoticeWhenNoServerIsDeclared()
-    {
-        string repository = NewRepository();
-        PutLaunchBinaryOnPath(McpBinary);
-        Directory.CreateDirectory(Path.Combine(repository, ".cursor"));
-        WriteFile(
-            repository,
-            ".kyber-weave/kyber-weave.yml",
-            "ontology:\n  docs-root: docs\nmcp:\n  required-servers: {}\n");
-        WriteFile(
-            repository,
-            CursorConfigRelativePath,
-            """{"mcpServers":{"kyber-weave":{"command":"kyber-weave-mcp","args":["--repo-root","."]}}}""");
-
-        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
-
-        AssertSucceeded(execution);
-        TheLineContaining(execution.Output, "KW-MCP-WIRE-007");
-    }
+            exit == 0,
+            $"docs init exited {exit}. Output:{Environment.NewLine}{Output}");
 
     private static string[] OutputLines(string output) =>
         [.. output.Split('\n').Select(line => line.TrimEnd('\r'))];
@@ -920,20 +896,4 @@ public sealed class DocsInitMcpCheckTests : IDisposable
 
         return matching[0];
     }
-}
-
-/// <summary>
-/// The collection the wiring-check cases run in. Both resources they mutate — the prompt seams and
-/// this process's <c>PATH</c> — are process-global, so no other test may observe them mid-change.
-/// </summary>
-[CollectionDefinition(Name, DisableParallelization = true)]
-[SuppressMessage(
-    "Naming",
-    "CA1711:Identifiers should not have incorrect suffix",
-    Justification = "xUnit collection definitions are named <Name>Collection by convention; the suffix "
-        + "is the framework idiom, not a claim to be a collection type.")]
-public sealed class DocsInitMcpCheckEnvironmentCollection
-{
-    /// <summary>The collection's name, as the test class refers to it.</summary>
-    public const string Name = "docs init MCP wiring check environment";
 }

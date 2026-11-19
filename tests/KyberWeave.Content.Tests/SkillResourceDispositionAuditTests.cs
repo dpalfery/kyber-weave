@@ -72,9 +72,6 @@ public sealed class SkillResourceDispositionAuditTests
 
     private const string ProductRoot = "products/kyber-squad";
 
-    /// <summary>The same product root as an absolute path, for the product APIs that read a real directory.</summary>
-    private static string ProductRootPath => Path.Combine(Corpus.Root, ProductRoot);
-
     /// <summary>
     /// Prevents a resource from being silently dropped, duplicated, or invented in the audit: the
     /// table's Resource column must equal, one-for-one, the 95 files on disk under
@@ -239,7 +236,7 @@ public sealed class SkillResourceDispositionAuditTests
         else
         {
             IReadOnlyList<DispositionRow> dispositions = ParseDispositionRows(Corpus.ReadText(RelativeAuditPath));
-            SquadSource source = RealSquadServices.Load(ProductRootPath);
+            SquadSource source = CanonicalSquadTree.SharedSource;
             Dictionary<string, HashSet<string>> renderedBySkill = source.Skills.ToDictionary(
                 skill => skill.Name,
                 skill => skill.Resources.Select(resource => resource.RelativePath).ToHashSet(StringComparer.Ordinal),

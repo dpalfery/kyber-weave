@@ -857,7 +857,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void DeliveryAgentBodyNamesTheTaskGateSkillAndEmitsItsDigest()
     {
-        SquadSource source = RealSquadServices.Load(ProductRootPath);
+        SquadSource source = CanonicalSquadTree.SharedSource;
         SquadAgent agent = Assert.Single(source.Agents, a => a.Name == "devops");
 
         Assert.Contains("task-gate", agent.InstructionBody, StringComparison.Ordinal);
@@ -1234,9 +1234,6 @@ public sealed class SquadCanonicalContentTests
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private const string ProductRoot = "products/kyber-squad";
-
-    /// <summary>The same product root as an absolute path, for the product APIs that read a real directory.</summary>
-    private static string ProductRootPath => Path.Combine(Corpus.Root, ProductRoot);
 
     /// <summary>The shipped default response guidance: the one owner of the response shape.</summary>
     private const string ResponseGuidanceDefaultPath = "products/kyber-squad/response-guidance.default.md";

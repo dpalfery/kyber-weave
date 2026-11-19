@@ -7,7 +7,6 @@ using KyberWeave.Core.RunStart;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using Xunit;
-using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -19,12 +18,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class PlatformAgentContentTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
-
-    private static readonly Lazy<SquadSource> Source = new(() => RealSquadServices.Load(ProductRoot));
+    private static SquadSource Source => CanonicalSquadTree.SharedSource;
 
     private static readonly Regex PlatformWord = new(
         @"\b(azure|aws|amazon|gcp|google cloud|kubernetes|k8s|github|gitlab|jira|bitbucket)\b",
@@ -36,7 +30,7 @@ public sealed class PlatformAgentContentTests
         RegexOptions.CultureInvariant);
 
     private static SquadAgent Agent(string name) =>
-        Assert.Single(Source.Value.Agents, agent => agent.Name == name);
+        Assert.Single(Source.Agents, agent => agent.Name == name);
 
     [Fact]
     public void PlatformResearcherUsesThePlatformReaderProfileAndTheTieredRoster()
@@ -54,7 +48,7 @@ public sealed class PlatformAgentContentTests
     public void PlatformResearcherRunsCommandsAndCannotWritePublishOrDelegate()
     {
         SquadAgent agent = Agent("platform-researcher");
-        SquadCapabilityProfile profile = Source.Value.CapabilityProfiles.Profiles[agent.CapabilityProfile];
+        SquadCapabilityProfile profile = Source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
 
         Assert.Equal(SquadPermissionDecision.Allow, profile.Permissions["process.execute"]);
         Assert.Equal(SquadPermissionDecision.Deny, profile.Permissions["filesystem.write"]);
@@ -137,8 +131,8 @@ public sealed class PlatformAgentContentTests
     [Fact]
     public void BothAgentsAreInTheFullBundle()
     {
-        Assert.Contains("devops", Source.Value.Bundle.AgentNames);
-        Assert.Contains("platform-researcher", Source.Value.Bundle.AgentNames);
+        Assert.Contains("devops", Source.Bundle.AgentNames);
+        Assert.Contains("platform-researcher", Source.Bundle.AgentNames);
     }
 
 

@@ -27,17 +27,33 @@ public sealed class InMemorySquadState
     /// <param name="applicationDataDirectory">
     /// The user's application-data directory on its own, with the home kept apart from it; a fixed one when null.
     /// </param>
+    /// <param name="existingFiles">
+    /// The file system to anchor the state on, so a command under test reads the same files the store records and one
+    /// test can place several state roots in one tree; a new one when null.
+    /// </param>
+    /// <param name="homeDirectory">
+    /// The home directory to anchor the state on, for a test whose command already names one; beneath
+    /// <paramref name="applicationDataDirectory"/> when null.
+    /// </param>
     public InMemorySquadState(
         InProcessLeaseHost? leaseHost = null,
         ILease? storeLease = null,
         string? stateRoot = null,
-        string? applicationDataDirectory = null)
+        string? applicationDataDirectory = null,
+        InMemoryFileSystem? existingFiles = null,
+        string? homeDirectory = null)
     {
-        Files = new InMemoryFileSystem(caseSensitive: true);
+        Files = existingFiles ?? new InMemoryFileSystem(caseSensitive: true);
         string applicationData = stateRoot is not null
-            ? Path.GetFullPath(stateRoot)
-            : applicationDataDirectory ?? Path.GetFullPath("/kw/application-data");
-        string home = stateRoot is null ? Path.GetFullPath("/kw/home") : Path.Combine(applicationData, "home");
+            ? Full(stateRoot)
+            : applicationDataDirectory is not null
+                ? Full(applicationDataDirectory)
+                : Path.Combine(Files.Root, "application-data");
+        string home = homeDirectory is not null
+            ? Full(homeDirectory)
+            : stateRoot is null && existingFiles is null
+                ? Path.GetFullPath("/kw/home")
+                : Path.Combine(applicationData, "home");
         Files.CreateDirectory(home);
         Files.CreateDirectory(applicationData);
         UserPaths = new FakeSquadUserPaths(applicationData, home);
@@ -99,6 +115,17 @@ public sealed class InMemorySquadState
     /// <returns>A new transaction.</returns>
     public SquadTransaction Transaction(ISquadTransactionObserver? observer = null) =>
         new(Store, Files, Semantics, new InProcessLease(LeaseHost), new FakeIdGenerator(), observer);
+
+    /// <summary>Resolves an anchor against the in-memory root, so a relative one never depends on the process directory.</summary>
+    /// <param name="path">The anchor directory the caller named.</param>
+    /// <returns>The full path on the in-memory file system.</returns>
+    private string Full(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+        // Anchors a relative path and normalises any dot segments, without the process directory.
+        return Path.GetFullPath(path, Files.Root);
+    }
 
     /// <summary>Creates a project directory and returns its canonical path.</summary>
     /// <param name="name">The directory name under the projects folder.</param>

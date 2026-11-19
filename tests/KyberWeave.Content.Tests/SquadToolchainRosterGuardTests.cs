@@ -6,7 +6,6 @@ using KyberWeave.Mcp;
 using KyberWeave.Tests.Fakes;
 using ModelContextProtocol.Server;
 using Xunit;
-using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -25,15 +24,10 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class SquadToolchainRosterGuardTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
-
     [Fact]
     public void ShippedToolchainRosterGrantsEveryToolTheKyberWeaveMcpServerExposes()
     {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
+        SquadSource source = CanonicalSquadTree.SharedSource;
 
         Assert.True(
             source.Toolchain.RequiredMcpTools.TryGetValue("kw-docs", out IReadOnlyList<string>? declared),
@@ -76,7 +70,7 @@ public sealed class SquadToolchainRosterGuardTests
     [Fact]
     public void ShippedToolchainRosterCoversEveryMcpServerTheSquadDeclares()
     {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
+        SquadSource source = CanonicalSquadTree.SharedSource;
         IReadOnlyList<string> declaredServers = SquadMcpDeclaration.ServerNames(source);
 
         Assert.True(
