@@ -1,17 +1,21 @@
 using System.Text;
-using System.Text.Json;
+using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
 using KyberDash.Core.Exceptions;
+using KyberDash.Data.Collector;
+using KyberDash.Data.Collector.Sources;
 using KyberDash.Domain;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
 
 namespace KyberDash.Application.Tests;
 
 /// <summary>
-/// OTLP admission policy: payload ceilings, decode failures, pause/resume, backlog backpressure, and
-/// the store-changed signal, with every repository mocked.
+/// OTLP admission policy: payload ceilings, decode failures, pause/resume, backlog backpressure,
+/// log mapping, metric persistence, DI wiring, and the store-changed signal against
+/// <see cref="InMemoryRelationalStore"/>.
 /// </summary>
 public class OtlpCollectorServiceTests
 {
@@ -40,6 +44,29 @@ public class OtlpCollectorServiceTests
         }
         """;
 
+    private const string UnknownTracePayload = """
+        {
+          "resourceSpans": [{
+            "resource": { "attributes": [ { "key": "service.name", "value": { "stringValue": "mystery-host" } } ] },
+            "scopeSpans": [{
+              "scope": { "name": "test", "version": "1" },
+              "spans": [{
+                "traceId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "spanId": "2222222222222222",
+                "name": "mystery.op",
+                "kind": "SPAN_KIND_INTERNAL",
+                "startTimeUnixNano": "1760000000000000000",
+                "endTimeUnixNano": "1760000000100000000",
+                "status": { "code": "STATUS_CODE_OK" },
+                "attributes": [
+                  { "key": "mystery.key", "value": { "stringValue": "mystery-value" } }
+                ]
+              }]
+            }]
+          }]
+        }
+        """;
+
     [Fact]
     public async Task OversizePayloadIsRejectedWith413WithoutDecoding()
     {
@@ -54,9 +81,7 @@ public class OtlpCollectorServiceTests
         Assert.False(result.Accepted);
         Assert.Equal(413, result.HttpStatusCode);
         Assert.Contains("exceeds", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        harness.Ingestion.Verify(
-            service => service.IngestSpans(It.IsAny<IReadOnlyList<OtlpSpan>>()),
-            Times.Never);
+        Assert.Equal(0, harness.Store.CountRecords());
     }
 
     [Fact]
@@ -85,11 +110,6 @@ public class OtlpCollectorServiceTests
     public async Task AcceptedPayloadIsQueuedAndFlushedThroughIngestionService()
     {
         Harness harness = new();
-        List<OtlpSpan> ingested = [];
-        harness.Ingestion
-            .Setup(service => service.IngestSpans(It.IsAny<IReadOnlyList<OtlpSpan>>()))
-            .Callback<IReadOnlyList<OtlpSpan>>(spans => ingested.AddRange(spans))
-            .Returns(new IngestOutcome(1, 0, 0));
 
         IngestAdmissionResult result = await harness.Collector.AdmitTracesAsync(
             Encoding.UTF8.GetBytes(CopilotTracePayload),
@@ -101,14 +121,16 @@ public class OtlpCollectorServiceTests
         Assert.Equal(200, result.HttpStatusCode);
         Assert.Equal(1, harness.Collector.PendingCount);
         Assert.True(harness.Collector.PendingBytes > 0);
+        Assert.Equal(0, harness.Store.CountRecords());
 
         int flushed = await harness.Collector.FlushPendingAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, flushed);
         Assert.Equal(0, harness.Collector.PendingCount);
         Assert.Equal(0, harness.Collector.PendingBytes);
-        OtlpSpan span = Assert.Single(ingested);
-        Assert.Equal("1111111111111111", span.SpanId);
+        CollectedRecord? record = harness.Store.GetRecord("1111111111111111");
+        Assert.NotNull(record);
+        Assert.Equal("copilot", record.HarnessId);
         Assert.NotNull(harness.Collector.LastAcceptedAt);
     }
 
@@ -122,11 +144,6 @@ public class OtlpCollectorServiceTests
     public async Task StartedCollectorFlushesAdmittedSpansWithoutAnExplicitFlush()
     {
         Harness harness = new();
-        List<OtlpSpan> ingested = [];
-        harness.Ingestion
-            .Setup(service => service.IngestSpans(It.IsAny<IReadOnlyList<OtlpSpan>>()))
-            .Callback<IReadOnlyList<OtlpSpan>>(spans => ingested.AddRange(spans))
-            .Returns(new IngestOutcome(1, 0, 0));
 
         int storeUpdated = 0;
         harness.Collector.StoreUpdated += (_, _) => Interlocked.Increment(ref storeUpdated);
@@ -143,10 +160,10 @@ public class OtlpCollectorServiceTests
             // The floor is the loop's own interval plus generous scheduling room; the wake on
             // admission normally lands it in milliseconds.
             DateTime deadline = DateTime.UtcNow + OtlpCollectorService.FlushInterval + TimeSpan.FromSeconds(10);
-            while (ingested.Count == 0 && DateTime.UtcNow < deadline)
+            while (harness.Store.CountRecords() == 0 && DateTime.UtcNow < deadline)
                 await Task.Delay(20, TestContext.Current.CancellationToken);
 
-            Assert.Single(ingested);
+            Assert.NotNull(harness.Store.GetRecord("1111111111111111"));
             Assert.Equal(0, harness.Collector.PendingCount);
             Assert.True(Volatile.Read(ref storeUpdated) >= 1);
             Assert.NotNull(harness.Collector.LastAcceptedAt);
@@ -161,9 +178,6 @@ public class OtlpCollectorServiceTests
     public async Task FlushRaisesStoreUpdatedExactlyOnceForABatchThatLanded()
     {
         Harness harness = new();
-        harness.Ingestion
-            .Setup(service => service.IngestSpans(It.IsAny<IReadOnlyList<OtlpSpan>>()))
-            .Returns(new IngestOutcome(1, 0, 0));
 
         int raised = 0;
         harness.Collector.StoreUpdated += (_, _) => raised++;
@@ -181,21 +195,19 @@ public class OtlpCollectorServiceTests
     public async Task FlushThatQuarantinesStillSignalsBecauseStoreStateChanged()
     {
         Harness harness = new();
-        harness.Ingestion
-            .Setup(service => service.IngestSpans(It.IsAny<IReadOnlyList<OtlpSpan>>()))
-            .Returns(new IngestOutcome(0, 1, 0));
 
         int raised = 0;
         harness.Collector.StoreUpdated += (_, _) => raised++;
 
         await harness.Collector.AdmitTracesAsync(
-            Encoding.UTF8.GetBytes(CopilotTracePayload),
+            Encoding.UTF8.GetBytes(UnknownTracePayload),
             "application/json",
             TestContext.Current.CancellationToken);
         _ = await harness.Collector.FlushPendingAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, raised);
         Assert.Equal(0, harness.Collector.PendingCount);
+        Assert.Equal(1, harness.Store.CountQuarantinedSpans());
     }
 
     [Fact]
@@ -217,9 +229,6 @@ public class OtlpCollectorServiceTests
     public async Task PauseFlushesAndRefusesAdmissionUntilResumed()
     {
         Harness harness = new();
-        harness.Ingestion
-            .Setup(service => service.IngestSpans(It.IsAny<IReadOnlyList<OtlpSpan>>()))
-            .Returns(new IngestOutcome(1, 0, 0));
 
         await harness.Collector.AdmitTracesAsync(
             Encoding.UTF8.GetBytes(CopilotTracePayload),
@@ -230,6 +239,7 @@ public class OtlpCollectorServiceTests
 
         Assert.True(harness.Collector.IsPaused);
         Assert.Equal(0, harness.Collector.PendingCount);
+        Assert.Equal(1, harness.Store.CountRecords());
 
         IngestAdmissionResult paused = await harness.Collector.AdmitTracesAsync(
             Encoding.UTF8.GetBytes(CopilotTracePayload),
@@ -267,18 +277,49 @@ public class OtlpCollectorServiceTests
     }
 
     [Fact]
-    public async Task AdmitAndFlushPersistsLogsAndMetricsWithoutSpans()
+    public void AdmitAndFlushPersistsMappedLogsProblemsForUnmappableLogsAndMetricsWithoutRemovedLogTables()
     {
         Harness harness = new();
-        Mock<ICanonStoreRepository> store = harness.Store;
+        InMemoryRelationalStore store = harness.Store;
 
-        IngestAdmissionResult logs = harness.Collector.AdmitAndFlush(
+        IngestAdmissionResult mappedLog = harness.Collector.AdmitAndFlush(
             Encoding.UTF8.GetBytes("""
-                {"resourceLogs":[{"scopeLogs":[{"logRecords":[{"timeUnixNano":"1760000000000000000","body":{"stringValue":"hi"}}]}]}]}
+                {
+                  "resourceLogs": [{
+                    "resource": { "attributes": [{ "key": "service.name", "value": { "stringValue": "claude-code" } }] },
+                    "scopeLogs": [{
+                      "scope": { "name": "claude_code", "version": "1.0" },
+                      "logRecords": [{
+                        "timeUnixNano": "1760000000000000000",
+                        "traceId": "0102030405060708090a0b0c0d0e0f10",
+                        "spanId": "aabbccddeeff0102",
+                        "body": { "stringValue": "mapped prompt text" },
+                        "attributes": [
+                          { "key": "claude_code.event", "value": { "stringValue": "user_prompt" } },
+                          { "key": "event.name", "value": { "stringValue": "claude_code.user_prompt" } },
+                          { "key": "session.id", "value": { "stringValue": "sess-log-1" } }
+                        ]
+                      }]
+                    }]
+                  }]
+                }
                 """),
             "application/json");
-        Assert.True(logs.Accepted);
-        store.Verify(repository => repository.StorePendingLogs(It.IsAny<IEnumerable<OtlpLog>>(), It.IsAny<string?>()), Times.Once);
+        Assert.True(mappedLog.Accepted);
+        Assert.Equal(1, store.CountRecords("claude-code"));
+        Assert.NotNull(store.GetSession("sess-log-1"));
+        Assert.Equal(0, store.CountIngestProblems());
+
+        IngestAdmissionResult unmappableLog = harness.Collector.AdmitAndFlush(
+            Encoding.UTF8.GetBytes("""
+                {"resourceLogs":[{"scopeLogs":[{"logRecords":[{"timeUnixNano":"1760000000000000000","body":{"stringValue":"secret-unmapped-hi"}}]}]}]}
+                """),
+            "application/json");
+        Assert.True(unmappableLog.Accepted);
+        Assert.Equal(1, store.CountRecords("claude-code"));
+        Assert.Equal(1, store.CountIngestProblems());
+        StoredIngestProblem problem = Assert.Single(store.ListIngestProblems());
+        Assert.DoesNotContain("secret-unmapped-hi", problem.Problem.Message, StringComparison.Ordinal);
 
         IngestAdmissionResult metrics = harness.Collector.AdmitAndFlush(
             Encoding.UTF8.GetBytes("""
@@ -286,22 +327,54 @@ public class OtlpCollectorServiceTests
                 """),
             "application/json");
         Assert.True(metrics.Accepted);
-        store.Verify(repository => repository.StoreMetrics(It.IsAny<IEnumerable<OtlpMetric>>(), It.IsAny<string?>()), Times.Once);
+        StoredMetricPoint point = Assert.Single(store.ListMetricPoints("gen_ai.client.token.usage"));
+        Assert.Equal("gauge", point.Kind);
+        Assert.Equal(1.0, point.Value);
+    }
+
+    [Fact]
+    public async Task ServiceCollectionExtensions_WiresOtlpCollectorServiceThroughRelationalWriterAndOperationalStore()
+    {
+        InMemoryRelationalStore store = new();
+        Mock<ICanonStoreRepository> forbiddenCanonStore = new(MockBehavior.Strict);
+
+        ServiceCollection services = new();
+        services.AddSingleton<IRelationalStoreWriter>(store);
+        services.AddSingleton<IOperationalStore>(store);
+        services.AddSingleton<ICanonStoreRepository>(forbiddenCanonStore.Object);
+        _ = services.AddDashApplication(new DashOptions());
+
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        IOtlpCollectorService collector = provider.GetRequiredService<IOtlpCollectorService>();
+
+        IngestAdmissionResult logResult = await collector.AdmitLogsAsync(
+            Encoding.UTF8.GetBytes("""
+                {"resourceLogs":[{"scopeLogs":[{"logRecords":[{"timeUnixNano":"1760000000000000000","body":{"stringValue":"unmapped"}}]}]}]}
+                """),
+            "application/json",
+            TestContext.Current.CancellationToken);
+        Assert.True(logResult.Accepted);
+
+        int flushed = await collector.FlushPendingAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(1, flushed);
+        Assert.Equal(1, store.CountIngestProblems());
+        forbiddenCanonStore.VerifyNoOtherCalls();
     }
 
     [Fact]
     public async Task OtlpConstructorRejectsNullDependencies()
     {
-        Mock<ICanonStoreRepository> store = new();
+        InMemoryRelationalStore store = new();
         Mock<ITranscriptIngestionService> ingestion = new();
 
-        Assert.Throws<ArgumentNullException>(() => new OtlpCollectorService(null!, ingestion.Object, new DashOptions()));
-        Assert.Throws<ArgumentNullException>(() => new OtlpCollectorService(store.Object, null!, new DashOptions()));
-        Assert.Throws<ArgumentNullException>(() => new OtlpCollectorService(store.Object, ingestion.Object, null!));
+        Assert.Throws<ArgumentNullException>(() => new OtlpCollectorService(null!, store, ingestion.Object, new DashOptions()));
+        Assert.Throws<ArgumentNullException>(() => new OtlpCollectorService(store, null!, ingestion.Object, new DashOptions()));
+        Assert.Throws<ArgumentNullException>(() => new OtlpCollectorService(store, store, null!, new DashOptions()));
+        Assert.Throws<ArgumentNullException>(() => new OtlpCollectorService(store, store, ingestion.Object, null!));
         await Task.CompletedTask;
     }
 
-    /// <summary>Collector over mocked collaborators with configurable ceilings.</summary>
+    /// <summary>Collector over <see cref="InMemoryRelationalStore"/> with configurable ceilings.</summary>
     private class Harness
     {
         public Harness(long? maxBodyBytes = null, long? maxPendingBytes = null)
@@ -317,12 +390,14 @@ public class OtlpCollectorServiceTests
                 options.MaxPendingBytes = maxPendingBytes.Value;
             }
 
-            Collector = new OtlpCollectorService(Store.Object, Ingestion.Object, options);
+            Store = new InMemoryRelationalStore();
+            Ingestion = new TranscriptIngestionService(Store, Store, new HarnessSourceRegistry());
+            Collector = new OtlpCollectorService(Store, Store, Ingestion, options);
         }
 
-        public Mock<ICanonStoreRepository> Store { get; } = new();
+        public InMemoryRelationalStore Store { get; }
 
-        public Mock<ITranscriptIngestionService> Ingestion { get; } = new();
+        public TranscriptIngestionService Ingestion { get; }
 
         public OtlpCollectorService Collector { get; }
     }

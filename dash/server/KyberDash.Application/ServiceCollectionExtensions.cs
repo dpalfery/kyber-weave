@@ -103,7 +103,8 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ITranscriptIngestionService>(provider => provider.GetRequiredService<TranscriptIngestionService>());
 
         services.TryAddSingleton<IOtlpCollectorService>(provider => new OtlpCollectorService(
-            provider.GetRequiredService<ICanonStoreRepository>(),
+            provider.GetRequiredService<IRelationalStoreWriter>(),
+            provider.GetRequiredService<IOperationalStore>(),
             provider.GetRequiredService<ITranscriptIngestionService>(),
             provider.GetRequiredService<DashOptions>()));
 
