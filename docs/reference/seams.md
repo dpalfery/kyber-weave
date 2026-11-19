@@ -55,6 +55,9 @@ Notes.
   views over the file-system seam, so a class can ask for the write it needs and nothing more.
 - The corpus seam is test infrastructure, not a product seam. It lives in the shared testing library
   so a content test says what it reads instead of walking the tree for the repository root.
+- `FakeRunStateStore` is the shared fake for `IRunStateStore`, the run records `run start` writes. The
+  hook's run-context resolver reads it in unit tests, so a test proves which worktree a dispatch resolves
+  without a real runs directory under the operator's home.
 - The configuration seam has a shared fake and a contract suite (task 2.3): the fake runs in a unit
   project and the adapter over the in-memory file system there too, and over the real disk in the
   integration project.
