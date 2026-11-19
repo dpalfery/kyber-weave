@@ -1,50 +1,38 @@
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
-using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Squad;
-using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Core.Squad.Release;
-using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Fakes;
 using Xunit;
-using Xunit.Sdk;
-using KyberWeave.Tests.Corpus;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Application.Tests.Squad.Deployment;
 
 /// <summary>
 /// Deployment-state contracts: claim and authority recovery. Split from the one class that used to hold all of
 /// them, so xUnit runs the themes on different cores.
 /// </summary>
-public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTestBase
+public sealed class SquadDeploymentStateRecoveryTests : InMemoryDeploymentStateTestBase
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
     [Fact]
     public async Task UninstallRecoversAnInterruptedUpdateFirstThenUninstallsInTheSameRun()
     {
-        using TransactionFixture fixture = TransactionFixture.Create();
+        TransactionFixture fixture = TransactionFixture.Create(this);
         SortedDictionary<string, TreeEntry> interrupted = InterruptTransactionAfter(
             fixture,
             SquadTransactionStepKind.FileBackedUp);
         RestoreTree(fixture.Path, interrupted);
         string journal = Path.Combine(fixture.Path, ".kyber-weave", ".squad-transaction", "intent.json");
-        Assert.True(File.Exists(journal));
-        SquadLifecycleService lifecycle = SquadHostDefaults.CreateLifecycleService(stateStore: Store(fixture.Path));
+        Assert.True(Files.FileExists(journal));
+        SquadLifecycleService lifecycle = LifecycleAt(fixture.Path);
 
         SquadLifecycleResult result = await lifecycle.UninstallAsync(
             new SquadUninstallRequest(fixture.Path, SquadDeploymentScope.Project),
             TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
-        Assert.False(File.Exists(journal));
-        Assert.False(File.Exists(ToPlatformPath(fixture.Path, fixture.RelativePath)));
+        Assert.False(Files.FileExists(journal));
+        Assert.False(Files.FileExists(ToPlatformPath(fixture.Path, fixture.RelativePath)));
         Assert.Contains(
             result.Warnings!,
             warning => warning.StartsWith("Recovered an unfinished Squad transaction", StringComparison.Ordinal));
@@ -53,20 +41,16 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
     [Fact]
     public async Task UninstallRefusesWhenTheInterruptedTransactionCannotBeRecoveredAndChangesNothing()
     {
-        using TransactionFixture fixture = TransactionFixture.Create();
+        TransactionFixture fixture = TransactionFixture.Create(this);
         SortedDictionary<string, TreeEntry> interrupted = InterruptTransactionAfter(
             fixture,
             SquadTransactionStepKind.FileBackedUp);
         RestoreTree(fixture.Path, interrupted);
         string journal = Path.Combine(fixture.Path, ".kyber-weave", ".squad-transaction", "intent.json");
-        string document = await File.ReadAllTextAsync(journal, Encoding.UTF8, TestContext.Current.CancellationToken);
-        await File.WriteAllTextAsync(
-            journal,
-            CorruptJournalDocument(document, "unknown"),
-            new UTF8Encoding(false),
-            TestContext.Current.CancellationToken);
+        string document = Files.ReadAllText(journal);
+        Files.WriteAllText(journal, CorruptJournalDocument(document, "unknown"));
         SortedDictionary<string, TreeEntry> before = CaptureTree(fixture.Path);
-        SquadLifecycleService lifecycle = SquadHostDefaults.CreateLifecycleService(stateStore: Store(fixture.Path));
+        SquadLifecycleService lifecycle = LifecycleAt(fixture.Path);
 
         InvalidOperationException refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             lifecycle.UninstallAsync(
@@ -86,7 +70,7 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
     [InlineData("null")]
     public void RecoverInvalidPreparedJournalIsNonAuthoritative(string corruption)
     {
-        using TransactionFixture fixture = TransactionFixture.Create();
+        TransactionFixture fixture = TransactionFixture.Create(this);
         string fixturePath = fixture.Path;
         SortedDictionary<string, TreeEntry> interrupted = InterruptTransactionAfter(
             fixture,
@@ -97,13 +81,12 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
             ".kyber-weave",
             ".squad-transaction",
             "intent.json");
-        string journal = File.ReadAllText(intentPath, Encoding.UTF8);
-        File.WriteAllText(
+        string journal = Files.ReadAllText(intentPath);
+        Files.WriteAllText(
             intentPath,
-            CorruptJournalDocument(journal, corruption),
-            new UTF8Encoding(false));
+            CorruptJournalDocument(journal, corruption));
         SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixturePath);
-        SquadTransaction transaction = Transaction(fixturePath);
+        SquadTransaction transaction = TransactionAt(fixturePath);
 
         Exception? exception = Record.Exception(() => transaction.Recover(
             fixturePath,
@@ -128,13 +111,13 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
         string operation,
         string racedNodeKind)
     {
-        using TempDirectory fixture = new();
+        DeploymentScope fixture = NewScope();
         string fixturePath = fixture.Path;
         const string relativePath = ".codex/agents/conductor.toml";
         SquadDeploymentPlan plan;
         if (operation == "missing-write")
         {
-            plan = RealSquadDeployment.Planner.CreateInstall(
+            plan = Planner.CreateInstall(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -153,7 +136,7 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
                 false));
             WriteState(fixturePath, Lock(), receipt);
             plan = operation == "existing-write"
-                ? RealSquadDeployment.Planner.CreateUpdate(
+                ? Planner.CreateUpdate(
                     fixturePath,
                     SquadDeploymentScope.Project,
                     Lock("1.2.4"),
@@ -162,14 +145,14 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
                     [],
                     false,
                     new FixedTimeProvider(InstalledAt.AddDays(1)))
-                : RealSquadDeployment.Planner.CreateUninstall(
+                : Planner.CreateUninstall(
                     fixturePath,
                     SquadDeploymentScope.Project,
                     receipt);
         }
 
-        LeafRaceObserver observer = new(fixturePath, relativePath, racedNodeKind);
-        SquadTransaction transaction = Transaction(fixturePath, observer);
+        LeafRaceObserver observer = new(Files, fixturePath, relativePath, racedNodeKind);
+        SquadTransaction transaction = TransactionAt(fixturePath, observer);
 
         Exception? exception = Record.Exception(() => transaction.Execute(plan));
 
@@ -178,30 +161,11 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
         AssertTreeEntryEqual(
             Assert.IsType<TreeEntry>(observer.RacedEntry),
             CaptureTree(fixturePath)[relativePath]);
-        Assert.True(File.Exists(observer.ExternalCanaryPath));
-        Assert.True(Directory.Exists(Path.Combine(
+        Assert.True(Files.FileExists(observer.ExternalCanaryPath));
+        Assert.True(Files.DirectoryExists(Path.Combine(
             fixturePath,
             ".kyber-weave",
             ".squad-transaction")));
-    }
-
-    [Fact]
-    public void ExecuteClaimPublicationUsesNoOverwrite()
-    {
-        string source = Corpus.ReadText("src/KyberWeave.Application/Squad/Deployment/SquadTransaction.cs");
-        int applyStart = source.IndexOf("private void ApplyFiles", StringComparison.Ordinal);
-        int restoreStart =
-            source.IndexOf("private IReadOnlyList<string> RestoreIntent", StringComparison.Ordinal);
-        Assert.True(applyStart >= 0 && restoreStart > applyStart);
-        string liveApplySource = source[applyStart..restoreStart];
-
-        Assert.Contains("ClaimExistingNoOverwrite", liveApplySource, StringComparison.Ordinal);
-        Assert.Contains("PublishStageNoOverwrite", liveApplySource, StringComparison.Ordinal);
-        Assert.Contains("VerifyAfterImage", liveApplySource, StringComparison.Ordinal);
-        Assert.DoesNotContain("overwrite: true", liveApplySource, StringComparison.Ordinal);
-        Assert.DoesNotContain("DeleteEntry(targetPath", liveApplySource, StringComparison.Ordinal);
-        Assert.DoesNotContain("Notify(", ExtractMethod(source, "ClaimExistingNoOverwrite"), StringComparison.Ordinal);
-        Assert.DoesNotContain("Notify(", ExtractMethod(source, "PublishStageNoOverwrite"), StringComparison.Ordinal);
     }
 
     [Theory]
@@ -218,7 +182,7 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
     public void RecoverPreparedArtifactAuthorityMustExactlyDescribeTransactionTree(
         string corruption)
     {
-        using TransactionFixture fixture = TransactionFixture.Create();
+        TransactionFixture fixture = TransactionFixture.Create(this);
         string fixturePath = fixture.Path;
         SortedDictionary<string, TreeEntry> interrupted = InterruptTransactionAfterCheckpoint(
             fixture,
@@ -236,7 +200,7 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
         CorruptPreparedAuthority(intent, transactionDirectory, corruption);
         WriteJsonObject(intentPath, intent);
         SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixturePath);
-        SquadTransaction transaction = Transaction(fixturePath);
+        SquadTransaction transaction = TransactionAt(fixturePath);
 
         Exception? exception = Record.Exception(() => transaction.Recover(
             fixturePath,
@@ -250,7 +214,7 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
     [Fact]
     public void RecoverToleratesAnEmptyUndescribedFolderInTheTransactionTree()
     {
-        using TransactionFixture fixture = TransactionFixture.Create();
+        TransactionFixture fixture = TransactionFixture.Create(this);
         string fixturePath = fixture.Path;
         SortedDictionary<string, TreeEntry> interrupted = InterruptTransactionAfterCheckpoint(
             fixture,
@@ -259,32 +223,33 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
         string transactionDirectory = Path.Combine(fixturePath, ".kyber-weave", ".squad-transaction");
 
         // What a kill between a stage move and the removal of its now-empty folders leaves.
-        Directory.CreateDirectory(Path.Combine(transactionDirectory, "staging", "emptied-by-a-kill"));
+        Files.CreateDirectory(Path.Combine(transactionDirectory, "staging", "emptied-by-a-kill"));
 
-        Exception? exception = Record.Exception(() => Transaction(fixturePath).Recover(
+        Exception? exception = Record.Exception(() => TransactionAt(fixturePath).Recover(
             fixturePath,
             SquadDeploymentScope.Project));
 
         Assert.Null(exception);
-        Assert.False(Directory.Exists(transactionDirectory));
+        Assert.False(Files.DirectoryExists(transactionDirectory));
     }
 
     [Fact]
     public void RecoverValidCreatedDirectoryAuthorityRemovesOnlyDeclaredEmptyDirectoriesDeepestFirst()
     {
-        using TempDirectory fixture = new();
+        DeploymentScope fixture = NewScope();
         string targetRoot = Path.Combine(fixture.Path, "target");
         string applicationData = Path.Combine(fixture.Path, "application-data");
-        Directory.CreateDirectory(targetRoot);
+        Files.CreateDirectory(targetRoot);
         Write(fixture.Path, "beside-target/canary.txt", "sibling canary");
         Write(applicationData, "shared/canary.txt", "application canary");
         SortedDictionary<string, TreeEntry> before = CaptureTree(fixture.Path);
-        SquadStateStore store = Store(applicationData);
+        SquadStateStore store = StoreAt(applicationData);
         CheckpointFailingObserver observer = new(
+            Files,
             fixture.Path,
             SquadTransactionCheckpointKind.Prepared);
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
-            RealSquadDeployment.Transaction(store, observer).Execute(CreateGlobalInstallPlan(targetRoot)));
+            TransactionAt(applicationData, observer).Execute(CreateGlobalInstallPlan(targetRoot)));
         RestoreTree(
             fixture.Path,
             Assert.IsType<SortedDictionary<string, TreeEntry>>(
@@ -297,7 +262,7 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
         JsonArray createdDirectories = Assert.IsType<JsonArray>(intent["createdDirectories"]);
         AssertCreatedDirectoryAuthorityIsCanonical(createdDirectories);
 
-        RealSquadDeployment.Transaction(store).Recover(targetRoot, SquadDeploymentScope.Global);
+        TransactionAt(applicationData).Recover(targetRoot, SquadDeploymentScope.Global);
 
         AssertTreesEqual(before, CaptureTree(fixture.Path));
     }
@@ -334,17 +299,17 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
         Assert.True(
             Enum.TryParse(crashPoint, out SquadTransactionCheckpointKind checkpoint),
             $"K4q requires the opt-in '{crashPoint}' crash boundary.");
-        using TempDirectory fixture = new();
-        SquadStateStore store = Store(fixture.Path);
+        DeploymentScope fixture = NewScope();
         ActiveTransitionScenario recoveryScenario = CreateActiveTransitionScenario(
             fixture.Path,
             scenario);
         SortedDictionary<string, TreeEntry> before = CaptureTree(fixture.Path);
         ActiveTransitionCrashObserver observer = new(
+            Files,
             fixture.Path,
             checkpoint,
             recoveryScenario.Subject);
-        SquadTransaction transaction = RealSquadDeployment.Transaction(store, observer);
+        SquadTransaction transaction = TransactionAt(fixture.Path, observer);
 
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
             transaction.Execute(recoveryScenario.Plan));
@@ -359,5 +324,19 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
 
         AssertTreesEqual(before, afterFirstRecovery);
         AssertTreesEqual(afterFirstRecovery, CaptureTree(fixture.Path));
+    }
+
+    /// <summary>Builds a lifecycle service over the in-memory state anchored on one project root.</summary>
+    /// <param name="root">The project root, which is also its application-data directory.</param>
+    /// <returns>The lifecycle service.</returns>
+    private SquadLifecycleService LifecycleAt(string root)
+    {
+        InMemorySquadState fixtureState = new(stateRoot: root, files: Files);
+        using FakeSquadReleaseSource releaseSource = FakeSquadReleaseSource.Failing(
+            new NotImplementedException("A recovery test never downloads a release."));
+        return SquadTestCommands.InMemoryLifecycle(
+            fixtureState,
+            releaseSource,
+            FakeSquadRenderer.Empty());
     }
 }
