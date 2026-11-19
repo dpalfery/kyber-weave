@@ -479,8 +479,15 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         {
             _seats.Record(prompt, toolOutput, context);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception) when (exception is IOException
+                                              or UnauthorizedAccessException
+                                              or System.Text.Json.JsonException
+                                              or InvalidDataException
+                                              or InvalidOperationException
+                                              or NotSupportedException)
         {
+            // A refused or failed save never blocks the dispatch. A programming error — a null
+            // argument, a bad cast — is not a save failure and must surface.
             context.Log.WriteLine($"Arbiter: a review seat was not saved ({exception.GetType().Name}: {OneLine(exception.Message)}).");
         }
     }
