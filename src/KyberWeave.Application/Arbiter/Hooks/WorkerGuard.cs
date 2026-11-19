@@ -305,8 +305,8 @@ public sealed class WorkerGuard(
         }
 
         // The guard sees only the start of each call, so the gap since the previous one is how long that call (and
-        // the model's turn after it) ran. Only a call that started a process can hang, so the per-call limit is judged
-        // on that call's marker. Read before this call's line is appended.
+        // the model's turn after it) ran. Only a call that started a process, or waited on one, can hang, so the
+        // per-call limit is judged on that call's marker. Read before this call's line is appended.
         (DateTimeOffset? previousCall, bool previousStartedProcess) =
             earlier.Length > 1 && WorkerGuardRules.Window.Read(earlier) is { } before
                 ? (before.LastCall, before.LastCallStartedProcess)
@@ -324,7 +324,7 @@ public sealed class WorkerGuard(
             budgets.TryCreate(home, key, WorkerGuardRules.HeaderLine(now, budget, call.Agent.Name));
         }
 
-        budgets.Append(home, key, WorkerGuardRules.CallLine(now, startedProcess: call.Command is not null));
+        budgets.Append(home, key, WorkerGuardRules.CallLine(now, startedProcess: call.StartedProcess));
 
         string[] lines = budgets.ReadLines(home, key);
         if (WorkerGuardRules.Window.Read(lines) is not { } window)

@@ -347,9 +347,9 @@ internal static class WorkerGuardRules
         string.Join(' ', command.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
     /// <summary>
-    /// The one-time deny after a call that started a process and ran past the per-call limit. A call that starts no
-    /// process (a read) cannot hang, so the limit never judges it. The denied call is counted like any other, so the
-    /// retry that follows comes right after it and is allowed.
+    /// The one-time deny after a call that started a process, or waited on one, and ran past the per-call limit. A
+    /// call that starts no process (a file read) cannot hang, so the limit never judges it. The denied call is counted
+    /// like any other, so the retry that follows comes right after it and is allowed.
     /// </summary>
     internal static string StalledCallRefusal(TimeSpan gap, int limit) =>
         $"{BudgetRuleId}: your previous tool call ran for about {(int)gap.TotalMinutes} minutes, past the {limit}-minute " +
@@ -490,6 +490,11 @@ internal static class WorkerGuardRules
         }
     }
 
+    /// <summary>
+    /// One guarded tool call. <paramref name="Command"/> is the shell command the call carries, which other rules
+    /// match on; <paramref name="StartedProcess"/> is true for a call that runs a process or waits on a running one,
+    /// which is what the per-call limit is judged on.
+    /// </summary>
     internal sealed record ToolCall(
         string Harness,
         string AgentId,
@@ -497,5 +502,6 @@ internal static class WorkerGuardRules
         string? Cwd,
         string? WritePath,
         string? Command,
+        bool StartedProcess,
         string? SessionId = null);
 }

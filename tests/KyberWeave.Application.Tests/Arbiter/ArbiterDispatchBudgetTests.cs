@@ -160,6 +160,24 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     }
 
     [Fact]
+    public void StalledCall_DeniesTheNextCallOnce_AfterAWaitOnARunningShell()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 1000, CallMinutes: 5);
+
+        // Copilot's read_bash waits on a shell that is still running, which is where a hung test shows up: the call
+        // carries no command, but it is judged like the bash call that started the process.
+        Assert.Empty(Guard("copilot-cli", CopilotReadBash("dev-medium", "agent-1"), Start, budget));
+
+        string answer = Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(10), budget);
+
+        using JsonDocument document = JsonDocument.Parse(answer);
+        Assert.Equal("deny", document.RootElement.GetProperty("permissionDecision").GetString());
+        Assert.Contains("NOT VERIFIED:", document.RootElement.GetProperty("permissionDecisionReason").GetString()!, StringComparison.Ordinal);
+
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(10).AddSeconds(5), budget));
+    }
+
+    [Fact]
     public void StalledCall_StillDeniesAfterABareTimestampFromABudgetFileWrittenBeforeTheMarker()
     {
         string directory = Path.Combine(_host.HomeDirectory, ".kyber-weave", "arbiter", "budgets");
@@ -347,6 +365,17 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
         agentType,
         toolName = "view",
         toolArgs = JsonSerializer.Serialize(new { path = Path.Combine(_host.HomeDirectory, "docs", "README.md") }),
+    });
+
+    /// <summary>Copilot CLI's wait on a shell that is still running: the call that hangs when the shell's process does.</summary>
+    private string CopilotReadBash(string agentType, string agentId) => JsonSerializer.Serialize(new
+    {
+        cwd = _host.HomeDirectory,
+        agentId,
+        parentAgentId = "root",
+        agentType,
+        toolName = "read_bash",
+        toolArgs = JsonSerializer.Serialize(new { shellId = "shell-1", delay = 30 }),
     });
 
     /// <summary>A Copilot CLI <c>subagentStop</c> event, trimmed from a live run: it ends one turn of the agent.</summary>
