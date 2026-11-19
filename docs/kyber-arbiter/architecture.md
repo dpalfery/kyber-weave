@@ -309,6 +309,36 @@ One service now answers those questions once per hook invocation.
   `no-failing-run` escalate. Marking changes no rule's effect: an advisory rule is still evaluated,
   logged and recorded.
 
+### The autonomous plan-approval nudge
+
+An autonomous conductor run is told to call the finalize tool right after the architect returns
+`STATUS: PLAN_READY`, and a model sometimes asks the user "Approve and execute the plan?" instead
+(Copilot CLI runs 7 and 14). Prompt text alone did not fix it, so the hook adds a deterministic nudge.
+
+- **Trigger and condition.** The hook records the return of a planner dispatch (trigger
+  `delegate.planner.returned`, target `architect`) whose return carries `STATUS: PLAN_READY`, and the
+  run's recorded autonomy is `autonomous`.
+- **The note.** It is attached to that return, word for word: "AUTONOMOUS RUN: the plan is ready. Call
+  docs_finalize_approved_plan_and_write_task_file now with the approval 'AUTONOMOUS_APPROVAL:
+  plan-approve-execute (autonomous: recommendation accepted)'. Do not ask the user to approve; then
+  dispatch the ready tasks." The quoted approval is the finalize tool's `approval` argument; the tool's `approvalMode` is `autonomous`.
+- **Autonomy source.** `kyber-weave run start` records the autonomy it resolved (the `--autonomy` value,
+  else the repository's `AGENTS.md` Config Reg value, else the configured `autonomy:`) as an `Autonomy`
+  field in the run record under `~/.kyber-weave/runs`. When none of the three is set, nothing is recorded.
+  The hook reads it as `HookRunContext.ActiveRun.Autonomy`. A record written before the field existed, or
+  a run with no record, reads as unknown, and unknown never nudges. The hook never infers autonomy from
+  prompt text.
+- **Delivery.** The note travels the existing post-return annotation paths: the `PostAnnotation` outcome
+  that Claude renders as `additionalContext` and Copilot as a post annotation, and, for a Copilot
+  background return, the pending note `TakePendingNotes` hands over on the conductor's next dispatch. A
+  harness that cannot deliver a post note (Antigravity) gets none.
+- **Once per plan revision.** A return is nudged once. When the ledger already holds a `PLAN_READY`
+  planner return paired with the same dispatch, a second recording of it adds no note. A re-dispatched
+  planner is a new dispatch and is nudged again.
+- **Never blocks.** The note is advisory and never turns an allow into a block. A return the rules
+  already escalated or blocked keeps its own text. A failure to build the note is logged and ignored
+  (the missing-input policy above).
+
 ## The rules
 
 Thirty-six rules ship with permanent `KW-ARB-*` ids, in three role files — the `conductor` file
