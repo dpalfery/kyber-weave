@@ -1,6 +1,7 @@
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.RunStart;
+using KyberWeave.Core.Squad.Briefs;
 
 namespace KyberWeave.Arbiter.Hooks;
 
@@ -29,7 +30,7 @@ internal static class AutonomousPlanNudge
     /// <param name="toolOutput">The return's text.</param>
     /// <param name="run">The active run record, or null when none is known.</param>
     internal static bool Applies(ArbiterEvaluationResult result, string? target, string? toolOutput, RunRecord? run) =>
-        string.Equals(run?.Autonomy, "autonomous", StringComparison.Ordinal)
+        string.Equals(BriefAutonomy.Normalize(run?.Autonomy), "autonomous", StringComparison.Ordinal)
         && !result.IsError
         && result.Dispatches.Any(dispatch => string.Equals(dispatch.Trigger, Trigger, StringComparison.Ordinal))
         && IsArchitect(target)
@@ -40,22 +41,31 @@ internal static class AutonomousPlanNudge
 
     /// <summary>
     /// Whether an earlier ledger event already recorded this same return as <c>PLAN_READY</c>: same harness call id,
-    /// or, when the harness gives none, the same dispatch.
+    /// or, when the harness gives none, the same dispatch, in the same harness, session and target. A return with no
+    /// ledger event of its own has nothing to be scoped by and is never a repeat.
     /// </summary>
     /// <param name="events">The ledger.</param>
     /// <param name="current">The event this evaluation appended, or null when it is not on the ledger.</param>
     /// <param name="callId">The harness's call id for the return, or null.</param>
     internal static bool AlreadyNudged(IReadOnlyList<ArbiterLedgerEvent> events, ArbiterLedgerEvent? current, string? callId)
     {
-        string? key = callId is { Length: > 0 } ? callId : null;
-        string? preId = current?.PreId;
+        if (current is null)
+        {
+            return false;
+        }
+
+        string? key = string.IsNullOrWhiteSpace(callId) ? null : callId;
+        string? preId = current.PreId;
         if (key is null && preId is null)
         {
             return false;
         }
 
         return events.Any(other =>
-            !string.Equals(other.Id, current?.Id, StringComparison.Ordinal)
+            !string.Equals(other.Id, current.Id, StringComparison.Ordinal)
+            && string.Equals(other.Harness, current.Harness, StringComparison.Ordinal)
+            && string.Equals(other.Session, current.Session, StringComparison.Ordinal)
+            && string.Equals(other.Target, current.Target, StringComparison.Ordinal)
             && other.Phase == ArbiterLedgerPhases.Post
             && string.Equals(other.Trigger, Trigger, StringComparison.Ordinal)
             && string.Equals(other.Returns?.PlannerStatus, PlanReady, StringComparison.OrdinalIgnoreCase)
