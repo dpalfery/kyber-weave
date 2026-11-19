@@ -135,6 +135,41 @@ public sealed class HookRunContextResolverTests
         Assert.Null(context.ActiveRun);
     }
 
+    /// <summary>
+    /// A harness that sends its directory as a relative path means it relative to the directory the hook process
+    /// started in. Resolving one against itself cannot anchor anything: the path seam refuses a base that is not
+    /// fully qualified, so the payload's own directory was dropped and the process directory anchored instead.
+    /// </summary>
+    [Fact]
+    public void ARelativePayloadCwdAnchorsTheRepositoryItResolvesTo()
+    {
+        string elsewhere = ArbiterTestRoots.Under("kw", "elsewhere");
+        _files.CreateDirectory(elsewhere);
+        FakeProcessEnvironment environment = new(
+            currentDirectory: elsewhere, homeDirectory: ArbiterTestRoots.Under("home"));
+        HookRunContextResolver resolver = new(
+            _git,
+            new ContainedPlanFileResolver(),
+            _planRoots,
+            _files,
+            _paths,
+            environment,
+            _runs,
+            _branches);
+
+        HookRunContext context = resolver.Resolve(new HookRunContextRequest(
+            "copilot-cli",
+            WorkspaceRoot: null,
+            EventCwd: $"..{Path.DirectorySeparatorChar}repo",
+            ProcessDirectory: elsewhere,
+            AgentWorktree: null,
+            Prompt: "TASK: T1",
+            HomeDirectory: ArbiterTestRoots.Under("home")));
+
+        Assert.Equal(_main, context.RepositoryRoot);
+        Assert.Equal(_main, context.Worktree);
+    }
+
     [Fact]
     public void ACandidateOutsideTheRepositoryAndItsWorktreesIsRefusedWithItsReason()
     {

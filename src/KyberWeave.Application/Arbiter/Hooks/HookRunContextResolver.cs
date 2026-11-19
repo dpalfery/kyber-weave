@@ -100,7 +100,7 @@ public sealed class HookRunContextResolver(
                 continue;
             }
 
-            if (!TryFullPath(candidate!, candidate!, out string full, notes, name))
+            if (!TryFullPath(candidate!, BaseFor(candidate!), out string full, notes, name))
             {
                 continue;
             }
@@ -308,7 +308,7 @@ public sealed class HookRunContextResolver(
         out string worktree)
     {
         worktree = root;
-        if (!TryFullPath(candidate, root, out string full, notes, name))
+        if (!TryFullPath(candidate, BaseFor(candidate), out string full, notes, name))
         {
             return false;
         }
@@ -450,10 +450,18 @@ public sealed class HookRunContextResolver(
 
     private bool IsValidated(string candidate, string root, IReadOnlyList<string> worktrees)
     {
-        string? full = FullPathOrNull(candidate, root);
+        string? full = FullPathOrNull(candidate, BaseFor(candidate));
         return full is not null
             && worktrees.Any(worktree => IsSame(worktree, full) || IsWithin(worktree, full));
     }
+
+    /// <summary>
+    /// The base a harness-provided path is resolved against: itself when it is already fully qualified, else the
+    /// directory the hook process started in — a harness sends a relative path from the session's own directory, and
+    /// the path seam refuses a base that is not fully qualified.
+    /// </summary>
+    private string BaseFor(string candidate) =>
+        Path.IsPathFullyQualified(candidate) ? candidate : environment.CurrentDirectory;
 
     private bool TryFullPath(string candidate, string baseDirectory, out string full, List<string> notes, string name)
     {
