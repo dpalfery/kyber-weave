@@ -570,6 +570,37 @@ Copilot CLI ingests local `~/.copilot/session-state/<id>/events.jsonl` session j
 | `CopilotCliJournalProblem` | `Code` | mapped | `ingest_problem.code` | Diagnostic code (`COPILOT_CLI_MALFORMED_LINE`). |
 | `CopilotCliJournalProblem` | `Message` | mapped | `ingest_problem.message` | Sanitized parse failure message. |
 
+## copilot-vscode
+
+Copilot VS Code ingests local VS Code `chatSessions` append/edit journals (`kind: 0/1/2`) and JSON session snapshots via `CopilotVscodeMapper` into `CollectedBatch` (`CopilotVscodeJournalDocument`, `CopilotVscodeRequest`, `CopilotVscodeToolCall`, `CopilotVscodeJournalProblem`). Each request emits an `llm.invoke` record carrying cumulative prior user messages and assistant responses plus the current user message and `modeInstructions` (excluding the current request's own response), along with child `tool.invoke` records from `result.metadata.toolCallRounds`.
+
+| Native type | Property | Disposition | Target mapping | Reason |
+|---|---|---|---|---|
+| `CopilotVscodeJournalDocument` | `SessionId` | mapped | `session.session_id`, `session.native_session_id`, `record_session_link.session_key` | Native session id from `sessionId`, falling back to journal file stem or source digest. |
+| `CopilotVscodeJournalDocument` | `CreationDate` | mapped | `record.started_at_utc` | Session creation timestamp used as fallback when a request omits `timestamp`. |
+| `CopilotVscodeJournalDocument` | `JournalVersion` | dropped | — | Journal format version integer (`version`) has no column on `session` or `record` in `RelationalSchemaCatalog`. |
+| `CopilotVscodeJournalDocument` | `Requests` | mapped | nested: CopilotVscodeRequest | Reconstructed ordered requests from `requests[]`. |
+| `CopilotVscodeJournalDocument` | `ParseProblems` | mapped | nested: CopilotVscodeJournalProblem | Non-fatal line-level JSONL parse diagnostics emitted as `ingest_problem` rows. |
+| `CopilotVscodeRequest` | `RequestIndex` | mapped | `record.span_id` | Zero-based index used for fallback `request-<index>` identity and duplicate `RequestId` disambiguation. |
+| `CopilotVscodeRequest` | `RequestId` | mapped | `record.span_id` | Primary native anchor for deterministic `synth:copilot-vscode:<session>:<requestId>` record identity. |
+| `CopilotVscodeRequest` | `Timestamp` | mapped | `record.started_at_utc` | ISO-8601 UTC request start timestamp (epoch numbers and ISO strings normalized). |
+| `CopilotVscodeRequest` | `ModelId` | mapped | `record_model.model_id` | Fallback model identifier after stripping leading `copilot/` prefix when `ResolvedModel` is absent. |
+| `CopilotVscodeRequest` | `ResolvedModel` | mapped | `record_model.model_id` | Primary resolved model identifier from `result.metadata.resolvedModel`. |
+| `CopilotVscodeRequest` | `AgentId` | mapped | `record_agent_instance.agent_instance_id` | Agent identifier from `result.metadata.agentId`. |
+| `CopilotVscodeRequest` | `UserMessage` | mapped | `content_part.bucket`, `content_part.position`, `content_part_text.part_text`, `content_part_withheld.utf8_bytes`, `content_part_role.role_name`, `content_part_truncation.original_utf8_bytes`, `record_correction.span_id`, `record_correction_rule.correction_rule` | Measured via `ToolContentMeasurer` into `conversation_history` (`role = user`) and scanned for user-correction rules. |
+| `CopilotVscodeRequest` | `ResponseText` | mapped | `content_part_text.part_text`, `content_part_withheld.utf8_bytes`, `content_part_role.role_name` | Assistant reply emitted into subsequent requests' `conversation_history` (`role = assistant`) and excluded from its own request. |
+| `CopilotVscodeRequest` | `ModeInstructions` | mapped | `content_part.bucket`, `content_part.position`, `content_part_text.part_text`, `content_part_withheld.utf8_bytes` | Deduplicated `modeInstructions` measured via `ToolContentMeasurer` into `instruction_context`. |
+| `CopilotVscodeRequest` | `PromptTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Input prompt token count (`token_class = input`, `direction = input`) from `result.metadata.promptTokens`. |
+| `CopilotVscodeRequest` | `MetadataOutputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Primary output token count (`token_class = output`, `direction = output`) from `result.metadata.outputTokens`. |
+| `CopilotVscodeRequest` | `CompletionTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Fallback output token count (`token_class = output`, `direction = output`) when `MetadataOutputTokens` is absent or zero. |
+| `CopilotVscodeRequest` | `ToolCalls` | mapped | nested: CopilotVscodeToolCall | Tool invocations extracted from `result.metadata.toolCallRounds` into child `tool.invoke` spans and `record_skill_invocation.skill_name`. |
+| `CopilotVscodeToolCall` | `CallId` | mapped | `tool_call.call_id` | Native tool call correlation identifier (or `tool-<index>` fallback). |
+| `CopilotVscodeToolCall` | `ToolName` | mapped | `tool_call.tool_name`, `record.name` | Invoked tool name on child `tool.invoke` span. |
+| `CopilotVscodeToolCall` | `RawArgumentsText` | mapped | `tool_call_input_size.utf8_bytes`, `tool_call_input_size.characters`, `tool_call_input_fingerprint.sha256`, `tool_call_input_text.text`, `tool_call_input_truncation.original_utf8_bytes` | Measured via `ToolContentMeasurer` with JSON payloads withheld to size + SHA-256 fingerprint. |
+| `CopilotVscodeJournalProblem` | `LineNumber` | mapped | `ingest_problem_location.location`, `ingest_problem.problem_key` | 1-based line number appended to problem key and locator. |
+| `CopilotVscodeJournalProblem` | `Code` | mapped | `ingest_problem.code` | Diagnostic code (`COPILOT_VSCODE_MALFORMED_LINE`). |
+| `CopilotVscodeJournalProblem` | `Message` | mapped | `ingest_problem.message` | Sanitized parse failure message. |
+
 ## antigravity
 
 Antigravity ingests over OTLP through `AntigravityAdapter` (`OtlpSpan`, `OtlpLog`, `OtlpMetric`, `RawSpan`), claiming spans carrying `gen_ai.agent.name = "antigravity"` ahead of `GeminiAdapter`, converting inclusive counts, and mapping `gemini.usage.thoughts_tokens` to reasoning tokens while leaving `cache_creation` unexported.
