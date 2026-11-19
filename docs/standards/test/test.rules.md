@@ -13,13 +13,11 @@ last-reviewed: 2026-11-19
 ## Unit tests by default
 
 - New behaviour gets an in-memory unit test. In C# that test runs against an interface with the
-  shared fakes the seam register names; in a React or TypeScript UI, including the tray UI, it
-  renders the component over fixtures and mocked query results, as the React standard says (the
-  tray UI's gate is `npm --prefix dash/tray/ui run test`, the Tauri standard's completion gate); in
-  Rust, including Tauri's Rust, it is a
-  `#[cfg(test)]` unit test beside the code it exercises, as the Rust standard says. A GitHub Actions
-  change is pinned by a repository-policy test in `tests/KyberWeave.RepoPolicy.Tests`, as the
-  GitHub Actions standard says.
+  shared fakes the seam register names; in a React or TypeScript UI, a Tauri UI included, it
+  renders the component over fixtures and mocked query results, as the React standard says, with
+  the commands that UI's standard gives; in Rust, Tauri's Rust included, it is a `#[cfg(test)]` unit
+  test beside the code it exercises, as the Rust standard says. A GitHub Actions change is pinned by
+  a repository-policy test, as the GitHub Actions standard says; `AGENTS.md` names that project.
 - Integration and end-to-end tests are the exception. A C# integration test proves an adapter or a
   whole flow against the real resource in the integration project; a browser flow that needs the
   real browser and server is a Playwright end-to-end test. Both run in CI, never in a developer's
