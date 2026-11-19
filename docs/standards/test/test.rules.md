@@ -12,12 +12,17 @@ last-reviewed: 2026-11-16
 
 ## Unit tests by default
 
-- New behaviour gets an in-memory unit test against an interface, using the fakes in the test
-  support project. That is the default for every change.
-- An integration test is the exception, kept for proving an adapter against the real resource. It
-  lives in the integration project and runs in CI; a developer's task gate never runs it.
-- A behaviour you can only test through a real resource means a seam is missing: add the seam and
-  unit-test against it rather than writing a slow test.
+- New behaviour gets an in-memory unit test. In C# that test runs against an interface with the
+  shared fakes the seam register names; in a React or TypeScript UI it renders the component over
+  fixtures and mocked query results, as the React standard says.
+- Integration and end-to-end tests are the exception. A C# integration test proves an adapter or a
+  whole flow against the real resource in the integration project; a browser flow that needs the
+  real browser and server is a Playwright end-to-end test. Both run in CI, never in a developer's
+  task gate; `AGENTS.md` names their homes.
+- In C#, a behaviour you can only test through a real disk, process or network means a seam is
+  missing: add the seam and unit-test against it. The browser-only behaviour the React standard
+  sends to Playwright (keyboard and focus behaviour, multi-view navigation) is the sanctioned
+  exception.
 
 ## Running tests in this repository
 
