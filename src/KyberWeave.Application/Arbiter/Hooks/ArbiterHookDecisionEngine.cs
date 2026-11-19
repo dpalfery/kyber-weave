@@ -516,7 +516,12 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             string note = string.IsNullOrWhiteSpace(outcome.Reason) ? AutonomousPlanNudge.Note : outcome.Reason + "\n\n" + AutonomousPlanNudge.Note;
             return outcome with { Kind = HookOutcomeKind.PostAnnotation, Reason = note };
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception) when (exception is IOException
+                                              or UnauthorizedAccessException
+                                              or (ArgumentException and not ArgumentNullException)
+                                              or InvalidDataException
+                                              or System.Text.Json.JsonException
+                                              or NotSupportedException)
         {
             context.Log.WriteLine($"Arbiter: the autonomous plan-approval note was not built ({exception.GetType().Name}: {OneLine(exception.Message)}).");
             return outcome;
