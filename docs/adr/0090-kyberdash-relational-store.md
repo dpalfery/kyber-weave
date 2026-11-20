@@ -148,9 +148,12 @@ re-ingested from harness files. The owner's store held 17 harness ids
 7. **The old database is deleted unread and history is re-ingested (OD-7, BL-1, DD-9, D14, D15).**
    Opening a store whose version predates 25 reads zero data rows, deletes
    `canon.db`, `-wal`, and `-shm` without copy or backup (tolerating absent
-   `-wal`/`-shm`), logs the path, old and new versions, settings reset, and
-   non-recoverable classes, then creates the fresh schema, stamps v25, resets
-   operator settings to defaults, and triggers full re-ingest via
+   `-wal`/`-shm`), emits the path, old and new versions, settings reset, and
+   non-recoverable classes through the injectable log action when one is
+   provided (defaulted in production composition), records the same detail on
+   `LastRebuildInfo` surfaced via doctor, then creates the fresh schema,
+   stamps v25, resets operator settings to defaults, and triggers full
+   re-ingest via
    `onRebuiltFromOlderSchema` / `TryTakePendingRebuildReingest()`. OTLP-only
    history with no harness file behind it is lost and that loss is accepted
    without a legacy copy (BL-1, RQ-7). The file-system and rebuild trigger go
