@@ -95,10 +95,13 @@ public class SessionProjectionTests
         Assert.Equal(80, unused.CostTokens);
         Assert.Equal(200, projection.Schema.Servers.Single(s => s.ServerName == "fs").Tokens);
 
-        Assert.NotNull(projection.TimelineSubagentSpanIds);
-        Assert.Empty(projection.TimelineSubagentSpanIds);
-        Assert.NotNull(projection.TimelineAuxiliarySpanIds);
-        Assert.Empty(projection.TimelineAuxiliarySpanIds);
+        // Both IProjectionStore implementations materialize the timeline mark lists as null
+        // when no mark rows exist, so a session with no subagent or auxiliary involvement reads
+        // back with null fields and zero typed timeline rows.
+        Assert.Null(projection.TimelineSubagentSpanIds);
+        Assert.Null(projection.TimelineAuxiliarySpanIds);
+        Assert.Equal(0, store.CountRows("session_timeline_subagent"));
+        Assert.Equal(0, store.CountRows("session_timeline_auxiliary"));
     }
 
     /// <summary>
