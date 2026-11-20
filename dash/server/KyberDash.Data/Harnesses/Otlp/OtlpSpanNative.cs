@@ -450,6 +450,25 @@ public record OtlpSpanNative(
         return false;
     }
 
+    /// <summary>
+    /// Returns whether <paramref name="native"/> carries Gemini attribution, either via
+    /// <c>gen_ai.system == "gemini"</c> or any <c>gemini.*</c> attribute key.
+    /// </summary>
+    /// <param name="native">Parsed OTLP span.</param>
+    /// <returns><see langword="true"/> when the span is Gemini-attributed and must be excluded.</returns>
+    public static bool IsGeminiAttributed(OtlpSpanNative native)
+    {
+        ArgumentNullException.ThrowIfNull(native);
+
+        string? system = FirstSafeString(native.Attributes, ["gen_ai.system"]);
+        if (string.Equals(system, "gemini", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return HasNamespace(native.Attributes, ["gemini"]);
+    }
+
     /// <summary>Returns whether <paramref name="attributes"/> contains at least one key in <paramref name="keys"/>.</summary>
     public static bool HasAnyKey(IReadOnlyDictionary<string, JsonElement> attributes, IReadOnlyList<string> keys)
     {
@@ -583,7 +602,13 @@ public record OtlpSpanNative(
         return null;
     }
 
-    private static bool TryTruncateToCounter(double value, out long result)
+    /// <summary>
+    /// Truncates <paramref name="value"/> toward zero when it fits in a 64-bit counter.
+    /// </summary>
+    /// <param name="value">Floating-point counter candidate.</param>
+    /// <param name="result">The truncated value when this method returns <see langword="true"/>.</param>
+    /// <returns><see langword="true"/> when <paramref name="value"/> is finite and in <see cref="long"/> range.</returns>
+    public static bool TryTruncateToCounter(double value, out long result)
     {
         const double UpperExclusive = 9223372036854775808d;
         const double LowerInclusive = -9223372036854775808d;
@@ -875,7 +900,13 @@ public record OtlpSpanNative(
         parts.Add(new ContentPart("tool_definitions", raw, Tokens: reported, Order: order++));
     }
 
-    private static string? ExtractToolServer(JsonElement tool)
+    /// <summary>
+    /// Extracts the MCP/server name from a tool definition entry by scanning
+    /// <see cref="ToolServerFields"/> for the first non-empty string property.
+    /// </summary>
+    /// <param name="tool">Tool definition entry.</param>
+    /// <returns>The server name, or <see langword="null"/> when absent.</returns>
+    public static string? ExtractToolServer(JsonElement tool)
     {
         if (tool.ValueKind != JsonValueKind.Object)
         {

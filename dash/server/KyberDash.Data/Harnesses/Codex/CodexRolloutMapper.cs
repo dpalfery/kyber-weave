@@ -963,18 +963,8 @@ public class CodexRolloutMapper : IHarnessMapper
         return false;
     }
 
-    private static string ResolveHarnessId(string? unitHarnessId)
-    {
-        if (string.IsNullOrWhiteSpace(unitHarnessId))
-        {
-            return TranscriptReaderRepository.CodexHarnessId;
-        }
-
-        string normalized = HarnessSourceRegistry.NormalizeHarnessId(unitHarnessId);
-        return string.Equals(normalized, "codex", StringComparison.Ordinal)
-            ? TranscriptReaderRepository.CodexHarnessId
-            : normalized;
-    }
+    private static string ResolveHarnessId(string? unitHarnessId) =>
+        HarnessJson.ResolveCodexHarnessId(unitHarnessId);
 
     private static string? NormalizeLocalShellStatus(string? status)
     {
@@ -1075,36 +1065,11 @@ public class CodexRolloutMapper : IHarnessMapper
     private static string FormatUtc(DateTimeOffset instant) =>
         instant.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
 
-    private static string? ReadCodexSystemPrompt(JsonElement payload)
-    {
-        string? direct = ReadString(payload, "system_prompt");
-        if (!string.IsNullOrEmpty(direct))
-        {
-            return direct;
-        }
+    private static string? ReadCodexSystemPrompt(JsonElement payload) =>
+        HarnessJson.ReadCodexSystemPrompt(payload);
 
-        if (payload.TryGetProperty("base_instructions", out JsonElement baseEl) && baseEl.ValueKind == JsonValueKind.Object)
-        {
-            return ReadString(baseEl, "text");
-        }
-
-        return null;
-    }
-
-    private static string? ReadCodexAgentsMd(JsonElement payload)
-    {
-        if (!payload.TryGetProperty("state", out JsonElement stateEl) || stateEl.ValueKind != JsonValueKind.Object)
-        {
-            return null;
-        }
-
-        if (!stateEl.TryGetProperty("agents_md", out JsonElement agentsEl) || agentsEl.ValueKind != JsonValueKind.Object)
-        {
-            return null;
-        }
-
-        return ReadString(agentsEl, "text");
-    }
+    private static string? ReadCodexAgentsMd(JsonElement payload) =>
+        HarnessJson.ReadCodexAgentsMd(payload);
 
     private static string? ReadCodexMessageText(JsonElement payload)
     {
@@ -1225,16 +1190,8 @@ public class CodexRolloutMapper : IHarnessMapper
         return null;
     }
 
-    private static string? ReadString(JsonElement obj, string key)
-    {
-        if (!obj.TryGetProperty(key, out JsonElement el) || el.ValueKind != JsonValueKind.String)
-        {
-            return null;
-        }
-
-        string? val = el.GetString();
-        return string.IsNullOrEmpty(val) ? null : val;
-    }
+    private static string? ReadString(JsonElement obj, string key) =>
+        HarnessJson.ReadString(obj, key);
 
     private static bool? ReadBool(JsonElement obj, string key)
     {

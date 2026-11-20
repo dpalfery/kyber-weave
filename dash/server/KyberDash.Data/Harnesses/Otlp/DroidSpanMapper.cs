@@ -87,18 +87,8 @@ public partial class DroidSpanMapper : OtlpSpanMapperBase
     /// </summary>
     /// <param name="native">Parsed OTLP span.</param>
     /// <returns><see langword="true"/> when the span is Gemini-attributed and must be excluded.</returns>
-    public static bool IsGeminiAttributed(OtlpSpanNative native)
-    {
-        ArgumentNullException.ThrowIfNull(native);
-
-        string? system = OtlpSpanNative.FirstSafeString(native.Attributes, ["gen_ai.system"]);
-        if (string.Equals(system, "gemini", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        return OtlpSpanNative.HasNamespace(native.Attributes, ["gemini"]);
-    }
+    public static bool IsGeminiAttributed(OtlpSpanNative native) =>
+        OtlpSpanNative.IsGeminiAttributed(native);
 
     private static RecordOp ResolveOp(OtlpSpanNative native)
     {

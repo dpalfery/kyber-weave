@@ -1449,25 +1449,8 @@ public partial class AntigravityTranscriptMapper : IHarnessMapper
         return server is not null && tool is not null ? (server, tool) : (null, null);
     }
 
-    private static string EnsureUniqueRecordId(HashSet<string> usedRecordIds, string candidate)
-    {
-        if (usedRecordIds.Add(candidate))
-        {
-            return candidate;
-        }
-
-        int suffix = 2;
-        while (true)
-        {
-            string indexed = string.Create(CultureInfo.InvariantCulture, $"{candidate}-{suffix}");
-            if (usedRecordIds.Add(indexed))
-            {
-                return indexed;
-            }
-
-            suffix++;
-        }
-    }
+    private static string EnsureUniqueRecordId(HashSet<string> usedRecordIds, string candidate) =>
+        HarnessJson.EnsureUniqueRecordId(usedRecordIds, candidate);
 
     private static bool TryReadSafeInteger(JsonElement obj, string propertyName, out long value)
     {
@@ -1505,16 +1488,8 @@ public partial class AntigravityTranscriptMapper : IHarnessMapper
         return el.GetString();
     }
 
-    private static string? SafeOptionalText(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        string trimmed = value.Trim();
-        return JsonDocumentText.IsDocument(trimmed) ? null : trimmed;
-    }
+    private static string? SafeOptionalText(string? value) =>
+        HarnessJson.SafeOptionalText(value);
 
     private static string SafeErrorMessage(string? content)
     {

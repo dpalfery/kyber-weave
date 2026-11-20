@@ -391,19 +391,8 @@ public static class CodexToolResultMapper
         return null;
     }
 
-    private static string? ReadNonEmptyString(IReadOnlyDictionary<string, JsonElement> attributes, string[] keys)
-    {
-        foreach (string key in keys)
-        {
-            string? value = ReadNonEmptyString(attributes, key);
-            if (value is not null)
-            {
-                return value;
-            }
-        }
-
-        return null;
-    }
+    private static string? ReadNonEmptyString(IReadOnlyDictionary<string, JsonElement> attributes, string[] keys) =>
+        OtlpSpanNative.FirstSafeString(attributes, keys);
 
     private static string? SafeOptionalText(string? value) =>
         string.IsNullOrWhiteSpace(value) || JsonDocumentText.IsDocument(value) ? null : value;

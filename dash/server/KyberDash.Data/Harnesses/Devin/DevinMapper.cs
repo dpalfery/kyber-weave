@@ -1110,30 +1110,11 @@ public partial class DevinMapper : IHarnessMapper
     private static bool IsPositiveNumber(double? value) =>
         value.HasValue && double.IsFinite(value.Value) && value.Value > 0;
 
-    private static string? FirstPresentString(params string?[] values)
-    {
-        foreach (string? value in values)
-        {
-            string? trimmed = value?.Trim();
-            if (!string.IsNullOrEmpty(trimmed))
-            {
-                return trimmed;
-            }
-        }
+    private static string? FirstPresentString(params string?[] values) =>
+        HarnessJson.FirstPresentString(values);
 
-        return null;
-    }
-
-    private static string? ReadOptionalString(JsonElement obj, string key)
-    {
-        if (!obj.TryGetProperty(key, out JsonElement el) || el.ValueKind != JsonValueKind.String)
-        {
-            return null;
-        }
-
-        string? value = el.GetString()?.Trim();
-        return string.IsNullOrEmpty(value) ? null : value;
-    }
+    private static string? ReadOptionalString(JsonElement obj, string key) =>
+        HarnessJson.ReadOptionalString(obj, key);
 
     private static string? ReadStringOnly(JsonElement obj, string key)
     {
@@ -1145,20 +1126,8 @@ public partial class DevinMapper : IHarnessMapper
         return el.GetString();
     }
 
-    private static double? ReadOptionalDouble(JsonElement obj, string key)
-    {
-        if (!obj.TryGetProperty(key, out JsonElement el) || el.ValueKind != JsonValueKind.Number)
-        {
-            return null;
-        }
-
-        if (el.TryGetDouble(out double value) && double.IsFinite(value))
-        {
-            return value;
-        }
-
-        return null;
-    }
+    private static double? ReadOptionalDouble(JsonElement obj, string key) =>
+        HarnessJson.ReadOptionalDouble(obj, key);
 
     private static string? SafeOptionalText(string? value)
     {

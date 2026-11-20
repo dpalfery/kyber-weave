@@ -207,6 +207,35 @@ public class KiloMapperTests
     }
 
     [Fact]
+    public void Map_SharedRuntimeWithholdsJsonDocumentTitle()
+    {
+        long t0 = T0.ToUnixTimeMilliseconds();
+        string export = """
+            {
+              "session_id": "sess-kilo-json-title",
+              "title": "{\"kind\": \"summary\"}",
+              "messages": [
+                {"id": "msg-a1", "session_id": "sess-kilo-json-title", "time_created": __KILO_TS_JT__, "data": {"role": "assistant", "modelID": "claude-opus-4-6", "tokens": {"input": 10, "output": 2}}}
+              ],
+              "parts": [
+                {"id": "part-a1", "message_id": "msg-a1", "time_created": __KILO_TS_JT__, "data": {"type": "text", "text": "hello"}}
+              ]
+            }
+            """
+            .Replace("__KILO_TS_JT__", t0.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
+        NativeSourceUnit unit = MakeNativeUnit(
+            "/fake-home/.local/share/kilo/kilo.db",
+            export,
+            KiloMapper.KiloSharedRuntimeHarnessId,
+            format: "kilo-sqlite",
+            parserId: "kilo-sqlite-reader");
+
+        CollectedBatch batch = new KiloMapper().Map(unit, BaselineUtc);
+
+        Assert.Null(Assert.Single(batch.Sessions).Title);
+    }
+
+    [Fact]
     public void Map_SharedRuntimeExtractsSkillsAndSubagentInvocations()
     {
         long t0 = T0.ToUnixTimeMilliseconds();

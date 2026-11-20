@@ -1264,16 +1264,8 @@ public class ClaudeTranscriptMapper : IHarnessMapper
         return false;
     }
 
-    private static bool TryReadInt(JsonElement obj, string key, out int value)
-    {
-        value = 0;
-        if (!obj.TryGetProperty(key, out JsonElement el) || el.ValueKind != JsonValueKind.Number)
-        {
-            return false;
-        }
-
-        return el.TryGetInt32(out value);
-    }
+    private static bool TryReadInt(JsonElement obj, string key, out int value) =>
+        HarnessJson.TryReadInt(obj, key, out value);
 
     private record UsageSnapshot(
         string? MessageId,

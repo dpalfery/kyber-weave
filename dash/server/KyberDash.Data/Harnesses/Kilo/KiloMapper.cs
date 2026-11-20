@@ -1634,7 +1634,7 @@ public class KiloMapper : IHarnessMapper
         new(0, MalformedLineCode, $"Skipping malformed Kilo payload: {detail}");
 
     private static string? SafeOptionalText(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value;
+        HarnessJson.SafeOptionalText(value);
 
     private static string FormatTimestamp(DateTimeOffset value) =>
         value.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
