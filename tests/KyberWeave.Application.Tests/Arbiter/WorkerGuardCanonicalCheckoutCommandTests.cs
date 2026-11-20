@@ -1,10 +1,6 @@
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Paths;
-using KyberWeave.Contracts.Repositories;
-using KyberWeave.Contracts.Services;
-using KyberWeave.Core.Arbiter.Stores;
-using KyberWeave.Core.Configuration;
 using KyberWeave.Core.RunStart;
 using KyberWeave.Data.RunStart;
 using KyberWeave.Tests.Fakes;
@@ -53,7 +49,7 @@ public sealed class WorkerGuardCanonicalCheckoutCommandTests
             isFileSystemCaseInsensitive: !_files.CaseSensitive);
         _checkout = new RunCheckoutGuard(
             _files,
-            new FileRunStateStore(_files, new UnusedBranches(), new FakePathResolver(_files), _environment),
+            new FileRunStateStore(_files, new FakeCheckedOutBranchReader(), new FakePathResolver(_files), _environment),
             _environment,
             new FakePathResolver(_files));
     }
@@ -342,7 +338,7 @@ public sealed class WorkerGuardCanonicalCheckoutCommandTests
     }
 
     private void StartRun() =>
-        new FileRunStateStore(_files, new UnusedBranches(), new FakePathResolver(_files), _environment).Write(
+        new FileRunStateStore(_files, new FakeCheckedOutBranchReader(), new FakePathResolver(_files), _environment).Write(
             _home,
             Branch,
             "origin/main",
@@ -390,41 +386,4 @@ public sealed class WorkerGuardCanonicalCheckoutCommandTests
         toolArgs = JsonSerializer.Serialize(new { path = Path.Combine(cwd, "src", "Job.cs") }),
     });
 
-    /// <summary>The run-record store reads this only for a record's live branch, which the guard reads from its git files instead.</summary>
-    private sealed class UnusedBranches : ICheckedOutBranchReader
-    {
-        public string? Read(string workingDirectory) => null;
-    }
-
-    private sealed class NoConfig : IHostConfigLoader
-    {
-        public HostConfigLoadResult TryLoad(string repoRoot) => new(false, null, null, "no project configuration");
-    }
-
-    private sealed class NoState : IArbiterStateFactory
-    {
-        public IArbiterLedger OpenLedger(string arbiterDirectory) => throw new NotSupportedException();
-
-        public IArbiterDecisionLog OpenDecisionLog(string arbiterDirectory) => throw new NotSupportedException();
-
-        public IArbiterRunStore OpenRunStore(string arbiterDirectory, ArbiterStoreOptions? options = null, TimeProvider? clock = null) =>
-            throw new NotSupportedException();
-    }
-
-    private sealed class NoBudgets : IWorkerBudgetStore
-    {
-        public void EnsureDirectory(string home) => throw new NotSupportedException();
-
-        public bool Exists(string home, string key) => false;
-
-        public string[] ReadLines(string home, string key) => [];
-
-        public void Delete(string home, string key) => throw new NotSupportedException();
-
-        public void TryCreate(string home, string key, string content) => throw new NotSupportedException();
-
-        public void Append(string home, string key, string content) => throw new NotSupportedException();
-
-        public void Sweep(string home, DateTimeOffset now, TimeSpan retention) => throw new NotSupportedException();
-    }
 }

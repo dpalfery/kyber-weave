@@ -356,7 +356,8 @@ facts, in two places:
   a variable such as `$WT`) and any other step do run in the working directory, so it is judged on that. A root
   agent (a person's own session) is never checked, and a project that sets `arbiter.enabled: false` is never
   refused. The guard reads only the run records and the checkout's git files, starts no process, and allows
-  anything it cannot read. A read through a view or grep tool carries no command and is never refused. A write a
+  anything it cannot read. A read through a grep tool carries no command, so this check never refuses one; a read
+  through a view or read tool is judged only by [the secret rule](#reading-a-secret-refusal). A write a
   command makes to a path it does not name is left to the return check below.
 - **On the return, everywhere returns are observed.** Before a dispatch to a specialist that writes files,
   the hook snapshots the canonical checkout; on the return it diffs it. Paths that changed are listed in the
@@ -367,6 +368,45 @@ facts, in two places:
   so its dispatch to a developer returns as `investigate.returned`, which the rule also covers.
 
 A run that branched in place works in the canonical checkout, so neither check applies to it.
+
+## Reading a secret refusal
+
+`KW-ARB-SECRET-001` stops a subagent's call that would put a secret into the transcript, which the model provider
+receives. It runs in the same worker-guard hook as the two rules above, on every Copilot CLI and Claude tool call
+from a Squad subagent, for every capability profile; a root agent is never checked, and `arbiter.enabled: false`
+turns it off with the rest of the Arbiter. It reads no file and starts no process: the call's own text decides it,
+and a command whose text it cannot read is refused rather than allowed. It refuses three things:
+
+- **Reading a secret file.** A shell command reads one with `cat`, `head`, `tail`, `less`, `more`, `type`,
+  `Get-Content`, `gc`, `bat`, `xxd`, `strings` or `base64`, by copying it with `cp` or `scp`, with `grep`, `rg`,
+  `egrep`, `fgrep`, `awk`, `sed`, `sort`, `uniq`, `od`, `hexdump`, `nl`, `jq`, `yq`, `openssl`, `diff`, `cut` or
+  `tr`, with `dd if=`, with PowerShell's `Select-String -Path`, by opening it from a one-line script, or with a
+  single `<` redirect (not a `<<` heredoc); the harness's own read tool (`view` on Copilot CLI, `Read` on Claude)
+  counts too. A secret file is one whose name holds `password`, `passwd`, `secret`, `credential`, `token`,
+  `apikey`, `api-key` or `api_key` when it has no extension or a configuration or data extension (`.txt`, `.json`,
+  `.yaml`, `.yml`, `.xml`, `.ini`, `.conf`, `.cfg`, `.config`, `.properties`, `.toml`, `.env`, `.secret`, `.pass`),
+  so a source or documentation file such as `TokenService.cs` or `secret-handling.md` is not refused for its name;
+  a `.env` file other than `.env.example`, `.env.sample` and `.env.template`; a file under
+  `~/.microsoft/usersecrets/`, `~/.ssh/` (except a `.pub` key, `known_hosts` and `config`),
+  `~/.aws/credentials`, `~/.azure/`, `~/.docker/config.json` or `~/.kube/config`, or one named
+  `~/.netrc`, `~/.git-credentials`, `~/.npmrc` or `~/.pypirc`; and any `*.pem`, `*.key`, `*.pfx` or `*.p12`.
+  Listing a directory or testing whether a file exists is allowed.
+- **Printing a secret from a store.** `dotnet user-secrets list`; `docker inspect` unless its `--format`/`-f`
+  template names no environment value; `env` or `printenv` with nothing to print, or `printenv` of a secret-named
+  variable; `echo`, `printf`, `Write-Output` or `Write-Host` of one; `Get-ChildItem env:`, `gci env:` or
+  `dir env:`; `security find-generic-password` or `find-internet-password` with `-w` or `-g`; `gh auth token`;
+  `az account get-access-token`; `kubectl get secret … -o yaml|json|jsonpath`; `cat /proc/*/environ`; and a Python
+  or Node one-liner that prints `os.environ` or `process.env`.
+- **Putting a literal secret on the command line.** A `NAME=value` (or `-e`/`--env` `NAME=value`) whose name says
+  it holds a secret and whose value is a literal rather than a reference; a `Password=` or `Pwd=` literal in a
+  connection string; `sqlcmd -P <literal>`; `mysql -p<literal>` or `--password=<literal>`;
+  `curl -u user:<literal>`; or `Authorization: Bearer <literal>`.
+
+The rule matches the whole command text, quotes and nested shell strings included, so `bash -c "cat …"`,
+`sh -c "…"` and `pwsh -Command "…"` escape nothing. A value passed by reference, as in
+`docker exec c sh -c 'SQLCMDPASSWORD="$MSSQL_SA_PASSWORD" sqlcmd …'`, is allowed, because the value never enters the
+transcript. The denial names the rule and the case, and tells the agent to let the tool read its own configuration
+or to pass the value by reference; a task that truly needs a secret ends `BLOCKED` with an `Open item:` line.
 
 ## Reading a budget stop
 

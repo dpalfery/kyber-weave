@@ -10,7 +10,8 @@ namespace KyberWeave.Arbiter.Hooks;
 /// The guard on a Squad subagent's own tool calls, from machine facts only. It refuses a write into, or a shell
 /// command that would run in, the repository's canonical checkout while a live run works in a worktree of its own
 /// (<c>KW-ARB-CHECKOUT-001</c>), ends a developer dispatch whose current turn has run past its budget of
-/// tool calls or minutes (<c>KW-ARB-BUDGET-001</c>), and refuses a read-only dispatch's command that the
+/// tool calls or minutes (<c>KW-ARB-BUDGET-001</c>), refuses a call that would put a secret into the transcript
+/// (<c>KW-ARB-SECRET-001</c>), and refuses a read-only dispatch's command that the
 /// declared technology folders' <c>worker.command</c> rules do not allow.
 /// </summary>
 /// <remarks>
@@ -18,9 +19,11 @@ namespace KyberWeave.Arbiter.Hooks;
 /// the checkout's git files and one append-only counter file per subagent are all it reads for the write, command
 /// and budget refusals. The command allow-list is the one place it reads the project's configuration and evaluates
 /// step 0, and only for a capability profile that may run commands and may not write files; there it also reads
-/// the ledger's dispatch headers, to learn the technology the read-only agent's dispatch named. A root agent (a
-/// person's own session, or the conductor) is never guarded, and neither is an agent outside the Squad
-/// catalog. Any error allows, and the log says why (ADR 0072).
+/// the ledger's dispatch headers, to learn the technology the read-only agent's dispatch named. The secret rule
+/// reads nothing: it decides from the call's own command text or read path, and applies to every capability profile.
+/// A root agent (a person's own session, or the conductor) is never guarded, and neither is an agent outside the
+/// Squad catalog. Any error allows, and the log says why (ADR 0072), except in the secret rule, which refuses a
+/// command whose text it cannot read.
 /// </remarks>
 /// <param name="budgets">The per-subagent budget files.</param>
 /// <param name="checkouts">Tells whether a write or a shell command lands in a canonical checkout while a run works elsewhere.</param>
@@ -43,6 +46,9 @@ public sealed class WorkerGuard(
 
     /// <summary>The rule id an exhausted budget is refused under.</summary>
     public const string BudgetRuleId = WorkerGuardRules.BudgetRuleId;
+
+    /// <summary>The rule id a call that would put a secret into the transcript is refused under.</summary>
+    public const string SecretRuleId = SecretRules.SecretRuleId;
 
     /// <summary>The status line a worker whose budget ran out returns.</summary>
     public const string BudgetExceededStatus = WorkerGuardRules.BudgetExceededStatus;
@@ -101,6 +107,7 @@ public sealed class WorkerGuard(
                                  seat ? seatBudgetLoader ?? LoadSeatBudget : budgetLoader ?? LoadBudget)
                              ?? WriteRefusal(call, home)
                              ?? ShellCheckoutRefusal(call, home)
+                             ?? SecretRefusal(call)
                              ?? CommandRefusal(call, home);
             if (reason is not null)
             {
@@ -150,6 +157,17 @@ public sealed class WorkerGuard(
 
         HostConfigLoadResult loaded = hostConfig.TryLoad(workingDirectory);
         return loaded.Success && loaded.Config?.Arbiter.ExplicitlyEnabled == false;
+    }
+
+    /// <summary>
+    /// The secret refusal, unless the project turns the Arbiter off: a call that would read, print or carry a secret
+    /// puts it into the transcript, which is sent to the model. The rule matches the call's whole text, so wrapping a
+    /// command in a shell escapes nothing, and it judges a read through the harness's own view tool by its path.
+    /// </summary>
+    private string? SecretRefusal(WorkerGuardRules.ToolCall call)
+    {
+        string? refusal = SecretRules.Refusal(call);
+        return refusal is not null && ArbiterTurnedOff(call.Cwd) ? null : refusal;
     }
 
     /// <summary>

@@ -42,13 +42,14 @@ internal static class WorkerGuardEventReader
 
             JsonObject? args = ArgumentsOf(root, "toolArgs");
             string? path = tool is "edit" or "create" && args is not null ? NodeText(args, "path") : null;
+            string? readPath = tool is "view" && args is not null ? NodeText(args, "path") : null;
             string? command = tool is "bash" or "powershell" && args is not null ? NodeText(args, "command") : null;
 
             // A read of a running shell's output waits on the process that shell started, so it is judged like the
             // command itself: a hung test shows up as a wait that never returns.
             bool startedProcess = tool is "bash" or "read_bash" or "powershell" or "read_powershell";
             return new WorkerGuardRules.ToolCall(
-                harness, agentId, agent, cwd, path, command, startedProcess, Text(root, "sessionId"));
+                harness, agentId, agent, cwd, path, command, startedProcess, Text(root, "sessionId"), readPath);
         }
 
         if (string.Equals(harness, ClaudeHarness, StringComparison.Ordinal))
@@ -70,12 +71,20 @@ internal static class WorkerGuardEventReader
                     "NotebookEdit" => NodeText(input, "notebook_path"),
                     _ => null,
                 };
+            string? readPath = input is null
+                ? null
+                : tool switch
+                {
+                    "Read" => NodeText(input, "file_path"),
+                    "NotebookRead" => NodeText(input, "notebook_path"),
+                    _ => null,
+                };
             string? command = tool is "Bash" && input is not null ? NodeText(input, "command") : null;
 
             // BashOutput waits on a shell that is still running, so it is judged like the Bash call that started it.
             bool startedProcess = tool is "Bash" or "BashOutput";
             return new WorkerGuardRules.ToolCall(
-                harness, agentId, agent, cwd, path, command, startedProcess, Text(root, "session_id"));
+                harness, agentId, agent, cwd, path, command, startedProcess, Text(root, "session_id"), readPath);
         }
 
         return null;

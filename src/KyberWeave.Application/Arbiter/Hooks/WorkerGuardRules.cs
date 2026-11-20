@@ -113,6 +113,7 @@ internal static class WorkerGuardRules
             ToolCall? call = WorkerGuardEventReader.Read(harness, stdin);
             return call is not null
                 && (call.WritePath is not null
+                    || call.ReadPath is not null
                     || call.Command is not null
                     || IsCommandJudged(call)
                     || string.Equals(call.Agent.CapabilityProfile, SeatProfile, StringComparison.Ordinal)
@@ -914,7 +915,8 @@ internal static class WorkerGuardRules
     /// <summary>
     /// One guarded tool call. <paramref name="Command"/> is the shell command the call carries, which other rules
     /// match on; <paramref name="StartedProcess"/> is true for a call that runs a process or waits on a running one,
-    /// which is what the per-call limit is judged on.
+    /// which is what the per-call limit is judged on. <paramref name="ReadPath"/> is the path a harness's own read or
+    /// view tool names, which the secret rule judges like a file a command would read.
     /// </summary>
     internal sealed record ToolCall(
         string Harness,
@@ -924,5 +926,6 @@ internal static class WorkerGuardRules
         string? WritePath,
         string? Command,
         bool StartedProcess,
-        string? SessionId = null);
+        string? SessionId = null,
+        string? ReadPath = null);
 }
