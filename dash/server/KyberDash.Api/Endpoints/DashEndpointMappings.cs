@@ -54,6 +54,7 @@ public static class DashEndpointMappings
         kyber.MapGet("/session/{id}/turn/{index}", TurnFiguresAsync);
         kyber.MapGet("/session/{id}/turn/{index}/content", TurnContentAsync);
         kyber.MapGet("/span/{id}/attributes", SpanAttributesAsync);
+        kyber.MapGet("/session/{sessionKey}/stored-fields", StoredFieldsAsync);
 
         kyber.MapGet("/compare", CompareAsync);
         kyber.MapGet("/compare/runs", CompareRunsAsync);
@@ -264,6 +265,14 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(query);
         return await Task.Run<IResult>(
             () => DashHttp.FromNullableJson(query.GetSpanAttributes(id), "Span not found"),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> StoredFieldsAsync(string sessionKey, IDashboardQueryService query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        return await Task.Run<IResult>(
+            () => DashHttp.FromNullableJson(query.GetStoredFields(sessionKey), "Session not found"),
             cancellationToken).ConfigureAwait(false);
     }
 

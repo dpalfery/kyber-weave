@@ -1158,6 +1158,21 @@ public class KyberBridgeEngine
     /// <returns>Model catalog snapshot payload.</returns>
     public JsonElement GetModelCatalog() => pricing.GetModelCatalogSnapshot();
 
+    /// <summary>Returns the catalog-driven stored-fields view for a session, or <see langword="null"/> if missing.</summary>
+    /// <param name="sessionKey">Canonical session identifier.</param>
+    /// <returns>Stored-fields JSON element, or <see langword="null"/>.</returns>
+    public JsonElement? GetStoredFields(string sessionKey)
+    {
+        EnsureProjected();
+        if (reader.GetSession(sessionKey) is null)
+        {
+            return null;
+        }
+
+        StoredFieldsView view = reader.StoredFields(sessionKey);
+        return JsonSerializer.SerializeToElement(view, CamelCaseJsonOptions);
+    }
+
     /// <summary>Executes an <c>/api/kyber/analytics/*</c> operation returning the versioned <c>AnalyticsEnvelope</c>.</summary>
     /// <param name="operation">Operation name.</param>
     /// <param name="request">Optional request payload.</param>
