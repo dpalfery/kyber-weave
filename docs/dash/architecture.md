@@ -99,6 +99,19 @@ code-refs:
   - AnalyzeContext
   - DetectFindings
   - RefreshHarnessSources
+  - RelationalSchemaCatalog
+  - SchemaDdlGenerator
+  - LegacyTableReplacementMap
+  - SqliteRelationalStore
+  - IRelationalStoreReader
+  - IRelationalStoreWriter
+  - IProjectionStore
+  - IOperationalStore
+  - CollectedBatch
+  - HarnessSourceRegistry
+  - IHarnessSourceReader
+  - IHarnessMapper
+  - StoredFieldsView
 ---
 
 # KyberDash architecture
@@ -1081,7 +1094,125 @@ it is in
 
 Session projection (`CanonSessionProjectorEngine.ProjectIncremental`) collapses duplicate twin turns per session and writes normalized `session` and compressed `session_turn` rows.
 
+## Relational store and schema catalog (schema 25)
+
+The live store is the normalized relational schema, not the legacy `CanonSchema` document tables.
+`RelationalSchemaCatalog` (`dash/server/KyberDash.Domain/Schema/RelationalSchemaCatalog.cs`) is the
+single static source of every table, column, key, foreign key, check, and index;
+`SchemaDdlGenerator` emits the deterministic `CREATE TABLE` DDL from it, and the stored-fields
+view and catalog tests read it directly. `SqliteRelationalStore`
+(`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore*.cs`) implements all four store
+seams — `IRelationalStoreWriter`, `IRelationalStoreReader`, `IProjectionStore`,
+`IOperationalStore` — against `canon.db` (`CanonDbPath.Resolve`) through bounded `ProcessRunner`
+calls to the system `sqlite3` CLI, stamped at `SchemaVersion = 25`.
+
+```mermaid
+flowchart LR
+    CAT["RelationalSchemaCatalog<br/>single static source"]
+    DDL["SchemaDdlGenerator<br/>deterministic DDL"]
+    COL["Collector DTOs<br/>CollectedBatch"]
+    W["IRelationalStoreWriter<br/>WriteBatch"]
+    DB[("canon.db<br/>schema 25")]
+    R["IRelationalStoreReader<br/>read-time aggregates"]
+    P["IProjectionStore<br/>sessions / runs / findings"]
+    O["IOperationalStore<br/>settings / quarantine / problems"]
+    CAT --> DDL --> DB
+    COL --> W --> DB
+    DB --> R
+    DB --> P
+    DB --> O
+```
+
+Catalog rules, enforced by `RelationalSchemaCatalogTests`:
+
+- Every column is `NOT NULL` and typed only `INTEGER`, `REAL`, or `TEXT` (booleans are
+  `INTEGER CHECK (x IN (0, 1))`, timestamps are ISO-8601 UTC `TEXT`, enums are `TEXT CHECK`).
+  There are no `BLOB`, `*_json`, `payload`, `raw`, or EAV columns.
+- Optional values live in 0..1 child tables keyed to the parent: a missing row means
+  "not reported", never `""`, `0`, `NULL`, or a status flag.
+- Every foreign key is `ON DELETE CASCADE`. Ordered multi-item children carry a non-null
+  `position` (`IsRepeatedItem`); non-repeated composite keys are allow-listed instead.
+- Projection tables store only non-derivable outputs. Turn counts, token totals, durations,
+  models, costs, cache ratios, tool counts, coverage, problems, and reconciliation are computed
+  at read time (DD-13) via `IRelationalStoreReader.GetSessionAggregate`,
+  `ListSessionAggregates`, and `SessionTurnSummaries`, never stored.
+- Mutually exclusive verdicts use exclusive pairs: `session_context` vs
+  `session_context_unmeasurable`, `session_schema` vs `session_schema_unmeasurable`, and
+  `content_part_text` vs `content_part_withheld`.
+- `LegacyTableReplacementMap`
+  (`dash/server/KyberDash.Domain/Schema/LegacyTableReplacementMap.cs`) maps all 22 v24
+  `CanonSchema` tables to typed replacement tables or documented removals (OTLP raw log tables
+  removed, priced cost read at read time, measurability maps dropped).
+
+Transitional state: `CanonSchema.cs` and `CanonStoreRepository*.cs` are still registered in
+`AddDashDataServices` alongside `SqliteRelationalStore`, but the live read path
+(`KyberBridgeEngine`, projection, rollups, refresh) runs on the relational seams above.
+
+## Collector boundary and mapping pipeline
+
+Harness formats never reach SQLite directly. They are normalized into static collector DTOs
+(`CollectedTypes.cs` in `dash/server/KyberDash.Domain/Collector/`, kept under
+`namespace KyberDash.Data.Collector` so `KyberDash.Contracts` can reference them without
+depending on `KyberDash.Data`):
+
+- Enums `RecordOp` (`llm.invoke` / `tool.invoke` / `agent.invoke` / `unspecified`),
+  `RecordKind`, `RecordStatus`, `TokenClass`, `SourceKind` (`file` / `otlp`), and
+  `ContentBucket` map 1:1 to `record` / `record_token_count` / `source` / `content_part` columns.
+- `CollectedSource(HarnessId, Kind, Locator)` feeds `source`;
+  `CollectedSession(SessionKey, HarnessId, NativeSessionId, Workspace, Title, ReportedUsage)`
+  feeds `session` plus `session_title` / `session_workspace` / `session_repository` /
+  `session_branch` / `session_model_usage`; `CollectedRecord` fans out to `record` and its
+  `record_*`, `content_part*`, `tool_definition*`, `tool_call*`, and `agent_invocation*`
+  children; `CollectedProblem` feeds `ingest_problem` and its optional child tables.
+
+The pipeline seam lives in `dash/server/KyberDash.Data/Collector/Sources/`:
+`IHarnessSourceReader` discovers native units over the `IHarnessFileSystem` seam (symlink-safe,
+test-scriptable), `IHarnessMapper` maps one `NativeSourceUnit` to one `CollectedBatch` without
+touching the filesystem or clock, and `HarnessSourceRegistry` owns registration — BL-2 harness
+coverage, `CanonPricing.NormalizeHarnessName` alias folding (`claude-desktop -> claude-code`,
+`cursor-agent -> cursor`), the `antigravity-cli` statusline cache, BL-3 exclusions (`windsurf`,
+`aider`), and the `SOURCE_FORMAT_UNEVIDENCED` verdict for `zcode` and other unevidenced formats.
+`IRelationalStoreWriter.WriteBatch` persists one batch (`source`, `session`, `record`,
+`ingest_problem` rows and children) atomically; `DeleteSource` cascades by `ON DELETE CASCADE`;
+`WriteProblem` persists a single diagnostic.
+
+## Analytics read path, error envelope, and stored-fields surface
+
+`KyberBridgeEngine` (`dash/server/KyberDash.Application/KyberBridgeEngine.cs`) reads only the
+relational seams: session aggregates and records from `IRelationalStoreReader`, runs,
+executions, harness rollups, findings, and predictions from `IProjectionStore`, and settings,
+quarantine, problems, and audit rows from `IOperationalStore`, with published pricing supplied
+as the read-time `IModelPricingLookup`. A session whose read fails is isolated: the answer
+carries `projection_status = "PROJECTION_FAILED"` while the remaining sessions answer normally,
+and the fault is surfaced through `GetCoverage`. Harness-reported and read-time published costs
+stay separate (`cost_reported` vs `cost`, plus a `cost_basis_mismatch` verdict) and are never
+blended.
+
+Analytics computation stays in the shared engine service (`ExecuteAnalytics`); the HTTP routes
+under `/api/kyber/analytics/*` and the MCP stdio adapter (`McpStdioHost`, eight additive
+loopback routes) share the same schemas, results, and errors. The MCP adapter never opens
+SQLite and never derives a domain figure. The versioned envelope (`contractVersion: 1`) carries
+`scope`, `data` (a measured empty result is distinct from unavailable data), `measurement`,
+`coverage`, `freshness` (engine instance and store/projection generation — request time is
+never substituted), `evidence`, `pagination`, and `error` (stable code, safe message, hint —
+never raw DB payloads). Status follows the envelope error: 200 when `error` is null; 400 for
+`invalid_request` / `unsupported_query`; 404 for `not_found`; 409 for `stale_cursor`; 413 for
+`budget_exceeded`; 503 for `ANALYTICS_STORE_UNAVAILABLE` / `incompatible_engine` / `cancelled`;
+500 for `internal_error`. Operations are `status`, `catalog`, `query`, `search-sessions`,
+`inspect`, `findings`, `compare`, and `outcomes`.
+
+The stored-fields inspection surface is `GET /api/kyber/session/{sessionKey}/stored-fields`
+(never `/api/sessions/...`), mapped in `DashEndpointMappings.StoredFieldsAsync` and served via
+`IDashboardQueryService.GetStoredFields` from `KyberBridgeEngine.GetStoredFields`. The reader
+implementation (`SqliteRelationalStore.Reader.StoredFields`) walks `RelationalSchemaCatalog`
+in catalog order and returns a `StoredFieldsView(SessionKey, Tables)` of `StoredTableFields`
+entries (`tableName`, `columnNames`, `rows`, `missingParentKeys`). Every reachable catalog
+column is labeled `table.column`; a parent key with no row in an optional child table is listed
+in `missingParentKeys` and rendered as "not reported" (never `0` or `""`). An unknown session
+answers HTTP 404.
+
 ## Normalization layer
+
 
 ```mermaid
 flowchart LR
@@ -2191,6 +2322,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridgeEngine`:
 | `/api/kyber/session/:id/turn/:index` | `GET` | Bounded per-turn figures | One turn's figures served from a single `session_turn` row — 404 for an unknown turn under the strict 0-based identity lookup. The turn page's counters query reads kilobytes here instead of the whole payload (up to 10,933 turns) it once fetched for one row's counters. |
 | `/api/kyber/timeline` | `GET` | Session timeline | The stored session `timeline` served from the payload directly, without reassembling the whole session payload; the shape the client already parses is unchanged. |
 | `/api/kyber/session/:id/content` | `GET` | `SessionContent` | Full canonical content for an inspected session part. |
+| `/api/kyber/session/{sessionKey}/stored-fields` | `GET` | `StoredFieldsView` (`sessionKey`, `tables[]` of `{ tableName, columnNames, rows, missingParentKeys }`) | Catalog-driven inspection of every applicable `RelationalSchemaCatalog` table for one session: every reachable column labeled `table.column`, absent optional rows listed in `missingParentKeys` as not reported (never `0` or `""`); 404 when the session is unknown; never `/api/sessions/...`. Served by `DashEndpointMappings.StoredFieldsAsync` via `IDashboardQueryService.GetStoredFields` from `KyberBridgeEngine.GetStoredFields` over `IRelationalStoreReader.StoredFields` ([analytics read path, error envelope, and stored-fields surface](#analytics-read-path-error-envelope-and-stored-fields-surface)). |
 | `/api/kyber/session/:id/turn/:index/content` | `GET` | `TurnContentResult` | Full unclipped assembled context for a specific turn ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)). Uses 0-based `:index`; strict resolution returns 404 for out-of-bounds turn indices, and 200 with empty parts when the turn exists but recorded no content. `?full=true` is the explicit lossless path — no default-budget truncation, no large-number sentinel — backing the whole-turn inspector; each part annotates recurrence against earlier captured turns by whole-text sha256 with no normalization, and `sharedContext` unions turn-span system prompts with non-turn session prompts, each tagged with its contributing `turnIndex` ([ordered, API-seen turn context](#ordered-api-seen-turn-context)). Additively carries `parentSpanId` and `rawPacket: { spanAttributesPath, interactionPath? }` — the packet pointers the turn view discloses; `interactionPath` is present only when the parent's quarantine row kept a payload ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). Additively carries a `skills` entry, `{listed: [{name, text?}], invoked: [names]}`, where either side or the whole entry may be `{availability: 'not_measurable', reason}` ([skills view contract](#skills-view-contract)). |
 | `/api/kyber/findings` | `GET` | `{ findings: Finding[], total, limit, offset, detectorCounts, unknownWindowSessions }` | Ranked findings; supports `?runId=`, `?sessionId=`, `?harness=`, `?detector=`, `?limit=`, `?offset=`. `total` describes the narrowed set; `detectorCounts` cover the run/session/harness scope ignoring paging and the detector filter so filter chips never evaporate; `unknownWindowSessions` counts sessions with an unreported context window in scope. |
 | `/api/kyber/finding/:id` | `GET` | `Finding` | Single finding detail with evidence rows and risk caveats. |
