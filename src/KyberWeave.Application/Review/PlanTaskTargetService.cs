@@ -13,7 +13,7 @@ namespace KyberWeave.Application.Review;
 
 /// <summary>
 /// Finds a task by the id a worker typed, and what its tests are, over the plans in flight first and then the
-/// checkout's other plans.
+/// checkout's plans still in review.
 /// </summary>
 /// <param name="tasks">Reads the checkout's plans and their task files.</param>
 /// <param name="taskGates">Checks a path the way the task gate will take it.</param>
@@ -43,10 +43,11 @@ public sealed partial class PlanTaskTargetService(
             return null;
         }
 
-        // The plan in flight first, then every other plan in this checkout: a review rework re-runs its task gate
-        // after the plan has moved into review, and the task's technology and files still come from its task file.
+        // The plan in flight first, then the plans still in review in this checkout: a review rework re-runs its task
+        // gate after the plan has moved into review, and the task's technology and files still come from its task file.
+        // A closed-out plan is left out, so its task with the same id cannot supply them instead.
         IReadOnlyList<string> plans =
-            [.. active, .. tasks.Plans(root, config).Where(plan => !active.Contains(plan, StringComparer.Ordinal))];
+            [.. active, .. tasks.ReviewPlans(root, config).Where(plan => !active.Contains(plan, StringComparer.Ordinal))];
 
         string? unusable = null;
         foreach (string plan in plans)

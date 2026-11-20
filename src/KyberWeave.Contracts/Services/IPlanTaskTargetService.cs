@@ -11,8 +11,8 @@ namespace KyberWeave.Contracts.Services;
 public interface IPlanTaskTargetService
 {
     /// <summary>
-    /// The task in this checkout's plans — the one in flight first, then the ones in review or closed out — or in
-    /// another worktree's active plan, or null with the reason when there is not exactly one match.
+    /// The task in this checkout's plans — the one in flight first, then the ones still in review — or in another
+    /// worktree's active plan, or null with the reason when there is not exactly one match.
     /// </summary>
     /// <param name="root">The repository root.</param>
     /// <param name="config">The effective configuration.</param>
