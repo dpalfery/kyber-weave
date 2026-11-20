@@ -181,7 +181,7 @@ apply, which the changed-file list already showed.
 12. **The verdict names the fix round; the loop runs until the review is clean.** `review verdict`
     prints `fix:` lines (failed blocking gates, and every critical, major and minor finding),
     `follow-up:` lines (findings the policy leaves out, and findings the reviewer dropped as
-    `pre-existing debt`) and a closing `fix round:` line (`KW-REVIEW-056`), and the conductor
+    `pre-existing debt` or `pr note`) and a closing `fix round:` line (`KW-REVIEW-056`), and the conductor
     dispatches from them, one dispatch per owning worker carrying all of its lines. APPROVE means not
     blocked, not nothing to do: any `fix:` line gets a fix round and then a narrow verifier cycle, and
     this repeats until a cycle prints none (`review clean: proceed to archive`) or a cap stops it,
