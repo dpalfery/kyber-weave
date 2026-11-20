@@ -144,8 +144,8 @@ internal static class WorkerGuardRules
     /// <param name="runWorktree">The worktree the live run works in.</param>
     internal static string StrayCommandRefusal(string canonicalCheckout, string runWorktree) =>
         $"{CheckoutRuleId}: this command would run in the repository's canonical checkout {canonicalCheckout} while " +
-        $"your run works in {runWorktree}. Run it in the run worktree instead; the canonical checkout stays " +
-        "untouched for the whole run.";
+        $"your run works in {runWorktree}. Start the command with `cd {runWorktree} && ` so every step runs in " +
+        "the run worktree; the canonical checkout stays untouched for the whole run.";
 
     /// <summary>
     /// The directories a command moves into before it acts: every <c>cd</c> or <c>pushd</c> argument and every
