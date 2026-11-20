@@ -20,8 +20,8 @@ namespace KyberWeave.Core.Arbiter;
 /// comma must not hide a hook the file declares. OpenCode keeps the plugin shim at
 /// <c>.opencode/plugins/kyber-arbiter.ts</c> and Pi at <c>.pi/extensions/kyber-arbiter.ts</c>. Every other
 /// harness reports true, which keeps today's deferral. A missing or malformed file is not a project hook.
-/// A file that is present but cannot be read throws, so the hook host logs that failure instead of treating
-/// the file as absent.
+/// A file that is present but cannot be read throws. The hook host logs that failure and still inserts the
+/// task prompt, because it could not prove a project hook and a bare allow would leave only the header lines.
 /// </remarks>
 /// <param name="files">The file system the project hook files are read through.</param>
 public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispatchHookProbe

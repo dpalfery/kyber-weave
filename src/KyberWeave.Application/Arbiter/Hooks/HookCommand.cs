@@ -160,7 +160,27 @@ public sealed class HookCommand : IArbiterHookHost
                 {
                     if (!string.Equals(adapter.HarnessToken, ClaudeHookAdapter.Token, StringComparison.Ordinal))
                     {
-                        if (_projectHooks.CoversHarness(repoRoot, adapter.HarnessToken))
+                        bool projectHookCovers;
+                        try
+                        {
+                            projectHookCovers = _projectHooks.CoversHarness(repoRoot, adapter.HarnessToken);
+                        }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+                        {
+                            // A present file that cannot be read is not "no hook", and it must not become a bare
+                            // allow: the worker would keep only the header lines. Log the failure and insert.
+                            log.WriteLine(
+                                $"Arbiter global scope: project {adapter.HarnessToken} hook file could not be read " +
+                                $"({OneLine(ex.Message)}); inserting the task prompt without evaluation.");
+                            return AllowWithoutEvaluation(
+                                adapter,
+                                payload,
+                                caller,
+                                NewContext(adapter, repoRoot, runContext, home, HookScope.Project, projectConfig, log),
+                                stdout);
+                        }
+
+                        if (projectHookCovers)
                         {
                             log.WriteLine(
                                 $"Arbiter global scope: deferred-to-project ({adapter.HarnessToken}: no per-dispatch probe; " +

@@ -46,6 +46,25 @@ public sealed class ArbiterGlobalHookInsertionTests
     }
 
     [Fact]
+    public void GlobalScope_WhenTheProjectHookFileCannotBeRead_InsertsAndLogsTheFailure()
+    {
+        using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
+        scenario.ProjectHooks.Answer = (_, _) => throw new UnauthorizedAccessException("denied");
+        string payload = AntigravityDispatch(scenario.ProjectRoot, TaskDispatch);
+
+        HookRun run = RunGlobal(scenario.Project, "antigravity", payload, new ScriptedPrompts());
+
+        Assert.Equal(0, run.Exit);
+        Assert.Contains("could not be read (denied)", run.Stderr, StringComparison.Ordinal);
+        Assert.DoesNotContain("KW-ARB-HOOK-001", run.Stderr, StringComparison.Ordinal);
+        using JsonDocument document = JsonDocument.Parse(run.Stdout);
+        Assert.StartsWith(
+            TaskPrompt,
+            document.RootElement.GetProperty("overwrite").GetProperty("Prompt").GetString(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void GlobalScope_AntigravityWithAProjectHook_DefersAndWritesThePlainAllow()
     {
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
