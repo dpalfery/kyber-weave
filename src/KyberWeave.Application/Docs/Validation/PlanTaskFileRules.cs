@@ -74,6 +74,13 @@ public static partial class PlanTaskFileRules
     /// </summary>
     public const string RetiredTechnologyRoster = "KW-DOC-TASKS-019";
 
+    /// <summary>
+    /// Error: the decision model, judging by the shipped rubric, put a task in a different tier from the rating the
+    /// architect wrote, and no Decisions row answers the disagreement. The plan goes back to the architect to
+    /// re-rate the task or to keep the rating and say why.
+    /// </summary>
+    public const string DifficultyDisagreed = "KW-DOC-TASKS-020";
+
     /// <summary>The three legal difficulty values, in order.</summary>
     public static IReadOnlyList<string> Difficulties { get; } = ["easy", "medium", "hard"];
 

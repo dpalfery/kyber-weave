@@ -1549,7 +1549,7 @@ return `STATUS: TOOL_FAILURE`, and this one cannot, so a failure can be diagnose
 The conductor's dispatch question: for this task, which agent do I dispatch, and is its prompt
 whole? It builds the same prompt `kyber-weave docs packet <task id>` prints, through the same
 service, and answers with the facts the dispatch needs and **never the prompt text**: the agent,
-the difficulty in use and who rated it (`architect`, `default` or `decision-model`), the one
+the difficulty in use and who rated it (`architect` or `default`), the one
 technology the task names, what the prompt budget left out, the harness in use, and the prompt
 file's path when this harness gets a file. The prompt reaches the worker through the dispatch hook,
 which replaces the dispatch's header block before the worker starts, so the conductor never reads

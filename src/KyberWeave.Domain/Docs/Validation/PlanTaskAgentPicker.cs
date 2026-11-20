@@ -1,15 +1,28 @@
 namespace KyberWeave.Core.Docs.Validation;
 
-/// <summary>One task's agent pick and difficulty rating: what the model chose and how sure it was.</summary>
+/// <summary>One task's agent pick and difficulty check: what the model chose and how sure it was.</summary>
 /// <param name="Agent">The chosen agent's name.</param>
 /// <param name="Confidence">The model's confidence, at or above the confidence floor of the picker.</param>
-/// <param name="Difficulty">
-/// The rating the model chose: <c>easy</c>, <c>medium</c> or <c>hard</c>, with the shipped rule's
-/// <c>standard</c> answer mapped to <c>medium</c>. Null when the rating did not clear the floor.
+/// <param name="DifficultyCheck">
+/// The decision model's answer to whether the architect's rating fits the rubric; null when the answer did
+/// not clear the floor, the model gave none, or the rubric could not be read.
 /// </param>
-/// <param name="DifficultyConfidence">The model's confidence in <paramref name="Difficulty"/>; null when there is none.</param>
 public sealed record PlanTaskAgentChoice(
     string Agent,
     double Confidence,
-    string? Difficulty = null,
-    double? DifficultyConfidence = null);
+    DifficultyAgreement? DifficultyCheck = null);
+
+/// <summary>The decision model's answer to the difficulty agreement question.</summary>
+/// <param name="Answer">Either <c>agreed</c> or <c>not-agreed</c>.</param>
+/// <param name="Confidence">The model's confidence in <paramref name="Answer"/>, at or above the picker's floor.</param>
+public sealed record DifficultyAgreement(string Answer, double Confidence)
+{
+    /// <summary>The answer that keeps the architect's rating.</summary>
+    public const string Agreed = "agreed";
+
+    /// <summary>The answer that sends the plan back to the architect to rate the task again.</summary>
+    public const string NotAgreed = "not-agreed";
+
+    /// <summary>Whether the model agreed with the architect's rating.</summary>
+    public bool IsAgreed => string.Equals(Answer, Agreed, StringComparison.Ordinal);
+}

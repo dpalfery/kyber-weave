@@ -76,8 +76,8 @@ public sealed record PlanTaskFile(
 /// difficulty is written as <c>medium</c>.
 /// </param>
 /// <param name="DifficultySource">
-/// Who rated the task: <c>architect</c> when the plan carries a <c>Difficulty:</c> line,
-/// <c>default</c> when it carries none, and <c>decision-model</c> when the model's answer replaced it.
+/// Who rated the task: <c>architect</c> when the plan carries a <c>Difficulty:</c> line, or <c>default</c> when it
+/// carries none. The decision model checks this rating but never changes it.
 /// </param>
 /// <param name="Technology">
 /// The one technology the task is written in, from its <c>Technology:</c> line; null when the task

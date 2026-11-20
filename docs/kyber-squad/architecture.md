@@ -1854,12 +1854,17 @@ New data files use the `.yml` extension, as every YAML file in the repository do
   Rust also receives the parent's rules and skills. A change that spans two unrelated technologies —
   an endpoint and its database migration — is written as two tasks with a dependency between them,
   so plans carry more, smaller tasks than they did before. The task file entry records `difficulty`,
-  `difficulty-source` (`architect`, `default` or `decision-model`) and `technology`. When the task
-  file is written with a decision model configured, the same request that picks the agent asks
-  `KW-ARB-DIFFICULTY-001`; an answer at 0.8 or more replaces the architect's rating, and its
-  `standard` answer becomes `medium`
+  `difficulty-source` (`architect` or `default`) and `technology`. When the task file is written with
+  a decision model configured, the same request that picks the agent asks whether the architect's
+  rating fits the task by the rubric in `products/kyber-squad/shared/difficulty-rubric.md`; the model
+  never changes the rating. An `agreed` answer at 0.8 or more, a lower answer, a provider fault or no
+  model leaves it exactly as the architect wrote it. A `not-agreed` answer at 0.8 or more is
+  `KW-DOC-TASKS-020`, which sends the plan back to the architect to re-rate the task or to keep the
+  rating and add a Decisions row `<task id> difficulty` that says why; that row stops the finding
+  being raised again
   ([ADR 0085](../adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md)).
-  No gate judges whether the rating is right.
+  The dispatch-time rule `KW-ARB-DIFFICULTY-001` is unchanged: it still reads the rating in use and
+  never rates the task.
 - **The conductor chooses the agent.** A plan task names the capabilities its work needs in plain
   words, never an agent or a skill, so a new agent needs no change to the architect. The finalize
   tool's ready queue shows each task's capabilities and its `agent=` pick, and the conductor
@@ -2582,14 +2587,14 @@ flowchart TD
     D --> Done
 ```
 
-A wrong rating therefore costs one attempt and corrects itself; nothing validates whether a rating is
-right.
+A wrong rating costs one attempt and corrects itself; the one check on it is the decision model's
+answer when the task file is written (`KW-DOC-TASKS-020`), and that check never changes the rating.
 
 The conductor does not choose the tier itself. It calls
 `docs_build_task_prompt_for_agent_dispatch` with the task id and the failed-attempt count, and
 dispatches the agent the reply names. The tool and the dispatch hook build the prompt through the
 same service, so the agent, the tier and the prompt cannot disagree. Its reply gives the agent, the
-difficulty in use and its source (`architect`, `default` or `decision-model`), the technology,
+difficulty in use and its source (`architect` or `default`), the technology,
 anything the prompt budget left out, and the prompt file's path on a harness whose hook cannot
 rewrite the dispatch; it never returns the prompt text.
 

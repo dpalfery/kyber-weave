@@ -26,6 +26,9 @@ public enum PlanTaskFileMode
 /// <param name="TaskCount">How many tasks the derived file carries.</param>
 /// <param name="Wrote">True when this run changed the file on disk.</param>
 /// <param name="File">The derived file; null when none was derived.</param>
+/// <param name="DifficultyChecks">
+/// One line per task on a write: what the decision model made of the architect's rating, or that it was not checked.
+/// </param>
 public sealed record PlanTaskFileOutcome(
     DiagnosticReport Report,
     string TaskFilePath,
@@ -33,4 +36,5 @@ public sealed record PlanTaskFileOutcome(
     string? ExecutionDigest,
     int TaskCount,
     bool Wrote,
-    PlanTaskFile? File = null);
+    PlanTaskFile? File = null,
+    IReadOnlyList<string>? DifficultyChecks = null);
