@@ -56,12 +56,10 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<IOperationalStore>(),
             provider.GetRequiredService<IPricingRepository>()));
 
-        services.TryAddSingleton(provider =>
-        {
-            ICanonStoreRepository store = provider.GetRequiredService<ICanonStoreRepository>();
-            IPricingRepository pricing = provider.GetRequiredService<IPricingRepository>();
-            return new CanonRollupsEngine(store, pricing);
-        });
+        services.TryAddSingleton(provider => new CanonRollupsEngine(
+            provider.GetRequiredService<IRelationalStoreReader>(),
+            provider.GetRequiredService<IProjectionStore>(),
+            provider.GetRequiredService<IPricingRepository>()));
 
         services.TryAddSingleton(provider => new CanonRefreshEngine(
             provider.GetRequiredService<ICanonStoreRepository>(),
