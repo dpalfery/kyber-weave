@@ -497,6 +497,84 @@ public sealed class TaskPromptServiceTests
         return seen;
     }
 
+    /// <summary>
+    /// A rules file whose frontmatter does not name its technology is in no bundle, so the rules
+    /// part must say the file exists and is invisible, not that the folder has no rules file.
+    /// </summary>
+    [Fact]
+    public void ARulesFileWhoseFrontmatterMissesTheTechnologyIsNamedRatherThanCalledAbsent()
+    {
+        using DocFixture fixture = Ready();
+        fixture.Write("6-Docs/standards/csharp/csharp.rules.md", Document(
+            "standards/csharp/rules", "csharp rules", "rule",
+            "# csharp rules\n\nINVISIBLE-RULES-MARKER: nullable is on."));
+
+        TaskPromptResult result = Build(fixture);
+
+        Assert.True(result.Built, result.Refusal);
+        string rules = Between(result.Prompt, "technology-rules");
+        Assert.DoesNotContain("INVISIBLE-RULES-MARKER", rules, StringComparison.Ordinal);
+        Assert.DoesNotContain("has no rules file", rules, StringComparison.Ordinal);
+        Assert.Contains("6-Docs/standards/csharp/csharp.rules.md", rules, StringComparison.Ordinal);
+        Assert.Contains("doc-type rule", rules, StringComparison.Ordinal);
+        Assert.Contains("technology csharp", rules, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave docs validate", rules, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ASkillsFileTypedReferenceIsNamedRatherThanCalledAbsent()
+    {
+        using DocFixture fixture = Ready();
+        fixture.Write("6-Docs/standards/csharp/csharp.skills.md", Document(
+            "standards/csharp/skills", "csharp skills", "reference",
+            "# csharp skills\n\nINVISIBLE-SKILLS-MARKER: run dotnet format.",
+            technology: "csharp"));
+
+        TaskPromptResult result = Build(fixture);
+
+        Assert.True(result.Built, result.Refusal);
+        string skills = Between(result.Prompt, "skills");
+        Assert.DoesNotContain("INVISIBLE-SKILLS-MARKER", skills, StringComparison.Ordinal);
+        Assert.DoesNotContain("has no skills file", skills, StringComparison.Ordinal);
+        Assert.Contains("6-Docs/standards/csharp/csharp.skills.md", skills, StringComparison.Ordinal);
+        Assert.Contains("doc-type skill", skills, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave docs validate", skills, StringComparison.Ordinal);
+    }
+
+    /// <summary>A file that really is absent keeps the plain text, so the two cases stay distinct.</summary>
+    [Fact]
+    public void AnAbsentRulesFileKeepsThePlainNoRulesFileText()
+    {
+        using DocFixture fixture = Ready();
+        fixture.Memory!.DeleteFile(fixture.FullPath("6-Docs/standards/csharp/csharp.rules.md"));
+
+        TaskPromptResult result = Build(fixture);
+
+        Assert.True(result.Built, result.Refusal);
+        Assert.Contains(
+            "has no rules file", Between(result.Prompt, "technology-rules"), StringComparison.Ordinal);
+    }
+
+    /// <summary>The parent's rules part uses the same wording when its file exists but is invisible.</summary>
+    [Fact]
+    public void AParentsUncarriedRulesFileIsNamedInTheParentPart()
+    {
+        using DocFixture fixture = Ready("react");
+        fixture.Write("6-Docs/standards/typescript/typescript.rules.md", Document(
+            "standards/typescript/rules", "typescript rules", "rule",
+            "# typescript rules\n\nINVISIBLE-PARENT-MARKER: strict mode is on."));
+
+        TaskPromptResult result = Build(fixture);
+
+        Assert.True(result.Built, result.Refusal);
+        string parent = Between(result.Prompt, "parent-rules");
+        Assert.DoesNotContain("INVISIBLE-PARENT-MARKER", parent, StringComparison.Ordinal);
+        Assert.DoesNotContain("has no rules file", parent, StringComparison.Ordinal);
+        Assert.Contains("6-Docs/standards/typescript/typescript.rules.md", parent, StringComparison.Ordinal);
+        Assert.Contains("parent technology 'typescript'", parent, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave docs validate", parent, StringComparison.Ordinal);
+    }
+
     private static string Between(string prompt, string tag)
     {
         int open = prompt.IndexOf($"<{tag}>\n", StringComparison.Ordinal);

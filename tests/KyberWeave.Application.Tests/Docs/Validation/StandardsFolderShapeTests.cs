@@ -327,6 +327,78 @@ public class StandardsFolderShapeTests
             && i.Message.Contains("symbolic link", StringComparison.Ordinal));
     }
 
+    /// <summary>A rules file whose frontmatter carries no <c>technology</c> line.</summary>
+    private static string RulesWithoutTechnology(string scope) => Rules(scope).Replace(
+        $"technology: {scope}\n", string.Empty, StringComparison.Ordinal);
+
+    /// <summary>A skills file that says it is a reference rather than a skill.</summary>
+    private static string SkillsTypedReference(string scope) => Skills(scope).Replace(
+        "doc-type: skill", "doc-type: reference", StringComparison.Ordinal);
+
+    private static string RoleSkills(string scope) => Skills(scope).Replace(
+        "technology: " + scope, "role: " + scope, StringComparison.Ordinal);
+
+    /// <summary>
+    /// A rules or skills file that exists but whose frontmatter does not declare the folder's
+    /// doc-type and scope is invisible to the standards lookup the task prompt reads, so every
+    /// worker is told the folder has no such file while validation says nothing. The folder
+    /// check must report it, naming the file, what it has and the two frontmatter lines to set.
+    /// </summary>
+    [Fact]
+    public void ARulesFileWithoutItsTechnologyLineIsAnErrorNamingWhatToSet()
+    {
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
+            .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.rules.md", RulesWithoutTechnology("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.skills.md", Skills("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
+
+        DiagnosticReport report = fixture.Validate(DotnetDeclared);
+
+        Diagnostic error = Assert.Single(
+            report.Items, item => item.Code == DocSpecValidator.StandardsFileFrontmatter);
+        Assert.Equal(Severity.Error, error.Severity);
+        Assert.Contains("dotnet.rules.md", error.Message, StringComparison.Ordinal);
+        Assert.Contains("no technology line", error.Message, StringComparison.Ordinal);
+        Assert.Contains("doc-type: rule", error.Hint, StringComparison.Ordinal);
+        Assert.Contains("technology: dotnet", error.Hint, StringComparison.Ordinal);
+        Assert.Contains("task prompts", error.Hint, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ASkillsFileTypedReferenceIsAnErrorNamingTheRequiredDocType()
+    {
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
+            .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.rules.md", Rules("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.skills.md", SkillsTypedReference("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
+
+        DiagnosticReport report = fixture.Validate(DotnetDeclared);
+
+        Diagnostic error = Assert.Single(
+            report.Items, item => item.Code == DocSpecValidator.StandardsFileFrontmatter);
+        Assert.Contains("dotnet.skills.md", error.Message, StringComparison.Ordinal);
+        Assert.Contains("doc-type 'reference'", error.Message, StringComparison.Ordinal);
+        Assert.Contains("doc-type: skill", error.Hint, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ARoleScopedFolderCarryingItsRoleLinesHasNoFindings()
+    {
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
+            .Write("6-Docs/standards/reviewer/reviewer.standards.md", RoleStandard("reviewer"))
+            .Write("6-Docs/standards/reviewer/reviewer.rules.md", RoleRules("reviewer"))
+            .Write("6-Docs/standards/reviewer/reviewer.skills.md", RoleSkills("reviewer"))
+            .Write("6-Docs/standards/reviewer/reviewer.arbiter-rules.yml", "rules: []\n");
+
+        DiagnosticReport report = fixture.Validate(DotnetDeclared);
+
+        Assert.DoesNotContain(
+            report.Items, item => item.Code == DocSpecValidator.StandardsFileFrontmatter);
+        Assert.False(report.HasErrors);
+    }
+
     private static string RoleRules(string scope) => Rules(scope).Replace(
         "technology: " + scope, "role: " + scope, StringComparison.Ordinal);
 

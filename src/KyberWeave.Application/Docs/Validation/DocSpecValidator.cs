@@ -66,6 +66,12 @@ public sealed class DocSpecValidator
     public const string InvalidBuildsOn = "KW-DOC-SPEC-014";
 
     /// <summary>
+    /// A folder's rules or skills file exists, but its frontmatter does not declare it as that
+    /// file: the wrong <c>doc-type</c>, or no <c>technology</c>/<c>role</c> line for the folder.
+    /// </summary>
+    public const string StandardsFileFrontmatter = "KW-DOC-SPEC-015";
+
+    /// <summary>
     /// The scalar keys the required-key matrix can demand beyond the base set.
     /// </summary>
     /// <remarks>
@@ -585,23 +591,84 @@ public sealed class DocSpecValidator
                     ValidateStandardHeadings(document, scope, report);
                 }
 
-                foreach (string file in new[]
+                foreach ((string file, string? docType) in new (string File, string? DocType)[]
                          {
-                             DocsLayout.RulesFile(docsRoot, scope),
-                             DocsLayout.SkillsFile(docsRoot, scope),
-                             DocsLayout.ArbiterRulesFile(docsRoot, scope)
+                             (DocsLayout.RulesFile(docsRoot, scope), "rule"),
+                             (DocsLayout.SkillsFile(docsRoot, scope), "skill"),
+                             (DocsLayout.ArbiterRulesFile(docsRoot, scope), null)
                          })
                 {
-                    if (ExistsWithoutLink(RepositoryRelative(file))) continue;
+                    string relativeFile = RepositoryRelative(file);
+                    if (!ExistsWithoutLink(relativeFile))
+                    {
+                        report.Add(new Diagnostic(
+                            MissingFolderFile, Severity.Error,
+                            $"the '{scope}' folder is missing '{Path.GetFileName(file)}'.",
+                            scope, relativeFolder,
+                            "Run 'kyber-weave docs standards migrate' to add the missing folder files."));
+                        continue;
+                    }
 
-                    report.Add(new Diagnostic(
-                        MissingFolderFile, Severity.Error,
-                        $"the '{scope}' folder is missing '{Path.GetFileName(file)}'.",
-                        scope, relativeFolder,
-                        "Run 'kyber-weave docs standards migrate' to add the missing folder files."));
+                    // The Arbiter's file is YAML with no frontmatter, so there is nothing here
+                    // to check. A rules or skills file that exists but does not declare itself
+                    // is in no standards bundle, and every task prompt then reports the folder
+                    // as having no such file.
+                    if (docType is not null
+                        && byPath.TryGetValue(relativeFile, out DocumentModel? fileDocument))
+                    {
+                        ValidateFolderFileFrontmatter(fileDocument, scope, docType, report);
+                    }
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Checks that a folder's rules or skills file declares itself as that file: its own
+    /// <c>doc-type</c>, and a scope line naming the folder.
+    /// </summary>
+    /// <remarks>
+    /// Existence alone is not enough. The standards lookup matches on <c>doc-type</c> plus the
+    /// <c>technology</c> (or <c>role</c>) key, so a file with either missing is in the corpus but
+    /// in no bundle: the prompt tells every worker the folder has no such file, and nothing else
+    /// says why. A document whose frontmatter could not be parsed is left to its own finding.
+    /// </remarks>
+    /// <param name="document">The file, as the corpus loaded it.</param>
+    /// <param name="scope">The technology or role whose folder holds it.</param>
+    /// <param name="expectedDocType">The file's required <c>doc-type</c>: <c>rule</c> or <c>skill</c>.</param>
+    /// <param name="report">Receives the finding.</param>
+    private void ValidateFolderFileFrontmatter(
+        DocumentModel document,
+        string scope,
+        string expectedDocType,
+        DiagnosticReport report)
+    {
+        if (!document.HasFrontmatter || document.ParseError is not null) return;
+
+        string scopeKey = DocsLayout.ScopeKey(_config.Roles, scope);
+        string? actualDocType = document.Frontmatter.DocType?.Trim();
+        string? scopeValue = scopeKey == "role"
+            ? document.Frontmatter.Role?.Trim()
+            : document.Frontmatter.Technology?.Trim();
+
+        bool typeWrong = !string.Equals(actualDocType, expectedDocType, StringComparison.OrdinalIgnoreCase);
+        bool scopeMissing = string.IsNullOrWhiteSpace(scopeValue);
+        if (!typeWrong && !scopeMissing) return;
+
+        string kind = expectedDocType == "rule" ? "rules" : "skills";
+        string hasType = string.IsNullOrWhiteSpace(actualDocType)
+            ? "no doc-type"
+            : $"doc-type '{actualDocType}'";
+        string hasScope = scopeMissing ? $"no {scopeKey} line" : $"{scopeKey} '{scopeValue}'";
+
+        report.Add(new Diagnostic(
+            StandardsFileFrontmatter, Severity.Error,
+            $"the '{scope}' folder's {kind} file '{document.RelativePath}' has {hasType} and " +
+            $"{hasScope}; it must declare doc-type '{expectedDocType}' and {scopeKey} '{scope}'.",
+            scope, document.RelativePath,
+            $"Set 'doc-type: {expectedDocType}' and '{scopeKey}: {scope}' in its frontmatter. " +
+            "Task prompts cannot see this file until it is fixed. " +
+            $"Run '{DocsLayout.MigrateStandardsCommand}' to apply the repair."));
     }
 
     /// <summary>
