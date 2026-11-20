@@ -174,13 +174,13 @@ that was fixed in `.claude` and left broken in `.cursor`.
 
 ## Feature 3 — Kyber-Squad
 
-Kyber-Squad is the portable agent team at the center of the framework: 24 specialist agents
-and 27 reusable skills, coordinated by a primary conductor and deployed consistently across
+Kyber-Squad is the portable agent team at the center of the framework: specialist agents
+and reusable skills, coordinated by a primary conductor and deployed consistently across
 13 coding harnesses. The workflow carries work from planning through specialist
 implementation, testing, review, and documentation closeout. The same canonical definitions
 and capability rules keep that team recognizable across harnesses.
 
-**The canonical tree.** Maintains 24 canonical agent bodies and 27 canonical skills under
+**The canonical tree.** Maintains the canonical agent bodies and canonical skills under
 [`products/kyber-squad/`](products/kyber-squad/README.md), governed by strict schemas, model
 profiles, and capability profiles. Generated target trees and APM packages are never tracked.
 
@@ -300,7 +300,7 @@ src/
   KyberWeave.Cli/         kyber-weave — skill | agent | squad | docs | utilities | review | update
   KyberWeave.Mcp/         kyber-weave-mcp — stdio MCP server
 products/
-  kyber-squad/            canonical 24 agents, 27 skills, profiles, and schemas
+  kyber-squad/            canonical agents, skills, profiles, and schemas
 dash/                     Feature 5 — KyberDash, first-party since a one-time fork of CodeBurn
   src/ dash/                CLI engine, provider parsers, and the web dashboard
   kyber/                    analyzers, OTLP receiver, canon store

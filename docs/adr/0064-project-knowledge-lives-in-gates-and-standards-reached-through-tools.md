@@ -74,8 +74,8 @@ That is the project's own answer, written in its configuration.
   silent, because nothing compares a host's copy against the repository it describes. A stale
   command is found by a worker at the moment it cannot finish, which is the worst time to discover
   it and the moment at which a fallback (the full suite) looks reasonable.
-- **Each agent carries its own copy of the repository's commands.** Rejected. 24 agents times 13
-  targets is one fact replicated per agent inside a single repository; a change to the test command
+- **Each agent carries its own copy of the repository's commands.** Rejected. Every agent times every
+  target is one fact replicated per agent inside a single repository; a change to the test command
   becomes a many-file edit that no gate covers, and the copies diverge the first time one is
   missed. It re-creates the duplication the task file's paste contract removed for prompts.
 - **A technology reference file inside each portable skill.** Rejected. It is the same problem one

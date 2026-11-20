@@ -289,8 +289,8 @@ The review council enforces explicit contract verification disciplines across it
 Seventeen concerns, but only **two** canonical agents carry them. The lens is a reference file;
 the agent is the seat that reads it.
 
-Seventeen agents would push the canonical roster from 22 to 39, clutter every harness's agent
-picker, and produce seventeen near-identical descriptions that would collide under
+An agent per lens would multiply the canonical roster, clutter every harness's agent
+picker, and produce near-identical descriptions that would collide under
 `KW-AGENT-LINT-001` and `KW-SKILL-LINT-011`. As files, adding a lens is a Markdown file rather
 than a deployment — which is exactly what adding `prior-art` cost.
 

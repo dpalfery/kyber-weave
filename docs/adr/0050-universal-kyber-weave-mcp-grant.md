@@ -69,7 +69,7 @@ and the per-target table below states each vehicle; the run rule that made the g
    stated on 2026-10-31 that every agent, the orchestrator among them, must reach the
    `kw-docs` MCP server because `docs_get_coding_standard_for_technology` is critical to quality
    for every agent. The directive names the `kw-docs` server only. On the shipped squad, whose
-   every profile allows `filesystem.read`, the rule yields all twenty-four agents — each on the
+   every profile allows `filesystem.read`, the rule yields every agent — each on the
    file its target renders. **Two targets have no file to render it on for the orchestrator**: on
    Devin and
    Pi the conductor is a lowered skill, so the entitlement there is structurally inexpressible

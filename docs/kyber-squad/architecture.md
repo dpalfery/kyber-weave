@@ -110,7 +110,7 @@ implemented and registered renderers today.
 ```mermaid
 flowchart TD
     subgraph Canonical["Canonical Product Source (products/kyber-squad/)"]
-        Agents["agents/*.md (15 Agents)"]
+        Agents["agents/*.md"]
         Skills["skills/*/SKILL.md (Squad canonical skills)"]
         Profiles["profiles/*.yml (Lattice & Models)"]
         Catalog["squad.yml / toolchain.yml"]
