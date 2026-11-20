@@ -26,6 +26,7 @@ baselines — see [CI Pipelines architecture](architecture.md) for why they neve
 | `KW-DOC-SPEC-005` | Error | `source-root` path does not exist |
 | `KW-DOC-SPEC-006` | Error | Duplicate `id`, or reference to an unknown id |
 | `KW-DOC-SPEC-007` | Error | `technology` on a document that is not a coding standard, or naming a different technology than its folder |
+| `KW-DOC-SPEC-015` | Error | A folder's rules or skills file exists but its frontmatter does not declare it as that file: `doc-type` other than `rule` / `skill`, or no `technology` / `role` line naming the folder. The task prompt cannot carry it until `docs standards migrate` (or a hand edit) sets those lines |
 
 ### Configuration registry — `docs validate`
 

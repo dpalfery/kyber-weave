@@ -13,14 +13,15 @@ namespace KyberWeave.Cli.Commands.Docs;
 public sealed class DocsStandardsMigrateSettings : DocsSettings
 {
     [CommandOption("--dry-run")]
-    [Description("Print the renames and additions without writing anything.")]
+    [Description("Print the renames, additions, repairs and reshapes without writing anything.")]
     public bool DryRun { get; set; }
 }
 
 /// <summary>
 /// Renames each legacy standards <c>README.md</c> to the folder-prefixed standard, writes
-/// the four files a technology or role folder holds, and re-renders the Config Reg block
-/// those renames make stale, so one run leaves the repository valid.
+/// the four files a technology or role folder holds, repairs the frontmatter of a rules or
+/// skills file that does not declare itself, and re-renders the Config Reg block those
+/// renames make stale, so one run leaves the repository valid.
 /// </summary>
 public sealed class DocsStandardsMigrateCommand(
     IKyberWeaveConfigRepository configs,
@@ -69,7 +70,7 @@ public sealed class DocsStandardsMigrateCommand(
         {
             console.MarkupLine(
                 "[green]Nothing to migrate.[/] Every standards folder already has its four " +
-                "files and the six headings in order.");
+                "files, its rules and skills frontmatter declares them, and the six headings are in order.");
             return 0;
         }
 
@@ -89,6 +90,10 @@ public sealed class DocsStandardsMigrateCommand(
 
                 case StandardsFolderChangeKind.Reshape:
                     console.MarkupLine($"  [green]reshaped[/] {target}");
+                    break;
+
+                case StandardsFolderChangeKind.Frontmatter:
+                    console.MarkupLine($"  [green]repaired[/] {target}");
                     break;
 
                 default:

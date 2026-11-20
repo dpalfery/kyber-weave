@@ -147,8 +147,11 @@ name one parent it `builds-on` (React on TypeScript, Tauri on Rust), and a task 
 receives the parent's rules and skills too. A folder whose standard is still `README.md` keeps
 working for at least two minor releases: every finding the rename would raise is a warning naming
 `kyber-weave docs standards migrate`, which clears them in one run, so an un-upgraded host still
-runs. The file names, checks and migration are in
-[Coding standards](../standards/README.md) and the
+runs. A rules or skills file must also carry its `doc-type` and the folder's `technology` (or
+`role`) line: the standards lookup matches on both, so a file without them is in no task prompt
+even though it is on disk. `KW-DOC-SPEC-015` reports that, and the same migration sets the two
+lines while keeping every other line and the body byte for byte. The file names, checks and
+migration are in [Coding standards](../standards/README.md) and the
 [governance gates](docgraph/governance.md).
 
 **A size budget.** Everything always loaded (the root `AGENTS.md`, the files it tells every agent
