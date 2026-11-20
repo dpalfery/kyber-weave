@@ -474,13 +474,16 @@ a Squad subagent. It denies a write into the canonical checkout while a live run
 reason: the call's working directory is inside the canonical checkout, or one of its `cd`, `pushd` or `git -C`
 steps moves into it, wherever in the command that step sits. A call's working directory inside the canonical
 checkout does not count when no step of the command runs there: a `cd` or `pushd` into a directory moves the
-shell before any later step, and a `git` step that names its own directory with `-C` runs there, so the guard
-judges those directories instead. A `cd` or `pushd` it cannot place (a bare `pushd`, `cd -`) and any other step
-do run in the working directory, so it is judged on that. It denies every call of a developer or `docs-dev`
-dispatch whose current turn is past `arbiter.dispatch-budget` (`KW-ARB-BUDGET-001`), and denies once the call after a
-process-starting call that ran past `dispatch-budget.call-minutes`, measured as the gap between the dispatch's
-consecutive calls; a file read is never judged, because only a call that started a process, or waited on one,
-can hang. It reads the run records, the checkout's git files and
+shell before every later step, and a `git` step that names its own directory with `-C` runs there, so the guard
+judges those directories instead. The walk follows the shell: a `cd` inside `( … )` ends at the closing `)`, so
+a later step still runs in the outer directory; a pipeline stage starts in the directory the pipeline did, so a
+`cd` in an earlier stage does not carry; and a step after `||` may run in the directory the previous step
+started in, because the left side may have failed. A `cd` or `pushd` it cannot place (a bare `pushd`, `cd -`, or
+a variable such as `$WT`) and any other step do run in the working directory, so it is judged on that. It denies
+every call of a developer or `docs-dev` dispatch whose current turn is past `arbiter.dispatch-budget`
+(`KW-ARB-BUDGET-001`), and denies once the call after a process-starting call that ran past
+`dispatch-budget.call-minutes`, measured as the gap between the dispatch's consecutive calls; a file read is
+never judged, because only a call that started a process, or waited on one, can hang. It reads the run records, the checkout's git files and
 one append-only counter file per subagent under `~/.kyber-weave/arbiter/budgets/`, starts no process, calls no
 model, and allows anything it cannot read on the write, command and budget paths. A read through a view or grep
 tool carries no command, so it is never judged; a write a command makes to a file it does not name is left to

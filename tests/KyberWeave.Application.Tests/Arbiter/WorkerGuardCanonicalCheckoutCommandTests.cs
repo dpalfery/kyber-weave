@@ -256,6 +256,91 @@ public sealed class WorkerGuardCanonicalCheckoutCommandTests
         Assert.NotEmpty(Guard("copilot-cli", Copilot(_repo, "dotnet build", tool: "powershell")));
     }
 
+    /// <summary>
+    /// The commands this guard judges, each with the call's working directory (null for the canonical checkout),
+    /// whether the guard allows it, and whether the retry prefix the refusal names makes it allowed. <c>{wt}</c>
+    /// stands for the run worktree, and a newline is a real newline in the command.
+    /// </summary>
+    public static TheoryData<string, string?, bool, bool> CommandsJudgedByTheirStepDirectories => new()
+    {
+        // A subshell's cd ends at the closing `)`, so a later step runs in the outer shell's directory.
+        { "(cd {wt}) && rm -rf src", null, false, true },
+        { "(cd {wt} && ls)", null, true, false },
+        { "(cd {wt} && ls) && ls", null, false, true },
+
+        // A step after `||` runs only when the change directory failed, so it may still run in the cwd.
+        { "cd {wt} || rm -rf src", null, false, true },
+
+        // A relative path resolves against the call's working directory.
+        { "cd ../repo.worktrees/add-widget && ls", null, true, false },
+        { "cd ../../repo && ls", "{wt}", false, false },
+
+        // pushd, and the forms the guard cannot place.
+        { "pushd {wt} && ls", null, true, false },
+        { "pushd && ls", null, false, false },
+        { "cd - && ls", null, false, false },
+        { "cd && ls", null, false, false },
+        { "cd $WT && ls", null, false, false },
+        { "cd \"${WT}\" && ls", null, false, false },
+
+        // A quoted or trailing-separator path names the same directory.
+        { "cd {wt}/ && ls", null, true, false },
+        { "cd '{wt}' && ls", null, true, false },
+
+        // git's own -C is a directory; a subcommand's -C is not.
+        { "git -C{wt} status", null, true, false },
+        { "git -C={wt} status", null, true, false },
+        { "git -c core.x=y -C {wt} status", null, true, false },
+        { "git commit -C HEAD", null, false, true },
+
+        // Separators: a join carries the shell, a pipeline stage does not.
+        { "cd {wt}; ls", null, true, false },
+        { "cd {wt} | ls", null, false, true },
+        { "cd {wt}\nls", null, true, false },
+        { "ls; cd {wt}", null, false, true },
+
+        // A command the guard cannot read is refused rather than guessed at.
+        { "bash -c \"cd {wt} && ls\"", null, false, true },
+
+        // The plain refusal whose retry prefix must make it allowed.
+        { "rm -rf src", null, false, true },
+    };
+
+    [Theory]
+    [MemberData(nameof(CommandsJudgedByTheirStepDirectories))]
+    public void EveryStepIsJudgedByTheDirectoryItRunsIn(string command, string? cwd, bool allowed, bool retryPrefixSuffices)
+    {
+        StartRun();
+        string resolved = command.Replace("{wt}", _worktree, StringComparison.Ordinal);
+        string callCwd = (cwd ?? _repo).Replace("{wt}", _worktree, StringComparison.Ordinal);
+
+        string answer = Guard("copilot-cli", Copilot(callCwd, resolved));
+
+        if (allowed)
+        {
+            Assert.Empty(answer);
+            return;
+        }
+
+        string reason = DenialReason(answer);
+        Assert.StartsWith(RuleId, reason, StringComparison.Ordinal);
+        if (retryPrefixSuffices)
+        {
+            Assert.Empty(Guard("copilot-cli", Copilot(callCwd, RetryPrefix(reason) + resolved)));
+        }
+    }
+
+    private static string RetryPrefix(string reason)
+    {
+        const string Marker = "Start the command with `";
+        int start = reason.IndexOf(Marker, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"The refusal does not name the retry prefix: {reason}");
+        start += Marker.Length;
+        int end = reason.IndexOf('`', start);
+        Assert.True(end > start, $"The refusal does not close the retry prefix: {reason}");
+        return reason[start..end];
+    }
+
     private void StartRun() =>
         new FileRunStateStore(_files, new UnusedBranches(), new FakePathResolver(_files), _environment).Write(
             _home,

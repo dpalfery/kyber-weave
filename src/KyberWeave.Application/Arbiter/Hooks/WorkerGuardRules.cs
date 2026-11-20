@@ -156,49 +156,15 @@ internal static class WorkerGuardRules
     /// Every segment is scanned, including the parts after a <c>&amp;&amp;</c>, <c>;</c> or <c>|</c> and inside a
     /// subshell, because a command can step into the canonical checkout at any point. A word only counts as the
     /// program where a program can stand, so a quoted argument that happens to read <c>cd</c> is not mistaken for
-    /// one, and quoted text stays a single word, so a path is taken whole.
+    /// one, and quoted text stays a single word, so a path is taken whole. A path the shell expands at run time,
+    /// such as a variable, is not one the guard can place, so it is not named here; <see cref="RunsInWorkingDirectory" />
+    /// treats that step as running in the working directory instead.
     /// </remarks>
-    internal static IReadOnlyList<string> EnteredDirectories(string command)
-    {
-        string[] tokens = ShellTokens(command);
-        List<string> directories = [];
-        bool commandStart = true;
-        for (int index = 0; index < tokens.Length; index++)
-        {
-            string token = tokens[index];
-            if (IsCommandSeparator(token))
-            {
-                commandStart = true;
-                continue;
-            }
+    internal static IReadOnlyList<string> EnteredDirectories(string command) =>
+        Walk(command).EnteredDirectories;
 
-            if (!commandStart)
-            {
-                continue;
-            }
-
-            if (IsChangeDirectory(token))
-            {
-                AddChangeDirectoryArgument(tokens, index, directories);
-                commandStart = false;
-            }
-            else if (IsGitProgram(token))
-            {
-                if (GitChangeDirectory(tokens, index) is { } directory)
-                {
-                    directories.Add(directory);
-                }
-
-                commandStart = false;
-            }
-            else if (!IsCommandPrefix(token))
-            {
-                commandStart = false;
-            }
-        }
-
-        return directories;
-    }
+    /// <summary>The reading of one command: the directories it enters, and whether a step of it runs in the working directory.</summary>
+    private readonly record struct CommandWalk(bool RunsInWorkingDirectory, IReadOnlyList<string> EnteredDirectories);
 
     /// <summary>The words that end one command and begin the next, kept as words of their own by <see cref="ShellTokens" />.</summary>
     private static readonly string[] CommandSeparators = ["&&", "||", "|", ";", "&", "(", ")"];
@@ -235,21 +201,10 @@ internal static class WorkerGuardRules
     }
 
     /// <summary>
-    /// Adds the directory a <c>cd</c> or <c>pushd</c> moves into: its first argument that is not an option. A
-    /// <c>pushd</c> with no argument swaps the directory stack, so it moves nowhere this guard can name.
-    /// </summary>
-    private static void AddChangeDirectoryArgument(string[] tokens, int index, List<string> directories)
-    {
-        if (ChangeDirectoryArgument(tokens, index) is { } directory)
-        {
-            directories.Add(directory);
-        }
-    }
-
-    /// <summary>
-    /// The directory a <c>cd</c> or <c>pushd</c> at <paramref name="index"/> moves into, or null when it names none
-    /// this guard can place: a bare <c>pushd</c> swaps the directory stack, and <c>cd -</c> returns to a directory
-    /// the command does not name.
+    /// The directory a <c>cd</c> or <c>pushd</c> at <paramref name="index"/> moves into, or null when it names none:
+    /// a bare <c>pushd</c> swaps the directory stack, and <c>cd -</c> returns to a directory the command does not
+    /// name. The argument it does return may still be one the guard cannot place, such as a variable, which the
+    /// caller checks with <see cref="IsPlaceableDirectory" />.
     /// </summary>
     private static string? ChangeDirectoryArgument(string[] tokens, int index)
     {
@@ -268,26 +223,82 @@ internal static class WorkerGuardRules
 
     /// <summary>
     /// Whether any step of the command runs in the call's own working directory, which is the only case where the
-    /// caller judges that directory. A <c>cd</c> or <c>pushd</c> naming a directory moves the shell before any later
-    /// step runs, and a <c>git</c> step with <c>-C</c> among its global options runs in that directory, so the walk
-    /// continues past it; a <c>cd</c> or <c>pushd</c> that names no directory this guard can place, and any other
-    /// step, do run in the working directory. A command with no step at all reports true, the fail-closed reading.
+    /// caller judges that directory. The walk follows the shell: a <c>cd</c> or <c>pushd</c> naming a placeable
+    /// directory moves the shell before later steps, a subshell's changes end at its closing <c>)</c>, a pipeline
+    /// stage starts in the directory the pipeline did, and a step after <c>||</c> may run in the directory the
+    /// previous step started in. A <c>git</c> step with <c>-C</c> runs in that directory and leaves the shell where
+    /// it was. A <c>cd</c> or <c>pushd</c> naming no directory the guard can place, a path it cannot resolve, and
+    /// any other step run in the working directory. A command with no step at all reports true, the fail-closed
+    /// reading.
     /// </summary>
     /// <remarks>
-    /// The steps are read in order with the same tokenizing and word tests <see cref="EnteredDirectories" /> uses, so
-    /// the two agree on which words are programs. Every directory the command enters is still judged by
+    /// The walk is the one <see cref="EnteredDirectories" /> reads, so the two always agree on which words are
+    /// programs and where each step runs. Every directory the command enters is still judged by
     /// <see cref="EnteredDirectories" />, whether or not this returns false.
     /// </remarks>
-    internal static bool RunsInWorkingDirectory(string command)
+    internal static bool RunsInWorkingDirectory(string command) => Walk(command).RunsInWorkingDirectory;
+
+    /// <summary>
+    /// Walks the command's steps once in shell order, tracking the directory each step runs in. The working
+    /// directory is the initial one, and the value no step can name: a directory change the guard cannot place
+    /// falls back to it, so the caller judges the safer path.
+    /// </summary>
+    private static CommandWalk Walk(string command)
     {
         string[] tokens = ShellTokens(command);
+        List<string> entered = [];
+        Stack<(string? Current, string? PipelineBase, string? BeforeLastStep, bool InPipeline)> subshells = [];
+        bool runsInWorkingDirectory = false;
+        bool sawStep = false;
+        string? current = null;
+        string? pipelineBase = null;
+        string? beforeLastStep = null;
+        bool inPipeline = false;
         bool commandStart = true;
-        bool gitDirectoryStep = false;
         for (int index = 0; index < tokens.Length; index++)
         {
             string token = tokens[index];
             if (IsCommandSeparator(token))
             {
+                if (string.Equals(token, "(", StringComparison.Ordinal))
+                {
+                    subshells.Push((current, pipelineBase, beforeLastStep, inPipeline));
+                    pipelineBase = current;
+                    inPipeline = false;
+                }
+                else if (string.Equals(token, ")", StringComparison.Ordinal))
+                {
+                    if (subshells.TryPop(out var outer))
+                    {
+                        (current, pipelineBase, beforeLastStep, inPipeline) = outer;
+                    }
+
+                    pipelineBase = current;
+                    inPipeline = false;
+                }
+                else if (string.Equals(token, "|", StringComparison.Ordinal))
+                {
+                    // A pipeline stage runs in its own subshell from the directory the pipeline began in.
+                    current = pipelineBase;
+                    inPipeline = true;
+                }
+                else
+                {
+                    if (inPipeline)
+                    {
+                        current = pipelineBase;
+                        inPipeline = false;
+                    }
+
+                    if (string.Equals(token, "||", StringComparison.Ordinal))
+                    {
+                        // The right side runs when the left failed, which can leave the shell where the left began.
+                        current = beforeLastStep;
+                    }
+
+                    pipelineBase = current;
+                }
+
                 commandStart = true;
                 continue;
             }
@@ -297,29 +308,72 @@ internal static class WorkerGuardRules
                 continue;
             }
 
+            beforeLastStep = current;
             if (IsChangeDirectory(token))
             {
-                return ChangeDirectoryArgument(tokens, index) is null;
-            }
-
-            if (IsGitProgram(token))
-            {
-                if (GitChangeDirectory(tokens, index) is null)
+                if (ChangeDirectoryArgument(tokens, index) is { } directory && IsPlaceableDirectory(directory))
                 {
-                    return true;
+                    entered.Add(directory);
+                    current = directory;
+                }
+                else
+                {
+                    runsInWorkingDirectory = true;
+                    current = null;
                 }
 
-                gitDirectoryStep = true;
+                sawStep = true;
+                commandStart = false;
+            }
+            else if (IsGitProgram(token))
+            {
+                if (GitChangeDirectory(tokens, index) is { } directory)
+                {
+                    if (IsPlaceableDirectory(directory))
+                    {
+                        entered.Add(directory);
+                    }
+                    else
+                    {
+                        // The step names a directory this guard cannot place, so it may run anywhere: judge the cwd.
+                        runsInWorkingDirectory = true;
+                    }
+                }
+                else if (current is null)
+                {
+                    // git with no -C runs where the shell stands.
+                    runsInWorkingDirectory = true;
+                }
+
+                sawStep = true;
                 commandStart = false;
             }
             else if (!IsCommandPrefix(token))
             {
-                return true;
+                if (current is null)
+                {
+                    runsInWorkingDirectory = true;
+                }
+
+                sawStep = true;
+                commandStart = false;
             }
         }
 
-        return !gitDirectoryStep;
+        return new CommandWalk(runsInWorkingDirectory || !sawStep, entered);
     }
+
+    /// <summary>
+    /// Whether the guard can place a directory a command names as written: a path, not a shell expansion such as a
+    /// variable, a glob or a home-directory shorthand the command does not spell out.
+    /// </summary>
+    private static bool IsPlaceableDirectory(string directory) =>
+        !string.IsNullOrWhiteSpace(directory)
+        && !directory.StartsWith('~')
+        && !directory.Contains('$', StringComparison.Ordinal)
+        && !directory.Contains('`', StringComparison.Ordinal)
+        && !directory.Contains('*', StringComparison.Ordinal)
+        && !directory.Contains('?', StringComparison.Ordinal);
 
     /// <summary>
     /// The directory a <c>git</c> step at <paramref name="index"/> names with <c>-C</c>, or null when it names none.
