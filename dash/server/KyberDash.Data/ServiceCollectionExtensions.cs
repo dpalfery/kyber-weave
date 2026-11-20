@@ -1,6 +1,23 @@
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
 using KyberDash.Core.Resilience;
+using KyberDash.Data.Collector.Sources;
+using KyberDash.Data.Harnesses.Antigravity;
+using KyberDash.Data.Harnesses.Claude;
+using KyberDash.Data.Harnesses.Cline;
+using KyberDash.Data.Harnesses.Codex;
+using KyberDash.Data.Harnesses.CommandCode;
+using KyberDash.Data.Harnesses.CopilotCli;
+using KyberDash.Data.Harnesses.CopilotVscode;
+using KyberDash.Data.Harnesses.Cursor;
+using KyberDash.Data.Harnesses.Devin;
+using KyberDash.Data.Harnesses.Droid;
+using KyberDash.Data.Harnesses.Kilo;
+using KyberDash.Data.Harnesses.KimiCode;
+using KyberDash.Data.Harnesses.Otlp;
+using KyberDash.Data.Harnesses.Pi;
+using KyberDash.Data.Harnesses.RooCode;
+using KyberDash.Data.Harnesses.Warp;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,8 +29,9 @@ namespace KyberDash.Data;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the data-access repositories. Every registration uses <c>TryAdd</c>, so a host or a test
-    /// that registers its own implementation before calling this method keeps it.
+    /// Registers the data-access repositories and every harness mapper. Every registration uses
+    /// <c>TryAdd</c>, so a host or a test that registers its own implementation before calling
+    /// this method keeps it.
     /// </summary>
     /// <param name="services">Service collection to populate.</param>
     /// <param name="options">Composition options; defaults are used when omitted.</param>
@@ -67,6 +85,40 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IWebAssetRepository>(provider =>
             new WebAssetRepository(provider.GetService<DashOptions>()?.DashboardDir));
 
+        RegisterHarnessMappers(services);
+
         return services;
+    }
+
+    /// <summary>
+    /// Registers every <see cref="IHarnessMapper"/> so the engines resolve mapper coverage for each
+    /// evidenced harness through the contract. Each registration uses <c>TryAddEnumerable</c>, so a
+    /// host that registers its own mapper for a harness keeps it alongside the built-ins.
+    /// </summary>
+    /// <param name="services">Service collection to populate.</param>
+    private static void RegisterHarnessMappers(IServiceCollection services)
+    {
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, AntigravityTranscriptMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, AntigravitySpanMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, ClaudeTranscriptMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, ClaudeSpanMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, ClineMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CodexRolloutMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CodexSpanMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CommandCodeMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CopilotCliMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CopilotVscodeMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CopilotSpanMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CursorMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, DevinMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, DroidSessionMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, DroidSpanMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, KiloMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, KimiCodeMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, OpenCodeSpanMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, PiMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, PiSpanMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, RooCodeMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, WarpMapper>());
     }
 }

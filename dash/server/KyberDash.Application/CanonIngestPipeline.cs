@@ -546,7 +546,7 @@ public static class CanonIngestPipeline
         {
             foreach (ContentPart part in record.Parts)
             {
-                if (!TryMapContentBucket(part.Part, out ContentBucket bucket))
+                if (!ContentBuckets.TryMap(part.Part, out ContentBucket bucket))
                 {
                     continue;
                 }
@@ -583,7 +583,7 @@ public static class CanonIngestPipeline
         {
             foreach (KeyValuePair<string, string> entry in record.Content.OrderBy(static kv => kv.Key, StringComparer.Ordinal))
             {
-                if (!TryMapContentBucket(entry.Key, out ContentBucket bucket))
+                if (!ContentBuckets.TryMap(entry.Key, out ContentBucket bucket))
                 {
                     continue;
                 }
@@ -710,43 +710,6 @@ public static class CanonIngestPipeline
         "unset" => RecordStatus.Unset,
         _ => RecordStatus.Unspecified,
     };
-
-    private static bool TryMapContentBucket(string bucket, out ContentBucket result)
-    {
-        switch (bucket)
-        {
-            case "system_prompt":
-                result = ContentBucket.SystemPrompt;
-                return true;
-            case "tool_definitions":
-                result = ContentBucket.ToolDefinitions;
-                return true;
-            case "tool_definition":
-                result = ContentBucket.ToolDefinition;
-                return true;
-            case "instruction_context":
-                result = ContentBucket.InstructionContext;
-                return true;
-            case "conversation_history":
-                result = ContentBucket.ConversationHistory;
-                return true;
-            case "tool_result_content":
-                result = ContentBucket.ToolResultContent;
-                return true;
-            case "user_prompt":
-                result = ContentBucket.UserPrompt;
-                return true;
-            case "user_message":
-                result = ContentBucket.UserMessage;
-                return true;
-            case "reasoning":
-                result = ContentBucket.Reasoning;
-                return true;
-            default:
-                result = default;
-                return false;
-        }
-    }
 
     private static string BoundedSpanPayload(OtlpSpan span)
     {

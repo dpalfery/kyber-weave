@@ -627,10 +627,48 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return [];
         }
 
+        // Batch the per-session reads: one sqlite3 batch each for all records, all projections,
+        // the fallback turns of sessions without a projection, and all stored ingest problems.
+        IReadOnlyList<CollectedRecord> allRecords = Records(harnessId: harnessId);
+        Dictionary<string, List<CollectedRecord>> recordsBySession = new(StringComparer.Ordinal);
+        foreach (CollectedRecord record in allRecords)
+        {
+            if (record.SessionKey is null)
+            {
+                continue;
+            }
+
+            if (!recordsBySession.TryGetValue(record.SessionKey, out List<CollectedRecord>? sessionRecords))
+            {
+                sessionRecords = [];
+                recordsBySession[record.SessionKey] = sessionRecords;
+            }
+
+            sessionRecords.Add(record);
+        }
+
+        Dictionary<string, StoredSessionProjection> projectionsBySession = new(StringComparer.Ordinal);
+        foreach (StoredSessionProjection projection in ListSessionProjections(harnessId))
+        {
+            projectionsBySession.TryAdd(projection.SessionId, projection);
+        }
+
+        List<string> sessionKeys = [.. sessions.Select(static s => s.SessionKey)];
+        List<string> missingProjectionKeys = [.. sessionKeys.Where(key => !projectionsBySession.ContainsKey(key))];
+        Dictionary<string, IReadOnlyList<StoredSessionTurn>> fallbackTurnsBySession = QuerySessionTurnsBySession(missingProjectionKeys);
+        Dictionary<string, List<Problem>> problemsBySession = QuerySessionIngestProblemsBySession(sessionKeys);
+
         List<SessionAggregateView> aggregates = new(sessions.Count);
         foreach (CollectedSession session in sessions)
         {
-            aggregates.Add(BuildSessionAggregateViewFromStore(session, pricing));
+            IReadOnlyList<CollectedRecord> records = recordsBySession.TryGetValue(session.SessionKey, out List<CollectedRecord>? sessionRecords)
+                ? sessionRecords
+                : [];
+            projectionsBySession.TryGetValue(session.SessionKey, out StoredSessionProjection? projection);
+            IReadOnlyList<StoredSessionTurn> projectedTurns = projection?.Turns
+                ?? (fallbackTurnsBySession.TryGetValue(session.SessionKey, out IReadOnlyList<StoredSessionTurn>? fallbackTurns) ? fallbackTurns : []);
+            IReadOnlyList<Problem> storedProblems = problemsBySession.TryGetValue(session.SessionKey, out List<Problem>? stored) ? stored : [];
+            aggregates.Add(BuildSessionAggregateView(session, records, projection, projectedTurns, storedProblems, pricing));
         }
 
         return aggregates;
@@ -665,10 +703,26 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         CollectedSession session,
         IModelPricingLookup? pricing)
     {
+        IReadOnlyList<CollectedRecord> records = Records(sessionKey: session.SessionKey);
+        StoredSessionProjection? projection = GetSessionProjection(session.SessionKey);
+        IReadOnlyList<StoredSessionTurn> projectedTurns = projection is not null
+            ? projection.Turns
+            : GetSessionTurns(session.SessionKey);
+        List<Problem> storedProblems = QuerySessionIngestProblems(session.SessionKey);
+        return BuildSessionAggregateView(session, records, projection, projectedTurns, storedProblems, pricing);
+    }
+
+    private SessionAggregateView BuildSessionAggregateView(
+        CollectedSession session,
+        IReadOnlyList<CollectedRecord> records,
+        StoredSessionProjection? projection,
+        IReadOnlyList<StoredSessionTurn> projectedTurns,
+        IReadOnlyList<Problem> storedProblems,
+        IModelPricingLookup? pricing)
+    {
         string sessionKey = session.SessionKey;
         string harnessId = session.HarnessId;
 
-        IReadOnlyList<CollectedRecord> records = Records(sessionKey: sessionKey);
         HashSet<string> sessionSpanIds = new(StringComparer.Ordinal);
         Dictionary<string, CollectedRecord> recordsBySpanId = new(records.Count, StringComparer.Ordinal);
         foreach (CollectedRecord record in records)
@@ -677,10 +731,6 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             recordsBySpanId[record.RecordId] = record;
         }
 
-        StoredSessionProjection? projection = GetSessionProjection(sessionKey);
-        IReadOnlyList<StoredSessionTurn> projectedTurns = projection is not null
-            ? projection.Turns
-            : GetSessionTurns(sessionKey);
         List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntriesForReader(projectedTurns, records);
 
         List<CostBlock> turnPublishedBlocks = new(turnEntries.Count);
@@ -947,7 +997,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             SchemaMeasurable: projection?.Schema is not null,
             ContextMeasurable: projection?.Context is not null);
 
-        List<Problem> problems = QuerySessionIngestProblems(sessionKey);
+        List<Problem> problems = [.. storedProblems];
         problems.AddRange(extraProblems);
 
         List<SubagentSession> subagents = BuildReaderSubagentSummaries(projection, records, recordsBySpanId);
@@ -999,9 +1049,60 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
     private List<Problem> QuerySessionIngestProblems(string sessionKey)
     {
-        string sessionExpr = TextExpr(sessionKey);
+        Dictionary<string, List<Problem>> grouped = QuerySessionIngestProblemsBySession([sessionKey]);
+        return grouped.TryGetValue(sessionKey, out List<Problem>? problems) ? problems : [];
+    }
+
+    private Dictionary<string, IReadOnlyList<StoredSessionTurn>> QuerySessionTurnsBySession(IReadOnlyList<string> sessionKeys)
+    {
+        Dictionary<string, IReadOnlyList<StoredSessionTurn>> turnsBySession = new(StringComparer.Ordinal);
+        if (sessionKeys.Count == 0)
+        {
+            return turnsBySession;
+        }
+
+        string filter = string.Join(", ", sessionKeys.Select(static key => TextExpr(key)));
         string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(ip.severity AS BLOB)), hex(CAST(ip.code AS BLOB)), hex(CAST(ip.message AS BLOB)), " +
+                     "SELECT hex(CAST(session_id AS BLOB)), position, hex(CAST(span_id AS BLOB)) FROM session_turn " +
+                     $"WHERE session_id IN ({filter}) ORDER BY session_id ASC, position ASC;\n";
+
+        string output = ExecuteSqlite(sql);
+        Dictionary<string, List<StoredSessionTurn>> grouped = new(StringComparer.Ordinal);
+        foreach (string line in TabLines(output))
+        {
+            string[] cols = SplitTabLine(line, 3, "session_turn");
+            string sessionId = ParseHexRequired(cols[0], "session_turn.session_id");
+            int position = ParseInt32Required(cols[1], "session_turn.position");
+            string spanId = ParseHexRequired(cols[2], "session_turn.span_id");
+            if (!grouped.TryGetValue(sessionId, out List<StoredSessionTurn>? turns))
+            {
+                turns = [];
+                grouped[sessionId] = turns;
+            }
+
+            turns.Add(new StoredSessionTurn(sessionId, position, spanId));
+        }
+
+        foreach (KeyValuePair<string, List<StoredSessionTurn>> entry in grouped)
+        {
+            turnsBySession[entry.Key] = entry.Value;
+        }
+
+        return turnsBySession;
+    }
+
+    private Dictionary<string, List<Problem>> QuerySessionIngestProblemsBySession(IReadOnlyList<string> sessionKeys)
+    {
+        Dictionary<string, List<Problem>> problemsBySession = new(StringComparer.Ordinal);
+        if (sessionKeys.Count == 0)
+        {
+            return problemsBySession;
+        }
+
+        string filter = string.Join(", ", sessionKeys.Select(static key => TextExpr(key)));
+        string sql = TabReadScriptHeader +
+                     "SELECT hex(CAST(att.session_key AS BLOB)), " +
+                     "hex(CAST(ip.severity AS BLOB)), hex(CAST(ip.code AS BLOB)), hex(CAST(ip.message AS BLOB)), " +
                      "typeof(ipl.location), COALESCE(hex(CAST(ipl.location AS BLOB)), ''), " +
                      "typeof(ips.span_id), COALESCE(hex(CAST(ips.span_id AS BLOB)), ''), " +
                      "typeof(ipst.stack), COALESCE(hex(CAST(ipst.stack AS BLOB)), '') " +
@@ -1009,26 +1110,33 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                      "LEFT JOIN ingest_problem_location ipl ON ipl.problem_id = ip.problem_id " +
                      "LEFT JOIN ingest_problem_span ips ON ips.problem_id = ip.problem_id " +
                      "LEFT JOIN ingest_problem_stack ipst ON ipst.problem_id = ip.problem_id " +
-                     "WHERE ip.problem_id IN (" +
-                     $"SELECT problem_id FROM ingest_problem_session WHERE session_id = {sessionExpr} UNION " +
-                     $"SELECT psp.problem_id FROM ingest_problem_span psp JOIN record_session_link rsl ON rsl.span_id = psp.span_id WHERE rsl.session_key = {sessionExpr}" +
-                     ") ORDER BY ip.problem_id ASC;\n";
+                     "JOIN (" +
+                     $"SELECT session_id AS session_key, problem_id FROM ingest_problem_session WHERE session_id IN ({filter}) UNION " +
+                     $"SELECT rsl.session_key AS session_key, psp.problem_id FROM ingest_problem_span psp JOIN record_session_link rsl ON rsl.span_id = psp.span_id WHERE rsl.session_key IN ({filter})" +
+                     ") att ON att.problem_id = ip.problem_id " +
+                     "ORDER BY att.session_key ASC, ip.problem_id ASC;\n";
 
         string output = ExecuteSqlite(sql);
-        List<Problem> problems = [];
         foreach (string line in TabLines(output))
         {
-            string[] cols = SplitTabLine(line, 9, "session ingest_problem");
-            ProblemSeverity severity = ParseProblemSeverityValue(ParseHexRequired(cols[0], "ingest_problem.severity"));
-            string code = ParseHexRequired(cols[1], "ingest_problem.code");
-            string message = ParseHexRequired(cols[2], "ingest_problem.message");
-            string? location = ParseNullableHex(cols[3], cols[4], "ingest_problem_location.location")
-                ?? ParseNullableHex(cols[5], cols[6], "ingest_problem_span.span_id");
-            string? stack = ParseNullableHex(cols[7], cols[8], "ingest_problem_stack.stack");
+            string[] cols = SplitTabLine(line, 10, "session ingest_problem");
+            string sessionId = ParseHexRequired(cols[0], "ingest_problem session_key");
+            ProblemSeverity severity = ParseProblemSeverityValue(ParseHexRequired(cols[1], "ingest_problem.severity"));
+            string code = ParseHexRequired(cols[2], "ingest_problem.code");
+            string message = ParseHexRequired(cols[3], "ingest_problem.message");
+            string? location = ParseNullableHex(cols[4], cols[5], "ingest_problem_location.location")
+                ?? ParseNullableHex(cols[6], cols[7], "ingest_problem_span.span_id");
+            string? stack = ParseNullableHex(cols[8], cols[9], "ingest_problem_stack.stack");
+            if (!problemsBySession.TryGetValue(sessionId, out List<Problem>? problems))
+            {
+                problems = [];
+                problemsBySession[sessionId] = problems;
+            }
+
             problems.Add(new Problem(severity, code, message, location, stack));
         }
 
-        return problems;
+        return problemsBySession;
     }
 
     private IReadOnlyList<CollectedRecord> QueryRecords(string? wherePredicate)

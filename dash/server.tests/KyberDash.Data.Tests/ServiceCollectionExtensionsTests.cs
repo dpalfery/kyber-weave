@@ -2,6 +2,7 @@ using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
 using KyberDash.Core.Resilience;
+using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain;
 using Microsoft.Extensions.DependencyInjection;
@@ -44,6 +45,39 @@ public class ServiceCollectionExtensionsTests : IDisposable
         Assert.IsType<SettingsRepository>(provider.GetRequiredService<ISettingsRepository>());
         Assert.IsType<ServerStateRepository>(provider.GetRequiredService<IServerStateRepository>());
         Assert.IsType<WebAssetRepository>(provider.GetRequiredService<IWebAssetRepository>());
+    }
+
+    [Fact]
+    public void AddDashDataServices_ResolvesHarnessMapperCoverageForEveryEvidencedHarness()
+    {
+        using ServiceProvider provider = BuildProvider(new DashOptions { DatabasePath = Path.Combine(directory.Path, "mappers.db") });
+
+        IReadOnlyList<IHarnessMapper> mappers = [.. provider.GetServices<IHarnessMapper>()];
+
+        Assert.NotEmpty(mappers);
+        HashSet<string> covered = new(mappers.Select(static m => m.HarnessId), StringComparer.Ordinal);
+        Assert.All(covered, static id => Assert.False(string.IsNullOrWhiteSpace(id)));
+        string[] expected =
+        [
+            "antigravity",
+            "claude-code",
+            "cline",
+            "codex-cli",
+            "commandcode",
+            "copilot",
+            "copilot-cli",
+            "copilot-vscode",
+            "cursor",
+            "devin",
+            "droid",
+            "kilo-shared-runtime",
+            "kimi-code",
+            "opencode",
+            "pi",
+            "roo-code",
+            "warp",
+        ];
+        Assert.All(expected, id => Assert.Contains(id, covered));
     }
 
     [Fact]
