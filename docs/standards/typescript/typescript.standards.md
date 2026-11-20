@@ -15,8 +15,9 @@ How TypeScript is written in this repository. Agents and skills resolve this doc
 what it says here outranks the defaults a portable agent shipped with.
 
 This standard covers TypeScript in KyberDash's web dashboard, tray UI, and Playwright/packaging
-scripts, including TSX. It records local decisions rather than summarizing the language or
-establishing a separate React architecture standard. The shared C# application and display-layer
+scripts, including TSX. It records local decisions rather than summarizing the language. React
+components, hooks, data states and their tests follow the
+[React standard](../react/react.standards.md), which builds on this one. The shared C# application and display-layer
 boundaries remain defined by [KyberDash architecture](../../dash/architecture.md) and the
 [display-layer rule](../../rules/kyberdash-display-layer.md).
 

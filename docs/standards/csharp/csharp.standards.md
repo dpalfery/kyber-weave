@@ -97,6 +97,23 @@ markup — a path containing brackets otherwise corrupts the render or throws.
 
 ## Testing
 
+### Design for unit tests: interface first
+
+Every class that does work is written so a unit test can exercise its behaviour in memory. That is
+a design rule, not a testing one: such a class takes its collaborators as interfaces through its
+constructor, and every outside resource is reached through a seam. The seam register
+([`docs/reference/seams.md`](../../reference/seams.md)) names each seam, its adapters and its fake,
+and the exceptions (sealed framework types that may be used directly);
+[ADR 0089](../../adr/0089-every-behaviour-is-testable-through-a-seam.md) is the decision behind it.
+Adapters are proved against the real resource by their contract suite, composition roots by a
+smoke test, and data-only Domain types need no seam.
+
+So the default test for new behaviour is an in-memory unit test against the interface. The other
+two kinds are the exceptions with their own homes, which `AGENTS.md` names: an integration test
+proves an adapter or a whole flow against the real resource and runs in CI only, and a content test
+reads shipped content through the corpus seam. When the only way to test a behaviour is through a
+real disk, process or network, the seam is missing: add it, then write the unit test.
+
 ### Tests
 
 Test authorship follows `<test-coding-standard>`. Language-level C# in test files follows
