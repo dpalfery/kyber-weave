@@ -40,14 +40,18 @@ public sealed class PlannerDifficultyAndTechnologyContractTests
 
         Assert.Contains("an existing pattern covers it", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("the plan leaves open", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("no pattern to copy", text, StringComparison.OrdinalIgnoreCase);
+        // Hard is for designing security or concurrency; applying an existing pattern of either is never hard.
+        Assert.Contains("the worker designs security or concurrency", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("cache busting", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("never `hard`", text, StringComparison.OrdinalIgnoreCase);
         // Size is not difficulty: a rating that rose with the file count sent routine work to the dearest tier.
         Assert.Contains("does not by itself raise the rating", text, StringComparison.OrdinalIgnoreCase);
-        // The tie-break and its exception: guess low in general, and high for plausibly hard security, concurrency,
-        // migration or caller-breaking work, without predicting gate coverage.
+        // The tie-break: guess low, because a failed attempt steps the task up. No exception sends a guess high: an
+        // authorization attribute copied from a neighbour sent a routine endpoint to the dearest tier.
         Assert.Contains("pick the lower", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("moves the task one tier up", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("may plausibly be `hard` for security, concurrency, a data migration or a choice that can break other callers: pick the higher, without predicting", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("pick the higher", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("follows one existing pattern", text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
