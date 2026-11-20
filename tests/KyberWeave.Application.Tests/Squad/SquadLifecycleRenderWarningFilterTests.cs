@@ -163,7 +163,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests
             declareServer: true,
             paddingCharacters: padding);
 
-        AssertOverflowWarningShown(prepared.RenderCodes, prepared.Warnings);
+        AssertOverflowWarningShown(prepared);
     }
 
     /// <summary>
@@ -180,7 +180,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests
         _ = await h.InstallAsync(ReleaseKind.Corpus, gateValue: "true", declareServer: true);
         InstallResult result = await h.UpdateAsync(ReleaseKind.Padded, gateValue: "true", paddingCharacters: padding);
 
-        AssertOverflowWarningShown(result.RenderCodes, result.Warnings);
+        AssertOverflowWarningShown(result);
     }
 
     /// <summary>
@@ -219,16 +219,25 @@ public sealed class SquadLifecycleRenderWarningFilterTests
         yield return ["name-invalid", "true", "bad name zz1", true];
     }
 
-    private static void AssertOverflowWarningShown(
-        IReadOnlyList<string> renderCodes,
-        IReadOnlyList<string> warnings)
+    /// <summary>
+    ///     Proves the guarantee the overflow facts are about: the conductor's own <c>agent-body-too-long</c> warning
+    ///     reaches the lifecycle result, and it is the only kind of warning the result carries. The result may name
+    ///     another shipped agent too, because the filter keeps every over-cap agent's warning once the overlay is
+    ///     applied, so the fact selects the conductor's warning instead of requiring it to be the only one.
+    /// </summary>
+    private static void AssertOverflowWarningShown(InstallResult result)
     {
         Assert.True(
-            renderCodes.Contains(AgentBodyTooLongCode),
-            $"Precondition: the overlay-applied render must emit '{AgentBodyTooLongCode}', but it emitted: {string.Join(", ", renderCodes)}.");
-        string warning = Assert.Single(warnings);
+            result.ConductorLength > SquadOperatorChannelFixture.ConductorBodyLimit,
+            $"Precondition: the overlay must carry the conductor past the " +
+            $"{SquadOperatorChannelFixture.ConductorBodyLimit}-character cap, but it renders to {result.ConductorLength} characters.");
+        string warning = Assert.Single(
+            result.Warnings,
+            line => line.Contains("'conductor'", StringComparison.Ordinal));
         Assert.StartsWith(AgentBodyTooLongCode + ": ", warning, StringComparison.Ordinal);
-        Assert.Contains("'conductor'", warning, StringComparison.Ordinal);
+        Assert.All(
+            result.Warnings,
+            line => Assert.StartsWith(AgentBodyTooLongCode + ": ", line, StringComparison.Ordinal));
     }
 
     private static void AssertRendererEmitted(InstallResult prepared, string code)
@@ -258,8 +267,9 @@ public sealed class SquadLifecycleRenderWarningFilterTests
     }
 
     /// <summary>
-    ///     Proves the precondition the overflow facts rest on: with the overlay off, the padded conductor does not exceed
-    ///     the cap, so any overflow with the overlay on is the overlay's doing.
+    ///     Proves the precondition the overflow facts rest on: with the overlay off the padded conductor renders under
+    ///     the cap, so any overflow with the overlay on is the overlay's doing. It is asserted on the conductor's own
+    ///     rendered length, because the render also reports any other agent that is over the cap.
     /// </summary>
     private static async Task AssertBodyAloneFitsCapAsync(int padding)
     {
@@ -270,7 +280,10 @@ public sealed class SquadLifecycleRenderWarningFilterTests
             declareServer: false,
             paddingCharacters: padding);
 
-        Assert.DoesNotContain(AgentBodyTooLongCode, result.RenderCodes);
+        Assert.True(
+            result.ConductorLength <= SquadOperatorChannelFixture.ConductorBodyLimit,
+            $"Precondition: with the overlay off the padded conductor must fit the " +
+            $"{SquadOperatorChannelFixture.ConductorBodyLimit}-character cap, but it renders to {result.ConductorLength} characters.");
     }
 
     /// <summary>Exactly <paramref name="paddingCharacters" /> characters, enough to put the body plus overlay over the cap.</summary>
@@ -306,8 +319,14 @@ public sealed class SquadLifecycleRenderWarningFilterTests
         Padded,
     }
 
-    /// <summary>The renderer warnings one render emitted beside the warnings the lifecycle result carries.</summary>
-    private sealed record InstallResult(IReadOnlyList<string> RenderCodes, IReadOnlyList<string> Warnings);
+    /// <summary>
+    ///     The renderer warnings one render emitted beside the warnings the lifecycle result carries, and the length of
+    ///     the conductor file that render produced.
+    /// </summary>
+    private sealed record InstallResult(
+        IReadOnlyList<string> RenderCodes,
+        IReadOnlyList<string> Warnings,
+        int ConductorLength);
 
     /// <summary>
     ///     One isolated in-memory install context: anchor, COPILOT_HOME, user home, state, and the shipped corpus
@@ -356,7 +375,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests
                 [SquadTarget.Copilot],
                 Version: InstallVersion));
             Assert.True(result.Success, $"The install failed: {string.Join("; ", result.Errors ?? [])}.");
-            return new InstallResult(renderer.WarningCodes, WarningsOf(result));
+            return new InstallResult(renderer.WarningCodes, WarningsOf(result), ConductorLengthOf(renderer));
         }
 
         /// <summary>Updates the install already in this context to <paramref name="kind"/>'s corpus.</summary>
@@ -375,7 +394,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests
                 SquadDeploymentScope.Global,
                 [SquadTarget.Copilot],
                 Version: UpdateVersion));
-            return new InstallResult(renderer.WarningCodes, WarningsOf(result));
+            return new InstallResult(renderer.WarningCodes, WarningsOf(result), ConductorLengthOf(renderer));
         }
 
         /// <summary>The rendered conductor's length with the overlay gate at <paramref name="gateValue"/>, declaring the server first.</summary>
@@ -392,6 +411,12 @@ public sealed class SquadLifecycleRenderWarningFilterTests
                 EnvironmentReader: SquadOperatorChannelFixture.CreateEnvironmentReader(gateValue, _copilotHome)));
             return SquadOperatorChannelFixture.ConductorText(result).Length;
         }
+
+        /// <summary>The conductor file length in the first render the fake answered, which is the one the result reports on.</summary>
+        private static int ConductorLengthOf(FakeSquadRenderer renderer) =>
+            renderer.Results.Count == 0
+                ? 0
+                : SquadOperatorChannelFixture.ConductorText(renderer.Results[0]).Length;
 
         private static IReadOnlyList<string> WarningsOf(SquadLifecycleResult result) =>
             result.Warnings ?? throw new InvalidOperationException("The lifecycle result carries no warnings list.");
