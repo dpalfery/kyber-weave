@@ -486,17 +486,25 @@ public static class CanonIngestPipeline
 
         long? reportedDurationMs = record.DurationMs >= 0 ? record.DurationMs : null;
 
-        List<CollectedTokenCount> tokens =
-        [
-            new CollectedTokenCount(TokenClass.Input, Math.Max(0L, record.Tokens.FreshInput)),
-            new CollectedTokenCount(TokenClass.CacheRead, Math.Max(0L, record.Tokens.CacheRead)),
-            new CollectedTokenCount(TokenClass.CacheWrite, Math.Max(0L, record.Tokens.CacheCreation)),
-            new CollectedTokenCount(TokenClass.Output, Math.Max(0L, record.Tokens.Output)),
-        ];
-
-        if (record.Tokens.Reasoning is long reasoning && reasoning >= 0)
+        // A declared-unmeasured class stays absent. Writing the default zero would make the
+        // session overview render a measured 0 for a harness that reported no counter.
+        bool inputUnmeasured = IsDeclaredNotMeasurable(record.Measurability, "token_usage");
+        bool outputUnmeasured = IsDeclaredNotMeasurable(record.Measurability, "output");
+        List<CollectedTokenCount> tokens = [];
+        if (!inputUnmeasured)
         {
-            tokens.Add(new CollectedTokenCount(TokenClass.Reasoning, reasoning));
+            tokens.Add(new CollectedTokenCount(TokenClass.Input, Math.Max(0L, record.Tokens.FreshInput)));
+            tokens.Add(new CollectedTokenCount(TokenClass.CacheRead, Math.Max(0L, record.Tokens.CacheRead)));
+            tokens.Add(new CollectedTokenCount(TokenClass.CacheWrite, Math.Max(0L, record.Tokens.CacheCreation)));
+        }
+
+        if (!outputUnmeasured)
+        {
+            tokens.Add(new CollectedTokenCount(TokenClass.Output, Math.Max(0L, record.Tokens.Output)));
+            if (record.Tokens.Reasoning is long reasoning && reasoning >= 0)
+            {
+                tokens.Add(new CollectedTokenCount(TokenClass.Reasoning, reasoning));
+            }
         }
 
         CollectedCost? cost = record.Cost.Value is double costValue
@@ -539,8 +547,25 @@ public static class CanonIngestPipeline
             AgentInstanceId: null,
             ToolDefinitions: [],
             Signals: new CollectedRecordSignals(errorMessage, null, null, null),
-            ReportedInputTokens: record.Tokens.ReportedInput >= 0 ? record.Tokens.ReportedInput : null,
-            ReportedOutputTokens: record.Tokens.ReportedOutput >= 0 ? record.Tokens.ReportedOutput : null);
+            ReportedInputTokens: inputUnmeasured || record.Tokens.ReportedInput < 0 ? null : record.Tokens.ReportedInput,
+            ReportedOutputTokens: outputUnmeasured || record.Tokens.ReportedOutput < 0 ? null : record.Tokens.ReportedOutput);
+    }
+
+    /// <summary>
+    /// Returns whether <paramref name="measurability"/> declares <paramref name="metric"/> not measurable.
+    /// A missing entry is not a declaration: the token classes stay as the adapter wrote them.
+    /// </summary>
+    private static bool IsDeclaredNotMeasurable(IReadOnlyDictionary<string, JsonElement>? measurability, string metric)
+    {
+        if (measurability is null || !measurability.TryGetValue(metric, out JsonElement element))
+        {
+            return false;
+        }
+
+        return element.ValueKind == JsonValueKind.Object
+            && element.TryGetProperty("availability", out JsonElement availability)
+            && availability.ValueKind == JsonValueKind.String
+            && string.Equals(availability.GetString(), "not_measurable", StringComparison.Ordinal);
     }
 
     private static readonly string[] ToolNameKeys =

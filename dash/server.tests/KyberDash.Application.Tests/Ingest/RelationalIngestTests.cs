@@ -223,6 +223,63 @@ public class RelationalIngestTests
     }
 
     /// <summary>
+    /// A Factory turn that declares token usage not measurable keeps the session input absent,
+    /// so the overview renders an em dash rather than a measured zero.
+    /// </summary>
+    [Fact]
+    public void IngestBatch_FactoryTurnWithoutTokenCounters_LeavesTotalInputUnmeasured()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionId = "factory-replay-content-off";
+
+        OtlpSpan turn = MakeOtlpSpan(
+            spanId: "aaaaaaaaaaaaaaaa",
+            traceId: "ffffffffffffffffffffffffffffffff",
+            serviceName: "kyberdash-factory-plugin",
+            name: "factory.turn",
+            kind: "internal",
+            attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["factory.contract_version"] = Element(CanonAdapters.DroidContractVersion),
+                ["factory.session.id"] = Element(sessionId),
+                ["factory.model"] = Element("gpt-5-codex"),
+            });
+
+        IngestOutcome outcome = CanonIngestPipeline.IngestBatch([turn], store, store);
+        Assert.Equal(new IngestOutcome(1, 0, 0), outcome);
+
+        CollectedRecord? stored = store.GetRecord("aaaaaaaaaaaaaaaa");
+        Assert.NotNull(stored);
+        Assert.DoesNotContain(stored.Tokens, static token => token.TokenClass == TokenClass.Input);
+        Assert.Null(stored.ReportedInputTokens);
+
+        _ = new CanonSessionProjectorEngine(store, store, store, pricing).ProjectIncremental();
+        SessionAggregateView? aggregate = store.GetSessionAggregate(sessionId, pricing.LoadPricingTables());
+        Assert.NotNull(aggregate);
+        Assert.Null(aggregate.TotalInput);
+
+        KyberBridgeEngine bridge = new(
+            store,
+            store,
+            store,
+            pricing,
+            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonRollupsEngine(store, store, pricing));
+        JsonElement summary = bridge.GetSessionDetail(sessionId)!.Value.GetProperty("summary");
+        Assert.Equal(JsonValueKind.Null, summary.GetProperty("total_input").ValueKind);
+
+        JsonElement listed = Assert.Single(
+            bridge.GetSessions().EnumerateArray(),
+            row => row.GetProperty("session_id").GetString() == sessionId);
+        JsonElement declared = listed.GetProperty("total_input");
+        Assert.Equal("not_measurable", declared.GetProperty("availability").GetString());
+        string? reason = declared.GetProperty("reason").GetString();
+        Assert.Contains("droid", reason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("token", reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Verifies <see cref="CanonIngestPipeline.IngestBatch(IReadOnlyList{OtlpSpan}, IRelationalStoreWriter, IOperationalStore, IReadOnlyList{IHarnessAdapter}?)"/>
     /// persists accepted records, problems, and quarantined spans through the relational contracts.
     /// </summary>

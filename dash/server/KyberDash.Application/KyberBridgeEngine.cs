@@ -2228,6 +2228,26 @@ public class KyberBridgeEngine
         return false;
     }
 
+    /// <summary>
+    /// A measured total stays a number, including zero. A session that has turns and no input
+    /// counter publishes the not-measurable declaration the sessions list already promised:
+    /// a missing number is not a measured zero, and the reason names the harness.
+    /// </summary>
+    private static object? TokenFigure(long? total, int? turnCount, string harness)
+    {
+        if (total is not null || turnCount is null or 0)
+        {
+            return total;
+        }
+
+        string named = string.IsNullOrWhiteSpace(harness) ? "The harness" : harness;
+        return new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["availability"] = "not_measurable",
+            ["reason"] = $"{named} telemetry did not report token usage for this session.",
+        };
+    }
+
     private static Dictionary<string, object?> ToSessionDto(SessionNode node)
     {
         Dictionary<string, object?> dto = new(StringComparer.Ordinal)
@@ -2245,7 +2265,7 @@ public class KyberBridgeEngine
             ["ended"] = node.Ended,
             ["turn_count"] = node.TurnCount,
             ["request_count"] = node.RequestCount,
-            ["total_input"] = node.TotalInput,
+            ["total_input"] = TokenFigure(node.TotalInput, node.TurnCount, node.Harness),
             ["total_output"] = node.TotalOutput,
             ["cost_usd"] = node.CostUsd,
             ["cost"] = node.Cost is null ? new { basis = "unknown", status = "no_rate" } : node.Cost,
