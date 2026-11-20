@@ -47,6 +47,13 @@ public sealed record ArbiterEvent
     /// <summary>The dispatch prompt, header block included.</summary>
     public string Prompt { get; init; } = string.Empty;
 
+    /// <summary>
+    /// The prompt the hook delivers to the worker when it differs from the dispatch: the inserted packet of a
+    /// <c>rewrite</c> path, or null when the worker runs what the caller wrote. The ledger's pair digest is taken
+    /// over this text, because the return carries it.
+    /// </summary>
+    public string? DeliveredPrompt { get; init; }
+
     /// <summary>The harness tool-call id, where the payload carries one.</summary>
     public string? ToolCallId { get; init; }
 

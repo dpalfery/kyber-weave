@@ -45,18 +45,26 @@ public sealed class DispatchPromptInsertionTests
     {
         public List<TaskPromptRequest> Requests { get; } = [];
 
+        public List<string> Repositories { get; } = [];
+
         public string Prompt { get; init; } = TaskPrompt;
 
         public string? Refusal { get; init; }
 
-        public ITaskPromptService ForRepository(string repositoryRoot, KyberWeaveConfig config) => this;
+        public TaskPromptRefusalKind RefusalKind { get; init; } = TaskPromptRefusalKind.MissingInput;
+
+        public ITaskPromptService ForRepository(string repositoryRoot, KyberWeaveConfig config)
+        {
+            Repositories.Add(repositoryRoot);
+            return this;
+        }
 
         public TaskPromptResult Build(TaskPromptRequest request, KyberWeaveConfig config)
         {
             Requests.Add(request);
             return Refusal is null
                 ? new TaskPromptResult(true, Prompt, "csharp-dev", "medium", "plan", request.Technology, [], null)
-                : TaskPromptResult.NotBuilt(Refusal);
+                : TaskPromptResult.NotBuilt(Refusal, RefusalKind);
         }
     }
 
@@ -533,7 +541,11 @@ public sealed class DispatchPromptInsertionTests
         }
     }
 
-    private HookCommand Host(IHookDecisionEngine engine, KyberWeaveConfig config, ScriptedPrompts prompts)
+    private HookCommand Host(
+        IHookDecisionEngine engine,
+        KyberWeaveConfig config,
+        ScriptedPrompts prompts,
+        IHookRunContextResolver? runContexts = null)
     {
         HarnessAdapterRegistry registry = ArbiterTestServices.Registry(engine);
         return new HookCommand(
@@ -544,7 +556,8 @@ public sealed class DispatchPromptInsertionTests
             ArbiterTestServices.Get<IProcessEnvironment>(),
             new FakeIdGenerator(),
             () => "decision-test-1",
-            prompts);
+            prompts,
+            runContexts);
     }
 
     private static (int Exit, string Stdout) Run(HookCommand command, string harness, string payload)
@@ -567,6 +580,67 @@ public sealed class DispatchPromptInsertionTests
         Assert.Single(prompts.Requests);
     }
 
+    /// <summary>
+    /// A conductor run writes its plan and task file in its run worktree, while the Copilot CLI hook runs in the
+    /// checkout the session started in. The prompt must be built from the worktree that holds the plan, or every
+    /// worker dispatch is refused for a task file that exists only there.
+    /// </summary>
+    [Fact]
+    public void ADispatchForAPlanOnlyTheRunWorktreeHolds_BuildsThePromptAgainstThatWorktree()
+    {
+        const string worktree = "/repo.worktrees/run";
+        ScriptedPrompts prompts = new();
+
+        (int exit, string stdout) = Run(
+            Host(new RecordingEngine(), DisabledConfig(), prompts, new FixedRunContexts(worktree)),
+            "copilot-cli",
+            Payload("copilot-cli", TaskDispatch));
+
+        Assert.Equal(0, exit);
+        Assert.Equal(TaskPrompt + "\n\nImplement the plan parser.", InsertedPrompt("copilot-cli", stdout));
+        TaskPromptRequest request = Assert.Single(prompts.Requests);
+        Assert.Equal(worktree, request.RepoRoot);
+        Assert.Equal([worktree], prompts.Repositories);
+    }
+
+    /// <summary>
+    /// The resolution is told the dispatch's own plan header and the text below it, so the resolver can pick the
+    /// worktree the dispatch names rather than guessing.
+    /// </summary>
+    [Fact]
+    public void ThePlanResolutionIsAskedWithTheDispatchedPlanAndBody()
+    {
+        RecordingRunContexts runContexts = new();
+        string dispatch = $"KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nRun worktree: /repo.worktrees/run";
+
+        _ = Run(
+            Host(new RecordingEngine(), DisabledConfig(), new ScriptedPrompts(), runContexts),
+            "copilot-cli",
+            Payload("copilot-cli", dispatch));
+
+        HookRunContextRequest request = Assert.Single(runContexts.Requests);
+        Assert.Equal("/repo", request.EventCwd);
+        Assert.Contains("PLAN_FILE: docs/plans/plan.md", request.Prompt, StringComparison.Ordinal);
+        Assert.Contains("Run worktree: /repo.worktrees/run", request.Prompt, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A plan that is under the hook's own checkout keeps it: the worktree lookup may never move a prompt away from
+    /// the repository the dispatch was evaluated in.
+    /// </summary>
+    [Fact]
+    public void ADispatchForAPlanTheHookCheckoutHolds_BuildsThePromptAgainstTheHookCheckout()
+    {
+        ScriptedPrompts prompts = new();
+
+        _ = Run(
+            Host(new RecordingEngine(), DisabledConfig(), prompts, new FixedRunContexts("/repo")),
+            "copilot-cli",
+            Payload("copilot-cli", TaskDispatch));
+
+        Assert.Equal("/repo", Assert.Single(prompts.Requests).RepoRoot);
+    }
+
     [Fact]
     public void WithTheArbiterOnTheRulesJudgeTheShortDispatchBeforeThePromptIsInserted()
     {
@@ -581,13 +655,33 @@ public sealed class DispatchPromptInsertionTests
         Assert.StartsWith(TaskPrompt, InsertedPrompt("claude", stdout), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A task file that is absent or unreadable is an input the hook could not read, not a finding against the work:
+    /// the dispatch continues unexpanded and the log names the path tried. Only a positive finding stops it.
+    /// </summary>
     [Fact]
-    public void APromptThatCannotBeBuiltStopsTheDispatchAndNamesTheRepairCommand()
+    public void AMissingTaskFileWarnsAndTheDispatchContinues()
     {
         const string refusal =
-            "No prompt: the task file for docs/plans/plan.md is missing or does not match the plan. " +
-            "Run 'kyber-weave docs tasks docs/plans/plan.md --write', then build the prompt again.";
+            "No prompt: the task file for docs/plans/plan.md is missing or does not match the plan; tried " +
+            "'/repo/docs/plans/plan.tasks.yml'. Run 'kyber-weave docs tasks docs/plans/plan.md --write', then build the prompt again.";
         ScriptedPrompts prompts = new() { Refusal = refusal };
+
+        (int exit, string stdout) = Run(
+            Host(new RecordingEngine(), DisabledConfig(), prompts), ClaudeHookAdapter.Token, Payload("claude", TaskDispatch));
+
+        Assert.Equal(0, exit);
+        Assert.DoesNotContain("permissionDecision", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("updatedInput", stdout, StringComparison.Ordinal);
+    }
+
+    /// <summary>A positive finding about the dispatch still stops it, as the security and roster checks do.</summary>
+    [Fact]
+    public void APositiveFindingStopsTheDispatchAndNamesTheRepairCommand()
+    {
+        const string refusal =
+            "No prompt: 'csharp-dev' is a removed technology developer. Dispatch dev-medium.";
+        ScriptedPrompts prompts = new() { Refusal = refusal, RefusalKind = TaskPromptRefusalKind.Finding };
 
         (int exit, string stdout) = Run(
             Host(new RecordingEngine(), DisabledConfig(), prompts), ClaudeHookAdapter.Token, Payload("claude", TaskDispatch));
@@ -596,8 +690,7 @@ public sealed class DispatchPromptInsertionTests
         using JsonDocument document = JsonDocument.Parse(stdout);
         JsonElement output = document.RootElement.GetProperty("hookSpecificOutput");
         Assert.Equal("deny", output.GetProperty("permissionDecision").GetString());
-        Assert.Contains("kyber-weave docs tasks docs/plans/plan.md --write", output.GetProperty("permissionDecisionReason").GetString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("updatedInput", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains(refusal, output.GetProperty("permissionDecisionReason").GetString(), StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -768,5 +861,33 @@ public sealed class DispatchPromptInsertionTests
         public KyberWeaveConfig? LoadProject(string repoRoot) => config;
 
         public string ResolveHomeDirectory(string? homeDirectory) => homeDirectory ?? "/home/test";
+    }
+
+    /// <summary>A plan root resolver that answers one root, standing for the worktree a plan was found in.</summary>
+    /// <summary>A run context that names one worktree, so the prompt is built from it.</summary>
+    private sealed class FixedRunContexts(string worktree) : IHookRunContextResolver
+    {
+        public HookRunContext Resolve(HookRunContextRequest request) => Context(worktree);
+
+        public HookRunContext SelectPlan(HookRunContext context, string? planFile, string? text) => context;
+
+        private static HookRunContext Context(string root) => new(
+            "/repo", "/repo/.git", null, root, [root], null, null, null, false, HookRunContextSource.EventWorktree, []);
+    }
+
+    /// <summary>A run context resolver that records what the hook asked and keeps the hook's own root.</summary>
+    private sealed class RecordingRunContexts : IHookRunContextResolver
+    {
+        public List<HookRunContextRequest> Requests { get; } = [];
+
+        public HookRunContext Resolve(HookRunContextRequest request)
+        {
+            Requests.Add(request);
+            return new HookRunContext(
+                "/repo", "/repo/.git", null, "/repo", ["/repo"], null, null, null, false,
+                HookRunContextSource.PayloadCwd, []);
+        }
+
+        public HookRunContext SelectPlan(HookRunContext context, string? planFile, string? text) => context;
     }
 }

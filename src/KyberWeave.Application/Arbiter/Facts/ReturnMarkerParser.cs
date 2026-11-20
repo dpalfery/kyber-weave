@@ -29,8 +29,8 @@ internal static partial class ReturnMarkerParser
 
         string text = Flatten(output);
         string? review = LastGroup(ResultRegex(), text);
-        string? status = LastGroup(StatusRegex(), text);
-        string? gate = LastGroup(TaskGateRegex(), text);
+        string? status = MarkerWord(LastGroup(StatusRegex(), text));
+        string? gate = MarkerWord(LastGroup(TaskGateRegex(), text));
         IReadOnlyList<string>? attested = readAttestations ? ReadAttested(text) : null;
         return review is null && status is null && attested is null && gate is null
             ? null
@@ -49,6 +49,38 @@ internal static partial class ReturnMarkerParser
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
         return pairs.Count == 0 ? null : pairs;
     }
+
+    /// <summary>
+    /// A status word as a model wrote it, without the punctuation or emphasis around it: "PASS," "**PASS**" and
+    /// "`PASS`." all read as PASS. Null when nothing is left.
+    /// </summary>
+    /// <param name="word">The word after a marker such as <c>STATUS:</c> or <c>TASK_GATE:</c>.</param>
+    public static string? MarkerWord(string? word)
+    {
+        if (word is null)
+        {
+            return null;
+        }
+
+        // Keep the leading run of word characters: emphasis, quotes, <> and any punctuation an
+        // editor attaches, including a dash glued to a following word, all fall away.
+        string trimmed = word.Trim();
+        int start = 0;
+        while (start < trimmed.Length && !IsWordCharacter(trimmed[start]))
+        {
+            start++;
+        }
+
+        int end = start;
+        while (end < trimmed.Length && IsWordCharacter(trimmed[end]))
+        {
+            end++;
+        }
+
+        return end == start ? null : trimmed[start..end];
+    }
+
+    private static bool IsWordCharacter(char value) => char.IsLetterOrDigit(value) || value == '_';
 
     private static string? LastGroup(Regex regex, string text)
     {
@@ -111,7 +143,7 @@ internal static partial class ReturnMarkerParser
     [GeneratedRegex(@"^STATUS:[ \t]*(\S+)", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex StatusRegex();
 
-    [GeneratedRegex(@"^TASK_GATE:[ \t]*([A-Z_]+)\b", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^TASK_GATE:[ \t]*(\S+)", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex TaskGateRegex();
 
     [GeneratedRegex(@"^ATTESTED:[ \t]*(.+?)[ \t]*\r?$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]

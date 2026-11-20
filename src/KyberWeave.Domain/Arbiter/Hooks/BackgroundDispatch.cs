@@ -12,13 +12,15 @@ namespace KyberWeave.Arbiter.Hooks;
 /// <param name="Caller">The dispatching agent, or <c>unidentified</c>.</param>
 /// <param name="Target">The dispatched agent type.</param>
 /// <param name="Prompt">The dispatch prompt as executed.</param>
+/// <param name="CallId">The harness's id for the dispatch tool call, when the payload carried one; null otherwise.</param>
 public sealed record BackgroundDispatch(
     string Harness,
     string SessionId,
     string AgentId,
     string Caller,
     string? Target,
-    string Prompt);
+    string Prompt,
+    string? CallId = null);
 
 /// <summary>What the Arbiter keeps about a background dispatch between its start and each of its turns ending.</summary>
 /// <param name="Dispatch">The dispatch as it started.</param>

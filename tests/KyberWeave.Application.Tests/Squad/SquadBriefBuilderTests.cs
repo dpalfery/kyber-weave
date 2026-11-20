@@ -1,3 +1,4 @@
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Briefs;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -50,6 +51,43 @@ public sealed class SquadBriefBuilderTests
 
         Assert.False(built);
         Assert.Contains("'/kw/work/repo/nowhere' does not exist", refusal, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheGivenAutonomyWinsAndTheConfigurationIsTheLastSource()
+    {
+        // The given value wins over both the registry and the configuration, read case- and space-insensitively.
+        _files.CreateDirectory(Repo);
+        _files.WriteAllText(Repo + "/AGENTS.md", "- **<autonomy>**: `supervised`\n");
+        KyberWeaveConfig configured = new()
+        {
+            Arbiter = KyberWeave.Core.Arbiter.ArbiterConfigDefaults.Product,
+            ConfigReg = new KyberWeave.Core.Configuration.ConfigRegConfig { Autonomy = "supervised" }
+        };
+
+        Assert.Equal("autonomous", _builder.ResolveAutonomy(Repo, "  AUTONOMOUS ", configured));
+
+        // With nothing given and no registry line, the configuration supplies the value.
+        _files.DeleteFile(Repo + "/AGENTS.md");
+        KyberWeaveConfig autonomous = new()
+        {
+            Arbiter = KyberWeave.Core.Arbiter.ArbiterConfigDefaults.Product,
+            ConfigReg = new KyberWeave.Core.Configuration.ConfigRegConfig { Autonomy = "autonomous" }
+        };
+
+        Assert.Equal("autonomous", _builder.ResolveAutonomy(Repo, null, autonomous));
+
+        // With nothing set anywhere, the run has none and reads the default.
+        Assert.Null(_builder.ResolveAutonomy(Repo, null, KyberWeaveConfigDefaults.Product));
+    }
+
+    [Fact]
+    public void TheRepositoryRegistryAutonomyIsUsedWhenNoneIsGiven()
+    {
+        _files.CreateDirectory(Repo);
+        _files.WriteAllText(Repo + "/AGENTS.md", "- **<autonomy>**: `autonomous`\n");
+
+        Assert.Equal("autonomous", _builder.ResolveAutonomy(Repo, null, KyberWeaveConfigDefaults.Product));
     }
 
     private sealed class RecordingBriefs : ISquadBriefService

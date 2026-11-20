@@ -17,10 +17,20 @@ public static class HookFastPath
     /// True only when the harness is served, the event is a JSON object and its adapter says it passes through. In every
     /// other case, including an adapter that throws, false: the hook command decides, and reports what went wrong.
     /// </returns>
-    public static bool IsPassThrough(string harness, string? caller, string stdin)
+    public static bool IsPassThrough(string harness, string? caller, string stdin) =>
+        TryPassThrough(harness, caller, stdin, out _);
+
+    /// <summary>Whether the harness's adapter passes this event through, and the document it answers with.</summary>
+    /// <param name="harness">The <c>--harness</c> token.</param>
+    /// <param name="caller">The rendered <c>--caller</c>, or null.</param>
+    /// <param name="stdin">The hook event as JSON.</param>
+    /// <param name="document">The adapter's allow document for the event, or null when the harness answers with silence.</param>
+    /// <returns>True under the same conditions as <see cref="IsPassThrough"/>.</returns>
+    public static bool TryPassThrough(string harness, string? caller, string stdin, out string? document)
     {
         ArgumentNullException.ThrowIfNull(harness);
         ArgumentNullException.ThrowIfNull(stdin);
+        document = null;
         try
         {
             HarnessAdapterRegistry registry = HarnessAdapterRegistry.CreateDefault(
@@ -30,9 +40,15 @@ public static class HookFastPath
                 return false;
             }
 
-            using JsonDocument document = JsonDocument.Parse(stdin);
-            return document.RootElement.ValueKind == JsonValueKind.Object
-                && adapter.IsPassThrough(document.RootElement, caller);
+            using JsonDocument parsed = JsonDocument.Parse(stdin);
+            if (parsed.RootElement.ValueKind != JsonValueKind.Object
+                || !adapter.IsPassThrough(parsed.RootElement, caller))
+            {
+                return false;
+            }
+
+            document = adapter.AllowDocument(parsed.RootElement);
+            return true;
         }
         catch (Exception)
         {

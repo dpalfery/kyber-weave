@@ -248,7 +248,7 @@ public class LegacyHostMigrationTests
         WriteLegacyStandards();
 
         StandardsFolderMigrationResult result =
-            _repo.Migration(config.Ontology).Run();
+            _repo.Migration(config).Run();
 
         foreach (string technology in Technologies)
         {
@@ -277,15 +277,91 @@ public class LegacyHostMigrationTests
     {
         KyberWeaveConfig config = DeclareTechnologies();
         WriteLegacyStandards();
-        _repo.Migration(config.Ontology).Run();
+        _repo.Migration(config).Run();
 
         string once = _repo.Memory.ReadAllText(PathOf("6-Docs/standards/csharp/csharp.standards.md"));
         StandardsFolderMigrationResult second =
-            _repo.Migration(config.Ontology).Run();
+            _repo.Migration(config).Run();
 
         Assert.Empty(second.Changes);
         Assert.Empty(second.Moves);
+        Assert.False(second.ConfigRegRefreshed);
         Assert.Equal(once, _repo.Memory.ReadAllText(PathOf("6-Docs/standards/csharp/csharp.standards.md")));
+    }
+
+    /// <summary>
+    /// The defect this closes: a host whose standards were still <c>README.md</c> when its
+    /// registry block was rendered. The migration renames those standards, so the block now
+    /// publishes seven paths that no longer exist; without re-rendering it, <c>docs validate</c>
+    /// reports them as errors and only <c>docs init</c> clears them. One command now clears the
+    /// whole warning period: the standards, their six headings, the missing folder files, and
+    /// the block.
+    /// </summary>
+    [Fact]
+    public void TheMigrationRefreshesAnOlderBuildsRegistryBlockAndLeavesTheHostValid()
+    {
+        KyberWeaveConfig config = DeclareTechnologies();
+        WriteLegacyStandards();
+        WriteOlderBuildRegistryBlock(config);
+        string userConfig = _repo.Memory.ReadAllText(PathOf(".kyber-weave/kyber-weave.yml"));
+
+        StandardsFolderMigrationResult result = _repo.Migration(config).Run();
+
+        Assert.True(result.ConfigRegRefreshed);
+
+        DiagnosticReport documents = ValidateDocuments(config);
+        DiagnosticReport registry = ValidateRegistry(config);
+        Assert.Empty(documents.Items);
+        Assert.Empty(registry.Items);
+        Assert.DoesNotContain(documents.Items, i =>
+            i.Code is DocSpecValidator.MissingFolderFile or DocSpecValidator.StandardHeadings);
+        Assert.DoesNotContain(registry.Items, i =>
+            i.Code is ConfigRegValidator.UnresolvedPath or ConfigRegValidator.StaleRendering);
+
+        Assert.DoesNotContain(
+            "6-Docs/standards/csharp/README.md",
+            _repo.Memory.ReadAllText(PathOf("AGENTS.md")),
+            StringComparison.Ordinal);
+        Assert.Equal(userConfig, _repo.Memory.ReadAllText(PathOf(".kyber-weave/kyber-weave.yml")));
+    }
+
+    /// <summary>
+    /// The refreshed block is the only thing outside a standards folder the migration touches,
+    /// and a second run finds neither a standard to rename nor a block to re-render.
+    /// </summary>
+    [Fact]
+    public void MigratingAnOlderBuildsHostTwiceChangesNothingTheSecondTime()
+    {
+        KyberWeaveConfig config = DeclareTechnologies();
+        WriteLegacyStandards();
+        WriteOlderBuildRegistryBlock(config);
+        _repo.Migration(config).Run();
+        string agents = _repo.Memory.ReadAllText(PathOf("AGENTS.md"));
+
+        StandardsFolderMigrationResult second = _repo.Migration(config).Run();
+
+        Assert.Empty(second.Changes);
+        Assert.Empty(second.Moves);
+        Assert.False(second.ConfigRegRefreshed);
+        Assert.Equal(agents, _repo.Memory.ReadAllText(PathOf("AGENTS.md")));
+    }
+
+    /// <summary>
+    /// A dry run says the block would be refreshed and leaves it stale, like every other change
+    /// it reports.
+    /// </summary>
+    [Fact]
+    public void ADryRunReportsTheRegistryRefreshWithoutWritingIt()
+    {
+        KyberWeaveConfig config = DeclareTechnologies();
+        WriteLegacyStandards();
+        WriteOlderBuildRegistryBlock(config);
+        string agents = _repo.Memory.ReadAllText(PathOf("AGENTS.md"));
+
+        StandardsFolderMigrationResult result = _repo.Migration(config).Run(dryRun: true);
+
+        Assert.True(result.ConfigRegRefreshed);
+        Assert.Equal(agents, _repo.Memory.ReadAllText(PathOf("AGENTS.md")));
     }
 
     private static IReadOnlyList<string> LevelTwoHeadings(string text) =>

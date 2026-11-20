@@ -253,7 +253,7 @@ public sealed class GateReportFacts(
                 if (word.Length > ReportField.Length && word.StartsWith(ReportField, StringComparison.Ordinal))
                     reportPath = word[ReportField.Length..];
                 else if (status is null && !word.Contains('=', StringComparison.Ordinal))
-                    status = word;
+                    status = ReturnMarkerParser.MarkerWord(word);
             }
 
             // A path with a space splits into words. The rest of the line after report= is kept as a second

@@ -46,6 +46,7 @@ public sealed class TaskPromptFileOverSeamTests
         TaskPromptResult result = Build("warp");
 
         Assert.False(result.Built);
+        Assert.Equal(TaskPromptRefusalKind.Finding, result.RefusalKind);
         Assert.Contains("could not be written", result.Refusal, StringComparison.Ordinal);
         Assert.Contains($"{TaskPromptService.ScratchFolder}/csharp/{TaskPromptService.PromptFileName}", result.Refusal, StringComparison.Ordinal);
         Assert.Null(result.PromptFile);

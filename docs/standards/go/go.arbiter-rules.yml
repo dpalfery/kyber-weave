@@ -1,3 +1,0 @@
-# Machine rules the Arbiter evaluates for the 'go' folder.
-# An empty list is valid: most folders declare none.
-rules: []

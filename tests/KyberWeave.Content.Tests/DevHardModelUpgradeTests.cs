@@ -4,7 +4,6 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
-using KyberWeave.Tests.Corpus;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -19,12 +18,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class DevHardModelUpgradeTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
-
-    private static readonly Lazy<SquadSource> Source = new(() => RealSquadServices.Load(ProductRoot));
+    private static SquadSource Source => CanonicalSquadTree.SharedSource;
 
     /// <summary>
     /// The harnesses where both developer tiers resolve to the same value because the matrix offers
@@ -66,7 +60,7 @@ public sealed class DevHardModelUpgradeTests
         ["antigravity"] = "flash",
         ["claude"] = "claude-haiku-5-5",
         ["codex"] = "gpt-6-luna",
-        ["copilot"] = "Claude Haiku 5.5 (copilot)",
+        ["copilot"] = "MAI Code 2 Flash (copilot)",
         ["cursor"] = "composer-2.5[]",
         ["devin"] = "deepseek-v4-1-flash-high",
         ["factory"] = "deepseek-v4.1-flash[reasoningEffort=high]",
@@ -82,7 +76,7 @@ public sealed class DevHardModelUpgradeTests
         ["antigravity"] = "flash",
         ["claude"] = "claude-sonnet-5-5",
         ["codex"] = "gpt-6.1-terra",
-        ["copilot"] = "GPT-6.1 Terra (copilot)",
+        ["copilot"] = "MAI Code 2 (copilot)",
         ["cursor"] = "grok-4.7[]",
         ["devin"] = "swe-2-high",
         ["factory"] = "deepseek-v4.1-flash[reasoningEffort=high]",
@@ -115,7 +109,7 @@ public sealed class DevHardModelUpgradeTests
     [Fact]
     public void DevHardResolvesToADifferentModelFromGeneralOnEveryOtherHarness()
     {
-        IReadOnlyDictionary<string, SquadModelProfile> profiles = Source.Value.ModelProfiles.Profiles;
+        IReadOnlyDictionary<string, SquadModelProfile> profiles = Source.ModelProfiles.Profiles;
         SquadModelProfile devHard = profiles["dev-hard"];
         SquadModelProfile general = profiles["general"];
 
@@ -148,7 +142,7 @@ public sealed class DevHardModelUpgradeTests
     [Fact]
     public void DevHardKeepsTheModelChosenForItOnEveryHarness()
     {
-        SquadModelProfile devHard = Source.Value.ModelProfiles.Profiles["dev-hard"];
+        SquadModelProfile devHard = Source.ModelProfiles.Profiles["dev-hard"];
 
         Assert.Equal("inherit", devHard.Default);
         Assert.Equal(Sort(DevHardModels), Sort(devHard.HarnessModels));
@@ -180,7 +174,7 @@ public sealed class DevHardModelUpgradeTests
     [Fact]
     public void DevEasyAndDevMediumKeepTheirModels()
     {
-        IReadOnlyDictionary<string, SquadModelProfile> profiles = Source.Value.ModelProfiles.Profiles;
+        IReadOnlyDictionary<string, SquadModelProfile> profiles = Source.ModelProfiles.Profiles;
 
         AssertProfileUnchanged(profiles["fast"], DevEasyModels);
         AssertProfileUnchanged(profiles["general"], DevMediumModels);

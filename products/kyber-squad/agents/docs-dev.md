@@ -22,16 +22,17 @@ Your task's files are your scope (see your baseline). A dispatch with a task id 
 
 ## Commands you run
 
-The only processes you run are these nine command classes:
+The only processes you run are these ten command classes:
 - `kyber-weave docs packet <task id>`: your brief for a dispatch that carries a task id, run from the worktree the dispatch names.
 - `kyber-weave docs closeout <plan>`: changes nothing and names every closeout item still missing from the plan named by the dispatch's `PLAN_FILE:`. Only an archive dispatch (Plan closeout, step 6) also runs `kyber-weave docs closeout <plan> --archive`, which sets the status, moves the plan to `<docs-root>/archive/plans/`, removes its `<plan>.tasks.yml` and updates both indexes; never do those steps by hand. An index file that command or the archive tool creates because the archive folder has none yet is the tool's own output, not a document you are adding: it needs no approval and is never a reason to return `BLOCKED`.
+- `kyber-weave docs standards migrate`: when a check reports the standards warning period (`KW-DOC-SPEC-012`, `KW-DOC-SPEC-013`, `KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`); it clears those warnings, so run it and re-check rather than reporting them.
 - `git mv` of the specification directory you close out to `<docs-root>/archive/specs/`, only after its closeout steps are complete.
 - `git rm` of that specification's `<spec-folder>/tasks.yml` in the same commit that archives it, so the file never reaches the main branch. Nothing durable is lost: the archived artifact keeps its decisions, tasks and test contract.
 - `kyber-weave docs validate .`, or, when the tool is not on `PATH`, the source-run form the host's `AGENTS.md` declares (`dotnet run --project <the CLI project> -- docs validate .`). Run it after every corpus edit. Add `--merge-ready` only after an archival move: before it, the open plan and its task file fail it.
 - `kyber-weave docs drift .` (or the same `dotnet run` form the host's AGENTS.md declares).
 - `kyber-weave docs tasks <plan> --write`: only when the validation above names `KW-DOC-TASKS-002` or `-003` after you corrected a task's files or text in the plan. It rewrites the plan's task file from the plan; commit it with the plan. Never run it for any other reason, and never for a task file you did not make stale.
 - Run the targeted tests that pin documentation, named by the packet.
-- `git add <your own documentation paths>` and `git commit` of them (the plan and its task file included, never anything else), once your closeout or review check is clean, whatever the dispatch says about committing; never for a plan archive step, and never a push.
+- `git add <your own documentation paths>` and `git commit` of them (the plan and its task file included), plus only the standards files and the root `AGENTS.md` that `kyber-weave docs standards migrate` reported changing in this run — never another file it merely printed — once your closeout or review check is clean, whatever the dispatch says about committing; never for a plan archive step, and never a push.
 
 Run nothing else. A plan is archived by the conductor's archive tool, or by you on an archive dispatch; a spec only by you.
 
@@ -60,7 +61,7 @@ When assigned a plan closeout:
 
 8. Harvest the plan's Design harvest declared at authoring time: every Design harvest requirement-group at its declared scale migrates into canonical documentation alongside the decisions. Record the documentation-impact of each migrated item.
 9. Record a Closeout mapping for every harvested item with its documentation-impact, impact-components, last-reviewed date, and status archived row. The archive sets the plan to `Status: Archived`, so the mapping must be complete before you return.
-10. Run `kyber-weave docs validate .` and `kyber-weave docs drift .` (with `--merge-ready` only after you archived). Report any finding as a blocker; do not report `CLOSEOUT_COMPLETE` while either check reports one.
+10. Run `kyber-weave docs validate .` and `kyber-weave docs drift .` (with `--merge-ready` only after you archived). Fix every finding they report — errors and warnings alike, including a warning the document carried before this change — then run both again, and repeat until both are clean. A warning is a finding you fix, not a blocker: the goal is a pull request that passes, not a report that names what failed. Return `STATUS: BLOCKED` only for a finding you cannot fix inside your authority, and then name the finding, why you cannot fix it, and who can. When the fix is a docs command in your command list, run it instead of blocking; the standards warning period is cleared by `kyber-weave docs standards migrate`.
 
 ## Specification closeout
 
@@ -92,7 +93,8 @@ When assigned a specification closeout:
    `git mv` and set the status to `Archived`, only after steps 2 to 4 are complete. The task file
    goes first, so the archived folder never carries one.
 6. Run `kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .`. Migrating content
-   moves code references between documents, and an unresolved reference is a broken join.
+   moves code references between documents, and an unresolved reference is a broken join. Fix every
+   finding and repeat, as Plan closeout step 10 requires.
 7. If any precondition or documentation update is unresolved, do not archive. Leave the
    specification `Review required` or return it to the appropriate active status, and
    report the precise gap to the orchestrator.

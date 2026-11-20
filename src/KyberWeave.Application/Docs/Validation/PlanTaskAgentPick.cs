@@ -291,6 +291,7 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     };
 
     /// <summary>The difficulty rule, with the shipped rule's question, answers and criteria, asked beside the pick.</summary>
+    /// <remarks>The criteria rate decisions rather than size and have not been re-tuned since that rewording: the confidence floor was set on the earlier wording.</remarks>
     private static ArbiterRule DifficultyRuleFor(string taskId, string key) => new(
         DifficultyPrefix + taskId,
         "docs.tasks",
@@ -312,9 +313,9 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
             },
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                ["easy"] = "A small, local change with one obvious path.",
-                [StandardAnswer] = "A change with several files or a non-obvious path, but no cross-cutting risk.",
-                ["hard"] = "A change that spans layers, alters contracts, or needs careful design.",
+                ["easy"] = "Every change is stated in the task and an existing pattern covers it, in however many files.",
+                [StandardAnswer] = "The worker makes design choices the task leaves open, in code that has patterns to follow.",
+                ["hard"] = "There is no pattern to copy, a wrong choice breaks other callers, or the work involves concurrency, security or a data migration.",
             },
             ConfidenceAtLeast: ConfidenceFloor));
 

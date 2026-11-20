@@ -1,6 +1,8 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Tests.Arbiter;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Core.RunStart;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter.Facts;
@@ -335,9 +337,93 @@ public sealed class ConductorGuardTests : IDisposable
         Assert.NotEmpty(RunIn(Cwd, Path.Combine(runs, "..", "secrets.json"), home));
     }
 
+    /// <summary>
+    /// A record names the branch its worktree has checked out, so declaring the records again makes a worktree a test
+    /// had scripted as reused live once more, exactly as a fresh <c>run start</c> does. Seeding only the worktrees the
+    /// dictionary did not already hold left the first declaration in place and the second run invisible.
+    /// </summary>
+    [Fact]
+    public void AReDeclaredRunRecordMakesItsWorktreeLiveAgain()
+    {
+        const string worktree = "/repo-worktree";
+        string repository = "/repo/.git";
+        string home = "/home";
+        FakeRunStateStore runs = new()
+        {
+            Records = [new RunRecord(repository, "opencode/fix/a", worktree, DateTimeOffset.UtcNow)],
+        };
+        runs.MarkWorktreeReused(worktree, "opencode/other/b");
+        Assert.False(runs.HasLiveRun(home, repository));
+
+        runs.Records = [new RunRecord(repository, "opencode/fix/a", worktree, DateTimeOffset.UtcNow.AddMinutes(1))];
+
+        Assert.True(runs.HasLiveRun(home, repository));
+    }
+
     private sealed class NoLinks : IFileLinkProbe
     {
         public bool HasLinkBelow(string root, string fullPath) => false;
+    }
+
+    /// <summary>
+    /// A record outlives its run: a worktree reused for another branch is not the run's worktree, so no run is live.
+    /// The fake the unit tests seed must say so too, or a test passes while production refuses the dispatch.
+    /// </summary>
+    [Fact]
+    public void ADispatchIsRefusedWhenTheRunsWorktreeHasAnotherBranchCheckedOut()
+    {
+        const string worktree = "/repo-worktree";
+        FakeRunStateStore runs = new()
+        {
+            Records = [new RunRecord("/repo/.git", "opencode/fix/a", worktree, DateTimeOffset.UtcNow)],
+        };
+        runs.MarkWorktreeReused(worktree, "opencode/other/b");
+
+        using InMemoryArbiterHost host = InMemoryArbiterHost.Create(services =>
+        {
+            services.AddSingleton<IFileLinkProbe>(new NoLinks());
+            services.AddSingleton<IRunStateStore>(runs);
+        });
+        host.Files.CreateDirectory(Cwd);
+        host.Files.CreateDirectory(worktree);
+        host.Git.CommonDirectory = "/repo/.git";
+        host.Git.Worktrees[Cwd] = [Cwd, worktree];
+        string home = host.InHome("stale-run");
+
+        using StringWriter stdout = new();
+        host.Get<IConductorGuard>().Run(
+            JsonSerializer.Serialize(new
+            {
+                cwd = Cwd,
+                toolName = "task",
+                toolArgs = new { agent_type = "dev-hard", prompt = "KYBER-ARBITER: true\nTASK: T1\n\nGo." },
+            }),
+            stdout,
+            TextWriter.Null,
+            copilotHome: CopilotHome,
+            homeDirectory: home);
+
+        Assert.Contains("KW-ARB-RUN-001", stdout.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Run 9's layout: the Copilot session started in the canonical checkout while `run start` put the plan and its
+    /// task file in a worktree. The conductor may read the plan it is asked to work from, in that worktree.
+    /// </summary>
+    [Fact]
+    public void APlanInTheRunWorktree_IsReadableWhileThePayloadCwdIsTheCanonicalCheckout()
+    {
+        string main = ArbiterTestRoots.Under("kw", "canonical");
+        string worktree = ArbiterTestRoots.Under("kw", "run");
+        _host.Files.CreateDirectory(main);
+        _host.Files.CreateDirectory(Path.Combine(worktree, "docs", "plans"));
+        string plan = Path.Combine(worktree, "docs", "plans", "2026-11-18-run.md");
+        _host.Write(plan, "# Plan\n");
+        _host.Write(Path.Combine(worktree, "docs", "plans", "2026-11-18-run.tasks.yml"), "schema: 2\n");
+        _host.Git.CommonDirectory = Path.Combine(main, ".git");
+        _host.Git.Worktrees[main] = [main, worktree];
+
+        Assert.Empty(RunIn(main, plan));
     }
 
     private static string Event(string tool, object arguments) =>

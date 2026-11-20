@@ -31,6 +31,7 @@ Every plan contains:
 
 - governed frontmatter including `development-mode: test-first | standard`, `documentation-impact: new-component | extends-component | no-design-change`, and `impact-components` (catalog component names; required and non-empty for `new-component` and `extends-component`);
 - problem and goal;
+- a `## Request trace` table mapping every explicit instruction in the request to the plan section, task or out-of-scope boundary that covers it;
 - a permanent Decisions section recording all material choices, alternatives, questions, and approvals;
 - the declared scale (`documentation-impact` plus `impact-components`) and a `Design harvest` table keyed by Target component and Target doc type (one row per durable design, contract, interface, behaviour, or operations section; a `no-design-change` scale carries `Documentation waiver: <reason>` instead of rows);
 - investigation findings;
@@ -63,6 +64,10 @@ impact-components:
 **Status: Draft.**
 
 ## Problem and goal
+## Request trace
+
+| Request instruction | Covered by | Evidence that it is met |
+|---|---|---|
 ## Scale
 ## Decisions
 
@@ -111,9 +116,13 @@ Every task that changes files carries a `Difficulty:` line and a `Technology:` l
 
 `Difficulty:` is the architect's rating, one of three values:
 
-- `easy`: a small, local change with one obvious path.
-- `medium`: several files or a non-obvious path, with no cross-cutting risk. This is the default when the line is missing.
-- `hard`: a change that spans layers, alters contracts, or needs careful design.
+- `easy`: every change is stated in the plan and an existing pattern covers it, in however many files.
+- `medium`: the worker makes design choices the plan leaves open, in code that has patterns to follow. This is the default when the line is missing.
+- `hard`: there is no pattern to copy, a wrong choice breaks other callers, or the work involves concurrency, security or a data migration.
+
+Rate the decisions the worker must make, not the size: the number of files or layers does not by itself raise the rating. When unsure between two ratings, pick the lower, because a failed attempt moves the task one tier up; the exception is a task that may plausibly be `hard` for security, concurrency, a data migration or a choice that can break other callers: pick the higher, without predicting whether its task gate would catch a wrong result.
+
+Examples: in one technology, a repository method, its service and its endpoint, each copying the neighbouring one, with the names and types in the plan, is `easy` although it spans three layers. One new optional field on a response is `easy` although it alters a contract. A new screen whose state handling the plan leaves to the worker is `medium`. Replacing how background jobs are locked is `hard` although it touches one file.
 
 `Technology:` names exactly one technology the task is written in, chosen from `ontology.technologies`. A change that spans two unrelated technologies is two tasks with a dependency between them, never one task with two technologies: an endpoint and its database migration are separate tasks, the migration first, because one prompt carries one technology's rules and one set of gates. A technology built on another (React on TypeScript) is still one task in the child; the parent's rules arrive with the child's.
 
@@ -129,7 +138,11 @@ When existing code contradicts a documented rule or standard (where a kind of fi
 
 ## The request's explicit instructions
 
-A value, class name, layout, endpoint shape or check the request states outright is a requirement, not a suggestion. Plan it as written. Where you think it is wrong, keep it and add a risk row saying why; do not replace it with the option you prefer. Before `PLAN_READY`, walk the request line by line: each instruction is met by a task's acceptance, or sits in the out-of-scope boundaries with the reason. A request that asks for proof (for example that values reach the screen from the database) gets a task or verification step that is actually executed, with its command and evidence, not a mocked stand-in. A plan the conductor has to send back for a missed instruction costs a planning round.
+A value, class name, layout, endpoint shape or check the request states outright is a requirement, not a suggestion. Plan it as written. Where you think it is wrong, keep it and add a risk row saying why; do not replace it with the option you prefer.
+
+Before `PLAN_READY`, trace the request to the plan in a `## Request trace` table: one row for each explicit instruction, naming the plan section, task or out-of-scope boundary that covers it and the evidence that it is met. A row that covers nothing is an instruction you have not planned. A request that asks for proof (for example that values reach the screen from the database) gets a task or verification step that is actually executed, with its command and evidence, not a mocked stand-in.
+
+When an instruction conflicts with a repository rule or standard, record the conflict as a `## Decisions` row before `PLAN_READY`, with the request, the rule, the recommended resolution and the reason. The user's explicit instruction is the recommended winner unless keeping it would break security or a hard repository ban — a rule the repository states it never permits. Record the row even when you believe the rule should win, and never reconcile the conflict silently inside a task or split the instruction into a substitute the owner did not ask for without that row. A plan the conductor has to send back for a missed instruction or an unrecorded conflict costs a planning round.
 
 ## Facts that depend on a version, and existing tests
 
@@ -193,7 +206,7 @@ Under `autonomy: autonomous`, decide per the autonomous-decisions reference and 
 
 After every plan save, obtain the two checks. Leave `mergeReady` false while the plan is in the active plans folder. A shell is not permission to implement.
 
-A check passes when it reports no error; warnings do not fail it. The standards warning period (`KW-DOC-SPEC-012`, `KW-DOC-SPEC-013`, `KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`) means the host has not run `kyber-weave docs standards migrate` yet, so record those warnings in the plan's risks and continue. Only an error outside your write boundary is `STATUS: BLOCKED`.
+Fix every finding a check reports in the plan — errors and warnings alike — and re-check until the only findings left are the standards warning period below. The standards warning period (`KW-DOC-SPEC-012`, `KW-DOC-SPEC-013`, `KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`) is outside your write boundary and does not stop the plan: `docs-dev` clears it at closeout with `kyber-weave docs standards migrate`, committed with the closeout. Do not list it as a risk, an accepted warning or out of scope. Any other finding outside your write boundary is `STATUS: BLOCKED`, and then name the finding, why you cannot fix it, and who can.
 
 ### With a shell
 
@@ -205,7 +218,7 @@ The MCP result cannot be checked against your checkout, so do not rely on it. Us
 
 ## Ready
 
-Return `PLAN_READY` only when the saved Draft has no open decisions (all rows in `## Decisions` have status `ANSWERED` or approved), contains the selected mode and matching approved contract, declares its scale (`documentation-impact` with `impact-components`) and its `Design harvest` table, has a schedulable dependency graph, and both documentation checks pass (no error; the standards warning period does not count):
+Return `PLAN_READY` only when the saved Draft has no open decisions (all rows in `## Decisions` have status `ANSWERED` or approved), has a `## Request trace` row for every explicit instruction in the request, contains the selected mode and matching approved contract, declares its scale (`documentation-impact` with `impact-components`) and its `Design harvest` table, has a schedulable dependency graph, and both documentation checks pass (no error; the standards warning period does not count):
 
 ```text
 STATUS: PLAN_READY

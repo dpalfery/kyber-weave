@@ -1,7 +1,7 @@
 ---
 schema: kyber-squad.agent/v1
 name: dev-medium
-description: "Implements application code and its tests in any technology, for a task rated medium: several files or a non-obvious path, no cross-cutting risk. Use only when the host's worker roster is tiered. Do not use for documentation-only work or for pushing, publishing and pipelines."
+description: "Implements application code and its tests in any technology, for a task rated medium: the worker makes design choices the plan leaves open, in code that has patterns to follow. Use only when the host's worker roster is tiered. Do not use for documentation-only work or for pushing, publishing and pipelines."
 invocation: subagent
 model-profile: general
 capability-profile: worker

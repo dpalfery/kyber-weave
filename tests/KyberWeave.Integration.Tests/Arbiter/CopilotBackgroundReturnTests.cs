@@ -341,7 +341,11 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
             providerFactory: _ => _provider,
             planReaderFactory: _ => new ThreeTaskPlan(),
             homeDirectory: () => _home.Path);
-        HookCommand command = ArbiterTestServices.Command(ArbiterTestServices.Registry(engine), ArbiterTestServices.LoadHostConfig, () => "cli-1");
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
+            ArbiterTestServices.LoadHostConfig,
+            () => "cli-1",
+            runContexts: ArbiterTestServices.Get<IHookRunContextResolver>());
         using StringWriter stdout = new();
         using StringWriter log = new();
 

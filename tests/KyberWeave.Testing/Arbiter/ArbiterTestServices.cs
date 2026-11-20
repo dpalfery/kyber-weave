@@ -75,6 +75,7 @@ internal static class ArbiterTestServices
             Get<IProcessEnvironment>(),
             Get<IBackgroundDispatchStore>(),
             Get<IIdGenerator>(),
+            new ReviewSeatRecorder(Get<IWritableFileSystem>(), Get<IPathResolver>()),
             providerFactory,
             gitFactsFactory,
             planReaderFactory,
@@ -106,11 +107,18 @@ internal static class ArbiterTestServices
     /// <param name="configLoader">Loads the project configuration; a test passes one that counts its calls.</param>
     /// <param name="newDecisionId">Builds a decision id; null uses <paramref name="ids"/>.</param>
     /// <param name="ids">The identifier seam; the registered one when null.</param>
+    /// <param name="prompts">The prompt service factory; null installs none, so no dispatch is expanded.</param>
+    /// <param name="runContexts">
+    /// The run context the hook reads paths from; null installs <see cref="PassthroughRunContexts"/>, which reads
+    /// nothing. An integration test that needs real git and worktrees passes <c>Get&lt;IHookRunContextResolver&gt;()</c>.
+    /// </param>
     internal static HookCommand Command(
         HarnessAdapterRegistry registry,
         Func<string, KyberWeaveConfig> configLoader,
         Func<string>? newDecisionId = null,
-        IIdGenerator? ids = null) =>
+        IIdGenerator? ids = null,
+        ITaskPromptServiceFactory? prompts = null,
+        IHookRunContextResolver? runContexts = null) =>
         new(
             registry,
             new DelegateHostConfig(configLoader, Get<IArbiterHostConfig>()),
@@ -118,7 +126,11 @@ internal static class ArbiterTestServices
             Get<IClaudeHookCoverage>(),
             Get<IProcessEnvironment>(),
             ids ?? Get<IIdGenerator>(),
-            newDecisionId);
+            newDecisionId,
+            prompts,
+            // A unit test resolves no paths unless it injects a resolver: the real one starts git and reads the
+            // operator's home on every hook invocation, which made this project's unit run minutes long.
+            runContexts ?? new PassthroughRunContexts());
 
     /// <summary>The git facts over the real adapters.</summary>
     internal static HookGitFacts HookGitFacts(string workingDirectory, string? homeDirectory = null, string? arbiterDirectory = null) =>

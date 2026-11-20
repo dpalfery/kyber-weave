@@ -19,7 +19,11 @@ public sealed record DispatchPromptQuery(
 /// <param name="Built">Whether <paramref name="Prompt"/> holds a prompt.</param>
 /// <param name="Prompt">The full task prompt, in the service's tagged parts.</param>
 /// <param name="Refusal">Why no prompt was built, naming the command that repairs it; null when one was built.</param>
-public sealed record DispatchPromptExpansion(bool Built, string Prompt, string? Refusal);
+/// <param name="MissingInput">
+/// True when the refusal is an input the hook could not read — a plan, task file or prior-results file that is absent
+/// or unreadable. Such a refusal warns and the dispatch continues; only a positive finding stops it.
+/// </param>
+public sealed record DispatchPromptExpansion(bool Built, string Prompt, string? Refusal, bool MissingInput = false);
 
 /// <summary>What happened when the hook looked for a prompt to insert.</summary>
 public enum DispatchInsertionKind
@@ -32,12 +36,21 @@ public enum DispatchInsertionKind
 
     /// <summary>The prompt could not be built, so the dispatch is stopped and no worker starts.</summary>
     Stopped,
+
+    /// <summary>
+    /// The prompt could not be built because an input was absent or unreadable. The dispatch carries no expanded
+    /// prompt and continues, and <see cref="DispatchInsertion.Reason"/> names the path tried.
+    /// </summary>
+    Warned,
 }
 
 /// <summary>The text a hook renders in place of a dispatch's identity line, or the reason it cannot.</summary>
 /// <param name="Kind">Whether anything was inserted.</param>
 /// <param name="Text">The dispatch's new text, for <see cref="DispatchInsertionKind.Inserted"/>.</param>
-/// <param name="Reason">The repair command, for <see cref="DispatchInsertionKind.Stopped"/>.</param>
+/// <param name="Reason">
+/// The repair command, for <see cref="DispatchInsertionKind.Stopped"/>, and the path tried for
+/// <see cref="DispatchInsertionKind.Warned"/>.
+/// </param>
 public sealed record DispatchInsertion(DispatchInsertionKind Kind, string Text = "", string? Reason = null)
 {
     /// <summary>The one answer for a dispatch that needs no insertion.</summary>

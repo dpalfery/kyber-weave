@@ -59,6 +59,7 @@ public sealed class ArbiterRulesCommand(IArbiterConfigResolver configs, IAnsiCon
         table.AddColumn("Effects");
         table.AddColumn("Facts");
         table.AddColumn("Shadow");
+        table.AddColumn("Gates");
         table.AddColumn("For-each");
         foreach (ArbiterRule rule in rules.OrderBy(r => r.Id, StringComparer.Ordinal).ThenBy(r => r.Trigger, StringComparer.Ordinal))
         {
@@ -71,6 +72,7 @@ public sealed class ArbiterRulesCommand(IArbiterConfigResolver configs, IAnsiCon
                 new Markup(Markup.Escape(string.Join(", ", rule.Effects.Select(pair => $"{pair.Key} -> {pair.Value}")))),
                 new Markup(Markup.Escape(string.Join(", ", FactsRead(rule)))),
                 new Markup(rule.Shadow ? "shadow" : "enforced"),
+                new Markup(ArbiterRuleAdvisory.IsAdvisory(rule) ? "advisory" : "—"),
                 new Markup(Markup.Escape(rule.Ask?.ForEach ?? "—")));
         }
 

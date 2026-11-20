@@ -43,7 +43,7 @@ public sealed class SquadDocsHarvestContractTests
 
     private static string DocsDevDescription()
     {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
+        SquadSource source = CanonicalSquadTree.SharedSource;
         SquadAgent agent = Assert.Single(source.Agents, candidate => candidate.Name == "docs-dev");
         return agent.Description;
     }
@@ -213,7 +213,7 @@ public sealed class SquadDocsHarvestContractTests
     [Fact]
     public void BugCrusherDelegatesToDocsDev()
     {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
+        SquadSource source = CanonicalSquadTree.SharedSource;
         SquadAgent agent = Assert.Single(source.Agents, candidate => candidate.Name == "bug-crusher");
 
         Assert.Contains("docs-dev", agent.DelegatesTo);
@@ -382,8 +382,9 @@ public sealed class SquadDocsHarvestContractTests
     }
 
     /// <summary>
-    /// docs-dev holds a shell only for the nine command classes its prompt names: the plan
-    /// closeout command, a specification's archival <c>git mv</c>, its task file's <c>git rm</c>, the two documentation checks, rewriting a task file it made stale,
+    /// docs-dev holds a shell only for the ten command classes its prompt names: the plan
+    /// closeout command, a specification's archival <c>git mv</c>, its task file's <c>git rm</c>, the two documentation checks, the standards migration that clears the
+    /// standards warning period, rewriting a task file it made stale,
     /// targeted doc-pinning tests, and committing its own documentation edits, so a later edit cannot widen the instruction-scoped boundary
     /// silently. The never-push and only-archiver rules are graded from the prose rule
     /// catalog (<c>docs-dev-shell-commands</c>, <c>docs-dev-only-spec-archiver</c>).
@@ -407,7 +408,7 @@ public sealed class SquadDocsHarvestContractTests
             .Split('\n')
             .Where(line => line.StartsWith("- ", StringComparison.Ordinal))
             .ToArray();
-        Assert.Equal(9, bullets.Length);
+        Assert.Equal(10, bullets.Length);
 
         // Every backticked span with a space is a command. "dotnet run" is the invocation-form
         // selector the validate and drift bullets name ("or the same `dotnet run` form"), not a
@@ -433,6 +434,7 @@ public sealed class SquadDocsHarvestContractTests
             "kyber-weave docs closeout <plan> --archive",
             "kyber-weave docs drift .",
             "kyber-weave docs packet <task id>",
+            "kyber-weave docs standards migrate",
             "kyber-weave docs tasks <plan> --write",
             "kyber-weave docs validate .",
         ];
@@ -462,7 +464,7 @@ public sealed class SquadDocsHarvestContractTests
     [Fact]
     public void DocumentationProfileIsConsumedOnlyByDocsDevAndGrantsExecute()
     {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
+        SquadSource source = CanonicalSquadTree.SharedSource;
         string[] expectedConsumers = ["docs-dev"];
         string[] consumers = source.Agents
             .Where(agent => agent.CapabilityProfile == "documentation")

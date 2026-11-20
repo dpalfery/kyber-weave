@@ -69,7 +69,7 @@ public static class RunBaseStateFormat
     /// <param name="place">Where the run works, when known.</param>
     public static string Serialize(string baseRef, string branch, RunStartPlace? place) =>
         JsonSerializer.Serialize(
-            new StateDocument(baseRef, place?.Repository, branch, place?.Worktree, place?.StartedAt),
+            new StateDocument(baseRef, place?.Repository, branch, place?.Worktree, place?.StartedAt, place?.Autonomy),
             JsonOptions);
 
     /// <summary>Reads the base out of a record.</summary>
@@ -117,7 +117,7 @@ public static class RunBaseStateFormat
 
         if (document is { Repository: { Length: > 0 } repository, Branch: { Length: > 0 } branch, Worktree: { Length: > 0 } worktree })
         {
-            record = new RunRecord(repository, branch, worktree, document.StartedAt);
+            record = new RunRecord(repository, branch, worktree, document.StartedAt, document.Autonomy);
             return true;
         }
 
@@ -143,5 +143,6 @@ public static class RunBaseStateFormat
         string? Repository = null,
         string? Branch = null,
         string? Worktree = null,
-        DateTimeOffset? StartedAt = null);
+        DateTimeOffset? StartedAt = null,
+        string? Autonomy = null);
 }

@@ -114,7 +114,8 @@ public sealed class ArbiterRealEngineTests : IDisposable
         IArbiterGitFacts? gitFacts = null,
         Func<ICredentialStore>? credentialStoreFactory = null,
         Func<string, string?>? environment = null,
-        IPlanRootResolver? planRoots = null)
+        IPlanRootResolver? planRoots = null,
+        IHookRunContextResolver? runContexts = null)
     {
         ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
             providerFactory: _ => provider,
@@ -126,13 +127,16 @@ public sealed class ArbiterRealEngineTests : IDisposable
         return ArbiterTestServices.Command(
             ArbiterTestServices.Registry(engine),
             ArbiterTestServices.LoadHostConfig,
-            () => "decision-test-1");
+            () => "decision-test-1",
+            runContexts: runContexts ?? ArbiterTestServices.Get<IHookRunContextResolver>());
     }
 
-    /// <summary>A plan root resolver that faults, standing in for a collaborator the engine cannot build or reach.</summary>
-    private sealed class ThrowingPlanRoots : IPlanRootResolver
+    /// <summary>A run-context resolver that faults, standing in for a collaborator the hook cannot build or reach.</summary>
+    private sealed class ThrowingRunContexts : IHookRunContextResolver
     {
-        public string Resolve(string hookRoot, string prompt, Func<string, IReadOnlyList<string>>? listWorktrees = null) => throw new NotSupportedException("container exploded");
+        public HookRunContext Resolve(HookRunContextRequest request) => throw new NotSupportedException("container exploded");
+
+        public HookRunContext SelectPlan(HookRunContext context, string? planFile, string? text) => throw new NotSupportedException("container exploded");
     }
 
     private string Payload(string hookEvent, string target, string prompt, string? status = null, string agentType = "conductor")
@@ -307,7 +311,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
         WriteConfig(DisabledShippedRules());
         HookCommand command = CreateCommand(
             new FakeProvider(),
-            planRoots: new ThrowingPlanRoots());
+            runContexts: new ThrowingRunContexts());
 
         (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "dev-medium", Prompt));
 

@@ -1,140 +1,18 @@
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using KyberWeave.Cli.Commands.Squad;
-using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Core.Squad.Release;
-using KyberWeave.Core.Squad.Rendering;
-using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests;
 using Xunit;
-using Xunit.Sdk;
-using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
 /// <summary>
-/// Deployment-state contracts: path policy, case semantics and containment. Split from the one class that used to hold all of
-/// them, so xUnit runs the themes on different cores.
+/// Deployment-state contracts: path policy, containment and canonical spelling on a real volume. The rest of the theme
+/// runs over the in-memory fakes in <c>KyberWeave.Application.Tests</c>; these cases stay because only a real symbolic
+/// link, a real volume's case rule or a Windows per-directory case probe can produce their subject.
 /// </summary>
 public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output) : SquadDeploymentStateTestBase
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
-    [SuppressMessage(
-        "Globalization",
-        "CA1308:Normalize strings to uppercase",
-        Justification = "Generates a deliberately case-varied path fixture; the lowercasing "
-                        + "is the test input, not a normalization.")]
-    public static IEnumerable<object[]> PortableInvalidPaths()
-    {
-        foreach (char forbidden in "<>:\"|?*")
-            yield return [$".codex/agents/bad{forbidden}name.md"];
-
-        yield return [".codex//agents/repeated-separator.md"];
-        yield return [".codex\\agents\\noncanonical-separators.md"];
-        yield return [".codex/agents/trailing-dot."];
-        yield return [".codex/agents/trailing-space "];
-        yield return [".codex/agents/e\u0301.md"];
-
-        for (int value = 0; value <= 0x1f; value++)
-            yield return [$".codex/agents/control{(char)value}name.md"];
-        for (int value = 0x7f; value <= 0x9f; value++)
-            yield return [$".codex/agents/control{(char)value}name.md"];
-
-        string[] deviceNames =
-        [
-            "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
-            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-            "COM\u00b9", "COM\u00b2", "COM\u00b3", "LPT\u00b9", "LPT\u00b2", "LPT\u00b3"
-        ];
-        foreach (string deviceName in deviceNames)
-        {
-            yield return [$".codex/agents/{deviceName}/SKILL.md"];
-            yield return [$".codex/agents/{deviceName.ToLowerInvariant()}.txt"];
-            yield return [$".codex/agents/{ToggleAsciiCase(deviceName)}.agent.md"];
-        }
-    }
-
-    [Theory]
-    [InlineData(".codex/agents/Reviewer.toml", ".codex/agents/reviewer.toml")]
-    [InlineData(".codex/agents/reviewer.toml", ".codex/agents/reviewer.toml.")]
-    [InlineData(".codex/agents/reviewer.toml", ".codex/agents/reviewer.toml ")]
-    [InlineData(".codex/agents/reviewer.toml", ".codex/agents./reviewer.toml")]
-    public void CreateInstallPortablePathAliasesAreRejectedBeforeWrites(
-        string firstPath,
-        string aliasPath)
-    {
-        using TempDirectory fixture = new();
-
-        SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            RealSquadDeployment.Planner.CreateInstall(
-                fixture.Path,
-                SquadDeploymentScope.Project,
-                Lock(),
-                [Rendered(firstPath, "first"), Rendered(aliasPath, "second")],
-                [],
-                false,
-                new FixedTimeProvider(InstalledAt)));
-
-        Assert.Contains("portable", exception.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(aliasPath, exception.Message, StringComparison.Ordinal);
-        Assert.Empty(Directory.EnumerateFileSystemEntries(fixture.Path));
-    }
-
-    [Theory]
-    [InlineData(".codex/agents/Reviewer.toml", ".codex/agents/reviewer.toml")]
-    [InlineData(".codex/agents/reviewer.toml", ".codex/agents/reviewer.toml.")]
-    [InlineData(".codex/agents/reviewer.toml", ".codex/agents/reviewer.toml ")]
-    [InlineData(".codex/agents/reviewer.toml", ".codex/agents./reviewer.toml")]
-    public void CreateUninstallReceiptPortablePathAliasesAreRejected(
-        string firstPath,
-        string aliasPath)
-    {
-        using TempDirectory fixture = new();
-        SquadReceipt receipt = Receipt(
-            new SquadOwnedFile(firstPath, Digest("first"), "codex", false),
-            new SquadOwnedFile(aliasPath, Digest("second"), "codex", false));
-
-        SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            RealSquadDeployment.Planner.CreateUninstall(
-                fixture.Path,
-                SquadDeploymentScope.Project,
-                receipt));
-
-        Assert.Contains("portable", exception.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(aliasPath, exception.Message, StringComparison.Ordinal);
-    }
-
-    [Theory]
-    [InlineData("../outside.md")]
-    [InlineData(".codex/../../outside.md")]
-    public void CreateInstallLexicalPathEscapeIsRejectedBeforeWrites(string relativePath)
-    {
-        using TempDirectory fixture = new();
-
-        SquadPathContainmentException exception = Assert.Throws<SquadPathContainmentException>(() =>
-            RealSquadDeployment.Planner.CreateInstall(
-                fixture.Path,
-                SquadDeploymentScope.Project,
-                Lock(),
-                [Rendered(relativePath, "escape")],
-                [],
-                false,
-                new FixedTimeProvider(InstalledAt)));
-
-        Assert.Contains(relativePath, exception.Message, StringComparison.Ordinal);
-        Assert.Empty(Directory.EnumerateFileSystemEntries(fixture.Path));
-    }
-
     [Fact]
-    public void CreateInstallPathThatResolvesThroughSymlinkOutsideRootIsRejected()
+    public void CreateInstallOnRealDiskRejectsPathThroughSymlinkLeavingRoot()
     {
         using TempDirectory fixture = new();
         using TempDirectory outside = new();
@@ -160,7 +38,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
     }
 
     [Fact]
-    public void CreateUninstallReceiptPathThatResolvesOutsideRootIsRejected()
+    public void CreateUninstallOnRealDiskRejectsPathThroughSymlinkLeavingRoot()
     {
         using TempDirectory fixture = new();
         using TempDirectory outside = new();
@@ -184,140 +62,6 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
             ".codex/agents/conductor.toml",
             exception.Message,
             StringComparison.Ordinal);
-    }
-
-    [Theory]
-    [MemberData(nameof(PortableInvalidPaths))]
-    public void CreateLifecyclePlanWindowsForbiddenDeviceControlAndUnicodeAliasesAreRejected(
-        string invalidPath)
-    {
-        using TempDirectory fixture = new();
-        string fixturePath = fixture.Path;
-        SquadOwnedFile owned = new(invalidPath, Digest("owned"), "codex", false);
-        SquadReceipt receipt = Receipt(owned);
-
-        Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            RealSquadDeployment.Planner.CreateInstall(
-                fixturePath,
-                SquadDeploymentScope.Project,
-                Lock(),
-                [Rendered(invalidPath, "generated")],
-                [],
-                false,
-                new FixedTimeProvider(InstalledAt))));
-        Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            RealSquadDeployment.Planner.CreateUpdate(
-                fixturePath,
-                SquadDeploymentScope.Project,
-                Lock("1.2.4"),
-                [Rendered(invalidPath, "updated")],
-                receipt,
-                [],
-                false,
-                new FixedTimeProvider(InstalledAt.AddDays(1)))));
-        Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            RealSquadDeployment.Planner.CreateUninstall(
-                fixturePath,
-                SquadDeploymentScope.Project,
-                receipt)));
-        Assert.Empty(Directory.EnumerateFileSystemEntries(fixturePath));
-    }
-
-    [Theory]
-    [InlineData(".codex/agents/\u00e9.md", ".codex/agents/e\u0301.md")]
-    [InlineData(".codex/agents/Reviewer.md", ".codex/agents/reviewer.md")]
-    public void CreateLifecyclePlanUnicodeAndCaseOnlyPortablePairsAreRejected(
-        string firstPath,
-        string aliasPath)
-    {
-        using TempDirectory fixture = new();
-        string fixturePath = fixture.Path;
-        SquadReceipt receipt = Receipt(
-            new SquadOwnedFile(firstPath, Digest("first"), "codex", false),
-            new SquadOwnedFile(aliasPath, Digest("alias"), "codex", false));
-
-        Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            RealSquadDeployment.Planner.CreateInstall(
-                fixturePath,
-                SquadDeploymentScope.Project,
-                Lock(),
-                [Rendered(firstPath, "first"), Rendered(aliasPath, "alias")],
-                [],
-                false,
-                new FixedTimeProvider(InstalledAt))));
-        Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            RealSquadDeployment.Planner.CreateUpdate(
-                fixturePath,
-                SquadDeploymentScope.Project,
-                Lock("1.2.4"),
-                [Rendered(firstPath, "first"), Rendered(aliasPath, "alias")],
-                receipt,
-                [],
-                false,
-                new FixedTimeProvider(InstalledAt.AddDays(1)))));
-        Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            RealSquadDeployment.Planner.CreateUninstall(
-                fixturePath,
-                SquadDeploymentScope.Project,
-                receipt)));
-        Assert.Empty(Directory.EnumerateFileSystemEntries(fixturePath));
-    }
-
-    [Theory]
-    [InlineData("wrong-area")]
-    [InlineData("non-ancestor")]
-    [InlineData("duplicate")]
-    [InlineData("unordered")]
-    [InlineData("absolute")]
-    [InlineData("traversal")]
-    [InlineData("sibling")]
-    [InlineData("outside-root")]
-    [InlineData("legacy-count")]
-    [InlineData("negative-count")]
-    [InlineData("maximum-count")]
-    public void RecoverCorruptCreatedDirectoryAuthorityCannotEscapeBoundRoots(string corruption)
-    {
-        using TempDirectory fixture = new();
-        string targetRoot = Path.Combine(fixture.Path, "target");
-        string applicationData = Path.Combine(fixture.Path, "application-data");
-        Directory.CreateDirectory(targetRoot);
-        Write(fixture.Path, "target-canary.txt", "target boundary canary");
-        Write(fixture.Path, "application-canary.txt", "application boundary canary");
-        Write(fixture.Path, "beside-target/canary.txt", "sibling canary");
-        SquadStateStore store = Store(applicationData);
-        SquadDeploymentPlan plan = CreateGlobalInstallPlan(targetRoot);
-        CheckpointFailingObserver observer = new(
-            fixture.Path,
-            SquadTransactionCheckpointKind.Prepared);
-        Assert.Throws<InjectedSquadTransactionFailure>(() =>
-            RealSquadDeployment.Transaction(store, observer).Execute(plan));
-        RestoreTree(
-            fixture.Path,
-            Assert.IsType<SortedDictionary<string, TreeEntry>>(
-                observer.InterruptedTreeSnapshot));
-        string intentPath = Path.Combine(
-            store.ResolveTransactionDirectory(targetRoot, SquadDeploymentScope.Global),
-            "intent.json");
-        JsonObject intent = ReadJsonObject(intentPath);
-        Assert.False(intent.ContainsKey("missingJournalDirectoryCount"));
-        Assert.False(intent.ContainsKey("missingTransactionDirectories"));
-        JsonArray createdDirectories = Assert.IsType<JsonArray>(intent["createdDirectories"]);
-        Assert.NotEmpty(createdDirectories);
-        AssertCreatedDirectoryAuthorityIsCanonical(createdDirectories);
-        CorruptCreatedDirectoryAuthority(intent, createdDirectories, fixture.Path, corruption);
-        WriteJsonObject(intentPath, intent);
-        SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixture.Path);
-
-        Exception? exception = Record.Exception(() => RealSquadDeployment.Transaction(store).Recover(
-            targetRoot,
-            SquadDeploymentScope.Global));
-
-        InvalidDataException invalid = Assert.IsType<InvalidDataException>(exception);
-        Assert.Contains("Squad", invalid.Message, StringComparison.OrdinalIgnoreCase);
-        AssertTreesEqual(beforeRecovery, CaptureTree(fixture.Path));
-        Assert.Equal("target boundary canary", Read(fixture.Path, "target-canary.txt"));
-        Assert.Equal("application boundary canary", Read(fixture.Path, "application-canary.txt"));
-        Assert.Equal("sibling canary", Read(fixture.Path, "beside-target/canary.txt"));
     }
 
     [Fact]
@@ -352,22 +96,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
     }
 
     [Fact]
-    public void ResolvePhysicalRootComparisonPolicyIsNotOperatingSystemWideCaseFolding()
-    {
-        string identitySource = Corpus.ReadText(
-            "src/KyberWeave.Application/Squad/Deployment/SquadPhysicalRootIdentities.cs");
-        string transactionSource = Corpus.ReadText(
-            "src/KyberWeave.Application/Squad/Deployment/SquadTransaction.cs");
-
-        Assert.DoesNotContain("physicalPath.ToUpperInvariant()", identitySource, StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "OperatingSystem.IsWindows()\n            ? StringComparison.OrdinalIgnoreCase",
-            transactionSource,
-            StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task ResolvePhysicalRootWindowsCaseSensitiveSiblingsRemainDistinct()
+    public async Task ResolvePhysicalRootWindowsCaseSensitiveSiblingsRemainDistinctOnRealDisk()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -443,7 +172,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
     }
 
     [Fact]
-    public void ResolveFileWindowsCaseSensitiveSiblingSymlinkEscapeIsRejected()
+    public void ResolveFileOnWindowsCaseSensitiveRealDiskRejectsSiblingSymlinkEscape()
     {
         using TempDirectory fixture = new();
         AssertHomeStoreSymlinkEscapesAreRejected(fixture.Path);
@@ -516,51 +245,13 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
         AssertTreesEqual(outsideBefore, CaptureTree(lowerRoot));
     }
 
-    [Fact]
-    public void AllContainmentHelpersUseCanonicalFileSystemSemantics()
-    {
-        string[] deploymentSources =
-        [
-            .. Corpus.EnumerateFiles("src", "*.cs")
-                .Where(path => path.Contains("Squad", StringComparison.Ordinal)
-                               && path.Split('/').Contains("Deployment", StringComparer.Ordinal))
-                .Order(StringComparer.Ordinal)
-        ];
-        const string semanticsPath = "src/KyberWeave.Data/Squad/Deployment/SquadFileSystemPathSemantics.cs";
-
-        Assert.True(
-            Corpus.Exists(semanticsPath),
-            "Containment must be centralized in SquadFileSystemPathSemantics.");
-
-        List<string> offenders = new();
-        foreach (string sourcePath in deploymentSources)
-        {
-            if (string.Equals(sourcePath, semanticsPath, StringComparison.Ordinal))
-                continue;
-
-            string source = Corpus.ReadText(sourcePath);
-            if (source.Contains("private static StringComparison PathComparison", StringComparison.Ordinal) ||
-                source.Contains("private static bool IsWithin(", StringComparison.Ordinal) ||
-                source.Contains("private static bool PathsEqual(", StringComparison.Ordinal) ||
-                source.Contains(
-                    "OperatingSystem.IsWindows()\n            ? StringComparison.OrdinalIgnoreCase",
-                    StringComparison.Ordinal))
-                offenders.Add(Path.GetFileName(sourcePath));
-        }
-
-        Assert.True(
-            offenders.Count == 0,
-            "Deployment containment helpers must delegate to " +
-            $"SquadFileSystemPathSemantics: {string.Join(", ", offenders)}");
-    }
-
     /// <summary>
     ///     A difference in case can appear in the middle of a path, not only in its last segment. Where
     ///     the variant spelling names the directory that is on disk, the result carries the on-disk
     ///     spelling; where it names nothing, only the existing prefix is corrected.
     /// </summary>
     [Fact]
-    public void CanonicalizeUsesTheOnDiskSpellingOfAMiddleSegment()
+    public void CanonicalizeUsesTheOnDiskSpellingOfAMiddleSegmentOnARealVolume()
     {
         using TempDirectory fixture = new();
         string onDiskMiddle = Path.Combine(fixture.Path, "MiddleSegment");
@@ -596,7 +287,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
     ///     containment decisions, so a link pointing outside the root cannot carry a path inside it.
     /// </summary>
     [Fact]
-    public void CanonicalizeFollowsASymlinkedSegmentAndContainmentHonoursIt()
+    public void CanonicalizeFollowsARealSymlinkedSegmentAndContainmentHonoursIt()
     {
         using TempDirectory fixture = new();
         using TempDirectory outside = new();
@@ -627,31 +318,11 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
     }
 
     /// <summary>
-    ///     The trailing segments of a path need not exist: resolution canonicalises the prefix that is
-    ///     on disk and keeps the caller's spelling for the rest, which is what lets an install plan a
-    ///     file that is not there yet.
-    /// </summary>
-    [Fact]
-    public void CanonicalizeKeepsANotYetExistingTailInItsGivenSpelling()
-    {
-        using TempDirectory fixture = new();
-        string existing = Path.Combine(fixture.Path, "Existing");
-        Directory.CreateDirectory(existing);
-
-        string canonicalExisting = SquadFileSystemPathSemantics.Instance.Canonicalize(existing);
-
-        string canonical = SquadFileSystemPathSemantics.Instance.Canonicalize(
-            Path.Combine(fixture.Path, "Existing", "new", "deeper", "leaf.md"));
-
-        Assert.Equal(Path.Combine(canonicalExisting, "new", "deeper", "leaf.md"), canonical);
-    }
-
-    /// <summary>
     ///     Each check answers from the filesystem as it is at that moment: replacing a directory with a
     ///     symlink between two checks must change the answer the second time.
     /// </summary>
     [Fact]
-    public void ContainmentRefusesAPathWhoseIntermediateDirectoryBecameASymlinkBetweenChecks()
+    public void ContainmentRefusesARealSymlinkThatReplacedAnIntermediateDirectoryBetweenChecks()
     {
         using TempDirectory fixture = new();
         using TempDirectory outside = new();

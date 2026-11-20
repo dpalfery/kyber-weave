@@ -315,8 +315,8 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         {
             JsonElement toolInput = RequireToolInput(payload);
             IReadOnlyList<string> dirs = ReadGuard.ProtectedDirectories(config);
-            ReadGuardResult verdict = ReadGuard.Check(
-                tool!, toolInput, RepoRootOf(payload, context.RepoRoot), dirs);
+            (string root, IReadOnlyList<string> roots) = GuardRoots(payload, context);
+            ReadGuardResult verdict = ReadGuard.Check(tool!, toolInput, root, dirs, roots);
             return verdict.Allowed
                 ? string.Empty
                 : RenderPreDeny(verdict.Reason ?? "Denied by the Read guard (Req 25.2, Req 25.4).");
@@ -524,6 +524,16 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
 
         return _engine.DecidePostDispatch(caller, target, toolOutput, config);
     }
+
+    /// <summary>
+    /// The roots the Read guard judges a path against: the run context's worktree and this repository's other
+    /// worktrees, so a worker's read in the run worktree is judged there even when the payload cwd is the checkout the
+    /// session started in.
+    /// </summary>
+    private static (string Root, IReadOnlyList<string> Roots) GuardRoots(JsonElement payload, HookContext context) =>
+        context.RunContext is { } run
+            ? (run.Worktree, run.Worktrees)
+            : (RepoRootOf(payload, context.RepoRoot), []);
 
     private static string RepoRootOf(JsonElement payload, string processDirectory)
     {

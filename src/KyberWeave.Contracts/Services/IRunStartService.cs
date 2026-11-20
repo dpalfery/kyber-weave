@@ -88,13 +88,15 @@ public sealed record RunStartFacts(
 /// <param name="Config">The loaded repository configuration.</param>
 /// <param name="ConfigPath">The configuration file that was read, or null when the repository has none.</param>
 /// <param name="IndexExecutor">Runs the CodeGraph child that prepares the index; null for the bounded production executor.</param>
+/// <param name="Autonomy">The autonomy the run resolved, recorded with the run; null when none was set.</param>
 public sealed record RunStartRequest(
     string RepositoryRoot,
     string Branch,
     string? Resume,
     KyberWeaveConfig Config,
     string? ConfigPath,
-    IProcessExecutor? IndexExecutor);
+    IProcessExecutor? IndexExecutor,
+    string? Autonomy = null);
 
 /// <summary>How one run start ended.</summary>
 /// <param name="Status">The outcome, which fixes the exit code.</param>

@@ -106,9 +106,9 @@ internal sealed class MemoryScaffoldHost
     /// <summary>The validator over this checkout with the given ontology.</summary>
     public DocSpecValidator Validator(OntologyConfig ontology) => new(Root, ontology, Store, Paths, Environment);
 
-    /// <summary>The standards-folder migration over this checkout with the given ontology.</summary>
-    public StandardsFolderMigration Migration(OntologyConfig ontology) =>
-        new(Memory, Root, ontology, Paths, Environment, new FakeIdGenerator());
+    /// <summary>The standards-folder migration over this checkout with the given configuration.</summary>
+    public StandardsFolderMigration Migration(KyberWeaveConfig config) =>
+        new(Memory, Root, config, Paths, Environment, new FakeIdGenerator());
 
     /// <summary>The registry validator over this checkout with the given configuration.</summary>
     public ConfigRegValidator RegistryValidator(KyberWeaveConfig config) => new(Root, config, Store, Paths, Environment);

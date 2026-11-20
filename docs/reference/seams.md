@@ -46,7 +46,7 @@ counted. Counts are lower bounds: one line can hold two calls.
 | Configuration | `IKyberWeaveConfigRepository` (`Contracts/Repositories`) | Load and try-load the repository's and the user's host configuration; find the config path | `FileKyberWeaveConfigRepository` (`KyberWeave.Application`, `Configuration/FileKyberWeaveConfigRepository.cs`) over `IRepositoryTreeProbe` (`KyberWeave.Application`, `Review/FileRepositoryTreeProbe.cs`), `IFileSystem`, `IPathResolver` and `IProcessEnvironment` | `FakeKyberWeaveConfigRepository` (`Fakes/FakeKyberWeaveConfigRepository.cs`) | `KyberWeaveConfigRepositoryContractTests`: fake in `KyberWeave.Tests/Configuration/FakeKyberWeaveConfigRepositoryContractTests.cs`, adapter over the in-memory file system in `KyberWeave.Tests/Configuration/InMemoryFileKyberWeaveConfigRepositoryContractTests.cs`, and over the real disk in `KyberWeave.Integration.Tests/Contracts/FileKyberWeaveConfigRepositoryContractTests.cs` |
 | Credentials | `ICredentialStore` (`KyberWeave.Contracts`, `Arbiter/ICredentialStore.cs`) | Read, write and delete one named secret per endpoint origin; a missing entry reads as null; deleting an absent entry succeeds; a store may refuse a key it cannot carry, and every key it accepts reads back unchanged; an origin or key with a line break is refused on every store | `OperatingSystemCredentialStore` picks `WindowsCredentialStore`, `MacKeychainCredentialStore` or `SecretServiceCredentialStore` (`KyberWeave.Data`, `Arbiter/Credentials/`) | `FakeCredentialStore` (`Fakes/FakeCredentialStore.cs`) | `CredentialStoreContractTests`: fake in `KyberWeave.Tests/Credentials/FakeCredentialStoreContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/OperatingSystemCredentialStoreContractTests.cs`, which skips where the host has no usable store |
 | Network | `HttpMessageHandler` (framework); `IEmbeddingTransport` for the loopback-pinned embedding endpoint (`Contracts/Repositories`) | A client takes a handler by constructor and wraps it in a private `HttpClient`; request shape, headers, status handling and cancellation are tested through the handler. The embedding transport adds the handler and name resolution the loopback check needs | `HttpClientHandler` built by `SocketArbiterHttpHandlers` and `SocketSquadReleaseHttpHandlers`; `LoopbackEmbeddingTransport` (`KyberWeave.Data`, `Docs/Analysis/Embeddings/LoopbackEmbeddingTransport.cs`) | `FakeHttpMessageHandler` (`Fakes/FakeHttpMessageHandler.cs`): scripted responses, a hanging or failing server, requests recorded with their bodies | None, and none is required: the handler is the framework's, and the only product adapter that adds behaviour (the loopback pin) is proven against a real loopback socket in `KyberWeave.Integration.Tests/LoopbackEmbeddingTransportTests.cs` |
-| Shipped content (tests) | `ICorpusSource` (`tests/KyberWeave.Testing/Corpus/ICorpusSource.cs`) | Read the shipped agents, skills, standards, documents and workflows by relative path, contained in the corpus; host name-case rule | `CheckoutCorpusSource` (`tests/KyberWeave.Testing/Corpus/CheckoutCorpusSource.cs`), a test adapter over this checkout | `InMemoryCorpusSource` (`tests/KyberWeave.Testing/Corpus/InMemoryCorpusSource.cs`) | `CorpusSourceContractTests`: both against the adapter and the fake in `KyberWeave.RepoPolicy.Tests/CorpusSourceContractTests.cs` |
+| Shipped content (tests) | `ICorpusSource` (`tests/KyberWeave.Testing/Corpus/ICorpusSource.cs`) | Read the shipped agents, skills, standards, documents and workflows by relative path, contained in the corpus; report a file's final link target so a portable-root escape is checkable; host name-case rule | `CheckoutCorpusSource` (`tests/KyberWeave.Testing/Corpus/CheckoutCorpusSource.cs`), a test adapter over this checkout | `InMemoryCorpusSource` (`tests/KyberWeave.Testing/Corpus/InMemoryCorpusSource.cs`) | `CorpusSourceContractTests`: both against the adapter and the fake in `KyberWeave.RepoPolicy.Tests/CorpusSourceContractTests.cs` |
 
 Notes.
 
@@ -55,6 +55,9 @@ Notes.
   views over the file-system seam, so a class can ask for the write it needs and nothing more.
 - The corpus seam is test infrastructure, not a product seam. It lives in the shared testing library
   so a content test says what it reads instead of walking the tree for the repository root.
+- `FakeRunStateStore` is the shared fake for `IRunStateStore`, the run records `run start` writes. The
+  hook's run-context resolver reads it in unit tests, so a test proves which worktree a dispatch resolves
+  without a real runs directory under the operator's home.
 - The configuration seam has a shared fake and a contract suite (task 2.3): the fake runs in a unit
   project and the adapter over the in-memory file system there too, and over the real disk in the
   integration project.
@@ -65,6 +68,10 @@ Notes.
 - An adapter is thin: it translates the call and holds no decision the logic should make. Where an
   adapter does hold policy (the file-system adapter's skip list, the process adapter's missing-
   executable mapping), that is noted below rather than hidden.
+- The fake follows the adapter, and a divergence is a contract case: moving a directory that is a
+  symbolic link moves the link rather than its target on both, proved by
+  `MoveDirectoryMovesADirectoryLinkAsALinkWithoutFollowingIt` in the shared file-system contract
+  suite.
 
 ## The adapter register
 

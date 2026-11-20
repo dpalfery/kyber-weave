@@ -41,6 +41,11 @@ code-refs:
   - RuleEffects
   - PlanFacts
   - PlanRootResolver
+  - HookRunContextResolver
+  - HookRunContext
+  - HookEvent
+  - HarnessHookEventReader
+  - ArbiterRuleAdvisory
   - TextExcerpts
   - ArbiterHookTimeout
 ---
@@ -162,7 +167,9 @@ block. The raw values are evidence, never a gate:
   not under the hook's directory, the resolver lists the repository's worktrees
   (`git worktree list --porcelain`) and uses the one that holds the plan for the plan, the task file
   and the git facts of that decision; several holding it prefer the one the dispatch names, then the
-  newest plan. A return whose headers were stripped follows the worktree its body names. The ledger
+  newest plan. The dispatch hook builds the prompt it inserts from the same root, so a plan and task
+  file that exist only in the run worktree still reach the worker. A return whose headers were
+  stripped follows the worktree its body names. The ledger
   stays in the hook's directory, so a dispatch and its return still pair.
 - **`delegation.plan-file-raw`** and **`delegation.task-raw`** carry the raw values to the model
   questions.
@@ -235,6 +242,102 @@ start time is the boundary because it is the one fact that exists for every run 
 a session id can outlive a run, a branch name and a worktree path can be reused, and a plan's digest
 changes when the plan is revised inside one run. A dispatch evaluated where no run is recorded is
 counted as before, against the whole ledger.
+
+## The run context
+
+A hook is handed a harness payload and nothing else, and the payload's `cwd` is the directory the
+harness session started in — not necessarily the worktree the work belongs to. A conductor run starts
+in the operator's checkout while `kyber-weave run start` puts the run in a worktree of the same
+repository, so a plan, its task file and the git facts live in a different directory from the one the
+payload names. Reading paths at each call site is what made those places disagree: seven sites each
+parsed the payload and resolved repository paths on their own, and a layout change broke every one.
+
+One service now answers those questions once per hook invocation.
+
+- **`IHookRunContextResolver`** (`KyberWeave.Contracts`) with `HookRunContextResolver`
+  (`KyberWeave.Application`) resolves, over the existing seams — `IFileSystem`, `IPathResolver`,
+  `IProcessEnvironment`, `IGitRepositoryFacts`, `IPlanFileResolver`, `IRunStateStore` and
+  `IPlanRootResolver` — one **`HookRunContext`**:
+  - `RepositoryRoot`: the directory configuration, the claim store and the ledger are read under.
+  - `CommonDirectory`: git's common directory for that repository, which identifies the repository
+    across its worktrees.
+  - `ActiveRun`: the record `kyber-weave run start` wrote for this repository, when one is live.
+  - `Worktree`: the working tree the plan, its task file and the git facts are read from.
+  - `PlanFile`, `PlanPath`, `TaskFile`: the dispatch's plan and the task file beside it, when both
+    resolve inside the worktree.
+  - `Worktrees`: every worktree of this repository, already checked to belong to it.
+  - `Source`: which candidate chose `Worktree`, and `Notes`: the precise reason for each candidate
+    that was refused and each path that was tried.
+
+- **Resolution order** is fixed and documented, and each candidate must belong to this repository or
+  one of its own git worktrees. A candidate that does not is refused with its reason and the next is
+  tried; it is never silently trusted.
+  1. **The worktree the event names** — a path in the dispatch prompt, packet or agent cwd that is a
+     worktree of this repository and holds the dispatch's plan.
+  2. **The active run** — the live record `run start` wrote for this repository, when its worktree is
+     still a worktree of this repository and still has the run's own branch checked out. A record
+     outlives its run, and a worktree can be reused for another branch, so both are checked.
+  3. **The payload cwd**, then the process directory when the payload carries none.
+
+  The repository anchor itself is the adapter's workspace root, else the payload cwd, else the
+  process directory, accepted only when git names its common directory. `Worktree` is chosen among
+  the validated candidates by the existing `IPlanRootResolver` rule: the anchor when it holds the
+  plan, else the worktree that holds it, with the worktree the dispatch names winning over the newest
+  plan when several do.
+
+- **Adapters are the only readers of raw harness JSON.** `IHarnessHookAdapter.Describe` turns one
+  payload into a typed `HookEvent`: cwd, agent identity and type, tool name and arguments, session and
+  call ids, and the dispatch prompt when the event carries one. The plugin shim's envelope
+  (`PluginEnvelope`) and the conductor guard's Copilot payload are read by the same kind of adapter.
+  Guards, rules and the hook host consume the typed event and the run context; none of them parses
+  `cwd`, `agent_id` or `tool_input` again.
+
+- **Missing input never blocks on its own.** A plan, task file, run record or receipt that is absent or
+  unreadable is an input the Arbiter could not read, not a finding: the guard or rule *escalates* (or
+  warns, where the harness has no escalation channel) with the precise reason and the path it tried,
+  and the dispatch continues. Only a positive finding — a machine fact or a confident model answer
+  that names a violation — blocks. Security checks stay fail-closed: a path that escapes the
+  repository or its worktrees, a plan outside them, and a credential failure are still refusals.
+  Each guard and rule applies the same policy, and the prompt guard's "no prompt" refusal is one of
+  them: a missing task file warns instead of stopping the dispatch.
+
+- **Advisory rules are marked in the rule data.** A rule is **advisory** when every answer it can give
+  maps to the trigger family's proceed effect — `allow`, `keep`, `spawn` or `applies` — so no answer can
+  gate. `ArbiterRuleAdvisory.IsAdvisory` computes it from the rule's own effects, and `arbiter rules`
+  lists it in its `Gates` column. `KW-ARB-OWNER-002` is advisory by construction; `KW-ARB-MODE-002` is
+  advisory as it ships, because every answer allows and only a host's `effects` override makes
+  `no-failing-run` escalate. Marking changes no rule's effect: an advisory rule is still evaluated,
+  logged and recorded.
+
+### The autonomous plan-approval nudge
+
+An autonomous conductor run is told to call the finalize tool right after the architect returns
+`STATUS: PLAN_READY`, and a model sometimes asks the user "Approve and execute the plan?" instead
+(Copilot CLI runs 7 and 14). Prompt text alone did not fix it, so the hook adds a deterministic nudge.
+
+- **Trigger and condition.** The hook records the return of a planner dispatch (trigger
+  `delegate.planner.returned`, target `architect`) whose return carries `STATUS: PLAN_READY`, and the
+  run's recorded autonomy is `autonomous`.
+- **The note.** It is attached to that return, word for word: "AUTONOMOUS RUN: the plan is ready. Call
+  docs_finalize_approved_plan_and_write_task_file now with the approval 'AUTONOMOUS_APPROVAL:
+  plan-approve-execute (autonomous: recommendation accepted)'. Do not ask the user to approve; then
+  dispatch the ready tasks." The quoted approval is the finalize tool's `approval` argument; the tool's `approvalMode` is `autonomous`.
+- **Autonomy source.** `kyber-weave run start` records the autonomy it resolved (the `--autonomy` value,
+  else the repository's `AGENTS.md` Config Reg value, else the configured `autonomy:`) as an `Autonomy`
+  field in the run record under `~/.kyber-weave/runs`. When none of the three is set, nothing is recorded.
+  The hook reads it as `HookRunContext.ActiveRun.Autonomy`. A record written before the field existed, or
+  a run with no record, reads as unknown, and unknown never nudges. The hook never infers autonomy from
+  prompt text.
+- **Delivery.** The note travels the existing post-return annotation paths: the `PostAnnotation` outcome
+  that Claude renders as `additionalContext` and Copilot as a post annotation, and, for a Copilot
+  background return, the pending note `TakePendingNotes` hands over on the conductor's next dispatch. A
+  harness that cannot deliver a post note (Antigravity) gets none.
+- **Once per plan revision.** A return is nudged once. When the ledger already holds a `PLAN_READY`
+  planner return paired with the same dispatch, a second recording of it adds no note. A re-dispatched
+  planner is a new dispatch and is nudged again.
+- **Never blocks.** The note is advisory and never turns an allow into a block. A return the rules
+  already escalated or blocked keeps its own text. A failure to build the note is logged and ignored
+  (the missing-input policy above).
 
 ## The rules
 
@@ -969,6 +1072,129 @@ TypeSafe directly with `jev-1.13.0` and `jev-1.14.0`. To repeat the runs reporte
 set `KW_ARBITER_CALIBRATE_ENDPOINT` to `https://openrouter.ai/api/v1` and
 `KW_ARBITER_CALIBRATE_MODELS` to `typesafe/jev-1.13,typesafe/jev-1.14`.
 
+## Return pairing and attestation scope
+
+A return is only a fact about a task when the ledger can say which dispatch it answers: the tasks a run
+completed, the files a dispatch holds in flight, and the model a retry steps up from all come from that
+pair. One mechanism answers it for every path — synchronous, background, batched, lens fan-out and
+`serve` — and it fails loudly rather than silently, because an unpaired return looks the same as a
+worker that never reported.
+
+### One key, two tiers
+
+Every dispatch has one **pair key**:
+
+1. **The harness's call id**, when the payload carries one: `tool_use_id` on Claude and Copilot in VS Code,
+   `toolCallId` (and a batch call's own `id`) on Copilot CLI, `call-id` in the plugin envelope. It is exact
+   and survives any rewrite of the prompt.
+2. **The pair digest**, only when the harness gives no call id: SHA-256 of the target and the prompt **as
+   the worker runs it**. That is the prompt after its header block is stripped, and — where the dispatch
+   hook inserts a prompt (`rewrite` in [Dispatch delivery path](#dispatch-delivery-path)) — the inserted
+   text, because that is what the post event carries and what the worker reads.
+
+Pairing takes the first unpaired pre event of the same harness with the same call id; failing that, the
+first unpaired pre event with the same digest, oldest first. Both keys are recorded on the pre event, so a
+harness that gives an id on one side and not the other still pairs by digest.
+
+The digest tier exists for the harnesses whose hook cannot see an id (Factory, Devin, Kilo) and for a
+ledger written before the id was read. It is why the digest is computed over the *delivered* prompt and
+not the dispatch: a post event carries what the harness ran, not what the dispatcher typed. A hook that
+inserts the expanded packet replaces the prompt entirely, and a digest over the un-inserted text could
+never match it. That is the defect a live Copilot CLI run exposed: the conductor started two background
+workers in one turn, the pre events recorded the short dispatch, the post events carried the inserted
+packet, and neither worker's return was ever recorded.
+
+### Every path, and every site that pairs
+
+| Path | What the pre event is | What the return is | How they pair |
+|---|---|---|---|
+| Sync dispatch | the `task`/`Agent` call before it runs | the same call's `postToolUse`, carrying the tool result | call id, else digest |
+| Background (`mode: "background"`) | the `task` call before it runs | `subagentStop` at the end of each of the agent's turns, not the launch result | the stored pre event: the hook remembers it by call id, else digest, under `background/` |
+| Batched / parallel | **each** `task` call of a `toolCalls` array, one pre event per call | one `postToolUse` per call | each call's own id, so siblings cannot claim each other's pre event |
+| Lens fan-out | each `lens.spawn` dispatch in the turn's batch | each lens's `subagentStop` or post | as batched: one pre event per lens |
+
+A batch is answered with one document, which can carry one inserted prompt, so only the first dispatch that
+needs one is expanded; every dispatch call in the batch is nevertheless judged and recorded, and one refusal
+refuses the batch. Each call is judged in the worktree that holds **its own** plan: the invocation resolves one
+run context, and a sibling whose plan lives in another worktree of the repository is read there.
+| `serve` (MCP fallback) | the asserted dispatch | the asserted return, which names its own `pre-id` | the asserted `pre-id`, else as above |
+
+The sites that pair, all through `ArbiterLedgerQueries`:
+
+- `ArbiterLedgerQueries.MatchPre` — the rule: call id first, then the oldest unpaired digest match. Called
+  inside the append lock by `InFlightLedger.AppendAsync`, so two concurrent returns cannot claim one pre.
+- `ArbiterHookDecisionEngine.TrackBackgroundDispatch` — resolves the pre event of a background launch and
+  stores it with the agent id; it reads the same two tiers.
+- `ArbiterHookDecisionEngine.DecideBackgroundReturn` — looks the stored pre event up by session and agent
+  id, then records the turn's response as its return with that `pre-id`.
+- `ArbiterLedgerQueries.ConcurrentWriters`, `InFlightPaths` and `DispatchTechnology` — read the pair to
+  know what is still in flight.
+
+When no pre event matches, the hook logs one line naming the key it tried: the agent or target, the call
+id, the digest, and how many pre events were already paired. An unpaired return is still recorded as its
+own post event, so `arbiter audit` shows it; it is never attributed to another dispatch, and it never
+marks a task complete.
+
+### Attestation scope
+
+A planner may attest that tasks are complete (`ATTESTED: T1=complete, T2=complete`) when it resolves an
+escalation. The attestation names task ids and no plan, and the escalation dispatch it answers carries no
+routing header block — its prompt opens with `STATUS: ARBITER_ESCALATION`, and the plan is the
+`PLAN_FILE:` line inside that envelope. Scoping the attestation by header block alone dropped it, and the
+readiness rule kept answering `waiting` after the architect had resolved the escalation.
+
+So an attestation is scoped to:
+
+1. the plan on the return's own headers (a normal planner dispatch, which does write `PLAN_FILE:`);
+2. else the plan the escalation envelope names on its `PLAN_FILE:` line, read from the dispatch prompt and
+   recorded on the event with the rest of the headers;
+3. else the run — an attestation with no plan at all counts only for returns of the run being judged.
+
+Only a return whose target class is `planner` (the architect and product-planning profiles) may attest,
+and a task the attestation names still counts only for the plan it is scoped to. A worker, a lens or an
+investigator that writes `ATTESTED:` is ignored, which is the fail-closed behaviour the marker has always
+had.
+
+### Review seat files
+
+A review council's lens dispatches each return a reply that the verdict command reads from a file:
+`<lens>.md` in the cycle's `seats` folder, a sibling of its `packets` folder. A reviewer on a harness with
+no file-write tool (Copilot CLI's read-only code reviewer) could not save them, and retyping fourteen
+replies is slow and can alter them. So the hook saves them, and the reviewer never writes a seat file.
+
+- **Trigger.** Every post-return path ends in `ArbiterHookDecisionEngine.Decide` with `isPost`: a
+  synchronous return, a batched call, and a background agent's turn (`DecideBackgroundReturn`, which
+  passes the stored dispatch prompt). Decide's first step hands the dispatch prompt and the reply to
+  `ReviewSeatRecorder`, before any rule runs, so a failed evaluation never loses a reply.
+- **What counts as a seat dispatch.** The prompt has a `Packet:` line whose path ends
+  `review/cycle-<n>/packets/<lens>.md`. A `LENS:` header, when the prompt still carries one, must equal the
+  `<lens>` in that file name; a mismatch is refused and logged. The dispatch hook strips the routing
+  headers before the worker runs, so a return's prompt often has no `LENS:` line, and the file name then
+  names the lens. Any other dispatch writes nothing.
+- **Reply text.** The reply is the text the harness returned, taken out of its tool-result JSON: a
+  string root, one of the `textResultForLlm`, `result`, `output`, `text` or `response` strings, a
+  `content` string, or the `text` blocks of a `content` array. A wire value that is not a string or
+  an object — an array, a number, a boolean, null — carries no reply and writes nothing, and a tool
+  result over 262,144 characters is refused before it is scanned or parsed, so a host payload
+  cannot make a seat file grow without bound.
+- **Path rule.** The file is `review/cycle-<n>/seats/<lens>.md` beside the packet. The lens must be a
+  lowercase name of letters, digits and hyphens.
+- **Containment.** The seats folder must resolve, links followed, strictly inside the run context's
+  repository root, its worktree or one of the repository's own worktrees. Anything else, and a seat file that
+  is itself a link, is refused and logged. A relative packet path resolves against the run's worktree.
+- **Append rule.** An empty reply writes nothing, so the reviewer sees the seat is missing and re-sends it. A
+  later non-empty reply for the same lens in the same cycle (a lens split across spawns, or a retry) is
+  appended after a blank line. That is the shape the verdict reads: `SeatOutputParser` sums every
+  `Discovery:` and `Input sites:` line of one file, because a lens split across two spawns is saved as one
+  file with two closing blocks. A reply the file already holds exactly is not appended again, because a
+  repeated finding id would make the file unreadable.
+- **Failure policy.** The write goes through `IWritableFileSystem`. A file-system, path, security, JSON,
+  invalid-data, unsupported-operation or argument failure (other than a null argument), and any refusal
+  above, is logged to the hook's log and never blocks or denies the dispatch, as in
+  [missing input never blocks](#the-run-context). A return that is not valid JSON is not a failure: its text
+  is the reply and is saved as it came. A programming error — a null argument, an invalid operation, a
+  bad cast — is not a save failure and is not swallowed.
+
 ## Harness facts
 
 One table covers every harness at project scope. Phase 1 hooks Claude, Copilot in VS Code, Copilot CLI and
@@ -987,7 +1213,7 @@ The degradation records these outcomes produce are listed once, in the
 | Codex | 2 | Owned block in the shared `.codex/hooks.json` (`PreToolUse`/`PostToolUse` matcher groups) | `spawn_agent` (also matched as `Agent`, under any namespace prefix) | Header inference from the marker | `tool_input.agent_type`, `tool_input.message`; returns pair by `tool_use_id` | Unsupported (unverified): no `spawn_agent` model parameter is documented [CX-HOOK], [CX-SUB] |
 | Cursor | 2 | Owned entries in the shared `.cursor/hooks.json` (`preToolUse`/`postToolUse`, `failClosed: true`) | `Task` | Header inference from the marker | `tool_input.prompt`; `tool_input.subagent_type` is undocumented, so when absent the rules answer `undecidable`. Returns pair by `tool_use_id` | Unsupported (unverified): whether `updated_input` applies to `Task` is undocumented [CU-SUB], [CU-HOOK] |
 | Kilo | 3 | The `.kilo/plugin/kyber-arbiter.ts` shim speaking the plugin envelope | `task` | Header inference from the marker | `args.subagent_type`, `args.prompt`; returns pair by `callID` | Unsupported (unverified): the task tool documents no model [KI-SUB] |
-| Antigravity | 3 | An owned top-level group `kyber-arbiter` in `.agents/hooks.json`, matching `^invoke_subagent$` | `invoke_subagent`; each element of `Subagents` is one dispatch | Header inference from the marker | `TypeName`, `Prompt`. Deny writes `{decision: "deny", reason}`; pass-through writes `{}`, since an explicit allow would bypass the user's approval prompts. An inserted prompt writes `{decision: "ask", overwrite: {Subagents: [...]}}` | Unsupported: `invoke_subagent` has no model field; tier is per custom subagent [AG-SUB], [AG-HOOK] |
+| Antigravity | 3 | An owned top-level group `kyber-arbiter` in `.agents/hooks.json`, matching `^invoke_subagent$` | `invoke_subagent`; each element of `Subagents` is one dispatch | Header inference from the marker | `TypeName`, `Prompt`, as one flat `args` object (the shape a real agy call sends) or as the `Subagents` list; see [the Antigravity payload](#the-antigravity-payload-and-caller-rule). Deny writes `{decision: "deny", reason}`; every other answer on a pre-tool event writes `{decision: "allow"}`, never `{}`, which agy reports as a denial with an empty reason. An inserted prompt writes `{decision: "ask", overwrite: {...}}` | Unsupported: `invoke_subagent` has no model field; tier is per custom subagent [AG-SUB], [AG-HOOK] |
 | Factory | 3 | An owned block in `.factory/hooks.json`, matcher groups at the top level with no `hooks` wrapper, plus a `SubagentStop` group with no matcher (Factory runs `Task` in the background, so the worker report arrives at stop, not at `PostToolUse`), unless shadowed (below) | `Task` | Header inference from the marker | `tool_input.subagent_type`, `tool_input.prompt`; returns pair by `pair-digest` | Unsupported: the docs say the caller cannot choose a model for a single call [FA-DROID], [FA-HOOK] |
 | Devin | 3 | An owned block in `.devin/hooks.v1.json` (the Claude Code format), matching `^run_subagent$` | `run_subagent` | Header inference from the marker | `tool_input.profile`, `tool_input.prompt`; returns pair by `pair-digest` | Unsupported (unverified): the `run_subagent` schema documents no model [DV-HOOK], [DV-LOG] |
 | Warp, ZCode | 3 | No hooks: the MCP fallback | — | Asserted by the caller in `arbiter_evaluate_agent_dispatch_or_return` | — | Not applicable: no hooks |
@@ -1060,7 +1286,7 @@ neither path.
 | Codex | rewrite | `hookSpecificOutput.updatedInput.message`, valid only with `allow` | Shipped header strip | A hook the user has not trusted is skipped; the worker runs `docs packet` | [CX-HOOK] |
 | Cursor | rewrite | `updated_input.prompt`, riding on `allow` only | Shipped header strip; `updated_input` on `Task` is documented only loosely, so a field the harness drops falls back to the file | A `failClosed` hook that does not run leaves the worker with the header lines; it runs `docs packet` | [CU-HOOK] |
 | Kilo | rewrite | `args` in the plugin envelope | Shipped header strip | The plugin shim absent leaves the worker with the header lines; it runs `docs packet` | [KI-SUB] |
-| Antigravity | rewrite | `overwrite` replaces `toolCall.args` by a **shallow top-level merge**, so the insertion resends the whole `Subagents` array, every element kept and only its `Prompt` replaced. `decision` is required; the hook returns `decision: "ask"` so the user's approval prompt still applies, and never `auto_approve` | The adapter inserts the prompt; the live check that the harness applies the merge has not run, because it is not installed in this worktree. It must show the worker received the replaced `Prompt` and the dispatcher's transcript did not | A project or global `hooks.json` that is absent or disabled means no hook; the worker runs `docs packet` | [AG-HOOK] |
+| Antigravity | rewrite | `overwrite` replaces `toolCall.args` by a **shallow top-level merge**, so the insertion resends `Prompt` for the flat shape, or the whole `Subagents` array, every element kept and only its `Prompt` replaced, for the list shape. `decision` is required; the hook returns `decision: "ask"` so the user's approval prompt still applies, and never `auto_approve` | The adapter inserts the prompt; the live check that the harness applies the merge has not run, because it is not installed in this worktree. It must show the worker received the replaced `Prompt` and the dispatcher's transcript did not | A project or global `hooks.json` that is absent or disabled means no hook; the worker runs `docs packet` | [AG-HOOK] |
 | Factory | rewrite | `hookSpecificOutput.updatedInput.prompt`, with every `tool_input` field copied | Shipped header strip | A missing or disabled hook file leaves the worker with the header lines; it runs `docs packet` | [FA-HOOK] |
 | Devin | rewrite | `hookSpecificOutput.updatedInput.prompt`, merged into the tool call | Shipped header strip | A missing hook file leaves the worker with the header lines; it runs `docs packet` | [DV-HOOK] |
 | ZCode | file until the check passes | `hookSpecificOutput.updatedInput` is a full replacement of the tool input, re-validated against the tool schema | Not yet: project hooks are ignored by the harness and no Kyber-Weave hook is rendered; a user-scope hook also needs `hooks.enabled: true`. The check must show the worker received the replaced prompt and the dispatcher's transcript did not | The hook is absent or disabled: the worker runs `docs packet` | [ZC-HOOK], read 2026-11-16 |
@@ -1188,8 +1414,8 @@ A read looks only at the newest 8 MiB of the ledger and of the decision log; the
 
 Caller inference from a planner target is one of those gates, and it applies only to a
 marked dispatch or on a trusted harness (`claude`, `copilot-vscode`). So an unmarked
-dispatch to a planner is evaluated on `factory` and `antigravity` with no caller, never as the
-conductor's, and `KW-ARB-AUDIT-002` reports it. An unmarked dispatch that carries `PLAN_FILE:` or `TASK:`, or any header that
+dispatch to a planner is evaluated on `factory` with no caller, never as the
+conductor's (Antigravity passes an unmarked dispatch through untouched), and `KW-ARB-AUDIT-002` reports it. An unmarked dispatch that carries `PLAN_FILE:` or `TASK:`, or any header that
 was rejected, still infers the conductor and stays gated. The cost is that a conductor which drops its marker goes
 ungated on those harnesses. That is the accepted risk the Arbiter design records, and the
 audit rule is how it is seen.
@@ -1246,8 +1472,8 @@ Per-harness notes:
   parameterizes the default export by harness token (`ArbiterPluginShim.Render`) and
   keeps the named `KyberArbiter` export alongside it. A named-only render fails OpenCode
   v2's loader with `SchemaError` and the plugin silently never loads.
-- **Antigravity** can dispatch several subagents in one call (`toolCall.args.Subagents`,
-  each element with its own target and prompt); the call is denied when any element
+- **Antigravity** sends one dispatch as a flat `toolCall.args` object (`TypeName`, `Prompt`, `Role`) and
+  documents a `Subagents` list for several; the call is denied when any marked element
   escalates. It documents no input-rewrite field for `hooks.json`, so routing headers are
   not stripped — only documented fields are written. Because `PostToolUse` output is `{}`,
   the adapter declares returns unobservable (`harness.observes-returns` is false):
@@ -1282,6 +1508,36 @@ post-dispatch finding is surfaced as context rather than enforced. Pre-dispatch 
 still block. On Antigravity and Devin, post-dispatch outcomes are not delivered at all —
 they are recorded and reported by `audit`. No trust gate is documented for any Phase 3
 harness.
+
+### The Antigravity payload and caller rule
+
+The shape below is from two real Antigravity CLI (`agy`) `PreToolUse` payloads captured on 2026-11-18, not from the
+task packet the first adapter was built on. The fixtures in `tests/KyberWeave.Application.Tests/Fixtures/arbiter-hooks/antigravity/`
+carry both, and their README gives the provenance.
+
+- **Event name.** `hookEventName` (camelCase). The adapter also accepts `hook_event_name`, which the older fixtures use.
+- **Dispatch arguments.** `toolCall.args` is one flat object `{TypeName, Prompt, Role}`. The adapter still accepts the
+  `Subagents` list that [AG-HOOK] documents, where each element is one dispatch.
+- **Extra fields.** `cwd`, `artifactDirectoryPath`, `lastUserInput`, `transcriptPath`, `modelName`, and `toolCall.id`,
+  which is the call id used to pair a post event with its pre event (the older `<conversationId>:<stepIdx>` is the fallback).
+- **No caller.** Nothing in the payload names the agent that made the call, so the standard Antigravity agent's dispatch
+  and the conductor's look the same apart from the prompt.
+
+**Caller rule.** The hook acts only when the conductor or another Kyber Weave agent is working. Every Squad dispatch
+starts with the `KYBER-ARBITER: true` marker header, so on Antigravity a dispatch whose prompt does not start with that
+header comes from the standard agent and passes through untouched: an explicit allow, nothing recorded, no run-start or
+roster rule applied, no log line. A marked dispatch is judged as on every other harness. With a `Subagents` list only
+the marked elements are judged. A non-dispatch tool passes through the same way.
+
+**Allow shape.** [AG-HOOK] gives `decision` as the one required field of a `PreToolUse` answer, and defines
+`"allow"` as proceeding "delegating to the next hook or default policy"; only `auto_approve` skips the user's approval
+prompt. An empty `{}` carries no decision, and agy turned it into "tool call denied by pre-tool hook:" with an empty
+reason when the first adapter failed and wrote `{}` (seen in the agy log on the same day). So every pass-through,
+disabled-Arbiter, deferred-to-project and fail-open answer on a pre-tool event writes `{"decision":"allow"}`. The allow
+shape is taken from that documentation; it has not been run against a live agy.
+
+**Post event.** `PostToolUse` has no `decision` field: [AG-HOOK] documents its output as `{}`, and the adapter writes `{}`.
+It never blocks, records the return of a marked dispatch only, and treats an unparseable post event as an allow.
 
 ### Verified global-hook matrix
 

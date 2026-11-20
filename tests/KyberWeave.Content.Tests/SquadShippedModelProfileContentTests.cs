@@ -21,7 +21,7 @@ public sealed class SquadShippedModelProfileContentTests
     [Theory]
     [InlineData("architect", "claude", "opus")]
     [InlineData("architect", "codex", "gpt-6.1-sol")]
-    [InlineData("architect", "copilot", "Claude Opus 5.5 (copilot)")]
+    [InlineData("architect", "copilot", "GPT-6.2 Sol (copilot)")]
     [InlineData("architect", "cursor", "claude-sonnet-5-5[effort=high]")]
     [InlineData("architect", "kilo", "zai-coding-plan/glm-5.3")]
     [InlineData("architect", "opencode", "zai-coding-plan/glm-5.3")]
@@ -29,7 +29,7 @@ public sealed class SquadShippedModelProfileContentTests
     [InlineData("architect", "devin", "claude-opus-5-5-high")]
     [InlineData("deep-planning", "claude", "opus")]
     [InlineData("deep-planning", "codex", "gpt-6.1-sol")]
-    [InlineData("deep-planning", "copilot", "Claude Opus 5.5 (copilot)")]
+    [InlineData("deep-planning", "copilot", "GPT-6.2 Sol (copilot)")]
     [InlineData("deep-planning", "cursor", "claude-sonnet-5-5[effort=high]")]
     [InlineData("deep-planning", "kilo", "zai-coding-plan/glm-5.3")]
     [InlineData("deep-planning", "opencode", "zai-coding-plan/glm-5.3")]
@@ -37,7 +37,7 @@ public sealed class SquadShippedModelProfileContentTests
     [InlineData("deep-planning", "devin", "claude-opus-5-5-high")]
     [InlineData("fast", "claude", "claude-haiku-5-5")]
     [InlineData("fast", "codex", "gpt-6-luna")]
-    [InlineData("fast", "copilot", "Claude Haiku 5.5 (copilot)")]
+    [InlineData("fast", "copilot", "MAI Code 2 Flash (copilot)")]
     [InlineData("fast", "cursor", "composer-2.5[]")]
     [InlineData("fast", "kilo", "opencode-go/muse-spark-1.3-contributor")]
     [InlineData("fast", "opencode", "opencode-go/muse-spark-1.3-contributor")]
@@ -45,7 +45,7 @@ public sealed class SquadShippedModelProfileContentTests
     [InlineData("fast", "devin", "deepseek-v4-1-flash-high")]
     [InlineData("general", "claude", "claude-sonnet-5-5")]
     [InlineData("general", "codex", "gpt-6.1-terra")]
-    [InlineData("general", "copilot", "GPT-6.1 Terra (copilot)")]
+    [InlineData("general", "copilot", "MAI Code 2 (copilot)")]
     [InlineData("general", "cursor", "grok-4.7[]")]
     [InlineData("general", "kilo", "opencode-go/muse-spark-1.3-contributor")]
     [InlineData("general", "opencode", "opencode-go/muse-spark-1.3-contributor")]
@@ -53,7 +53,7 @@ public sealed class SquadShippedModelProfileContentTests
     [InlineData("general", "devin", "swe-2-high")]
     [InlineData("reviewer", "claude", "sonnet")]
     [InlineData("reviewer", "codex", "gpt-6.1-terra")]
-    [InlineData("reviewer", "copilot", "Gemini 3.8 Flash (copilot)")]
+    [InlineData("reviewer", "copilot", "GPT-6.1 Terra (copilot)")]
     [InlineData("reviewer", "cursor", "kimi-k2.7-code[]")]
     [InlineData("reviewer", "kilo", "opencode-go/kimi-k2.7-code")]
     [InlineData("reviewer", "opencode", "opencode-go/kimi-k2.7-code")]
@@ -116,8 +116,7 @@ public sealed class SquadShippedModelProfileContentTests
                 if (model.Contains("haiku", StringComparison.OrdinalIgnoreCase))
                 {
                     Assert.True(
-                        (profileName == "fast" && harness == "claude" && model == "claude-haiku-5-5") ||
-                        (profileName == "fast" && harness == "copilot" && model == "Claude Haiku 5.5 (copilot)"),
+                        (profileName == "fast" && harness == "claude" && model == "claude-haiku-5-5"),
                         $"Profile '{profileName}' on harness '{harness}' unexpectedly resolves to '{model}'.");
                 }
             }

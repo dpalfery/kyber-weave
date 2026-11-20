@@ -3,6 +3,7 @@ using KyberWeave.Data.Hooks;
 using System.Text.Json;
 using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter.Providers;
@@ -123,7 +124,11 @@ public sealed class ArbiterPlanWorktreeTests
             "ontology:\n  docs-root: docs\narbiter:\n  enabled: true\n  provider:\n    kind: none\n");
 
         ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(providerFactory: _ => new NoneProvider(), homeDirectory: () => home.Path);
-        HookCommand command = ArbiterTestServices.Command(ArbiterTestServices.Registry(engine), ArbiterTestServices.LoadHostConfig, () => "wt-1");
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
+            ArbiterTestServices.LoadHostConfig,
+            () => "wt-1",
+            runContexts: ArbiterTestServices.Get<IHookRunContextResolver>());
         string toolInput = JsonSerializer.Serialize(new Dictionary<string, string>
         {
             ["description"] = "T7",
@@ -166,7 +171,11 @@ public sealed class ArbiterPlanWorktreeTests
             "ontology:\n  docs-root: docs\narbiter:\n  enabled: true\n  provider:\n    kind: none\n");
 
         ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(providerFactory: _ => new NoneProvider(), homeDirectory: () => home.Path);
-        HookCommand command = ArbiterTestServices.Command(ArbiterTestServices.Registry(engine), ArbiterTestServices.LoadHostConfig, () => "wt-2");
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
+            ArbiterTestServices.LoadHostConfig,
+            () => "wt-2",
+            runContexts: ArbiterTestServices.Get<IHookRunContextResolver>());
         string prompt = $"TASK_ID: T7\nWORKTREE: {worktree}\n\nWrite the failing tests in tests/StatusCardsTests.cs.";
         string stdin = JsonSerializer.Serialize(new Dictionary<string, object>
         {

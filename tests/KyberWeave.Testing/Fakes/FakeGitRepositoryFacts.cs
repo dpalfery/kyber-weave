@@ -13,6 +13,12 @@ internal sealed class FakeGitRepositoryFacts : IGitRepositoryFacts
     /// <summary>The common git directory every working directory reports; null when git names no repository.</summary>
     public string? CommonDirectory { get; set; }
 
+    /// <summary>
+    /// The common git directory a named working directory reports, when it differs from
+    /// <see cref="CommonDirectory"/>; a null value is a directory git could not attest, which a caller must refuse.
+    /// </summary>
+    public Dictionary<string, string?> CommonDirectories { get; init; } = new(StringComparer.Ordinal);
+
     /// <summary>The worktrees each working directory reports, by working directory; empty when not named.</summary>
     public Dictionary<string, IReadOnlyList<string>> Worktrees { get; init; } = new(StringComparer.Ordinal);
 
@@ -24,7 +30,8 @@ internal sealed class FakeGitRepositoryFacts : IGitRepositoryFacts
         Worktrees.TryGetValue(workingDirectory, out IReadOnlyList<string>? worktrees) ? worktrees : [];
 
     /// <inheritdoc />
-    public string? GetCommonDirectory(string workingDirectory, string gitExecutable = "git") => CommonDirectory;
+    public string? GetCommonDirectory(string workingDirectory, string gitExecutable = "git") =>
+        CommonDirectories.TryGetValue(workingDirectory, out string? declared) ? declared : CommonDirectory;
 
     /// <inheritdoc />
     public string? GetCurrentBranch(string workingDirectory, string gitExecutable = "git") => null;

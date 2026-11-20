@@ -95,6 +95,8 @@ public enum HookScope
 /// <param name="BuildDispatchPrompt">Builds the task prompt a dispatch's identity line is replaced with, or null
 /// when the host has no prompt service. The adapters call it through <c>DispatchPromptInsertion</c>, after
 /// the rules judged the short dispatch and alone when the Arbiter is off.</param>
+/// <param name="RunContext">The one run context this invocation resolved: the repository, the active run and the
+/// worktree holding the plan. Null only for a caller outside the hook, such as an offline evaluation.</param>
 public sealed record HookContext(
     string RepoRoot,
     Func<string> NewDecisionId,
@@ -104,7 +106,8 @@ public sealed record HookContext(
     HookScope Scope = HookScope.Project,
     ModelOverrideCapability? ModelOverride = null,
     Func<string, bool>? ConfirmModelWrite = null,
-    Func<DispatchPromptQuery, DispatchPromptExpansion>? BuildDispatchPrompt = null);
+    Func<DispatchPromptQuery, DispatchPromptExpansion>? BuildDispatchPrompt = null,
+    HookRunContext? RunContext = null);
 
 /// <summary>Names the claim that one evaluation of a sub-agent dispatch event takes.</summary>
 /// <param name="ToolUseId">The harness's id for the tool call. The claim store turns it into a safe file name.</param>

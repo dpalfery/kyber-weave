@@ -16,6 +16,9 @@ namespace KyberDash.Application;
 /// </remarks>
 public class AnalyticsService : IAnalyticsService
 {
+    /// <summary>Longest exception text copied into an error envelope.</summary>
+    private const int MaxFailureMessageChars = 500;
+
     /// <summary>Operations this service understands, in the order they are advertised.</summary>
     public static IReadOnlyList<string> Operations { get; } =
     [
@@ -42,12 +45,66 @@ public class AnalyticsService : IAnalyticsService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A failing operation is reported as a contract-v1 envelope with HTTP <c>500</c> rather than an
+    /// exception, because the endpoint and the MCP adapter both read the envelope: an empty <c>500</c>
+    /// gives a caller nothing to act on.
+    /// </remarks>
     public AnalyticsExecutionResult Execute(string operation, JsonElement? request)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(operation);
 
-        (int statusCode, JsonElement envelope) = bridge.ExecuteAnalytics(operation, request);
-        return new AnalyticsExecutionResult(statusCode, envelope);
+        try
+        {
+            (int statusCode, JsonElement envelope) = bridge.ExecuteAnalytics(operation, request);
+            return new AnalyticsExecutionResult(statusCode, envelope);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return Failure(operation, ex);
+        }
+    }
+
+    /// <summary>Builds the contract-v1 envelope reported when an analytics operation throws.</summary>
+    /// <param name="operation">Operation that failed.</param>
+    /// <param name="exception">The exception the engine raised.</param>
+    /// <returns>A <c>500</c> result carrying the operation and the cause.</returns>
+    public static AnalyticsExecutionResult Failure(string operation, Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        string cause = exception.GetType().Name + ": " + exception.Message;
+        if (cause.Length > MaxFailureMessageChars)
+        {
+            int cut = MaxFailureMessageChars;
+            if (char.IsHighSurrogate(cause[cut - 1]))
+                cut--;
+            cause = cause[..cut] + "…";
+        }
+
+        string message = string.Create(
+            CultureInfo.InvariantCulture,
+            $"The analytics operation '{operation}' failed ({cause}).");
+
+        JsonElement envelope = JsonSerializer.SerializeToElement(new
+        {
+            contractVersion = KyberBridgeEngine.ApiContractVersion,
+            scope = new { },
+            data = (object?)null,
+            measurement = new { },
+            coverage = new { },
+            freshness = new { },
+            evidence = Array.Empty<object>(),
+            pagination = new { },
+            error = new
+            {
+                code = "internal_error",
+                message,
+                hint = "The request was valid; the engine could not complete it. Check the engine log and retry.",
+            },
+        });
+
+        return new AnalyticsExecutionResult(500, envelope);
     }
 
     /// <summary>Returns whether <paramref name="operation"/> is one of the advertised operations.</summary>
