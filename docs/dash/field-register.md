@@ -913,6 +913,56 @@ In `CommandCodeMapper`, each assistant message maps to a `CollectedRecord` (`llm
 | `CommandCodeParseProblem` | `LineNumber` | mapped | `ingest_problem_location.location`, `ingest_problem.problem_key` | 1-based line number appended to problem key and locator. |
 | `CommandCodeParseProblem` | `Code` | mapped | `ingest_problem.code` | Diagnostic code (`COMMANDCODE_MALFORMED_LINE`). |
 | `CommandCodeParseProblem` | `Message` | mapped | `ingest_problem.message` | Sanitized parse failure message. |
+## cline
+
+Cline (VS Code extension) ingests local `tasks/<id>/ui_messages.json` task files via `ClineMapper` into `CollectedBatch` (`ClineTaskDocument`, `ClineUsageEntry`, `ClineParseProblem`). The first `user_feedback`/`text` message seeds the session user message (truncated to 500 characters); every `api_req_started` entry carrying input or output tokens emits one `llm.invoke` record (`RecordKind.Internal`) with harness-reported token rows and cost. The `api_conversation_history.json` sidecar is not supplied to the mapper, so the model always falls back to `cline-auto`, no workspace is recorded, and negative or non-finite costs are dropped rather than persisted.
+
+| Native type | Property | Disposition | Target mapping | Reason |
+|---|---|---|---|---|
+| `ClineTaskDocument` | `TaskId` | mapped | `session.session_id`, `session.native_session_id`, `record_session_link.session_key` | Task directory name from the `ui_messages.json` parent folder. |
+| `ClineTaskDocument` | `UserMessage` | mapped | `content_part_text.part_text`, `content_part_withheld.utf8_bytes`, `content_part_role.role_name`, `record_correction.span_id`, `record_correction_rule.correction_rule` | First user message measured through `ToolContentMeasurer` onto the first record and scanned for user-correction rules. |
+| `ClineTaskDocument` | `Entries` | mapped | nested: ClineUsageEntry | Usage-bearing `api_req_started` entries in file order. |
+| `ClineTaskDocument` | `ParseProblems` | mapped | nested: ClineParseProblem | Non-fatal element-level parse diagnostics emitted as `ingest_problem` rows. |
+| `ClineUsageEntry` | `Index` | mapped | `record.span_id` | Zero-based entry position seeding deterministic `synth:cline:<task>:req-<index>` record identity. |
+| `ClineUsageEntry` | `Timestamp` | mapped | `record.started_at_utc` | Entry `ts` milliseconds (ISO strings accepted); invalid or absent values fall back to the unit timestamp. |
+| `ClineUsageEntry` | `InputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Harness-reported input tokens (`token_class = input`); entries with zero input and output tokens are skipped. |
+| `ClineUsageEntry` | `OutputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Harness-reported output tokens (`token_class = output`). |
+| `ClineUsageEntry` | `CacheReadTokens` | mapped | `record_token_count.token_count` | Harness-reported cache-read tokens (`token_class = cache_read`). |
+| `ClineUsageEntry` | `CacheWriteTokens` | mapped | `record_token_count.token_count` | Harness-reported cache-write tokens (`token_class = cache_write`). |
+| `ClineUsageEntry` | `Cost` | mapped | `record_reported_cost.amount` | Harness-reported cost in USD; absent, negative, or non-finite costs emit no `record_reported_cost` row and read-time pricing applies. |
+| `ClineParseProblem` | `LineNumber` | mapped | `ingest_problem_location.location`, `ingest_problem.problem_key` | 1-based element ordinal, or 0 for document-level failures, appended to problem key and locator. |
+| `ClineParseProblem` | `Code` | mapped | `ingest_problem.code` | Diagnostic code (`CLINE_MALFORMED_LINE`). |
+| `ClineParseProblem` | `Message` | mapped | `ingest_problem.message` | Sanitized parse failure message. |
+
+## cline-cli
+
+Cline CLI ingests local `sessions/<id>/<id>.messages.json` session files via `ClineMapper` into `CollectedBatch` (`ClineCliDocument`, `ClineCliMessage`, `ClineCliToolCall`, `ClineParseProblem`). The first user-role message seeds the session user message; every assistant message carrying usage metrics emits one `llm.invoke` record (`RecordKind.Internal`) with harness-reported token rows, cost only when metered, invoked skills, and child `tool.invoke` spans for `tool_use` blocks. The `<id>.json` metadata sidecar is not supplied to the mapper, so the model falls back to `unknown`, no workspace is recorded, and the session-usage rollup fallback cannot apply.
+
+| Native type | Property | Disposition | Target mapping | Reason |
+|---|---|---|---|---|
+| `ClineCliDocument` | `SessionId` | mapped | `session.session_id`, `session.native_session_id`, `record_session_link.session_key` | Messages file stem (minus `.messages.json`), falling back to the parent directory name. |
+| `ClineCliDocument` | `UserMessage` | mapped | `content_part_text.part_text`, `content_part_withheld.utf8_bytes`, `content_part_role.role_name`, `record_correction.span_id`, `record_correction_rule.correction_rule` | First user-role message text measured through `ToolContentMeasurer` onto the first record and scanned for user-correction rules. |
+| `ClineCliDocument` | `Messages` | mapped | nested: ClineCliMessage | Usage-bearing assistant messages in file order. |
+| `ClineCliDocument` | `ParseProblems` | mapped | nested: ClineParseProblem | Non-fatal message-level parse diagnostics emitted as `ingest_problem` rows. |
+| `ClineCliMessage` | `MessageId` | mapped | `record.span_id` | Native message identifier seeding deterministic `synth:cline-cli:<session>:<messageId>` record identity. |
+| `ClineCliMessage` | `Timestamp` | mapped | `record.started_at_utc` | Message `ts` epoch milliseconds (seconds-resolution values promoted, ISO strings accepted); invalid or absent values fall back to the unit timestamp. |
+| `ClineCliMessage` | `Model` | mapped | `record_model.model_id` | Model identifier from `modelInfo.id` (`unknown` fallback); cost-model resolution is read-time. |
+| `ClineCliMessage` | `InputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Harness-reported input tokens (`token_class = input`). |
+| `ClineCliMessage` | `OutputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Harness-reported output tokens (`token_class = output`). |
+| `ClineCliMessage` | `CacheReadTokens` | mapped | `record_token_count.token_count` | Harness-reported cache-read tokens (`token_class = cache_read`). |
+| `ClineCliMessage` | `CacheWriteTokens` | mapped | `record_token_count.token_count` | Harness-reported cache-write tokens (`token_class = cache_write`). |
+| `ClineCliMessage` | `Cost` | mapped | `record_reported_cost.amount` | Harness-reported cost in USD, persisted only when `CostReported` is true; otherwise read-time pricing applies. |
+| `ClineCliMessage` | `CostReported` | dropped | — | Presence flag gating `record_reported_cost` insertion; absence of a `record_reported_cost` row represents un-reported cost. |
+| `ClineCliMessage` | `Tools` | mapped | nested: ClineCliToolCall | Tool invocations extracted from `tool_use` blocks into child `tool.invoke` spans. |
+| `ClineCliMessage` | `Skills` | mapped | `record_skill_invocation.skill_name` | Skill names invoked via the `Skill` tool on the parent `llm.invoke` record. |
+| `ClineCliMessage` | `SubagentTypes` | dropped | — | Agent type names carry no spawning call ids in the messages file, so no `agent.invoke` linkage can be built. |
+| `ClineCliMessage` | `WebSearchRequests` | dropped | — | Per-message `WebFetch` counter with no normalized column; web fetch invocations are persisted as `tool_call` spans. |
+| `ClineCliToolCall` | `CallId` | mapped | `tool_call.call_id` | Native tool call correlation identifier (or positional fallback) and child span disambiguator. |
+| `ClineCliToolCall` | `ToolName` | mapped | `tool_call.tool_name`, `record.name` | Canonical tool name after `toolNameMap` mapping (unknown tools pass through). |
+| `ClineCliToolCall` | `InputJson` | mapped | `tool_call_input_size.utf8_bytes`, `tool_call_input_size.characters`, `tool_call_input_fingerprint.sha256`, `tool_call_input_text.text`, `tool_call_input_truncation.original_utf8_bytes` | Raw tool input measured via `ToolContentMeasurer` with JSON payloads withheld to size and SHA-256 fingerprint; per-tool file and command derivations fold into the measured input. |
+| `ClineParseProblem` | `LineNumber` | mapped | `ingest_problem_location.location`, `ingest_problem.problem_key` | 1-based message ordinal, or 0 for document-level failures, appended to problem key and locator. |
+| `ClineParseProblem` | `Code` | mapped | `ingest_problem.code` | Diagnostic code (`CLINE_MALFORMED_LINE`). |
+| `ClineParseProblem` | `Message` | mapped | `ingest_problem.message` | Sanitized parse failure message. |
 
 ## zcode
 
