@@ -15,6 +15,12 @@ internal sealed class FakePlanTaskService : IPlanTaskService
     /// <summary>The active plans each root reports, by root; a root not named here has none.</summary>
     public Dictionary<string, IReadOnlyList<string>> PlansByRoot { get; init; } = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Every plan each root reports, by root, whatever its status; a root not named here has none. Defaults to the
+    /// same plans <see cref="PlansByRoot"/> names, since a test that declares one plan rarely means two.
+    /// </summary>
+    public Dictionary<string, IReadOnlyList<string>> AllPlansByRoot { get; init; } = new(StringComparer.Ordinal);
+
     /// <summary>The task file each artifact path reports, by artifact path; an artifact not named here yields an empty file.</summary>
     public Dictionary<string, PlanTaskFileOutcome> Outcomes { get; init; } = new(StringComparer.Ordinal);
 
@@ -41,5 +47,15 @@ internal sealed class FakePlanTaskService : IPlanTaskService
     {
         ArgumentNullException.ThrowIfNull(config);
         return PlansByRoot.TryGetValue(repoRoot, out IReadOnlyList<string>? plans) ? plans : [];
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> Plans(string repoRoot, KyberWeaveConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        if (AllPlansByRoot.TryGetValue(repoRoot, out IReadOnlyList<string>? plans))
+            return plans;
+
+        return ActivePlans(repoRoot, config);
     }
 }

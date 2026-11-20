@@ -25,7 +25,14 @@ public sealed partial class PlanTaskService(
             .Run(artifactPath, mode);
 
     /// <inheritdoc />
-    public IReadOnlyList<string> ActivePlans(string repoRoot, KyberWeaveConfig config)
+    public IReadOnlyList<string> ActivePlans(string repoRoot, KyberWeaveConfig config) =>
+        Plans(repoRoot, config, activeOnly: true);
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> Plans(string repoRoot, KyberWeaveConfig config) =>
+        Plans(repoRoot, config, activeOnly: false);
+
+    private IReadOnlyList<string> Plans(string repoRoot, KyberWeaveConfig config, bool activeOnly)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
@@ -47,7 +54,7 @@ public sealed partial class PlanTaskService(
                     .Where(files.FileExists));
             foreach (string file in candidates)
             {
-                if (IsActive(file))
+                if (!activeOnly || IsActive(file))
                 {
                     found.Add(Path.GetRelativePath(root, file).Replace('\\', '/'));
                 }

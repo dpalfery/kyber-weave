@@ -578,11 +578,13 @@ gates --agent <slug>` runs the first of those that resolves — the agent's own 
 technology's, then the entry of the technology agent the shipped map names, then the parent
 technology's — against the files the agent changed. Both are optional; when no route declares a
 gate, `--agent` reports `KW-REVIEW-027`, naming both keys. With `--task <id>` and no `--paths`, the
-files and the test classes for `{tests}` come from the task in the active plan, the report goes to
-the task's scratch folder, and each test gate prints a short result (failing tests with their first
-error line) with the full output in a log beside it; the plan is also read from another worktree of
-the repository, so a worker whose checkout does not hold the run's plan resolves the task the way
-`docs packet` does. See the [command surface](../cli-command-surface.md).
+files and the test classes for `{tests}` come from the task in the plan in flight, or in this
+checkout's plan that has moved into review, so a review rework re-runs the task's own gates and
+resolves its technology; the report goes to the task's scratch folder, and each test gate prints a
+short result (failing tests with their first error line) with the full output in a log beside it;
+the plan is also read from another worktree of the repository when no plan here holds the task, so
+a worker whose checkout does not hold the run's plan resolves the task the way `docs packet` does.
+See the [command surface](../cli-command-surface.md).
 
 ```yaml
 review:

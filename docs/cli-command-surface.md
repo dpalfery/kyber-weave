@@ -519,10 +519,11 @@ verdict engine under [Review council architecture](code-review/architecture.md#h
 `review gates --agent <NAME>` selects the [task gates](code-review/architecture.md#task-gates)
 declared for that agent under `review.task-gates` and runs them against the files that agent
 changed, instead of running the repository-wide `review.gates`. With `--task` and no `--paths`,
-the files are the task's own from the one Ready or In progress plan plus the test file its Test
-contract names, and the classes that contract names fill `{tests}` ahead of the classes mapped from
-the files (the lookup `docs packet` prints from). The run prints a `task:` line naming the plan and
-files; when no active plan has the task it says why, and the files are the git change as before. Without `--out`, `--task` writes the
+the files are the task's own from the plan in flight, or from this checkout's plan that has moved
+into review, plus the test file its Test contract names, and the classes that contract names fill
+`{tests}` ahead of the classes mapped from the files (the lookup `docs packet` prints from). The
+run prints a `task:` line naming the plan and
+files; when no plan here or in another worktree has the task it says why, and the files are the git change as before. Without `--out`, `--task` writes the
 report to `.agent_scratchpad/<task>/task-gate.json`, or `task-gate-red.json` with `--red`; a `--fix` run writes it only when
 its fix commands changed no task file, because that run is the verification run. Each test
 gate and each failed gate is then printed in a few lines: pass or fail, the test totals, each

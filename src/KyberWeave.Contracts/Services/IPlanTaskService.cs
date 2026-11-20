@@ -20,4 +20,13 @@ public interface IPlanTaskService
     /// <param name="config">The effective configuration, which says where plans live.</param>
     /// <returns>Repository-relative paths, sorted.</returns>
     IReadOnlyList<string> ActivePlans(string repoRoot, KyberWeaveConfig config);
+
+    /// <summary>
+    /// Lists every plan and specification task list under the planning folders, whatever its status: the ones in
+    /// flight and the ones in review or already closed out.
+    /// </summary>
+    /// <param name="repoRoot">The absolute repository root.</param>
+    /// <param name="config">The effective configuration, which says where plans live.</param>
+    /// <returns>Repository-relative paths, sorted.</returns>
+    IReadOnlyList<string> Plans(string repoRoot, KyberWeaveConfig config);
 }
