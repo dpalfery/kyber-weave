@@ -1,5 +1,6 @@
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
+using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Domain;
 using Microsoft.Extensions.DependencyInjection;
@@ -62,11 +63,15 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<IPricingRepository>()));
 
         services.TryAddSingleton(provider => new CanonRefreshEngine(
-            provider.GetRequiredService<ICanonStoreRepository>(),
-            provider.GetRequiredService<ITranscriptReaderRepository>(),
-            provider.GetRequiredService<IPricingRepository>(),
+            provider.GetRequiredService<IRelationalStoreWriter>(),
+            provider.GetRequiredService<IRelationalStoreReader>(),
+            provider.GetRequiredService<IOperationalStore>(),
+            provider.GetRequiredService<HarnessSourceRegistry>(),
+            [.. provider.GetServices<IHarnessMapper>()],
+            provider.GetService<IHarnessFileSystem>(),
             provider.GetRequiredService<CanonSessionProjectorEngine>(),
-            provider.GetRequiredService<CanonRollupsEngine>()));
+            provider.GetRequiredService<CanonRollupsEngine>(),
+            provider.GetService<DashOptions>()));
 
         services.TryAddSingleton(provider => new KyberBridgeEngine(
             provider.GetRequiredService<IRelationalStoreReader>(),
