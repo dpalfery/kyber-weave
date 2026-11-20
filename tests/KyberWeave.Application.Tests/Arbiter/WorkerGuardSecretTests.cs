@@ -1,10 +1,5 @@
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
-using KyberWeave.Contracts.Repositories;
-using KyberWeave.Contracts.Services;
-using KyberWeave.Core.Arbiter.Stores;
-using KyberWeave.Core.Configuration;
-using KyberWeave.Core.RunStart;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
@@ -263,49 +258,4 @@ public sealed class WorkerGuardSecretTests
         tool_name = "Read",
         tool_input = new { file_path = path },
     });
-
-    private sealed class NoConfig : IHostConfigLoader
-    {
-        public HostConfigLoadResult TryLoad(string repoRoot) => new(false, null, null, "no project configuration");
-    }
-
-    private sealed class NoState : IArbiterStateFactory
-    {
-        public IArbiterLedger OpenLedger(string arbiterDirectory) => throw new NotSupportedException();
-
-        public IArbiterDecisionLog OpenDecisionLog(string arbiterDirectory) => throw new NotSupportedException();
-
-        public IArbiterRunStore OpenRunStore(string arbiterDirectory, ArbiterStoreOptions? options = null, TimeProvider? clock = null) =>
-            throw new NotSupportedException();
-    }
-
-    private sealed class NoBudgets : IWorkerBudgetStore
-    {
-        public void EnsureDirectory(string home) => throw new NotSupportedException();
-
-        public bool Exists(string home, string key) => false;
-
-        public string[] ReadLines(string home, string key) => [];
-
-        public void Delete(string home, string key) => throw new NotSupportedException();
-
-        public void TryCreate(string home, string key, string content) => throw new NotSupportedException();
-
-        public void Append(string home, string key, string content) => throw new NotSupportedException();
-
-        public void Sweep(string home, DateTimeOffset now, TimeSpan retention) => throw new NotSupportedException();
-    }
-
-    private sealed class NoCheckouts : IRunCheckout
-    {
-        public string? CanonicalCheckoutOf(string commonDirectory) => null;
-
-        public IReadOnlyList<RunRecord>? LiveSeparateRuns(string homeDirectory, string canonicalCheckout) => [];
-
-        public string? CanonicalCheckoutContaining(string path) => null;
-
-        public string? StrayWriteRefusal(string path, string workingDirectory, string homeDirectory) => null;
-
-        public string? ReadCheckedOutBranch(string worktree) => null;
-    }
 }
