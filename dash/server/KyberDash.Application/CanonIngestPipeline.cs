@@ -422,16 +422,23 @@ public static class CanonIngestPipeline
             CollectedRecord collected = ToCollectedRecord(record);
             bucket.Records.Add(collected);
 
-            if (!string.IsNullOrWhiteSpace(collected.SessionKey)
-                && !bucket.Sessions.ContainsKey(collected.SessionKey))
+            if (!string.IsNullOrWhiteSpace(collected.SessionKey))
             {
-                bucket.Sessions[collected.SessionKey] = new CollectedSession(
-                    SessionKey: collected.SessionKey,
-                    HarnessId: collected.HarnessId,
-                    NativeSessionId: collected.SessionKey,
-                    Workspace: null,
-                    Title: null,
-                    ReportedUsage: []);
+                string? sessionLabel = ExtractSafeAttributeString(record.Raw, [CanonSynth.SessionLabelKey]);
+                if (!bucket.Sessions.TryGetValue(collected.SessionKey, out CollectedSession? existing))
+                {
+                    bucket.Sessions[collected.SessionKey] = new CollectedSession(
+                        SessionKey: collected.SessionKey,
+                        HarnessId: collected.HarnessId,
+                        NativeSessionId: collected.SessionKey,
+                        Workspace: null,
+                        Title: sessionLabel,
+                        ReportedUsage: []);
+                }
+                else if (string.IsNullOrWhiteSpace(existing.Title) && sessionLabel is not null)
+                {
+                    bucket.Sessions[collected.SessionKey] = existing with { Title = sessionLabel };
+                }
             }
         }
 

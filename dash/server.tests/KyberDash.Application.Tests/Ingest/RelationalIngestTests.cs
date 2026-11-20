@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using KyberDash.Application;
+using KyberDash.Application.Tests;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
@@ -126,6 +128,47 @@ public class RelationalIngestTests
         Assert.NotNull(quarantined);
         Assert.Equal("unclaimed", quarantined.Reason);
         Assert.Equal(["mystery"], quarantined.ObservedNamespaces);
+    }
+
+    /// <summary>
+    /// An OpenCode replay keeps the session label stamped on the request. The request is not
+    /// always the first span, so a label that arrives later still names the session.
+    /// </summary>
+    [Fact]
+    public void IngestBatch_OpenCodeReplay_PreservesSessionLabel()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionId = "ses-replay";
+
+        OtlpSpan step = OpenCodeSpan(
+            spanId: "cccccccccccccccc",
+            name: "opencode.step",
+            attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["opencode.contract_version"] = Element("3"),
+                ["opencode.span.kind"] = Element("step"),
+                ["opencode.session.id"] = Element(sessionId),
+                ["opencode.usage.input"] = Element(10),
+                ["opencode.usage.output"] = Element(2),
+            });
+        OtlpSpan request = OpenCodeSpan(
+            spanId: "dddddddddddddddd",
+            name: "opencode.request",
+            attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["opencode.contract_version"] = Element("3"),
+                ["opencode.span.kind"] = Element("request"),
+                ["opencode.session.id"] = Element(sessionId),
+                ["kyber.session.label"] = Element("kw-probe runA shared-service"),
+            });
+
+        IngestOutcome outcome = CanonIngestPipeline.IngestBatch([step, request], store, store);
+        Assert.Equal(new IngestOutcome(2, 0, 0), outcome);
+
+        ProjectionPassReport report = new CanonSessionProjectorEngine(store, store, store, pricing).ProjectIncremental();
+        Assert.Equal(1, report.Built);
+        Assert.Equal("kw-probe runA shared-service", store.GetSessionProjection(sessionId)!.Label);
     }
 
     /// <summary>
@@ -423,6 +466,18 @@ public class RelationalIngestTests
         Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
 
     private static JsonElement Element(object value) => JsonSerializer.SerializeToElement(value);
+
+    private static OtlpSpan OpenCodeSpan(
+        string spanId,
+        string name,
+        IReadOnlyDictionary<string, JsonElement> attributes) =>
+        MakeOtlpSpan(
+            spanId,
+            traceId: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            serviceName: "opencode",
+            name,
+            kind: "internal",
+            attributes);
 
     private static OtlpSpan MakeOtlpSpan(
         string spanId,
