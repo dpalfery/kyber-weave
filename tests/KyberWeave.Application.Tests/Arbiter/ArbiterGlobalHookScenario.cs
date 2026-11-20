@@ -136,6 +136,10 @@ internal sealed class ArbiterGlobalHookScenario : IDisposable
     public static string CursorTaskDispatch(string root) =>
         Fixture(root, "cursor/pre-task-dispatch.json", _ => { });
 
+    /// <summary>The Codex PreToolUse dispatch fixture, run in the given project.</summary>
+    public static string CodexTaskDispatch(string root) =>
+        Fixture(root, "codex/pre-spawn-dispatch.json", _ => { });
+
     /// <summary>The Claude PreToolUse hand-back fixture, run in the given project.</summary>
     public static string Handback(string root) =>
         Fixture(root, "claude/pre-subagent-handback.json", _ => { });

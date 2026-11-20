@@ -11,27 +11,50 @@ namespace KyberWeave.Core.Arbiter;
 /// whether to defer a dispatch or to answer it itself.
 /// </summary>
 /// <remarks>
-/// Only Antigravity and OpenCode have a project hook file this probe can read. Antigravity keeps its hook in
-/// <c>.agents/hooks.json</c>, where a dispatch hook is a <c>PreToolUse</c> matcher group for
-/// <c>invoke_subagent</c> running the project-scope command. OpenCode keeps it in the plugin shim at
-/// <c>.opencode/plugins/kyber-arbiter.ts</c>. Every other harness reports true, which keeps today's deferral.
-/// Nothing here throws: an unreadable or malformed file is a project hook that was not proven.
+/// Five harnesses have a project hook file this probe reads. Antigravity keeps a <c>PreToolUse</c> matcher
+/// group for <c>invoke_subagent</c> in <c>.agents/hooks.json</c>. Factory keeps its event map in
+/// <c>.factory/hooks.json</c>, falling back to the <c>hooks</c> key of <c>.factory/settings.json</c> when that
+/// file is absent, and dispatches on <c>Task</c>. Cursor keeps a <c>hooks.preToolUse</c> list in
+/// <c>.cursor/hooks.json</c>, also dispatching on <c>Task</c>. A JSON harness is covered when a matching
+/// entry's command runs the project-scope hook. OpenCode keeps the plugin shim at
+/// <c>.opencode/plugins/kyber-arbiter.ts</c> and Pi at <c>.pi/extensions/kyber-arbiter.ts</c>. Every other
+/// harness reports true, which keeps today's deferral. Nothing here throws: an unreadable or malformed file is
+/// a project hook that was not proven.
 /// </remarks>
 /// <param name="files">The file system the project hook files are read through.</param>
 public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispatchHookProbe
 {
     private const string AntigravityToken = "antigravity";
+    private const string FactoryToken = "factory";
+    private const string CursorToken = "cursor";
     private const string OpenCodeToken = "opencode";
+    private const string PiToken = "pi";
     private const string AntigravityHookPath = ".agents/hooks.json";
+    private const string FactoryHookPath = ".factory/hooks.json";
+    private const string FactorySettingsPath = ".factory/settings.json";
+    private const string FactorySettingsHooksKey = "hooks";
+    private const string CursorHookPath = ".cursor/hooks.json";
     private const string OpenCodeShimPath = ".opencode/plugins/kyber-arbiter.ts";
+    private const string PiShimPath = ".pi/extensions/kyber-arbiter.ts";
     private const string AntigravityDispatchTool = "invoke_subagent";
+    private const string FactoryDispatchTool = "Task";
+    private const string CursorDispatchTool = "Task";
     private const string AntigravityCommandMarker = "kyber-weave-arbiter hook --harness antigravity";
+    private const string FactoryCommandMarker = "kyber-weave-arbiter hook --harness factory";
+    private const string CursorCommandMarker = "kyber-weave-arbiter hook --harness cursor";
     private const string GlobalScopeFlag = "--scope global";
-    private const string OpenCodeMarker = "\"kyber-weave-arbiter\"";
-    private const string OpenCodeGlobalScopeMarker = "\"--scope\", \"global\"";
+    private const string ShimMarker = "\"kyber-weave-arbiter\"";
+    private const string ShimGlobalScopeMarker = "\"--scope\", \"global\"";
 
     // A matcher is a .NET regex in this check. A pattern that stalls must not stall the dispatch.
     private static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(100);
+
+    // Factory may tolerate JSONC, so its files may carry comments and trailing commas.
+    private static readonly JsonDocumentOptions FactoryJsonOptions = new()
+    {
+        CommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true,
+    };
 
     /// <inheritdoc />
     public bool CoversHarness(string projectRoot, string harnessToken)
@@ -44,9 +67,24 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
             return AntigravityCovers(projectRoot);
         }
 
+        if (string.Equals(harnessToken, FactoryToken, StringComparison.Ordinal))
+        {
+            return FactoryCovers(projectRoot);
+        }
+
+        if (string.Equals(harnessToken, CursorToken, StringComparison.Ordinal))
+        {
+            return CursorCovers(projectRoot);
+        }
+
         if (string.Equals(harnessToken, OpenCodeToken, StringComparison.Ordinal))
         {
-            return OpenCodeCovers(projectRoot);
+            return ShimCovers(projectRoot, OpenCodeShimPath);
+        }
+
+        if (string.Equals(harnessToken, PiToken, StringComparison.Ordinal))
+        {
+            return ShimCovers(projectRoot, PiShimPath);
         }
 
         return true;
@@ -69,30 +107,10 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
 
             foreach (KeyValuePair<string, JsonNode?> property in root)
             {
-                if (property.Value is not JsonObject group || group["PreToolUse"] is not JsonArray entries)
+                if (property.Value is JsonObject group
+                    && EventMapCoversDispatchTool(group, AntigravityDispatchTool, AntigravityCommandMarker))
                 {
-                    continue;
-                }
-
-                foreach (JsonNode? node in entries)
-                {
-                    if (node is not JsonObject entry
-                        || Text(entry["matcher"]) is not { } matcher
-                        || !Matches(matcher)
-                        || entry["hooks"] is not JsonArray actions)
-                    {
-                        continue;
-                    }
-
-                    foreach (JsonNode? action in actions)
-                    {
-                        if (action is JsonObject hook
-                            && Text(hook["command"]) is { } command
-                            && IsProjectAntigravityHook(command))
-                        {
-                            return true;
-                        }
-                    }
+                    return true;
                 }
             }
 
@@ -105,19 +123,94 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
         }
     }
 
-    private bool OpenCodeCovers(string projectRoot)
+    private bool FactoryCovers(string projectRoot)
     {
         try
         {
-            string path = Path.Combine(projectRoot, OpenCodeShimPath);
+            string path = Path.Combine(projectRoot, FactoryHookPath);
+            if (files.FileExists(path))
+            {
+                return JsonNode.Parse(files.ReadAllText(path), documentOptions: FactoryJsonOptions) is JsonObject events
+                    && EventMapCoversDispatchTool(events, FactoryDispatchTool, FactoryCommandMarker);
+            }
+
+            // Factory reads the settings hooks key only when hooks.json is absent, so hooks.json wins.
+            string settingsPath = Path.Combine(projectRoot, FactorySettingsPath);
+            if (!files.FileExists(settingsPath))
+            {
+                return false;
+            }
+
+            return JsonNode.Parse(files.ReadAllText(settingsPath), documentOptions: FactoryJsonOptions) is JsonObject settings
+                && settings[FactorySettingsHooksKey] is JsonObject fallback
+                && EventMapCoversDispatchTool(fallback, FactoryDispatchTool, FactoryCommandMarker);
+        }
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
+        {
+            // A file that cannot be read or parsed proves no project hook.
+            return false;
+        }
+    }
+
+    private bool CursorCovers(string projectRoot)
+    {
+        try
+        {
+            string path = Path.Combine(projectRoot, CursorHookPath);
+            if (!files.FileExists(path))
+            {
+                return false;
+            }
+
+            if (JsonNode.Parse(files.ReadAllText(path)) is not JsonObject root
+                || root["hooks"] is not JsonObject hooks
+                || hooks["preToolUse"] is not JsonArray entries)
+            {
+                return false;
+            }
+
+            foreach (JsonNode? node in entries)
+            {
+                if (node is not JsonObject entry)
+                {
+                    continue;
+                }
+
+                // Cursor treats an entry with no matcher as matching every tool.
+                string? matcher = Text(entry["matcher"]);
+                if (matcher is not null && !Matches(CursorDispatchTool, matcher))
+                {
+                    continue;
+                }
+
+                if (Text(entry["command"]) is { } command && IsProjectHook(command, CursorCommandMarker))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
+        {
+            // A file that cannot be read or parsed proves no project hook.
+            return false;
+        }
+    }
+
+    private bool ShimCovers(string projectRoot, string relativePath)
+    {
+        try
+        {
+            string path = Path.Combine(projectRoot, relativePath);
             if (!files.FileExists(path))
             {
                 return false;
             }
 
             string shim = files.ReadAllText(path);
-            return shim.Contains(OpenCodeMarker, StringComparison.Ordinal)
-                && !shim.Contains(OpenCodeGlobalScopeMarker, StringComparison.Ordinal);
+            return shim.Contains(ShimMarker, StringComparison.Ordinal)
+                && !shim.Contains(ShimGlobalScopeMarker, StringComparison.Ordinal);
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {
@@ -126,11 +219,43 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
         }
     }
 
-    private static bool Matches(string matcher)
+    /// <summary>Whether one harness's event map carries a <c>PreToolUse</c> group for its dispatch tool.</summary>
+    private static bool EventMapCoversDispatchTool(JsonObject eventMap, string dispatchTool, string commandMarker)
+    {
+        if (eventMap["PreToolUse"] is not JsonArray entries)
+        {
+            return false;
+        }
+
+        foreach (JsonNode? node in entries)
+        {
+            if (node is not JsonObject entry
+                || Text(entry["matcher"]) is not { } matcher
+                || !Matches(dispatchTool, matcher)
+                || entry["hooks"] is not JsonArray actions)
+            {
+                continue;
+            }
+
+            foreach (JsonNode? action in actions)
+            {
+                if (action is JsonObject hook
+                    && Text(hook["command"]) is { } command
+                    && IsProjectHook(command, commandMarker))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool Matches(string dispatchTool, string matcher)
     {
         try
         {
-            return Regex.IsMatch(AntigravityDispatchTool, matcher, RegexOptions.CultureInvariant, MatchTimeout);
+            return Regex.IsMatch(dispatchTool, matcher, RegexOptions.CultureInvariant, MatchTimeout);
         }
         catch (ArgumentException)
         {
@@ -143,8 +268,8 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
         }
     }
 
-    private static bool IsProjectAntigravityHook(string command) =>
-        command.Contains(AntigravityCommandMarker, StringComparison.Ordinal)
+    private static bool IsProjectHook(string command, string commandMarker) =>
+        command.Contains(commandMarker, StringComparison.Ordinal)
         && !command.Contains(GlobalScopeFlag, StringComparison.Ordinal);
 
     private static string? Text(JsonNode? node) =>

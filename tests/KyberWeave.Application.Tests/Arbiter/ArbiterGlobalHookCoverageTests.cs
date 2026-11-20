@@ -154,17 +154,17 @@ public sealed class ArbiterGlobalHookCoverageTests
     [Fact]
     public void GlobalScope_WhenHarnessHasNoPerDispatchProbe_DefersNamingTheHarness()
     {
-        // Cursor has no per-dispatch probe for the user-level hook. The project's own Cursor hooks
+        // Codex has no per-dispatch probe for the user-level hook. The project's own Codex hooks
         // decide, so the user-level hook defers and names the harness, and allows nothing itself.
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
-        string payload = ArbiterGlobalHookScenario.CursorTaskDispatch(scenario.ProjectRoot);
+        string payload = ArbiterGlobalHookScenario.CodexTaskDispatch(scenario.ProjectRoot);
 
-        HookRun run = scenario.RunGlobal(payload, "cursor");
+        HookRun run = scenario.RunGlobal(payload, "codex");
 
         Assert.Equal(0, run.Exit);
         Assert.True(string.IsNullOrWhiteSpace(run.Stdout),
-            $"A deferred Cursor dispatch must emit no decision document. Output: {run.Stdout}");
+            $"A deferred Codex dispatch must emit no decision document. Output: {run.Stdout}");
         Assert.Contains(ArbiterGlobalHookScenario.DeferredLog, run.Stderr, StringComparison.Ordinal);
-        Assert.Contains("cursor", run.Stderr, StringComparison.Ordinal);
+        Assert.Contains("codex", run.Stderr, StringComparison.Ordinal);
     }
 }

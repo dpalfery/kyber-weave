@@ -8,7 +8,7 @@ using Xunit;
 namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
-/// The user-level hook at global scope for a harness that has no per-dispatch probe. When the project
+/// The user-level hook at global scope for a harness whose project hook it can probe. When the project
 /// enables the Arbiter but carries no hook of its own for that harness, the user-level hook inserts the
 /// task prompt itself: deferring would leave the worker with only the header lines. When the project does
 /// carry one, it keeps deferring and lets that hook decide.
@@ -22,6 +22,12 @@ public sealed class ArbiterGlobalHookInsertionTests
         "Arbiter global scope: no project antigravity hook; inserting the task prompt without evaluation.";
     private const string OpenCodeNoHookLog =
         "Arbiter global scope: no project opencode hook; inserting the task prompt without evaluation.";
+    private const string FactoryNoHookLog =
+        "Arbiter global scope: no project factory hook; inserting the task prompt without evaluation.";
+    private const string CursorNoHookLog =
+        "Arbiter global scope: no project cursor hook; inserting the task prompt without evaluation.";
+    private const string PiNoHookLog =
+        "Arbiter global scope: no project pi hook; inserting the task prompt without evaluation.";
 
     [Fact]
     public void GlobalScope_AntigravityWithoutAProjectHook_InsertsTheTaskPrompt()
@@ -92,6 +98,109 @@ public sealed class ArbiterGlobalHookInsertionTests
         Assert.DoesNotContain(OpenCodeNoHookLog, run.Stderr, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void GlobalScope_FactoryWithoutAProjectHook_InsertsTheTaskPrompt()
+    {
+        using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
+        scenario.ProjectHooks.Uncover("factory");
+        string payload = FactoryDispatch(scenario.ProjectRoot, TaskDispatch);
+
+        HookRun run = RunGlobal(scenario.Project, "factory", payload, new ScriptedPrompts());
+
+        Assert.Equal(0, run.Exit);
+        Assert.Contains(FactoryNoHookLog, run.Stderr, StringComparison.Ordinal);
+        using JsonDocument document = JsonDocument.Parse(run.Stdout);
+        JsonElement updated = document.RootElement.GetProperty("hookSpecificOutput").GetProperty("updatedInput");
+        Assert.StartsWith(TaskPrompt, updated.GetProperty("prompt").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GlobalScope_FactoryWithAProjectHook_DefersAndWritesNoDocument()
+    {
+        using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
+        scenario.ProjectHooks.Cover("factory");
+        string payload = FactoryDispatch(scenario.ProjectRoot, TaskDispatch);
+
+        HookRun run = RunGlobal(scenario.Project, "factory", payload, new ScriptedPrompts());
+
+        Assert.Equal(0, run.Exit);
+        Assert.Contains(ArbiterGlobalHookScenario.DeferredLog, run.Stderr, StringComparison.Ordinal);
+        Assert.Contains("factory", run.Stderr, StringComparison.Ordinal);
+        Assert.True(string.IsNullOrWhiteSpace(run.Stdout),
+            $"A deferred Factory dispatch must emit no decision document. Output: {run.Stdout}");
+        Assert.DoesNotContain(FactoryNoHookLog, run.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GlobalScope_CursorWithoutAProjectHook_InsertsTheTaskPrompt()
+    {
+        using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
+        scenario.ProjectHooks.Uncover("cursor");
+        string payload = ArbiterGlobalHookScenario.CursorTaskDispatch(scenario.ProjectRoot);
+
+        HookRun run = RunGlobal(scenario.Project, "cursor", payload, new ScriptedPrompts());
+
+        Assert.Equal(0, run.Exit);
+        Assert.Contains(CursorNoHookLog, run.Stderr, StringComparison.Ordinal);
+        using JsonDocument document = JsonDocument.Parse(run.Stdout);
+        JsonElement updated = document.RootElement.GetProperty("updated_input");
+        Assert.StartsWith(TaskPrompt, updated.GetProperty("prompt").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GlobalScope_CursorWithAProjectHook_DefersAndWritesNoDocument()
+    {
+        using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
+        scenario.ProjectHooks.Cover("cursor");
+        string payload = ArbiterGlobalHookScenario.CursorTaskDispatch(scenario.ProjectRoot);
+
+        HookRun run = RunGlobal(scenario.Project, "cursor", payload, new ScriptedPrompts());
+
+        Assert.Equal(0, run.Exit);
+        Assert.Contains(ArbiterGlobalHookScenario.DeferredLog, run.Stderr, StringComparison.Ordinal);
+        Assert.Contains("cursor", run.Stderr, StringComparison.Ordinal);
+        Assert.True(string.IsNullOrWhiteSpace(run.Stdout),
+            $"A deferred Cursor dispatch must emit no decision document. Output: {run.Stdout}");
+        Assert.DoesNotContain(CursorNoHookLog, run.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GlobalScope_PiWithoutAProjectHook_InsertsTheTaskPrompt()
+    {
+        using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
+        scenario.ProjectHooks.Uncover("pi");
+        string payload = PiDispatch(scenario.ProjectRoot, TaskDispatch);
+
+        HookRun run = RunGlobal(scenario.Project, "pi", payload, new ScriptedPrompts());
+
+        Assert.Equal(0, run.Exit);
+        Assert.Contains(PiNoHookLog, run.Stderr, StringComparison.Ordinal);
+        using JsonDocument document = JsonDocument.Parse(run.Stdout);
+        JsonElement root = document.RootElement;
+        Assert.Equal("allow", root.GetProperty("decision").GetString());
+        Assert.StartsWith(
+            TaskPrompt,
+            root.GetProperty("args").GetProperty("prompt").GetString(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GlobalScope_PiWithAProjectHook_DefersAndWritesNoDocument()
+    {
+        using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
+        scenario.ProjectHooks.Cover("pi");
+        string payload = PiDispatch(scenario.ProjectRoot, TaskDispatch);
+
+        HookRun run = RunGlobal(scenario.Project, "pi", payload, new ScriptedPrompts());
+
+        Assert.Equal(0, run.Exit);
+        Assert.Contains(ArbiterGlobalHookScenario.DeferredLog, run.Stderr, StringComparison.Ordinal);
+        Assert.Contains("pi", run.Stderr, StringComparison.Ordinal);
+        Assert.True(string.IsNullOrWhiteSpace(run.Stdout),
+            $"A deferred Pi dispatch must emit no decision document. Output: {run.Stdout}");
+        Assert.DoesNotContain(PiNoHookLog, run.Stderr, StringComparison.Ordinal);
+    }
+
     private static HookRun RunGlobal(
         InMemoryArbiterHost host,
         string harness,
@@ -120,6 +229,47 @@ public sealed class ArbiterGlobalHookInsertionTests
             ["harness"] = "opencode",
             ["phase"] = "before",
             ["tool"] = "task",
+            ["call-id"] = "call-1",
+            ["session"] = "ses-1",
+            ["cwd"] = root,
+            ["args"] = new JsonObject
+            {
+                ["description"] = "Implement T3",
+                ["prompt"] = prompt,
+                ["subagent_type"] = "dev-medium",
+            },
+        };
+        return envelope.ToJsonString();
+    }
+
+    private static string FactoryDispatch(string root, string prompt)
+    {
+        JsonObject payload = new()
+        {
+            ["session_id"] = "session-factory-1",
+            ["transcript_path"] = Path.Combine(root, ".factory", "transcripts", "session-factory-1.jsonl"),
+            ["cwd"] = root,
+            ["permission_mode"] = "default",
+            ["hook_event_name"] = "PreToolUse",
+            ["tool_name"] = "Task",
+            ["tool_input"] = new JsonObject
+            {
+                ["prompt"] = prompt,
+                ["subagent_type"] = "dev-medium",
+                ["description"] = "Implement T3",
+            },
+        };
+        return payload.ToJsonString();
+    }
+
+    private static string PiDispatch(string root, string prompt)
+    {
+        JsonObject envelope = new()
+        {
+            ["schema"] = PluginEnvelope.SchemaV1,
+            ["harness"] = "pi",
+            ["phase"] = "before",
+            ["tool"] = "Agent",
             ["call-id"] = "call-1",
             ["session"] = "ses-1",
             ["cwd"] = root,
