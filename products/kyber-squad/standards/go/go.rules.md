@@ -11,4 +11,4 @@ last-reviewed: 2026-11-16
 # go rules
 
 The rules that hold for every technology, including secrets and input validation, are
-in the shared rules file beside this folder.
+in the shared rules file, `shared-rules.md` at the root of the standards folders (`<standards-root>/shared-rules.md`), one level above this folder.
