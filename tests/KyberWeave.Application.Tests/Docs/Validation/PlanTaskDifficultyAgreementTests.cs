@@ -132,6 +132,20 @@ public sealed class PlanTaskDifficultyAgreementTests : IDisposable
     }
 
     [Fact]
+    public void NotAgreedSurvivesAPickBelowTheFloor()
+    {
+        // The agreement is its own answer: an unsure pick writes no agent, and must not discard the verdict.
+        AgreementProvider provider = new("dev-medium", 0.5, DifficultyAgreement.NotAgreed, 0.9);
+
+        PlanTaskFileOutcome outcome = Write(provider);
+
+        Diagnostic finding = Assert.Single(outcome.Report.Items, item => item.Code == PlanTaskFileRules.DifficultyDisagreed);
+        Assert.Equal(Severity.Error, finding.Severity);
+        Assert.Null(outcome.File!.Tasks![0].Agent);
+        Assert.Equal("T1 difficulty easy: not-agreed (confidence 0.9)", Assert.Single(outcome.DifficultyChecks!));
+    }
+
+    [Fact]
     public void TheRequestCarriesTheRubricAndTheArchitectsRating()
     {
         AgreementProvider provider = new("dev-medium", 0.95, DifficultyAgreement.Agreed, 0.9);

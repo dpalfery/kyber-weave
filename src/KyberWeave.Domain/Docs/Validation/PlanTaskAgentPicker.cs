@@ -1,14 +1,17 @@
 namespace KyberWeave.Core.Docs.Validation;
 
 /// <summary>One task's agent pick and difficulty check: what the model chose and how sure it was.</summary>
-/// <param name="Agent">The chosen agent's name.</param>
-/// <param name="Confidence">The model's confidence, at or above the confidence floor of the picker.</param>
+/// <param name="Agent">
+/// The chosen agent's name; null when the pick is missing, below the picker's confidence floor or names no
+/// candidate, which leaves the agent for the conductor to choose. The difficulty check is independent of it.
+/// </param>
+/// <param name="Confidence">The model's confidence in <paramref name="Agent"/>; 0 when there is no agent.</param>
 /// <param name="DifficultyCheck">
 /// The decision model's answer to whether the architect's rating fits the rubric; null when the answer did
 /// not clear the floor, the model gave none, or the rubric could not be read.
 /// </param>
 public sealed record PlanTaskAgentChoice(
-    string Agent,
+    string? Agent,
     double Confidence,
     DifficultyAgreement? DifficultyCheck = null);
 

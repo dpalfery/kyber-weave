@@ -609,11 +609,12 @@ public sealed partial class PlanTaskFileGenerator
                 {
                     PlanTaskFileEntry entry = entries[index];
                     if (entry.Role is null && entry.Agent is null && entry.Id is not null
-                        && picks.TryGetValue(entry.Id, out PlanTaskAgentChoice? choice))
+                        && picks.TryGetValue(entry.Id, out PlanTaskAgentChoice? choice)
+                        && choice.Agent is { } agent)
                     {
                         entries[index] = entry with
                         {
-                            Agent = choice.Agent,
+                            Agent = agent,
                             AgentConfidence = choice.Confidence,
                         };
                     }

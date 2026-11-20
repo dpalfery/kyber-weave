@@ -14,8 +14,10 @@ namespace KyberWeave.Core.Docs.Validation;
 /// <remarks>
 /// Each task is its own question, so the model reads only that task's state (one batched request read several tasks'
 /// state as one and answered every question at about 0.3). The requests run in parallel, so the cost is about one
-/// round trip however many tasks the plan holds, and an unreachable model costs at most one timeout. Only an answer at or above the floor is kept; below it, or on any provider fault,
-/// the task gets no pick and the conductor chooses from the capabilities, as it does when no model is configured.
+/// round trip however many tasks the plan holds, and an unreachable model costs at most one timeout. The agreement
+/// answer is independent of the pick: it is kept even when the pick is missing, unsure or names no candidate, so the
+/// architect's rating is still checked. Only a pick at or above the floor is kept; below it, or on any provider fault,
+/// the task gets no agent and the conductor chooses from the capabilities, as it does when no model is configured.
 /// The architect rates the task; the model only checks that rating and never changes it.
 /// </remarks>
 public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
@@ -231,8 +233,14 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
 
         for (int index = 0; index < asked.Count; index++)
         {
-            if (choices[index] is { } choice && names.Contains(choice.Agent))
-                picks[asked[index].Id!] = choice;
+            if (choices[index] is not { } choice)
+                continue;
+
+            // An answer naming no candidate is no pick, exactly as a missing one; the agreement it arrived with
+            // is independent of the pick, so it is kept.
+            picks[asked[index].Id!] = choice.Agent is not null && !names.Contains(choice.Agent)
+                ? choice with { Agent = null, Confidence = 0 }
+                : choice;
         }
 
         return picks;
@@ -269,16 +277,10 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
             return null;
         }
 
-        if (!result.AnswersByRule.TryGetValue(id, out string? answer))
-            return null;
-        double? confidence = result.ScoresByRule is not null && result.ScoresByRule.TryGetValue(id, out ArbiterStep1Score? score)
-            ? score.Confidence
-            : null;
-        if (confidence is not { } sure || sure < ConfidenceFloor)
-        {
-            return null;
-        }
+        string? answer = result.AnswersByRule.TryGetValue(id, out string? picked) ? picked : null;
 
+        // The agreement is read first and on its own: a pick the floor rejects must not throw away a confident
+        // verdict on the architect's rating.
         DifficultyAgreement? agreement = null;
         if (rubric is not null
             && result.AnswersByRule.TryGetValue(agreementId, out string? verdict)
@@ -289,6 +291,16 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
             && agreementConfidence >= ConfidenceFloor)
         {
             agreement = new DifficultyAgreement(verdict, Math.Round(agreementConfidence, 3));
+        }
+
+        // The pick stays optional: a missing answer, or one below the floor, writes no agent and leaves the
+        // conductor to choose from the capabilities.
+        double? confidence = result.ScoresByRule is not null && result.ScoresByRule.TryGetValue(id, out ArbiterStep1Score? score)
+            ? score.Confidence
+            : null;
+        if (answer is null || confidence is not { } sure || sure < ConfidenceFloor)
+        {
+            return new PlanTaskAgentChoice(null, 0, agreement);
         }
 
         return new PlanTaskAgentChoice(answer, Math.Round(sure, 3), agreement);
