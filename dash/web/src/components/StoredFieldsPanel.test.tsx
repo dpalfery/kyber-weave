@@ -139,7 +139,10 @@ describe('StoredFieldsPanel: states', () => {
   it('shows a loading state while the view is in flight', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
     mount()
-    expect(screen.getByTestId('stored-fields-loading').textContent).toMatch(/loading/i)
+    const loading = screen.getByTestId('stored-fields-loading')
+    expect(loading.textContent).toMatch(/loading/i)
+    expect(loading.getAttribute('role')).toBe('status')
+    expect(loading.getAttribute('aria-live')).toBe('polite')
   })
 
   it('states plainly when no session key is given', () => {
@@ -152,12 +155,18 @@ describe('StoredFieldsPanel: states', () => {
   it('states not found when the session was never projected', async () => {
     stubFetch({ error: 'Session not found' }, 404, false)
     mount()
-    expect((await screen.findByTestId('stored-fields-not-found')).textContent).toMatch(/no stored fields/i)
+    const notFound = await screen.findByTestId('stored-fields-not-found')
+    expect(notFound.textContent).toMatch(/no stored fields/i)
+    expect(notFound.getAttribute('role')).toBe('status')
+    expect(notFound.getAttribute('aria-live')).toBe('polite')
   })
 
   it('states a load failure without inventing fields', async () => {
     stubFetch({ error: 'boom' }, 500, false)
     mount()
-    expect((await screen.findByTestId('stored-fields-error')).textContent).toMatch(/could not be loaded/i)
+    const failure = await screen.findByTestId('stored-fields-error')
+    expect(failure.textContent).toMatch(/could not be loaded/i)
+    expect(failure.getAttribute('role')).toBe('status')
+    expect(failure.getAttribute('aria-live')).toBe('polite')
   })
 })

@@ -161,7 +161,7 @@ function StoredFieldsLoader({ sessionKey, className }: { sessionKey: string; cla
   if (!isError && data === undefined) {
     return (
       <div data-testid="stored-fields-panel" className={className}>
-        <div data-testid="stored-fields-loading" className="text-xs text-tertiary-foreground">
+        <div data-testid="stored-fields-loading" role="status" aria-live="polite" className="text-xs text-tertiary-foreground">
           Loading stored fields…
         </div>
       </div>
@@ -172,11 +172,11 @@ function StoredFieldsLoader({ sessionKey, className }: { sessionKey: string; cla
     return (
       <div data-testid="stored-fields-panel" className={className}>
         {isNotFoundError(error) ? (
-          <div data-testid="stored-fields-not-found" className="text-xs text-tertiary-foreground">
+          <div data-testid="stored-fields-not-found" role="status" aria-live="polite" className="text-xs text-tertiary-foreground">
             No stored fields were projected for this session.
           </div>
         ) : (
-          <div data-testid="stored-fields-error" className="text-xs text-tertiary-foreground">
+          <div data-testid="stored-fields-error" role="status" aria-live="polite" className="text-xs text-tertiary-foreground">
             Stored fields could not be loaded.
           </div>
         )}
