@@ -144,7 +144,7 @@ public record DroidDocument(
 /// reporting malformed lines and settings as warnings. Cost is never persisted: Droid reports no
 /// per-call cost and rate-table estimation happens at read/projection time.
 /// </remarks>
-public sealed class DroidSessionMapper : IHarnessMapper
+public class DroidSessionMapper : IHarnessMapper
 {
     /// <summary>Canonical harness identifier for Droid transcripts.</summary>
     public const string DroidHarnessId = "droid";
