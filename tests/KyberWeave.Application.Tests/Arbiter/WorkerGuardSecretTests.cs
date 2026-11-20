@@ -72,6 +72,34 @@ public sealed class WorkerGuardSecretTests
         { "shell", "cat deploy.key", false },
         { "shell", "cat ~/.config/hotshot-logistics/api-key.txt", false },
 
+        // 1. A secret fragment in a source or documentation file's name does not make it a secret: the fragment
+        //    test covers a file with no extension, or a configuration or data extension, only.
+        { "copilot-read", "src/KyberWeave.Application/Arbiter/Hooks/SecretRules.cs", true },
+        { "shell", "cat src/Auth/TokenService.cs", true },
+        { "copilot-read", "docs/security/secret-handling.md", true },
+        { "shell", "head -n 40 tests/PasswordHasherTests.cs", true },
+        { "copilot-read", "config/db-password.txt", false },
+        { "shell", "cat appsettings.secrets.json", false },
+        { "shell", "cat ~/.config/x/sa-password", false },
+
+        // 1. A heredoc counts only when the word after a single `<` is a secret file, and an open() only when the
+        //    file it names is.
+        { "shell", "cat > notes.md <<'EOF'\nreset the password weekly\nEOF", true },
+        { "shell", "python3 - <<'EOF'\nprint('token count')\nEOF", true },
+        { "shell", "python3 -c \"open('README.md').read()\"", true },
+        { "shell", "sqlcmd -i query.sql < ~/.config/x/sa-password", false },
+        { "shell", "python3 -c \"print(open('/home/u/.aws/credentials').read())\"", false },
+
+        // 1. Every reading program that names a file, including the search, text and JSON tools.
+        { "shell", "grep . ~/.config/x/sa-password", false },
+        { "shell", "sed -n 1p .env", false },
+        { "shell", "awk 1 ~/.aws/credentials", false },
+        { "shell", "jq . config/api-token.json", false },
+        { "shell", "dd if=~/.ssh/id_ed25519", false },
+        { "shell", "Select-String -Path .env -Pattern x", false },
+        { "shell", "grep -rn \"Password=\" src/", true },
+        { "shell", "jq . package.json", true },
+
         // 1. A read through the harness's own view tool carries the path, so the rule sees it too.
         { "copilot-read", "~/.config/hotshot-logistics/sa-password", false },
         { "claude-read", "~/.config/hotshot-logistics/sa-password", false },

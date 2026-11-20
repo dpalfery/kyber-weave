@@ -486,7 +486,9 @@ every call of a developer or `docs-dev` dispatch whose current turn is past `arb
 never judged, because only a call that started a process, or waited on one, can hang. It also denies a call that
 would put a secret into the transcript, which goes to the model provider (`KW-ARB-SECRET-001`): the rule applies to
 every capability profile, reads no file and starts no process, and decides from the call's own command text or from
-the path the harness's `view` or `Read` tool names. It refuses a command that reads a secret file, one that prints a
+the path the harness's `view` or `Read` tool names. It refuses a command that reads a secret file (a name fragment
+decides only when the file has no extension or a configuration or data extension, so a source file such as
+`TokenService.cs` is not refused for its name), one that prints a
 secret from a store (`dotnet user-secrets list`, `docker inspect` without a non-environment `--format`, `env` and
 `printenv` with nothing to print or with a secret-named argument, a secret-named variable echoed or printed, `env:`
 listings, the keychain and cloud token lookups, `kubectl get secret … -o yaml|json|jsonpath`, `/proc/*/environ`,

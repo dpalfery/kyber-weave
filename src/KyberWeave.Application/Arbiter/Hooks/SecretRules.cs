@@ -25,12 +25,32 @@ internal static partial class SecretRules
     private static readonly HashSet<string> ReadingPrograms = new(StringComparer.OrdinalIgnoreCase)
     {
         "cat", "head", "tail", "less", "more", "type", "get-content", "gc", "bat", "xxd", "strings", "base64",
-        "cp", "scp",
+        "cp", "scp", "grep", "rg", "egrep", "fgrep", "awk", "sed", "sort", "uniq", "od", "hexdump", "nl",
+        "jq", "yq", "openssl", "diff", "cut", "tr", "dd", "select-string",
+    };
+
+    /// <summary>
+    /// The readers whose first argument is a pattern, script or filter rather than a file, so only the arguments
+    /// after it can name a file they read.
+    /// </summary>
+    private static readonly HashSet<string> PatternFirstPrograms = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "grep", "rg", "egrep", "fgrep", "awk", "sed", "jq", "yq",
     };
 
     /// <summary>The name fragments that make a file a secret wherever it sits.</summary>
     private static readonly string[] SecretNameFragments =
         ["password", "passwd", "secret", "credential", "token", "apikey", "api-key", "api_key"];
+
+    /// <summary>
+    /// The extensions whose files may be named like a secret, because they carry configuration or data. A file with
+    /// no extension is also covered; a source or documentation file is not.
+    /// </summary>
+    private static readonly string[] ConfigurationAndDataExtensions =
+    [
+        ".txt", ".json", ".yaml", ".yml", ".xml", ".ini", ".conf", ".cfg", ".config", ".properties", ".toml",
+        ".env", ".secret", ".pass",
+    ];
 
     /// <summary>The extensions that carry a key or a certificate.</summary>
     private static readonly string[] SecretExtensions = [".pem", ".key", ".pfx", ".p12"];
@@ -117,9 +137,9 @@ internal static partial class SecretRules
     }
 
     /// <summary>
-    /// Whether this step reads a secret file: a reading program takes one as an argument, a <c>&lt;</c> redirect
-    /// feeds one to the step, or a script opens one. Listing a directory and testing a file names no reader, so
-    /// neither is judged here.
+    /// Whether this step reads a secret file: a reading program takes one as an argument, a single <c>&lt;</c>
+    /// redirect feeds one to the step, or a script's <c>open(...)</c> call names one. Listing a directory and
+    /// testing a file names no reader, so neither is judged here.
     /// </summary>
     private static bool ReadsSecretFile(string step)
     {
@@ -131,26 +151,96 @@ internal static partial class SecretRules
 
         for (int index = 0; index < words.Length; index++)
         {
-            string program = ProgramName(words[index]);
-            if (!ReadingPrograms.Contains(program))
+            if (ReadsSecretFileArgument(words, index))
             {
-                continue;
-            }
-
-            // cp and scp read the files they name except the last, which is where they write.
-            int last = IsCopyProgram(program) ? words.Length - 1 : words.Length;
-            for (int argument = index + 1; argument < last; argument++)
-            {
-                if (IsSecretFile(words[argument]))
-                {
-                    return true;
-                }
+                return true;
             }
         }
 
-        // A `<` redirect, and a script that opens a path, both read the file the step names.
-        return step.Contains('<', StringComparison.Ordinal) || ScriptsOpenAFile().IsMatch(step);
+        return ReadsThroughInputRedirect(step) || ScriptOpensSecretFile(step);
     }
+
+    /// <summary>Whether the program at this word reads a secret file among the arguments that follow it.</summary>
+    private static bool ReadsSecretFileArgument(string[] words, int index)
+    {
+        string program = ProgramName(words[index]);
+        if (!ReadingPrograms.Contains(program))
+        {
+            return false;
+        }
+
+        if (PatternFirstPrograms.Contains(program))
+        {
+            return AnySecretFileAfterPattern(words, index);
+        }
+
+        if (string.Equals(program, "dd", StringComparison.OrdinalIgnoreCase))
+        {
+            return words[(index + 1)..].Any(word =>
+                word.StartsWith("if=", StringComparison.OrdinalIgnoreCase) && IsSecretFile(word[3..]));
+        }
+
+        if (string.Equals(program, "select-string", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelectStringPaths(words, index).Any(IsSecretFile);
+        }
+
+        // cp and scp read the files they name except the last, which is where they write.
+        int last = IsCopyProgram(program) ? words.Length - 1 : words.Length;
+        for (int argument = index + 1; argument < last; argument++)
+        {
+            if (IsSecretFile(words[argument]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a program whose first argument is a pattern, script or filter reads a secret file among the
+    /// arguments after that first one.
+    /// </summary>
+    private static bool AnySecretFileAfterPattern(string[] words, int index)
+    {
+        int first = index + 1;
+        while (first < words.Length && words[first].StartsWith('-'))
+        {
+            first++;
+        }
+
+        for (int argument = first + 1; argument < words.Length; argument++)
+        {
+            if (IsSecretFile(words[argument]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The paths a PowerShell <c>Select-String</c> call names after <c>-Path</c> or <c>-LiteralPath</c>.</summary>
+    private static IEnumerable<string> SelectStringPaths(string[] words, int index)
+    {
+        for (int argument = index + 1; argument < words.Length - 1; argument++)
+        {
+            if (string.Equals(words[argument], "-Path", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(words[argument], "-LiteralPath", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return words[argument + 1];
+            }
+        }
+    }
+
+    /// <summary>Whether a single <c>&lt;</c> redirect feeds a secret file to this step.</summary>
+    private static bool ReadsThroughInputRedirect(string step) =>
+        InputRedirect().Matches(step).Any(match => IsSecretFile(match.Groups["path"].Value));
+
+    /// <summary>Whether a script's <c>open(...)</c> call names a secret file as its argument.</summary>
+    private static bool ScriptOpensSecretFile(string step) =>
+        ScriptsOpenAFile().Matches(step).Any(match => IsSecretFile(match.Groups["path"].Value.Trim()));
 
     /// <summary>Whether this step prints a secret from a store: a secret manager, a process environment, or a
     /// variable whose name says it holds one.</summary>
@@ -266,9 +356,11 @@ internal static partial class SecretRules
     }
 
     /// <summary>
-    /// Whether a word names a secret file: a secret-named file, a dotenv file, a file with a key or certificate
-    /// extension, a credential store, or anything under a private directory. A listed directory, a published key
-    /// and a dotenv example are not secret files.
+    /// Whether a word names a secret file: a file whose name says it holds one, a dotenv file, a file with a key or
+    /// certificate extension, a credential store, or anything under a private directory. The name fragment test
+    /// covers a file with no extension or a configuration or data extension, so a source or documentation file such
+    /// as <c>TokenService.cs</c> or <c>secret-handling.md</c> is not refused for its name. A listed directory, a
+    /// published key and a dotenv example are not secret files.
     /// </summary>
     internal static bool IsSecretFile(string word)
     {
@@ -286,7 +378,7 @@ internal static partial class SecretRules
 
         string file = segments[^1];
         if (SecretFileNames.Contains(file)
-            || SecretNameFragments.Any(fragment => file.Contains(fragment, StringComparison.OrdinalIgnoreCase))
+            || IsSecretFileName(file)
             || SecretExtensions.Any(extension => file.EndsWith(extension, StringComparison.OrdinalIgnoreCase)))
         {
             return true;
@@ -308,6 +400,20 @@ internal static partial class SecretRules
 
         int ssh = Array.FindIndex(segments, segment => string.Equals(segment, ".ssh", StringComparison.OrdinalIgnoreCase));
         return ssh >= 0 && ssh < segments.Length - 1 && !IsPublicSshFile(file);
+    }
+
+    /// <summary>
+    /// Whether the file's name alone says it holds a secret. The fragment test applies only to a file with no
+    /// extension or a configuration or data extension.
+    /// </summary>
+    private static bool IsSecretFileName(string file)
+    {
+        int dot = file.LastIndexOf('.');
+        string extension = dot > 0 ? file[dot..] : string.Empty;
+        bool mayHoldConfiguration = extension.Length == 0
+            || ConfigurationAndDataExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
+        return mayHoldConfiguration
+            && SecretNameFragments.Any(fragment => file.Contains(fragment, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>Whether the path names a file that sits somewhere below the named directory.</summary>
@@ -505,7 +611,10 @@ internal static partial class SecretRules
     [GeneratedRegex(@"os\.environ|process\.env")]
     private static partial Regex WholeEnvironment();
 
-    [GeneratedRegex(@"(?i)\bopen\s*\(")]
+    [GeneratedRegex(@"(?<!<)<(?!<)\s*(?<path>[^\s<>]+)")]
+    private static partial Regex InputRedirect();
+
+    [GeneratedRegex(@"(?i)\bopen\s*\(\s*(?<path>[^,)\r\n]*)")]
     private static partial Regex ScriptsOpenAFile();
 
     [GeneratedRegex(@"(?i)\b(?:echo|printf|write-output|write-host)\b")]

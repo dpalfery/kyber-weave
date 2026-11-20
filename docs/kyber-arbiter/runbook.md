@@ -378,12 +378,17 @@ turns it off with the rest of the Arbiter. It reads no file and starts no proces
 and a command whose text it cannot read is refused rather than allowed. It refuses three things:
 
 - **Reading a secret file.** A shell command reads one with `cat`, `head`, `tail`, `less`, `more`, `type`,
-  `Get-Content`, `gc`, `bat`, `xxd`, `strings` or `base64`, by copying it with `cp` or `scp`, by opening it from a
-  one-line script, or with a `<` redirect; the harness's own read tool (`view` on Copilot CLI, `Read` on Claude)
+  `Get-Content`, `gc`, `bat`, `xxd`, `strings` or `base64`, by copying it with `cp` or `scp`, with `grep`, `rg`,
+  `egrep`, `fgrep`, `awk`, `sed`, `sort`, `uniq`, `od`, `hexdump`, `nl`, `jq`, `yq`, `openssl`, `diff`, `cut` or
+  `tr`, with `dd if=`, with PowerShell's `Select-String -Path`, by opening it from a one-line script, or with a
+  single `<` redirect (not a `<<` heredoc); the harness's own read tool (`view` on Copilot CLI, `Read` on Claude)
   counts too. A secret file is one whose name holds `password`, `passwd`, `secret`, `credential`, `token`,
-  `apikey`, `api-key` or `api_key`; a `.env` file other than `.env.example`, `.env.sample` and
-  `.env.template`; a file under `~/.microsoft/usersecrets/`, `~/.ssh/` (except a `.pub` key, `known_hosts` and
-  `config`), `~/.aws/credentials`, `~/.azure/`, `~/.docker/config.json` or `~/.kube/config`, or one named
+  `apikey`, `api-key` or `api_key` when it has no extension or a configuration or data extension (`.txt`, `.json`,
+  `.yaml`, `.yml`, `.xml`, `.ini`, `.conf`, `.cfg`, `.config`, `.properties`, `.toml`, `.env`, `.secret`, `.pass`),
+  so a source or documentation file such as `TokenService.cs` or `secret-handling.md` is not refused for its name;
+  a `.env` file other than `.env.example`, `.env.sample` and `.env.template`; a file under
+  `~/.microsoft/usersecrets/`, `~/.ssh/` (except a `.pub` key, `known_hosts` and `config`),
+  `~/.aws/credentials`, `~/.azure/`, `~/.docker/config.json` or `~/.kube/config`, or one named
   `~/.netrc`, `~/.git-credentials`, `~/.npmrc` or `~/.pypirc`; and any `*.pem`, `*.key`, `*.pfx` or `*.p12`.
   Listing a directory or testing whether a file exists is allowed.
 - **Printing a secret from a store.** `dotnet user-secrets list`; `docker inspect` unless its `--format`/`-f`
