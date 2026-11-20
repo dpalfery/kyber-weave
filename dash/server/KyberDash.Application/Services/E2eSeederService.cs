@@ -106,6 +106,7 @@ public class E2eSeederService : IE2eSeederService
 
         SeedMeasuredClaudeCode();
         SeedRenderingOnlyOpencode();
+        SeedZeroRecordDroid();
 
         _ = projection.ProjectRunsAndHarnesses();
 
@@ -256,6 +257,30 @@ public class E2eSeederService : IE2eSeederService
                         Headroom: 130000,
                         Pressure: 0.35),
                 ])));
+    }
+
+    /// <summary>
+    /// Bounds the zero-record seed: <c>droid</c> never gains a run, but its rendering-only session
+    /// row must exist so the rollup projection emits its empty rollup and <c>/harness/droid</c>
+    /// renders honest-empty instead of the missing-rollup 404.
+    /// </summary>
+    private void SeedZeroRecordDroid()
+    {
+        WriteRenderingOnlySession("hc-zero-record-session-1", "droid", "harness-collection zero-record session");
+
+        projections.ReplaceSessionProjection(new StoredSessionProjection(
+            SessionId: "hc-zero-record-session-1",
+            Label: "harness-collection zero-record session",
+            IsSubagent: false,
+            SpanCount: 0,
+            StartedAtUtc: "2026-09-06T12:00:00.000Z",
+            EndedAtUtc: "2026-09-06T12:01:00.000Z",
+            ParentSessionId: null,
+            AgentName: null,
+            IncludedInParent: false,
+            RequestSpanIds: [],
+            Turns: [],
+            ContextUnmeasurableReason: "zero-record seed — context not measured"));
     }
 
     private void SeedRenderingOnlyOpencode()
