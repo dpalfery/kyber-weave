@@ -19,6 +19,7 @@ echo "$RUN"
 cd "$HC_DEMO_REPO"
 git worktree list --porcelain | sed -n 's/^worktree //p' | sort >"$RUN/worktrees.before"
 git for-each-ref --format='%(refname:short)' refs/heads | sort >"$RUN/branches.before"
+git rev-parse HEAD >"$RUN/canonical-head.before"
 
 # Strip the frontmatter; the run gets the feature text plus the autonomy switch only.
 { printf 'autonomy: autonomous\n\n'; awk 'NR==1&&/^---$/{f=1;next} f&&/^---$/{f=0;next} !f' "$HC_DEMO_PROMPT"; } >"$RUN/prompt.md"

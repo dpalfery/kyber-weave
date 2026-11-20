@@ -43,6 +43,17 @@ if [ -n "$(git status --porcelain)" ]; then
     git stash push -q -u -m "hill-climb $(basename "$RUN") leftovers" && hc_log "stashed uncommitted changes in the canonical checkout"
 fi
 [ "$(git branch --show-current)" = "$DEFAULT" ] || git checkout -q "$DEFAULT"
+# A run must never commit in the canonical checkout. If it did, keep those commits as evidence and move the
+# branch back to where the run found it.
+if [ -f "$RUN/canonical-head.before" ]; then
+    BEFORE=$(cat "$RUN/canonical-head.before")
+    NOW=$(git rev-parse HEAD)
+    if [ "$NOW" != "$BEFORE" ] && git merge-base --is-ancestor "$BEFORE" "$NOW"; then
+        git bundle create "$EV/canonical-commits.bundle" "$BEFORE..$DEFAULT" 2>/dev/null || true
+        git log --format='%h %s' "$BEFORE..$NOW" >"$EV/canonical-commits.log"
+        git reset -q --hard "$BEFORE" && hc_log "moved $DEFAULT back from $(git rev-parse --short "$NOW") to $(git rev-parse --short "$BEFORE"): the run committed in the canonical checkout"
+    fi
+fi
 for wt in $NEW_WT; do git worktree remove --force "$wt" && hc_log "removed worktree $wt"; done
 git worktree prune
 for b in $NEW_BR; do git branch -D -q "$b" && hc_log "deleted branch $b"; done
