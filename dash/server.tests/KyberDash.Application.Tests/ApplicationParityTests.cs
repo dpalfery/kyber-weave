@@ -1,8 +1,11 @@
 using System.Globalization;
 using System.Text.Json;
+using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
 using KyberDash.Core.Exceptions;
+using KyberDash.Data.Collector;
+using KyberDash.Data.Collector.Sources;
 using KyberDash.Domain;
 using Moq;
 using Xunit;
@@ -33,7 +36,7 @@ public class ApplicationParityTests
         (ProjectionPassReport pass, IReadOnlyList<HarnessRollupRow> rollups) = projection.ProjectAll();
 
         Assert.Equal(2, pass.Built);
-        Assert.Equal(12, rollups.Count);
+        Assert.Equal(10, rollups.Count);
         Assert.Contains(rollups, static r => r.Harness == "claude-code" && r.SampleCount == 1);
         Assert.Contains(store.ListFindings(sessionId: "sess-b"), static finding => finding.DetectorId == "oversized-tool-result");
 
@@ -62,13 +65,22 @@ public class ApplicationParityTests
     [Fact]
     public void UsageIngestionProjectionQueryPipelineAnswersEveryDashboardRead()
     {
-        FakeCanonStoreRepository store = new();
-        FakeSettingsRepository settings = new();
+        InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
-        CanonRefreshEngine refresh = new(store, new FakeTranscriptReaderRepository(), pricing, new CanonSessionProjectorEngine(store, pricing), new CanonRollupsEngine(store, pricing));
-        TranscriptIngestionService ingestion = new(store, new FakeTranscriptReaderRepository(), refresh);
-        CanonProjectionService projection = new(store, new CanonSessionProjectorEngine(store, pricing), new CanonRollupsEngine(store, pricing));
-        KyberBridgeEngine bridge = new(store, settings, pricing, new CanonSessionProjectorEngine(store, pricing), new CanonRollupsEngine(store, pricing));
+        TranscriptIngestionService ingestion = new(store, store, new HarnessSourceRegistry());
+        CanonProjectionService projection = new(
+            store,
+            store,
+            store,
+            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonRollupsEngine(store, store, pricing));
+        KyberBridgeEngine bridge = new(
+            store,
+            store,
+            store,
+            pricing,
+            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonRollupsEngine(store, store, pricing));
         DashboardQueryService query = new(bridge);
 
         OtlpSpan span = new(
@@ -96,7 +108,7 @@ public class ApplicationParityTests
 
         (ProjectionPassReport pass, IReadOnlyList<HarnessRollupRow> rollups) = projection.ProjectAll();
         Assert.Equal(1, pass.Built);
-        Assert.Equal(12, rollups.Count);
+        Assert.Single(rollups);
         Assert.Contains(rollups, static r => r.Harness == "copilot" && r.SampleCount == 1);
 
         Assert.Contains("sess-copilot", query.GetSessions().GetRawText(), StringComparison.Ordinal);
@@ -125,18 +137,16 @@ public class ApplicationParityTests
     [Fact]
     public void SessionContentForASpanAnswersFlatPartsAndNothingForASpanThatCapturedNone()
     {
-        FakeCanonStoreRepository store = new();
-        CanonicalRecord empty = MakeLlmRecord("span-empty", "sess-content", "droid", "2026-11-14T10:00:00.000Z", 0, 0);
-        CanonicalRecord withParts = MakeLlmRecord("span-parts", "sess-content", "droid", "2026-11-14T10:01:00.000Z", 0, 0) with
-        {
-            Parts = [new ContentPart("user_prompt", "hello", Tokens: 3)],
-        };
-        CanonicalRecord fromContent = MakeLlmRecord("span-content", "sess-content", "droid", "2026-11-14T10:02:00.000Z", 0, 0) with
-        {
-            Parts = null,
-            Content = new Dictionary<string, string> { ["user_prompt"] = "hi" },
-        };
-        store.PutRecords([empty, withParts, fromContent]);
+        InMemoryRelationalStore store = new();
+        WriteSession(store, "sess-content",
+            [
+                Turn("span-empty", "sess-content", 0),
+                Turn(
+                    "span-parts",
+                    "sess-content",
+                    1,
+                    parts: [new CollectedContentPart(0, ContentBucket.UserPrompt, "hello", Withheld: null, ReportedTokens: 3, Server: null, Role: null, Resident: null, OriginalUtf8BytesWhenTruncated: null)]),
+            ]);
         KyberBridgeEngine bridge = Bridge(store);
 
         JsonElement none = bridge.GetSessionContent("sess-content", spanId: "span-empty", full: true)!.Value;
@@ -149,16 +159,15 @@ public class ApplicationParityTests
         Assert.Equal("hello", entry.GetProperty("text").GetString());
         Assert.Equal(3, entry.GetProperty("tokens").GetInt64());
 
-        JsonElement viaContent = bridge.GetSessionContent("sess-content", spanId: "span-content", full: true)!.Value;
-        JsonElement contentEntry = Assert.Single(viaContent.GetProperty("parts").EnumerateArray().ToList());
-        Assert.Equal("user_prompt", contentEntry.GetProperty("part").GetString());
-        Assert.Equal("hi", contentEntry.GetProperty("text").GetString());
+        JsonElement partFiltered = bridge.GetSessionContent("sess-content", spanId: "span-parts", part: "user_prompt", full: true)!.Value;
+        JsonElement filteredEntry = Assert.Single(partFiltered.GetProperty("parts").EnumerateArray().ToList());
+        Assert.Equal("hello", filteredEntry.GetProperty("text").GetString());
     }
 
     [Fact]
     public void PredictionRecordingValidatesTheBodyAndStoresTheRow()
     {
-        FakeCanonStoreRepository store = new();
+        InMemoryRelationalStore store = new();
         KyberBridgeEngine bridge = Bridge(store);
 
         Assert.False(bridge.TryRecordPrediction(Json("not-an-object"), out PredictionRow? rejected, out string? error));
@@ -173,7 +182,7 @@ public class ApplicationParityTests
         Assert.NotNull(created);
         Assert.Equal("finding-1", created.FindingId);
         Assert.Equal(500, created.PredictedWasteTokens);
-        Assert.Single(store.ListPredictions("run-1"));
+        Assert.Single(((IProjectionStore)store).ListPredictions("run-1"));
         Assert.Equal(1, bridge.GetCalibration().GetProperty("totalPredictions").GetInt32());
     }
 
@@ -614,15 +623,74 @@ public class ApplicationParityTests
         Assert.Empty(store.Records);
     }
 
-    private static KyberBridgeEngine Bridge(FakeCanonStoreRepository store)
+    private static KyberBridgeEngine Bridge(InMemoryRelationalStore store)
     {
         FakePricingRepository pricing = new();
         return new KyberBridgeEngine(
             store,
-            new FakeSettingsRepository(),
+            store,
+            store,
             pricing,
-            new CanonSessionProjectorEngine(store, pricing),
-            new CanonRollupsEngine(store, pricing));
+            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonRollupsEngine(store, store, pricing));
+    }
+
+    private static void WriteSession(InMemoryRelationalStore store, string sessionKey, IReadOnlyList<CollectedRecord> records)
+    {
+        store.WriteBatch(new CollectedBatch(
+            Source: new CollectedSource("droid", SourceKind.Otlp, "otlp:droid"),
+            Sessions:
+            [
+                new CollectedSession(
+                    SessionKey: sessionKey,
+                    HarnessId: "droid",
+                    NativeSessionId: sessionKey,
+                    Workspace: null,
+                    Title: null,
+                    ReportedUsage: []),
+            ],
+            Records: records,
+            Problems: []));
+    }
+
+    private static CollectedRecord Turn(
+        string spanId,
+        string sessionKey,
+        int minuteOffset,
+        IReadOnlyList<CollectedContentPart>? parts = null)
+    {
+        DateTimeOffset startedAt = new DateTimeOffset(2026, 11, 14, 10, 0, 0, TimeSpan.Zero).AddMinutes(minuteOffset);
+        return new CollectedRecord(
+            RecordId: spanId,
+            HarnessId: "droid",
+            Op: RecordOp.LlmInvoke,
+            Kind: RecordKind.Client,
+            Name: "chat.turn",
+            StartedAt: startedAt,
+            Status: RecordStatus.Ok,
+            SessionKey: sessionKey,
+            ParentRecordId: null,
+            TraceId: null,
+            Model: null,
+            EndedAt: null,
+            ReportedDurationMs: 1_000,
+            Tokens:
+            [
+                new CollectedTokenCount(TokenClass.Input, 0),
+                new CollectedTokenCount(TokenClass.CacheRead, 0),
+                new CollectedTokenCount(TokenClass.CacheWrite, 0),
+                new CollectedTokenCount(TokenClass.Output, 0),
+            ],
+            ReportedCost: null,
+            Parts: parts ?? [],
+            Tool: null,
+            Agent: null,
+            SkillsInvoked: [],
+            AgentInstanceId: null,
+            ToolDefinitions: [],
+            Signals: new CollectedRecordSignals(ErrorMessage: null, EditFailures: null, CorrectionRule: null, DeclaredContextWindow: null),
+            ReportedInputTokens: 0,
+            ReportedOutputTokens: 0);
     }
 
     private static RefreshSourceInput Source(

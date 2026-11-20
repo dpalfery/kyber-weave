@@ -10,9 +10,9 @@ namespace KyberDash.Application;
 /// (<see cref="KyberBridgeEngine"/>).
 /// </summary>
 /// <remarks>
-/// The eight operations are read-only projections of the canonical store. An unknown operation is a
-/// caller error, not a server failure, so it answers <c>400</c> with a message naming the operation
-/// instead of throwing.
+/// The eight operations are read-only projections of the relational KyberDash store answered by
+/// <see cref="KyberBridgeEngine"/>. An unknown operation is a caller error, not a server failure,
+/// so it answers <c>400</c> with a message naming the operation instead of throwing.
 /// </remarks>
 public class AnalyticsService : IAnalyticsService
 {

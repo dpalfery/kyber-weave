@@ -1,9 +1,11 @@
 using System.Globalization;
 using System.Text.Json;
+using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
 using KyberDash.Core.Exceptions;
 using KyberDash.Core.Resilience;
+using KyberDash.Data.Collector;
 using KyberDash.Domain;
 using Moq;
 using Xunit;
@@ -543,26 +545,56 @@ public class AnalyticsServiceTests
             Assert.Equal(200, result.StatusCode);
         }
 
-        Assert.Empty(harness.Store.Records);
-        Assert.Empty(harness.Store.ListSessions());
+        Assert.Equal(0, harness.Store.CountRows("record"));
+        Assert.Equal(0, harness.Store.CountRows("session"));
 
-        harness.Store.PutRecord(new CanonicalRecord
-        {
-            SpanId = "span-inspect-1",
-            TraceId = "trace-sess-inspect",
-            Source = "claude-code",
-            Harness = "claude-code",
-            SessionId = "sess-inspect",
-            Name = "llm.invoke",
-            Op = "llm.invoke",
-            Kind = "client",
-            Timestamp = "2026-11-14T10:00:00.000Z",
-            DurationMs = 100,
-            Status = "ok",
-            Tokens = new TokenUsage(10, 0, 0, 5, 10, 5),
-            Content = new Dictionary<string, string>(StringComparer.Ordinal),
-            Cost = new CostBlock(CostBasis.Published, CostStatus.NoRate),
-        });
+        harness.Store.WriteBatch(new CollectedBatch(
+            Source: new CollectedSource("claude-code", SourceKind.Otlp, "otlp:claude-code"),
+            Sessions:
+            [
+                new CollectedSession(
+                    SessionKey: "sess-inspect",
+                    HarnessId: "claude-code",
+                    NativeSessionId: "sess-inspect",
+                    Workspace: null,
+                    Title: null,
+                    ReportedUsage: []),
+            ],
+            Records:
+            [
+                new CollectedRecord(
+                    RecordId: "span-inspect-1",
+                    HarnessId: "claude-code",
+                    Op: RecordOp.LlmInvoke,
+                    Kind: RecordKind.Client,
+                    Name: "llm.invoke",
+                    StartedAt: new DateTimeOffset(2026, 11, 14, 10, 0, 0, TimeSpan.Zero),
+                    Status: RecordStatus.Ok,
+                    SessionKey: "sess-inspect",
+                    ParentRecordId: null,
+                    TraceId: null,
+                    Model: null,
+                    EndedAt: null,
+                    ReportedDurationMs: 100,
+                    Tokens:
+                    [
+                        new CollectedTokenCount(TokenClass.Input, 10),
+                        new CollectedTokenCount(TokenClass.CacheRead, 0),
+                        new CollectedTokenCount(TokenClass.CacheWrite, 0),
+                        new CollectedTokenCount(TokenClass.Output, 5),
+                    ],
+                    ReportedCost: null,
+                    Parts: [],
+                    Tool: null,
+                    Agent: null,
+                    SkillsInvoked: [],
+                    AgentInstanceId: null,
+                    ToolDefinitions: [],
+                    Signals: new CollectedRecordSignals(ErrorMessage: null, EditFailures: null, CorrectionRule: null, DeclaredContextWindow: null),
+                    ReportedInputTokens: 10,
+                    ReportedOutputTokens: 5),
+            ],
+            Problems: []));
         using JsonDocument inspectBody = JsonDocument.Parse("""{"sessionId":"sess-inspect"}""");
         AnalyticsExecutionResult inspectResult = harness.Analytics.Execute("inspect", inspectBody.RootElement);
         Assert.Equal(200, inspectResult.StatusCode);
@@ -610,13 +642,17 @@ public class AnalyticsServiceTests
     {
         public Harness()
         {
-            KyberBridgeEngine bridge = new(Store, Settings, Pricing, new CanonSessionProjectorEngine(Store, Pricing), new CanonRollupsEngine(Store, Pricing));
+            KyberBridgeEngine bridge = new(
+                Store,
+                Store,
+                Store,
+                Pricing,
+                new CanonSessionProjectorEngine(Store, Store, Store, Pricing),
+                new CanonRollupsEngine(Store, Store, Pricing));
             Analytics = new AnalyticsService(bridge);
         }
 
-        public FakeCanonStoreRepository Store { get; } = new();
-
-        public FakeSettingsRepository Settings { get; } = new();
+        public InMemoryRelationalStore Store { get; } = new();
 
         public FakePricingRepository Pricing { get; } = new();
 

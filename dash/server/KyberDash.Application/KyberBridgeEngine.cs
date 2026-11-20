@@ -3,14 +3,35 @@ using System.Text;
 using System.Text.Json;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Core.Exceptions;
+using KyberDash.Data.Collector;
 using KyberDash.Domain;
 
 namespace KyberDash.Application;
 
 /// <summary>
-/// Bounded read and analytics query bridge over <see cref="ICanonStoreRepository"/> serving
-/// the KyberDash HTTP and MCP contracts.
+/// Bounded read and analytics query bridge over the relational KyberDash store
+/// (<see cref="IRelationalStoreReader"/>, <see cref="IProjectionStore"/>, and
+/// <see cref="IOperationalStore"/>) serving the KyberDash HTTP and MCP contracts.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Every route answers from typed store rows: the engine holds no dependency on
+/// <c>ICanonStoreRepository</c> and parses no persisted store JSON. Session figures come from
+/// <see cref="IRelationalStoreReader.GetSessionAggregate"/>,
+/// <see cref="IRelationalStoreReader.ListSessionAggregates"/>, and
+/// <see cref="IRelationalStoreReader.SessionTurnSummaries"/> priced at read time through
+/// <see cref="IPricingRepository.LoadPricingTables"/> as the <see cref="IModelPricingLookup"/>;
+/// run, harness, finding, and prediction reads come from <see cref="IProjectionStore"/>; settings,
+/// quarantine, problems, and audit reads come from <see cref="IOperationalStore"/>.
+/// </para>
+/// <para>
+/// A session whose read fails is isolated: its answer carries
+/// <c>projection_status = "PROJECTION_FAILED"</c> while the remaining sessions answer normally,
+/// and every isolated failure is surfaced through <see cref="GetCoverage"/>. Harness-reported and
+/// read-time published costs are reported as separate <c>cost_reported</c> and <c>cost</c> blocks
+/// with a structured <c>cost_basis_mismatch</c> verdict, and are never blended into one figure.
+/// </para>
+/// </remarks>
 public class KyberBridgeEngine
 {
     /// <summary>Default byte budget applied to turn and session content responses (32 KiB).</summary>
@@ -21,6 +42,17 @@ public class KyberBridgeEngine
 
     /// <summary>Default KyberDash engine version reported by <c>/api/kyber/version</c> and <c>/api/kyber/meta</c>.</summary>
     public const string DefaultVersion = "0.21.0";
+
+    /// <summary>Session marker answered when a single session's projection read fails.</summary>
+    private const string ProjectionFailedStatus = "PROJECTION_FAILED";
+
+    /// <summary>Source label recorded on hydrated records; the relational store keeps no raw source string.</summary>
+    private const string RelationalSourceName = "relational";
+
+    private const string TimestampFormat = "yyyy-MM-dd'T'HH:mm:ss.fff'Z'";
+
+    /// <summary>Order base placing typed tool definitions after captured content parts.</summary>
+    private const int TypedDefinitionOrderBase = 1_000;
 
     private static readonly JsonSerializerOptions CamelCaseJsonOptions = new()
     {
@@ -39,51 +71,53 @@ public class KyberBridgeEngine
         "outcomes",
     ];
 
-    private readonly ICanonStoreRepository store;
-    private readonly ISettingsRepository settings;
+    private readonly IRelationalStoreReader reader;
+    private readonly IProjectionStore projections;
+    private readonly IOperationalStore operationalStore;
     private readonly IPricingRepository pricing;
     private readonly CanonSessionProjectorEngine projector;
     private readonly CanonRollupsEngine rollups;
     private readonly Func<DateTimeOffset> clock;
     private readonly string version;
     private readonly string instanceId;
-    private readonly IProjectionStore? predictionStore;
+    private readonly Lock projectionFailureLock = new();
+    private readonly Dictionary<string, string> projectionFailures = new(StringComparer.Ordinal);
+    private string? lastProjectionPassFault;
 
     /// <summary>
     /// Initializes a new <see cref="KyberBridgeEngine"/>.
     /// </summary>
-    /// <param name="store">Canonical store repository.</param>
-    /// <param name="settings">Operator settings repository.</param>
-    /// <param name="pricing">Model rate-table repository.</param>
+    /// <param name="reader">Typed relational store reader answering session aggregates and records.</param>
+    /// <param name="projections">Projection store holding sessions, runs, harness rollups, findings, and predictions.</param>
+    /// <param name="operationalStore">Operational store holding settings, quarantine, problems, and audit rows.</param>
+    /// <param name="pricing">Model rate-table repository used as the read-time pricing lookup.</param>
     /// <param name="projector">Session projection engine.</param>
     /// <param name="rollups">Run and harness rollup engine.</param>
     /// <param name="version">Engine build version string.</param>
     /// <param name="clock">Optional UTC clock override for deterministic timestamps.</param>
     /// <param name="instanceId">Optional process instance identifier for analytics freshness metadata.</param>
-    /// <param name="predictionStore">Optional typed prediction store. When provided, predictions persist
-    /// through <see cref="IProjectionStore"/> as <c>prediction</c> rows with optional
-    /// <c>prediction_comparison</c>, <c>prediction_observed_delta</c>, and
-    /// <c>prediction_calibration</c> child rows; otherwise they use the legacy repository.</param>
     public KyberBridgeEngine(
-        ICanonStoreRepository store,
-        ISettingsRepository settings,
+        IRelationalStoreReader reader,
+        IProjectionStore projections,
+        IOperationalStore operationalStore,
         IPricingRepository pricing,
         CanonSessionProjectorEngine projector,
         CanonRollupsEngine rollups,
         string version = DefaultVersion,
         Func<DateTimeOffset>? clock = null,
-        string? instanceId = null,
-        IProjectionStore? predictionStore = null)
+        string? instanceId = null)
     {
-        ArgumentNullException.ThrowIfNull(store);
-        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(reader);
+        ArgumentNullException.ThrowIfNull(projections);
+        ArgumentNullException.ThrowIfNull(operationalStore);
         ArgumentNullException.ThrowIfNull(pricing);
         ArgumentNullException.ThrowIfNull(projector);
         ArgumentNullException.ThrowIfNull(rollups);
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
 
-        this.store = store;
-        this.settings = settings;
+        this.reader = reader;
+        this.projections = projections;
+        this.operationalStore = operationalStore;
         this.pricing = pricing;
         this.projector = projector;
         this.rollups = rollups;
@@ -92,21 +126,36 @@ public class KyberBridgeEngine
         this.instanceId = string.IsNullOrWhiteSpace(instanceId)
             ? string.Create(CultureInfo.InvariantCulture, $"kyberdash-{Environment.ProcessId}")
             : instanceId;
-        this.predictionStore = predictionStore;
     }
 
     /// <summary>Ensures dirty sessions, runs, executions, and harness rollups are projected up to date.</summary>
+    /// <remarks>
+    /// A transient store fault in the projection pass is isolated instead of failing every read:
+    /// sessions projected before the fault still answer, and the fault is surfaced through
+    /// <see cref="GetCoverage"/>. Per-session read faults are isolated the same way, answering
+    /// <c>PROJECTION_FAILED</c> for the broken session only.
+    /// </remarks>
     public void EnsureProjected()
     {
         bool builtOrPruned = false;
         if (!projector.IsProjectionCurrent())
         {
-            ProjectionPassReport report = projector.ProjectIncremental();
-            builtOrPruned = report.Built > 0 || report.Pruned > 0;
+            try
+            {
+                ProjectionPassReport report = projector.ProjectIncremental();
+                builtOrPruned = report.Built > 0 || report.Pruned > 0;
+            }
+            catch (Exception ex) when (IsTransientStoreFault(ex))
+            {
+                lock (projectionFailureLock)
+                {
+                    lastProjectionPassFault = ex.Message;
+                }
+            }
         }
 
         if (builtOrPruned
-            || (store.ListSessions().Count > 0 && store.ListHarnessRollups().Count == 0))
+            || (projections.ListSessionProjections().Count > 0 && projections.ListHarnessRollups().Count == 0))
         {
             rollups.ProjectRunsAndHarnesses();
         }
@@ -119,44 +168,43 @@ public class KyberBridgeEngine
     public JsonElement GetSessions(int? limit = null, string? harness = null)
     {
         EnsureProjected();
-        IReadOnlyList<SessionSummaryRow> rows = store.ListSessions(harness);
+        IModelPricingLookup lookup = pricing.LoadPricingTables();
+        string? normalizedHarness = NormalizeHarnessFilter(harness);
+        IReadOnlyList<StoredSessionProjection> rows = projections.ListSessionProjections(normalizedHarness);
         Dictionary<string, SessionNode> byId = new(StringComparer.Ordinal);
-        List<SessionNode> orderedNodes = [];
+        List<SessionNode> orderedNodes = new(rows.Count);
 
-        foreach (SessionSummaryRow row in rows)
+        foreach (StoredSessionProjection row in rows)
         {
-            JsonElement? summary = ParseSummary(row);
-            JsonElement? totalInput = TryGetOptionalProperty(summary, "total_input");
-            JsonElement? totalOutput = TryGetOptionalProperty(summary, "total_output");
-            int? turnCount = TryGetNullableInt(summary, "turn_count");
-            int? requestCount = TryGetNullableInt(summary, "request_count");
-            IReadOnlyList<string> models = ExtractStringArray(summary, "models");
-            JsonElement cost = ExtractCost(summary);
-            double? costUsd = ExtractUsdCost(cost);
-
+            CollectedSession? session = reader.GetSession(row.SessionId);
+            (SessionAggregateView? aggregate, _, string? projectionStatus) = ReadSessionFigures(row.SessionId, lookup);
+            string harnessId = ResolveHarness(aggregate, session);
             string label = !string.IsNullOrWhiteSpace(row.Label)
-                ? row.Label!
-                : CanonPricing.FormatSessionTitle(new SessionTitleInput(row.SessionId, row.AgentName, row.Harness, row.Label));
+                ? row.Label
+                : CanonPricing.FormatSessionTitle(new SessionTitleInput(row.SessionId, row.AgentName, harnessId, row.Label));
 
             SessionNode node = new(
                 SessionId: row.SessionId,
-                Harness: row.Harness,
+                Harness: harnessId,
                 Label: label,
                 IsSubagent: row.IsSubagent,
-                ParentSession: row.ParentSession,
+                ParentSession: row.ParentSessionId,
                 AgentName: row.AgentName,
-                Repo: row.Repo,
-                Branch: row.Branch,
-                Started: row.Started,
-                Ended: row.Ended,
-                TurnCount: turnCount,
-                RequestCount: requestCount,
-                TotalInput: totalInput,
-                TotalOutput: totalOutput,
-                CostUsd: costUsd,
-                Cost: cost,
-                Models: models,
-                Problems: row.ProblemsCount ?? 0,
+                Repo: session?.Workspace?.Repository,
+                Branch: session?.Workspace?.Branch,
+                Started: row.StartedAtUtc,
+                Ended: row.EndedAtUtc,
+                TurnCount: aggregate?.TurnCount,
+                RequestCount: aggregate?.RequestCount,
+                TotalInput: aggregate?.TotalInput,
+                TotalOutput: aggregate?.TotalOutput,
+                CostUsd: ExtractUsdCost(aggregate?.PublishedCost),
+                Cost: aggregate?.PublishedCost,
+                CostReported: aggregate?.ReportedCost,
+                CostBasisMismatch: aggregate?.CostBasisMismatch,
+                Models: aggregate?.Models ?? [],
+                Problems: aggregate?.Problems.Count ?? 0,
+                ProjectionStatus: projectionStatus,
                 Subagents: []);
 
             byId[row.SessionId] = node;
@@ -200,55 +248,42 @@ public class KyberBridgeEngine
     public JsonElement? GetSessionDetail(string sessionId)
     {
         EnsureProjected();
-        SessionSummaryRow? session = store.GetSession(sessionId);
-        if (session is null)
+        StoredSessionProjection? projection = projections.GetSessionProjection(sessionId);
+        if (projection is null)
         {
             return null;
         }
 
-        Dictionary<string, object?> root = new(StringComparer.Ordinal);
-        if (session.Payload.ValueKind == JsonValueKind.Object)
+        CollectedSession? session = reader.GetSession(sessionId);
+        IModelPricingLookup lookup = pricing.LoadPricingTables();
+        (SessionAggregateView? aggregate, IReadOnlyList<ReadTimeTurnSummary> turns, string? projectionStatus) =
+            ReadSessionFigures(sessionId, lookup);
+
+        Dictionary<string, object?> root = new(StringComparer.Ordinal)
         {
-            foreach (JsonProperty prop in session.Payload.EnumerateObject())
-            {
-                root[prop.Name] = prop.Value;
-            }
+            ["session_id"] = projection.SessionId,
+            ["sessionId"] = projection.SessionId,
+            ["harness"] = ResolveHarness(aggregate, session),
+            ["label"] = projection.Label,
+            ["is_subagent"] = projection.IsSubagent,
+            ["parent_session"] = projection.ParentSessionId,
+            ["agent_name"] = projection.AgentName,
+            ["repo"] = session?.Workspace?.Repository,
+            ["branch"] = session?.Workspace?.Branch,
+            ["started"] = projection.StartedAtUtc,
+            ["ended"] = projection.EndedAtUtc,
+            ["problems_count"] = aggregate?.Problems.Count ?? 0,
+            ["context_limit_source"] = ResolveContextLimitSource(projection),
+            ["summary"] = aggregate is null ? null : BuildSessionSummary(aggregate),
+            ["problems"] = aggregate?.Problems ?? Array.Empty<Problem>(),
+            ["turns"] = turns.Select(ToTurnDto).ToList(),
+        };
+
+        if (projectionStatus is not null)
+        {
+            root["projection_status"] = projectionStatus;
         }
 
-        root["session_id"] = session.SessionId;
-        root["sessionId"] = session.SessionId;
-        root["harness"] = session.Harness;
-        root["label"] = session.Label;
-        root["is_subagent"] = session.IsSubagent;
-        root["parent_session"] = session.ParentSession;
-        root["agent_name"] = session.AgentName;
-        root["repo"] = session.Repo;
-        root["branch"] = session.Branch;
-        root["started"] = session.Started;
-        root["ended"] = session.Ended;
-        root["problems_count"] = session.ProblemsCount ?? 0;
-        root["context_limit_source"] = session.ContextLimitSource;
-
-        if (!root.ContainsKey("summary"))
-        {
-            root["summary"] = ParseSummary(session);
-        }
-
-        if (!root.ContainsKey("problems"))
-        {
-            root["problems"] = Array.Empty<object>();
-        }
-
-        IReadOnlyList<JsonElement> turns = store.ListSessionTurnPayloads(sessionId);
-        if (!root.TryGetValue("turns", out object? existingTurnsObj)
-            || existingTurnsObj is not JsonElement existingTurnsEl
-            || existingTurnsEl.ValueKind != JsonValueKind.Array
-            || existingTurnsEl.GetArrayLength() == 0)
-        {
-            root["turns"] = turns;
-        }
-
-        root["payload"] = session.Payload;
         return JsonSerializer.SerializeToElement(root, CamelCaseJsonOptions);
     }
 
@@ -258,28 +293,39 @@ public class KyberBridgeEngine
     public JsonElement? GetSessionSummary(string sessionId)
     {
         EnsureProjected();
-        SessionSummaryRow? session = store.GetSession(sessionId);
-        if (session is null)
+        StoredSessionProjection? projection = projections.GetSessionProjection(sessionId);
+        if (projection is null)
         {
             return null;
         }
 
-        return JsonSerializer.SerializeToElement(new
+        CollectedSession? session = reader.GetSession(sessionId);
+        IModelPricingLookup lookup = pricing.LoadPricingTables();
+        (SessionAggregateView? aggregate, _, string? projectionStatus) = ReadSessionFigures(sessionId, lookup);
+
+        Dictionary<string, object?> payload = new(StringComparer.Ordinal)
         {
-            session_id = session.SessionId,
-            harness = session.Harness,
-            label = session.Label,
-            is_subagent = session.IsSubagent,
-            parent_session = session.ParentSession,
-            agent_name = session.AgentName,
-            repo = session.Repo,
-            branch = session.Branch,
-            started = session.Started,
-            ended = session.Ended,
-            problems = session.ProblemsCount ?? 0,
-            context_limit_source = session.ContextLimitSource,
-            summary = ParseSummary(session),
-        });
+            ["session_id"] = projection.SessionId,
+            ["harness"] = ResolveHarness(aggregate, session),
+            ["label"] = projection.Label,
+            ["is_subagent"] = projection.IsSubagent,
+            ["parent_session"] = projection.ParentSessionId,
+            ["agent_name"] = projection.AgentName,
+            ["repo"] = session?.Workspace?.Repository,
+            ["branch"] = session?.Workspace?.Branch,
+            ["started"] = projection.StartedAtUtc,
+            ["ended"] = projection.EndedAtUtc,
+            ["problems"] = aggregate?.Problems.Count ?? 0,
+            ["context_limit_source"] = ResolveContextLimitSource(projection),
+            ["summary"] = aggregate is null ? null : BuildSessionSummary(aggregate),
+        };
+
+        if (projectionStatus is not null)
+        {
+            payload["projection_status"] = projectionStatus;
+        }
+
+        return JsonSerializer.SerializeToElement(payload, CamelCaseJsonOptions);
     }
 
     /// <summary>Returns turn-level figures for <paramref name="turnIndex"/> in <paramref name="sessionId"/>, or <see langword="null"/>.</summary>
@@ -289,8 +335,8 @@ public class KyberBridgeEngine
     public JsonElement? GetTurnFigures(string sessionId, int turnIndex)
     {
         EnsureProjected();
-        JsonElement? turn = store.GetSessionTurnPayload(sessionId, turnIndex);
-        if (!turn.HasValue)
+        IReadOnlyList<ReadTimeTurnSummary> turns = TrySessionTurnSummaries(sessionId);
+        if (turnIndex < 0 || turnIndex >= turns.Count)
         {
             return null;
         }
@@ -299,8 +345,8 @@ public class KyberBridgeEngine
         {
             sessionId,
             turnIndex,
-            turn = turn.Value,
-        });
+            turn = ToTurnDto(turns[turnIndex]),
+        }, CamelCaseJsonOptions);
     }
 
     /// <summary>Returns bounded or full text/parts content for a single turn.</summary>
@@ -312,13 +358,14 @@ public class KyberBridgeEngine
     public JsonElement? GetTurnContent(string sessionId, int turnIndex, int budget = ContentResponseBudget, bool full = false)
     {
         EnsureProjected();
-        JsonElement? turn = store.GetSessionTurnPayload(sessionId, turnIndex);
-        if (!turn.HasValue)
+        IReadOnlyList<ReadTimeTurnSummary> turns = TrySessionTurnSummaries(sessionId);
+        if (turnIndex < 0 || turnIndex >= turns.Count)
         {
             return null;
         }
 
-        string serialized = turn.Value.GetRawText();
+        Dictionary<string, object?> turn = ToTurnDto(turns[turnIndex]);
+        string serialized = JsonSerializer.Serialize(turn, CamelCaseJsonOptions);
         int totalBytes = Encoding.UTF8.GetByteCount(serialized);
         int effectiveBudget = budget > 0 ? budget : ContentResponseBudget;
         bool truncated = !full && totalBytes > effectiveBudget;
@@ -329,7 +376,7 @@ public class KyberBridgeEngine
             sessionId,
             turnIndex,
             content = truncated ? slice : null,
-            turn = truncated ? (JsonElement?)null : turn.Value,
+            turn = truncated ? null : turn,
             truncated,
             budget = effectiveBudget,
             totalBytes,
@@ -351,13 +398,14 @@ public class KyberBridgeEngine
         bool full = false)
     {
         EnsureProjected();
-        SessionSummaryRow? session = store.GetSession(sessionId);
-        if (session is null)
+        StoredSessionProjection? projection = projections.GetSessionProjection(sessionId);
+        if (projection is null)
         {
             return null;
         }
 
-        IReadOnlyList<CanonicalRecord> records = store.ListRecordsBySessionKey(sessionId);
+        List<CanonicalRecord> records = [.. reader.Records(sessionKey: sessionId).Select(ToCanonicalRecord)];
+        records.Sort(CompareRecords);
         IEnumerable<CanonicalRecord> filtered = records;
         if (!string.IsNullOrEmpty(spanId))
         {
@@ -445,28 +493,33 @@ public class KyberBridgeEngine
     /// <summary>Returns stored span attributes and token/cost blocks for <paramref name="spanId"/>.</summary>
     /// <param name="spanId">Span identifier.</param>
     /// <returns>Span attributes JSON element, or <see langword="null"/> when absent.</returns>
+    /// <remarks>
+    /// The relational store keeps no raw attribute bag; <c>attributes</c> carries the typed
+    /// attributes a hydrated record still names (declared context window, model, agent).
+    /// </remarks>
     public JsonElement? GetSpanAttributes(string spanId)
     {
-        CanonicalRecord? record = store.GetRecord(spanId);
+        CollectedRecord? record = reader.GetRecord(spanId);
         if (record is null)
         {
             return null;
         }
 
+        CanonicalRecord hydrated = ToCanonicalRecord(record);
         return JsonSerializer.SerializeToElement(new
         {
-            spanId = record.SpanId,
-            traceId = record.TraceId,
-            sessionId = record.SessionId,
-            harness = record.Harness,
-            source = record.Source,
-            name = record.Name,
-            op = record.Op,
-            kind = record.Kind,
-            timestamp = record.Timestamp,
-            tokens = record.Tokens,
-            cost = record.Cost,
-            attributes = record.Raw ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal),
+            spanId = hydrated.SpanId,
+            traceId = hydrated.TraceId,
+            sessionId = hydrated.SessionId,
+            harness = hydrated.Harness,
+            source = hydrated.Source,
+            name = hydrated.Name,
+            op = hydrated.Op,
+            kind = hydrated.Kind,
+            timestamp = hydrated.Timestamp,
+            tokens = hydrated.Tokens,
+            cost = hydrated.Cost,
+            attributes = hydrated.Raw ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal),
         }, CamelCaseJsonOptions);
     }
 
@@ -489,42 +542,46 @@ public class KyberBridgeEngine
         int page = 1)
     {
         EnsureProjected();
-        IReadOnlyList<Finding> all = store.ListFindings(sessionId: sessionId, runId: runId);
-        IEnumerable<Finding> scoped = all;
+        IReadOnlyList<StoredFinding> all = projections.ListFindings(runId: runId, sessionId: sessionId);
+        IEnumerable<StoredFinding> scoped = all;
         if (!string.IsNullOrWhiteSpace(harness))
         {
             string normHarness = CanonPricing.NormalizeHarnessName(harness.Trim());
-            HashSet<string> matchingSessionIds = [.. store.ListSessions(normHarness).Select(s => s.SessionId)];
-            HashSet<string> matchingRunIds = [.. store.ListRuns(normHarness).Select(r => r.RunId)];
+            HashSet<string> matchingSessionIds = [.. reader.Sessions()
+                .Where(s => string.Equals(CanonPricing.NormalizeHarnessName(s.HarnessId), normHarness, StringComparison.Ordinal))
+                .Select(s => s.SessionKey)];
+            HashSet<string> matchingRunIds = [.. projections.ListRuns()
+                .Where(r => string.Equals(CanonPricing.NormalizeHarnessName(r.HarnessId), normHarness, StringComparison.Ordinal))
+                .Select(r => r.RunId)];
             scoped = scoped.Where(f =>
                 (f.SessionId is not null && matchingSessionIds.Contains(f.SessionId))
                 || (f.RunId is not null && matchingRunIds.Contains(f.RunId)));
         }
 
-        List<Finding> baseList = [.. scoped];
+        List<StoredFinding> baseList = [.. scoped];
         Dictionary<string, int> detectorCounts = new(StringComparer.Ordinal);
         foreach (string detectorId in CanonFindings.DetectorIds)
         {
             detectorCounts[detectorId] = 0;
         }
 
-        foreach (Finding finding in baseList)
+        foreach (StoredFinding finding in baseList)
         {
             detectorCounts.TryGetValue(finding.DetectorId, out int current);
             detectorCounts[finding.DetectorId] = current + 1;
         }
 
-        IEnumerable<Finding> filtered = baseList;
+        IEnumerable<StoredFinding> filtered = baseList;
         if (!string.IsNullOrWhiteSpace(detector))
         {
             filtered = filtered.Where(f => string.Equals(f.DetectorId, detector.Trim(), StringComparison.Ordinal));
         }
 
-        List<Finding> list = [.. filtered];
+        List<StoredFinding> list = [.. filtered];
         int total = list.Count;
         int safeLimit = Math.Clamp(limit, 1, 500);
         int safeOffset = Math.Max(0, offset);
-        List<Finding> pageItems = [.. list.Skip(safeOffset).Take(safeLimit)];
+        List<Finding> pageItems = [.. list.Skip(safeOffset).Take(safeLimit).Select(ToFindingRow)];
 
         return JsonSerializer.SerializeToElement(new
         {
@@ -545,7 +602,8 @@ public class KyberBridgeEngine
     public Finding? GetFindingById(string findingId)
     {
         EnsureProjected();
-        return store.GetFinding(findingId);
+        StoredFinding? stored = projections.GetFinding(findingId);
+        return stored is null ? null : ToFindingRow(stored);
     }
 
     /// <summary>Returns all harness efficiency rollups (projecting runs and rollups if missing).</summary>
@@ -553,10 +611,10 @@ public class KyberBridgeEngine
     public JsonElement GetHarnesses()
     {
         EnsureProjected();
-        IReadOnlyList<HarnessRollupRow> harnessRollups = store.ListHarnessRollups();
+        List<HarnessRollupRow> harnessRollups = [.. projections.ListHarnessRollups().Select(ToHarnessRollupRow)];
         if (harnessRollups.Count == 0)
         {
-            harnessRollups = rollups.ProjectRunsAndHarnesses();
+            harnessRollups = [.. rollups.ProjectRunsAndHarnesses()];
         }
 
         HarnessAggregationContext context = BuildHarnessAggregationContext();
@@ -573,14 +631,14 @@ public class KyberBridgeEngine
     {
         EnsureProjected();
         string norm = CanonPricing.NormalizeHarnessName(harnessId);
-        HarnessRollupRow? row = store.GetHarnessRollup(norm);
-        if (row is null)
+        StoredHarnessRollup? stored = projections.GetHarnessRollup(norm);
+        if (stored is null)
         {
             return null;
         }
 
         HarnessAggregationContext context = BuildHarnessAggregationContext();
-        return JsonSerializer.SerializeToElement(BuildHarnessSummaryDto(row, context), CamelCaseJsonOptions);
+        return JsonSerializer.SerializeToElement(BuildHarnessSummaryDto(ToHarnessRollupRow(stored), context), CamelCaseJsonOptions);
     }
 
     /// <summary>Lists all projected runs.</summary>
@@ -589,33 +647,35 @@ public class KyberBridgeEngine
     public JsonElement GetRuns(string? harness = null)
     {
         EnsureProjected();
-        IReadOnlyList<RunRow> runRows = store.ListRuns(harness);
-        Dictionary<string, int> findingCounts = CountFindingsByRun();
-        Dictionary<string, SessionSummaryRow> sessionsById = store.ListSessions()
-            .ToDictionary(static s => s.SessionId, StringComparer.Ordinal);
+        IModelPricingLookup lookup = pricing.LoadPricingTables();
+        string? normalizedHarness = NormalizeHarnessFilter(harness);
+        IReadOnlyList<StoredRun> runRows = projections.ListRuns(normalizedHarness);
+        Dictionary<string, string> runBySession = BuildRunBySessionIndex(runRows);
+        Dictionary<string, int> findingCounts = CountFindingsByRun(runBySession);
+        Dictionary<string, SessionAggregateView> aggregatesById = BuildAggregateIndex(lookup);
 
         List<object> mappedRuns = new(runRows.Count);
-        foreach (RunRow run in runRows)
+        foreach (StoredRun run in runRows)
         {
-            IReadOnlyList<ExecutionRow> execs = store.ListExecutionsForRun(run.RunId);
-            RunSessionFigures figures = SummarizeRunSessions(execs, sessionsById);
+            IReadOnlyList<StoredExecution> execs = projections.ListExecutionsForRun(run.RunId);
+            RunSessionFigures figures = SummarizeRunSessions(execs, aggregatesById);
             mappedRuns.Add(new
             {
                 runId = run.RunId,
-                harness = run.Harness,
+                harness = run.HarnessId,
                 label = run.Label,
                 groupingBasis = run.GroupingBasis,
                 groupingRule = run.GroupingRule,
                 workingDirectory = run.WorkingDirectory,
-                started = run.Started,
-                ended = run.Ended,
+                started = run.StartedAtUtc,
+                ended = run.EndedAtUtc,
                 executionCount = execs.Count > 0 ? execs.Count : run.ExecutionCount,
                 turnCount = figures.TurnCount,
                 totalInput = figures.TotalInput,
                 totalOutput = figures.TotalOutput,
                 costUsd = figures.CostUsd,
                 findingCount = findingCounts.GetValueOrDefault(run.RunId),
-                payload = run.Payload,
+                payload = (object?)null,
             });
         }
 
@@ -628,83 +688,74 @@ public class KyberBridgeEngine
     public JsonElement? GetRunById(string runId)
     {
         EnsureProjected();
-        RunRow? run = store.GetRun(runId);
+        StoredRun? run = projections.GetRun(runId);
         if (run is null)
         {
             return null;
         }
 
-        IReadOnlyList<ExecutionRow> executions = store.ListExecutionsForRun(runId);
-        IReadOnlyList<Finding> findings = store.ListFindings(runId: runId);
+        IModelPricingLookup lookup = pricing.LoadPricingTables();
+        IReadOnlyList<StoredExecution> executions = projections.ListExecutionsForRun(runId);
+        HashSet<string> runSessionIds = [.. executions
+            .Where(static e => !string.IsNullOrEmpty(e.SessionId))
+            .Select(static e => e.SessionId!)];
+        // A derived run groups sessions rather than being named on the finding rows, so a run's
+        // findings are the ones naming the run or any of its sessions.
+        List<StoredFinding> findings = [.. projections.ListFindings()
+            .Where(f => string.Equals(f.RunId, runId, StringComparison.Ordinal)
+                || (f.SessionId is not null && runSessionIds.Contains(f.SessionId)))];
         JsonElement scorecard = rollups.BuildScorecard(runId);
+        Dictionary<string, SessionAggregateView> aggregatesById = BuildAggregateIndex(lookup);
 
-        Dictionary<string, SessionSummaryRow> sessionsById = new(StringComparer.Ordinal);
-        foreach (ExecutionRow exec in executions)
-        {
-            if (string.IsNullOrEmpty(exec.SessionId) || sessionsById.ContainsKey(exec.SessionId))
-            {
-                continue;
-            }
-
-            SessionSummaryRow? session = store.GetSession(exec.SessionId);
-            if (session is not null)
-            {
-                sessionsById[exec.SessionId] = session;
-            }
-        }
-
-        RunSessionFigures figures = SummarizeRunSessions(executions, sessionsById);
+        RunSessionFigures figures = SummarizeRunSessions(executions, aggregatesById);
         List<object> enrichedExecutions = new(executions.Count);
-        foreach (ExecutionRow exec in executions)
+        foreach (StoredExecution exec in executions)
         {
-            SessionSummaryFigures? sFig = !string.IsNullOrEmpty(exec.SessionId)
-                && sessionsById.TryGetValue(exec.SessionId, out SessionSummaryRow? s)
-                    ? ExtractSessionSummaryFigures(s)
-                    : null;
+            (int? TurnCount, double? CostUsd) sessionFigures = SessionFiguresOf(exec, aggregatesById);
             enrichedExecutions.Add(new
             {
                 executionId = exec.ExecutionId,
                 runId = exec.RunId,
                 sessionId = exec.SessionId,
                 parentExecutionId = exec.ParentExecutionId,
-                harness = exec.Harness,
+                harness = exec.HarnessId,
                 agentName = exec.AgentName,
                 isRoot = exec.IsRoot,
-                started = exec.Started,
-                ended = exec.Ended,
-                parentLinkage = exec.ParentLinkage,
-                turnCount = sFig?.TurnCount,
-                costUsd = sFig?.CostUsd,
-                payload = exec.Payload,
+                started = exec.StartedAtUtc,
+                ended = exec.EndedAtUtc,
+                parentLinkage = (object?)null,
+                turnCount = sessionFigures.TurnCount,
+                costUsd = sessionFigures.CostUsd,
+                payload = (object?)null,
             });
         }
 
-        List<object> executionTree = BuildExecutionTree(executions, sessionsById);
-        List<object> turns = ExtractRunTurns(executions);
+        List<object> executionTree = BuildExecutionTree(executions, aggregatesById);
+        List<Dictionary<string, object?>> turns = ExtractRunTurns(executions, lookup);
 
         return JsonSerializer.SerializeToElement(new
         {
             run = new
             {
                 runId = run.RunId,
-                harness = run.Harness,
+                harness = run.HarnessId,
                 label = run.Label,
                 groupingBasis = run.GroupingBasis,
                 groupingRule = run.GroupingRule,
                 workingDirectory = run.WorkingDirectory,
-                started = run.Started,
-                ended = run.Ended,
+                started = run.StartedAtUtc,
+                ended = run.EndedAtUtc,
                 executionCount = executions.Count > 0 ? executions.Count : run.ExecutionCount,
                 turnCount = figures.TurnCount,
                 totalInput = figures.TotalInput,
                 totalOutput = figures.TotalOutput,
                 costUsd = figures.CostUsd,
                 findingCount = findings.Count,
-                payload = run.Payload,
+                payload = (object?)null,
             },
             executions = enrichedExecutions,
             executionTree,
-            findings,
+            findings = findings.Select(ToFindingRow),
             turns,
             scorecard,
         }, CamelCaseJsonOptions);
@@ -736,8 +787,9 @@ public class KyberBridgeEngine
     /// <returns>Quarantine page JSON element.</returns>
     public JsonElement GetQuarantinePage(string? harness, int limit, int offset, int page)
     {
-        int total = store.CountQuarantine(harness);
-        IReadOnlyList<QuarantineRow> rows = store.ListQuarantinePage(harness, limit, offset);
+        int total = operationalStore.CountQuarantinedSpans(harness);
+        IReadOnlyList<StoredQuarantinedSpan> rows = operationalStore.ListQuarantinedSpans(harness, limit, offset);
+        // The typed quarantine row keeps no raw payload, so no entry advertises stored evidence.
         List<object> entries = [.. rows.Select(r => (object)new
         {
             spanId = r.SpanId,
@@ -745,9 +797,9 @@ public class KyberBridgeEngine
             reason = r.Reason,
             source = r.Source,
             name = r.Name,
-            timestamp = r.Timestamp,
-            harness = r.Harness,
-            evidenceAvailable = !string.IsNullOrEmpty(r.RawPayload),
+            timestamp = r.TimestampUtc,
+            harness = r.HarnessId,
+            evidenceAvailable = false,
         })];
 
         return JsonSerializer.SerializeToElement(new
@@ -765,7 +817,7 @@ public class KyberBridgeEngine
     /// <returns>Quarantine detail JSON element, or <see langword="null"/>.</returns>
     public JsonElement? GetQuarantineDetail(string spanId)
     {
-        QuarantineRow? row = store.GetQuarantineItem(spanId);
+        StoredQuarantinedSpan? row = operationalStore.GetQuarantinedSpan(spanId);
         if (row is null)
         {
             return null;
@@ -778,10 +830,10 @@ public class KyberBridgeEngine
             reason = row.Reason,
             source = row.Source,
             name = row.Name,
-            timestamp = row.Timestamp,
-            harness = row.Harness,
-            rawPayload = row.RawPayload,
-            evidenceAvailable = !string.IsNullOrEmpty(row.RawPayload),
+            timestamp = row.TimestampUtc,
+            harness = row.HarnessId,
+            rawPayload = (string?)null,
+            evidenceAvailable = false,
         });
     }
 
@@ -793,20 +845,9 @@ public class KyberBridgeEngine
     /// <returns>Problems page JSON element.</returns>
     public JsonElement GetProblemsPage(string? harness, int limit, int offset, int page)
     {
-        int total = store.CountProblems(harness);
-        IReadOnlyList<StoredProblemRow> rows = store.ListProblems(harness, limit, offset);
-        List<object> problems = [.. rows.Select(p => (object)new
-        {
-            id = p.Id,
-            spanId = p.SpanId,
-            severity = p.Severity,
-            code = p.Code,
-            message = p.Message,
-            location = p.Location,
-            sessionId = p.SessionId,
-            harness = p.Harness,
-            timestamp = p.Timestamp,
-        })];
+        int total = operationalStore.CountIngestProblems(harness);
+        IReadOnlyList<StoredIngestProblem> rows = operationalStore.ListIngestProblems(harness, limit: limit, offset: offset);
+        List<object> problems = [.. rows.Select(p => (object)ToProblemDto(p))];
 
         return JsonSerializer.SerializeToElement(new
         {
@@ -823,12 +864,12 @@ public class KyberBridgeEngine
     /// <returns>Problem detail JSON element, or <see langword="null"/>.</returns>
     public JsonElement? GetProblemDetail(string rawId)
     {
-        if (!int.TryParse(rawId, NumberStyles.Integer, CultureInfo.InvariantCulture, out int id))
+        if (!long.TryParse(rawId, NumberStyles.Integer, CultureInfo.InvariantCulture, out long id))
         {
             return null;
         }
 
-        StoredProblemRow? row = store.GetProblemById(id);
+        StoredIngestProblem? row = operationalStore.GetIngestProblem(id);
         if (row is null)
         {
             return null;
@@ -836,33 +877,36 @@ public class KyberBridgeEngine
 
         return JsonSerializer.SerializeToElement(new
         {
-            id = row.Id,
-            spanId = row.SpanId,
-            severity = row.Severity,
-            code = row.Code,
-            message = row.Message,
-            location = row.Location,
-            sessionId = row.SessionId,
-            harness = row.Harness,
-            timestamp = row.Timestamp,
-            stack = row.Stack,
+            id = row.ProblemId,
+            spanId = row.Problem.SpanId ?? string.Empty,
+            severity = row.Problem.Severity,
+            code = row.Problem.Code,
+            message = row.Problem.Message,
+            location = row.Problem.Location,
+            sessionId = row.Problem.SessionKey,
+            harness = row.Problem.HarnessId,
+            timestamp = row.Problem.TimestampUtc,
+            stack = row.Problem.Stack,
         });
     }
 
     /// <summary>Returns store metadata and REST contract version for <c>/api/kyber/meta</c>.</summary>
     /// <returns>Store metadata JSON element.</returns>
-    public JsonElement GetMeta() =>
-        JsonSerializer.SerializeToElement(new
+    public JsonElement GetMeta()
+    {
+        StoreStateView? storeState = operationalStore.GetStoreState();
+        return JsonSerializer.SerializeToElement(new
         {
-            schemaVersion = CanonSchema.SchemaVersion,
-            detectorVersion = CanonSchema.DetectorVersion,
-            storeGeneration = store.ComputeStoreGeneration(),
-            recordCount = store.CountRecords(),
-            sessionCount = store.ListSessions().Count,
-            findingCount = store.ListFindings().Count,
+            schemaVersion = storeState?.SchemaVersion ?? CanonSchema.SchemaVersion,
+            detectorVersion = storeState?.DetectorVersion ?? CanonSchema.DetectorVersion,
+            storeGeneration = operationalStore.GetWriteMarker(),
+            recordCount = reader.CountRecords(),
+            sessionCount = reader.Sessions().Count,
+            findingCount = projections.ListFindings().Count,
             version,
             apiVersion = ApiContractVersion,
         });
+    }
 
     /// <summary>Returns the store-free build and REST contract version for <c>/api/kyber/version</c>.</summary>
     /// <returns>Version JSON element.</returns>
@@ -878,16 +922,16 @@ public class KyberBridgeEngine
     public JsonElement GetCoverage()
     {
         EnsureProjected();
-        IReadOnlyList<HarnessRollupRow> harnessRollups = store.ListHarnessRollups();
-        IReadOnlyList<SourceCheckpoint> checkpoints = store.ListSourceCheckpoints();
+        List<HarnessRollupRow> harnessRollups = [.. projections.ListHarnessRollups().Select(ToHarnessRollupRow)];
+        IReadOnlyList<SourceCheckpoint> checkpoints = operationalStore.ListSourceCheckpoints();
         object refresh = BuildRefreshCoverage();
         object ingest = BuildIngestCoverage();
-        List<object> quarantineByReason = [.. store.ListQuarantine()
+        List<object> quarantineByReason = [.. operationalStore.ListQuarantinedSpans()
             .GroupBy(static q => string.IsNullOrEmpty(q.Reason) ? "unknown" : q.Reason, StringComparer.Ordinal)
             .Select(static g => new { reason = g.Key, count = g.Count() })
             .OrderByDescending(static x => x.count)
             .ThenBy(static x => x.reason, StringComparer.Ordinal)];
-        bool receiverEnabled = settings.ReadSettings().ReceiverHosted;
+        bool receiverEnabled = operationalStore.ReadSettings().ReceiverHosted;
         object receiver = new
         {
             enabled = receiverEnabled,
@@ -904,6 +948,7 @@ public class KyberBridgeEngine
             lastErrorAt = (string?)null,
             healthy = false,
         };
+        object projectionHealth = BuildProjectionHealth();
 
         return JsonSerializer.SerializeToElement(new
         {
@@ -912,6 +957,7 @@ public class KyberBridgeEngine
             quarantineByReason,
             checkpoints,
             receiver,
+            projection = projectionHealth,
             dimensions = CanonRollupsEngine.CoverageDimensions,
             harnesses = harnessRollups.Select(r => new
             {
@@ -932,26 +978,27 @@ public class KyberBridgeEngine
     public JsonElement GetReport(string? harness = null, string? sessionId = null, string? runId = null, int limit = 50)
     {
         EnsureProjected();
-        IReadOnlyList<SessionSummaryRow> sessions = store.ListSessions(harness);
+        string? normalizedHarness = NormalizeHarnessFilter(harness);
+        List<CollectedSession> sessions = [.. reader.Sessions(normalizedHarness)];
         if (!string.IsNullOrEmpty(sessionId))
         {
-            sessions = [.. sessions.Where(s => string.Equals(s.SessionId, sessionId, StringComparison.Ordinal))];
+            sessions = [.. sessions.Where(s => string.Equals(s.SessionKey, sessionId, StringComparison.Ordinal))];
         }
 
-        IReadOnlyList<Finding> findings = store.ListFindings(sessionId: sessionId, runId: runId);
-        IReadOnlyList<HarnessRollupRow> harnesses = store.ListHarnessRollups();
+        IReadOnlyList<StoredFinding> findings = projections.ListFindings(sessionId: sessionId, runId: runId);
+        List<HarnessRollupRow> harnesses = [.. projections.ListHarnessRollups().Select(ToHarnessRollupRow)];
 
         int boundedLimit = Math.Clamp(limit, 1, 200);
         return JsonSerializer.SerializeToElement(new
         {
             schemaVersion = ApiContractVersion,
-            generatedAt = clock().UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
-            storeGeneration = store.ComputeStoreGeneration(),
+            generatedAt = clock().UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture),
+            storeGeneration = operationalStore.GetWriteMarker(),
             sessionCount = sessions.Count,
             findingCount = findings.Count,
             harnessCount = harnesses.Count,
             harnesses,
-            findings = findings.Take(boundedLimit),
+            findings = findings.Take(boundedLimit).Select(ToFindingRow),
         }, CamelCaseJsonOptions);
     }
 
@@ -961,18 +1008,19 @@ public class KyberBridgeEngine
     public JsonElement GetTimeline(string? sessionId = null)
     {
         EnsureProjected();
-        IReadOnlyList<SessionSummaryRow> sessions = string.IsNullOrWhiteSpace(sessionId)
-            ? store.ListSessions().Take(25).ToList()
-            : store.GetSession(sessionId) is SessionSummaryRow single
+        List<CollectedSession> sessions = string.IsNullOrWhiteSpace(sessionId)
+            ? [.. reader.Sessions().Take(25)]
+            : reader.GetSession(sessionId) is CollectedSession single
                 ? [single]
                 : [];
 
         List<object> trees = [];
-        foreach (SessionSummaryRow session in sessions)
+        foreach (CollectedSession session in sessions)
         {
-            IReadOnlyList<CanonicalRecord> records = store.ListRecordsBySessionKey(session.SessionId);
+            List<CanonicalRecord> records = [.. reader.Records(sessionKey: session.SessionKey).Select(ToCanonicalRecord)];
+            records.Sort(CompareRecords);
             TimelineNode timeline = CanonContextAnalysis.BuildTimeline(records);
-            trees.Add(new { sessionId = session.SessionId, harness = session.Harness, timeline });
+            trees.Add(new { sessionId = session.SessionKey, harness = session.HarnessId, timeline });
         }
 
         return JsonSerializer.SerializeToElement(new { sessions = trees }, CamelCaseJsonOptions);
@@ -981,17 +1029,10 @@ public class KyberBridgeEngine
     /// <summary>Lists recorded predictions.</summary>
     /// <param name="runId">Optional run filter.</param>
     /// <returns>Serialized predictions array.</returns>
-    public JsonElement GetPredictions(string? runId = null)
-    {
-        if (predictionStore is not null)
-        {
-            return JsonSerializer.SerializeToElement(
-                predictionStore.ListPredictions(runId).Select(ToPredictionRow),
-                CamelCaseJsonOptions);
-        }
-
-        return JsonSerializer.SerializeToElement(store.ListPredictions(runId), CamelCaseJsonOptions);
-    }
+    public JsonElement GetPredictions(string? runId = null) =>
+        JsonSerializer.SerializeToElement(
+            projections.ListPredictions(runId).Select(ToPredictionRow),
+            CamelCaseJsonOptions);
 
     /// <summary>Records a prediction from a finding/run request body.</summary>
     /// <param name="body">Request JSON body.</param>
@@ -1047,9 +1088,20 @@ public class KyberBridgeEngine
             ? Math.Clamp(score, 0.0, 1.0)
             : null;
         string id = string.Create(CultureInfo.InvariantCulture, $"pred-{Guid.NewGuid():N}");
-        string nowIso = clock().UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+        string nowIso = clock().UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture);
         string tier = confidence >= 0.8 ? "high" : confidence >= 0.5 ? "medium" : "low";
 
+        projections.ReplacePrediction(new StoredPrediction(
+            PredictionId: id,
+            FindingId: findingId,
+            RunId: runId,
+            PredictedWasteTokens: predictedWaste,
+            Confidence: confidence,
+            ConfidenceTier: tier,
+            CreatedAtUtc: nowIso,
+            ComparisonRunId: comparisonRunId,
+            ObservedDeltaTokens: observedDeltaTokens,
+            CalibrationScore: calibrationScore));
         created = new PredictionRow(
             Id: id,
             FindingId: findingId,
@@ -1063,24 +1115,6 @@ public class KyberBridgeEngine
             ObservedDeltaTokens: observedDeltaTokens,
             CalibrationScore: calibrationScore,
             Payload: null);
-        if (predictionStore is not null)
-        {
-            predictionStore.ReplacePrediction(new StoredPrediction(
-                PredictionId: id,
-                FindingId: findingId,
-                RunId: runId,
-                PredictedWasteTokens: predictedWaste,
-                Confidence: confidence,
-                ConfidenceTier: tier,
-                CreatedAtUtc: nowIso,
-                ComparisonRunId: comparisonRunId,
-                ObservedDeltaTokens: observedDeltaTokens,
-                CalibrationScore: calibrationScore));
-        }
-        else
-        {
-            store.PutPrediction(created);
-        }
 
         return true;
     }
@@ -1107,9 +1141,7 @@ public class KyberBridgeEngine
     /// <returns>Calibration summary JSON element.</returns>
     public JsonElement GetCalibration()
     {
-        IReadOnlyList<PredictionRow> predictions = predictionStore is not null
-            ? [.. predictionStore.ListPredictions().Select(ToPredictionRow)]
-            : store.ListPredictions();
+        List<PredictionRow> predictions = [.. projections.ListPredictions().Select(ToPredictionRow)];
         List<PredictionRow> scored = [.. predictions.Where(p => p.CalibrationScore.HasValue)];
         double? meanScore = scored.Count > 0 ? Math.Round(scored.Average(p => p.CalibrationScore!.Value), 4) : null;
 
@@ -1173,7 +1205,7 @@ public class KyberBridgeEngine
             ?? trimmedOp;
 
         string nowIso = FormatTimestamp(clock());
-        uint generation = store.ComputeStoreGeneration();
+        long generation = operationalStore.GetWriteMarker();
         object freshness = CreateAnalyticsFreshness(nowIso, generation);
         object defaultScope = CreateDefaultAnalyticsScope();
 
@@ -1197,9 +1229,9 @@ public class KyberBridgeEngine
                 {
                     ready = true,
                     storeGeneration = generation,
-                    sessionCount = store.ListSessions().Count,
-                    recordCount = store.CountRecords(),
-                    findingCount = store.ListFindings().Count,
+                    sessionCount = reader.Sessions().Count,
+                    recordCount = reader.CountRecords(),
+                    findingCount = projections.ListFindings().Count,
                 },
             };
             return (200, BuildAnalyticsEnvelope(defaultScope, statusData, new { }, freshness, new { }, null, null, null));
@@ -1212,7 +1244,7 @@ public class KyberBridgeEngine
                 operations = AnalyticsOperations,
                 dimensions = new[] { "harness", "model", "repo", "outcome" },
                 metrics = new[] { "sessions", "turns", "total_input", "total_output", "cache_read" },
-                source = new { harnesses = store.ListObservedHarnesses() },
+                source = new { harnesses = reader.Harnesses() },
             };
             return (200, BuildAnalyticsEnvelope(defaultScope, catalogData, new { }, freshness, new { }, null, null, null));
         }
@@ -1221,7 +1253,7 @@ public class KyberBridgeEngine
             && request.Value.TryGetProperty("harness", out JsonElement hEl) && hEl.ValueKind == JsonValueKind.String
                 ? hEl.GetString()
                 : null;
-        IReadOnlyList<SessionSummaryRow> sessions = store.ListSessions(harnessFilter);
+        string? normalizedFilter = NormalizeHarnessFilter(harnessFilter);
 
         if (string.Equals(normalizedOp, "search-sessions", StringComparison.Ordinal))
         {
@@ -1230,26 +1262,30 @@ public class KyberBridgeEngine
                     ? qEl.GetString()
                     : null;
 
-            IEnumerable<SessionSummaryRow> matched = sessions;
+            IEnumerable<CollectedSession> matched = reader.Sessions(normalizedFilter);
             if (!string.IsNullOrWhiteSpace(queryText))
             {
                 matched = matched.Where(s =>
-                    s.SessionId.Contains(queryText, StringComparison.OrdinalIgnoreCase)
-                    || (s.Label?.Contains(queryText, StringComparison.OrdinalIgnoreCase) ?? false)
-                    || (s.Repo?.Contains(queryText, StringComparison.OrdinalIgnoreCase) ?? false));
+                    s.SessionKey.Contains(queryText, StringComparison.OrdinalIgnoreCase)
+                    || (s.Title?.Contains(queryText, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || (s.Workspace?.Repository?.Contains(queryText, StringComparison.OrdinalIgnoreCase) ?? false));
             }
 
-            List<SessionSummaryRow> items = [.. matched.Take(50)];
+            List<CollectedSession> items = [.. matched.Take(50)];
             object searchData = new
             {
-                items = items.Select(s => new
+                items = items.Select(s =>
                 {
-                    sessionId = s.SessionId,
-                    harness = s.Harness,
-                    label = s.Label,
-                    started = s.Started,
-                    ended = s.Ended,
-                    repo = s.Repo,
+                    StoredSessionProjection? projection = projections.GetSessionProjection(s.SessionKey);
+                    return new
+                    {
+                        sessionId = s.SessionKey,
+                        harness = s.HarnessId,
+                        label = projection?.Label ?? s.Title,
+                        started = projection?.StartedAtUtc,
+                        ended = projection?.EndedAtUtc,
+                        repo = s.Workspace?.Repository,
+                    };
                 }),
             };
             return (200, BuildAnalyticsEnvelope(defaultScope, searchData, new { }, freshness, new { returnedCount = items.Count, nextCursor = (string?)null }, null, null, null));
@@ -1277,8 +1313,8 @@ public class KyberBridgeEngine
 
         if (string.Equals(normalizedOp, "findings", StringComparison.Ordinal))
         {
-            IReadOnlyList<Finding> findings = store.ListFindings();
-            return (200, BuildAnalyticsEnvelope(defaultScope, new { items = findings }, new { }, freshness, new { returnedCount = findings.Count, nextCursor = (string?)null }, null, null, null));
+            IReadOnlyList<StoredFinding> findings = projections.ListFindings();
+            return (200, BuildAnalyticsEnvelope(defaultScope, new { items = findings.Select(ToFindingRow) }, new { }, freshness, new { returnedCount = findings.Count, nextCursor = (string?)null }, null, null, null));
         }
 
         if (string.Equals(normalizedOp, "compare", StringComparison.Ordinal))
@@ -1286,20 +1322,25 @@ public class KyberBridgeEngine
             return (200, BuildAnalyticsEnvelope(defaultScope, new { deltas = rollups.CompareHarnesses() }, new { }, freshness, new { }, null, null, null));
         }
 
+        IModelPricingLookup lookup = pricing.LoadPricingTables();
+        IReadOnlyList<SessionAggregateView> aggregates = reader.ListSessionAggregates(normalizedFilter, lookup);
+
         if (string.Equals(normalizedOp, "outcomes", StringComparison.Ordinal))
         {
-            List<object> outcomes = [.. sessions.Select(s => (object)new
+            // The relational schema keeps no outcome rows, so an outcome stays not-measurable
+            // rather than being guessed from unrelated telemetry.
+            List<object> outcomes = [.. aggregates.Select(a => (object)new
             {
-                sessionId = s.SessionId,
-                harness = s.Harness,
-                outcome = ExtractOutcome(s),
+                sessionId = a.SessionKey,
+                harness = a.HarnessId,
+                outcome = "not_measurable",
             })];
             return (200, BuildAnalyticsEnvelope(defaultScope, new { items = outcomes }, new { }, freshness, new { returnedCount = outcomes.Count, nextCursor = (string?)null }, null, null, null));
         }
 
         // operation == "query"
-        List<object> groups = [.. sessions
-            .GroupBy(s => s.Harness, StringComparer.Ordinal)
+        List<object> groups = [.. aggregates
+            .GroupBy(a => a.HarnessId, StringComparer.Ordinal)
             .OrderBy(g => g.Key, StringComparer.Ordinal)
             .Select(g => (object)new
             {
@@ -1326,7 +1367,7 @@ public class KyberBridgeEngine
             timestamp = DateTimeOffset.UtcNow;
         }
 
-        object freshness = CreateAnalyticsFreshness(FormatTimestamp(timestamp), 0u);
+        object freshness = CreateAnalyticsFreshness(FormatTimestamp(timestamp), 0L);
         object defaultScope = CreateDefaultAnalyticsScope();
         string message = string.IsNullOrWhiteSpace(rawMessage) ? fallbackMessage : rawMessage;
 
@@ -1334,9 +1375,9 @@ public class KyberBridgeEngine
     }
 
     private static string FormatTimestamp(DateTimeOffset timestamp) =>
-        timestamp.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+        timestamp.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture);
 
-    private object CreateAnalyticsFreshness(string generatedAt, uint generation) =>
+    private object CreateAnalyticsFreshness(string generatedAt, long generation) =>
         new
         {
             generatedAt,
@@ -1380,112 +1421,432 @@ public class KyberBridgeEngine
         }, CamelCaseJsonOptions);
     }
 
-    private static JsonElement? ParseSummary(SessionSummaryRow row)
+    /// <summary>Reads a session's aggregate and turn summaries, isolating any fault to that session.</summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="lookup">Read-time pricing tables.</param>
+    /// <returns>The aggregate when readable, the turn summaries when readable, and the isolation marker when either read failed.</returns>
+    private (SessionAggregateView? Aggregate, IReadOnlyList<ReadTimeTurnSummary> Turns, string? ProjectionStatus) ReadSessionFigures(
+        string sessionKey,
+        IModelPricingLookup lookup)
     {
-        if (!string.IsNullOrEmpty(row.SummaryJson))
+        SessionAggregateView? aggregate = null;
+        IReadOnlyList<ReadTimeTurnSummary> turns = [];
+        string? status = null;
+
+        try
+        {
+            aggregate = reader.GetSessionAggregate(sessionKey, lookup);
+        }
+        catch (Exception ex)
+        {
+            RecordProjectionFailure(sessionKey, ex.Message);
+            status = ProjectionFailedStatus;
+        }
+
+        try
+        {
+            turns = reader.SessionTurnSummaries(sessionKey, lookup);
+        }
+        catch (Exception ex)
+        {
+            RecordProjectionFailure(sessionKey, ex.Message);
+            status = ProjectionFailedStatus;
+        }
+
+        return (aggregate, turns, status);
+    }
+
+    private IReadOnlyList<ReadTimeTurnSummary> TrySessionTurnSummaries(string sessionKey)
+    {
+        try
+        {
+            return reader.SessionTurnSummaries(sessionKey, pricing.LoadPricingTables());
+        }
+        catch (Exception ex)
+        {
+            RecordProjectionFailure(sessionKey, ex.Message);
+            return [];
+        }
+    }
+
+    private void RecordProjectionFailure(string sessionKey, string message)
+    {
+        lock (projectionFailureLock)
+        {
+            projectionFailures[sessionKey] = message;
+        }
+    }
+
+    private object BuildProjectionHealth()
+    {
+        string? lastError;
+        List<string> failedSessions;
+        lock (projectionFailureLock)
+        {
+            lastError = lastProjectionPassFault ?? (projectionFailures.Count > 0 ? projectionFailures.Values.First() : null);
+            failedSessions = [.. projectionFailures.Keys.Order(StringComparer.Ordinal)];
+        }
+
+        return new
+        {
+            status = lastError is null ? "ok" : ProjectionFailedStatus,
+            lastError,
+            failedSessions,
+        };
+    }
+
+    private static bool IsTransientStoreFault(Exception ex) =>
+        ex is SqliteExecutionException or CircuitBreakerOpenException or IOException or TimeoutException;
+
+    private static string? NormalizeHarnessFilter(string? harness) =>
+        string.IsNullOrWhiteSpace(harness) ? null : CanonPricing.NormalizeHarnessName(harness.Trim());
+
+    private static string ResolveHarness(SessionAggregateView? aggregate, CollectedSession? session) =>
+        aggregate?.HarnessId ?? session?.HarnessId ?? string.Empty;
+
+    private static string? ResolveContextLimitSource(StoredSessionProjection projection) =>
+        projection.Context?.ContextLimitSource ?? projection.ContextUnmeasurableReason;
+
+    private static object BuildSessionSummary(SessionAggregateView aggregate) =>
+        new
+        {
+            turn_count = aggregate.TurnCount,
+            request_count = aggregate.RequestCount,
+            total_input = aggregate.TotalInput,
+            total_output = aggregate.TotalOutput,
+            total_cache_read = aggregate.TotalCacheRead,
+            total_cache_creation = aggregate.TotalCacheCreation,
+            duration_ms = aggregate.DurationMs,
+            models = aggregate.Models,
+            cache_hit_ratio = aggregate.CacheHitRatio,
+            cache_creation_coverage = aggregate.CacheCreationCoverage,
+            tool_calls = aggregate.ToolCalls,
+            tools_invoked = aggregate.ToolsInvoked,
+            tools_offered = aggregate.ToolsOffered,
+            has_tool_definitions = aggregate.HasToolDefinitions,
+            cost = aggregate.PublishedCost,
+            cost_reported = aggregate.ReportedCost,
+            cost_basis_mismatch = aggregate.CostBasisMismatch,
+            coverage = new
+            {
+                schema_measurable = aggregate.Coverage.SchemaMeasurable,
+                context_measurable = aggregate.Coverage.ContextMeasurable,
+            },
+            problems = aggregate.Problems,
+        };
+
+    private static Dictionary<string, object?> ToTurnDto(ReadTimeTurnSummary turn) => new(StringComparer.Ordinal)
+    {
+        ["turnIndex"] = turn.Position,
+        ["spanId"] = turn.SpanId,
+        ["timestamp"] = turn.TimestampUtc,
+        ["model"] = turn.Model,
+        ["inputTokens"] = turn.InputTokens,
+        ["outputTokens"] = turn.OutputTokens,
+        ["tokens"] = turn.InputTokens.HasValue && turn.OutputTokens.HasValue
+            ? turn.InputTokens.Value + turn.OutputTokens.Value
+            : null,
+        ["freshInputTokens"] = turn.FreshInputTokens,
+        ["cacheReadTokens"] = turn.CacheReadTokens,
+        ["cacheCreationTokens"] = turn.CacheCreationTokens,
+        ["reasoningTokens"] = turn.ReasoningTokens,
+        ["durationMs"] = turn.DurationMs,
+        ["cost"] = turn.PublishedCost,
+        ["costUsd"] = ExtractUsdCost(turn.PublishedCost),
+        ["costReported"] = turn.ReportedCost,
+    };
+
+    private static object ToProblemDto(StoredIngestProblem row) => new
+    {
+        id = row.ProblemId,
+        spanId = row.Problem.SpanId ?? string.Empty,
+        severity = row.Problem.Severity,
+        code = row.Problem.Code,
+        message = row.Problem.Message,
+        location = row.Problem.Location,
+        sessionId = row.Problem.SessionKey,
+        harness = row.Problem.HarnessId,
+        timestamp = row.Problem.TimestampUtc,
+    };
+
+    private static Finding ToFindingRow(StoredFinding finding) =>
+        new(
+            Id: finding.FindingId,
+            DetectorId: finding.DetectorId,
+            Title: finding.Title,
+            Mechanism: finding.Mechanism,
+            EvidenceLinks: finding.EvidenceLinks,
+            Confidence: finding.Confidence,
+            EstimatedWasteTokens: finding.EstimatedWasteTokens,
+            Recommendation: finding.Recommendation,
+            ErrorBar: finding.ErrorBar,
+            OutcomeRiskCaveat: finding.OutcomeRiskCaveat,
+            RunId: finding.RunId,
+            SessionId: finding.SessionId,
+            RankScore: finding.RankScore,
+            MeasurementClass: finding.MeasurementClass,
+            ConfidenceBasis: finding.ConfidenceBasis,
+            WhatWouldRaiseIt: finding.WhatWouldRaiseIt,
+            Payload: finding.CompactionHazard is null
+                ? null
+                : new Dictionary<string, object?>
+                {
+                    ["compactionHazard"] = new
+                    {
+                        contextLimit = finding.CompactionHazard.ContextLimit,
+                        contextLimitSource = finding.CompactionHazard.ContextLimitSource,
+                    },
+                });
+
+    private static double? ExtractUsdCost(ReadTimeCostSummary? cost) =>
+        cost is not null
+        && cost.Status == CostStatus.Priced
+        && string.Equals(cost.Currency, "USD", StringComparison.Ordinal)
+        && cost.Value is double value
+        && double.IsFinite(value)
+            ? value
+            : null;
+
+    private Dictionary<string, SessionAggregateView> BuildAggregateIndex(IModelPricingLookup lookup)
+    {
+        Dictionary<string, SessionAggregateView> aggregates = new(StringComparer.Ordinal);
+        foreach (StoredSessionProjection projection in projections.ListSessionProjections())
         {
             try
             {
-                using JsonDocument doc = JsonDocument.Parse(row.SummaryJson);
-                if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                SessionAggregateView? aggregate = reader.GetSessionAggregate(projection.SessionId, lookup);
+                if (aggregate is not null)
                 {
-                    return doc.RootElement.Clone();
+                    aggregates[projection.SessionId] = aggregate;
                 }
             }
-            catch (JsonException)
+            catch (Exception ex)
             {
+                RecordProjectionFailure(projection.SessionId, ex.Message);
             }
         }
 
-        if (row.Payload.ValueKind == JsonValueKind.Object
-            && row.Payload.TryGetProperty("summary", out JsonElement embedded)
-            && embedded.ValueKind == JsonValueKind.Object)
+        return aggregates;
+    }
+
+    private static (int? TurnCount, double? CostUsd) SessionFiguresOf(
+        StoredExecution execution,
+        Dictionary<string, SessionAggregateView> aggregatesById)
+    {
+        if (string.IsNullOrEmpty(execution.SessionId)
+            || !aggregatesById.TryGetValue(execution.SessionId, out SessionAggregateView? aggregate))
         {
-            return embedded.Clone();
+            return (null, null);
+        }
+
+        return (aggregate.TurnCount, ExtractUsdCost(aggregate.PublishedCost));
+    }
+
+    private static RunSessionFigures SummarizeRunSessions(
+        IReadOnlyList<StoredExecution> executions,
+        Dictionary<string, SessionAggregateView> aggregatesById)
+    {
+        HashSet<string> seenSessions = new(StringComparer.Ordinal);
+        int turnCount = 0;
+        bool hasTurns = false;
+        long totalInput = 0;
+        bool hasInput = false;
+        long totalOutput = 0;
+        bool hasOutput = false;
+        double costUsd = 0;
+        bool hasCost = false;
+
+        foreach (StoredExecution exec in executions)
+        {
+            if (string.IsNullOrEmpty(exec.SessionId) || !seenSessions.Add(exec.SessionId))
+            {
+                continue;
+            }
+
+            if (!aggregatesById.TryGetValue(exec.SessionId, out SessionAggregateView? aggregate))
+            {
+                continue;
+            }
+
+            turnCount += aggregate.TurnCount;
+            hasTurns = true;
+
+            if (aggregate.TotalInput.HasValue)
+            {
+                totalInput += aggregate.TotalInput.Value;
+                hasInput = true;
+            }
+
+            if (aggregate.TotalOutput.HasValue)
+            {
+                totalOutput += aggregate.TotalOutput.Value;
+                hasOutput = true;
+            }
+
+            if (ExtractUsdCost(aggregate.PublishedCost) is double sessionCost)
+            {
+                costUsd += sessionCost;
+                hasCost = true;
+            }
+        }
+
+        return new RunSessionFigures(
+            hasTurns ? turnCount : null,
+            hasInput ? totalInput : null,
+            hasOutput ? totalOutput : null,
+            hasCost ? Math.Round(costUsd, 6) : null);
+    }
+
+    private Dictionary<string, string> BuildRunBySessionIndex(IReadOnlyList<StoredRun> runRows)
+    {
+        Dictionary<string, string> runBySession = new(StringComparer.Ordinal);
+        foreach (StoredRun run in runRows)
+        {
+            foreach (StoredExecution exec in projections.ListExecutionsForRun(run.RunId))
+            {
+                if (!string.IsNullOrEmpty(exec.SessionId))
+                {
+                    runBySession.TryAdd(exec.SessionId, run.RunId);
+                }
+            }
+        }
+
+        return runBySession;
+    }
+
+    private Dictionary<string, int> CountFindingsByRun(Dictionary<string, string> runBySession)
+    {
+        Dictionary<string, int> counts = new(StringComparer.Ordinal);
+        foreach (StoredFinding finding in projections.ListFindings())
+        {
+            string? runId = finding.RunId
+                ?? (finding.SessionId is not null ? runBySession.GetValueOrDefault(finding.SessionId) : null);
+            if (runId is not null)
+            {
+                counts[runId] = counts.GetValueOrDefault(runId) + 1;
+            }
+        }
+
+        return counts;
+    }
+
+    /// <summary>
+    /// Maps a typed harness rollup onto the legacy rollup row shape the harness summary DTO and
+    /// scorecard still consume, mirroring the rollups engine's own translation.
+    /// </summary>
+    /// <param name="rollup">Typed harness rollup.</param>
+    /// <returns>Legacy rollup row carrying the typed metrics.</returns>
+    private static HarnessRollupRow ToHarnessRollupRow(StoredHarnessRollup rollup)
+    {
+        ArgumentNullException.ThrowIfNull(rollup);
+
+        string pressureReason = $"No measurable turns found in recorded sessions for harness \"{rollup.HarnessId}\".";
+        Dictionary<string, JsonElement> measurability = new(StringComparer.Ordinal)
+        {
+            ["context_pressure"] = MetricTagOf(rollup, "context_pressure_median", pressureReason),
+            ["context_pressure_median"] = MetricTagOf(rollup, "context_pressure_median", pressureReason),
+            ["context_pressure_p95"] = MetricTagOf(rollup, "context_pressure_p95", pressureReason),
+            ["cache_hit_rate"] = MetricTagOf(rollup, "cache_hit_rate", $"Cache-read telemetry not observed for harness \"{rollup.HarnessId}\"."),
+            ["tool_yield"] = MetricTagOf(rollup, "tool_yield", $"No tool definitions recorded for harness \"{rollup.HarnessId}\"."),
+            ["delegation_overhead"] = MetricTagOf(rollup, "delegation_overhead", $"No subagent executions observed for harness \"{rollup.HarnessId}\"."),
+            ["field_coverage"] = JsonSerializer.SerializeToElement("measured"),
+        };
+
+        return new HarnessRollupRow(
+            Harness: rollup.HarnessId,
+            SampleCount: Math.Max(rollup.SessionCount, Math.Max(rollup.RunCount, rollup.ExecutionCount)),
+            ContextPressureMedian: MetricValueOf(rollup, "context_pressure_median"),
+            ContextPressureP95: MetricValueOf(rollup, "context_pressure_p95"),
+            CacheHitRate: MetricValueOf(rollup, "cache_hit_rate"),
+            ToolYield: MetricValueOf(rollup, "tool_yield"),
+            DelegationOverhead: MetricValueOf(rollup, "delegation_overhead"),
+            FieldCoverage: ComputeFieldCoverageOf(rollup),
+            Measurability: measurability,
+            Payload: JsonSerializer.SerializeToElement(new
+            {
+                sessionCount = rollup.SessionCount,
+                runCount = rollup.RunCount,
+                executionCount = rollup.ExecutionCount,
+                unknownWindowSessions = rollup.UnknownWindowSessions,
+                windowSessionsTotal = rollup.WindowSessionsTotal,
+            }));
+    }
+
+    private static double? MetricValueOf(StoredHarnessRollup rollup, string metric)
+    {
+        foreach (StoredHarnessRollupMetric entry in rollup.Metrics)
+        {
+            if (string.Equals(entry.Metric, metric, StringComparison.Ordinal))
+            {
+                return entry.Value;
+            }
         }
 
         return null;
     }
 
-    private static string ExtractOutcome(SessionSummaryRow row)
+    private static JsonElement MetricTagOf(StoredHarnessRollup rollup, string metric, string missingReason)
     {
-        if (row.Payload.ValueKind == JsonValueKind.Object
-            && row.Payload.TryGetProperty("outcome", out JsonElement outEl)
-            && outEl.ValueKind == JsonValueKind.Object
-            && outEl.TryGetProperty("status", out JsonElement stEl)
-            && stEl.ValueKind == JsonValueKind.String)
+        foreach (StoredHarnessRollupMetric entry in rollup.Metrics)
         {
-            return stEl.GetString() ?? "not_measurable";
+            if (string.Equals(entry.Metric, metric, StringComparison.Ordinal))
+            {
+                return JsonSerializer.SerializeToElement(entry.Basis);
+            }
         }
 
-        return "not_measurable";
+        return JsonSerializer.SerializeToElement(new { status = "not_measurable", reason = missingReason });
     }
 
-    private static JsonElement? TryGetOptionalProperty(JsonElement? obj, string name)
+    private static double ComputeFieldCoverageOf(StoredHarnessRollup rollup)
     {
-        if (!obj.HasValue || obj.Value.ValueKind != JsonValueKind.Object)
+        int covered = 0;
+        if (MetricValueOf(rollup, "context_pressure_median").HasValue
+            || MetricValueOf(rollup, "context_pressure_p95").HasValue)
         {
-            return null;
+            covered++;
         }
 
-        if (!obj.Value.TryGetProperty(name, out JsonElement el)
-            || el.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        if (MetricValueOf(rollup, "cache_hit_rate").HasValue)
         {
-            return null;
+            covered++;
         }
 
-        return el.Clone();
-    }
-
-    private static string? TryGetString(JsonElement? obj, string name)
-    {
-        if (!obj.HasValue || obj.Value.ValueKind != JsonValueKind.Object)
+        if (MetricValueOf(rollup, "tool_yield").HasValue)
         {
-            return null;
+            covered++;
         }
 
-        return obj.Value.TryGetProperty(name, out JsonElement el) && el.ValueKind == JsonValueKind.String
-            ? el.GetString()
-            : null;
-    }
-
-    private static double? TryGetNullableDouble(JsonElement? obj, string name)
-    {
-        if (!obj.HasValue || obj.Value.ValueKind != JsonValueKind.Object)
+        if (MetricValueOf(rollup, "delegation_overhead").HasValue)
         {
-            return null;
+            covered++;
         }
 
-        return obj.Value.TryGetProperty(name, out JsonElement el)
-            && el.ValueKind == JsonValueKind.Number
-            && el.TryGetDouble(out double val)
-            && double.IsFinite(val)
-                ? val
-                : null;
+        return Math.Round((double)covered / CanonRollupsEngine.CoverageDimensions.Count, 4);
     }
 
     private HarnessAggregationContext BuildHarnessAggregationContext()
     {
         Dictionary<string, int> sessionCounts = new(StringComparer.Ordinal);
         Dictionary<string, string> sessionHarnessById = new(StringComparer.Ordinal);
-        foreach (SessionSummaryRow session in store.ListSessions())
+        foreach (CollectedSession session in reader.Sessions())
         {
-            string norm = CanonPricing.NormalizeHarnessName(session.Harness);
+            string norm = CanonPricing.NormalizeHarnessName(session.HarnessId);
             sessionCounts[norm] = sessionCounts.GetValueOrDefault(norm) + 1;
-            sessionHarnessById[session.SessionId] = norm;
+            sessionHarnessById[session.SessionKey] = norm;
         }
 
         Dictionary<string, int> runCounts = new(StringComparer.Ordinal);
         Dictionary<string, string> runHarnessById = new(StringComparer.Ordinal);
-        foreach (RunRow run in store.ListRuns())
+        foreach (StoredRun run in projections.ListRuns())
         {
-            string norm = CanonPricing.NormalizeHarnessName(run.Harness);
+            string norm = CanonPricing.NormalizeHarnessName(run.HarnessId);
             runCounts[norm] = runCounts.GetValueOrDefault(norm) + 1;
             runHarnessById[run.RunId] = norm;
         }
 
         Dictionary<string, int> findingCounts = new(StringComparer.Ordinal);
-        foreach (Finding finding in store.ListFindings())
+        foreach (StoredFinding finding in projections.ListFindings())
         {
             string? resolved = finding.SessionId is not null && sessionHarnessById.TryGetValue(finding.SessionId, out string? sh)
                 ? sh
@@ -1499,7 +1860,7 @@ public class KyberBridgeEngine
         }
 
         Dictionary<string, List<SourceCheckpoint>> checkpointsByHarness = new(StringComparer.Ordinal);
-        foreach (SourceCheckpoint cp in store.ListSourceCheckpoints())
+        foreach (SourceCheckpoint cp in operationalStore.ListSourceCheckpoints())
         {
             string norm = CanonPricing.NormalizeHarnessName(cp.HarnessId);
             if (!checkpointsByHarness.TryGetValue(norm, out List<SourceCheckpoint>? list))
@@ -1539,33 +1900,15 @@ public class KyberBridgeEngine
             delegationOverhead = row.DelegationOverhead,
             fieldCoverage = row.FieldCoverage,
             measurability = row.Measurability,
-            noDataReason = row.SampleCount == 0 ? ExtractNoDataReason(row) : null,
+            // The typed rollup row keeps no reason payload, so a data-less harness states its
+            // reason here instead of a stored JSON blob.
+            noDataReason = row.SampleCount == 0
+                ? $"No measurable sessions recorded for harness \"{row.Harness}\"."
+                : null,
             checkpointSummary = BuildCheckpointSummary(cps),
             scorecard = CanonRollupsEngine.BuildHarnessScorecard(row),
             payload = row.Payload,
         };
-    }
-
-    private static string? ExtractNoDataReason(HarnessRollupRow row)
-    {
-        if (row.Payload is { ValueKind: JsonValueKind.Object } payload)
-        {
-            if (payload.TryGetProperty("noDataReason", out JsonElement ndEl)
-                && ndEl.ValueKind == JsonValueKind.String
-                && !string.IsNullOrEmpty(ndEl.GetString()))
-            {
-                return ndEl.GetString();
-            }
-
-            if (payload.TryGetProperty("reason", out JsonElement rEl)
-                && rEl.ValueKind == JsonValueKind.String
-                && !string.IsNullOrEmpty(rEl.GetString()))
-            {
-                return rEl.GetString();
-            }
-        }
-
-        return null;
     }
 
     private static object BuildCheckpointSummary(IReadOnlyList<SourceCheckpoint> checkpoints)
@@ -1596,102 +1939,16 @@ public class KyberBridgeEngine
         return new { ok, partial, failed, unavailable };
     }
 
-    private Dictionary<string, int> CountFindingsByRun()
-    {
-        Dictionary<string, int> counts = new(StringComparer.Ordinal);
-        foreach (Finding finding in store.ListFindings())
-        {
-            if (!string.IsNullOrEmpty(finding.RunId))
-            {
-                counts[finding.RunId] = counts.GetValueOrDefault(finding.RunId) + 1;
-            }
-        }
-
-        return counts;
-    }
-
-    private static RunSessionFigures SummarizeRunSessions(
-        IReadOnlyList<ExecutionRow> executions,
-        Dictionary<string, SessionSummaryRow> sessionsById)
-    {
-        HashSet<string> seenSessions = new(StringComparer.Ordinal);
-        int turnCount = 0;
-        bool hasTurns = false;
-        long totalInput = 0;
-        bool hasInput = false;
-        long totalOutput = 0;
-        bool hasOutput = false;
-        double costUsd = 0;
-        bool hasCost = false;
-
-        foreach (ExecutionRow exec in executions)
-        {
-            if (string.IsNullOrEmpty(exec.SessionId) || !seenSessions.Add(exec.SessionId))
-            {
-                continue;
-            }
-
-            if (!sessionsById.TryGetValue(exec.SessionId, out SessionSummaryRow? session))
-            {
-                continue;
-            }
-
-            SessionSummaryFigures sFig = ExtractSessionSummaryFigures(session);
-            if (sFig.TurnCount.HasValue)
-            {
-                turnCount += sFig.TurnCount.Value;
-                hasTurns = true;
-            }
-
-            if (sFig.TotalInput.HasValue)
-            {
-                totalInput += sFig.TotalInput.Value;
-                hasInput = true;
-            }
-
-            if (sFig.TotalOutput.HasValue)
-            {
-                totalOutput += sFig.TotalOutput.Value;
-                hasOutput = true;
-            }
-
-            if (sFig.CostUsd.HasValue)
-            {
-                costUsd += sFig.CostUsd.Value;
-                hasCost = true;
-            }
-        }
-
-        return new RunSessionFigures(
-            hasTurns ? turnCount : null,
-            hasInput ? totalInput : null,
-            hasOutput ? totalOutput : null,
-            hasCost ? Math.Round(costUsd, 6) : null);
-    }
-
-    private static SessionSummaryFigures ExtractSessionSummaryFigures(SessionSummaryRow session)
-    {
-        JsonElement? summary = ParseSummary(session);
-        int? turnCount = TryGetNullableInt(summary, "turn_count");
-        long? totalInput = TryGetNullableLong(summary, "total_input");
-        long? totalOutput = TryGetNullableLong(summary, "total_output");
-        double? costUsd = ExtractUsdCost(ExtractCost(summary));
-        return new SessionSummaryFigures(turnCount, totalInput, totalOutput, costUsd);
-    }
-
-    private static List<object> BuildExecutionTree(
-        IReadOnlyList<ExecutionRow> executions,
-        Dictionary<string, SessionSummaryRow> sessionsById)
+    private List<object> BuildExecutionTree(
+        IReadOnlyList<StoredExecution> executions,
+        Dictionary<string, SessionAggregateView> aggregatesById)
     {
         Dictionary<string, ExecutionTreeNode> nodesById = new(StringComparer.Ordinal);
         List<ExecutionTreeNode> ordered = new(executions.Count);
-        foreach (ExecutionRow exec in executions)
+        foreach (StoredExecution exec in executions)
         {
-            SessionSummaryFigures? sFig = !string.IsNullOrEmpty(exec.SessionId)
-                && sessionsById.TryGetValue(exec.SessionId, out SessionSummaryRow? s)
-                    ? ExtractSessionSummaryFigures(s)
-                    : null;
-            ExecutionTreeNode node = new(exec, sFig?.TurnCount, sFig?.CostUsd, []);
+            (int? TurnCount, double? CostUsd) sessionFigures = SessionFiguresOf(exec, aggregatesById);
+            ExecutionTreeNode node = new(exec, sessionFigures.TurnCount, sessionFigures.CostUsd, []);
             nodesById[exec.ExecutionId] = node;
             ordered.Add(node);
         }
@@ -1748,58 +2005,49 @@ public class KyberBridgeEngine
             runId = node.Row.RunId,
             sessionId = node.Row.SessionId,
             parentExecutionId = node.Row.ParentExecutionId,
-            harness = node.Row.Harness,
+            harness = node.Row.HarnessId,
             agentName = node.Row.AgentName,
             isRoot = node.Row.IsRoot,
-            started = node.Row.Started,
-            ended = node.Row.Ended,
-            parentLinkage = node.Row.ParentLinkage,
+            started = node.Row.StartedAtUtc,
+            ended = node.Row.EndedAtUtc,
+            parentLinkage = (object?)null,
             turnCount = node.TurnCount,
             costUsd = node.CostUsd,
-            payload = node.Row.Payload,
+            payload = (object?)null,
             children = node.Children.Select(ToExecutionTreeDto).ToList(),
         };
     }
 
-    private List<object> ExtractRunTurns(IReadOnlyList<ExecutionRow> executions)
+    private List<Dictionary<string, object?>> ExtractRunTurns(
+        IReadOnlyList<StoredExecution> executions,
+        IModelPricingLookup lookup)
     {
         HashSet<string> seenSessions = new(StringComparer.Ordinal);
-        List<object> turns = [];
-        foreach (ExecutionRow exec in executions)
+        List<Dictionary<string, object?>> turns = [];
+        foreach (StoredExecution exec in executions)
         {
             if (string.IsNullOrEmpty(exec.SessionId) || !seenSessions.Add(exec.SessionId))
             {
                 continue;
             }
 
-            IReadOnlyList<JsonElement> payloads = store.ListSessionTurnPayloads(exec.SessionId);
-            for (int i = 0; i < payloads.Count; i++)
+            IReadOnlyList<ReadTimeTurnSummary> sessionTurns;
+            try
             {
-                JsonElement turn = payloads[i];
-                int turnIndex = TryGetNullableInt(turn, "turnIndex") ?? TryGetNullableInt(turn, "index") ?? i;
-                long? inputTokens = TryGetNullableLong(turn, "inputTokens") ?? TryGetNullableLong(turn, "input");
-                long? outputTokens = TryGetNullableLong(turn, "outputTokens") ?? TryGetNullableLong(turn, "output");
-                long? tokens = TryGetNullableLong(turn, "tokens") ?? (inputTokens.HasValue && outputTokens.HasValue ? inputTokens.Value + outputTokens.Value : null);
-                double? costUsd = TryGetNullableDouble(turn, "costUsd");
-                if (!costUsd.HasValue && turn.ValueKind == JsonValueKind.Object && turn.TryGetProperty("cost", out JsonElement costEl))
-                {
-                    costUsd = ExtractUsdCost(costEl);
-                }
+                sessionTurns = reader.SessionTurnSummaries(exec.SessionId, lookup);
+            }
+            catch (Exception ex)
+            {
+                RecordProjectionFailure(exec.SessionId, ex.Message);
+                continue;
+            }
 
-                turns.Add(new
-                {
-                    turnIndex,
-                    executionId = exec.ExecutionId,
-                    sessionId = exec.SessionId,
-                    model = TryGetString(turn, "model"),
-                    tokens,
-                    inputTokens,
-                    outputTokens,
-                    costUsd,
-                    contextPressure = TryGetNullableDouble(turn, "contextPressure") ?? TryGetNullableDouble(turn, "pressure"),
-                    cacheHitRatio = TryGetNullableDouble(turn, "cacheHitRatio") ?? TryGetNullableDouble(turn, "cache_hit_ratio"),
-                    timestamp = TryGetString(turn, "timestamp"),
-                });
+            foreach (ReadTimeTurnSummary turn in sessionTurns)
+            {
+                Dictionary<string, object?> dto = ToTurnDto(turn);
+                dto["executionId"] = exec.ExecutionId;
+                dto["sessionId"] = exec.SessionId;
+                turns.Add(dto);
             }
         }
 
@@ -1808,7 +2056,7 @@ public class KyberBridgeEngine
 
     private object BuildRefreshCoverage()
     {
-        IReadOnlyList<RefreshRunRow> runs = store.ListRefreshRuns(50);
+        IReadOnlyList<RefreshRunRow> runs = operationalStore.ListRefreshRuns(50);
         RefreshRunRow? success = runs.Where(static r => string.Equals(r.Status, "success", StringComparison.Ordinal))
             .OrderByDescending(static r => r.StartedAt, StringComparer.Ordinal)
             .FirstOrDefault();
@@ -1819,7 +2067,7 @@ public class KyberBridgeEngine
             .OrderByDescending(static r => r.StartedAt, StringComparer.Ordinal)
             .FirstOrDefault();
 
-        string? lastCleanAt = store.GetMetadata("last_clean_at");
+        string? lastCleanAt = operationalStore.GetLastCleanAtUtc();
         bool superseded = false;
         if (success is not null
             && !string.IsNullOrEmpty(lastCleanAt)
@@ -1839,7 +2087,7 @@ public class KyberBridgeEngine
         {
             coveredThrough = windowRun.StartedAt;
             coveredFrom = (throughDto - TimeSpan.FromDays(7 * weeks))
-                .UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+                .UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture);
         }
 
         return new
@@ -1859,10 +2107,22 @@ public class KyberBridgeEngine
 
     private object BuildIngestCoverage()
     {
-        IReadOnlyDictionary<string, int> recordCounts = store.CountRecordsBySource();
+        Dictionary<string, int> recordCounts = new(StringComparer.Ordinal);
+        foreach (IGrouping<string, StoredSource> group in reader.Sources()
+                     .GroupBy(static s => s.Source.Locator, StringComparer.Ordinal))
+        {
+            int count = 0;
+            foreach (StoredSource source in group)
+            {
+                count += reader.Records(sourceId: source.SourceId).Count;
+            }
+
+            recordCounts[group.Key] = count;
+        }
+
         Dictionary<string, (int Total, string? LastAt)> logSums = new(StringComparer.Ordinal);
         string? lastReceivedAt = null;
-        foreach (IngestLogEntry entry in store.GetIngestLog())
+        foreach (IngestLogEntry entry in operationalStore.ListIngestLog())
         {
             logSums.TryGetValue(entry.Source, out (int Total, string? LastAt) existing);
             string? newer = existing.LastAt is null || string.Compare(entry.Timestamp, existing.LastAt, StringComparison.Ordinal) > 0
@@ -1927,86 +2187,162 @@ public class KyberBridgeEngine
         return (source, "otlp");
     }
 
-    private static long? TryGetNullableLong(JsonElement? obj, string name)
+    /// <summary>
+    /// Hydrates a typed collected record into the canonical record shape the analysis modules
+    /// (<see cref="CanonContextAnalysis.BuildTimeline"/> and the content reader) consume, naming
+    /// only the attributes the relational store actually kept.
+    /// </summary>
+    /// <param name="record">Typed collected record.</param>
+    /// <returns>Hydrated canonical record.</returns>
+    private static CanonicalRecord ToCanonicalRecord(CollectedRecord record)
     {
-        if (!obj.HasValue || obj.Value.ValueKind != JsonValueKind.Object)
+        ArgumentNullException.ThrowIfNull(record);
+
+        Dictionary<string, JsonElement> raw = new(StringComparer.Ordinal);
+        if (record.Signals.DeclaredContextWindow is > 0)
         {
-            return null;
+            raw[CanonPricing.DeclaredContextLimitKey] = JsonSerializer.SerializeToElement(record.Signals.DeclaredContextWindow.Value);
         }
 
-        return obj.Value.TryGetProperty(name, out JsonElement el)
-            && el.ValueKind == JsonValueKind.Number
-            && el.TryGetInt64(out long val)
-                ? val
-                : null;
-    }
-
-    private static int? TryGetNullableInt(JsonElement? obj, string name)
-    {
-        if (!obj.HasValue || obj.Value.ValueKind != JsonValueKind.Object)
+        if (!string.IsNullOrWhiteSpace(record.Model))
         {
-            return null;
+            raw["gen_ai.response.model"] = JsonSerializer.SerializeToElement(record.Model);
         }
 
-        return obj.Value.TryGetProperty(name, out JsonElement el)
-            && el.ValueKind == JsonValueKind.Number
-            && el.TryGetInt32(out int val)
-                ? val
-                : null;
-    }
-
-    private static IReadOnlyList<string> ExtractStringArray(JsonElement? obj, string name)
-    {
-        if (!obj.HasValue
-            || obj.Value.ValueKind != JsonValueKind.Object
-            || !obj.Value.TryGetProperty(name, out JsonElement el)
-            || el.ValueKind != JsonValueKind.Array)
+        if (!string.IsNullOrWhiteSpace(record.Agent?.AgentName))
         {
-            return [];
+            raw["gen_ai.agent.name"] = JsonSerializer.SerializeToElement(record.Agent.AgentName);
         }
 
-        List<string> items = [];
-        foreach (JsonElement item in el.EnumerateArray())
+        long freshInput = 0;
+        long cacheRead = 0;
+        long cacheCreation = 0;
+        long output = 0;
+        long? reasoning = null;
+        foreach (CollectedTokenCount tokenCount in record.Tokens)
         {
-            if (item.ValueKind == JsonValueKind.String && item.GetString() is string s)
+            switch (tokenCount.TokenClass)
             {
-                items.Add(s);
+                case TokenClass.Input:
+                    freshInput = tokenCount.Count;
+                    break;
+                case TokenClass.CacheRead:
+                    cacheRead = tokenCount.Count;
+                    break;
+                case TokenClass.CacheWrite:
+                    cacheCreation = tokenCount.Count;
+                    break;
+                case TokenClass.Output:
+                    output = tokenCount.Count;
+                    break;
+                case TokenClass.Reasoning:
+                    reasoning = tokenCount.Count;
+                    break;
             }
         }
 
-        return items;
-    }
-
-    private static JsonElement ExtractCost(JsonElement? summary)
-    {
-        if (summary.HasValue
-            && summary.Value.ValueKind == JsonValueKind.Object
-            && summary.Value.TryGetProperty("cost", out JsonElement costEl)
-            && costEl.ValueKind == JsonValueKind.Object)
+        List<ContentPart> parts = new(record.Parts.Count + record.ToolDefinitions.Count);
+        foreach (CollectedContentPart part in record.Parts)
         {
-            return costEl.Clone();
+            parts.Add(new ContentPart(
+                Part: PartKeyOf(part.Bucket),
+                Text: part.PlainText ?? string.Empty,
+                Tokens: part.ReportedTokens ?? part.Withheld?.MeasuredTokens,
+                Server: part.Server,
+                Role: part.Role,
+                Order: part.Position,
+                Resident: part.Resident,
+                Truncated: part.OriginalUtf8BytesWhenTruncated.HasValue));
         }
 
-        return JsonSerializer.SerializeToElement(new { basis = "unknown", status = "no_rate" });
-    }
-
-    private static double? ExtractUsdCost(JsonElement cost)
-    {
-        if (cost.ValueKind == JsonValueKind.Object
-            && cost.TryGetProperty("status", out JsonElement statusEl)
-            && string.Equals(statusEl.GetString(), "priced", StringComparison.Ordinal)
-            && cost.TryGetProperty("currency", out JsonElement currEl)
-            && string.Equals(currEl.GetString(), "USD", StringComparison.Ordinal)
-            && cost.TryGetProperty("value", out JsonElement valEl)
-            && valEl.ValueKind == JsonValueKind.Number
-            && valEl.TryGetDouble(out double val)
-            && double.IsFinite(val))
+        foreach (CollectedToolDefinition definition in record.ToolDefinitions)
         {
-            return val;
+            parts.Add(new ContentPart(
+                Part: "tool_definitions",
+                Text: definition.ToolName,
+                Tokens: definition.SchemaTokens,
+                Server: definition.Server,
+                Order: TypedDefinitionOrderBase + definition.Position));
         }
 
-        return null;
+        parts.Sort(static (left, right) => (left.Order ?? 0).CompareTo(right.Order ?? 0));
+
+        return new CanonicalRecord
+        {
+            SpanId = record.RecordId,
+            TraceId = record.TraceId,
+            ParentSpanId = record.ParentRecordId,
+            Source = RelationalSourceName,
+            Harness = record.HarnessId,
+            SessionId = record.SessionKey,
+            Name = record.Name,
+            Op = OpNameOf(record.Op),
+            Kind = KindNameOf(record.Kind),
+            Timestamp = record.StartedAt.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture),
+            DurationMs = record.ReportedDurationMs ?? 0,
+            Status = StatusNameOf(record.Status),
+            Tokens = new TokenUsage(
+                FreshInput: freshInput,
+                CacheRead: cacheRead,
+                CacheCreation: cacheCreation,
+                Output: output,
+                ReportedInput: record.ReportedInputTokens ?? 0,
+                ReportedOutput: record.ReportedOutputTokens ?? 0,
+                Reasoning: reasoning),
+            Content = CanonValidation.ContentFromParts(parts),
+            Parts = parts,
+            Cost = record.ReportedCost is null
+                ? new CostBlock(CostBasis.Unknown, CostStatus.NoRate)
+                : new CostBlock(CostBasis.Harness, CostStatus.Priced, record.ReportedCost.Amount, record.ReportedCost.Currency),
+            Measurability = null,
+            Raw = raw,
+        };
     }
+
+    private static int CompareRecords(CanonicalRecord left, CanonicalRecord right)
+    {
+        int byTimestamp = string.Compare(left.Timestamp, right.Timestamp, StringComparison.Ordinal);
+        return byTimestamp != 0 ? byTimestamp : string.Compare(left.SpanId, right.SpanId, StringComparison.Ordinal);
+    }
+
+    private static string OpNameOf(RecordOp op) => op switch
+    {
+        RecordOp.LlmInvoke => "llm.invoke",
+        RecordOp.ToolInvoke => "tool.invoke",
+        RecordOp.AgentInvoke => "agent.invoke",
+        _ => "unspecified",
+    };
+
+    private static string KindNameOf(RecordKind kind) => kind switch
+    {
+        RecordKind.Internal => "internal",
+        RecordKind.Server => "server",
+        RecordKind.Client => "client",
+        RecordKind.Producer => "producer",
+        RecordKind.Consumer => "consumer",
+        _ => "unspecified",
+    };
+
+    private static string StatusNameOf(RecordStatus status) => status switch
+    {
+        RecordStatus.Ok => "ok",
+        RecordStatus.Error => "error",
+        RecordStatus.Unspecified => "unspecified",
+        _ => "unset",
+    };
+
+    private static string PartKeyOf(ContentBucket bucket) => bucket switch
+    {
+        ContentBucket.SystemPrompt => "system_prompt",
+        ContentBucket.ToolDefinitions => "tool_definitions",
+        ContentBucket.ToolDefinition => "tool_definition",
+        ContentBucket.InstructionContext => "instruction_context",
+        ContentBucket.ConversationHistory => "conversation_history",
+        ContentBucket.ToolResultContent => "tool_result_content",
+        ContentBucket.UserPrompt => "user_prompt",
+        ContentBucket.UserMessage => "user_message",
+        _ => "reasoning",
+    };
 
     private static bool IsAncestorOrSelf(string candidateId, string parentId, Dictionary<string, SessionNode> byId)
     {
@@ -2025,31 +2361,39 @@ public class KyberBridgeEngine
         return false;
     }
 
-    private static object ToSessionDto(SessionNode node)
+    private static Dictionary<string, object?> ToSessionDto(SessionNode node)
     {
-        return new
+        Dictionary<string, object?> dto = new(StringComparer.Ordinal)
         {
-            session_id = node.SessionId,
-            sessionId = node.SessionId,
-            harness = node.Harness,
-            label = node.Label,
-            is_subagent = node.IsSubagent,
-            parent_session = node.ParentSession,
-            agent_name = node.AgentName,
-            repo = node.Repo,
-            branch = node.Branch,
-            started = node.Started,
-            ended = node.Ended,
-            turn_count = node.TurnCount,
-            request_count = node.RequestCount,
-            total_input = node.TotalInput,
-            total_output = node.TotalOutput,
-            cost_usd = node.CostUsd,
-            cost = node.Cost,
-            models = node.Models,
-            problems = node.Problems,
-            subagents = node.Subagents.Select(ToSessionDto).ToList(),
+            ["session_id"] = node.SessionId,
+            ["sessionId"] = node.SessionId,
+            ["harness"] = node.Harness,
+            ["label"] = node.Label,
+            ["is_subagent"] = node.IsSubagent,
+            ["parent_session"] = node.ParentSession,
+            ["agent_name"] = node.AgentName,
+            ["repo"] = node.Repo,
+            ["branch"] = node.Branch,
+            ["started"] = node.Started,
+            ["ended"] = node.Ended,
+            ["turn_count"] = node.TurnCount,
+            ["request_count"] = node.RequestCount,
+            ["total_input"] = node.TotalInput,
+            ["total_output"] = node.TotalOutput,
+            ["cost_usd"] = node.CostUsd,
+            ["cost"] = node.Cost is null ? new { basis = "unknown", status = "no_rate" } : node.Cost,
+            ["cost_reported"] = node.CostReported,
+            ["cost_basis_mismatch"] = node.CostBasisMismatch,
+            ["models"] = node.Models,
+            ["problems"] = node.Problems,
+            ["subagents"] = node.Subagents.Select(ToSessionDto).ToList(),
         };
+        if (node.ProjectionStatus is not null)
+        {
+            dto["projection_status"] = node.ProjectionStatus;
+        }
+
+        return dto;
     }
 
     private static string TruncateUtf8(string text, int maxBytes)
@@ -2069,31 +2413,25 @@ public class KyberBridgeEngine
         return Encoding.UTF8.GetString(utf8, 0, end);
     }
 
-    private record HarnessAggregationContext(
+    private sealed record HarnessAggregationContext(
         Dictionary<string, int> SessionCounts,
         Dictionary<string, int> RunCounts,
         Dictionary<string, int> FindingCounts,
         Dictionary<string, List<SourceCheckpoint>> CheckpointsByHarness);
 
-    private record RunSessionFigures(
+    private sealed record RunSessionFigures(
         int? TurnCount,
         long? TotalInput,
         long? TotalOutput,
         double? CostUsd);
 
-    private record SessionSummaryFigures(
-        int? TurnCount,
-        long? TotalInput,
-        long? TotalOutput,
-        double? CostUsd);
-
-    private record ExecutionTreeNode(
-        ExecutionRow Row,
+    private sealed record ExecutionTreeNode(
+        StoredExecution Row,
         int? TurnCount,
         double? CostUsd,
         List<ExecutionTreeNode> Children);
 
-    private record SessionNode(
+    private sealed record SessionNode(
         string SessionId,
         string Harness,
         string Label,
@@ -2106,11 +2444,14 @@ public class KyberBridgeEngine
         string? Ended,
         int? TurnCount,
         int? RequestCount,
-        JsonElement? TotalInput,
-        JsonElement? TotalOutput,
+        long? TotalInput,
+        long? TotalOutput,
         double? CostUsd,
-        JsonElement Cost,
+        ReadTimeCostSummary? Cost,
+        ReadTimeCostSummary? CostReported,
+        ReadTimeCostBasisMismatch? CostBasisMismatch,
         IReadOnlyList<string> Models,
         int Problems,
+        string? ProjectionStatus,
         List<SessionNode> Subagents);
 }

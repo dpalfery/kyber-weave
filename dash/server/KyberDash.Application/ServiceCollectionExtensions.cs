@@ -69,8 +69,9 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<CanonRollupsEngine>()));
 
         services.TryAddSingleton(provider => new KyberBridgeEngine(
-            provider.GetRequiredService<ICanonStoreRepository>(),
-            provider.GetRequiredService<ISettingsRepository>(),
+            provider.GetRequiredService<IRelationalStoreReader>(),
+            provider.GetRequiredService<IProjectionStore>(),
+            provider.GetRequiredService<IOperationalStore>(),
             provider.GetRequiredService<IPricingRepository>(),
             provider.GetRequiredService<CanonSessionProjectorEngine>(),
             provider.GetRequiredService<CanonRollupsEngine>(),

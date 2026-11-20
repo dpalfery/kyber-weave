@@ -133,7 +133,7 @@ public class FindingPredictionProjectionTests
     public void TryRecordPrediction_WritesTypedOptionalPredictionChildren()
     {
         InMemoryRelationalStore projections = new();
-        KyberBridgeEngine bridge = NewBridge(new FakeCanonStoreRepository(), projections);
+        KyberBridgeEngine bridge = NewBridge(projections);
         JsonElement body = JsonSerializer.SerializeToElement(new
         {
             findingId = "finding-1",
@@ -182,7 +182,7 @@ public class FindingPredictionProjectionTests
     public void TryRecordPrediction_OmitsAbsentOptionalPredictionChildren()
     {
         InMemoryRelationalStore projections = new();
-        KyberBridgeEngine bridge = NewBridge(new FakeCanonStoreRepository(), projections);
+        KyberBridgeEngine bridge = NewBridge(projections);
         JsonElement body = JsonSerializer.SerializeToElement(new
         {
             findingId = "finding-9",
@@ -211,16 +211,16 @@ public class FindingPredictionProjectionTests
     private static CanonSessionProjectorEngine NewProjector(InMemoryRelationalStore store) =>
         new(store, store, store, new FakePricingRepository());
 
-    private static KyberBridgeEngine NewBridge(ICanonStoreRepository store, InMemoryRelationalStore projections) =>
+    private static KyberBridgeEngine NewBridge(InMemoryRelationalStore projections) =>
         new(
-            store,
-            new FakeSettingsRepository(),
+            projections,
+            projections,
+            projections,
             new FakePricingRepository(),
-            new CanonSessionProjectorEngine(store, new FakePricingRepository()),
-            new CanonRollupsEngine(store, new FakePricingRepository()),
+            new CanonSessionProjectorEngine(projections, projections, projections, new FakePricingRepository()),
+            new CanonRollupsEngine(projections, projections, new FakePricingRepository()),
             clock: () => FixedTimestamp,
-            instanceId: "test-instance",
-            predictionStore: projections);
+            instanceId: "test-instance");
 
     private static void WriteSession(
         InMemoryRelationalStore store,

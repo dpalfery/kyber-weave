@@ -1,6 +1,9 @@
 using System.Text.Json;
+using KyberDash.Application;
+using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Core.Exceptions;
+using KyberDash.Data.Collector;
 using KyberDash.Domain;
 using Moq;
 using Xunit;
@@ -17,17 +20,18 @@ public sealed class AnalyticsErrorEnvelopeTests
     [MemberData(nameof(StoreFaultCases))]
     public void StoreFaultReturnsUnavailableContractV1Envelope(Exception storeException, bool failDuringGeneration)
     {
-        Mock<ICanonStoreRepository> store = CreateBaseStoreMock();
+        (Mock<IRelationalStoreReader> reader, _, Mock<IOperationalStore> operational) = CreateBaseStoreMocks();
         if (failDuringGeneration)
         {
-            store.Setup(repository => repository.ComputeStoreGeneration()).Throws(storeException);
+            operational.Setup(store => store.GetWriteMarker()).Throws(storeException);
         }
         else
         {
-            store.Setup(repository => repository.ListSessions(It.IsAny<string?>())).Throws(storeException);
+            reader.Setup(store => store.ListSessionAggregates(It.IsAny<string?>(), It.IsAny<IModelPricingLookup?>()))
+                .Throws(storeException);
         }
 
-        KyberBridgeEngine engine = CreateEngine(store.Object);
+        KyberBridgeEngine engine = CreateEngine(reader.Object, operational: operational.Object);
 
         (int statusCode, JsonElement envelope) = engine.ExecuteAnalytics("query", null);
 
@@ -40,9 +44,10 @@ public sealed class AnalyticsErrorEnvelopeTests
     [MemberData(nameof(InvalidArgumentCases))]
     public void InvalidArgumentFaultReturnsBadRequestContractV1Envelope(Exception argumentException)
     {
-        Mock<ICanonStoreRepository> store = CreateBaseStoreMock();
-        store.Setup(repository => repository.ListSessions(It.IsAny<string?>())).Throws(argumentException);
-        KyberBridgeEngine engine = CreateEngine(store.Object);
+        (Mock<IRelationalStoreReader> reader, Mock<IProjectionStore> projections, Mock<IOperationalStore> operational) = CreateBaseStoreMocks();
+        reader.Setup(store => store.ListSessionAggregates(It.IsAny<string?>(), It.IsAny<IModelPricingLookup?>()))
+            .Throws(argumentException);
+        KyberBridgeEngine engine = CreateEngine(reader.Object, projections.Object, operational.Object);
 
         (int statusCode, JsonElement envelope) = engine.ExecuteAnalytics("query", null);
 
@@ -54,8 +59,8 @@ public sealed class AnalyticsErrorEnvelopeTests
     [Fact]
     public void BlankOperationReturnsInvalidArgumentContractV1Envelope()
     {
-        FakeCanonStoreRepository store = new();
-        KyberBridgeEngine engine = CreateEngine(store);
+        InMemoryRelationalStore store = new();
+        KyberBridgeEngine engine = CreateEngine(store, store, store);
 
         (int statusCode, JsonElement envelope) = engine.ExecuteAnalytics("   ", null);
 
@@ -67,10 +72,10 @@ public sealed class AnalyticsErrorEnvelopeTests
     [Fact]
     public void UnexpectedFaultReturnsNonEmptyInternalErrorContractV1Envelope()
     {
-        Mock<ICanonStoreRepository> store = CreateBaseStoreMock();
-        store.Setup(repository => repository.ListSessions(It.IsAny<string?>()))
+        (Mock<IRelationalStoreReader> reader, Mock<IProjectionStore> projections, Mock<IOperationalStore> operational) = CreateBaseStoreMocks();
+        reader.Setup(store => store.ListSessionAggregates(It.IsAny<string?>(), It.IsAny<IModelPricingLookup?>()))
             .Throws(new InvalidOperationException("Corrupted rollup state"));
-        KyberBridgeEngine engine = CreateEngine(store.Object);
+        KyberBridgeEngine engine = CreateEngine(reader.Object, projections.Object, operational.Object);
 
         (int statusCode, JsonElement envelope) = engine.ExecuteAnalytics("query", null);
 
@@ -97,33 +102,52 @@ public sealed class AnalyticsErrorEnvelopeTests
             new DashValidationException("VALIDATION_ERROR", "Malformed filter argument."),
         };
 
-    private static Mock<ICanonStoreRepository> CreateBaseStoreMock()
+    private static (Mock<IRelationalStoreReader> Reader, Mock<IProjectionStore> Projections, Mock<IOperationalStore> Operational) CreateBaseStoreMocks()
     {
-        Mock<ICanonStoreRepository> store = new();
-        store.Setup(repository => repository.ComputeStoreGeneration()).Returns(42u);
-        store.Setup(repository => repository.RecordsWriteMarker()).Returns(0L);
-        store.Setup(repository => repository.CountRecords()).Returns(0);
-        store.Setup(repository => repository.HasCurrentDetectorVersion()).Returns(true);
-        store.Setup(repository => repository.GetMetadata("projection_records_marker")).Returns("0");
-        store.Setup(repository => repository.GetMetadata("projection_schema_version")).Returns("24");
-        store.Setup(repository => repository.GetMetadata("schema_version")).Returns("24");
-        store.Setup(repository => repository.ListSessions(It.IsAny<string?>())).Returns([]);
-        store.Setup(repository => repository.ListHarnessRollups()).Returns([]);
-        store.Setup(repository => repository.ListFindings(It.IsAny<string?>(), It.IsAny<string?>())).Returns([]);
-        store.Setup(repository => repository.ListObservedHarnesses()).Returns([]);
-        return store;
+        Mock<IRelationalStoreReader> reader = new();
+        reader.Setup(store => store.Sessions(It.IsAny<string?>())).Returns(Array.Empty<CollectedSession>());
+        reader.Setup(store => store.Records(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()))
+            .Returns(Array.Empty<CollectedRecord>());
+        reader.Setup(store => store.CountRecords(It.IsAny<string?>())).Returns(0);
+        reader.Setup(store => store.Harnesses()).Returns(Array.Empty<string>());
+        reader.Setup(store => store.ListSessionAggregates(It.IsAny<string?>(), It.IsAny<IModelPricingLookup?>()))
+            .Returns(Array.Empty<SessionAggregateView>());
+
+        Mock<IProjectionStore> projections = new();
+        projections.Setup(store => store.ListSessionProjections(It.IsAny<string?>()))
+            .Returns(Array.Empty<StoredSessionProjection>());
+        projections.Setup(store => store.ListRuns(It.IsAny<string?>())).Returns(Array.Empty<StoredRun>());
+        projections.Setup(store => store.ListExecutionsForRun(It.IsAny<string>())).Returns(Array.Empty<StoredExecution>());
+        projections.Setup(store => store.ListFindings(It.IsAny<string?>(), It.IsAny<string?>())).Returns(Array.Empty<StoredFinding>());
+        projections.Setup(store => store.ListHarnessRollups()).Returns(Array.Empty<StoredHarnessRollup>());
+        projections.Setup(store => store.ListPredictions(It.IsAny<string?>(), It.IsAny<string?>())).Returns(Array.Empty<StoredPrediction>());
+
+        Mock<IOperationalStore> operational = new();
+        operational.Setup(store => store.GetWriteMarker()).Returns(0L);
+        operational.Setup(store => store.GetProjectionState()).Returns((ProjectionStateView?)null);
+        operational.Setup(store => store.GetProjectionDirtyState()).Returns((DirtyProjectionState?)null);
+        operational.Setup(store => store.ReadSettings())
+            .Returns(new SettingsView(FolderImportScheduled: false, JobsPaused: false, RefreshCadenceMinutes: 5, ReceiverHosted: false, DashboardPort: 4747));
+
+        return (reader, projections, operational);
     }
 
-    private static KyberBridgeEngine CreateEngine(ICanonStoreRepository store)
+    private static KyberBridgeEngine CreateEngine(
+        IRelationalStoreReader reader,
+        IProjectionStore? projections = null,
+        IOperationalStore? operational = null)
     {
-        FakeSettingsRepository settings = new();
+        InMemoryRelationalStore memory = new();
+        IProjectionStore resolvedProjections = projections ?? memory;
+        IOperationalStore resolvedOperational = operational ?? memory;
         FakePricingRepository pricing = new();
         return new KyberBridgeEngine(
-            store,
-            settings,
+            reader,
+            resolvedProjections,
+            resolvedOperational,
             pricing,
-            new CanonSessionProjectorEngine(store, pricing),
-            new CanonRollupsEngine(store, pricing),
+            new CanonSessionProjectorEngine(reader, resolvedProjections, resolvedOperational, pricing),
+            new CanonRollupsEngine(reader, resolvedProjections, pricing),
             clock: () => FixedTimestamp,
             instanceId: "test-instance");
     }
