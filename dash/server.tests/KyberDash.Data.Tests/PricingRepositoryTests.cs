@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
@@ -10,17 +11,38 @@ using Xunit;
 namespace KyberDash.Data.Tests;
 
 /// <summary>Rate-table loading, pricing-provider registration, and model-catalog status for <see cref="PricingRepository"/>.</summary>
+/// <remarks>
+/// This class reconfigures <see cref="CanonPricing"/>'s process-wide provider (the constructor
+/// registers a store-backed one, and the tests exercise registration), so it joins
+/// <see cref="CanonPricingStatics"/> and restores the provider it found: leaving empty tables
+/// behind once starved a parallel reader of rates for <c>claude-sonnet-4-5</c>.
+/// </remarks>
+[Collection(Repositories.CanonPricingStatics.Name)]
 public class PricingRepositoryTests : IDisposable
 {
+    private readonly (Func<PricingTables>? Provider, PricingTables? Cache) savedPricingProvider;
+
+    /// <summary>Captures the process-wide pricing provider so <see cref="Dispose"/> can put it back.</summary>
+    public PricingRepositoryTests()
+    {
+        savedPricingProvider = (
+            PricingField("_pricingProvider").GetValue(null) as Func<PricingTables>,
+            PricingField("_cachedTables").GetValue(null) as PricingTables);
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
-        // Restore the process-wide provider so other tests are not left with a repository-backed one.
-        CanonPricing.ConfigurePricingProvider(() => CanonPricing.BuildPricingTables(
-            new Dictionary<string, ModelCosts>(StringComparer.Ordinal),
-            new Dictionary<string, ModelCosts>(StringComparer.Ordinal)));
+        // Restore the process-wide provider so other tests are not left with a repository-backed
+        // one (or with empty tables that would price ambient reads as having no rate).
+        PricingField("_pricingProvider").SetValue(null, savedPricingProvider.Provider);
+        PricingField("_cachedTables").SetValue(null, savedPricingProvider.Cache);
         GC.SuppressFinalize(this);
     }
+
+    private static FieldInfo PricingField(string name) =>
+        typeof(CanonPricing).GetField(name, BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException($"CanonPricing.{name} is no longer a private static field.");
 
     [Fact]
     public void LoadPricingTables_ReadsEmbeddedSnapshotAndFallback()

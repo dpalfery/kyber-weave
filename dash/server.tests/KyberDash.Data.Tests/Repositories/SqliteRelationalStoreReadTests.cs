@@ -19,6 +19,13 @@ namespace KyberDash.Data.Tests.Repositories;
 /// verifying identical behavior against <see cref="InMemoryRelationalStore"/> across empty, unfiltered, and
 /// filtered queries via the <see cref="KyberDash.Core.Repositories.BaseSqliteRepository.ExecuteSqliteCore"/> seam.
 /// </summary>
+/// <remarks>
+/// The populated-corpus spot checks read <see cref="CanonPricing"/>'s process-wide tables through the
+/// <see langword="null"/>-pricing overloads, so this class joins <see cref="CanonPricingStatics"/>: any
+/// parallel class that reconfigures the provider mid-read would otherwise price the same corpus
+/// differently between the two stores (or between the parity section and the spot checks).
+/// </remarks>
+[Collection(CanonPricingStatics.Name)]
 public class SqliteRelationalStoreReadTests : IDisposable
 {
     private const string DummySha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -1146,8 +1153,9 @@ public class CanonPricingOverloadsTests
 }
 
 /// <summary>
-/// The collection shared by tests that read <see cref="CanonPricing"/>'s process-wide tables: it
-/// runs exclusively, so no parallel class can reconfigure the provider mid-read.
+/// The collection shared by tests that read <see cref="CanonPricing"/>'s process-wide tables and by
+/// tests that reconfigure the provider: it runs exclusively, so no parallel class can swap the
+/// tables mid-read, and every writer restores what it found.
 /// </summary>
 [CollectionDefinition(Name, DisableParallelization = true)]
 public static class CanonPricingStatics
