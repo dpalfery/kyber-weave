@@ -64,9 +64,7 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-| Plan | Status | Date | Component | Goal |
-|---|---|---|---|---|
-| [2026-11-19-kyberdash-relational-store.md](2026-11-19-kyberdash-relational-store.md) | Ready | 2026-11-19 | KyberDash | Redesign `canon.db` into a third-normal-form relational store with typed repository-layer DTOs, no JSON columns, Copilot CLI `events.jsonl` and full evidenced harness mapping, schema-only analytics, and `/api/kyber/session/{sessionKey}/stored-fields` UI inspection. |
+No plans are open.
 
 ## Archived Plans
 

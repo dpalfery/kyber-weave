@@ -2,7 +2,7 @@
 id: plans/2026-11-19-kyberdash-relational-store
 title: KyberDash Relational Store Implementation
 doc-type: plan
-status: current
+status: archived
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-11-19
@@ -15,7 +15,7 @@ impact-components:
 
 # KyberDash Relational Store Implementation
 
-**Status: Ready, 2026-11-19.**
+**Status: Archived, 2026-11-20.**
 
 ## Problem and goal
 
