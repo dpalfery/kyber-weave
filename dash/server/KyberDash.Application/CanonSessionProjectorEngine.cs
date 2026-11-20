@@ -2594,7 +2594,7 @@ public partial class CanonSessionProjectorEngine
                 continue;
             }
 
-            string runId = $"derived:{harness}:{StripLeadingHarnessPrefix(harness, projection.SessionId)}";
+            string runId = $"derived:{harness}:{CanonPipelineShared.StripHarnessPrefix(harness, projection.SessionId)}";
             if (!membersByRun.TryGetValue(runId, out List<RunMember>? members))
             {
                 members = [];
@@ -2691,14 +2691,6 @@ public partial class CanonSessionProjectorEngine
     /// <param name="harness">Canonical harness identifier.</param>
     /// <param name="seed">Session identifier seed.</param>
     /// <returns>Seed without the harness prefix.</returns>
-    private static string StripLeadingHarnessPrefix(string harness, string seed)
-    {
-        string prefix = $"{harness}:";
-        return seed.StartsWith(prefix, StringComparison.Ordinal)
-            ? seed[prefix.Length..]
-            : seed;
-    }
-
     /// <summary>A stored session projection paired with its relational session metadata for run grouping.</summary>
     /// <param name="Projection">Stored projected session summary.</param>
     /// <param name="Session">Relational session metadata.</param>

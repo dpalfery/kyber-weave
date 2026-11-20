@@ -166,7 +166,7 @@ public class CanonRollupsEngine
         }
 
         string fallback = fallbackRunId ?? first.SessionId ?? first.TraceId ?? first.SpanId;
-        string seed = StripLeadingHarnessPrefix(first.Harness, fallback);
+        string seed = CanonPipelineShared.StripHarnessPrefix(first.Harness, fallback);
         return new DerivedRunIdentity(
             RunId: $"derived:{first.Harness}:{seed}",
             GroupingBasis: "derived",
@@ -478,11 +478,11 @@ public class CanonRollupsEngine
         return new HarnessRollupRow(
             Harness: rollup.HarnessId,
             SampleCount: Math.Max(rollup.SessionCount, Math.Max(rollup.RunCount, rollup.ExecutionCount)),
-            ContextPressureMedian: MetricValue(rollup, "context_pressure_median"),
-            ContextPressureP95: MetricValue(rollup, "context_pressure_p95"),
-            CacheHitRate: MetricValue(rollup, "cache_hit_rate"),
-            ToolYield: MetricValue(rollup, "tool_yield"),
-            DelegationOverhead: MetricValue(rollup, "delegation_overhead"),
+            ContextPressureMedian: CanonPipelineShared.RollupMetricValue(rollup, "context_pressure_median"),
+            ContextPressureP95: CanonPipelineShared.RollupMetricValue(rollup, "context_pressure_p95"),
+            CacheHitRate: CanonPipelineShared.RollupMetricValue(rollup, "cache_hit_rate"),
+            ToolYield: CanonPipelineShared.RollupMetricValue(rollup, "tool_yield"),
+            DelegationOverhead: CanonPipelineShared.RollupMetricValue(rollup, "delegation_overhead"),
             FieldCoverage: fieldCoverage,
             Measurability: measurability,
             Payload: payload);
@@ -498,41 +498,28 @@ public class CanonRollupsEngine
         ArgumentNullException.ThrowIfNull(rollup);
 
         int covered = 0;
-        if (MetricValue(rollup, "context_pressure_median").HasValue
-            || MetricValue(rollup, "context_pressure_p95").HasValue)
+        if (CanonPipelineShared.RollupMetricValue(rollup, "context_pressure_median").HasValue
+            || CanonPipelineShared.RollupMetricValue(rollup, "context_pressure_p95").HasValue)
         {
             covered++;
         }
 
-        if (MetricValue(rollup, "cache_hit_rate").HasValue)
+        if (CanonPipelineShared.RollupMetricValue(rollup, "cache_hit_rate").HasValue)
         {
             covered++;
         }
 
-        if (MetricValue(rollup, "tool_yield").HasValue)
+        if (CanonPipelineShared.RollupMetricValue(rollup, "tool_yield").HasValue)
         {
             covered++;
         }
 
-        if (MetricValue(rollup, "delegation_overhead").HasValue)
+        if (CanonPipelineShared.RollupMetricValue(rollup, "delegation_overhead").HasValue)
         {
             covered++;
         }
 
         return Math.Round((double)covered / CoverageDimensions.Count, 4);
-    }
-
-    private static double? MetricValue(StoredHarnessRollup rollup, string metric)
-    {
-        foreach (StoredHarnessRollupMetric entry in rollup.Metrics)
-        {
-            if (string.Equals(entry.Metric, metric, StringComparison.Ordinal))
-            {
-                return entry.Value;
-            }
-        }
-
-        return null;
     }
 
     private static JsonElement MetricTag(StoredHarnessRollup rollup, string metric, string missingReason)
@@ -921,14 +908,6 @@ public class CanonRollupsEngine
         }
 
         return null;
-    }
-
-    private static string StripLeadingHarnessPrefix(string harness, string seed)
-    {
-        string prefix = $"{harness}:";
-        return seed.StartsWith(prefix, StringComparison.Ordinal)
-            ? seed[prefix.Length..]
-            : seed;
     }
 
     private static string SanitizePathSegment(string value)

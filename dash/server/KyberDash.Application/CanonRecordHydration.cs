@@ -116,11 +116,11 @@ public static class CanonRecordHydration
             Harness = record.HarnessId,
             SessionId = record.SessionKey,
             Name = record.Name,
-            Op = OpNameOf(record.Op),
-            Kind = KindNameOf(record.Kind),
+            Op = CanonRecordVocabulary.FormatRecordOp(record.Op),
+            Kind = CanonRecordVocabulary.FormatRecordKind(record.Kind),
             Timestamp = record.StartedAt.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture),
             DurationMs = record.ReportedDurationMs ?? 0,
-            Status = StatusNameOf(record.Status),
+            Status = CanonRecordVocabulary.FormatRecordStatus(record.Status),
             Tokens = new TokenUsage(
                 FreshInput: freshInput,
                 CacheRead: cacheRead,
@@ -138,32 +138,6 @@ public static class CanonRecordHydration
             Raw = raw,
         };
     }
-
-    private static string OpNameOf(RecordOp op) => op switch
-    {
-        RecordOp.LlmInvoke => "llm.invoke",
-        RecordOp.ToolInvoke => "tool.invoke",
-        RecordOp.AgentInvoke => "agent.invoke",
-        _ => "unspecified",
-    };
-
-    private static string KindNameOf(RecordKind kind) => kind switch
-    {
-        RecordKind.Internal => "internal",
-        RecordKind.Server => "server",
-        RecordKind.Client => "client",
-        RecordKind.Producer => "producer",
-        RecordKind.Consumer => "consumer",
-        _ => "unspecified",
-    };
-
-    private static string StatusNameOf(RecordStatus status) => status switch
-    {
-        RecordStatus.Ok => "ok",
-        RecordStatus.Error => "error",
-        RecordStatus.Unspecified => "unspecified",
-        _ => "unset",
-    };
 
     private static string PartKeyOf(ContentBucket bucket) => bucket switch
     {

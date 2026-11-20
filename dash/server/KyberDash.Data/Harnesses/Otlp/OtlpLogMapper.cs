@@ -100,7 +100,7 @@ public static class OtlpLogMapper
                     null,
                     source,
                     new CollectedProblem(
-                        ProblemKey: UniqueProblemKey(usedProblemKeys, fallbackKey, InvalidIdCode, index),
+                        ProblemKey: CanonRecordVocabulary.UniqueProblemKey(usedProblemKeys, "otlp-log:", fallbackKey, InvalidIdCode, index),
                         Severity: ProblemSeverityWireString(ProblemSeverity.Error),
                         Code: InvalidIdCode,
                         Message: "OTLP log record lacked a valid plain-text log identifier; raw payload was not retained.",
@@ -124,7 +124,7 @@ public static class OtlpLogMapper
                     null,
                     source,
                     new CollectedProblem(
-                        ProblemKey: UniqueProblemKey(usedProblemKeys, log.LogId, InvalidTimestampCode, index),
+                        ProblemKey: CanonRecordVocabulary.UniqueProblemKey(usedProblemKeys, "otlp-log:", log.LogId, InvalidTimestampCode, index),
                         Severity: ProblemSeverityWireString(ProblemSeverity.Error),
                         Code: InvalidTimestampCode,
                         Message: "OTLP log record lacked a valid UTC timestamp; raw payload was not retained.",
@@ -159,7 +159,7 @@ public static class OtlpLogMapper
                     null,
                     source,
                     new CollectedProblem(
-                        ProblemKey: UniqueProblemKey(usedProblemKeys, log.LogId, UnknownOpencodeContractCode, index),
+                        ProblemKey: CanonRecordVocabulary.UniqueProblemKey(usedProblemKeys, "otlp-log:", log.LogId, UnknownOpencodeContractCode, index),
                         Severity: ProblemSeverityWireString(ProblemSeverity.Error),
                         Code: UnknownOpencodeContractCode,
                         Message: "OTLP log carried an unsupported OpenCode contract version; raw payload was not retained.",
@@ -179,7 +179,7 @@ public static class OtlpLogMapper
                     null,
                     source,
                     new CollectedProblem(
-                        ProblemKey: UniqueProblemKey(usedProblemKeys, log.LogId, UnknownDroidContractCode, index),
+                        ProblemKey: CanonRecordVocabulary.UniqueProblemKey(usedProblemKeys, "otlp-log:", log.LogId, UnknownDroidContractCode, index),
                         Severity: ProblemSeverityWireString(ProblemSeverity.Error),
                         Code: UnknownDroidContractCode,
                         Message: "OTLP log carried an unsupported Droid contract version; raw payload was not retained.",
@@ -219,7 +219,7 @@ public static class OtlpLogMapper
                     null,
                     item.Source,
                     new CollectedProblem(
-                        ProblemKey: UniqueProblemKey(usedProblemKeys, item.Log.LogId, UnattributedCode, item.Index),
+                        ProblemKey: CanonRecordVocabulary.UniqueProblemKey(usedProblemKeys, "otlp-log:", item.Log.LogId, UnattributedCode, item.Index),
                         Severity: ProblemSeverityWireString(ProblemSeverity.Error),
                         Code: UnattributedCode,
                         Message: message,
@@ -244,7 +244,7 @@ public static class OtlpLogMapper
                     harness,
                     item.Source,
                     new CollectedProblem(
-                        ProblemKey: UniqueProblemKey(usedProblemKeys, item.Log.LogId, NormalizeFailedCode, item.Index),
+                        ProblemKey: CanonRecordVocabulary.UniqueProblemKey(usedProblemKeys, "otlp-log:", item.Log.LogId, NormalizeFailedCode, item.Index),
                         Severity: ProblemSeverityWireString(ProblemSeverity.Error),
                         Code: NormalizeFailedCode,
                         Message: SafeProblemMessage(exception.Message, "OTLP log normalization failed; raw payload was not retained."),
@@ -265,7 +265,7 @@ public static class OtlpLogMapper
                     normalized.Harness,
                     item.Source,
                     new CollectedProblem(
-                        ProblemKey: UniqueProblemKey(usedProblemKeys, item.Log.LogId, validationProblem.Code, item.Index),
+                        ProblemKey: CanonRecordVocabulary.UniqueProblemKey(usedProblemKeys, "otlp-log:", item.Log.LogId, validationProblem.Code, item.Index),
                         Severity: ProblemSeverityWireString(validationProblem.Severity),
                         Code: validationProblem.Code,
                         Message: SafeProblemMessage(validationProblem.Message, "OTLP log failed validation; raw payload was not retained."),
@@ -374,11 +374,11 @@ public static class OtlpLogMapper
         string? errorMessage = ExtractSafeAttributeString(log.Attributes, ErrorMessageKeys);
         RecordStatus status = errorMessage is not null
             ? RecordStatus.Error
-            : MapRecordStatus(normalized.Status);
+            : CanonRecordVocabulary.ParseRecordStatus(normalized.Status);
 
         string name = !string.IsNullOrWhiteSpace(normalized.Name) && !JsonDocumentText.IsDocument(normalized.Name)
             ? normalized.Name
-            : FormatOpName(op);
+            : CanonRecordVocabulary.FormatRecordOp(op);
 
         string? spanId = SafeOptionalText(log.SpanId);
         string? parentRecordId = spanId is not null && !string.Equals(spanId, log.LogId, StringComparison.Ordinal)
@@ -431,7 +431,7 @@ public static class OtlpLogMapper
         IReadOnlyDictionary<string, JsonElement> attributes,
         TokenUsage tokens)
     {
-        RecordOp mapped = MapRecordOp(normalizedOp);
+        RecordOp mapped = CanonRecordVocabulary.ParseRecordOp(normalizedOp);
         if (mapped != RecordOp.Unspecified)
         {
             return mapped;
@@ -672,19 +672,6 @@ public static class OtlpLogMapper
         return [.. namespaces.Order(StringComparer.Ordinal)];
     }
 
-    private static string UniqueProblemKey(HashSet<string> usedKeys, string logId, string code, int index)
-    {
-        string baseKey = string.Create(CultureInfo.InvariantCulture, $"otlp-log:{logId}:{code}");
-        if (usedKeys.Add(baseKey))
-        {
-            return baseKey;
-        }
-
-        string indexedKey = string.Create(CultureInfo.InvariantCulture, $"{baseKey}:{index}");
-        _ = usedKeys.Add(indexedKey);
-        return indexedKey;
-    }
-
     private static string? ExtractSafeAttributeString(
         IReadOnlyDictionary<string, JsonElement> attributes,
         IReadOnlyList<string> keys)
@@ -774,29 +761,6 @@ public static class OtlpLogMapper
     private static string SafeProblemMessage(string? message, string fallback) =>
         string.IsNullOrWhiteSpace(message) || JsonDocumentText.IsDocument(message) ? fallback : message;
 
-    private static RecordOp MapRecordOp(string op) => op switch
-    {
-        "llm.invoke" => RecordOp.LlmInvoke,
-        "tool.invoke" => RecordOp.ToolInvoke,
-        "agent.invoke" => RecordOp.AgentInvoke,
-        _ => RecordOp.Unspecified,
-    };
-
-    private static string FormatOpName(RecordOp op) => op switch
-    {
-        RecordOp.LlmInvoke => "llm.invoke",
-        RecordOp.ToolInvoke => "tool.invoke",
-        RecordOp.AgentInvoke => "agent.invoke",
-        _ => "unspecified",
-    };
-
-    private static RecordStatus MapRecordStatus(string status) => status switch
-    {
-        "ok" => RecordStatus.Ok,
-        "error" => RecordStatus.Error,
-        "unset" => RecordStatus.Unset,
-        _ => RecordStatus.Unspecified,
-    };
 
     private sealed record PreparedLog(
         int Index,

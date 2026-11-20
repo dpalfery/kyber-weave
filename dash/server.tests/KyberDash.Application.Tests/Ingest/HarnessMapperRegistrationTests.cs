@@ -1,3 +1,4 @@
+using KyberDash.Application;
 using KyberDash.Application.Tests.Analytics;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
@@ -36,10 +37,9 @@ public class HarnessMapperRegistrationTests
     {
         using ServiceProvider provider = Composition();
 
-        Dictionary<string, IHarnessMapper> lookup = EngineLookup(provider.GetServices<IHarnessMapper>());
+        Dictionary<string, IHarnessMapper> lookup = HarnessMapperLookup.Build(provider.GetServices<IHarnessMapper>());
 
-        IHarnessMapper? resolved = lookup.GetValueOrDefault(harnessId)
-            ?? lookup.GetValueOrDefault(HarnessSourceRegistry.NormalizeHarnessId(harnessId));
+        IHarnessMapper? resolved = HarnessMapperLookup.Resolve(lookup, harnessId);
         Assert.True(resolved is not null, $"no IHarnessMapper resolves for evidenced harness '{harnessId}'.");
     }
 
@@ -57,7 +57,7 @@ public class HarnessMapperRegistrationTests
     public void AddDashApplication_LocalTranscriptMappersOwnTheSharedHarnessKeys()
     {
         using ServiceProvider provider = Composition();
-        Dictionary<string, IHarnessMapper> lookup = EngineLookup(provider.GetServices<IHarnessMapper>());
+        Dictionary<string, IHarnessMapper> lookup = HarnessMapperLookup.Build(provider.GetServices<IHarnessMapper>());
 
         Assert.True(lookup.TryGetValue("claude-code", out IHarnessMapper? claude));
         Assert.IsType<ClaudeTranscriptMapper>(claude);
@@ -73,21 +73,4 @@ public class HarnessMapperRegistrationTests
 
     private static ServiceProvider Composition() =>
         new ServiceCollection().AddDashApplication().BuildServiceProvider();
-
-    /// <summary>
-    /// Rebuilds the harness-keyed mapper lookup with the same rules the refresh and ingestion
-    /// engines apply: the mapper's raw harness id (later registrations overwrite earlier ones)
-    /// plus its normalized fold.
-    /// </summary>
-    private static Dictionary<string, IHarnessMapper> EngineLookup(IEnumerable<IHarnessMapper> mappers)
-    {
-        Dictionary<string, IHarnessMapper> lookup = new(StringComparer.Ordinal);
-        foreach (IHarnessMapper mapper in mappers)
-        {
-            lookup[mapper.HarnessId] = mapper;
-            _ = lookup.TryAdd(HarnessSourceRegistry.NormalizeHarnessId(mapper.HarnessId), mapper);
-        }
-
-        return lookup;
-    }
 }

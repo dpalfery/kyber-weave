@@ -108,7 +108,7 @@ public class CanonRefreshEngine
         this.reader = reader;
         this.operationalStore = operationalStore;
         this.sourceRegistry = sourceRegistry;
-        mappersByHarness = BuildMapperLookup(mappers);
+        mappersByHarness = HarnessMapperLookup.Build(mappers);
         this.fileSystem = fileSystem ?? PhysicalHarnessFileSystem.Instance;
 
         bool explicitHome = !string.IsNullOrWhiteSpace(homeDirectory);
@@ -354,7 +354,7 @@ public class CanonRefreshEngine
         ArgumentNullException.ThrowIfNull(unit);
 
         IHarnessSourceReader? sourceReader = sourceRegistry!.GetReader(unit.HarnessId);
-        IHarnessMapper? mapper = ResolveMapper(unit.HarnessId);
+        IHarnessMapper? mapper = HarnessMapperLookup.Resolve(mappersByHarness, unit.HarnessId);
         if (sourceReader is null || mapper is null)
         {
             return new RefreshSourceStatusRow(unit.HarnessId, unit.SourceKey, "skipped", 0);
@@ -447,36 +447,6 @@ public class CanonRefreshEngine
             activeStore.UpsertSourceCheckpoint(failedCheckpoint);
             return new RefreshSourceStatusRow(unit.HarnessId, unit.SourceKey, "failed", 0, safeMessage);
         }
-    }
-
-    private IHarnessMapper? ResolveMapper(string harnessId)
-    {
-        if (mappersByHarness.TryGetValue(harnessId, out IHarnessMapper? direct))
-        {
-            return direct;
-        }
-
-        string normalized = HarnessSourceRegistry.NormalizeHarnessId(harnessId);
-        return mappersByHarness.GetValueOrDefault(normalized);
-    }
-
-    private static Dictionary<string, IHarnessMapper> BuildMapperLookup(IReadOnlyList<IHarnessMapper>? mappers)
-    {
-        Dictionary<string, IHarnessMapper> lookup = new(StringComparer.Ordinal);
-        if (mappers is null)
-        {
-            return lookup;
-        }
-
-        foreach (IHarnessMapper mapper in mappers)
-        {
-            ArgumentNullException.ThrowIfNull(mapper);
-            lookup[mapper.HarnessId] = mapper;
-            string normalized = HarnessSourceRegistry.NormalizeHarnessId(mapper.HarnessId);
-            _ = lookup.TryAdd(normalized, mapper);
-        }
-
-        return lookup;
     }
 
     private static string FormatUtc(DateTimeOffset instant) =>

@@ -180,7 +180,7 @@ public class CodexSpanMapper : IHarnessMapper
                 Problem? validationProblem = CanonValidation.ValidateTokens(usage, native.SpanId);
                 if (validationProblem is not null)
                 {
-                    string problemKey = UniqueProblemKey(usedProblemKeys, native.SpanId, validationProblem.Code, index);
+                    string problemKey = CanonRecordVocabulary.UniqueProblemKey(usedProblemKeys, "otlp:", native.SpanId, validationProblem.Code, index);
                     problems.Add(new CollectedProblem(
                         ProblemKey: problemKey,
                         Severity: FormatProblemSeverity(validationProblem.Severity),
@@ -233,9 +233,9 @@ public class CodexSpanMapper : IHarnessMapper
     private static CollectedRecord MapNative(OtlpSpanNative native, string harnessId)
     {
         RecordOp op = ResolveOp(native);
-        RecordKind kind = MapRecordKind(native.Kind);
-        RecordStatus status = MapRecordStatus(native.StatusCode);
-        string opWire = FormatRecordOp(op);
+        RecordKind kind = CanonRecordVocabulary.ParseRecordKind(native.Kind);
+        RecordStatus status = CanonRecordVocabulary.ParseRecordStatus(native.StatusCode);
+        string opWire = CanonRecordVocabulary.FormatRecordOp(op);
         string name = !string.IsNullOrWhiteSpace(native.Name) && !JsonDocumentText.IsDocument(native.Name)
             ? native.Name
             : opWire;
@@ -357,19 +357,6 @@ public class CodexSpanMapper : IHarnessMapper
             : normalized;
     }
 
-    private static string UniqueProblemKey(HashSet<string> usedKeys, string spanId, string code, int index)
-    {
-        string baseKey = string.Create(CultureInfo.InvariantCulture, $"otlp:{spanId}:{code}");
-        if (usedKeys.Add(baseKey))
-        {
-            return baseKey;
-        }
-
-        string indexedKey = string.Create(CultureInfo.InvariantCulture, $"{baseKey}:{index}");
-        _ = usedKeys.Add(indexedKey);
-        return indexedKey;
-    }
-
     private static string? SafeOptionalText(string? value) =>
         string.IsNullOrWhiteSpace(value) || JsonDocumentText.IsDocument(value) ? null : value;
 
@@ -379,29 +366,4 @@ public class CodexSpanMapper : IHarnessMapper
         _ => "error",
     };
 
-    private static string FormatRecordOp(RecordOp op) => op switch
-    {
-        RecordOp.LlmInvoke => "llm.invoke",
-        RecordOp.ToolInvoke => "tool.invoke",
-        RecordOp.AgentInvoke => "agent.invoke",
-        _ => "unspecified",
-    };
-
-    private static RecordKind MapRecordKind(string kind) => kind switch
-    {
-        "internal" => RecordKind.Internal,
-        "server" => RecordKind.Server,
-        "client" => RecordKind.Client,
-        "producer" => RecordKind.Producer,
-        "consumer" => RecordKind.Consumer,
-        _ => RecordKind.Unspecified,
-    };
-
-    private static RecordStatus MapRecordStatus(string status) => status switch
-    {
-        "ok" => RecordStatus.Ok,
-        "error" => RecordStatus.Error,
-        "unset" => RecordStatus.Unset,
-        _ => RecordStatus.Unspecified,
-    };
 }

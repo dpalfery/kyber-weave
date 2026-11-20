@@ -303,7 +303,7 @@ public static class CanonIngestPipeline
                 legacyProblems.Add(legacyProblem);
 
                 CollectedProblem relationalProblem = new(
-                    ProblemKey: UniqueProblemKey(usedProblemKeys, raw.SpanId, "ADAPTER_NORMALIZE_FAILED", index),
+                    ProblemKey: CanonRecordVocabulary.UniqueProblemKey(usedProblemKeys, "otlp:", raw.SpanId, "ADAPTER_NORMALIZE_FAILED", index),
                     Severity: severity,
                     Code: "ADAPTER_NORMALIZE_FAILED",
                     Message: message,
@@ -361,7 +361,7 @@ public static class CanonIngestPipeline
                 legacyProblems.Add(legacyProblem);
 
                 CollectedProblem relationalProblem = new(
-                    ProblemKey: UniqueProblemKey(usedProblemKeys, timed.SpanId, problem.Code, index),
+                    ProblemKey: CanonRecordVocabulary.UniqueProblemKey(usedProblemKeys, "otlp:", timed.SpanId, problem.Code, index),
                     Severity: severity,
                     Code: problem.Code,
                     Message: message,
@@ -512,11 +512,11 @@ public static class CanonIngestPipeline
         return new CollectedRecord(
             RecordId: record.SpanId,
             HarnessId: record.Harness,
-            Op: MapRecordOp(record.Op),
-            Kind: MapRecordKind(record.Kind),
+            Op: CanonRecordVocabulary.ParseRecordOp(record.Op),
+            Kind: CanonRecordVocabulary.ParseRecordKind(record.Kind),
             Name: name,
             StartedAt: startedAt,
-            Status: MapRecordStatus(record.Status),
+            Status: CanonRecordVocabulary.ParseRecordStatus(record.Status),
             SessionKey: sessionKey,
             ParentRecordId: parentRecordId,
             TraceId: traceId,
@@ -642,19 +642,6 @@ public static class CanonIngestPipeline
             HarnessId: SafeOptionalText(harness)));
     }
 
-    private static string UniqueProblemKey(HashSet<string> usedKeys, string spanId, string code, int index)
-    {
-        string baseKey = string.Create(CultureInfo.InvariantCulture, $"otlp:{spanId}:{code}");
-        if (usedKeys.Add(baseKey))
-        {
-            return baseKey;
-        }
-
-        string indexedKey = string.Create(CultureInfo.InvariantCulture, $"{baseKey}:{index}");
-        _ = usedKeys.Add(indexedKey);
-        return indexedKey;
-    }
-
     private static string? ExtractSafeAttributeString(
         IReadOnlyDictionary<string, JsonElement>? attributes,
         IReadOnlyList<string> keys)
@@ -684,32 +671,6 @@ public static class CanonIngestPipeline
 
     private static string SafeProblemMessage(string? message, string fallback) =>
         string.IsNullOrWhiteSpace(message) || JsonDocumentText.IsDocument(message) ? fallback : message;
-
-    private static RecordOp MapRecordOp(string op) => op switch
-    {
-        "llm.invoke" => RecordOp.LlmInvoke,
-        "tool.invoke" => RecordOp.ToolInvoke,
-        "agent.invoke" => RecordOp.AgentInvoke,
-        _ => RecordOp.Unspecified,
-    };
-
-    private static RecordKind MapRecordKind(string kind) => kind switch
-    {
-        "internal" => RecordKind.Internal,
-        "server" => RecordKind.Server,
-        "client" => RecordKind.Client,
-        "producer" => RecordKind.Producer,
-        "consumer" => RecordKind.Consumer,
-        _ => RecordKind.Unspecified,
-    };
-
-    private static RecordStatus MapRecordStatus(string status) => status switch
-    {
-        "ok" => RecordStatus.Ok,
-        "error" => RecordStatus.Error,
-        "unset" => RecordStatus.Unset,
-        _ => RecordStatus.Unspecified,
-    };
 
     private static string BoundedSpanPayload(OtlpSpan span)
     {

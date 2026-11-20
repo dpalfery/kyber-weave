@@ -1765,11 +1765,11 @@ public class KyberBridgeEngine
         return new HarnessRollupRow(
             Harness: rollup.HarnessId,
             SampleCount: Math.Max(rollup.SessionCount, Math.Max(rollup.RunCount, rollup.ExecutionCount)),
-            ContextPressureMedian: MetricValueOf(rollup, "context_pressure_median"),
-            ContextPressureP95: MetricValueOf(rollup, "context_pressure_p95"),
-            CacheHitRate: MetricValueOf(rollup, "cache_hit_rate"),
-            ToolYield: MetricValueOf(rollup, "tool_yield"),
-            DelegationOverhead: MetricValueOf(rollup, "delegation_overhead"),
+            ContextPressureMedian: CanonPipelineShared.RollupMetricValue(rollup, "context_pressure_median"),
+            ContextPressureP95: CanonPipelineShared.RollupMetricValue(rollup, "context_pressure_p95"),
+            CacheHitRate: CanonPipelineShared.RollupMetricValue(rollup, "cache_hit_rate"),
+            ToolYield: CanonPipelineShared.RollupMetricValue(rollup, "tool_yield"),
+            DelegationOverhead: CanonPipelineShared.RollupMetricValue(rollup, "delegation_overhead"),
             FieldCoverage: ComputeFieldCoverageOf(rollup),
             Measurability: measurability,
             Payload: JsonSerializer.SerializeToElement(new
@@ -1780,19 +1780,6 @@ public class KyberBridgeEngine
                 unknownWindowSessions = rollup.UnknownWindowSessions,
                 windowSessionsTotal = rollup.WindowSessionsTotal,
             }));
-    }
-
-    private static double? MetricValueOf(StoredHarnessRollup rollup, string metric)
-    {
-        foreach (StoredHarnessRollupMetric entry in rollup.Metrics)
-        {
-            if (string.Equals(entry.Metric, metric, StringComparison.Ordinal))
-            {
-                return entry.Value;
-            }
-        }
-
-        return null;
     }
 
     private static JsonElement MetricTagOf(StoredHarnessRollup rollup, string metric, string missingReason)
@@ -1811,23 +1798,23 @@ public class KyberBridgeEngine
     private static double ComputeFieldCoverageOf(StoredHarnessRollup rollup)
     {
         int covered = 0;
-        if (MetricValueOf(rollup, "context_pressure_median").HasValue
-            || MetricValueOf(rollup, "context_pressure_p95").HasValue)
+        if (CanonPipelineShared.RollupMetricValue(rollup, "context_pressure_median").HasValue
+            || CanonPipelineShared.RollupMetricValue(rollup, "context_pressure_p95").HasValue)
         {
             covered++;
         }
 
-        if (MetricValueOf(rollup, "cache_hit_rate").HasValue)
+        if (CanonPipelineShared.RollupMetricValue(rollup, "cache_hit_rate").HasValue)
         {
             covered++;
         }
 
-        if (MetricValueOf(rollup, "tool_yield").HasValue)
+        if (CanonPipelineShared.RollupMetricValue(rollup, "tool_yield").HasValue)
         {
             covered++;
         }
 
-        if (MetricValueOf(rollup, "delegation_overhead").HasValue)
+        if (CanonPipelineShared.RollupMetricValue(rollup, "delegation_overhead").HasValue)
         {
             covered++;
         }

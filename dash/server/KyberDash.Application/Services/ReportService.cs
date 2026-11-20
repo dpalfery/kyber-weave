@@ -234,7 +234,7 @@ public class ReportService : IReportService
     {
         ArgumentNullException.ThrowIfNull(rollup);
         ArgumentException.ThrowIfNullOrWhiteSpace(metric);
-        return rollup.Metrics.FirstOrDefault(candidate => candidate.Metric == metric)?.Value;
+        return CanonPipelineShared.RollupMetricValue(rollup, metric);
     }
 
     /// <summary>Formats a ratio as a whole percentage, or <c>absent</c> when the source did not measure it.</summary>
