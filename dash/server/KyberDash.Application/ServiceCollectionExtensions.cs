@@ -3,21 +3,8 @@ using KyberDash.Contracts.Services;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Data.Harnesses.Antigravity;
-using KyberDash.Data.Harnesses.Claude;
 using KyberDash.Data.Harnesses.Cline;
-using KyberDash.Data.Harnesses.Codex;
-using KyberDash.Data.Harnesses.CommandCode;
-using KyberDash.Data.Harnesses.CopilotCli;
-using KyberDash.Data.Harnesses.CopilotVscode;
-using KyberDash.Data.Harnesses.Cursor;
-using KyberDash.Data.Harnesses.Devin;
-using KyberDash.Data.Harnesses.Droid;
 using KyberDash.Data.Harnesses.Kilo;
-using KyberDash.Data.Harnesses.KimiCode;
-using KyberDash.Data.Harnesses.Otlp;
-using KyberDash.Data.Harnesses.Pi;
-using KyberDash.Data.Harnesses.RooCode;
-using KyberDash.Data.Harnesses.Warp;
 using KyberDash.Domain;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -50,7 +37,7 @@ public static class ServiceCollectionExtensions
 
         _ = Data.ServiceCollectionExtensions.AddDashDataServices(services, resolvedOptions);
 
-        RegisterHarnessMappers(services);
+        RegisterHarnessMapperAliases(services);
         RegisterEngines(services, resolvedOptions);
         RegisterServices(services);
 
@@ -101,46 +88,22 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers every <see cref="IHarnessMapper"/> implementation so the refresh and ingestion
-    /// engines resolve a non-empty mapping pipeline in production.
+    /// Registers the harness-family alias mappers the engines' <see cref="IHarnessMapper.HarnessId"/>-keyed
+    /// lookup needs on top of the base mapper registrations the data-layer composition already made.
     /// </summary>
+    /// <remarks>
+    /// <see cref="AddDashApplication"/> always calls <see cref="Data.ServiceCollectionExtensions.AddDashDataServices"/>
+    /// first, and that registers every mapper implementation (span mappers before transcript
+    /// mappers, so the transcript mappers own the shared local-file harness ids under the
+    /// engines' last-wins lookup). The family mappers it registers also map their family
+    /// members' units inside <c>Map</c>, but the lookup keys on HarnessId alone, so the
+    /// evidenced member ids (antigravity-cli, cline-cli, kilo-vscode-legacy) resolve through
+    /// alias registrations pointing at the family mapper. Plain <c>AddSingleton</c>:
+    /// <c>TryAddEnumerable</c> would dedupe the three alias instances by their shared wrapper type.
+    /// </remarks>
     /// <param name="services">Service collection to populate.</param>
-    private static void RegisterHarnessMappers(IServiceCollection services)
+    private static void RegisterHarnessMapperAliases(IServiceCollection services)
     {
-        // The engines key their mapper lookup on HarnessId and let later registrations overwrite
-        // earlier ones, so the OTLP span mappers register first and the transcript mappers last:
-        // the shared local-file ids (claude-code, codex-cli, antigravity, droid, pi) must stay
-        // owned by the transcript mappers, or a transcript unit would reach a span mapper and map
-        // to nothing.
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, AntigravitySpanMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, ClaudeSpanMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CodexSpanMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CopilotSpanMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, DroidSpanMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, OpenCodeSpanMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, PiSpanMapper>());
-
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, AntigravityTranscriptMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, ClaudeTranscriptMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, ClineMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CodexRolloutMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CommandCodeMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CopilotCliMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CopilotVscodeMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CursorMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, DevinMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, DroidSessionMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, KiloMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, KimiCodeMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, PiMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, RooCodeMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, WarpMapper>());
-
-        // The family mappers above also map their family members' units inside Map, but the
-        // engines' lookup keys on HarnessId alone, so the evidenced member ids resolve through
-        // alias registrations pointing at the family mapper. Plain AddSingleton: TryAddEnumerable
-        // would dedupe the three alias instances by their shared wrapper type, and TryAddSingleton
-        // would drop them behind the first mapper registration above.
         _ = services.AddSingleton<IHarnessMapper>(new HarnessMapperAlias(new AntigravityTranscriptMapper(), AntigravityTranscriptMapper.AntigravityCliHarnessId));
         _ = services.AddSingleton<IHarnessMapper>(new HarnessMapperAlias(new ClineMapper(), ClineMapper.ClineCliHarnessId));
         _ = services.AddSingleton<IHarnessMapper>(new HarnessMapperAlias(new KiloMapper(), KiloMapper.KiloVscodeLegacyHarnessId));

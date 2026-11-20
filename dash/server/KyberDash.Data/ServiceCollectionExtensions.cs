@@ -95,29 +95,37 @@ public static class ServiceCollectionExtensions
     /// evidenced harness through the contract. Each registration uses <c>TryAddEnumerable</c>, so a
     /// host that registers its own mapper for a harness keeps it alongside the built-ins.
     /// </summary>
+    /// <remarks>
+    /// The engines build their mapper lookup keyed on <see cref="IHarnessMapper.HarnessId"/>,
+    /// letting later registrations overwrite earlier ones, so the OTLP span mappers register
+    /// first and the local transcript mappers last: the ids the two families share (claude-code,
+    /// codex-cli, antigravity, droid, pi) must stay owned by the transcript mappers, or a
+    /// transcript unit reaching a span mapper would map to nothing.
+    /// </remarks>
     /// <param name="services">Service collection to populate.</param>
     private static void RegisterHarnessMappers(IServiceCollection services)
     {
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, AntigravityTranscriptMapper>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, AntigravitySpanMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, ClaudeTranscriptMapper>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, ClaudeSpanMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CodexSpanMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CopilotSpanMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, DroidSpanMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, OpenCodeSpanMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, PiSpanMapper>());
+
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, AntigravityTranscriptMapper>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, ClaudeTranscriptMapper>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, ClineMapper>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CodexRolloutMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CodexSpanMapper>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CommandCodeMapper>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CopilotCliMapper>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CopilotVscodeMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CopilotSpanMapper>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, CursorMapper>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, DevinMapper>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, DroidSessionMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, DroidSpanMapper>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, KiloMapper>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, KimiCodeMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, OpenCodeSpanMapper>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, PiMapper>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, PiSpanMapper>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, RooCodeMapper>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessMapper, WarpMapper>());
     }

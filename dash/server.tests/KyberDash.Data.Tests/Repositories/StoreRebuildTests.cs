@@ -262,31 +262,34 @@ public class StoreRebuildTests
         string dbPath = Path.Combine(rootDir, "canon.db");
         FakeRelationalStoreFileSystem fakeFs = CreateExistingDatabaseSet(dbPath);
 
-        ScriptedSqliteRelationalStore store = new(
-            dbPath,
-            new SqliteCircuitBreaker(),
-            initialize: false,
-            fakeFs);
-        store.EnqueueResponse("store_state");
-        store.EnqueueResponse("24\t5");
-        store.EnqueueResponse(string.Empty);
-        store.EnqueueResponse(string.Empty);
-
         // D15: the store's diagnostic log defaults to Console.Error, so a destructive rebuild is
-        // never silent even when no host or test supplies a logger.
+        // never silent even when no host or test supplies a logger. The capture is installed
+        // before the store is constructed because the default binds the Console.Error instance it
+        // finds at construction time — a swap made afterwards cannot intercept its writes.
         using StringWriter captured = new();
         TextWriter originalError = Console.Error;
         Console.SetError(captured);
         try
         {
+            ScriptedSqliteRelationalStore store = new(
+                dbPath,
+                new SqliteCircuitBreaker(),
+                initialize: false,
+                fakeFs);
+            store.EnqueueResponse("store_state");
+            store.EnqueueResponse("24\t5");
+            store.EnqueueResponse(string.Empty);
+            store.EnqueueResponse(string.Empty);
+
             store.EnsureInitialized();
+
+            Assert.True(store.RebuiltFromOlderSchema);
         }
         finally
         {
             Console.SetError(originalError);
         }
 
-        Assert.True(store.RebuiltFromOlderSchema);
         string logged = captured.ToString();
         Assert.Contains("Deleted incompatible relational store", logged, StringComparison.Ordinal);
         Assert.Contains("schema version 24", logged, StringComparison.Ordinal);
