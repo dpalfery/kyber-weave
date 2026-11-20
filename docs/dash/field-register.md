@@ -1029,6 +1029,79 @@ In `RooCodeMapper`, each `api_req_started` entry with non-zero tokens maps to a 
 | `RooCodeTaskDocument` | `MessageCount` | dropped | — | Transient entry count gating session emission when no billable entries exist. |
 | `RooCodeTaskDocument` | `Requests` | mapped | nested: RooCodeApiRequest | Billing entries in task order. |
 | `RooCodeTaskDocument` | `ParseProblems` | mapped | nested: RooCodeParseProblem | Non-fatal document-level parse diagnostics emitted as `ingest_problem` rows. |
+## devin
+
+Devin ingests offline from Devin CLI agent-trajectory transcript JSON via `DevinMapper` (mapping `DevinTranscriptDocument` over `DevinStep`, `DevinStepMetadata`, `DevinStepExtra`, `DevinStepMetrics`, `DevinToolCall`, and `DevinParseProblem` into `CollectedBatch`). Each usage-bearing non-user step maps to one `llm.invoke` record with harness-reported tokens and ACU-derived cost, each step tool call maps to a child `tool.invoke` span, and the nearest preceding user message maps to the `user_message` content part.
+
+In `DevinMapper`, transcript steps gate on any positive usage (committed ACUs or any token field) while `is_user_input` steps never emit records; step-level `metrics` win over legacy `metadata.metrics` only when actually carrying token fields. Model names resolve locally (`MODEL_*` placeholders fall back, `gpt-*` ids normalize dash versions and surface effort tiers, all other ids resolve through the offline short-name table); user aliases and provider-namespace stripping resolve at read time. The configured `acuUsdRate` prices committed ACUs into `record_reported_cost`; without a rate, costs stay unreported (never `$0`) so rate-table estimation applies. Assistant message text and observations carry no call-level fields in the deleted provider and are dropped, as are the live-only surfaces (`sessions.db` project/title/model/timestamp enrichment and hidden-session filtering, discovery, and the unpriced-rate stderr warning).
+
+| Native type | Property | Disposition | Target mapping | Reason |
+|---|---|---|---|---|
+| `DevinTranscriptDocument` | `IsValid` | dropped | — | Transient parse-success flag; malformed roots emit an `ingest_problem` row instead of records. |
+| `DevinTranscriptDocument` | `SessionId` | mapped | `session.session_id`, `session.native_session_id`, `record_session_link.session_key` | Falls back to the transcript file stem when absent. |
+| `DevinTranscriptDocument` | `AgentModelName` | mapped | `record_model.model_id` | Model fallback after step `model_name` when no generation model resolves. |
+| `DevinTranscriptDocument` | `Steps` | mapped | nested: DevinStep | Transcript steps in order; user-input and usage-less steps emit no records. |
+| `DevinTranscriptDocument` | `ParseProblems` | mapped | nested: DevinParseProblem | Non-object steps recorded as row-level diagnostics. |
+| `DevinStep` | `StepId` | mapped | `record.span_id` | Seeds deterministic `record.span_id` (`synth:devin:<session>:<stepId>`) with per-file dedup. |
+| `DevinStep` | `Source` | dropped | — | Step source has no normalized column in `RelationalSchemaCatalog`. |
+| `DevinStep` | `ModelName` | mapped | `record_model.model_id` | Step model fallback in display-name resolution. |
+| `DevinStep` | `MessageText` | mapped | `content_part_text.part_text`, `content_part_withheld.utf8_bytes`, `content_part_role.role_name`, `record_correction_rule.correction_rule` | Nearest preceding user-input message measured through `ToolContentMeasurer` and scanned for user-correction rules. |
+| `DevinStep` | `ToolCalls` | mapped | nested: DevinToolCall | Tool invocations emitted as child `tool.invoke` spans. |
+| `DevinStep` | `Extra` | mapped | nested: DevinStepExtra | ATIF v1.7 cost/model overrides. |
+| `DevinStep` | `Metrics` | mapped | nested: DevinStepMetrics | Preferred token location when carrying token fields. |
+| `DevinStep` | `Metadata` | mapped | nested: DevinStepMetadata | Step timestamp, cost, model, and legacy token location. |
+| `DevinStepMetadata` | `CreatedAt` | mapped | `record.started_at_utc` | ISO-8601 UTC step timestamp, falling back to the unit write time. |
+| `DevinStepMetadata` | `CommittedAcuCost` | mapped | `record_reported_cost.amount` | Priced by the configured ACU rate; unpriced ACUs stay unreported. |
+| `DevinStepMetadata` | `GenerationModel` | mapped | `record_model.model_id` | Backend model preferred in display-name resolution. |
+| `DevinStepMetadata` | `IsUserInput` | mapped | `content_part_role.role_name` | Gates user-message attribution; user steps emit no records. |
+| `DevinStepMetadata` | `InputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Legacy input tokens (`token_class = input`). |
+| `DevinStepMetadata` | `OutputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Legacy output tokens (`token_class = output`). |
+| `DevinStepMetadata` | `CacheCreationTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Legacy cache-creation tokens (`token_class = cache_write`). |
+| `DevinStepMetadata` | `CacheReadTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Legacy cache-read tokens (`token_class = cache_read`). |
+| `DevinStepExtra` | `CommittedAcuCost` | mapped | `record_reported_cost.amount` | ATIF v1.7 override, losing to `metadata.committed_acu_cost`. |
+| `DevinStepExtra` | `GenerationModel` | mapped | `record_model.model_id` | ATIF v1.7 override, losing to `metadata.generation_model`. |
+| `DevinStepMetrics` | `PromptTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Step input tokens (`token_class = input`). |
+| `DevinStepMetrics` | `CompletionTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Step output tokens (`token_class = output`). |
+| `DevinStepMetrics` | `CachedTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Step cache-read tokens (`token_class = cache_read`). |
+| `DevinStepMetrics` | `CacheCreationInputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Step cache-creation tokens (`token_class = cache_write`). |
+| `DevinToolCall` | `CallId` | mapped | `tool_call.call_id` | Upstream tool call id, defaulting to a positional fallback. |
+| `DevinToolCall` | `FunctionName` | mapped | `tool_call.tool_name` | Raw tool function name (no display normalization in the deleted provider). |
+| `DevinToolCall` | `ArgumentsJson` | mapped | `tool_call_input_*` | Raw arguments measured through `ToolContentMeasurer` into the child span input. |
+| `DevinParseProblem` | `LineNumber` | mapped | `ingest_problem_location.location`, `ingest_problem.problem_key` | 1-based step index, or 0 for document-level failures. |
+| `DevinParseProblem` | `Code` | mapped | `ingest_problem.code` | Diagnostic code for the failure. |
+| `DevinParseProblem` | `Message` | mapped | `ingest_problem.message` | Sanitized parse failure message. |
+
+## warp
+
+Warp ingests offline from a per-conversation JSON export of the Warp SQLite store via `WarpMapper` (mapping `WarpExportDocument` over `WarpConversationRow`, `WarpQueryRow`, `WarpBlockRow`, and `WarpParseProblem` into `CollectedBatch`), mirroring the `agent_conversations`, `ai_queries`, and `blocks` projections in `warp.ts`. Each completed exchange maps to one `llm.invoke` record with tokens allocated from the conversation-level primary-agent budget (falling back to input-length weights), and each attributed command block maps to a child `tool.invoke` span named `Bash` carrying the full command text.
+
+In `WarpMapper`, pending exchanges and exchanges without a parseable start timestamp are skipped; model ids resolve through the static alias table with exchange `model_id` winning over coding/planning ids and the conversation-dominant model replacing `auto` placeholders; user prompts truncate to 500 characters into `user_message` parts. Costs stay unreported (`calculateCost` pricing and the estimated-cost bit are read-time concerns), and the derived per-exchange tool-name/`bashCommands` arrays fold into the child `tool_call` rows. Live-SQLite-only surfaces (schema validation, discovery, access-denial draining, and workspace maps) have no offline input and are not persisted.
+
+| Native type | Property | Disposition | Target mapping | Reason |
+|---|---|---|---|---|
+| `WarpExportDocument` | `IsValid` | dropped | — | Transient parse-success flag; malformed envelopes emit an `ingest_problem` row instead of records. |
+| `WarpExportDocument` | `Conversation` | mapped | nested: WarpConversationRow | Exported conversation row scoping the batch. |
+| `WarpExportDocument` | `Queries` | mapped | nested: WarpQueryRow | Exported query rows in start order. |
+| `WarpExportDocument` | `Blocks` | mapped | nested: WarpBlockRow | Exported block rows attributed to the nearest preceding exchange. |
+| `WarpExportDocument` | `ParseProblems` | mapped | nested: WarpParseProblem | Skipped row-level diagnostics. |
+| `WarpConversationRow` | `ConversationId` | mapped | `session.session_id`, `session.native_session_id`, `record_session_link.session_key` | Decoded from the `dbPath:conversationId` source key and matched against the export. |
+| `WarpConversationRow` | `ConversationData` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Conversation usage JSON driving the primary-agent token budget and dominant model. |
+| `WarpConversationRow` | `LastModifiedAt` | dropped | — | Discovery ordering only; the live reader owns session listing. |
+| `WarpQueryRow` | `ExchangeId` | mapped | `record.span_id` | Seeds deterministic `record.span_id` (`synth:warp:<conversation>:<exchange>`) with per-file dedup. |
+| `WarpQueryRow` | `ConversationId` | mapped | `record_session_link.session_key` | Export scoping; SQL-side filtering lives in the reader. |
+| `WarpQueryRow` | `StartTs` | mapped | `record.started_at_utc` | Warp space-separated timestamp parsed as UTC; unparseable rows are skipped. |
+| `WarpQueryRow` | `Input` | mapped | `content_part_text.part_text`, `content_part_withheld.utf8_bytes`, `content_part_role.role_name`, `record_correction_rule.correction_rule` | First `Query.text` measured through `ToolContentMeasurer` and scanned for user-correction rules; also drives fallback token weights. |
+| `WarpQueryRow` | `WorkingDirectory` | mapped | `session_workspace.working_directory` | Latest non-empty working directory across the conversation. |
+| `WarpQueryRow` | `OutputStatus` | mapped | `record.status` | Only `Completed`/`Cancelled`/`Failed` exchanges emit records. |
+| `WarpQueryRow` | `ModelId` | mapped | `record_model.model_id` | Preferred model id in exchange resolution. |
+| `WarpQueryRow` | `PlanningModelId` | mapped | `record_model.model_id` | Model fallback after `model_id` and `coding_model_id`. |
+| `WarpQueryRow` | `CodingModelId` | mapped | `record_model.model_id` | Model fallback after `model_id`. |
+| `WarpBlockRow` | `BlockId` | mapped | `tool_call.call_id` | Native block id on the child `Bash` span. |
+| `WarpBlockRow` | `StartTs` | mapped | `record.started_at_utc` | Block start timestamp attributing the block and stamping the child span. |
+| `WarpBlockRow` | `StylizedCommand` | mapped | `tool_call_input_*` | Full command text measured through `ToolContentMeasurer`; derived base-name lists stay derivable at read time. |
+| `WarpParseProblem` | `LineNumber` | mapped | `ingest_problem_location.location`, `ingest_problem.problem_key` | 1-based row index within its section, or 0 for document-level failures. |
+| `WarpParseProblem` | `Code` | mapped | `ingest_problem.code` | Diagnostic code for the failure. |
+| `WarpParseProblem` | `Message` | mapped | `ingest_problem.message` | Sanitized parse failure message. |
 
 ## zcode
 
