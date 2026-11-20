@@ -5,7 +5,7 @@ description: "Reviews a saved Draft implementation plan adversarially through ev
 invocation: subagent
 model-profile: reviewer
 capability-profile: read-only
-copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, web]
+copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, web, skill]
 delegates-to: []
 fallback: role-skill
 aliases: []

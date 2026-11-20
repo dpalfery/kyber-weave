@@ -4,7 +4,7 @@ name: conductor
 description: "Primary orchestrator and default entry point: accepts a plan, specification, todo, or open request; coordinates the chosen workflow; and defaults delivery to test-first development."
 invocation: primary
 capability-profile: orchestrator
-copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, todo, "kw-docs/*", agent]
+copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, todo, "kw-docs/*", agent, skill]
 delegates-to: [architect, bug-crusher-investigator, code-reviewer, dev-easy, dev-hard, dev-medium, devops, docs-dev, plan-reviewer, platform-researcher, product-owner, research-agent, review-lens, review-triage]
 fallback: role-skill
 aliases: []

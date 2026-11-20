@@ -4,7 +4,7 @@ title: Exact Copilot Tool Membership with One Cross-Agent Emission Order
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-20
 ---
 
 # ADR 0017: Exact Copilot Tool Membership with One Cross-Agent Emission Order
@@ -46,6 +46,7 @@ edit/createFile
 edit/editFiles
 edit/rename
 vscodeGeneral/rename
+skill
 ```
 
 ## Amendment 2026-10-12: `tool_search`
@@ -65,6 +66,17 @@ granular `edit/*` ids plus `web` to broad `edit` without `web`, so it now reads
 The catalog keeps the granular ids (history still names them); the architect was their
 only canonical member. The rejected alternative below still describes the adoption-time
 reasoning and is left intact.
+
+## Amendment 2026-11-20: `skill`
+
+`skill` is the Copilot CLI's skill-loading tool (observed on Copilot CLI 1.0.115): a custom
+agent run as a subagent receives only the tools its `tools:` line names, so an agent that does
+not list `skill` reports that it holds no skill-loading tool and cannot read any skill deployed
+beside it — the lens charters, the working agreements and the task gate among them. It slots
+last and binds to no capability (`null`, like `vscode`, `todo` and `tool_search`): it reads a
+skill already deployed beside the agent and confers no new grant, so no capability profile
+changes. Per the consequences above, the slot, the binding, and the canonical membership update
+landed together, and every canonical agent declares it.
 
 ## Alternatives Considered
 

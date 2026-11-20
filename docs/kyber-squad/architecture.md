@@ -979,8 +979,10 @@ and validates.
 - **Copilot tool order ([ADR 0017](../adr/0017-copilot-deterministic-tool-order.md))**:
   `CopilotRenderer` emits `CopilotToolCatalog.Normalize(agent.CopilotTools)` — membership from
   the agent, order from one global catalog sequence (`vscode`, `tool_search`, `read`, `todo`, MCP wildcards,
-  then search/execute/web/edit/agent and the granular edit tools). Normalization never adds a
-  tool the agent omitted and never reorders per agent. Capability bindings are an upper bound
+  then search/execute/web/edit/agent, the granular edit tools, and last `skill`). Normalization never adds a
+  tool the agent omitted and never reorders per agent. `skill` is the Copilot CLI's only way for a subagent
+  to load a skill deployed beside it — a subagent receives no tool it does not list, so every agent lists it —
+  and it reads an already-deployed skill, so it binds to no capability. Capability bindings are an upper bound
   at load/validation time, not a second membership source. Wildcards remain single-quoted in
   the YAML flow sequence.
 - **Resource projection**: after each principal file, the renderer appends the owner's validated
