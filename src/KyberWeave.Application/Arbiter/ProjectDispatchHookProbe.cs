@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -46,11 +47,19 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
     private const string ScopeFlag = "--scope";
     private const string ScopeEqualsGlobal = "--scope=global";
     private const string GlobalScopeValue = "global";
-    private const string ShimMarker = "\"kyber-weave-arbiter\"";
-    private const string ShimGlobalScopeMarker = "\"--scope\", \"global\"";
 
     // A matcher is a .NET regex in this check. A pattern that stalls must not stall the dispatch.
     private static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(100);
+
+    private static readonly Regex ShimNamesArbiter = new(
+        """['"`]kyber-weave-arbiter['"`]""",
+        RegexOptions.CultureInvariant,
+        MatchTimeout);
+
+    private static readonly Regex ShimGlobalScope = new(
+        """['"`]--scope['"`]\s*,\s*['"`]global['"`]|['"`]--scope=global['"`]""",
+        RegexOptions.CultureInvariant,
+        MatchTimeout);
 
     // A comment or a trailing comma must not hide a declared hook. Factory already tolerates JSONC;
     // Antigravity and Cursor files are read the same way.
@@ -169,8 +178,84 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
             return false;
         }
 
-        return shim.Contains(ShimMarker, StringComparison.Ordinal)
-            && !shim.Contains(ShimGlobalScopeMarker, StringComparison.Ordinal);
+        string code = WithoutComments(shim);
+        return ShimNamesArbiter.IsMatch(code) && !ShimGlobalScope.IsMatch(code);
+    }
+
+    // A commented-out spawn line is not a hook. Strings are left intact so a quote inside a command is not a comment.
+    private static string WithoutComments(string source)
+    {
+        StringBuilder code = new(source.Length);
+        bool inLine = false;
+        bool inBlock = false;
+        char quote = '\0';
+        for (int index = 0; index < source.Length; index++)
+        {
+            char current = source[index];
+            char next = index + 1 < source.Length ? source[index + 1] : '\0';
+            if (inLine)
+            {
+                if (current == '\n')
+                {
+                    inLine = false;
+                    code.Append(current);
+                }
+
+                continue;
+            }
+
+            if (inBlock)
+            {
+                if (current == '*' && next == '/')
+                {
+                    inBlock = false;
+                    index++;
+                }
+
+                continue;
+            }
+
+            if (quote != '\0')
+            {
+                code.Append(current);
+                if (current == '\\' && next != '\0')
+                {
+                    code.Append(next);
+                    index++;
+                    continue;
+                }
+
+                if (current == quote)
+                {
+                    quote = '\0';
+                }
+
+                continue;
+            }
+
+            if (current == '/' && next == '/')
+            {
+                inLine = true;
+                index++;
+                continue;
+            }
+
+            if (current == '/' && next == '*')
+            {
+                inBlock = true;
+                index++;
+                continue;
+            }
+
+            if (current is '"' or '\'' or '`')
+            {
+                quote = current;
+            }
+
+            code.Append(current);
+        }
+
+        return code.ToString();
     }
 
     /// <summary>

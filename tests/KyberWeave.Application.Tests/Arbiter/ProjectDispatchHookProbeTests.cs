@@ -411,6 +411,42 @@ public sealed class ProjectDispatchHookProbeTests
     public void OpenCode_WhenTheShimIsAbsent_DoesNotCover() =>
         Assert.False(_probe.CoversHarness(Root, "opencode"));
 
+    [Theory]
+    [InlineData("""const command = ["kyber-weave-arbiter","--scope","global"];""")]
+    [InlineData("""const command = ['kyber-weave-arbiter', '--scope', 'global'];""")]
+    public void OpenCode_WhenTheGlobalShimUsesAnotherSpelling_DoesNotCover(string shim)
+    {
+        Write(OpenCodeShimPath, shim);
+
+        Assert.False(_probe.CoversHarness(Root, "opencode"));
+    }
+
+    [Fact]
+    public void OpenCode_WhenTheMarkerIsOnlyAComment_DoesNotCover()
+    {
+        Write(
+            OpenCodeShimPath,
+            """
+            // const command = "kyber-weave-arbiter";
+            export const unused = 1;
+            """);
+
+        Assert.False(_probe.CoversHarness(Root, "opencode"));
+    }
+
+    [Fact]
+    public void OpenCode_WhenACommentMentionsTheGlobalFlag_StillCoversTheProjectHook()
+    {
+        Write(
+            OpenCodeShimPath,
+            """
+            // ["kyber-weave-arbiter", "--scope", "global"]
+            const command = "kyber-weave-arbiter";
+            """);
+
+        Assert.True(_probe.CoversHarness(Root, "opencode"));
+    }
+
     [Fact]
     public void Pi_WhenTheExtensionCarriesTheProjectHook_Covers()
     {
