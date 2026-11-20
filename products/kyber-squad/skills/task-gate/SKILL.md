@@ -49,9 +49,10 @@ Run no format command a declared gate does not cover.
 
 ## Loop and the 3-cycle cap
 
-A cycle is one `--fix` run followed by one verification run. When a gate fails, make the fix its
-output calls for and run one cycle. The loop has a 3-cycle cap: after three cycles, stop even when a
-gate still fails, return the escalation below, and do not run a fourth.
+A cycle is one `--fix` run, plus the verification run after it only when its fixes changed a task
+file. When a gate fails, make the fix its output calls for and run one cycle. The loop has a 3-cycle
+cap: after three cycles, stop even when a gate still fails, return the escalation below, and do not
+run a fourth.
 
 A gate that cannot run for a reason outside the task is not a failure to fix. Report it as skipped
 with its reason, and do not claim a pass for it.
