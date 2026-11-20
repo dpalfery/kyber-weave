@@ -130,6 +130,8 @@ public sealed class WorkerGuardRepositoryRootTests
 
         public IReadOnlyList<RunRecord>? LiveSeparateRuns(string homeDirectory, string canonicalCheckout) => [];
 
+        public string? CanonicalCheckoutContaining(string path) => null;
+
         public string? StrayWriteRefusal(string path, string workingDirectory, string homeDirectory) => null;
 
         public string? ReadCheckedOutBranch(string worktree) => null;

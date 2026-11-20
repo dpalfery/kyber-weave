@@ -95,8 +95,8 @@ internal static class WorkerGuardRules
 
     /// <summary>
     /// Whether the event can need a refusal at all, decided from the event alone: a root agent, an agent outside the Squad
-    /// catalog, and a developer-less call that writes no file are never guarded. The guard process asks it before it
-    /// builds anything, because the guard runs on every tool call.
+    /// catalog, and a developer-less call that neither writes a file nor runs a shell command are never guarded. The guard
+    /// process asks it before it builds anything, because the guard runs on every tool call.
     /// </summary>
     /// <param name="harness">The harness token.</param>
     /// <param name="stdin">The hook event as JSON.</param>
@@ -113,6 +113,7 @@ internal static class WorkerGuardRules
             ToolCall? call = WorkerGuardEventReader.Read(harness, stdin);
             return call is not null
                 && (call.WritePath is not null
+                    || call.Command is not null
                     || IsCommandJudged(call)
                     || string.Equals(call.Agent.CapabilityProfile, SeatProfile, StringComparison.Ordinal)
                     || IsBudgeted(call.Agent.CapabilityProfile));
@@ -134,6 +135,271 @@ internal static class WorkerGuardRules
     internal static bool IsCommandJudged(ToolCall call) =>
         call.Command is { Length: > 0 }
         && string.Equals(call.Agent.CapabilityProfile, PlatformReaderProfile, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The refusal a shell command earns when it would run in a repository's canonical checkout while a live run of
+    /// that repository works in a worktree of its own.
+    /// </summary>
+    /// <param name="canonicalCheckout">The canonical checkout the command would run in.</param>
+    /// <param name="runWorktree">The worktree the live run works in.</param>
+    internal static string StrayCommandRefusal(string canonicalCheckout, string runWorktree) =>
+        $"{CheckoutRuleId}: this command would run in the repository's canonical checkout {canonicalCheckout} while " +
+        $"your run works in {runWorktree}. Run it in the run worktree instead; the canonical checkout stays " +
+        "untouched for the whole run.";
+
+    /// <summary>
+    /// The directories a command moves into before it acts: every <c>cd</c> or <c>pushd</c> argument and every
+    /// <c>git -C</c> argument, as the shell wrote the path. A relative path is resolved against the call's working
+    /// directory by the caller, which is the only place that knows it.
+    /// </summary>
+    /// <remarks>
+    /// Every segment is scanned, including the parts after a <c>&amp;&amp;</c>, <c>;</c> or <c>|</c> and inside a
+    /// subshell, because a command can step into the canonical checkout at any point. A word only counts as the
+    /// program where a program can stand, so a quoted argument that happens to read <c>cd</c> is not mistaken for
+    /// one, and quoted text stays a single word, so a path is taken whole.
+    /// </remarks>
+    internal static IReadOnlyList<string> EnteredDirectories(string command)
+    {
+        string[] tokens = ShellTokens(command);
+        List<string> directories = [];
+        bool commandStart = true;
+        for (int index = 0; index < tokens.Length; index++)
+        {
+            string token = tokens[index];
+            if (IsCommandSeparator(token))
+            {
+                commandStart = true;
+                continue;
+            }
+
+            if (!commandStart)
+            {
+                continue;
+            }
+
+            if (IsChangeDirectory(token))
+            {
+                AddChangeDirectoryArgument(tokens, index, directories);
+                commandStart = false;
+            }
+            else if (IsGitProgram(token))
+            {
+                AddGitDirectory(tokens, index, directories);
+                commandStart = false;
+            }
+            else if (!IsCommandPrefix(token))
+            {
+                commandStart = false;
+            }
+        }
+
+        return directories;
+    }
+
+    /// <summary>The words that end one command and begin the next, kept as words of their own by <see cref="ShellTokens" />.</summary>
+    private static readonly string[] CommandSeparators = ["&&", "||", "|", ";", "&", "(", ")"];
+
+    /// <summary>The words that may stand before a program without being one: wrappers, keywords and assignments.</summary>
+    private static readonly HashSet<string> CommandPrefixes = new(StringComparer.Ordinal)
+    {
+        "sudo", "env", "command", "exec", "nohup", "time",
+        "if", "then", "else", "elif", "do", "while", "until", "!", "{", "}",
+    };
+
+    private static bool IsCommandSeparator(string token) =>
+        CommandSeparators.Contains(token, StringComparer.Ordinal);
+
+    private static bool IsCommandPrefix(string token) =>
+        CommandPrefixes.Contains(token, StringComparer.Ordinal) || IsAssignment(token);
+
+    private static bool IsChangeDirectory(string token) =>
+        string.Equals(token, "cd", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(token, "pushd", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Whether a word names git, however its path is written, including Windows' <c>git.exe</c>.</summary>
+    private static bool IsGitProgram(string token)
+    {
+        string program = Normalise(token);
+        int separator = program.LastIndexOf('\\');
+        if (separator >= 0)
+        {
+            program = program[(separator + 1)..];
+        }
+
+        return string.Equals(program, "git", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(program, "git.exe", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Adds the directory a <c>cd</c> or <c>pushd</c> moves into: its first argument that is not an option. A
+    /// <c>pushd</c> with no argument swaps the directory stack, so it moves nowhere this guard can name.
+    /// </summary>
+    private static void AddChangeDirectoryArgument(string[] tokens, int index, List<string> directories)
+    {
+        for (int next = index + 1; next < tokens.Length && !IsCommandSeparator(tokens[next]); next++)
+        {
+            if (tokens[next].StartsWith('-'))
+            {
+                continue;
+            }
+
+            directories.Add(tokens[next]);
+            return;
+        }
+    }
+
+    /// <summary>
+    /// Adds the directory <c>git -C</c> moves into. Only git's global options, which come before its subcommand,
+    /// are read, so a subcommand's own <c>-C</c> is never taken for a directory change.
+    /// </summary>
+    private static void AddGitDirectory(string[] tokens, int index, List<string> directories)
+    {
+        for (int next = index + 1; next < tokens.Length && !IsCommandSeparator(tokens[next]); next++)
+        {
+            string option = tokens[next];
+            if (!option.StartsWith('-') || string.Equals(option, "--", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (string.Equals(option, "-C", StringComparison.Ordinal))
+            {
+                if (next + 1 < tokens.Length && !IsCommandSeparator(tokens[next + 1]))
+                {
+                    directories.Add(tokens[next + 1]);
+                }
+
+                return;
+            }
+
+            if (option.StartsWith("-C", StringComparison.Ordinal) && option.Length > 2)
+            {
+                directories.Add(option[2..].TrimStart('='));
+                return;
+            }
+
+            if (GitOptionTakesValue(option))
+            {
+                next++;
+            }
+        }
+    }
+
+    /// <summary>The git global options that take a separate value, so the word after one is not a subcommand.</summary>
+    private static bool GitOptionTakesValue(string option) =>
+        option is "-c" or "--git-dir" or "--work-tree" or "--namespace" or "--exec-path" or "--super-prefix"
+            or "--config-env" or "--attr-source";
+
+    /// <summary>
+    /// The command split into words: quotes are honoured and removed, and an unquoted join, redirect or newline
+    /// becomes a word of its own, so the scan can stop one command where the next begins.
+    /// </summary>
+    private static string[] ShellTokens(string command)
+    {
+        List<string> tokens = [];
+        StringBuilder word = new();
+        bool singleQuoted = false;
+        bool doubleQuoted = false;
+        for (int index = 0; index < command.Length; index++)
+        {
+            char current = command[index];
+            if (singleQuoted)
+            {
+                if (current == '\'')
+                {
+                    singleQuoted = false;
+                }
+                else
+                {
+                    word.Append(current);
+                }
+
+                continue;
+            }
+
+            if (doubleQuoted)
+            {
+                if (current == '\\'
+                    && index + 1 < command.Length
+                    && command[index + 1] is '"' or '\\')
+                {
+                    word.Append(command[++index]);
+                }
+                else if (current == '"')
+                {
+                    doubleQuoted = false;
+                }
+                else
+                {
+                    word.Append(current);
+                }
+
+                continue;
+            }
+
+            switch (current)
+            {
+                case '\'':
+                    singleQuoted = true;
+                    break;
+                case '"':
+                    doubleQuoted = true;
+                    break;
+                case ' ' or '\t':
+                    FlushWord(tokens, word);
+                    break;
+                case ';' or '\n' or '\r':
+                    FlushWord(tokens, word);
+                    tokens.Add(";");
+                    break;
+                case '(' or ')':
+                    FlushWord(tokens, word);
+                    tokens.Add(current.ToString());
+                    break;
+                case '|':
+                    FlushWord(tokens, word);
+                    if (index + 1 < command.Length && command[index + 1] == '|')
+                    {
+                        index++;
+                        tokens.Add("||");
+                    }
+                    else
+                    {
+                        tokens.Add("|");
+                    }
+
+                    break;
+                case '&':
+                    FlushWord(tokens, word);
+                    if (index + 1 < command.Length && command[index + 1] == '&')
+                    {
+                        index++;
+                        tokens.Add("&&");
+                    }
+                    else
+                    {
+                        tokens.Add("&");
+                    }
+
+                    break;
+                default:
+                    word.Append(current);
+                    break;
+            }
+        }
+
+        FlushWord(tokens, word);
+        return [.. tokens];
+    }
+
+    private static void FlushWord(List<string> tokens, StringBuilder word)
+    {
+        if (word.Length > 0)
+        {
+            tokens.Add(word.ToString());
+            word.Clear();
+        }
+    }
 
     /// <summary>
     /// The refusal a technology's command allow-list makes, or null when no rule refuses this command. A rule

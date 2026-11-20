@@ -470,14 +470,17 @@ Arbiter off, and with it the guard. Each `ArchitectShellGuard` decision writes a
 runs on every Copilot CLI and Claude tool call from the user-level hook file or settings block, the only
 places those harnesses report a subagent's calls with its id and type, and it acts only on a call from inside
 a Squad subagent. It denies a write into the canonical checkout while a live run works in its own worktree
-(`KW-ARB-CHECKOUT-001`, the same id as the return rule) and every call of a developer or `docs-dev` dispatch
-whose current turn is past `arbiter.dispatch-budget` (`KW-ARB-BUDGET-001`), and denies once the call after a
+(`KW-ARB-CHECKOUT-001`, the same id as the return rule), and a shell command that would run there for the same
+reason: the call's working directory is inside the canonical checkout, or one of its `cd`, `pushd` or `git -C`
+steps moves into it, wherever in the command that step sits. It denies every call of a developer or `docs-dev`
+dispatch whose current turn is past `arbiter.dispatch-budget` (`KW-ARB-BUDGET-001`), and denies once the call after a
 process-starting call that ran past `dispatch-budget.call-minutes`, measured as the gap between the dispatch's
 consecutive calls; a file read is never judged, because only a call that started a process, or waited on one,
 can hang. It reads the run records, the checkout's git files and
 one append-only counter file per subagent under `~/.kyber-weave/arbiter/budgets/`, starts no process, calls no
-model, and allows anything it cannot read on the write and budget paths. A developer's shell command that writes
-a file is not seen by it; the return rule catches that.
+model, and allows anything it cannot read on the write, command and budget paths. A read through a view or grep
+tool carries no command, so it is never judged; a write a command makes to a file it does not name is left to
+the return rule below.
 
 A command from a `platform-reader` dispatch (the `platform-researcher` agent) is seen. The guard raises
 `worker.command` with the command's text, its *form* — the program and leading words, with a leading
