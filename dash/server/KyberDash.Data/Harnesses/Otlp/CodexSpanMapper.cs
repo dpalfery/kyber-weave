@@ -22,7 +22,7 @@ namespace KyberDash.Data.Harnesses.Otlp;
 /// parsing, so prompts, tool arguments/results, <c>user.email</c>, and account identifiers
 /// are dropped. The dropped fields are registered in <c>docs/dash/field-register.md</c>.
 /// </remarks>
-public sealed class CodexSpanMapper : IHarnessMapper
+public class CodexSpanMapper : IHarnessMapper
 {
     private const string MalformedOtlpCode = "MALFORMED_OTLP_PAYLOAD";
 

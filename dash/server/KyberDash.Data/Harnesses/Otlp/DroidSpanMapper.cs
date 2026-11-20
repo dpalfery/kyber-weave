@@ -25,7 +25,7 @@ namespace KyberDash.Data.Harnesses.Otlp;
 /// <c>gen_ai.*</c> keys. Gemini-attributed spans (<c>gen_ai.system == "gemini"</c> or any
 /// <c>gemini.*</c> attribute) are excluded from batches so they yield zero stored records.
 /// </remarks>
-public sealed partial class DroidSpanMapper : IHarnessMapper
+public partial class DroidSpanMapper : IHarnessMapper
 {
     private const string DefaultToolErrorMessage = "Tool execution failed.";
     private const string DefaultAgentErrorMessage = "Agent invocation failed.";

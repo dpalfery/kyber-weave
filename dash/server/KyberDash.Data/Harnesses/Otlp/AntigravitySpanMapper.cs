@@ -25,7 +25,7 @@ namespace KyberDash.Data.Harnesses.Otlp;
 /// <c>gen_ai.tool.name</c> spans map to <c>tool.invoke</c>, and <c>invoke_agent</c> spans map to
 /// <c>agent.invoke</c>, mirroring <c>CanonAdapters.CanonicalOp</c>.
 /// </remarks>
-public sealed partial class AntigravitySpanMapper : IHarnessMapper
+public partial class AntigravitySpanMapper : IHarnessMapper
 {
     private const string DefaultToolErrorMessage = "Tool execution failed.";
     private const string DefaultAgentErrorMessage = "Agent invocation failed.";

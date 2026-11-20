@@ -23,7 +23,7 @@ namespace KyberDash.Data.Harnesses.Otlp;
 /// <c>agent.invoke</c>, mirroring <c>CanonAdapters.CanonicalOp</c>. No Copilot Chat span shapes
 /// beyond those evidenced keys are assumed.
 /// </remarks>
-public sealed partial class CopilotSpanMapper : IHarnessMapper
+public partial class CopilotSpanMapper : IHarnessMapper
 {
     private const string DefaultToolErrorMessage = "Tool execution failed.";
     private const string DefaultAgentErrorMessage = "Agent invocation failed.";

@@ -27,7 +27,7 @@ namespace KyberDash.Data.Harnesses.Otlp;
 /// map to conversation-history, system-prompt, and tool-definition parts measured through
 /// <see cref="ToolContentMeasurer"/>, so JSON payloads are withheld, never stored raw.
 /// </remarks>
-public sealed partial class OpenCodeSpanMapper : IHarnessMapper
+public partial class OpenCodeSpanMapper : IHarnessMapper
 {
     private const string DefaultToolErrorMessage = "Tool execution failed.";
     private const string DefaultAgentErrorMessage = "Agent invocation failed.";
