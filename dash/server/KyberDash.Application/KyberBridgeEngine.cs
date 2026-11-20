@@ -273,6 +273,8 @@ public class KyberBridgeEngine
             ["problems"] = aggregate?.Problems ?? Array.Empty<Problem>(),
             ["turns"] = turns.Select(ToTurnDto).ToList(),
             ["tools"] = aggregate is null ? Array.Empty<object>() : ToolRows(aggregate),
+            ["timeline"] = TimelineChildren(projection.SessionId),
+            ["requests"] = aggregate is null ? Array.Empty<object>() : RequestRows(aggregate),
         };
 
         if (projectionStatus is not null)
@@ -502,6 +504,7 @@ public class KyberBridgeEngine
         }
 
         CanonicalRecord hydrated = CanonRecordHydration.Hydrate(record);
+        AttachCapturedPrompt(record, hydrated);
         return JsonSerializer.SerializeToElement(new
         {
             spanId = hydrated.SpanId,
@@ -1517,6 +1520,86 @@ public class KyberBridgeEngine
 
     private static string? ResolveContextLimitSource(StoredSessionProjection projection) =>
         projection.Context?.ContextLimitSource ?? projection.ContextUnmeasurableReason;
+
+    private List<TimelineNode> TimelineChildren(string sessionId)
+    {
+        List<CollectedRecord> stored = [.. reader.Records(sessionKey: sessionId)];
+        List<CanonicalRecord> records = new(stored.Count);
+        foreach (CollectedRecord storedRecord in stored)
+        {
+            CanonicalRecord hydrated = CanonRecordHydration.Hydrate(storedRecord);
+            AttachCapturedPrompt(storedRecord, hydrated);
+            records.Add(hydrated);
+        }
+
+        records.Sort(CompareRecords);
+        if (records.Count == 0)
+        {
+            return [];
+        }
+
+        return [.. CanonContextAnalysis.BuildTimeline(records).Children];
+    }
+
+    /// <summary>
+    /// Puts a captured Factory prompt back on the span attribute the inspector reads.
+    /// The relational row keeps the text as a content part, and content that was withheld
+    /// never becomes a part, so a consent-off turn stays without the prompt.
+    /// </summary>
+    private static void AttachCapturedPrompt(CollectedRecord stored, CanonicalRecord hydrated)
+    {
+        if (!string.Equals(stored.HarnessId, "droid", StringComparison.OrdinalIgnoreCase)
+            || hydrated.Raw is not Dictionary<string, JsonElement> raw)
+        {
+            return;
+        }
+
+        string? prompt = CapturedPromptText(stored);
+        if (prompt is null)
+        {
+            return;
+        }
+
+        raw[FactoryKeys.PromptText] = JsonSerializer.SerializeToElement(prompt);
+    }
+
+    private static string? CapturedPromptText(CollectedRecord stored)
+    {
+        foreach (CollectedContentPart part in stored.Parts)
+        {
+            if (part.Bucket is not (ContentBucket.UserPrompt or ContentBucket.UserMessage or ContentBucket.ConversationHistory))
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(part.PlainText))
+            {
+                continue;
+            }
+
+            return part.PlainText;
+        }
+
+        return null;
+    }
+
+    private static List<Dictionary<string, object?>> RequestRows(SessionAggregateView aggregate)
+    {
+        List<Dictionary<string, object?>> rows = new(aggregate.Requests.Count);
+        foreach (ReadTimeSessionRequestSummary request in aggregate.Requests)
+        {
+            rows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["request"] = request.RequestSpanId,
+                ["timestamp"] = request.TimestampUtc,
+                ["turns"] = request.Turns,
+                ["model"] = request.Model,
+                ["prompt"] = request.PromptPreview,
+            });
+        }
+
+        return rows;
+    }
 
     private static List<Dictionary<string, object?>> ToolRows(SessionAggregateView aggregate)
     {

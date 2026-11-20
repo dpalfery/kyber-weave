@@ -277,6 +277,57 @@ public class RelationalIngestTests
         string? reason = declared.GetProperty("reason").GetString();
         Assert.Contains("droid", reason, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("token", reason, StringComparison.OrdinalIgnoreCase);
+
+        JsonElement timeline = bridge.GetSessionDetail(sessionId)!.Value.GetProperty("timeline");
+        Assert.Contains(timeline.EnumerateArray(), static node => node.GetProperty("name").GetString() == "factory.turn");
+    }
+
+    /// <summary>
+    /// A Factory turn captured with content consent keeps the prompt on the timeline span
+    /// the inspector reads and on the session request the payload publishes.
+    /// </summary>
+    [Fact]
+    public void IngestBatch_FactoryTurnWithConsent_PublishesPromptOnTimelineAndRequest()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionId = "factory-replay-content-on";
+        const string prompt = "the recorded factory prompt that must not travel without consent";
+
+        OtlpSpan turn = MakeOtlpSpan(
+            spanId: "aaaaaaaaaaaaaaaa",
+            traceId: "ffffffffffffffffffffffffffffffff",
+            serviceName: "kyberdash-factory-plugin",
+            name: "factory.turn",
+            kind: "internal",
+            attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["factory.contract_version"] = Element(CanonAdapters.DroidContractVersion),
+                ["factory.session.id"] = Element(sessionId),
+                ["factory.model"] = Element("gpt-5-codex"),
+                ["factory.turn.prompt.text"] = Element(prompt),
+            });
+
+        IngestOutcome outcome = CanonIngestPipeline.IngestBatch([turn], store, store);
+        Assert.Equal(new IngestOutcome(1, 0, 0), outcome);
+        _ = new CanonSessionProjectorEngine(store, store, store, pricing).ProjectIncremental();
+
+        KyberBridgeEngine bridge = new(
+            store,
+            store,
+            store,
+            pricing,
+            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonRollupsEngine(store, store, pricing));
+        JsonElement detail = bridge.GetSessionDetail(sessionId)!.Value;
+        JsonElement node = Assert.Single(
+            detail.GetProperty("timeline").EnumerateArray(),
+            static row => row.GetProperty("name").GetString() == "factory.turn");
+        Assert.Equal(prompt, node.GetProperty("attributes").GetProperty(FactoryKeys.PromptText).GetString());
+        Assert.Contains(
+            detail.GetProperty("requests").EnumerateArray(),
+            row => row.GetProperty("prompt").ValueKind == JsonValueKind.String
+                && row.GetProperty("prompt").GetString() == prompt);
     }
 
     /// <summary>
