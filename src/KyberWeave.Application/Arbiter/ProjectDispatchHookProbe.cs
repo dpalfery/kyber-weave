@@ -56,9 +56,10 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
         RegexOptions.CultureInvariant,
         MatchTimeout);
 
+    // The hook host compares the scope value case-insensitively, so GLOBAL is the same flag.
     private static readonly Regex ShimGlobalScope = new(
         """['"`]--scope['"`]\s*,\s*['"`]global['"`]|['"`]--scope=global['"`]""",
-        RegexOptions.CultureInvariant,
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase,
         MatchTimeout);
 
     // A comment or a trailing comma must not hide a declared hook. Factory already tolerates JSONC;

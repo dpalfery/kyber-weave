@@ -414,6 +414,7 @@ public sealed class ProjectDispatchHookProbeTests
     [Theory]
     [InlineData("""const command = ["kyber-weave-arbiter","--scope","global"];""")]
     [InlineData("""const command = ['kyber-weave-arbiter', '--scope', 'global'];""")]
+    [InlineData("""const command = ["kyber-weave-arbiter", "--scope", "GLOBAL"];""")]
     public void OpenCode_WhenTheGlobalShimUsesAnotherSpelling_DoesNotCover(string shim)
     {
         Write(OpenCodeShimPath, shim);
