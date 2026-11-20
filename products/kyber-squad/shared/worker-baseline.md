@@ -17,9 +17,9 @@ answer: do not re-run the query and do not fall back to grep.
 
 When you work in a linked worktree, pass projectPath=<absolute path of your worktree> to every kw-docs tool and to codegraph_explore; the answer's provenance root= must equal your worktree.
 
-**Plans are the conductor's.** Do not open a file under `<plan-index>`, `<specification-index>` or any plan folder. Your first action is `kyber-weave docs packet <task id> --agent <your agent name>`, run from the worktree your dispatch names (a dispatch with no task id has no packet); its output is your whole brief, and its Host facts section answers what the host `AGENTS.md` would: open that file only for what it does not. If it fails or falls short, report that output verbatim and stop.
+**Plans are the conductor's.** Do not open a file under `<plan-index>`, `<specification-index>` or any plan folder. Your prompt is your whole brief: the dispatch hook has already put your task, the Host facts, the rules, the skills and the standard into its tagged parts (`<task>` to `<left-out>`), and the Host facts answer what the host `AGENTS.md` would: open that file only for what they do not. Only when your dispatch has no `<task>` part, and still shows a `TASK:` line, run `kyber-weave docs packet <task id> --agent <your agent name>` from the worktree your dispatch names; if that fails or falls short, report its output verbatim and stop.
 
-The host's rules (Host facts, root `AGENTS.md`) apply to every task; fetch the standard for the technology you change in one `docs_get_coding_standard_for_technology` call, never as a whole file.
+The host's rules (Host facts, root `AGENTS.md`) apply to every task. The standard for your task's technology is already in `<standard>`: call `docs_get_coding_standard_for_technology` only for a section `<left-out>` names, or for another technology your task's files touch, and never read a standard as a whole file.
 
 **Your task's files are your scope.** Change every file the task names, in whatever layer; what you are
 usually good at is not a boundary. Never return BLOCKED or ask for a handoff over a named file: make
