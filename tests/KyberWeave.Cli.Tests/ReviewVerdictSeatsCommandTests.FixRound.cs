@@ -71,6 +71,25 @@ public sealed partial class ReviewVerdictSeatsCommandTests
     }
 
     /// <summary>
+    /// A finding dropped as a pull request note blocks nothing and is listed as follow-up work, exactly as pre-existing
+    /// debt is; a clean review says the loop ends.
+    /// </summary>
+    [Fact]
+    public void AFindingDroppedAsAPullRequestNoteIsFollowUpWorkAndTheLoopEnds()
+    {
+        WriteSeat("correctness", FindingSeat(severity: "major"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--drop", "correctness/off-by-one=pr note: the pull request describes this instead",
+                .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        IReadOnlyList<string> lines = MessagesWithCode(run.Output, FixRound);
+        Assert.Contains("follow-up: correctness/off-by-one (major) src/Foo.cs:12 (pr note)", lines);
+        Assert.Contains("fix round: none (fix level minor); review clean: proceed to archive.", lines);
+    }
+
+    /// <summary>
     /// A later cycle carries the prior minor finding the fix round did not take, so the last cycle, which the pull
     /// request reads, still lists it; the major the fix round took is not carried.
     /// </summary>

@@ -1095,7 +1095,7 @@ rather than performing it.
 
 **The review loop.** The verdict prints what the fix round takes, one `fix:` line each (every
 failed blocking gate and every finding at or above `review.policy.fix-level`), what becomes follow-up work (`follow-up:`: findings
-below the fix level, and findings dropped as `pre-existing debt`), and a
+below the fix level, and findings dropped as `pre-existing debt` or `pr note`), and a
 closing `fix round:` line (`KW-REVIEW-056`). Each `fix:` line goes to the worker that owns its
 scope, one dispatch per worker, after `REQUEST_CHANGES` and after an `APPROVE` alike. The council
 re-reviews until the verdict prints `fix round: none`: `review clean: proceed to archive` when
