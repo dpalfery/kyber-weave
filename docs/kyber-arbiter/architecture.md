@@ -1272,8 +1272,8 @@ and no row reads `rewrite` for an adapter that does not insert: the worker would
 id. The shipped header-strip rewrite is the evidence wherever it runs today: the hook returns the dispatch
 input with the routing headers removed, the worker starts from the returned input, and the dispatcher's
 transcript keeps what it sent. Antigravity inserts through `overwrite`, whose merge replaces the whole
-`Subagents` array, so it counts as a rewrite by the owner's decision; the live check the row describes still
-has to confirm the harness applies it. Among the harnesses Kyber-Weave serves no adapter is left with
+`Subagents` array, so it counts as a rewrite by the owner's decision; a live dispatch on 2026-11-19 confirmed the
+harness applies it. Among the harnesses Kyber-Weave serves no adapter is left with
 neither path.
 
 | Harness | Path | Rewrite field and shape | Live check: worker got the replaced text, dispatcher transcript did not | When the hook is not trusted or not enabled | Source, read 2026-11-16 |
@@ -1281,12 +1281,12 @@ neither path.
 | Claude | rewrite | `hookSpecificOutput.updatedInput` replaces the whole tool input; only `prompt` changes | Shipped header strip | An untrusted workspace leaves the worker with the header lines; it runs `docs packet` for its task id | [CC-HOOK] |
 | Copilot in VS Code | rewrite | `hookSpecificOutput.updatedInput.prompt` (Preview) | Shipped header strip | Without `chat.useHooks` or a trusted workspace the hook does not run; the worker runs `docs packet` | [GH-HOOK] |
 | Copilot CLI | rewrite | `modifiedArgs.prompt` beside `permissionDecision: allow` | Shipped header strip | A missing hook file leaves the worker with the header lines; it runs `docs packet` | [GH-HOOK] |
-| OpenCode | rewrite | `args`, the complete arguments object, which the shim assigns over the call | Shipped header strip | The plugin shim absent leaves the worker with the header lines; it runs `docs packet` | [OC-AGENT] |
+| OpenCode | rewrite | `args`, the complete arguments object, which the 2.x shim assigns to `event.input` in its `ctx.tool.hook("execute.before")` callback | Passed 2026-11-19 on OpenCode 2.3.0, global shim: the `subagent` dispatch carried the header lines, the hook inserted the T30 prompt, the worker's prompt opened with `<task>` and held no `TASK:` line, and the dispatcher's tool call kept the header. Before this fix the 1.x-shaped shim registered nothing on 2.x, so no hook ran | The plugin shim absent leaves the worker with the header lines; it runs `docs packet` | [OC-AGENT] |
 | Pi | rewrite | `args` in the plugin envelope | Shipped header strip | The extension absent leaves the worker with the header lines; it runs `docs packet` | [PI-EXT] |
 | Codex | rewrite | `hookSpecificOutput.updatedInput.message`, valid only with `allow` | Shipped header strip | A hook the user has not trusted is skipped; the worker runs `docs packet` | [CX-HOOK] |
 | Cursor | rewrite | `updated_input.prompt`, riding on `allow` only | Shipped header strip; `updated_input` on `Task` is documented only loosely, so a field the harness drops falls back to the file | A `failClosed` hook that does not run leaves the worker with the header lines; it runs `docs packet` | [CU-HOOK] |
 | Kilo | rewrite | `args` in the plugin envelope | Shipped header strip | The plugin shim absent leaves the worker with the header lines; it runs `docs packet` | [KI-SUB] |
-| Antigravity | rewrite | `overwrite` replaces `toolCall.args` by a **shallow top-level merge**, so the insertion resends `Prompt` for the flat shape, or the whole `Subagents` array, every element kept and only its `Prompt` replaced, for the list shape. `decision` is required; the hook returns `decision: "ask"` so the user's approval prompt still applies, and never `auto_approve` | The adapter inserts the prompt; the live check that the harness applies the merge has not run, because it is not installed in this worktree. It must show the worker received the replaced `Prompt` and the dispatcher's transcript did not | A project or global `hooks.json` that is absent or disabled means no hook; the worker runs `docs packet` | [AG-HOOK] |
+| Antigravity | rewrite | `overwrite` replaces `toolCall.args` by a **shallow top-level merge**, so the insertion resends `Prompt` for the flat shape, or the whole `Subagents` array, every element kept and only its `Prompt` replaced, for the list shape. `decision` is required; the hook returns `decision: "ask"` so the user's approval prompt still applies, and never `auto_approve` | Passed 2026-11-19 on agy 1.5.12, global `~/.gemini/config/hooks.json`: the flat `invoke_subagent` dispatch carried the header lines, the hook answered `decision: ask` with `overwrite.Prompt`, the worker echoed `<task>` and `Task T30: …`, and the dispatcher's transcript held the header and the worker's reply only. `ask` passes under `-p --dangerously-skip-permissions`. Before this fix the user-level hook deferred to a project hook that did not exist | A project or global `hooks.json` that is absent or disabled means no hook; the worker runs `docs packet` | [AG-HOOK] |
 | Factory | rewrite | `hookSpecificOutput.updatedInput.prompt`, with every `tool_input` field copied | Shipped header strip | A missing or disabled hook file leaves the worker with the header lines; it runs `docs packet` | [FA-HOOK] |
 | Devin | rewrite | `hookSpecificOutput.updatedInput.prompt`, merged into the tool call | Shipped header strip | A missing hook file leaves the worker with the header lines; it runs `docs packet` | [DV-HOOK] |
 | ZCode | file until the check passes | `hookSpecificOutput.updatedInput` is a full replacement of the tool input, re-validated against the tool schema | Not yet: project hooks are ignored by the harness and no Kyber-Weave hook is rendered; a user-scope hook also needs `hooks.enabled: true`. The check must show the worker received the replaced prompt and the dispatcher's transcript did not | The hook is absent or disabled: the worker runs `docs packet` | [ZC-HOOK], read 2026-11-16 |
@@ -1342,6 +1342,10 @@ flowchart TD
   and engine as a project hook, so the answer is the same.
 - **Other harnesses** keep deferring when the project enables Arbiter, logging
   `deferred-to-project (<harness>: no per-dispatch probe; the project's own <harness> hooks decide)`.
+  Antigravity and OpenCode defer only when the project carries its own hook for them
+  (`ProjectDispatchHookProbe`: an Arbiter `PreToolUse` entry on `invoke_subagent` in `.agents/hooks.json`, or
+  `.opencode/plugins/kyber-arbiter.ts`). Without one, the user-level hook inserts the task prompt without
+  evaluating, as it does for a project that opts out, so the worker never starts with only the header lines.
 
 The probe reads Claude Code's documented precedence (project sub-agents outrank user sub-agents; personal
 skills outrank project skills). Two points are not documented and are the design's assumptions: that
@@ -1471,7 +1475,12 @@ Per-harness notes:
   `{ id, setup }` while Kilo's fork accepts `{ id, server }`, so the shared generator
   parameterizes the default export by harness token (`ArbiterPluginShim.Render`) and
   keeps the named `KyberArbiter` export alongside it. A named-only render fails OpenCode
-  v2's loader with `SchemaError` and the plugin silently never loads.
+  v2's loader with `SchemaError` and the plugin silently never loads. OpenCode 2.x also ignores a hooks
+  object returned from `setup`: the OpenCode shim registers `ctx.tool.hook("execute.before" | "execute.after")`,
+  reads the call id from `event.id` and the arguments from `event.input`, and rewrites the call by assigning
+  `event.input` (verified live on 2.3.0, 2026-11-19). Kilo keeps the 1.x hooks object. A global-scope shim
+  resolves the repository from the harness directory only, taking the nearest `.kyber-weave/kyber-weave.yml` or
+  `.git`: walking up from its own file under `~/.config` reached the user config in `~/.kyber-weave/` first.
 - **Antigravity** sends one dispatch as a flat `toolCall.args` object (`TypeName`, `Prompt`, `Role`) and
   documents a `Subagents` list for several; the call is denied when any marked element
   escalates. It documents no input-rewrite field for `hooks.json`, so routing headers are
