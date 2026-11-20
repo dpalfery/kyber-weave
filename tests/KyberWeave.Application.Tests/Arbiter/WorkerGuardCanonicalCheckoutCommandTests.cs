@@ -67,8 +67,8 @@ public sealed class WorkerGuardCanonicalCheckoutCommandTests
 
         Assert.Equal(
             $"{RuleId}: this command would run in the repository's canonical checkout {_repo} while your run works " +
-            $"in {_worktree}. Run it in the run worktree instead; the canonical checkout stays untouched for the " +
-            "whole run.",
+            $"in {_worktree}. Start the command with `cd {_worktree} && ` so every step runs in the run worktree; " +
+            "the canonical checkout stays untouched for the whole run.",
             reason);
     }
 
