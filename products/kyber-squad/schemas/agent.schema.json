@@ -58,7 +58,8 @@
           "edit/createFile",
           "edit/editFiles",
           "edit/rename",
-          "vscodeGeneral/rename"
+          "vscodeGeneral/rename",
+          "skill"
         ]
       }
     },
