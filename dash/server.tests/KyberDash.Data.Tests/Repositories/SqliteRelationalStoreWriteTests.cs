@@ -83,7 +83,7 @@ public class SqliteRelationalStoreWriteTests
         string pragmaSql = store.ExecutedSql[0];
         Assert.Contains("PRAGMA journal_mode = WAL;", pragmaSql, StringComparison.Ordinal);
         Assert.Contains("PRAGMA synchronous = NORMAL;", pragmaSql, StringComparison.Ordinal);
-        Assert.Contains($"PRAGMA journal_size_limit = {CanonSchema.WalSizeLimitBytes.ToString(CultureInfo.InvariantCulture)};", pragmaSql, StringComparison.Ordinal);
+        Assert.Contains($"PRAGMA journal_size_limit = {SqliteRelationalStore.WalSizeLimitBytes.ToString(CultureInfo.InvariantCulture)};", pragmaSql, StringComparison.Ordinal);
         string expectedStoreStateDdl = NormalizeLineEndings(SchemaDdlGenerator.GenerateTableDdl(RelationalSchemaCatalog.GetTable("store_state"))).Trim();
         Assert.Contains(expectedStoreStateDdl, NormalizeLineEndings(pragmaSql), StringComparison.Ordinal);
 
@@ -94,7 +94,7 @@ public class SqliteRelationalStoreWriteTests
         Assert.StartsWith("PRAGMA foreign_keys = ON;\nBEGIN IMMEDIATE;\n", ddlSql, StringComparison.Ordinal);
         Assert.Contains(NormalizeLineEndings(SchemaDdlGenerator.GenerateSchemaDdl()).Trim(), ddlSql, StringComparison.Ordinal);
         Assert.Contains(
-            $"INSERT OR IGNORE INTO store_state (singleton_id, schema_version, detector_version) VALUES (1, {SqliteRelationalStore.SchemaVersion.ToString(CultureInfo.InvariantCulture)}, {CanonSchema.DetectorVersion.ToString(CultureInfo.InvariantCulture)});",
+            $"INSERT OR IGNORE INTO store_state (singleton_id, schema_version, detector_version) VALUES (1, {SqliteRelationalStore.SchemaVersion.ToString(CultureInfo.InvariantCulture)}, {SqliteRelationalStore.DetectorVersion.ToString(CultureInfo.InvariantCulture)});",
             ddlSql,
             StringComparison.Ordinal);
         Assert.Contains("\nCOMMIT;", ddlSql, StringComparison.Ordinal);
@@ -154,7 +154,7 @@ public class SqliteRelationalStoreWriteTests
         Assert.Equal(3, store.ExecutedSql.Count);
         string ddlSql = NormalizeLineEndings(store.ExecutedSql[2]);
         Assert.Contains(
-            $"UPDATE store_state SET detector_version = {CanonSchema.DetectorVersion.ToString(CultureInfo.InvariantCulture)} WHERE singleton_id = 1 AND detector_version <> {CanonSchema.DetectorVersion.ToString(CultureInfo.InvariantCulture)};",
+            $"UPDATE store_state SET detector_version = {SqliteRelationalStore.DetectorVersion.ToString(CultureInfo.InvariantCulture)} WHERE singleton_id = 1 AND detector_version <> {SqliteRelationalStore.DetectorVersion.ToString(CultureInfo.InvariantCulture)};",
             ddlSql,
             StringComparison.Ordinal);
         Assert.False(Directory.Exists(rootDir));

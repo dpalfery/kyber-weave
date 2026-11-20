@@ -4,6 +4,7 @@ using System.Text.Json;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Core.Exceptions;
 using KyberDash.Data.Collector;
+using KyberDash.Data.Repositories;
 using KyberDash.Domain;
 
 namespace KyberDash.Application;
@@ -15,8 +16,8 @@ namespace KyberDash.Application;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Every route answers from typed store rows: the engine holds no dependency on
-/// <c>ICanonStoreRepository</c> and parses no persisted store JSON. Session figures come from
+/// Every route answers from typed store rows: the engine reads only the relational store
+/// contracts and parses no persisted store JSON. Session figures come from
 /// <see cref="IRelationalStoreReader.GetSessionAggregate"/>,
 /// <see cref="IRelationalStoreReader.ListSessionAggregates"/>, and
 /// <see cref="IRelationalStoreReader.SessionTurnSummaries"/> priced at read time through
@@ -897,8 +898,8 @@ public class KyberBridgeEngine
         StoreStateView? storeState = operationalStore.GetStoreState();
         return JsonSerializer.SerializeToElement(new
         {
-            schemaVersion = storeState?.SchemaVersion ?? CanonSchema.SchemaVersion,
-            detectorVersion = storeState?.DetectorVersion ?? CanonSchema.DetectorVersion,
+            schemaVersion = storeState?.SchemaVersion ?? SqliteRelationalStore.SchemaVersion,
+            detectorVersion = storeState?.DetectorVersion ?? SqliteRelationalStore.DetectorVersion,
             storeGeneration = operationalStore.GetWriteMarker(),
             recordCount = reader.CountRecords(),
             sessionCount = reader.Sessions().Count,

@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace KyberDash.Domain.Schema;
 
-/// <summary>Disposition of a legacy v24 <see cref="CanonSchema"/> table in the normalized relational schema.</summary>
+/// <summary>Disposition of a legacy v24 legacy v24 schema table in the normalized relational schema.</summary>
 public enum LegacyTableDisposition
 {
     /// <summary>Replaced by one or more normalized tables in <see cref="RelationalSchemaCatalog"/>.</summary>
@@ -16,7 +16,7 @@ public enum LegacyTableDisposition
 }
 
 /// <summary>
-/// Mapping entry connecting a legacy v24 <see cref="CanonSchema"/> table to its typed replacement tables
+/// Mapping entry connecting a legacy v24 legacy v24 schema table to its typed replacement tables
 /// in <see cref="RelationalSchemaCatalog"/> or documenting its removal rationale.
 /// </summary>
 /// <param name="LegacyTableName">Legacy v24 SQLite table name.</param>
@@ -30,7 +30,7 @@ public record LegacyTableReplacementEntry(
     string? RemovedDetails = null);
 
 /// <summary>
-/// Authoritative mapping from all 22 legacy v24 <see cref="CanonSchema"/> tables to their
+/// Authoritative mapping from all 22 legacy v24 legacy v24 schema tables to their
 /// normalized replacement tables in <see cref="RelationalSchemaCatalog"/> or documented removals.
 /// </summary>
 public static class LegacyTableReplacementMap
@@ -41,7 +41,7 @@ public static class LegacyTableReplacementMap
         new ReadOnlyDictionary<string, LegacyTableReplacementEntry>(
             MapEntries.ToDictionary(static entry => entry.LegacyTableName, StringComparer.Ordinal));
 
-    /// <summary>All 22 v24 <see cref="CanonSchema"/> table replacement entries in declaration order.</summary>
+    /// <summary>All 22 v24 legacy v24 schema table replacement entries in declaration order.</summary>
     public static IReadOnlyList<LegacyTableReplacementEntry> Entries => MapEntries;
 
     /// <summary>Lookup table keyed by legacy v24 table name.</summary>

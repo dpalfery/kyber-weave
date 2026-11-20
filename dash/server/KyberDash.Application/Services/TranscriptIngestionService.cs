@@ -18,9 +18,6 @@ namespace KyberDash.Application;
 /// </summary>
 /// <remarks>
 /// Every write path into normalized telemetry tables goes through this service: OTLP admission,
-/// local harness source refresh, and retention checkpointing. Retained transitional support for
-/// <see cref="ICanonStoreRepository"/> remains until remaining legacy callers finish migrating.
-/// </remarks>
 public class TranscriptIngestionService : ITranscriptIngestionService
 {
     /// <summary>Diagnostic code emitted when a local source unit cannot be read or parsed.</summary>
@@ -35,9 +32,6 @@ public class TranscriptIngestionService : ITranscriptIngestionService
     private readonly string stateDirectory;
     private readonly Func<DateTimeOffset> clock;
 
-    private readonly ICanonStoreRepository? legacyStore;
-    private readonly ITranscriptReaderRepository? legacyTranscripts;
-    private readonly CanonRefreshEngine? legacyRefresh;
 
     /// <summary>
     /// Initializes a relational <see cref="TranscriptIngestionService"/> persisting batches and
@@ -86,32 +80,6 @@ public class TranscriptIngestionService : ITranscriptIngestionService
         this.clock = clock ?? (static () => DateTimeOffset.UtcNow);
     }
 
-    /// <summary>
-    /// Initializes a transitional <see cref="TranscriptIngestionService"/> over
-    /// <see cref="ICanonStoreRepository"/> for callers not yet migrated to the relational contracts.
-    /// </summary>
-    /// <param name="store">Canonical store repository receiving records and checkpoints.</param>
-    /// <param name="transcripts">Transcript reader repository discovering local sources.</param>
-    /// <param name="refresh">Refresh engine owning deduplication, checkpoints, and retention.</param>
-    public TranscriptIngestionService(
-        ICanonStoreRepository store,
-        ITranscriptReaderRepository transcripts,
-        CanonRefreshEngine refresh)
-    {
-        ArgumentNullException.ThrowIfNull(store);
-        ArgumentNullException.ThrowIfNull(transcripts);
-        ArgumentNullException.ThrowIfNull(refresh);
-
-        legacyStore = store;
-        legacyTranscripts = transcripts;
-        legacyRefresh = refresh;
-        mappersByHarness = new Dictionary<string, IHarnessMapper>(StringComparer.Ordinal);
-        fileSystem = PhysicalHarnessFileSystem.Instance;
-        homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        stateDirectory = ServerStateRepository.ResolveStateDirectory();
-        clock = static () => DateTimeOffset.UtcNow;
-    }
-
     /// <inheritdoc />
     public IngestOutcome IngestSpans(IReadOnlyList<OtlpSpan> spans)
     {
@@ -121,61 +89,23 @@ public class TranscriptIngestionService : ITranscriptIngestionService
             return new IngestOutcome(0, 0, 0);
         }
 
-        if (writer is not null && operationalStore is not null)
-        {
-            return CanonIngestPipeline.IngestBatch(spans, writer, operationalStore);
-        }
-
-        return CanonIngestPipeline.IngestBatch(spans, legacyStore!);
+        return CanonIngestPipeline.IngestBatch(spans, writer!, operationalStore!);
     }
 
     /// <inheritdoc />
     public RefreshReport RefreshHarnessSources(int historyWeeks = 2)
     {
-        if (legacyRefresh is not null && legacyTranscripts is not null)
-        {
-            int legacyWeeks = CanonSchema.NormalizeHistoryWeeks(historyWeeks) ?? CanonRefreshEngine.DefaultHistoryWeeks;
-            DateTimeOffset since = DateTimeOffset.UtcNow.AddDays(-7.0 * legacyWeeks);
-            IReadOnlyList<RefreshSourceInput> sources = legacyTranscripts.DiscoverLocalSources(since);
-            return legacyRefresh.RefreshHarnessSources(sources, legacyWeeks, trigger: "refresh");
-        }
-
         return RefreshRelationalSources(historyWeeks);
     }
 
     /// <inheritdoc />
     public PurgeExpiredContentResult PurgeExpiredContent(DateTimeOffset? now = null)
     {
-        if (legacyRefresh is not null)
-        {
-            return legacyRefresh.PurgeExpiredContent(now);
-        }
-
         DateTimeOffset instant = now ?? clock();
         string cutoffUtc = FormatUtc(CanonRefreshEngine.ContentRetentionFloor(instant));
         operationalStore!.SetContentRetentionDays(CanonRefreshEngine.ContentRetentionDays);
         operationalStore.SetContentPurgeMarkUtc(cutoffUtc);
         return new PurgeExpiredContentResult(0, cutoffUtc);
-    }
-
-    /// <summary>Records a transcript refresh in the audit table under an explicit trigger label.</summary>
-    /// <param name="sources">Declarative refreshable source units.</param>
-    /// <param name="historyWeeks">History lookback in weeks.</param>
-    /// <param name="trigger">Trigger label stored on the audit row.</param>
-    /// <returns>The refresh report.</returns>
-    public RefreshReport IngestSources(
-        IReadOnlyList<RefreshSourceInput> sources,
-        int historyWeeks,
-        string trigger)
-    {
-        ArgumentNullException.ThrowIfNull(sources);
-        if (legacyRefresh is null)
-        {
-            throw new NotSupportedException(
-                "IngestSources(RefreshSourceInput) is only supported on the transitional legacy store path; use RefreshHarnessSources.");
-        }
-
-        return legacyRefresh.RefreshHarnessSources(sources, historyWeeks, trigger);
     }
 
     /// <summary>Retention floor applied by <see cref="PurgeExpiredContent"/>.</summary>
@@ -191,7 +121,7 @@ public class TranscriptIngestionService : ITranscriptIngestionService
 
     private RefreshReport RefreshRelationalSources(int historyWeeks)
     {
-        int weeks = CanonSchema.NormalizeHistoryWeeks(historyWeeks) ?? CanonRefreshEngine.DefaultHistoryWeeks;
+        int weeks = CanonRefreshEngine.NormalizeHistoryWeeks(historyWeeks) ?? CanonRefreshEngine.DefaultHistoryWeeks;
         DateTimeOffset commandStarted = clock();
         DateTimeOffset windowStart = commandStarted.AddDays(-7.0 * weeks);
         string coveredFromUtc = FormatUtc(windowStart);

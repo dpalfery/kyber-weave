@@ -9,7 +9,6 @@ using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Domain;
 using Microsoft.Extensions.DependencyInjection;
-using Moq;
 using Xunit;
 
 namespace KyberDash.Application.Tests.Ingest;
@@ -312,8 +311,7 @@ public class RelationalIngestTests
     }
 
     /// <summary>
-    /// Verifies <c>IngestSpanNormalizer</c> no longer contains <c>PipelineSink : ICanonStoreRepository</c>
-    /// and produces relational DTO batch output directly.
+    /// Verifies <c>IngestSpanNormalizer</c> produces relational DTO batch output directly.
     /// </summary>
     [Fact]
     public void IngestSpanNormalizer_DropsPipelineSinkAndProducesRelationalDtoBatchOutput()
@@ -323,7 +321,6 @@ public class RelationalIngestTests
 
         Type[] nestedTypes = normalizerType.GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic);
         Assert.DoesNotContain(nestedTypes, static t => string.Equals(t.Name, "PipelineSink", StringComparison.Ordinal));
-        Assert.DoesNotContain(nestedTypes, static t => typeof(ICanonStoreRepository).IsAssignableFrom(t));
 
         OtlpSpan validSpan = MakeOtlpSpan(
             spanId: "6666666666666666",
@@ -379,15 +376,13 @@ public class RelationalIngestTests
     /// <summary>
     /// Verifies <see cref="ServiceCollectionExtensions.AddDashApplication"/> wires
     /// <see cref="TranscriptIngestionService"/> with <see cref="IRelationalStoreWriter"/>,
-    /// <see cref="IOperationalStore"/>, and <see cref="HarnessSourceRegistry"/> without calling
-    /// <see cref="ICanonStoreRepository"/>.
+    /// <see cref="IOperationalStore"/>, and <see cref="HarnessSourceRegistry"/>.
     /// </summary>
     [Fact]
     public void ServiceCollectionExtensions_WiresTranscriptIngestionServiceThroughRelationalWriterAndOperationalStore()
     {
         InMemoryRelationalStore store = new();
         SpyRelationalStoreWriter spyWriter = new(store);
-        Mock<ICanonStoreRepository> forbiddenCanonStore = new(MockBehavior.Strict);
         FakeHarnessFileSystem fs = new();
         string path = Combine(HomeRoot, ".commandcode/projects/repo/di.jsonl");
         fs.AddFile(path, "{\"type\":\"turn\",\"id\":\"rec-di\"}\n", BaselineUtc);
@@ -395,7 +390,6 @@ public class RelationalIngestTests
         ServiceCollection services = new();
         services.AddSingleton<IRelationalStoreWriter>(spyWriter);
         services.AddSingleton<IOperationalStore>(store);
-        services.AddSingleton<ICanonStoreRepository>(forbiddenCanonStore.Object);
         services.AddSingleton<IHarnessFileSystem>(fs);
         services.AddSingleton<IHarnessMapper, CountingCommandCodeMapper>();
 
@@ -423,7 +417,6 @@ public class RelationalIngestTests
 
         Assert.Equal(1, spanOutcome.Accepted);
         Assert.NotNull(store.GetRecord("8888888888888888"));
-        forbiddenCanonStore.VerifyNoOtherCalls();
     }
 
     private static string Combine(string root, string relative) =>

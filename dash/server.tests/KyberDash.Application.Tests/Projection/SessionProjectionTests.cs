@@ -136,8 +136,7 @@ public class SessionProjectionTests
 
     /// <summary>
     /// Token counting during the pass persists its cache entries through
-    /// <see cref="IOperationalStore"/> (<c>token_cache</c>), never through
-    /// <see cref="ICanonStoreRepository"/>, which this engine instance never receives.
+    /// <see cref="IOperationalStore"/> (<c>token_cache</c>).
     /// </summary>
     [Fact]
     public void ProjectIncremental_CountsTokensThroughTheOperationalStore()
@@ -222,7 +221,7 @@ public class SessionProjectionTests
             store,
             store,
             engine,
-            new CanonRollupsEngine(new FakeCanonStoreRepository(), new FakePricingRepository()));
+            new CanonRollupsEngine(store, store, new FakePricingRepository()));
 
         ProjectionPassReport first = service.ProjectIncremental();
         Assert.Equal(1, first.Built);

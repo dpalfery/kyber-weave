@@ -1,15 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.RegularExpressions;
 using KyberDash.Domain.Schema;
 using Xunit;
 
 namespace KyberDash.Domain.Tests.Schema;
 
 /// <summary>
-/// Verification tests ensuring <see cref="LegacyTableReplacementMap"/> maps every v24
-/// <see cref="CanonSchema"/> table to typed replacement tables in <see cref="RelationalSchemaCatalog"/>
+/// Verification tests ensuring <see cref="LegacyTableReplacementMap"/> maps every legacy v24
+/// table to typed replacement tables in <see cref="RelationalSchemaCatalog"/>
 /// or an explicit removal rationale.
 /// </summary>
 public sealed partial class LegacyTableReplacementMapTests
@@ -40,21 +39,11 @@ public sealed partial class LegacyTableReplacementMapTests
         "refresh_run",
     ];
 
-    [GeneratedRegex(@"CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+(?<name>[a-z][a-z0-9_]*)", RegexOptions.CultureInvariant)]
-    private static partial Regex LegacyCreateTableRegex();
-
-    /// <summary>Verifies all 22 v24 tables from <see cref="CanonSchema"/> are uniquely mapped with no extra keys.</summary>
+    /// <summary>Verifies all 22 legacy v24 tables are uniquely mapped with no extra keys.</summary>
     [Fact]
-    public void ReplacementMap_CoversAllTwentyTwoV24CanonSchemaTablesWithoutGapsOrExtras()
+    public void ReplacementMap_CoversAllTwentyTwoV24TablesWithoutGapsOrExtras()
     {
-        HashSet<string> ddlTables = new(StringComparer.Ordinal);
-        foreach (Match match in LegacyCreateTableRegex().Matches(CanonSchema.SchemaSql + "\n" + CanonSchema.SessionTurnTableSql))
-        {
-            _ = ddlTables.Add(match.Groups["name"].Value);
-        }
-
         Assert.Equal(22, ExpectedLegacyTables.Length);
-        Assert.Equal(ExpectedLegacyTables.OrderBy(static n => n, StringComparer.Ordinal), ddlTables.OrderBy(static n => n, StringComparer.Ordinal));
 
         Assert.Equal(22, LegacyTableReplacementMap.Entries.Count);
 

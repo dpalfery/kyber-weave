@@ -295,95 +295,6 @@ public class BoundedIngestWriter
     public IngestOutcome Flush(IRelationalStoreWriter writer, IOperationalStore operationalStore) =>
         FlushRelational(writer, operationalStore).Outcome;
 
-    /// <summary>
-    /// Transitional overload draining queued telemetry into <paramref name="store"/> for remaining
-    /// legacy test callers not yet migrated to <see cref="IRelationalStoreWriter"/>.
-    /// </summary>
-    /// <param name="store">Legacy canonical store repository.</param>
-    /// <returns>Aggregate ingest outcome across drained span and log batches.</returns>
-    public IngestOutcome Flush(ICanonStoreRepository store)
-    {
-        ArgumentNullException.ThrowIfNull(store);
-
-        lock (flushGate)
-        {
-            int accepted = 0;
-            int quarantined = 0;
-            int rejected = 0;
-
-            while (true)
-            {
-                (List<OtlpSpan> batch, long batchBytes) = DequeueSpanBatch();
-                if (batch.Count == 0)
-                {
-                    break;
-                }
-
-                try
-                {
-                    IngestOutcome outcome = IngestDrainedBatch(batch, store);
-                    accepted += outcome.Accepted;
-                    quarantined += outcome.Quarantined;
-                    rejected += outcome.Rejected;
-                }
-                finally
-                {
-                    ReleaseInflightSpans(batch.Count, batchBytes);
-                }
-            }
-
-            (List<OtlpLog> logs, long drainedLogBytes) = DequeueAllLogs();
-            try
-            {
-                if (logs.Count > 0)
-                {
-                    OtlpLogMapResult mapped = OtlpLogMapper.Map(logs);
-                    foreach (CollectedBatch batch in mapped.Batches)
-                    {
-                        foreach (CollectedProblem problem in batch.Problems)
-                        {
-                            store.RecordProblem(ToLegacyProblem(problem));
-                        }
-                    }
-
-                    foreach (CollectedProblem problem in mapped.StandaloneProblems)
-                    {
-                        store.RecordProblem(ToLegacyProblem(problem));
-                    }
-
-                    rejected += mapped.Outcome.Rejected;
-                }
-            }
-            finally
-            {
-                ReleaseInflightLogs(logs.Count, drainedLogBytes);
-            }
-
-            (List<OtlpMetric> metrics, long drainedMetricBytes) = DequeueAllMetrics();
-            try
-            {
-                if (metrics.Count > 0)
-                {
-                    store.StoreMetrics(metrics);
-                }
-            }
-            finally
-            {
-                ReleaseInflightMetrics(metrics.Count, drainedMetricBytes);
-            }
-
-            if (accepted > 0)
-            {
-                store.RecordIngest(
-                    "otlp",
-                    accepted,
-                    DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture));
-            }
-
-            return new IngestOutcome(accepted, quarantined, rejected);
-        }
-    }
-
     internal (IngestOutcome Outcome, int MetricPointsWritten) FlushRelational(
         IRelationalStoreWriter writer,
         IOperationalStore operationalStore)
@@ -594,33 +505,6 @@ public class BoundedIngestWriter
         return normalized.Outcome;
     }
 
-    private IngestOutcome IngestDrainedBatch(IReadOnlyList<OtlpSpan> batch, ICanonStoreRepository store)
-    {
-        if (ingestion is null)
-        {
-            return CanonIngestPipeline.IngestBatch(batch, store);
-        }
-
-        IngestSpanNormalizer.NormalizedSpanBatch normalized = IngestSpanNormalizer.Normalize(batch);
-        foreach (QuarantineRow row in normalized.Quarantined)
-        {
-            store.QuarantineAndDelete(row);
-        }
-
-        if (normalized.Problems.Count > 0)
-        {
-            store.RecordProblems(normalized.Problems);
-        }
-
-        if (normalized.Records.Count == 0)
-        {
-            return normalized.Outcome;
-        }
-
-        _ = ingestion.IngestSpans(batch);
-        return normalized.Outcome;
-    }
-
     private static List<StoredMetricPoint> MapMetricPoints(IReadOnlyList<OtlpMetric> metrics)
     {
         List<StoredMetricPoint> points = [];
@@ -744,15 +628,4 @@ public class BoundedIngestWriter
     private static string? SafeOptionalText(string? value) =>
         string.IsNullOrWhiteSpace(value) || JsonDocumentText.IsDocument(value) ? null : value;
 
-    private static SpanProblemRow ToLegacyProblem(CollectedProblem problem) =>
-        new(
-            SpanId: problem.SpanId ?? problem.Location ?? problem.ProblemKey,
-            Severity: problem.Severity,
-            Code: problem.Code,
-            Message: problem.Message,
-            Stack: problem.Stack,
-            Location: problem.Location,
-            SessionId: problem.SessionKey,
-            Harness: problem.HarnessId,
-            Timestamp: problem.TimestampUtc);
 }

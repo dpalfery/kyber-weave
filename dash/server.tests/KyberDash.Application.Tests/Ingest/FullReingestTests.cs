@@ -9,7 +9,6 @@ using KyberDash.Data.Collector;
 using KyberDash.Data.Collector.Sources;
 using KyberDash.Domain;
 using Microsoft.Extensions.DependencyInjection;
-using Moq;
 using Xunit;
 
 namespace KyberDash.Application.Tests.Ingest;
@@ -146,8 +145,7 @@ public class FullReingestTests
 
     /// <summary>
     /// Verifies <see cref="ServiceCollectionExtensions.AddDashApplication"/> wires
-    /// <see cref="CanonRefreshEngine"/> through the relational store contracts without calling
-    /// <see cref="ICanonStoreRepository"/>.
+    /// <see cref="CanonRefreshEngine"/> through the relational store contracts.
     /// </summary>
     [Fact]
     public void ServiceCollectionExtensions_WiresCanonRefreshEngineThroughRelationalContracts()
@@ -167,19 +165,14 @@ public class FullReingestTests
             typeof(Func<DateTimeOffset>),
         ]);
         Assert.NotNull(relationalCtor);
-        Assert.DoesNotContain(relationalCtor.GetParameters(), static p => p.ParameterType == typeof(ICanonStoreRepository));
-
         InMemoryRelationalStore store = new();
         FakeHarnessFileSystem fs = new();
-        Mock<ICanonStoreRepository> forbiddenCanonStore = new(MockBehavior.Strict);
-
         ServiceCollection services = new();
         services.AddSingleton<IRelationalStoreWriter>(store);
         services.AddSingleton<IRelationalStoreReader>(store);
         services.AddSingleton<IOperationalStore>(store);
         services.AddSingleton<IProjectionStore>(store);
         services.AddSingleton<IPricingRepository>(new FakePricingRepository());
-        services.AddSingleton<ICanonStoreRepository>(forbiddenCanonStore.Object);
         services.AddSingleton<IHarnessFileSystem>(fs);
         services.AddSingleton<IHarnessMapper>(new StubHarnessMapper("commandcode"));
 
@@ -192,7 +185,6 @@ public class FullReingestTests
 
         Assert.Equal(0, report.ExitCode);
         Assert.Empty(report.Harnesses);
-        forbiddenCanonStore.VerifyNoOtherCalls();
     }
 
     private static CanonRefreshEngine MakeEngine(

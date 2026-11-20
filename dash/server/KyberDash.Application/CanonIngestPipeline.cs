@@ -147,51 +147,6 @@ public static class CanonIngestPipeline
     }
 
     /// <summary>
-    /// Runs attribution, normalization, token validation, and persistence for a batch of decoded
-    /// OTLP spans against the transitional <paramref name="store"/>.
-    /// </summary>
-    /// <remarks>
-    /// Retained temporarily until remaining legacy callers (<c>BoundedIngestWriter</c> and
-    /// <c>CanonIngestTests</c>) finish migrating off <see cref="ICanonStoreRepository"/>.
-    /// </remarks>
-    /// <param name="spans">Decoded OTLP spans to ingest.</param>
-    /// <param name="store">Canonical store repository receiving records, quarantine, and problems.</param>
-    /// <param name="adapters">Harness adapters in tie-break order (defaults to <see cref="CanonAdapters.DefaultAdapters"/>).</param>
-    /// <returns>Per-batch accepted, quarantined, and rejected counters.</returns>
-    public static IngestOutcome IngestBatch(
-        IReadOnlyList<OtlpSpan> spans,
-        ICanonStoreRepository store,
-        IReadOnlyList<IHarnessAdapter>? adapters = null)
-    {
-        ArgumentNullException.ThrowIfNull(spans);
-        ArgumentNullException.ThrowIfNull(store);
-
-        if (spans.Count == 0)
-        {
-            return new IngestOutcome(0, 0, 0);
-        }
-
-        IngestSpanNormalizer.NormalizedSpanBatch normalized = NormalizeBatch(spans, adapters);
-
-        foreach (QuarantineRow row in normalized.Quarantined)
-        {
-            store.QuarantineAndDelete(row);
-        }
-
-        foreach (SpanProblemRow problem in normalized.Problems)
-        {
-            store.RecordProblem(problem);
-        }
-
-        if (normalized.Records.Count > 0)
-        {
-            store.PutRecords(normalized.Records);
-        }
-
-        return normalized.Outcome;
-    }
-
-    /// <summary>
     /// Performs pure in-memory attribution, normalization, and validation over <paramref name="spans"/>
     /// without touching any store, producing both legacy DTOs and normalized relational DTO batches.
     /// </summary>

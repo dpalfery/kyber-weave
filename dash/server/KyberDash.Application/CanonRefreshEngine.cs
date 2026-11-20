@@ -35,15 +35,14 @@ public record FullReingestReport(
 /// <summary>
 /// Rolling content retention purge, checkpoint coverage arithmetic, and source refresh orchestrator
 /// operating on <see cref="IRelationalStoreWriter"/>, <see cref="IRelationalStoreReader"/>, and
-/// <see cref="IOperationalStore"/>, with a transitional <see cref="ICanonStoreRepository"/> path kept
-/// until the remaining legacy callers finish migrating.
+/// <see cref="IOperationalStore"/>.
 /// </summary>
 public class CanonRefreshEngine
 {
     /// <summary>Rolling content retention window in days (decision D18).</summary>
     public const int ContentRetentionDays = 14;
 
-    /// <summary>Default lookback window applied by <see cref="RefreshHarnessSources(IReadOnlyList{RefreshSourceInput}, int, string)"/> in weeks.</summary>
+    /// <summary>Default lookback window applied by source refresh passes in weeks.</summary>
     public const int DefaultHistoryWeeks = 2;
 
     /// <summary>Metadata key recording the retention window applied by the last purge pass.</summary>
@@ -52,8 +51,6 @@ public class CanonRefreshEngine
     /// <summary>Metadata key recording the ISO-8601 UTC cutoff applied by the last purge pass.</summary>
     public const string ContentPurgedThroughKey = "content_purged_through";
 
-    private readonly ICanonStoreRepository store;
-    private readonly IPricingRepository pricing;
     private readonly CanonSessionProjectorEngine? projector;
     private readonly CanonRollupsEngine? rollups;
     private readonly IRelationalStoreWriter? writer;
@@ -69,34 +66,6 @@ public class CanonRefreshEngine
 
     /// <summary>Diagnostic code emitted when a local source unit cannot be read or parsed.</summary>
     public const string SourceUnreadableCode = "SOURCE_UNREADABLE";
-
-    /// <summary>
-    /// Initializes a transitional <see cref="CanonRefreshEngine"/> over
-    /// <see cref="ICanonStoreRepository"/> for callers not yet migrated to the relational contracts.
-    /// </summary>
-    /// <param name="store">Canonical store repository.</param>
-    /// <param name="transcripts">Transcript reader repository discovering local sources.</param>
-    /// <param name="pricing">Model rate-table repository.</param>
-    /// <param name="projector">Session projector engine refreshed after source commits.</param>
-    /// <param name="rollups">Rollup engine refreshed after source commits.</param>
-    public CanonRefreshEngine(
-        ICanonStoreRepository store,
-        ITranscriptReaderRepository transcripts,
-        IPricingRepository pricing,
-        CanonSessionProjectorEngine projector,
-        CanonRollupsEngine rollups)
-    {
-        ArgumentNullException.ThrowIfNull(store);
-        ArgumentNullException.ThrowIfNull(transcripts);
-        ArgumentNullException.ThrowIfNull(pricing);
-        ArgumentNullException.ThrowIfNull(projector);
-        ArgumentNullException.ThrowIfNull(rollups);
-
-        this.store = store;
-        this.pricing = pricing;
-        this.projector = projector;
-        this.rollups = rollups;
-    }
 
     /// <summary>
     /// Initializes a relational <see cref="CanonRefreshEngine"/> persisting batches and
@@ -132,10 +101,6 @@ public class CanonRefreshEngine
         ArgumentNullException.ThrowIfNull(operationalStore);
         ArgumentNullException.ThrowIfNull(sourceRegistry);
 
-        // Transitional: legacy-only fields stay unset on the relational path and are never
-        // read by FullReingest; they are removed with the legacy constructor in a later task.
-        this.store = null!;
-        this.pricing = null!;
         this.projector = projector;
         this.rollups = rollups;
 
@@ -159,6 +124,15 @@ public class CanonRefreshEngine
 
         this.clock = clock ?? (static () => DateTimeOffset.UtcNow);
     }
+
+    /// <summary>
+    /// Normalizes a persisted history coverage window according to "absent is not zero":
+    /// only positive 32-bit integers are retained; non-positive or null values return <see langword="null"/>.
+    /// </summary>
+    /// <param name="value">Candidate history window in weeks.</param>
+    /// <returns>The valid window, or <see langword="null"/> when <paramref name="value"/> is absent or out of range.</returns>
+    public static int? NormalizeHistoryWeeks(long? value) =>
+        value is > 0 and <= int.MaxValue ? (int)value.Value : null;
 
     /// <summary>Returns <paramref name="now"/> minus <see cref="ContentRetentionDays"/> days.</summary>
     /// <param name="now">Reference instant.</param>
@@ -222,149 +196,6 @@ public class CanonRefreshEngine
     }
 
     /// <summary>
-    /// Empties <c>content_json</c> and <c>parts_json</c> in place on records older than 14 days
-    /// while preserving rows and <c>raw</c> compressed payloads, and stamps retention metadata.
-    /// </summary>
-    /// <param name="now">Optional UTC reference instant.</param>
-    /// <returns>Summary of purged records and applied cutoff timestamp.</returns>
-    public PurgeExpiredContentResult PurgeExpiredContent(DateTimeOffset? now = null)
-    {
-        DateTimeOffset instant = now ?? DateTimeOffset.UtcNow;
-        string cutoffUtc = ContentRetentionFloor(instant).UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
-
-        int purged = store.PurgeContentBefore(cutoffUtc);
-        store.SetMetadata(ContentRetentionDaysKey, ContentRetentionDays.ToString(CultureInfo.InvariantCulture));
-        store.SetMetadata(ContentPurgedThroughKey, cutoffUtc);
-
-        return new PurgeExpiredContentResult(purged, cutoffUtc);
-    }
-
-    /// <summary>
-    /// Orchestrates one refresh pass using the current UTC clock: reconciles stale <c>running</c>
-    /// rows, opens a <c>refresh_run</c> row, skips reusable checkpoints, synthesizes and deduplicates
-    /// changed source units against OTLP spans, commits them atomically, enforces 14-day content
-    /// retention, and projects sessions/runs/harness rollups.
-    /// </summary>
-    /// <param name="sources">Declarative refreshable source units.</param>
-    /// <param name="historyWeeks">Lookback window in weeks.</param>
-    /// <param name="trigger">Trigger label recorded on the audit row.</param>
-    /// <returns>Summary report for the refresh pass.</returns>
-    public RefreshReport RefreshHarnessSources(
-        IReadOnlyList<RefreshSourceInput> sources,
-        int historyWeeks = DefaultHistoryWeeks,
-        string trigger = "cli") =>
-        RefreshHarnessSources(sources, now: null, historyWeeks, trigger);
-
-    /// <summary>
-    /// Orchestrates one refresh pass with an explicit optional reference timestamp.
-    /// </summary>
-    /// <param name="sources">Declarative refreshable source units.</param>
-    /// <param name="now">Optional reference instant (defaults to <see cref="DateTimeOffset.UtcNow"/>).</param>
-    /// <param name="historyWeeks">Lookback window in weeks.</param>
-    /// <param name="trigger">Trigger label recorded on the audit row.</param>
-    /// <returns>Summary report for the refresh pass.</returns>
-    public RefreshReport RefreshHarnessSources(
-        IReadOnlyList<RefreshSourceInput> sources,
-        DateTimeOffset? now,
-        int historyWeeks = DefaultHistoryWeeks,
-        string trigger = "cli")
-    {
-        ArgumentNullException.ThrowIfNull(sources);
-        ArgumentException.ThrowIfNullOrWhiteSpace(trigger);
-
-        _ = pricing.LoadPricingTables();
-
-        DateTimeOffset commandStarted = now ?? DateTimeOffset.UtcNow;
-        int normalizedWeeks = CanonSchema.NormalizeHistoryWeeks(historyWeeks) ?? DefaultHistoryWeeks;
-        DateTimeOffset windowStart = commandStarted.AddDays(-7 * normalizedWeeks);
-
-        string coveredFromUtc = windowStart.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
-        string coveredThroughUtc = commandStarted.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
-        string importedAtUtc = coveredThroughUtc;
-
-        store.ReconcileDeadRefreshRuns(importedAtUtc);
-        string runId = Guid.NewGuid().ToString("D", CultureInfo.InvariantCulture);
-        store.StartRefreshRun(runId, trigger, importedAtUtc, Environment.ProcessId, normalizedWeeks);
-
-        bool runClosed = false;
-        try
-        {
-            IReadOnlyList<CanonicalRecord> existingOtlp = store.ListOtlpRecords(coveredFromUtc, coveredThroughUtc);
-            HashSet<string> existingOtlpSpanIds = new(existingOtlp.Select(static r => r.SpanId), StringComparer.Ordinal);
-            List<RefreshSourceStatusRow> rows = new(sources.Count);
-
-            foreach (RefreshSourceInput source in sources)
-            {
-                ArgumentNullException.ThrowIfNull(source);
-                if (CanonSynth.IsExcludedHarness(source.HarnessId))
-                {
-                    rows.Add(new RefreshSourceStatusRow(source.HarnessId, source.SourceKey, "skipped", 0));
-                    continue;
-                }
-
-                rows.Add(ProcessSourceUnit(
-                    source,
-                    existingOtlp,
-                    existingOtlpSpanIds,
-                    coveredFromUtc,
-                    coveredThroughUtc,
-                    importedAtUtc));
-            }
-
-            PurgeExpiredContentResult purgeResult = PurgeExpiredContent(commandStarted);
-            projector!.ProjectIncremental();
-            rollups!.ProjectRunsAndHarnesses();
-
-            int failedCount = rows.Count(static r => string.Equals(r.Status, "failed", StringComparison.Ordinal));
-            int exitCode = failedCount > 0 ? 1 : 0;
-
-            int sessionCount = store.ListSessions().Count;
-            int runCount = store.ListRuns().Count;
-            int executionCount = store.ListObservedHarnesses().Sum(h => store.ListExecutionsByHarness(h).Count);
-            int rollupCount = store.ListHarnessRollups().Count;
-
-            string summary = exitCode == 0
-                ? string.Create(CultureInfo.InvariantCulture, $"{rows.Count} source unit(s), {sessionCount} session(s)")
-                : string.Create(CultureInfo.InvariantCulture, $"{failedCount} of {rows.Count} source unit(s) failed");
-
-            store.CompleteRefreshRun(
-                runId,
-                exitCode == 0 ? "success" : "failure",
-                DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
-                summary);
-            runClosed = true;
-
-            return new RefreshReport(
-                RunId: runId,
-                HistoryWeeks: normalizedWeeks,
-                CommandStartedAt: importedAtUtc,
-                Rows: rows,
-                PurgedContentCount: purgeResult.Purged,
-                Sessions: sessionCount,
-                Runs: runCount,
-                Executions: executionCount,
-                Rollups: rollupCount,
-                ExitCode: exitCode);
-        }
-        catch (Exception ex) when (!runClosed)
-        {
-            try
-            {
-                store.CompleteRefreshRun(
-                    runId,
-                    "failure",
-                    DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
-                    ex.Message);
-            }
-            catch (InvalidOperationException)
-            {
-            }
-
-            throw;
-        }
-    }
-
-    /// <summary>
     /// Runs a full re-ingest pass over the refresh history window: discovers every local source
     /// unit, replaces its previously persisted rows, maps and commits fresh batches through
     /// <see cref="IRelationalStoreWriter"/>, checkpoints each unit in <see cref="IOperationalStore"/>,
@@ -396,7 +227,7 @@ public class CanonRefreshEngine
             "FullReingest requires the relational store constructor.");
         ArgumentException.ThrowIfNullOrWhiteSpace(trigger);
 
-        int normalizedWeeks = CanonSchema.NormalizeHistoryWeeks(historyWeeks) ?? DefaultHistoryWeeks;
+        int normalizedWeeks = NormalizeHistoryWeeks(historyWeeks) ?? DefaultHistoryWeeks;
         DateTimeOffset commandStarted = now ?? clock();
         DateTimeOffset windowStart = commandStarted.AddDays(-7 * normalizedWeeks);
         string coveredFromUtc = FormatUtc(windowStart);
@@ -656,130 +487,6 @@ public class CanonRefreshEngine
 
     private static string? SafeOptionalText(string? value) =>
         string.IsNullOrWhiteSpace(value) || JsonDocumentText.IsDocument(value) ? null : value;
-
-    private RefreshSourceStatusRow ProcessSourceUnit(
-        RefreshSourceInput source,
-        IReadOnlyList<CanonicalRecord> existingOtlp,
-        HashSet<string> existingOtlpSpanIds,
-        string coveredFromUtc,
-        string coveredThroughUtc,
-        string importedAtUtc)
-    {
-        SourceCheckpoint? existing = store.GetSourceCheckpoint(source.HarnessId, source.SourceKey);
-        CoverageInterval requested = new(coveredFromUtc, coveredThroughUtc);
-        CoverageRequest request = new(source.RevisionToken, source.ParserContractVersion);
-
-        if (CheckpointIsReusable(existing, request) && UncoveredIntervals(existing, requested, request).Count == 0)
-        {
-            return new RefreshSourceStatusRow(source.HarnessId, source.SourceKey, "skipped", 0);
-        }
-
-        try
-        {
-            IReadOnlyList<SourceRecordEnvelope> envelopes = source.LoadEnvelopes();
-            IReadOnlyList<CanonicalRecord> synthesized = CanonSynth.SynthesizeEnvelopes(envelopes);
-            IReadOnlyList<CanonicalRecord> deduplicated = CanonSynthDedup.Deduplicate(synthesized, existingOtlp, store.RecordProblem);
-
-            List<CanonicalRecord> recordsToCommit = [];
-            List<RecordProvenanceRow> provenances = [];
-
-            foreach (CanonicalRecord record in deduplicated)
-            {
-                bool isSynth = record.SpanId.StartsWith(CanonSynth.SynthSpanPrefix, StringComparison.Ordinal);
-                if (!isSynth && existingOtlpSpanIds.Contains(record.SpanId))
-                {
-                    if (record.Parts is { Count: > 0 })
-                    {
-                        recordsToCommit.Add(record);
-                    }
-
-                    continue;
-                }
-
-                recordsToCommit.Add(record);
-
-                if (isSynth)
-                {
-                    (string? nativeSid, string? nativeRid, string locationToken) = ExtractProvenanceFields(record);
-                    provenances.Add(new RecordProvenanceRow(
-                        SpanId: record.SpanId,
-                        HarnessId: source.HarnessId,
-                        SourceKey: source.SourceKey,
-                        NativeSessionId: nativeSid,
-                        NativeRecordId: nativeRid,
-                        SourceRevision: source.RevisionToken,
-                        ParserVersion: source.ParserContractVersion,
-                        ImportedAtUtc: importedAtUtc,
-                        LocationToken: locationToken));
-                }
-            }
-
-            SourceCheckpoint updatedCheckpoint = new(
-                HarnessId: source.HarnessId,
-                SourceKey: source.SourceKey,
-                ProviderId: source.ProviderId,
-                ParserId: source.ParserId,
-                ParserContractVersion: source.ParserContractVersion,
-                Format: source.Format,
-                SourceRootLabel: source.SourceRootLabel,
-                RevisionToken: source.RevisionToken,
-                CoveredFromUtc: coveredFromUtc,
-                CoveredThroughUtc: coveredThroughUtc,
-                LastAttemptUtc: importedAtUtc,
-                LastSuccessUtc: importedAtUtc,
-                LastStatus: "ok",
-                LastErrorCode: null,
-                UnitCount: envelopes.Count,
-                RecordCount: recordsToCommit.Count);
-
-            store.CommitSourceUnit(updatedCheckpoint, recordsToCommit, provenances);
-            return new RefreshSourceStatusRow(source.HarnessId, source.SourceKey, "committed", recordsToCommit.Count);
-        }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or JsonException or ArgumentException)
-        {
-            SourceCheckpoint failedCheckpoint = new(
-                HarnessId: source.HarnessId,
-                SourceKey: source.SourceKey,
-                ProviderId: source.ProviderId,
-                ParserId: source.ParserId,
-                ParserContractVersion: source.ParserContractVersion,
-                Format: source.Format,
-                SourceRootLabel: source.SourceRootLabel,
-                RevisionToken: source.RevisionToken,
-                CoveredFromUtc: existing?.CoveredFromUtc ?? coveredFromUtc,
-                CoveredThroughUtc: existing?.CoveredThroughUtc ?? coveredThroughUtc,
-                LastAttemptUtc: importedAtUtc,
-                LastSuccessUtc: existing?.LastSuccessUtc,
-                LastStatus: "failed",
-                LastErrorCode: "HARNESS_REFRESH_ERROR",
-                UnitCount: 0,
-                RecordCount: 0);
-
-            store.UpsertSourceCheckpoint(failedCheckpoint);
-            return new RefreshSourceStatusRow(source.HarnessId, source.SourceKey, "failed", 0, ex.Message);
-        }
-    }
-
-    private static (string? NativeSessionId, string? NativeRecordId, string LocationToken) ExtractProvenanceFields(CanonicalRecord record)
-    {
-        if (record.Raw is not null
-            && record.Raw.TryGetValue("provenance", out JsonElement provEl)
-            && provEl.ValueKind == JsonValueKind.Object)
-        {
-            string? nativeSid = provEl.TryGetProperty("nativeSessionId", out JsonElement sidEl) && sidEl.ValueKind == JsonValueKind.String
-                ? sidEl.GetString()
-                : record.SessionId;
-            string? nativeRid = provEl.TryGetProperty("nativeRecordId", out JsonElement ridEl) && ridEl.ValueKind == JsonValueKind.String
-                ? ridEl.GetString()
-                : null;
-            string loc = provEl.TryGetProperty("locationToken", out JsonElement locEl) && locEl.ValueKind == JsonValueKind.String
-                ? locEl.GetString() ?? string.Empty
-                : string.Empty;
-            return (nativeSid, nativeRid, loc);
-        }
-
-        return (record.SessionId, null, string.Empty);
-    }
 
     private static List<CoverageInterval> SubtractClosed(CoverageInterval requested, CoverageInterval covered)
     {

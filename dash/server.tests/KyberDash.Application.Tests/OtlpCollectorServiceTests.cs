@@ -336,12 +336,10 @@ public class OtlpCollectorServiceTests
     public async Task ServiceCollectionExtensions_WiresOtlpCollectorServiceThroughRelationalWriterAndOperationalStore()
     {
         InMemoryRelationalStore store = new();
-        Mock<ICanonStoreRepository> forbiddenCanonStore = new(MockBehavior.Strict);
 
         ServiceCollection services = new();
         services.AddSingleton<IRelationalStoreWriter>(store);
         services.AddSingleton<IOperationalStore>(store);
-        services.AddSingleton<ICanonStoreRepository>(forbiddenCanonStore.Object);
         _ = services.AddDashApplication(new DashOptions());
 
         await using ServiceProvider provider = services.BuildServiceProvider();
@@ -358,7 +356,6 @@ public class OtlpCollectorServiceTests
         int flushed = await collector.FlushPendingAsync(TestContext.Current.CancellationToken);
         Assert.Equal(1, flushed);
         Assert.Equal(1, store.CountIngestProblems());
-        forbiddenCanonStore.VerifyNoOtherCalls();
     }
 
     [Fact]

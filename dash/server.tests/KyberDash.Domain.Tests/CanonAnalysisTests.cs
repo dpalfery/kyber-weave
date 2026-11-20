@@ -2,7 +2,9 @@ using System.Globalization;
 using System.Text.Json;
 using KyberDash.Application;
 using KyberDash.Application.Tests.Fakes;
+using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
+using KyberDash.Data.Collector;
 using KyberDash.Domain;
 using Xunit;
 
@@ -559,46 +561,48 @@ public class CanonAnalysisTests
     [Fact]
     public void SessionProjection_RebuildsDirtySessionsPrunesStaleOnesAndPersistsFindings()
     {
-        FakeCanonStoreRepository store = new();
-        CanonSessionProjectorEngine projector = new(store, new FakePricingRepository());
-
-        CanonicalRecord sessionATurn = MakeLlmRecord(
-            "span-a-1",
-            "sess-a",
-            "claude-code",
-            "2026-11-14T23:00:00.000Z",
-            freshInput: 400,
-            output: 60,
-            cacheRead: 100,
-            parts:
-            [
-                new ContentPart("system_prompt", "You are helpful."),
-                new ContentPart("user_prompt", "Fix the bug"),
-            ],
-            raw: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
-            {
-                ["gen_ai.response.model"] = Element("claude-sonnet-4-6"),
-                ["gen_ai.request.max_context_tokens"] = Element(200_000),
-            });
-        CanonicalRecord sessionBTurn = MakeLlmRecord(
-            "span-b-1",
-            "sess-b",
-            "codex",
-            "2026-11-14T23:01:00.000Z",
-            freshInput: 1_500,
-            output: 120,
-            parts:
-            [
-                new ContentPart("user_prompt", "Build feature B"),
-            ],
-            raw: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
-            {
-                ["gen_ai.response.model"] = Element("gpt-5.3-codex"),
-                ["gen_ai.request.max_context_tokens"] = Element(200_000),
-            });
+        InMemoryRelationalStore store = new();
+        CanonSessionProjectorEngine projector = new(store, store, store, new FakePricingRepository());
 
         Assert.True(projector.IsProjectionCurrent());
-        store.PutRecords([sessionATurn, sessionBTurn]);
+
+        WriteSession(
+            store,
+            "sess-a",
+            "claude-code",
+            [
+                Turn(
+                    "span-a-1",
+                    "sess-a",
+                    "claude-code",
+                    inputTokens: 400,
+                    cacheRead: 100,
+                    outputTokens: 60,
+                    parts:
+                    [
+                        TextPart(0, ContentBucket.SystemPrompt, "You are helpful."),
+                        TextPart(1, ContentBucket.UserPrompt, "Fix the bug"),
+                    ],
+                    model: "claude-sonnet-4-6",
+                    declaredContextWindow: 200_000),
+            ]);
+        WriteSession(
+            store,
+            "sess-b",
+            "codex",
+            [
+                Turn(
+                    "span-b-1",
+                    "sess-b",
+                    "codex",
+                    minuteOffset: 1,
+                    inputTokens: 1_500,
+                    outputTokens: 120,
+                    parts: [TextPart(0, ContentBucket.UserPrompt, "Build feature B")],
+                    model: "gpt-5.3-codex",
+                    declaredContextWindow: 200_000),
+            ]);
+        store.SetWriteMarker(1);
         Assert.False(projector.IsProjectionCurrent());
 
         ProjectionPassReport firstPass = projector.ProjectIncremental();
@@ -608,39 +612,32 @@ public class CanonAnalysisTests
         Assert.Contains("sess-b", firstPass.RebuiltKeys);
         Assert.True(projector.IsProjectionCurrent());
 
-        SessionSummaryRow? sessionA = store.GetSession("sess-a");
+        StoredSessionProjection? sessionA = ((IProjectionStore)store).GetSessionProjection("sess-a");
         Assert.NotNull(sessionA);
-        Assert.Equal("claude-code", sessionA.Harness);
-        Assert.Equal(500, sessionA.Payload.GetProperty("summary").GetProperty("total_input").GetInt64());
+        Assert.Equal(1, sessionA.SpanCount);
+        Assert.NotNull(sessionA.Context);
+        StoredSessionContextTurn contextTurn = Assert.Single(sessionA.Context.Turns, static turn => turn.Position == 0);
+        Assert.Equal(500, contextTurn.InputTokens);
 
-        CanonicalRecord oversizedToolResult = new()
-        {
-            SpanId = "span-b-tool",
-            TraceId = "trace-sess-b",
-            ParentSpanId = "span-b-1",
-            Source = "codex",
-            Harness = "codex",
-            SessionId = "sess-b",
-            Name = "search_docs",
-            Op = "tool.invoke",
-            Kind = "internal",
-            Timestamp = "2026-11-14T23:01:05.000Z",
-            DurationMs = 45,
-            Status = "ok",
-            Tokens = new TokenUsage(0, 0, 0, 0, 0, 0),
-            Content = new Dictionary<string, string>(StringComparer.Ordinal),
-            Parts =
+        WriteSession(
+            store,
+            "sess-b",
+            "codex",
             [
-                new ContentPart("tool_result_content", new string('z', 15_000), Tokens: 3_750),
-            ],
-            Cost = new CostBlock(CostBasis.Published, CostStatus.OutOfScope),
-            Raw = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
-            {
-                ["gen_ai.tool.result_bytes"] = Element(15_000),
-            },
-        };
-
-        store.PutRecord(oversizedToolResult);
+                Turn(
+                    "span-b-tool",
+                    "sess-b",
+                    "codex",
+                    minuteOffset: 2,
+                    parentSpanId: "span-b-1",
+                    name: "search_docs",
+                    op: RecordOp.ToolInvoke,
+                    parts: [new CollectedContentPart(0, ContentBucket.ToolResultContent, new string('z', 15_000), null, 3_750, null, null, null, null)],
+                    model: "gpt-5.3-codex",
+                    declaredContextWindow: 200_000),
+            ]);
+        store.SetWriteMarker(2);
+        store.SetProjectionDirtyState(new DirtyProjectionState(FromSeq: 1, ToSeq: 2, Keys: ["sess-b"], IsWildcard: false));
         Assert.False(projector.IsProjectionCurrent());
 
         ProjectionPassReport secondPass = projector.ProjectIncremental();
@@ -648,82 +645,145 @@ public class CanonAnalysisTests
         Assert.Equal(1, secondPass.Skipped);
         Assert.True(secondPass.Findings >= 1);
 
-        IReadOnlyList<Finding> sessionBFindings = store.ListFindings(sessionId: "sess-b");
+        IReadOnlyList<StoredFinding> sessionBFindings = ((IProjectionStore)store).ListFindings(sessionId: "sess-b");
         Assert.Contains(sessionBFindings, static finding => finding.DetectorId == "oversized-tool-result");
 
-        // A stale session with no live records is pruned on the next pass.
-        store.PutSession(new SessionSummaryRow(
+        // A stale projection with no live records is pruned on the next pass.
+        WriteSession(store, "sess-gone", "codex", []);
+        ((IProjectionStore)store).ReplaceSessionProjection(new StoredSessionProjection(
             SessionId: "sess-gone",
-            Harness: "codex",
-            Label: null,
+            Label: "gone",
             IsSubagent: false,
-            ParentSession: null,
+            SpanCount: 1,
+            StartedAtUtc: "2026-11-01T00:00:00.000Z",
+            EndedAtUtc: "2026-11-01T00:05:00.000Z",
+            ParentSessionId: null,
             AgentName: null,
-            Repo: null,
-            Branch: null,
-            Started: "2026-11-01T00:00:00.000Z",
-            Ended: "2026-11-01T00:01:00.000Z",
-            SummaryJson: null,
-            ProblemsCount: null,
-            ContextLimitSource: null,
-            Payload: Element(new { })));
-        store.PutRecord(sessionBTurn with { SpanId = "span-b-2", Timestamp = "2026-11-14T23:02:00.000Z" });
+            IncludedInParent: false,
+            RequestSpanIds: [],
+            Turns: []));
+        store.SetWriteMarker(3);
 
         ProjectionPassReport thirdPass = projector.ProjectIncremental();
         Assert.Equal(1, thirdPass.Pruned);
-        Assert.Null(store.GetSession("sess-gone"));
+        Assert.Null(((IProjectionStore)store).GetSessionProjection("sess-gone"));
     }
 
     [Fact]
-    public void RunAndHarnessRollups_GroupSessionsPerHarnessDayAndStoreExecutions()
+    public void RunAndHarnessRollups_GroupSessionsPerHarnessAndStoreExecutions()
     {
-        FakeCanonStoreRepository store = new();
-        CanonRollupsEngine rollups = new(store, new FakePricingRepository());
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
 
-        store.PutSessions(
-        [
-            MakeSession("s1", "claude-code", "2026-11-14T10:00:00.000Z", "2026-11-14T10:05:00.000Z"),
-            MakeSession("s2", "claude-code", "2026-11-14T12:00:00.000Z", "2026-11-14T12:05:00.000Z"),
-            MakeSession("s3", "codex", "2026-11-15T09:00:00.000Z", "2026-11-15T09:05:00.000Z"),
-        ]);
+        WriteSession(store, "s1", "claude-code", [Turn("span-s1", "s1", "claude-code", inputTokens: 100, outputTokens: 10)]);
+        WriteSession(store, "s2", "claude-code", [Turn("span-s2", "s2", "claude-code", minuteOffset: 120, inputTokens: 100, outputTokens: 10)]);
+        WriteSession(store, "s3", "codex", [Turn("span-s3", "s3", "codex", minuteOffset: 1_500, inputTokens: 100, outputTokens: 10)]);
 
+        CanonSessionProjectorEngine projector = new(store, store, store, pricing);
+        ProjectionPassReport pass = projector.ProjectIncremental();
+        Assert.Equal(3, pass.Built);
+
+        CanonRollupsEngine rollups = new(store, store, pricing);
         IReadOnlyList<HarnessRollupRow> rows = rollups.ProjectRunsAndHarnesses();
-        Assert.Equal(12, rows.Count);
+        Assert.Equal(2, rows.Count);
         HarnessRollupRow claude = Assert.Single(rows, static row => row.Harness == "claude-code");
         Assert.Equal(2, claude.SampleCount);
         HarnessRollupRow codex = Assert.Single(rows, static row => row.Harness == "codex");
         Assert.Equal(1, codex.SampleCount);
 
-        IReadOnlyList<RunRow> runs = store.ListRuns();
+        IReadOnlyList<StoredRun> runs = ((IProjectionStore)store).ListRuns();
         Assert.Equal(3, runs.Count);
         Assert.Contains(runs, static run => run.RunId == "derived:claude-code:s1" && run.ExecutionCount == 1);
         Assert.Contains(runs, static run => run.RunId == "derived:claude-code:s2" && run.ExecutionCount == 1);
         Assert.Contains(runs, static run => run.RunId == "derived:codex:s3" && run.ExecutionCount == 1);
 
-        IReadOnlyList<ExecutionRow> executions = store.ListExecutionsForRun("derived:claude-code:s1");
-        ExecutionRow execution = Assert.Single(executions);
+        IReadOnlyList<StoredExecution> executions = ((IProjectionStore)store).ListExecutionsForRun("derived:claude-code:s1");
+        StoredExecution execution = Assert.Single(executions);
         Assert.True(execution.IsRoot);
 
         Assert.Equal(2, CanonRollupsEngine.ComputeMedian([1.0, 3.0]));
         Assert.Equal(3.0, CanonRollupsEngine.ComputeP95([1.0, 2.0, 3.0]));
     }
 
-    private static SessionSummaryRow MakeSession(string sessionId, string harness, string started, string ended) =>
+    private static void WriteSession(
+        InMemoryRelationalStore store,
+        string sessionKey,
+        string harnessId,
+        IReadOnlyList<CollectedRecord> records) =>
+        store.WriteBatch(new CollectedBatch(
+            Source: new CollectedSource(harnessId, SourceKind.Otlp, "otlp:" + harnessId),
+            Sessions:
+            [
+                new CollectedSession(
+                    SessionKey: sessionKey,
+                    HarnessId: harnessId,
+                    NativeSessionId: sessionKey,
+                    Workspace: null,
+                    Title: null,
+                    ReportedUsage: []),
+            ],
+            Records: records,
+            Problems: []));
+
+    private static CollectedRecord Turn(
+        string spanId,
+        string sessionKey,
+        string harnessId,
+        int minuteOffset = 0,
+        long inputTokens = 0,
+        long cacheRead = 0,
+        long outputTokens = 0,
+        string? parentSpanId = null,
+        string name = "chat.turn",
+        RecordOp op = RecordOp.LlmInvoke,
+        string? model = "claude-sonnet-4-6",
+        IReadOnlyList<CollectedContentPart>? parts = null,
+        long? declaredContextWindow = null) =>
+        new CollectedRecord(
+            RecordId: spanId,
+            HarnessId: harnessId,
+            Op: op,
+            Kind: RecordKind.Client,
+            Name: name,
+            StartedAt: TurnBase.AddMinutes(minuteOffset),
+            Status: RecordStatus.Ok,
+            SessionKey: sessionKey,
+            ParentRecordId: parentSpanId,
+            TraceId: null,
+            Model: model,
+            EndedAt: null,
+            ReportedDurationMs: 1_000,
+            Tokens:
+            [
+                new CollectedTokenCount(TokenClass.Input, inputTokens),
+                new CollectedTokenCount(TokenClass.CacheRead, cacheRead),
+                new CollectedTokenCount(TokenClass.CacheWrite, 0),
+                new CollectedTokenCount(TokenClass.Output, outputTokens),
+            ],
+            ReportedCost: null,
+            Parts: parts ?? [],
+            Tool: null,
+            Agent: null,
+            SkillsInvoked: [],
+            AgentInstanceId: null,
+            ToolDefinitions: [],
+            Signals: new CollectedRecordSignals(ErrorMessage: null, EditFailures: null, CorrectionRule: null, DeclaredContextWindow: declaredContextWindow),
+            ReportedInputTokens: inputTokens + cacheRead,
+            ReportedOutputTokens: outputTokens);
+
+    private static CollectedContentPart TextPart(int position, ContentBucket bucket, string text) =>
         new(
-            SessionId: sessionId,
-            Harness: harness,
-            Label: null,
-            IsSubagent: false,
-            ParentSession: null,
-            AgentName: null,
-            Repo: null,
-            Branch: null,
-            Started: started,
-            Ended: ended,
-            SummaryJson: null,
-            ProblemsCount: null,
-            ContextLimitSource: null,
-            Payload: Element(new { }));
+            Position: position,
+            Bucket: bucket,
+            PlainText: text,
+            Withheld: null,
+            ReportedTokens: null,
+            Server: null,
+            Role: null,
+            Resident: null,
+            OriginalUtf8BytesWhenTruncated: null);
+
+    private static readonly DateTimeOffset TurnBase = new(2026, 11, 14, 23, 0, 0, TimeSpan.Zero);
 
     private static CanonicalRecord MakeLlmRecord(
         string spanId,

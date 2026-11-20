@@ -51,7 +51,7 @@ public class OperationalStoreTests : IDisposable
         InMemoryRelationalStore memory = new();
 
         StoreStateView? initialSqliteState = sqlite.GetStoreState();
-        Assert.Equal(new StoreStateView(SqliteRelationalStore.SchemaVersion, CanonSchema.DetectorVersion), initialSqliteState);
+        Assert.Equal(new StoreStateView(SqliteRelationalStore.SchemaVersion, SqliteRelationalStore.DetectorVersion), initialSqliteState);
         Assert.Null(memory.GetStoreState());
 
         ScriptedSqliteRelationalStore scriptedAbsent = new(

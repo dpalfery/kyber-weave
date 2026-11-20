@@ -3,7 +3,9 @@ using System.Text;
 using System.Text.Json;
 using KyberDash.Application;
 using KyberDash.Application.Tests.Fakes;
+using KyberDash.Contracts.Repositories;
 using KyberDash.Core.Exceptions;
+using KyberDash.Data.Collector;
 using KyberDash.Domain;
 using Xunit;
 
@@ -142,9 +144,9 @@ public class CanonIngestTests
     }
 
     [Fact]
-    public void IngestBatchRoundTripsAcceptedRecordsProblemsQuarantineAndDirtySessions()
+    public void IngestBatchRoundTripsAcceptedRecordsProblemsAndQuarantine()
     {
-        FakeCanonStoreRepository store = new();
+        InMemoryRelationalStore store = new();
 
         OtlpSpan copilotTurn = MakeOtlpSpan(
             spanId: "1111111111111111",
@@ -217,45 +219,49 @@ public class CanonIngestTests
 
         IngestOutcome outcome = CanonIngestPipeline.IngestBatch(
             [copilotTurn, piTurn, badClaudeOutput, structuralSpan, badOpencodeVersion],
+            store,
             store);
 
         Assert.Equal(2, outcome.Accepted);
         Assert.Equal(2, outcome.Quarantined);
         Assert.Equal(1, outcome.Rejected);
 
-        CanonicalRecord? loadedCopilot = store.GetRecord("1111111111111111");
+        CollectedRecord? loadedCopilot = store.GetRecord("1111111111111111");
         Assert.NotNull(loadedCopilot);
-        Assert.Equal("copilot", loadedCopilot.Harness);
-        Assert.Equal("copilot-host", loadedCopilot.Source);
-        Assert.Equal("sess-copilot", loadedCopilot.SessionId);
-        Assert.Equal("llm.invoke", loadedCopilot.Op);
-        Assert.Equal(300, loadedCopilot.Tokens.FreshInput);
-        Assert.Equal(600, loadedCopilot.Tokens.CacheRead);
-        Assert.Equal(100, loadedCopilot.Tokens.CacheCreation);
-        Assert.Equal(1000, loadedCopilot.Tokens.ReportedInput);
-        Assert.Equal(new string('s', 400), loadedCopilot.Content["system_prompt"]);
-        Assert.NotNull(loadedCopilot.Raw);
+        Assert.Equal("copilot", loadedCopilot.HarnessId);
+        Assert.Equal("sess-copilot", loadedCopilot.SessionKey);
+        Assert.Equal(RecordOp.LlmInvoke, loadedCopilot.Op);
+        Assert.Equal(300, TokenCount(loadedCopilot, TokenClass.Input));
+        Assert.Equal(600, TokenCount(loadedCopilot, TokenClass.CacheRead));
+        Assert.Equal(100, TokenCount(loadedCopilot, TokenClass.CacheWrite));
+        Assert.Equal(250, TokenCount(loadedCopilot, TokenClass.Output));
+        Assert.Equal(1000, loadedCopilot.ReportedInputTokens);
+        Assert.Contains(
+            loadedCopilot.Parts,
+            static part => part.Bucket == ContentBucket.SystemPrompt && part.PlainText == new string('s', 400));
 
-        CanonicalRecord? loadedPi = store.GetRecord("2222222222222222");
+        CollectedRecord? loadedPi = store.GetRecord("2222222222222222");
         Assert.NotNull(loadedPi);
-        Assert.Equal("pi", loadedPi.Harness);
-        Assert.Null(loadedPi.SessionId);
-        Assert.Equal(50, loadedPi.Tokens.FreshInput);
-        Assert.Equal(200, loadedPi.Tokens.CacheRead);
-        Assert.Equal(250, loadedPi.Tokens.ReportedInput);
-        Assert.Equal("debugging", loadedPi.Content["instruction_context"]);
+        Assert.Equal("pi", loadedPi.HarnessId);
+        Assert.Null(loadedPi.SessionKey);
+        Assert.Equal(50, TokenCount(loadedPi, TokenClass.Input));
+        Assert.Equal(200, TokenCount(loadedPi, TokenClass.CacheRead));
+        Assert.Equal(250, loadedPi.ReportedInputTokens);
+        Assert.Contains(
+            loadedPi.Parts,
+            static part => part.Bucket == ContentBucket.InstructionContext && part.PlainText == "debugging");
 
-        Assert.False(store.HasRecord("3333333333333333"));
-        SpanProblemRow problem = Assert.Single(store.GetProblems("3333333333333333"));
-        Assert.Equal(CanonValidation.TokenNegativeClass, problem.Code);
-        Assert.Equal("claude-code", problem.Harness);
+        Assert.Null(store.GetRecord("3333333333333333"));
+        StoredIngestProblem problem = Assert.Single(store.ListIngestProblems(spanId: "3333333333333333"));
+        Assert.Equal(CanonValidation.TokenNegativeClass, problem.Problem.Code);
+        Assert.Equal("claude-code", problem.Problem.HarnessId);
 
-        QuarantineRow? healthRow = store.GetQuarantineItem("4444444444444444");
+        StoredQuarantinedSpan? healthRow = store.GetQuarantinedSpan("4444444444444444");
         Assert.NotNull(healthRow);
         Assert.Equal("non-model span", healthRow.Reason);
         Assert.Equal(["custom", "http"], healthRow.ObservedNamespaces);
 
-        QuarantineRow? opencodeVersionRow = store.GetQuarantineItem("5555555555555555");
+        StoredQuarantinedSpan? opencodeVersionRow = store.GetQuarantinedSpan("5555555555555555");
         Assert.NotNull(opencodeVersionRow);
         Assert.Equal(CanonAdapters.UnknownOpencodeContractVersionReason, opencodeVersionRow.Reason);
     }
@@ -381,7 +387,7 @@ public class CanonIngestTests
     [Fact]
     public void BoundedIngestWriterEnforces64MiBAnd256MiBCeilingsAndFlushesWithoutLoss()
     {
-        FakeCanonStoreRepository store = new();
+        InMemoryRelationalStore store = new();
         BoundedIngestWriter writer = new();
 
         OtlpSpan singleSpan = MakeOtlpSpan(
@@ -422,12 +428,12 @@ public class CanonIngestTests
         Assert.Equal(503, backpressure.HttpStatusCode);
         Assert.Equal(BoundedIngestWriter.RetryAfterSeconds, backpressure.RetryAfterSeconds);
 
-        IngestOutcome flushOutcome = writer.Flush(store);
+        IngestOutcome flushOutcome = writer.Flush(store, store);
         Assert.Equal(4, flushOutcome.Accepted);
         Assert.Equal(0, writer.PendingBytes);
         Assert.Equal(0, writer.PendingSpans);
-        Assert.True(store.HasRecord("1111111111111110"));
-        Assert.True(store.HasRecord("1111111111111113"));
+        Assert.NotNull(store.GetRecord("1111111111111110"));
+        Assert.NotNull(store.GetRecord("1111111111111113"));
     }
 
     [Fact]
@@ -474,6 +480,9 @@ public class CanonIngestTests
         RawSpan modelCall = structural with { Kind = "client", Name = "llm.invoke", Attributes = attributes };
         Assert.False(CanonIngestPipeline.IsStructuralSpan(modelCall));
     }
+
+    private static long TokenCount(CollectedRecord record, TokenClass tokenClass) =>
+        record.Tokens.Single(token => token.TokenClass == tokenClass).Count;
 
     private static RawSpan MakeRawSpan(
         string spanId,

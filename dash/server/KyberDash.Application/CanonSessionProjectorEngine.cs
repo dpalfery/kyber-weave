@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector;
+using KyberDash.Data.Repositories;
 using KyberDash.Domain;
 
 namespace KyberDash.Application;
@@ -20,11 +21,6 @@ namespace KyberDash.Application;
 /// schema children (with exclusive <c>_unmeasurable</c> rows), and timeline marks through
 /// <see cref="IProjectionStore"/> — no JSON payload column anywhere.
 /// </para>
-/// <para>
-/// A transitional constructor keeps the <see cref="ICanonStoreRepository"/> path for callers not
-/// yet migrated (decision D4's dual-registration pattern); T45/T53 remove it once the last legacy
-/// caller moves over.
-/// </para>
 /// </remarks>
 public partial class CanonSessionProjectorEngine
 {
@@ -36,8 +32,6 @@ public partial class CanonSessionProjectorEngine
     private const string DroidHarness = "droid";
     private const string DroidPluginSource = "kyberdash-factory-plugin";
     private const string SessionLabelKey = "kyber.session.label";
-    private const string ProjectionRecordsMarkerKey = "projection_records_marker";
-    private const string ProjectionSchemaVersionKey = "projection_schema_version";
     private const string RelationalSourceName = "relational";
     private const string TimestampFormat = "yyyy-MM-dd'T'HH:mm:ss.fff'Z'";
     private const string NoMessageStructureReason = "no_message_structure";
@@ -69,7 +63,6 @@ public partial class CanonSessionProjectorEngine
     private readonly IRelationalStoreReader? reader;
     private readonly IProjectionStore? projections;
     private readonly IOperationalStore? operationalStore;
-    private readonly ICanonStoreRepository? legacyStore;
     private readonly IPricingRepository pricing;
 
     /// <summary>
@@ -96,24 +89,6 @@ public partial class CanonSessionProjectorEngine
         this.operationalStore = operationalStore;
         this.pricing = pricing;
     }
-
-    /// <summary>
-    /// Initializes a transitional <see cref="CanonSessionProjectorEngine"/> over
-    /// <see cref="ICanonStoreRepository"/> for callers not yet migrated to the relational contracts.
-    /// </summary>
-    /// <param name="store">Canonical store repository.</param>
-    /// <param name="pricing">Model rate-table repository used when repricing turns.</param>
-    public CanonSessionProjectorEngine(ICanonStoreRepository store, IPricingRepository pricing)
-    {
-        ArgumentNullException.ThrowIfNull(store);
-        ArgumentNullException.ThrowIfNull(pricing);
-
-        legacyStore = store;
-        this.pricing = pricing;
-    }
-
-    /// <summary>Canonical store repository backing this engine; <see langword="null"/> on the relational path.</summary>
-    public ICanonStoreRepository? Store => legacyStore;
 
     [GeneratedRegex(@"^invoke_agent(?:[ :]|$)", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
     private static partial Regex InvokeAgentNameRegex();
@@ -270,7 +245,7 @@ public partial class CanonSessionProjectorEngine
         new(operationalStore, CanonTokenCache.ApproximateTokenizerName);
 
     /// <summary>
-    /// Derives a complete <see cref="SessionSummaryRow"/> (including <c>summary_json</c>,
+    /// Derives a complete <see cref="SessionSummaryRow"/> (including the summary totals,
     /// context analysis, schema ranking, timeline without raw attributes, and turns) from
     /// one session's records.
     /// </summary>
@@ -736,7 +711,7 @@ public partial class CanonSessionProjectorEngine
     /// <returns><see langword="true"/> when stored projections match the current write marker and versions.</returns>
     public bool IsProjectionCurrent()
     {
-        return legacyStore is not null ? IsLegacyProjectionCurrent() : IsRelationalProjectionCurrent();
+        return IsRelationalProjectionCurrent();
     }
 
     private bool IsRelationalProjectionCurrent()
@@ -756,23 +731,6 @@ public partial class CanonSessionProjectorEngine
         return reader!.CountRecords() == 0 || projections!.ListSessionProjections().Count > 0;
     }
 
-    private bool IsLegacyProjectionCurrent()
-    {
-        long currentMarker = legacyStore!.RecordsWriteMarker();
-        string? prevMarkerRaw = legacyStore.GetMetadata(ProjectionRecordsMarkerKey);
-        if (!long.TryParse(prevMarkerRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out long prevMarker))
-        {
-            return currentMarker == 0 && legacyStore.CountRecords() == 0 && legacyStore.ListSessions().Count == 0;
-        }
-
-        if (prevMarker != currentMarker || !HasCurrentProjectionEnvironment())
-        {
-            return false;
-        }
-
-        return legacyStore.CountRecords() == 0 || legacyStore.ListSessions().Count > 0;
-    }
-
     /// <summary>
     /// Runs an incremental session projection pass over the store, rebuilding
     /// only session keys dirtied since the previous pass (or all keys on a full/first pass).
@@ -780,448 +738,13 @@ public partial class CanonSessionProjectorEngine
     /// <returns>Summary of built, skipped, and pruned sessions plus emitted finding count.</returns>
     public ProjectionPassReport ProjectIncremental()
     {
-        return legacyStore is not null ? ProjectIncrementalLegacy() : ProjectIncrementalRelational();
-    }
-
-    private ProjectionPassReport ProjectIncrementalLegacy()
-    {
-        ICanonStoreRepository store = legacyStore!;
-        _ = pricing.LoadPricingTables();
-
-        string? prevMarkerRaw = store.GetMetadata(ProjectionRecordsMarkerKey);
-        bool hasPrevMarker = long.TryParse(prevMarkerRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out long prevMarker);
-        long currentMarker = store.RecordsWriteMarker();
-        DirtyProjectionState dirtyState = store.GetDirtyProjectionState();
-        IReadOnlyDictionary<string, IReadOnlyList<string>>? existingMap = store.GetProjectedSessionKeyMap();
-        bool environmentCurrent = HasCurrentProjectionEnvironment();
-
-        bool canIncremental = environmentCurrent
-            && hasPrevMarker
-            && dirtyState.FromSeq == prevMarker
-            && dirtyState.ToSeq == currentMarker
-            && !dirtyState.IsWildcard
-            && dirtyState.Keys is not null
-            && existingMap is not null;
-
-        HashSet<string>? dirtySet = canIncremental
-            ? new HashSet<string>(dirtyState.Keys!, StringComparer.Ordinal)
-            : null;
-        HashSet<string>? existingBuiltSet = canIncremental
-            ? new HashSet<string>(store.GetBuiltSessionIds(), StringComparer.Ordinal)
-            : null;
-
-        CachedTokenCounter counter = new(operationalStore, CanonTokenCache.ApproximateTokenizerName);
-        SessionIdentities identities = new(store.GetSessionKeyHarnesses());
-        IReadOnlyList<string> sessionKeys = store.GetDistinctSessionKeys();
-
-        int builtCount = 0;
-        int skippedCount = 0;
-        int findingsCount = 0;
-        List<string> rebuiltKeys = [];
-        List<string> skippedKeys = [];
-        HashSet<string> builtSessionIds = new(StringComparer.Ordinal);
-        Dictionary<string, IReadOnlyList<string>> sessionIdsByKey = new(StringComparer.Ordinal);
-
-        foreach (string key in sessionKeys)
-        {
-            if (canIncremental
-                && dirtySet is not null
-                && !dirtySet.Contains(key)
-                && existingMap!.TryGetValue(key, out IReadOnlyList<string>? priorIds)
-                && priorIds.All(existingBuiltSet!.Contains))
-            {
-                foreach (string priorId in priorIds)
-                {
-                    builtSessionIds.Add(priorId);
-                }
-
-                sessionIdsByKey[key] = priorIds;
-                skippedKeys.Add(key);
-                skippedCount += priorIds.Count;
-                continue;
-            }
-
-            IReadOnlyList<CanonicalRecord> loaded = store.ListRecordsBySessionKey(key);
-            List<CanonicalRecord> repriced = RepriceTurns(loaded);
-            Dictionary<string, List<CanonicalRecord>> grouped = GroupByCanonicalHarness(repriced);
-            if (grouped.Count == 0)
-            {
-                sessionIdsByKey[key] = [];
-                skippedCount++;
-                continue;
-            }
-
-            List<string> builtForKey = [];
-            foreach (KeyValuePair<string, List<CanonicalRecord>> group in grouped)
-            {
-                string harness = group.Key;
-                List<CanonicalRecord> groupRecords = group.Value;
-                if (groupRecords.Count == 0 || !HasEvidence(groupRecords))
-                {
-                    skippedCount++;
-                    continue;
-                }
-
-                IReadOnlyList<CanonicalRecord> merged = DedupeTwinTurns(groupRecords, key);
-                if (merged.Count == 0 || !HasEvidence(merged))
-                {
-                    skippedCount++;
-                    continue;
-                }
-
-                string sessionId = identities.Claim(key, harness);
-                SessionSummaryRow parentRow = BuildSessionSummary(
-                    sessionId,
-                    merged,
-                    counter.Count,
-                    isSubagent: false,
-                    parentSession: null);
-                store.PutSession(parentRow);
-                builtSessionIds.Add(sessionId);
-                builtForKey.Add(sessionId);
-                builtCount++;
-
-                findingsCount += RebuildSessionFindings(sessionId, merged, identities);
-
-                bool isCopilot = CanonPricing.IsCopilotHarness(harness) || string.Equals(harness, "copilot", StringComparison.Ordinal);
-                if (isCopilot && !sessionId.Contains('#', StringComparison.Ordinal))
-                {
-                    foreach (CanonicalRecord invokeSpan in merged)
-                    {
-                        if (!IsInvokeAgentSpan(invokeSpan) || string.Equals(invokeSpan.SpanId, sessionId, StringComparison.Ordinal))
-                        {
-                            continue;
-                        }
-
-                        string subagentId = $"{sessionId}#{invokeSpan.SpanId}";
-                        List<CanonicalRecord> descendants = CollectDescendantRecords(invokeSpan.SpanId, merged);
-                        descendants.Sort(CompareRecordTimestamps);
-
-                        string? earliestTimestamp = invokeSpan.Timestamp;
-                        if (descendants.Count > 0)
-                        {
-                            double bestMs = RecordTimestampMs(invokeSpan);
-                            foreach (CanonicalRecord desc in descendants)
-                            {
-                                double descMs = RecordTimestampMs(desc);
-                                if (double.IsFinite(descMs) && (!double.IsFinite(bestMs) || descMs < bestMs))
-                                {
-                                    bestMs = descMs;
-                                    earliestTimestamp = desc.Timestamp;
-                                }
-                            }
-                        }
-
-                        CanonicalRecord rootInvoke = invokeSpan with
-                        {
-                            ParentSpanId = null,
-                            Timestamp = earliestTimestamp ?? invokeSpan.Timestamp,
-                        };
-                        List<CanonicalRecord> subagentRecords = [rootInvoke, .. descendants];
-                        string? subAgentName = ExtractAgentName(invokeSpan);
-                        string? taskSummary = ExtractTaskSummary(subagentRecords);
-                        string subLabel = CanonPricing.FormatSessionTitle(new SessionTitleInput(
-                            AgentName: subAgentName,
-                            TaskSummary: taskSummary,
-                            SessionId: subagentId,
-                            Harness: harness));
-
-                        SessionSummaryRow subRow = BuildSessionSummary(
-                            subagentId,
-                            subagentRecords,
-                            counter.Count,
-                            isSubagent: true,
-                            parentSession: sessionId,
-                            agentName: subAgentName,
-                            label: subLabel,
-                            includedInParent: true);
-                        store.PutSession(subRow);
-                        builtSessionIds.Add(subagentId);
-                        builtForKey.Add(subagentId);
-                        builtCount++;
-
-                        findingsCount += RebuildSessionFindings(subagentId, subagentRecords, identities);
-                    }
-                }
-
-                bool isClaude = IsClaudeHarness(harness) || merged.Any(static r => IsClaudeHarness(r.Harness));
-                if (isClaude && !sessionId.StartsWith("agent-", StringComparison.Ordinal) && !sessionId.Contains('#', StringComparison.Ordinal))
-                {
-                    findingsCount += BuildClaudeSubagentSessions(
-                        sessionId,
-                        harness,
-                        merged,
-                        counter.Count,
-                        identities,
-                        builtSessionIds,
-                        builtForKey,
-                        ref builtCount);
-                }
-            }
-
-            sessionIdsByKey[key] = builtForKey;
-            rebuiltKeys.Add(key);
-        }
-
-        counter.Flush();
-
-        int prunedCount = 0;
-        foreach (string existingId in store.GetBuiltSessionIds())
-        {
-            if (builtSessionIds.Contains(existingId))
-            {
-                continue;
-            }
-
-            store.DeleteFindingsForSession(existingId);
-            store.DeleteSession(existingId);
-            prunedCount++;
-        }
-
-        long finalMarker = store.RecordsWriteMarker();
-        store.SetMetadata(ProjectionRecordsMarkerKey, finalMarker.ToString(CultureInfo.InvariantCulture));
-        store.SetMetadata(
-            ProjectionSchemaVersionKey,
-            store.GetMetadata("schema_version") ?? CanonSchema.SchemaVersion.ToString(CultureInfo.InvariantCulture));
-        store.SetDetectorVersion(CanonSchema.DetectorVersion);
-        store.RecordProjectedSessionKeys(finalMarker, sessionIdsByKey);
-
-        return new ProjectionPassReport(
-            Built: builtCount,
-            Skipped: skippedCount,
-            Pruned: prunedCount,
-            Findings: findingsCount,
-            RebuiltKeys: rebuiltKeys,
-            SkippedKeys: skippedKeys);
+        return ProjectIncrementalRelational();
     }
 
     private bool HasCurrentProjectionEnvironment()
     {
-        if (legacyStore is not null)
-        {
-            string? recordedSchema = legacyStore.GetMetadata(ProjectionSchemaVersionKey);
-            string? storeSchema = legacyStore.GetMetadata("schema_version");
-            return legacyStore.HasCurrentDetectorVersion()
-                && recordedSchema is not null
-                && string.Equals(recordedSchema, storeSchema, StringComparison.Ordinal);
-        }
-
         ProjectionStateView? projectionState = operationalStore!.GetProjectionState();
-        return projectionState is not null && projectionState.ProjectionSchemaVersion == CanonSchema.SchemaVersion;
-    }
-
-    private int RebuildSessionFindings(
-        string sessionId,
-        IReadOnlyList<CanonicalRecord> sessionRecords,
-        SessionIdentities identities)
-    {
-        ICanonStoreRepository store = legacyStore!;
-        store.DeleteFindingsForSession(sessionId);
-        OutcomeBlock outcome = CanonFindings.DeriveOutcome(sessionRecords);
-        IReadOnlyList<Finding> findings = CanonFindings.DetectFindings(new DetectFindingsInput(
-            RunId: sessionId,
-            SessionId: sessionId,
-            Records: sessionRecords,
-            Outcome: outcome,
-            SessionIdentityLookup: identities.IdFor));
-        if (findings.Count > 0)
-        {
-            store.PutFindings(findings);
-        }
-
-        return findings.Count;
-    }
-
-    private int BuildClaudeSubagentSessions(
-        string sessionId,
-        string harness,
-        IReadOnlyList<CanonicalRecord> merged,
-        Func<string, long> countTokens,
-        SessionIdentities identities,
-        HashSet<string> builtSessionIds,
-        List<string> builtForKey,
-        ref int builtCount)
-    {
-        ICanonStoreRepository store = legacyStore!;
-        Dictionary<string, string> recordAgentMap = new(StringComparer.Ordinal);
-        foreach (CanonicalRecord record in merged)
-        {
-            string? agentId = ExtractClaudeAgentId(record);
-            if (!string.IsNullOrEmpty(agentId))
-            {
-                recordAgentMap[record.SpanId] = agentId;
-            }
-        }
-
-        foreach (CanonicalRecord record in merged)
-        {
-            if (!recordAgentMap.TryGetValue(record.SpanId, out string? agentId))
-            {
-                continue;
-            }
-
-            foreach (CanonicalRecord desc in CollectDescendantRecords(record.SpanId, merged))
-            {
-                recordAgentMap.TryAdd(desc.SpanId, agentId);
-            }
-        }
-
-        Dictionary<string, List<CanonicalRecord>> groups = new(StringComparer.Ordinal);
-        foreach (CanonicalRecord record in merged)
-        {
-            if (!recordAgentMap.TryGetValue(record.SpanId, out string? agentId))
-            {
-                continue;
-            }
-
-            string subId = ClaudeSubagentSessionId(sessionId, agentId);
-            if (!groups.TryGetValue(subId, out List<CanonicalRecord>? list))
-            {
-                list = [];
-                groups[subId] = list;
-            }
-
-            list.Add(record);
-        }
-
-        int findings = 0;
-        foreach (KeyValuePair<string, List<CanonicalRecord>> kv in groups)
-        {
-            string subagentId = kv.Key;
-            List<CanonicalRecord> groupRecords = kv.Value;
-            if (groupRecords.Count == 0)
-            {
-                continue;
-            }
-
-            HashSet<string> groupSpanIds = new(groupRecords.Select(static r => r.SpanId), StringComparer.Ordinal);
-            List<CanonicalRecord> prepared = groupRecords.Select(r =>
-                r.ParentSpanId is null || !groupSpanIds.Contains(r.ParentSpanId)
-                    ? r with { ParentSpanId = null }
-                    : r).ToList();
-
-            int rootIndex = prepared.FindIndex(static r => IsInvokeAgentSpan(r) || string.Equals(r.Op, "agent.invoke", StringComparison.Ordinal));
-            if (rootIndex < 0 && prepared.Count > 0)
-            {
-                rootIndex = 0;
-            }
-
-            if (rootIndex >= 0)
-            {
-                string rootSpanId = prepared[rootIndex].SpanId;
-                for (int i = 0; i < prepared.Count; i++)
-                {
-                    CanonicalRecord rec = prepared[i];
-                    if (string.Equals(rec.SpanId, rootSpanId, StringComparison.Ordinal))
-                    {
-                        prepared[i] = rec with { ParentSpanId = null };
-                    }
-                    else if (rec.ParentSpanId is null || !groupSpanIds.Contains(rec.ParentSpanId))
-                    {
-                        prepared[i] = rec with { ParentSpanId = rootSpanId };
-                    }
-                }
-
-                CanonicalRecord? earliest = prepared
-                    .Where(static r => double.IsFinite(RecordTimestampMs(r)))
-                    .OrderBy(RecordTimestampMs)
-                    .FirstOrDefault();
-                CanonicalRecord currentRoot = prepared[rootIndex];
-                if (earliest is not null && !(RecordTimestampMs(currentRoot) <= RecordTimestampMs(earliest)))
-                {
-                    prepared[rootIndex] = currentRoot with { Timestamp = earliest.Timestamp };
-                }
-            }
-
-            prepared.Sort(CompareRecordTimestamps);
-
-            string? subAgentName = ExtractClaudeAgentName(prepared);
-            string? taskSummary = ExtractClaudeDescription(prepared);
-            string subLabel = CanonPricing.FormatSessionTitle(new SessionTitleInput(
-                AgentName: subAgentName,
-                TaskSummary: taskSummary,
-                SessionId: subagentId,
-                Harness: harness));
-
-            string resolvedParent = sessionId;
-            foreach (CanonicalRecord r in prepared)
-            {
-                string? p = AttributeOf(r, ["parent_session_id", "parent_session", "parentSessionId", "parentSession", "gen_ai.parent_session_id"]);
-                if (!string.IsNullOrWhiteSpace(p))
-                {
-                    resolvedParent = p.Trim();
-                    break;
-                }
-            }
-
-            SessionSummaryRow subRow = BuildSessionSummary(
-                subagentId,
-                prepared,
-                countTokens,
-                isSubagent: true,
-                parentSession: resolvedParent,
-                agentName: subAgentName,
-                label: subLabel,
-                includedInParent: string.Equals(resolvedParent, sessionId, StringComparison.Ordinal));
-            store.PutSession(subRow);
-            builtSessionIds.Add(subagentId);
-            builtForKey.Add(subagentId);
-            builtCount++;
-
-            findings += RebuildSessionFindings(subagentId, prepared, identities);
-        }
-
-        return findings;
-    }
-
-    private List<CanonicalRecord> RepriceTurns(IReadOnlyList<CanonicalRecord> records)
-    {
-        ICanonStoreRepository store = legacyStore!;
-        Dictionary<string, CostBlock> changes = new(StringComparer.Ordinal);
-        List<CanonicalRecord> updated = new(records.Count);
-        foreach (CanonicalRecord record in records)
-        {
-            if (!string.Equals(record.Op, "llm.invoke", StringComparison.Ordinal) && !IsRollup(record))
-            {
-                updated.Add(record);
-                continue;
-            }
-
-            string? model = AttributeOf(record, ModelKeys);
-            CostBlock next;
-            if (CanonPricing.IsPublishedTableHarness(record.Harness))
-            {
-                next = CanonPricing.PricePublishedTurn(record.Tokens, model, record.Harness, record.Cost);
-            }
-            else if (CanonPricing.IsCopilotHarness(record.Harness))
-            {
-                next = CanonPricing.PriceCopilotTurn(record.Tokens, model, record.Harness, record.Cost);
-            }
-            else
-            {
-                updated.Add(record);
-                continue;
-            }
-
-            if (string.Equals(
-                    JsonSerializer.Serialize(next, ProjectionJsonOptions),
-                    JsonSerializer.Serialize(record.Cost, ProjectionJsonOptions),
-                    StringComparison.Ordinal))
-            {
-                updated.Add(record);
-                continue;
-            }
-
-            changes[record.SpanId] = next;
-            updated.Add(record with { Cost = next });
-        }
-
-        if (changes.Count > 0)
-        {
-            store.SetCosts(changes);
-        }
-
-        return updated;
+        return projectionState is not null && projectionState.ProjectionSchemaVersion == SqliteRelationalStore.SchemaVersion;
     }
 
     private static Dictionary<string, object?> SerializeContextPayload(
@@ -3017,7 +2540,7 @@ public partial class CanonSessionProjectorEngine
         RebuildRunExecutionProjection();
 
         long finalMarker = operationalStore.GetWriteMarker();
-        operationalStore.SetProjectionState(new ProjectionStateView(CanonSchema.SchemaVersion, finalMarker));
+        operationalStore.SetProjectionState(new ProjectionStateView(SqliteRelationalStore.SchemaVersion, finalMarker));
         operationalStore.ClearProjectionDirtyState();
 
         return new ProjectionPassReport(
@@ -3031,8 +2554,8 @@ public partial class CanonSessionProjectorEngine
 
     /// <summary>
     /// Rebuilds typed run grouping (<c>run*</c>) and execution linkage (<c>execution*</c>) rows
-    /// from the stored session projections, replacing the legacy <c>parent_linkage_json</c> and
-    /// <c>payload</c> columns with nullable typed child rows.
+    /// from the stored session projections, replacing legacy parent-linkage and
+    /// payload columns with nullable typed child rows.
     /// </summary>
     /// <remarks>
     /// <para>

@@ -3,6 +3,7 @@ using KyberDash.Application;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector;
+using KyberDash.Data.Repositories;
 using KyberDash.Domain;
 using Xunit;
 
@@ -12,7 +13,7 @@ namespace KyberDash.Application.Tests.Analytics;
 /// Read-path parity for the relational KyberDash store: <see cref="KyberBridgeEngine"/> and
 /// <see cref="AnalyticsService"/> answer every analytics and dashboard query from
 /// <see cref="IRelationalStoreReader"/>, <see cref="IProjectionStore"/>, and
-/// <see cref="IOperationalStore"/> with zero <c>ICanonStoreRepository</c> dependencies, isolate a
+/// <see cref="IOperationalStore"/>, isolate a
 /// failing session as <c>PROJECTION_FAILED</c> while the remaining sessions answer, and report
 /// harness-reported and read-time published costs separately without blending them.
 /// </summary>
@@ -320,8 +321,8 @@ public sealed class AnalyticsReadPathTests
         Assert.True(bridge.GetCompare().TryGetProperty("harnesses", out _));
 
         JsonElement meta = bridge.GetMeta();
-        Assert.Equal(CanonSchema.SchemaVersion, meta.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal(CanonSchema.DetectorVersion, meta.GetProperty("detectorVersion").GetInt32());
+        Assert.Equal(SqliteRelationalStore.SchemaVersion, meta.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(SqliteRelationalStore.DetectorVersion, meta.GetProperty("detectorVersion").GetInt32());
         Assert.Equal(2, meta.GetProperty("recordCount").GetInt32());
         Assert.Equal(1, meta.GetProperty("sessionCount").GetInt32());
         Assert.Equal(1, meta.GetProperty("apiVersion").GetInt32());
