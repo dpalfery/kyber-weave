@@ -963,6 +963,72 @@ Cline CLI ingests local `sessions/<id>/<id>.messages.json` session files via `Cl
 | `ClineParseProblem` | `LineNumber` | mapped | `ingest_problem_location.location`, `ingest_problem.problem_key` | 1-based message ordinal, or 0 for document-level failures, appended to problem key and locator. |
 | `ClineParseProblem` | `Code` | mapped | `ingest_problem.code` | Diagnostic code (`CLINE_MALFORMED_LINE`). |
 | `ClineParseProblem` | `Message` | mapped | `ingest_problem.message` | Sanitized parse failure message. |
+## kimi-code
+
+Kimi Code ingests from local `wire.jsonl` session streams via `KimiCodeMapper` (mapping `KimiCodeWireDocument` over `KimiCodeCall`, `KimiCodeToolCall`, `KimiCodeSessionState`, and `KimiCodeParseProblem` into `CollectedBatch`), with the sibling `state.json` session companion arriving as companion text when the caller supplies it. Only the offline-derivable semantics of `kimicode.ts` are ported: per-turn prompts and tool calls, alias-resolved models, harness-reported exclusive token usage, and composer session attribution. The wire format carries no reported cost, so published rates apply at read time; provider-recorded agent lineage is exposed through `KimiCodeMapper.ResolveLineage` (mirroring `kimicodeLineageForSource`) for discovery-time attribution.
+
+In `KimiCodeMapper`, each billed `usage.record` line maps to a `CollectedRecord` (`llm.invoke`) with a deterministic span (`synth:kimi-code:<session>:<agent>:<line>:<ordinal>`), model resolution through the `llm.request` alias map, timestamp resolution from usage, request, then session state (timestamp-less usage lines are skipped), and one child `tool.invoke` span per observed tool call. Sessions emit when the wire holds any non-blank line, even with zero billed calls.
+
+| Native type | Property | Disposition | Target mapping | Reason |
+|---|---|---|---|---|
+| `KimiCodeLineage` | `ParentSessionId` | dropped | — | Provider-recorded parent agent has no session-parent column; shared session keys preserve attribution. |
+| `KimiCodeLineage` | `Role` | dropped | — | Lineage role (`root`/`child`) is a discovery-time annotation with no relational column. |
+| `KimiCodeLineage` | `Evidence` | dropped | — | Attribution evidence (`provider-recorded`) is a discovery-time annotation with no relational column. |
+| `KimiCodeAgentDescriptor` | `ParentAgentId` | dropped | — | Transient lineage input resolved via `ResolveLineage`; only the shared session key is persisted. |
+| `KimiCodeSessionState` | `CreatedAt` | mapped | `record.started_at_utc` | Fallback UTC timestamp when usage and request lines carry none. |
+| `KimiCodeSessionState` | `UpdatedAt` | mapped | `record.started_at_utc` | Preferred fallback UTC timestamp when usage and request lines carry none. |
+| `KimiCodeSessionState` | `WorkDir` | mapped | `session_workspace.working_directory` | Session working directory recorded on the workspace row. |
+| `KimiCodeSessionState` | `Agents` | mapped | nested: KimiCodeAgentDescriptor | Agent name to descriptor map feeding `ResolveLineage`. |
+| `KimiCodeToolCall` | `Name` | mapped | `tool_call.tool_name` | Canonical tool name through the provider tool-name map. |
+| `KimiCodeToolCall` | `RawArgsText` | mapped | `tool_call_input_text.text`, `tool_call_input_size.utf8_bytes`, `tool_call_input_size.characters`, `tool_call_input_fingerprint.sha256`, `tool_call_input_truncation.original_utf8_bytes` | Raw JSON arguments measured through `ToolContentMeasurer` into child `tool.invoke` spans. |
+| `KimiCodeToolCall` | `BashCommand` | dropped | — | Raw shell command folds into the measured `RawArgsText` input; no separate command column exists. |
+| `KimiCodeCall` | `LineNumber` | mapped | `record.span_id` | Wire line seeds deterministic `synth` record identity with the session, agent, and ordinal. |
+| `KimiCodeCall` | `UsageOrdinal` | mapped | `record.span_id` | Per-wire billed-event ordinal disambiguating repeated usage lines. |
+| `KimiCodeCall` | `Model` | mapped | `record_model.model_id` | Alias-resolved real model identifier (`kimicode-unknown` fallback). |
+| `KimiCodeCall` | `ModelAlias` | dropped | — | Transient usage alias resolved into `Model` during mapping. |
+| `KimiCodeCall` | `TurnId` | dropped | — | Turn correlation is preserved by pairing each usage line with its turn prompt; no turn column exists. |
+| `KimiCodeCall` | `UserMessage` | mapped | `content_part_text.part_text`, `content_part_withheld.utf8_bytes`, `content_part_role.role_name`, `record_correction.span_id`, `record_correction_rule.correction_rule` | Paired turn prompt measured through `ToolContentMeasurer` and scanned for user-correction rules. |
+| `KimiCodeCall` | `Timestamp` | mapped | `record.started_at_utc` | Resolved ISO-8601 UTC event timestamp; timestamp-less usage lines are skipped. |
+| `KimiCodeCall` | `InputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Harness-reported exclusive input tokens (`inputOther`). |
+| `KimiCodeCall` | `OutputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Harness-reported output tokens (`output`). |
+| `KimiCodeCall` | `CacheReadTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Harness-reported cache-read tokens (`inputCacheRead`). |
+| `KimiCodeCall` | `CacheWriteTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Harness-reported cache-creation tokens (`inputCacheCreation`). |
+| `KimiCodeCall` | `Tools` | mapped | nested: KimiCodeToolCall | Tool invocations observed since the previous billed event. |
+| `KimiCodeParseProblem` | `LineNumber` | mapped | `ingest_problem_location.location`, `ingest_problem.problem_key` | 1-based wire line number, or 0 for document-level failures. |
+| `KimiCodeParseProblem` | `Code` | mapped | `ingest_problem.code` | Diagnostic code for the failure. |
+| `KimiCodeParseProblem` | `Message` | mapped | `ingest_problem.message` | Sanitized parse failure message. |
+| `KimiCodeWireDocument` | `Calls` | mapped | nested: KimiCodeCall | Billed usage events in wire order. |
+| `KimiCodeWireDocument` | `TotalLines` | dropped | — | Transient non-blank line count gating session emission; not persisted per line. |
+| `KimiCodeWireDocument` | `State` | mapped | nested: KimiCodeSessionState | Parsed `state.json` companion, or null when absent or malformed. |
+| `KimiCodeWireDocument` | `ParseProblems` | mapped | nested: KimiCodeParseProblem | Non-fatal line-level parse diagnostics emitted as `ingest_problem` rows. |
+
+## roo-code
+
+Roo Code ingests from local cline-style task directories via `RooCodeMapper` (mapping `RooCodeTaskDocument` over `RooCodeApiRequest`, `RooCodeHistoryMeta`, and `RooCodeParseProblem` into `CollectedBatch`), with the task's `api_conversation_history.json` arriving as companion text when the caller supplies it. Only the offline-derivable semantics of `roo-code.ts` (via the shared `vscode-cline-parser.ts` grammar) are ported: per-request harness-reported usage and cost, the first user prompt, and history-derived model and workspace attribution. Cost estimation from the model table is a read-time concern, so requests without a harness-reported cost carry no `ReportedCost`.
+
+In `RooCodeMapper`, each `api_req_started` entry with non-zero tokens maps to a `CollectedRecord` (`llm.invoke`) with a deterministic span (`synth:roo-code:<task>:<index>`); zero-token entries are skipped, user text attaches only to the first record, invalid timestamps fall back to the unit write time, and tasks with messages but no billable entries still emit their session.
+
+| Native type | Property | Disposition | Target mapping | Reason |
+|---|---|---|---|---|
+| `RooCodeHistoryMeta` | `Model` | mapped | `record_model.model_id` | Bare model name from the history `<model>` tag (`cline-auto` fallback). |
+| `RooCodeHistoryMeta` | `Workspace` | mapped | `session_workspace.working_directory` | Workspace directory from `Current Workspace Directory (...)`, when present. |
+| `RooCodeApiRequest` | `Index` | mapped | `record.span_id` | Position among `api_req_started` entries seeding deterministic `synth` record identity. |
+| `RooCodeApiRequest` | `InputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Harness-reported input tokens (`tokensIn`), when present. |
+| `RooCodeApiRequest` | `OutputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Harness-reported output tokens (`tokensOut`), when present. |
+| `RooCodeApiRequest` | `CacheReadTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Harness-reported cache-read tokens (`cacheReads`), when present. |
+| `RooCodeApiRequest` | `CacheWriteTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Harness-reported cache-write tokens (`cacheWrites`), when present. |
+| `RooCodeApiRequest` | `ReportedCostUsd` | mapped | `record_reported_cost.amount` | Harness-reported USD cost (`currency = "USD"`) when strictly positive and finite. |
+| `RooCodeApiRequest` | `Timestamp` | mapped | `record.started_at_utc` | ISO-8601 UTC entry timestamp (`ts`); invalid values fall back to the unit write time. |
+| `RooCodeParseProblem` | `LineNumber` | mapped | `ingest_problem_location.location`, `ingest_problem.problem_key` | Entry index within `ui_messages.json` (0 for document-level failures). |
+| `RooCodeParseProblem` | `Code` | mapped | `ingest_problem.code` | Diagnostic code for the failure. |
+| `RooCodeParseProblem` | `Message` | mapped | `ingest_problem.message` | Sanitized parse failure message. |
+| `RooCodeTaskDocument` | `TaskId` | mapped | `session.session_id`, `session.native_session_id`, `record_session_link.session_key` | Native task directory name. |
+| `RooCodeTaskDocument` | `UserMessage` | mapped | `content_part_text.part_text`, `content_part_withheld.utf8_bytes`, `content_part_role.role_name`, `record_correction.span_id`, `record_correction_rule.correction_rule` | First user prompt (500 characters) attached to the first record and scanned for user-correction rules. |
+| `RooCodeTaskDocument` | `Model` | mapped | `record_model.model_id` | Resolved model identifier for every record in the task. |
+| `RooCodeTaskDocument` | `Workspace` | mapped | `session_workspace.working_directory` | Workspace directory recorded on the session workspace row. |
+| `RooCodeTaskDocument` | `MessageCount` | dropped | — | Transient entry count gating session emission when no billable entries exist. |
+| `RooCodeTaskDocument` | `Requests` | mapped | nested: RooCodeApiRequest | Billing entries in task order. |
+| `RooCodeTaskDocument` | `ParseProblems` | mapped | nested: RooCodeParseProblem | Non-fatal document-level parse diagnostics emitted as `ingest_problem` rows. |
 
 ## zcode
 
