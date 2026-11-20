@@ -323,6 +323,12 @@ public static class Composition
             {
                 return args[index + 1];
             }
+
+            string equalsForm = name + "=";
+            if (args[index].StartsWith(equalsForm, StringComparison.Ordinal))
+            {
+                return args[index][equalsForm.Length..];
+            }
         }
 
         return null;
