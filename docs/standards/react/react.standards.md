@@ -74,8 +74,8 @@ holds no business logic of its own.
 - Tailwind utility classes, composed with `clsx` and `tailwind-merge`. An inline `style` object is
   only for a value the theme cannot express: one computed at runtime (a measured width, a chart
   position) or provided by the server (a status colour). A server-provided value is used only after
-  the code checks it against an allowlist — a theme token name, or a colour that matches `#rgb` or
-  `#rrggbb`, with an optional alpha of the same length — and is then passed as a CSS variable of
+  the code checks it against an allowlist — a theme token name, or a hex colour in one of `#rgb`,
+  `#rgba`, `#rrggbb`, or `#rrggbbaa` — and is then passed as a CSS variable of
   that checked value. An unchecked server string is never written into a style, a CSS variable or a
   stylesheet.
 - Colours, spacing and fonts come from the Tailwind theme (`@theme` tokens in the app's stylesheet);

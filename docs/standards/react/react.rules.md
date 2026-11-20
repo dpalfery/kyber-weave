@@ -27,5 +27,5 @@ last-reviewed: 2026-11-19
 - No `dangerouslySetInnerHTML`. No `console` calls except `console.error` for an error the user also
   sees. No looking up DOM nodes React renders; a ref only moves focus, measures or observes.
 - Semantic, keyboard-operable markup; Tailwind with theme tokens for styling. A server-provided
-  value used as a style is checked against an allowlist first (a theme token, or a `#rgb` /
-  `#rrggbb` colour with an optional alpha of the same length), as the React standard says.
+  value used as a style is checked against an allowlist first (a theme token, or a hex colour
+  in one of `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`), as the React standard says.
