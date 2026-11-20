@@ -1,11 +1,5 @@
-using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using System.Text.RegularExpressions;
-using KyberDash.Core.Exceptions;
 using KyberDash.Data.Collector;
-using KyberDash.Data.Collector.Sources;
 using KyberDash.Domain;
 
 namespace KyberDash.Data.Harnesses.Otlp;
@@ -25,10 +19,8 @@ namespace KyberDash.Data.Harnesses.Otlp;
 /// <c>gen_ai.*</c> keys. Gemini-attributed spans (<c>gen_ai.system == "gemini"</c> or any
 /// <c>gemini.*</c> attribute) are excluded from batches so they yield zero stored records.
 /// </remarks>
-public partial class DroidSpanMapper : IHarnessMapper
+public partial class DroidSpanMapper : OtlpSpanMapperBase
 {
-    private const string MalformedOtlpCode = "MALFORMED_OTLP_PAYLOAD";
-
     /// <summary>Canonical harness identifier emitted for Droid OTLP spans.</summary>
     public const string DroidHarnessId = "droid";
 
@@ -48,9 +40,9 @@ public partial class DroidSpanMapper : IHarnessMapper
     private static partial Regex InvokeAgentNameRegex();
 
     /// <inheritdoc />
-    public string HarnessId => DroidHarnessId;
+    protected override string CanonicalHarnessId => DroidHarnessId;
 
-    private static readonly OtlpSpanMapperCore.OtlpMapperHooks Hooks = new(
+    private static readonly OtlpSpanMapperCore.OtlpMapperHooks MapperHooks = new(
         ResolveOp,
         TryBuildTokenUsage,
         ResolveSessionKey: ResolveSession,
@@ -61,41 +53,10 @@ public partial class DroidSpanMapper : IHarnessMapper
         ResolveExtraToolStatus: static native => OtlpSpanNative.FirstSafeString(native.Attributes, DroidToolStatusKeys),
         ShouldSkipSpan: IsGeminiAttributed);
 
-    /// <inheritdoc />
-    public CollectedBatch Map(NativeSourceUnit unit, DateTimeOffset importedAtUtc)
+    /// <summary>Initializes a new instance of the <see cref="DroidSpanMapper"/> class.</summary>
+    public DroidSpanMapper()
+        : base(MapperHooks)
     {
-        ArgumentNullException.ThrowIfNull(unit);
-        ArgumentNullException.ThrowIfNull(unit.Unit);
-
-        string harnessId = ResolveHarnessId(unit.Unit.HarnessId);
-        CollectedSource source = new(harnessId, unit.Unit.Kind, unit.Unit.SourceKey);
-
-        if (string.IsNullOrWhiteSpace(unit.RawText))
-        {
-            return new CollectedBatch(source, [], [], []);
-        }
-
-        IReadOnlyList<OtlpSpan> spans;
-        try
-        {
-            spans = OtlpCollector.DecodeTracesJson(Encoding.UTF8.GetBytes(unit.RawText));
-        }
-        catch (Exception ex) when (ex is OtlpDecodeException or OtlpPayloadTooLargeException or JsonException)
-        {
-            string digest = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(unit.Unit.SourceKey)))[..16];
-            string message = OtlpSpanMapperCore.SafeOptionalText(ex.Message) ?? "Failed to decode OTLP trace payload.";
-            CollectedProblem problem = new(
-                ProblemKey: $"otlp:{digest}:{MalformedOtlpCode}",
-                Severity: OtlpSpanMapperCore.FormatProblemSeverity(ProblemSeverity.Error),
-                Code: MalformedOtlpCode,
-                Message: message,
-                Location: OtlpSpanMapperCore.SafeOptionalText(unit.Unit.SourceKey),
-                HarnessId: harnessId,
-                TimestampUtc: importedAtUtc.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture));
-            return new CollectedBatch(source, [], [], [problem]);
-        }
-
-        return OtlpSpanMapperCore.MapSpans(spans, Parse, unit.Unit.SourceKey, harnessId, Hooks);
     }
 
     /// <summary>
@@ -105,7 +66,7 @@ public partial class DroidSpanMapper : IHarnessMapper
     /// </summary>
     /// <param name="span">Decoded OTLP span.</param>
     /// <returns>Extracted <see cref="OtlpSpanNative"/>.</returns>
-    public OtlpSpanNative Parse(OtlpSpan span)
+    public override OtlpSpanNative Parse(OtlpSpan span)
     {
         ArgumentNullException.ThrowIfNull(span);
         OtlpSpanNative native = OtlpSpanNative.Parse(span);
@@ -118,39 +79,6 @@ public partial class DroidSpanMapper : IHarnessMapper
 
         List<ContentPart> parts = [.. native.Parts, new ContentPart("conversation_history", prompt, Role: "user", Order: native.Parts.Count)];
         return native with { Parts = parts };
-    }
-
-    /// <summary>
-    /// Maps a single decoded Droid OTLP <paramref name="span"/> into a normalized
-    /// <see cref="CollectedRecord"/>.
-    /// </summary>
-    /// <param name="span">Decoded OTLP span.</param>
-    /// <returns>Normalized <see cref="CollectedRecord"/>.</returns>
-    public CollectedRecord MapSpan(OtlpSpan span)
-    {
-        ArgumentNullException.ThrowIfNull(span);
-        OtlpSpanNative native = Parse(span);
-        return OtlpSpanMapperCore.MapNative(native, DroidHarnessId, Hooks);
-    }
-
-    /// <summary>
-    /// Maps a batch of decoded Droid OTLP <paramref name="spans"/> into sessions, validated
-    /// records, and token/ingest problems. Gemini-attributed spans are skipped so they yield
-    /// zero stored records.
-    /// </summary>
-    /// <param name="spans">Decoded OTLP spans.</param>
-    /// <param name="sourceLocator">Optional source locator override; defaults to the first span's <c>service.name</c> or <c>"otlp"</c>.</param>
-    /// <param name="harnessIdOverride">Optional harness identifier override; defaults to <see cref="HarnessId"/>.</param>
-    /// <returns>Static <see cref="CollectedBatch"/> for persistence.</returns>
-    public CollectedBatch MapSpans(
-        IReadOnlyList<OtlpSpan> spans,
-        string? sourceLocator = null,
-        string? harnessIdOverride = null)
-    {
-        ArgumentNullException.ThrowIfNull(spans);
-
-        string harnessId = ResolveHarnessId(harnessIdOverride);
-        return OtlpSpanMapperCore.MapSpans(spans, Parse, sourceLocator, harnessId, Hooks);
     }
 
     /// <summary>
@@ -241,18 +169,5 @@ public partial class DroidSpanMapper : IHarnessMapper
     {
         return OtlpSpanNative.FirstSafeString(native.Attributes, OtlpSpanNative.DroidModelKeys)
             ?? native.Model;
-    }
-
-    private static string ResolveHarnessId(string? unitHarnessId)
-    {
-        if (string.IsNullOrWhiteSpace(unitHarnessId))
-        {
-            return DroidHarnessId;
-        }
-
-        string normalized = HarnessSourceRegistry.NormalizeHarnessId(unitHarnessId);
-        return string.Equals(normalized, "droid", StringComparison.Ordinal)
-            ? DroidHarnessId
-            : normalized;
     }
 }

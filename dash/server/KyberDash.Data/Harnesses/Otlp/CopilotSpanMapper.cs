@@ -1,11 +1,5 @@
-using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using System.Text.RegularExpressions;
-using KyberDash.Core.Exceptions;
 using KyberDash.Data.Collector;
-using KyberDash.Data.Collector.Sources;
 using KyberDash.Domain;
 
 namespace KyberDash.Data.Harnesses.Otlp;
@@ -23,10 +17,8 @@ namespace KyberDash.Data.Harnesses.Otlp;
 /// <c>agent.invoke</c>, mirroring <c>CanonAdapters.CanonicalOp</c>. No Copilot Chat span shapes
 /// beyond those evidenced keys are assumed.
 /// </remarks>
-public partial class CopilotSpanMapper : IHarnessMapper
+public partial class CopilotSpanMapper : OtlpSpanMapperBase
 {
-    private const string MalformedOtlpCode = "MALFORMED_OTLP_PAYLOAD";
-
     [GeneratedRegex(@"^invoke_agent(?:[ :]|$)", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
     private static partial Regex InvokeAgentNameRegex();
 
@@ -34,89 +26,14 @@ public partial class CopilotSpanMapper : IHarnessMapper
     public const string CopilotHarnessId = "copilot";
 
     /// <inheritdoc />
-    public string HarnessId => CopilotHarnessId;
+    protected override string CanonicalHarnessId => CopilotHarnessId;
 
-    private static readonly OtlpSpanMapperCore.OtlpMapperHooks Hooks = new(ResolveOp, TryBuildTokenUsage);
+    private static readonly OtlpSpanMapperCore.OtlpMapperHooks MapperHooks = new(ResolveOp, TryBuildTokenUsage);
 
-    /// <inheritdoc />
-    public CollectedBatch Map(NativeSourceUnit unit, DateTimeOffset importedAtUtc)
+    /// <summary>Initializes a new instance of the <see cref="CopilotSpanMapper"/> class.</summary>
+    public CopilotSpanMapper()
+        : base(MapperHooks)
     {
-        ArgumentNullException.ThrowIfNull(unit);
-        ArgumentNullException.ThrowIfNull(unit.Unit);
-
-        string harnessId = ResolveHarnessId(unit.Unit.HarnessId);
-        CollectedSource source = new(harnessId, unit.Unit.Kind, unit.Unit.SourceKey);
-
-        if (string.IsNullOrWhiteSpace(unit.RawText))
-        {
-            return new CollectedBatch(source, [], [], []);
-        }
-
-        IReadOnlyList<OtlpSpan> spans;
-        try
-        {
-            spans = OtlpCollector.DecodeTracesJson(Encoding.UTF8.GetBytes(unit.RawText));
-        }
-        catch (Exception ex) when (ex is OtlpDecodeException or OtlpPayloadTooLargeException or JsonException)
-        {
-            string digest = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(unit.Unit.SourceKey)))[..16];
-            string message = OtlpSpanMapperCore.SafeOptionalText(ex.Message) ?? "Failed to decode OTLP trace payload.";
-            CollectedProblem problem = new(
-                ProblemKey: $"otlp:{digest}:{MalformedOtlpCode}",
-                Severity: OtlpSpanMapperCore.FormatProblemSeverity(ProblemSeverity.Error),
-                Code: MalformedOtlpCode,
-                Message: message,
-                Location: OtlpSpanMapperCore.SafeOptionalText(unit.Unit.SourceKey),
-                HarnessId: harnessId,
-                TimestampUtc: importedAtUtc.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture));
-            return new CollectedBatch(source, [], [], [problem]);
-        }
-
-        return OtlpSpanMapperCore.MapSpans(spans, Parse, unit.Unit.SourceKey, harnessId, Hooks);
-    }
-
-    /// <summary>
-    /// Parses <paramref name="span"/> into an <see cref="OtlpSpanNative"/> using the canonical
-    /// OTLP attribute key lists.
-    /// </summary>
-    /// <param name="span">Decoded OTLP span.</param>
-    /// <returns>Extracted <see cref="OtlpSpanNative"/>.</returns>
-    public OtlpSpanNative Parse(OtlpSpan span)
-    {
-        ArgumentNullException.ThrowIfNull(span);
-        return OtlpSpanNative.Parse(span);
-    }
-
-    /// <summary>
-    /// Maps a single decoded Copilot OTLP <paramref name="span"/> into a normalized
-    /// <see cref="CollectedRecord"/>.
-    /// </summary>
-    /// <param name="span">Decoded OTLP span.</param>
-    /// <returns>Normalized <see cref="CollectedRecord"/>.</returns>
-    public CollectedRecord MapSpan(OtlpSpan span)
-    {
-        ArgumentNullException.ThrowIfNull(span);
-        OtlpSpanNative native = Parse(span);
-        return OtlpSpanMapperCore.MapNative(native, CopilotHarnessId, Hooks);
-    }
-
-    /// <summary>
-    /// Maps a batch of decoded Copilot OTLP <paramref name="spans"/> into sessions, validated
-    /// records, and token/ingest problems.
-    /// </summary>
-    /// <param name="spans">Decoded OTLP spans.</param>
-    /// <param name="sourceLocator">Optional source locator override; defaults to the first span's <c>service.name</c> or <c>"otlp"</c>.</param>
-    /// <param name="harnessIdOverride">Optional harness identifier override; defaults to <see cref="HarnessId"/>.</param>
-    /// <returns>Static <see cref="CollectedBatch"/> for persistence.</returns>
-    public CollectedBatch MapSpans(
-        IReadOnlyList<OtlpSpan> spans,
-        string? sourceLocator = null,
-        string? harnessIdOverride = null)
-    {
-        ArgumentNullException.ThrowIfNull(spans);
-
-        string harnessId = ResolveHarnessId(harnessIdOverride);
-        return OtlpSpanMapperCore.MapSpans(spans, Parse, sourceLocator, harnessId, Hooks);
     }
 
     private static RecordOp ResolveOp(OtlpSpanNative native)
@@ -163,18 +80,5 @@ public partial class CopilotSpanMapper : IHarnessMapper
 
         usage = CanonAdapters.ConvertInclusiveCounts(input, cacheRead, cacheCreation, output, native.InputTokens.HasValue, reasoning);
         return true;
-    }
-
-    private static string ResolveHarnessId(string? unitHarnessId)
-    {
-        if (string.IsNullOrWhiteSpace(unitHarnessId))
-        {
-            return CopilotHarnessId;
-        }
-
-        string normalized = HarnessSourceRegistry.NormalizeHarnessId(unitHarnessId);
-        return string.Equals(normalized, "copilot", StringComparison.Ordinal)
-            ? CopilotHarnessId
-            : normalized;
     }
 }
