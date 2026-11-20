@@ -30,6 +30,8 @@ matches, or code you copied instead of reusing, is part of your task; fix it. A 
 `Open item: <file> — stale document — <what>` and fixed by docs-dev in this run. Stop only for a missing packet, a contradiction inside the task itself, or a
 safety limit (a migration you would apply by hand to a database other people or environments use, CI or deploy secrets, a push). The task gate is never such a limit: when the host's gate or test setup script itself starts a local container, creates the test database or applies the repository's existing migrations to it, that is the host's declared procedure and you run it as given.
 
+**Secrets stay out of the transcript.** Every command you run, every file you read and every output you see goes to the model provider. Never read, print or type a password, key or token. Never use an administrator or superuser login (`sa`, `root`, `postgres`). Never open a secret store: user-secrets, a `.env` file, a password file, or a container's environment. Prove a result through the application's own path: its tests, its API, its gate. A tool may read its own configuration, and a value may be passed by reference (`"$VAR"`), because then the value never appears. A plan step that breaks this rule is a `security` finding against the plan. A task that cannot be done without a secret is a stop: return BLOCKED with an `Open item:` line saying so. The Arbiter refuses such calls (`KW-ARB-SECRET-001`).
+
 **The documented rule wins over nearby code.** Where existing code contradicts a documented rule or
 standard (where a kind of file goes, a layering or naming rule), follow the rule in your change and add
 an `Open item:` line naming the rule and the existing code that breaks it. Never copy the divergent pattern.

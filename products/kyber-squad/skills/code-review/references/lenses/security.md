@@ -45,7 +45,7 @@ are explicitly **not yours**, so that they are reported once rather than three t
 
 Everything else is yours: injection in all its forms, deserialization, path traversal,
 cryptographic misuse, hardcoded or logged secrets, certificate validation bypass, unsafe
-template rendering, and cross-site scripting.
+template rendering, and cross-site scripting. That includes a plan step, script or instruction that would send an agent to an administrator login or a secret store, judged by the worker baseline's "Secrets stay out of the transcript" rule. The exposure path is the transcript itself, which goes to the model provider, so such a step is a finding at confidence 8 or above.
 
 ## What this lens must not report
 

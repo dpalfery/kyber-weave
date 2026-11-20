@@ -28,6 +28,7 @@ Also check the plan itself:
 - Every task's `Difficulty:` follows the shared difficulty rubric, and a task the rubric calls advanced states its failure mode and mitigation.
 - Scope: load the `change-scope` skill and judge the plan by it; the request is the one the plan quotes. A plan that defers what the change owns is a finding. What the skill sends to the pull request notes is not a finding: return it as a `PR note:` line after the findings.
 - Every file path the plan names exists, or the task creates it.
+- Every step that checks data or runs a command keeps to your baseline's "Secrets stay out of the transcript" rule; a step that breaks it is a `security` finding.
 
 # Findings
 

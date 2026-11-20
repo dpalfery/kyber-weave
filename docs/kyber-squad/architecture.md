@@ -1524,8 +1524,8 @@ receipt architecture. It adds no boundary, schema, or dependency.
 
 ### The shared worker baseline, injected once per dispatched worker
 
-Four rules apply to every worker on every task, whatever its role: discover before you read, do not
-open a plan or specification, never run the full test suite, and batch independent reads into one round
+A set of rules applies to every worker on every task, whatever its role: among them discover before you read, do not
+open a plan or specification, never run the full test suite, keep secrets out of the transcript, and batch independent reads into one round
 trip. They used to be paraphrased in every agent body and in several skills, so each worker paid for
 them again on every round trip and two copies could drift. They now live in one file,
 `products/kyber-squad/shared/worker-baseline.md`, and `SquadWorkerBaselineInjector` appends that block
@@ -1536,7 +1536,7 @@ a direct read only for what an index does not cover, with that file and the reas
 report; tools are called directly, tool search only when the harness lists them as deferred, a failed
 call falls back to the shell form and then direct reads, and a tool is called unavailable only with
 the quoted error text of a call that was made); the plan-read ban (`<plan-index>` and `<specification-index>` are the conductor's, and an
-insufficient packet returns a blocker); the scope rule (the task's named files are the scope in any layer, a worker never returns BLOCKED or asks for a handoff over one, and unnamed work or any issue outside its task is reported as an `Open item:` line, never fixed, ADR 0080 and ADR 0082); the documented-rule line (a documented rule wins over nearby code that contradicts it, and the conflict is an open item); the full-suite ban (run the classes the task names, because the
+insufficient packet returns a blocker); the scope rule (the task's named files are the scope in any layer, a worker never returns BLOCKED or asks for a handoff over one, and unnamed work or any issue outside its task is reported as an `Open item:` line, never fixed, ADR 0080 and ADR 0082); the documented-rule line (a documented rule wins over nearby code that contradicts it, and the conflict is an open item); the secrets line (no password, key or token is read, printed or typed, no administrator login and no secret store is used, results are proved through the application's own tests, API or gate, a plan step that breaks it is a `security` finding, and the Arbiter's `KW-ARB-SECRET-001` refuses such calls); the full-suite ban (run the classes the task names, because the
 review council and CI run the full suite on the integrated head); the batched-reads line; and the
 skills-location line, which names the directory this render's skills were installed to
 (`{{skills-root}}` in the source, answered per harness and scope in the render pipeline: repository-relative
