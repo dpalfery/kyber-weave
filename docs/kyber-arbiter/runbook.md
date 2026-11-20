@@ -57,8 +57,9 @@ hook's behaviour depends on the harness:
   `Arbiter global scope: deferred-to-project (<harness>: no per-dispatch probe; the project's own <harness> hooks decide).`
   Those harnesses have no per-dispatch probe yet, so a project with no hook for that harness is not gated there.
   `arbiter doctor` reports it as `ungated`.
-- **Antigravity and OpenCode** with no project hook of their own (no Arbiter entry in `.agents/hooks.json`, no
-  `.opencode/plugins/kyber-arbiter.ts`) log
+- **Antigravity, OpenCode, Factory, Cursor and Pi** with no project hook of their own (no Arbiter entry in
+  `.agents/hooks.json`, `.factory/hooks.json` or `.cursor/hooks.json`, no `.opencode/plugins/kyber-arbiter.ts`
+  or `.pi/extensions/kyber-arbiter.ts`) log
   `Arbiter global scope: no project <harness> hook; inserting the task prompt without evaluation.`
   The worker gets its task prompt; the dispatch is still not gated, as above. With a project hook they defer.
 
