@@ -167,6 +167,52 @@ public sealed class WorkerGuardCanonicalCheckoutCommandTests
     }
 
     [Fact]
+    public void EveryStepNamingItsOwnGitDirectoryFromTheCanonicalCheckoutIsAllowed()
+    {
+        StartRun();
+
+        Assert.Empty(Guard(
+            "copilot-cli",
+            Copilot(_repo, $"git -C {_worktree} status -sb && git -C {_worktree} worktree list")));
+    }
+
+    [Fact]
+    public void AGitDirectoryStepFollowedByAChangeDirectoryIntoTheRunWorktreeIsAllowed()
+    {
+        StartRun();
+
+        Assert.Empty(Guard(
+            "copilot-cli",
+            Copilot(_repo, $"git -C {_worktree} status -sb && cd {_worktree} && ls")));
+    }
+
+    [Fact]
+    public void AGitDirectoryStepFollowedByAPlainGitStepIsStillRefused()
+    {
+        StartRun();
+
+        Assert.NotEmpty(Guard(
+            "copilot-cli",
+            Copilot(_repo, $"git -C {_worktree} status -sb && git worktree list")));
+    }
+
+    [Fact]
+    public void AGitDirectoryStepIntoTheCanonicalCheckoutIsStillRefused()
+    {
+        StartRun();
+
+        Assert.NotEmpty(Guard("copilot-cli", Copilot(_repo, $"git -C {_repo} status")));
+    }
+
+    [Fact]
+    public void APlainGitStepFromTheCanonicalCheckoutIsStillRefused()
+    {
+        StartRun();
+
+        Assert.NotEmpty(Guard("copilot-cli", Copilot(_repo, "git status")));
+    }
+
+    [Fact]
     public void WithNoLiveRunNothingChanges()
     {
         Assert.Empty(Guard("copilot-cli", Copilot(_repo, $"cd {_repo} && git cherry-pick abc123")));

@@ -184,7 +184,11 @@ internal static class WorkerGuardRules
             }
             else if (IsGitProgram(token))
             {
-                AddGitDirectory(tokens, index, directories);
+                if (GitChangeDirectory(tokens, index) is { } directory)
+                {
+                    directories.Add(directory);
+                }
+
                 commandStart = false;
             }
             else if (!IsCommandPrefix(token))
@@ -263,65 +267,85 @@ internal static class WorkerGuardRules
     }
 
     /// <summary>
-    /// The directory the command's first step moves into when that step is a <c>cd</c> or <c>pushd</c> naming one, or
-    /// null when the command's first step is anything else (including a directory change it cannot place). A command
-    /// that steps into a directory before its first program never runs in the call's own working directory, so the
-    /// caller judges that directory in the working directory's place. The path is returned as the shell wrote it, for
-    /// the caller to resolve against the working directory.
+    /// Whether any step of the command runs in the call's own working directory, which is the only case where the
+    /// caller judges that directory. A <c>cd</c> or <c>pushd</c> naming a directory moves the shell before any later
+    /// step runs, and a <c>git</c> step with <c>-C</c> among its global options runs in that directory, so the walk
+    /// continues past it; a <c>cd</c> or <c>pushd</c> that names no directory this guard can place, and any other
+    /// step, do run in the working directory. A command with no step at all reports true, the fail-closed reading.
     /// </summary>
-    internal static string? LeadingChangeDirectory(string command)
+    /// <remarks>
+    /// The steps are read in order with the same tokenizing and word tests <see cref="EnteredDirectories" /> uses, so
+    /// the two agree on which words are programs. Every directory the command enters is still judged by
+    /// <see cref="EnteredDirectories" />, whether or not this returns false.
+    /// </remarks>
+    internal static bool RunsInWorkingDirectory(string command)
     {
         string[] tokens = ShellTokens(command);
+        bool commandStart = true;
+        bool gitDirectoryStep = false;
         for (int index = 0; index < tokens.Length; index++)
         {
             string token = tokens[index];
             if (IsCommandSeparator(token))
             {
-                return null;
+                commandStart = true;
+                continue;
+            }
+
+            if (!commandStart)
+            {
+                continue;
             }
 
             if (IsChangeDirectory(token))
             {
-                return ChangeDirectoryArgument(tokens, index);
+                return ChangeDirectoryArgument(tokens, index) is null;
             }
 
-            if (!IsCommandPrefix(token))
+            if (IsGitProgram(token))
             {
-                return null;
+                if (GitChangeDirectory(tokens, index) is null)
+                {
+                    return true;
+                }
+
+                gitDirectoryStep = true;
+                commandStart = false;
+            }
+            else if (!IsCommandPrefix(token))
+            {
+                return true;
             }
         }
 
-        return null;
+        return !gitDirectoryStep;
     }
 
     /// <summary>
-    /// Adds the directory <c>git -C</c> moves into. Only git's global options, which come before its subcommand,
-    /// are read, so a subcommand's own <c>-C</c> is never taken for a directory change.
+    /// The directory a <c>git</c> step at <paramref name="index"/> names with <c>-C</c>, or null when it names none.
+    /// Only git's global options, which come before its subcommand, are read, so a subcommand's own <c>-C</c> is
+    /// never taken for a directory change.
     /// </summary>
-    private static void AddGitDirectory(string[] tokens, int index, List<string> directories)
+    private static string? GitChangeDirectory(string[] tokens, int index)
     {
         for (int next = index + 1; next < tokens.Length && !IsCommandSeparator(tokens[next]); next++)
         {
             string option = tokens[next];
             if (!option.StartsWith('-') || string.Equals(option, "--", StringComparison.Ordinal))
             {
-                return;
+                return null;
             }
 
             if (string.Equals(option, "-C", StringComparison.Ordinal))
             {
-                if (next + 1 < tokens.Length && !IsCommandSeparator(tokens[next + 1]))
-                {
-                    directories.Add(tokens[next + 1]);
-                }
-
-                return;
+                return next + 1 < tokens.Length && !IsCommandSeparator(tokens[next + 1])
+                    ? tokens[next + 1]
+                    : null;
             }
 
             if (option.StartsWith("-C", StringComparison.Ordinal) && option.Length > 2)
             {
-                directories.Add(option[2..].TrimStart('='));
-                return;
+                return option[2..].TrimStart('=');
             }
 
             if (GitOptionTakesValue(option))
@@ -329,6 +353,8 @@ internal static class WorkerGuardRules
                 next++;
             }
         }
+
+        return null;
     }
 
     /// <summary>The git global options that take a separate value, so the word after one is not a subcommand.</summary>
