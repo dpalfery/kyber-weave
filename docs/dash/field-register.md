@@ -818,6 +818,39 @@ In `PiMapper`, each JSONL line maps to `CollectedSession`, `CollectedRecord` (`l
 | `RawSpan` | `Kind` | mapped | `record.kind` | Normalized OTLP span kind. |
 | `RawSpan` | `Timestamp` | mapped | `record.started_at_utc`, `quarantined_span_timestamp.timestamp_utc` | Optional ISO start timestamp. |
 
+## cursor
+
+Cursor ingests from two offline surfaces via `CursorMapper` into `CollectedBatch`: a JSON export of `cursorDiskKV` bubble rows (`CursorBubbleDocument` over `CursorBubbleRow`, mirroring the `BUBBLE_QUERY_BASE` projection in `cursor.ts`) and `cursor-agent` transcripts (`CursorTranscriptDocument` over `CursorTranscriptTurn`, covering both the JSONL and legacy text grammars). Every bubble row and transcript turn carrying usage emits one usage-bearing `llm.invoke` record (`RecordKind.Internal`); units attributed to the `cursor-agent` alias normalize to `cursor` via `NormalizeHarnessName`. Live-SQLite-only derivations from `cursor.ts` (workspace attribution map, composer meter and stream input, agent-stream tool attachment, results cache, paged scans, and cost estimation) have no offline input and are not persisted; neither surface reports cost, so published rates apply at read time.
+
+In `CursorMapper`, each bubble row maps to a `CollectedRecord` with composer session linkage, per-side usage (harness-reported counts, estimated from text length at four characters per token when both are zero), and paired user text; zero-usage rows, timestamp-less rows, and multiline tool-call sub-composer keys are skipped. Each transcript turn maps to a `CollectedRecord` with estimated input, output, and reasoning tokens and measured content parts; transcripts with no recognizable turns emit an `ingest_problem` row instead of records.
+
+| Native type | Property | Disposition | Target mapping | Reason |
+|---|---|---|---|---|
+| `CursorBubbleRow` | `BubbleKey` | mapped | `record.span_id` | Row key seeds deterministic `synth` record identity under the composer session. |
+| `CursorBubbleRow` | `InputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Harness-reported input tokens; absent or zero falls back to text-length estimation for `record_token_count` only. |
+| `CursorBubbleRow` | `OutputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Harness-reported output tokens; absent or zero falls back to text-length estimation for `record_token_count` only. |
+| `CursorBubbleRow` | `Model` | mapped | `record_model.model_id` | Raw model name with a `cursor-auto` display fallback when null or `default`; cost-model resolution is read-time. |
+| `CursorBubbleRow` | `CreatedAt` | mapped | `record.started_at_utc` | ISO-8601 UTC bubble timestamp; rows without a parseable timestamp are skipped. |
+| `CursorBubbleRow` | `RequestId` | mapped | `record.span_id` | Request anchor for deterministic record identity. |
+| `CursorBubbleRow` | `UserText` | mapped | `content_part_text.part_text`, `content_part_withheld.utf8_bytes`, `content_part_role.role_name`, `record_correction.span_id`, `record_correction_rule.correction_rule` | Leading text excerpt measured through `ToolContentMeasurer` and scanned for user-correction rules. |
+| `CursorBubbleRow` | `TextLength` | mapped | `record_token_count.token_count` | Full text length driving the token estimate when both native counts are zero; zero-length rows emit no record. |
+| `CursorBubbleRow` | `BubbleType` | mapped | `content_part.bucket` | Value `1` selects the user-turn pairing path; all other values select the assistant path. |
+| `CursorBubbleRow` | `ContextWindow` | dropped | — | Runtime-reported context window resolves through the model catalog at projection time rather than per-turn storage. |
+| `CursorBubbleRow` | `CodeBlocks` | dropped | — | Language tags fold into the unstructured per-call tool list, which is dropped with `Tools` for lack of call ids. |
+| `CursorBubbleDocument` | `Rows` | mapped | nested: CursorBubbleRow | Bubble rows in export order. |
+| `CursorBubbleDocument` | `ParseProblems` | mapped | nested: CursorParseProblem | Non-fatal row-level parse diagnostics emitted as `ingest_problem` rows. |
+| `CursorParseProblem` | `LineNumber` | mapped | `ingest_problem_location.location`, `ingest_problem.problem_key` | 1-based row number, or 0 for document-level failures, appended to problem key and locator. |
+| `CursorParseProblem` | `Code` | mapped | `ingest_problem.code` | Diagnostic code for the failure. |
+| `CursorParseProblem` | `Message` | mapped | `ingest_problem.message` | Sanitized parse failure message. |
+| `CursorTranscriptTurn` | `UserMessage` | mapped | `content_part_text.part_text`, `content_part_withheld.utf8_bytes`, `content_part_role.role_name`, `record_correction.span_id`, `record_correction_rule.correction_rule` | User prompt measured through `ToolContentMeasurer` and scanned for user-correction rules. |
+| `CursorTranscriptTurn` | `Body` | mapped | `content_part_text.part_text`, `content_part_withheld.utf8_bytes`, `content_part_role.role_name` | Assistant reply measured through `ToolContentMeasurer`. |
+| `CursorTranscriptTurn` | `Reasoning` | mapped | `content_part_text.part_text`, `content_part_withheld.utf8_bytes`, `content_part_role.role_name` | Thinking lines measured through `ToolContentMeasurer` into the reasoning bucket. |
+| `CursorTranscriptTurn` | `Tools` | dropped | — | Unstructured per-turn tool names carry no call ids, inputs, or results, so no `tool_call` rows are emitted. |
+| `CursorTranscriptDocument` | `ConversationId` | mapped | `session.session_id`, `session.native_session_id`, `record_session_link.session_key` | UUID transcript stem, or a 16-character digest of the transcript path. |
+| `CursorTranscriptDocument` | `Turns` | mapped | nested: CursorTranscriptTurn | Parsed user and assistant turns in transcript order. |
+| `CursorTranscriptDocument` | `Recognized` | dropped | — | Transient parse-success flag; unrecognized transcripts emit an `ingest_problem` row instead of records. |
+| `CursorTranscriptDocument` | `ParseProblems` | mapped | nested: CursorParseProblem | Non-fatal line-level parse diagnostics emitted as `ingest_problem` rows. |
+
 ## zcode
 
 `zcode` is **unevidenced** in the C# KyberDash codebase: no native reader type, `TranscriptReaderRepository` parser, OTLP `IHarnessAdapter`, or hook wire mapper exists for ZCode (only the `"zcode"` string appears in `CanonSynth.BuildProviderConventions`, and ZCode collection remains deferred in [Telemetry inventory](telemetry-inventory.md) under issue #214). There are no native reader properties to map or drop until a native ZCode collector is implemented.
