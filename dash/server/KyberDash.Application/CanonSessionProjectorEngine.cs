@@ -3015,6 +3015,8 @@ public partial class CanonSessionProjectorEngine
             prunedCount++;
         }
 
+        RebuildRunExecutionProjection();
+
         long finalMarker = operationalStore.GetWriteMarker();
         operationalStore.SetProjectionState(new ProjectionStateView(CanonSchema.SchemaVersion, finalMarker));
         operationalStore.ClearProjectionDirtyState();
@@ -3027,6 +3029,161 @@ public partial class CanonSessionProjectorEngine
             RebuiltKeys: rebuiltKeys,
             SkippedKeys: skippedKeys);
     }
+
+    /// <summary>
+    /// Rebuilds typed run grouping (<c>run*</c>) and execution linkage (<c>execution*</c>) rows
+    /// from the stored session projections, replacing the legacy <c>parent_linkage_json</c> and
+    /// <c>payload</c> columns with nullable typed child rows.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Explicit run identifiers and parent-session attributes are not observable through
+    /// <see cref="IRelationalStoreReader"/> (a <see cref="CollectedRecord"/> carries no raw
+    /// attribute bag), so every run groups by derivation (<c>derived</c>/
+    /// <c>session_fallback</c>) and every execution is a root unless its stored projection names
+    /// a parent session that is itself projected. Parent linkage is then the nullable typed
+    /// <c>execution_parent</c> row: absent means no parent, never a JSON status object.
+    /// </para>
+    /// <para>
+    /// The rebuild covers every stored session projection (not just the sessions this pass built)
+    /// so repeated passes converge, then deletes runs and executions whose sessions are gone.
+    /// </para>
+    /// </remarks>
+    private void RebuildRunExecutionProjection()
+    {
+        Dictionary<string, CollectedSession> sessionsByKey = new(StringComparer.Ordinal);
+        foreach (CollectedSession session in reader!.Sessions())
+        {
+            sessionsByKey.TryAdd(session.SessionKey, session);
+        }
+
+        List<StoredSessionProjection> stored = [.. projections!.ListSessionProjections()];
+        stored.Sort(static (left, right) => string.CompareOrdinal(left.SessionId, right.SessionId));
+
+        Dictionary<string, List<RunMember>> membersByRun = new(StringComparer.Ordinal);
+        Dictionary<string, string> harnessByRun = new(StringComparer.Ordinal);
+        foreach (StoredSessionProjection projection in stored)
+        {
+            if (!sessionsByKey.TryGetValue(projection.SessionId, out CollectedSession? session))
+            {
+                continue;
+            }
+
+            string harness = CanonPricing.NormalizeHarnessName(session.HarnessId);
+            if (CanonPricing.IsExcludedHarnessIdentity(harness))
+            {
+                continue;
+            }
+
+            string runId = $"derived:{harness}:{StripLeadingHarnessPrefix(harness, projection.SessionId)}";
+            if (!membersByRun.TryGetValue(runId, out List<RunMember>? members))
+            {
+                members = [];
+                membersByRun[runId] = members;
+                harnessByRun[runId] = harness;
+            }
+
+            members.Add(new RunMember(projection, session));
+        }
+
+        HashSet<string> projectedSessionIds = new(stored.Select(static projection => projection.SessionId), StringComparer.Ordinal);
+
+        List<StoredRun> runs = new(membersByRun.Count);
+        List<StoredExecution> executions = [];
+        foreach (string runId in membersByRun.Keys.OrderBy(static id => id, StringComparer.Ordinal))
+        {
+            List<RunMember> members = membersByRun[runId];
+            members.Sort(static (left, right) =>
+            {
+                int started = string.CompareOrdinal(left.Projection.StartedAtUtc, right.Projection.StartedAtUtc);
+                return started != 0 ? started : string.CompareOrdinal(left.Projection.SessionId, right.Projection.SessionId);
+            });
+
+            string? startedAt = null;
+            string? endedAt = null;
+            foreach (RunMember member in members)
+            {
+                if (startedAt is null || string.CompareOrdinal(member.Projection.StartedAtUtc, startedAt) < 0)
+                {
+                    startedAt = member.Projection.StartedAtUtc;
+                }
+
+                if (endedAt is null || string.CompareOrdinal(member.Projection.EndedAtUtc, endedAt) > 0)
+                {
+                    endedAt = member.Projection.EndedAtUtc;
+                }
+            }
+
+            RunMember earliest = members[0];
+            string? workingDirectory = earliest.Session.Workspace?.WorkingDirectory ?? earliest.Session.Workspace?.Repository;
+            runs.Add(new StoredRun(
+                RunId: runId,
+                HarnessId: harnessByRun[runId],
+                GroupingBasis: "derived",
+                GroupingRule: "session_fallback",
+                ExecutionCount: members.Count,
+                Label: earliest.Projection.Label,
+                WorkingDirectory: workingDirectory,
+                StartedAtUtc: startedAt,
+                EndedAtUtc: endedAt));
+
+            foreach (RunMember member in members)
+            {
+                string? parentExecutionId = member.Projection.ParentSessionId is not null
+                    && projectedSessionIds.Contains(member.Projection.ParentSessionId)
+                    ? $"exec:{member.Projection.ParentSessionId}"
+                    : null;
+                executions.Add(new StoredExecution(
+                    ExecutionId: $"exec:{member.Projection.SessionId}",
+                    RunId: runId,
+                    HarnessId: harnessByRun[runId],
+                    IsRoot: !member.Projection.IsSubagent && parentExecutionId is null,
+                    SessionId: member.Projection.SessionId,
+                    ParentExecutionId: parentExecutionId,
+                    AgentName: member.Projection.AgentName,
+                    StartedAtUtc: member.Projection.StartedAtUtc,
+                    EndedAtUtc: member.Projection.EndedAtUtc));
+            }
+        }
+
+        projections.ReplaceRuns(runs);
+
+        // ReplaceExecutions upserts by execution id without removing executions that no longer
+        // belong to a live run, so each live run's executions are cleared before the new set lands.
+        foreach (StoredRun run in runs)
+        {
+            projections.DeleteExecutionsForRun(run.RunId);
+        }
+
+        projections.ReplaceExecutions(executions);
+
+        HashSet<string> liveRuns = new(runs.Select(static run => run.RunId), StringComparer.Ordinal);
+        foreach (StoredRun existing in projections.ListRuns())
+        {
+            if (!liveRuns.Contains(existing.RunId))
+            {
+                projections.DeleteExecutionsForRun(existing.RunId);
+                projections.DeleteRun(existing.RunId);
+            }
+        }
+    }
+
+    /// <summary>Strips a leading <c>{harness}:</c> prefix from a session seed, when present.</summary>
+    /// <param name="harness">Canonical harness identifier.</param>
+    /// <param name="seed">Session identifier seed.</param>
+    /// <returns>Seed without the harness prefix.</returns>
+    private static string StripLeadingHarnessPrefix(string harness, string seed)
+    {
+        string prefix = $"{harness}:";
+        return seed.StartsWith(prefix, StringComparison.Ordinal)
+            ? seed[prefix.Length..]
+            : seed;
+    }
+
+    /// <summary>A stored session projection paired with its relational session metadata for run grouping.</summary>
+    /// <param name="Projection">Stored projected session summary.</param>
+    /// <param name="Session">Relational session metadata.</param>
+    private sealed record RunMember(StoredSessionProjection Projection, CollectedSession Session);
 
     private static IEnumerable<string> PriorIdsOf(
         string key,
