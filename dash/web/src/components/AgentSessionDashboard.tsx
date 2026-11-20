@@ -10,6 +10,7 @@ import { SchemaCostRanking, type SchemaCostAnalysis, type SchemaCostToolRow } fr
 import { SkillsPanel } from './SkillsPanel.js'
 import { TimelineView, type TimelineNode, type CostBlock } from './analysis/TimelineView.js'
 import { SessionCostPanel } from './SessionCostPanel.js'
+import { StoredFieldsPanel } from './StoredFieldsPanel.js'
 import { findContextTurn, findTurnByTransport } from '../lib/kyberApi.js'
 import type {
   KyberContextBucket,
@@ -1437,6 +1438,13 @@ export function AgentSessionContent({
           Section 5: Session Cost & Token Accounting
       --------------------------------------------------------------------- */}
       <SessionCostPanel session={session} />
+
+      {/* ---------------------------------------------------------------------
+          Stored Fields: what the relational store persisted for this session
+      --------------------------------------------------------------------- */}
+      <div className="space-y-2" data-testid="stored-fields-section">
+        <StoredFieldsPanel sessionKey={session.session_id ?? session.id} />
+      </div>
 
       {/* ---------------------------------------------------------------------
           Section 6: Slide-out Inspector Drawer
