@@ -1,14 +1,42 @@
 ---
-id: specs/kyberdash-relational-store/tasks
+id: archive/specs/kyberdash-relational-store/tasks
 title: KyberDash relational store tasks
 doc-type: spec
-status: draft
+status: archived
 owner: dpalfery
-last-reviewed: 2026-11-18
+last-reviewed: 2026-11-20
 component: KyberDash
+documentation-impact: extends-component
+impact-components: [KyberDash]
 ---
 
 # Implementation Plan
+
+**Status:** Archived, 2026-11-20. Superseded by and fully delivered through [the relational-store plan](../../plans/2026-11-19-kyberdash-relational-store.md): every task below shipped as plan tasks T1–T56, and every box is ticked to record that delivery.
+
+**Phase status:** Delivered (archived 2026-11-20)
+
+## Decisions
+
+| ID | Question | Answer / decision | Status |
+|---|---|---|---|
+| ST-1 | Where is this task list's lasting record? | Tasks 1.1–18.1 as delivered through plan tasks T1–T56. The behaviour each task delivered lives in the canonical documents mapped below. | Closed |
+
+## Design harvest
+
+The specification's items H1–H7 are declared in [the specification](README.md#design-harvest) and mapped there. This row traces this document's own content.
+
+| ID | Design item | Target component | Target doc type | Harvested |
+|---|---|---|---|---|
+| SH-1 | Tasks 1.1–18.1 as delivered through plan tasks T1–T56, including the T53 deletion and the T54/T55 documentation tasks | KyberDash | architecture | yes |
+
+## Closeout mapping
+
+| ID | Destination | Documentation impact | Status |
+|---|---|---|---|
+| ST-1 | [KyberDash architecture](../../../dash/architecture.md) | extends-component | archived |
+| SH-1 | [KyberDash architecture](../../../dash/architecture.md) | extends-component | archived |
+
 
 > **Not approved for execution.** This task list was written under an autonomous approval for
 > specification drafting only (AP-D3). No task may start until the owner approves execution. Three
@@ -108,7 +136,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
 
 ### 1. Schema catalog
 
-- [ ] 1.1 Define the record tables in `RelationalSchemaCatalog` and generate their DDL
+- [x] 1.1 Define the record tables in `RelationalSchemaCatalog` and generate their DDL
   Difficulty: hard
   Technology: csharp
   Depends on: none
@@ -122,7 +150,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
     repeated-item table has a typed `position`. No table has an entity-attribute-value or
     attribute-bag shape (a table whose columns are a name and a value).
   - _Requirements: 2.1, 2.2, 2.5, 3.1, 3.2, 3.3, 3.5, 3.7, 6.3_
-- [ ] 1.2 Add the projection, operational and catalog tables and the replacement map
+- [x] 1.2 Add the projection, operational and catalog tables and the replacement map
   Difficulty: medium
   Technology: csharp
   Depends on: 1.1
@@ -136,7 +164,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
 
 ### 2. Collector DTOs and the JSON text guard
 
-- [ ] 2.1 Define the collector DTOs
+- [x] 2.1 Define the collector DTOs
   Difficulty: medium
   Technology: csharp
   Depends on: 1.1
@@ -149,7 +177,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
     `CollectedToolDefinition`, `CollectedRecordSignals`, `CollectedAgentInvocation`,
     `CollectedModelUsage` and `CollectedWorkspace`.
   - _Requirements: 1.1, 1.2, 1.3, 1.4_
-- [ ] 2.2 Add `JsonDocumentText`, `ToolContentMeasurer` and the defined-field list
+- [x] 2.2 Add `JsonDocumentText`, `ToolContentMeasurer` and the defined-field list
   Difficulty: medium
   Technology: csharp
   Depends on: 2.1
@@ -163,7 +191,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
 
 ### 3. Store interfaces and the in-memory fake
 
-- [ ] 3.1 Declare the store interfaces
+- [x] 3.1 Declare the store interfaces
   Difficulty: easy
   Technology: csharp
   Depends on: 2.1
@@ -172,7 +200,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
   Command: `dotnet test dash/server.tests/KyberDash.Domain.Tests --filter FullyQualifiedName~StoreInterfaceShape`
   Acceptance criteria: the four interfaces take and return only collector DTOs and typed read models, and a test fails if any member exposes a JSON or dictionary type.
   - _Requirements: 1.1, 5.1, 10.1_
-- [ ] 3.2 Build `InMemoryRelationalStore`
+- [x] 3.2 Build `InMemoryRelationalStore`
   Difficulty: hard
   Technology: csharp
   Depends on: 1.2, 2.2, 3.1
@@ -184,7 +212,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
 
 ### 4. SQLite adapter
 
-- [ ] 4.1 Write `SqliteRelationalStore` for writes and schema creation
+- [x] 4.1 Write `SqliteRelationalStore` for writes and schema creation
   Difficulty: hard
   Technology: csharp
   Depends on: 3.2
@@ -195,7 +223,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
   - Test through a subclass that overrides `ExecuteSqliteCore`, records statements and returns
     canned tab-separated hex output (DD-11).
   - _Requirements: 2.3, 2.6, 6.4, 10.1, 10.4_
-- [ ] 4.2 Implement the reader queries
+- [x] 4.2 Implement the reader queries
   Difficulty: hard
   Technology: csharp
   Depends on: 4.1
@@ -207,7 +235,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
 
 ### 5. Discovery and the record writer
 
-- [ ] 5.1 Replace `DiscoverLocalSources` with a reader registry
+- [x] 5.1 Replace `DiscoverLocalSources` with a reader registry
   Difficulty: medium
   Technology: csharp
   Depends on: 2.1
@@ -216,7 +244,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~HarnessSourceRegistry`
   Acceptance criteria: the registry has one entry per candidate harness in the support matrix; Claude, Codex and Copilot CLI sources are found; a harness whose reader is not built, or whose format is unevidenced (BL-3), produces an `ingest_problem` with `SOURCE_FORMAT_UNEVIDENCED`, never a silent zero.
   - _Requirements: 1.1, 1.5, 8.1_
-- [ ] 5.2 Write mapped batches through the writer
+- [x] 5.2 Write mapped batches through the writer
   Difficulty: medium
   Technology: csharp
   Depends on: 3.2, 5.1
@@ -228,7 +256,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
 
 ### 6. File harnesses with C# readers today
 
-- [ ] 6.1 Map Claude Code files
+- [x] 6.1 Map Claude Code files
   Difficulty: medium
   Technology: csharp
   Depends on: 5.2, 15.1
@@ -238,7 +266,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
   Acceptance criteria: the tests assert every DTO property filled and every absent child row for fixtures with all token classes, none, `tool_use` and `tool_result` pairs, a JSON-document tool result, a nested JSON string, prose with a JSON fragment, and numbers and booleans where text is expected.
   - Port the mapping from `CanonSynth` to `IHarnessMapper`.
   - _Requirements: 1.2, 2.4, 2.7, 6.1, 6.2, 11.1, 11.4, 11.6, 11.7_
-- [ ] 6.2 Map Codex files, with a tool fixture
+- [x] 6.2 Map Codex files, with a tool fixture
   Difficulty: medium
   Technology: csharp
   Depends on: 5.2, 15.1
@@ -247,7 +275,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~CodexRolloutMapper`
   Acceptance criteria: `function_call` and `custom_tool_call`, paired with their outputs by call id (including the `id` fallback and `arguments` versus `input`), become `tool.invoke` records whose parent is the model call; JSON arguments keep only measurements.
   - _Requirements: 1.2, 2.4, 11.1, 11.3, 11.6, 11.7_
-- [ ] 6.3 Map Codex `local_shell_call`
+- [x] 6.3 Map Codex `local_shell_call`
   Difficulty: medium
   Technology: csharp
   Depends on: 6.2
@@ -261,7 +289,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
 
 ### 7. Copilot CLI journal
 
-- [ ] 7.1 Read `events.jsonl` and map model calls
+- [x] 7.1 Read `events.jsonl` and map model calls
   Difficulty: medium
   Technology: csharp
   Depends on: 5.2, 15.1
@@ -274,7 +302,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
   - Fixtures also cover reasoning text, `user.message`, `system.message`, model change and
     context change.
   - _Requirements: 8.1, 8.2, 8.5, 11.1, 11.6_
-- [ ] 7.2 Map Copilot CLI tool calls
+- [x] 7.2 Map Copilot CLI tool calls
   Difficulty: medium
   Technology: csharp
   Depends on: 7.1
@@ -285,7 +313,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
   - Fixtures: object `arguments`, a JSON-document result, a plain result, a failed tool with an
     error code, an MCP tool, and a `skill` request with `skill.invoked`.
   - _Requirements: 2.4, 2.7, 8.3, 8.5, 11.3, 11.7_
-- [ ] 7.3 Map Copilot CLI sub-agents
+- [x] 7.3 Map Copilot CLI sub-agents
   Difficulty: medium
   Technology: csharp
   Depends on: 7.2
@@ -294,7 +322,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~CopilotCliSubagent`
   Acceptance criteria: `subagent.started`, `subagent.completed` and `subagent.failed` give `agent.invoke` records whose parent is the spawning tool call; sub-agent records are linked through `record_agent_instance` only when a documented-shape fixture proves the `agentId` join (DD-8), and otherwise have no link.
   - _Requirements: 8.4, 8.5, 11.3_
-- [ ] 7.4 Map Copilot CLI session usage and workspace
+- [x] 7.4 Map Copilot CLI session usage and workspace
   Difficulty: easy
   Technology: csharp
   Depends on: 7.1
@@ -306,7 +334,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
 
 ### 8. OTLP span mappers
 
-- [ ] 8.1 Add `OtlpSpanNative` and map Claude spans
+- [x] 8.1 Add `OtlpSpanNative` and map Claude spans
   Difficulty: medium
   Technology: csharp
   Depends on: 5.2, 15.1
@@ -317,7 +345,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
   - `OtlpSpanNative` is built from the `CanonAdapters.cs` key lists; fixtures use the existing
     span builders.
   - _Requirements: 1.2, 11.1, 11.3, 11.6_
-- [ ] 8.2 Map Codex spans
+- [x] 8.2 Map Codex spans
   Difficulty: easy
   Technology: csharp
   Depends on: 8.1
@@ -326,7 +354,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~CodexSpanMapper`
   Acceptance criteria: only the allowlisted Codex keys are mapped, and every other attribute is absent from the DTOs.
   - _Requirements: 1.2, 11.6_
-- [ ] 8.3 Map Copilot spans
+- [x] 8.3 Map Copilot spans
   Difficulty: easy
   Technology: csharp
   Depends on: 8.1
@@ -335,7 +363,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~CopilotSpanMapper`
   Acceptance criteria: the `copilot` adapter's keys are mapped, including `gen_ai.tool.name` and `invoke_agent` where present; no fixture asserts Copilot Chat `agent.invoke` beyond what the adapter evidences.
   - _Requirements: 1.2, 11.6, 11.7_
-- [ ] 8.4 Map Antigravity and OpenCode spans
+- [x] 8.4 Map Antigravity and OpenCode spans
   Difficulty: medium
   Technology: csharp
   Depends on: 8.1
@@ -344,7 +372,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~AntigravityOpenCodeSpanMapper`
   Acceptance criteria: Antigravity adapter keys are mapped; OpenCode `step`, `tool` and `request` spans give `llm.invoke`, `tool.invoke` and `agent.invoke`.
   - _Requirements: 1.2, 11.3, 11.6_
-- [ ] 8.5 Map Droid and Pi spans, and keep Gemini excluded
+- [x] 8.5 Map Droid and Pi spans, and keep Gemini excluded
   Difficulty: medium
   Technology: csharp
   Depends on: 8.1
@@ -356,7 +384,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
 
 ### 9. OTLP logs and Codex tool events
 
-- [ ] 9.1 Map OTLP logs on receipt and remove the log tables
+- [x] 9.1 Map OTLP logs on receipt and remove the log tables
   Difficulty: medium
   Technology: csharp
   Depends on: 1.2, 5.2
@@ -365,7 +393,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
   Command: `dotnet test dash/server.tests/KyberDash.Application.Tests --filter FullyQualifiedName~OtlpLogMapper`
   Acceptance criteria: no log is written to `pending_logs`, `quarantined_logs` or `enriched_logs`; a log the mapper cannot map is counted in `ingest_problem` with no payload kept (DD-10).
   - _Requirements: 4.5, 6.4_
-- [ ] 9.2 Map Codex `codex.tool_result` to `tool.invoke`
+- [x] 9.2 Map Codex `codex.tool_result` to `tool.invoke`
   Difficulty: medium
   Technology: csharp
   Depends on: 8.2, 9.1
@@ -382,7 +410,7 @@ author their resolution; if the command fails, the task is reported `BLOCKED` an
 Each port maps only the fields its deleted TypeScript provider read, from
 `fc80ddf9^:dash/src/providers/*`, with fixtures that mirror the shapes that provider parsed.
 
-- [ ] 10.1 Port the Copilot VS Code journal reader
+- [x] 10.1 Port the Copilot VS Code journal reader
   Difficulty: medium
   Technology: csharp
   Depends on: 5.2, 15.1
@@ -391,7 +419,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~CopilotVscodeMapper`
   Acceptance criteria: fixtures mirroring `copilot-vscode.ts`'s parsed shapes give the records that provider produced, and every field it read has a register row.
   - _Requirements: 1.2, 6.2, 11.1, 11.2_
-- [ ] 10.2 Port the Antigravity transcript reader
+- [x] 10.2 Port the Antigravity transcript reader
   Difficulty: medium
   Technology: csharp
   Depends on: 5.2, 15.1
@@ -400,7 +428,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~AntigravityTranscriptMapper`
   Acceptance criteria: transcript fixtures give `llm.invoke` records, and `PLANNER_RESPONSE.tool_calls` give `tool.invoke` records.
   - _Requirements: 1.2, 6.2, 11.1, 11.2_
-- [ ] 10.3 Port the Droid session reader
+- [x] 10.3 Port the Droid session reader
   Difficulty: medium
   Technology: csharp
   Depends on: 5.2, 15.1
@@ -409,7 +437,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~DroidSessionMapper`
   Acceptance criteria: fixtures mirroring the `~/.factory/sessions` shapes give the records the deleted provider produced.
   - _Requirements: 1.2, 6.2, 11.1, 11.2_
-- [ ] 10.4 Port the Pi reader
+- [x] 10.4 Port the Pi reader
   Difficulty: easy
   Technology: csharp
   Depends on: 5.2, 15.1
@@ -418,7 +446,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~PiMapper`
   Acceptance criteria: fixtures mirroring `pi.ts`'s parsed shapes give the records that provider produced.
   - _Requirements: 1.2, 6.2, 11.1, 11.2_
-- [ ] 10.5 Port the Cursor reader
+- [x] 10.5 Port the Cursor reader
   Difficulty: medium
   Technology: csharp
   Depends on: 5.2, 15.1
@@ -427,7 +455,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~CursorMapper`
   Acceptance criteria: fixtures give usage-bearing `llm.invoke` records only, as the deleted provider produced.
   - _Requirements: 1.2, 6.2, 11.1, 11.2_
-- [ ] 10.6 Port the Kilo readers
+- [x] 10.6 Port the Kilo readers
   Difficulty: medium
   Technology: csharp
   Depends on: 5.2, 15.1
@@ -436,7 +464,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~KiloMapper`
   Acceptance criteria: `kilo-shared-runtime` and `kilo-vscode-legacy` fixtures each give the records their deleted provider produced, under their own harness ids.
   - _Requirements: 1.2, 6.2, 11.1, 11.2_
-- [ ] 10.7 Port the CommandCode reader
+- [x] 10.7 Port the CommandCode reader
   Difficulty: easy
   Technology: csharp
   Depends on: 5.2, 15.1
@@ -445,7 +473,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~CommandCodeMapper`
   Acceptance criteria: fixtures give `llm.invoke` records, and `tool_use` items give `tool.invoke` records.
   - _Requirements: 1.2, 6.2, 11.1, 11.2, 11.3_
-- [ ] 10.8 Port the Devin and Warp readers
+- [x] 10.8 Port the Devin and Warp readers
   Difficulty: medium
   Technology: csharp
   Depends on: 5.2, 15.1
@@ -454,7 +482,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~DevinWarpMapper`
   Acceptance criteria: each harness's fixtures give the records its deleted provider produced.
   - _Requirements: 1.2, 6.2, 11.1, 11.2_
-- [ ] 10.9 Port the Kimi Code and Roo Code readers
+- [x] 10.9 Port the Kimi Code and Roo Code readers
   Difficulty: medium
   Technology: csharp
   Depends on: 5.2, 15.1
@@ -463,7 +491,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~KimiRooMapper`
   Acceptance criteria: each harness's fixtures give the records its deleted provider produced.
   - _Requirements: 1.2, 6.2, 11.1, 11.2_
-- [ ] 10.10 Port the Cline readers
+- [x] 10.10 Port the Cline readers
   Difficulty: medium
   Technology: csharp
   Depends on: 5.2, 15.1
@@ -474,7 +502,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   - _Requirements: 1.2, 6.2, 11.1, 11.2_
 ### 11. Projections
 
-- [ ] 11.1 Rewrite the session projector over the reader
+- [x] 11.1 Rewrite the session projector over the reader
   Difficulty: hard
   Technology: csharp
   Depends on: 1.2, 4.2
@@ -483,7 +511,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Command: `dotnet test dash/server.tests/KyberDash.Application.Tests --filter FullyQualifiedName~SessionProjection`
   Acceptance criteria: the projector reads only `IRelationalStoreReader` and writes typed rows to `IProjectionStore` for context pressure per turn, schema ranking, timeline sub-agent and auxiliary marks, and exclusive unmeasurable-reason rows; schema cost comes from `tool_definition.schema_tokens`.
   - _Requirements: 3.4, 3.7, 4.3_
-- [ ] 11.2 Project runs and executions
+- [x] 11.2 Project runs and executions
   Difficulty: medium
   Technology: csharp
   Depends on: 11.1
@@ -492,7 +520,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Command: `dotnet test dash/server.tests/KyberDash.Application.Tests --filter FullyQualifiedName~RunExecutionProjection`
   Acceptance criteria: run grouping and execution linkage are typed rows, and no `parent_linkage_json` or equivalent exists.
   - _Requirements: 4.2, 4.3_
-- [ ] 11.3 Project harness rollups
+- [x] 11.3 Project harness rollups
   Difficulty: medium
   Technology: csharp
   Depends on: 11.1
@@ -501,7 +529,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Command: `dotnet test dash/server.tests/KyberDash.Application.Tests --filter FullyQualifiedName~RollupProjection`
   Acceptance criteria: rollups are typed metric rows, and a harness with no records has no metric rows rather than zeros.
   - _Requirements: 3.1, 4.3_
-- [ ] 11.4 Project findings and predictions
+- [x] 11.4 Project findings and predictions
   Difficulty: medium
   Technology: csharp
   Depends on: 11.1
@@ -513,7 +541,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
 
 ### 12. Operational tables
 
-- [ ] 12.1 Replace `metadata` and the operational tables
+- [x] 12.1 Replace `metadata` and the operational tables
   Difficulty: medium
   Technology: csharp
   Depends on: 3.2
@@ -525,7 +553,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
 
 ### 13. Analytics
 
-- [ ] 13.1 Put one error boundary around every analytics operation
+- [x] 13.1 Put one error boundary around every analytics operation
   Difficulty: easy
   Technology: csharp
   Depends on: none
@@ -535,7 +563,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Acceptance criteria: with the real `KyberBridgeEngine`, a store failure answers `ANALYTICS_STORE_UNAVAILABLE`, a bad argument `ANALYTICS_INVALID_ARGUMENT` and anything else `ANALYTICS_INTERNAL`, each in a non-empty contract-v1 error envelope, never an empty 500.
   - This task is independent of the schema and fixes the visible symptom first.
   - _Requirements: 5.3_
-- [ ] 13.2 Run `AnalyticsService` over the reader
+- [x] 13.2 Run `AnalyticsService` over the reader
   Difficulty: hard
   Technology: csharp
   Depends on: 4.2, 11.1, 11.2, 11.3, 11.4, 13.1
@@ -544,7 +572,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Command: `dotnet test dash/server.tests/KyberDash.Application.Tests --filter FullyQualifiedName~AnalyticsReadPath`
   Acceptance criteria: `AnalyticsService` depends only on `IRelationalStoreReader` and `IProjectionStore`, with no harness-format or JSON parse of store values; a failed session projection writes `PROJECTION_FAILED` and the operation answers from the rest; cost is harness-reported, priced at read time, or a stated reason, never blended.
   - _Requirements: 3.6, 5.1, 5.4, 5.5, 10.3_
-- [ ] 13.3 Assemble the all-harness fixture set
+- [x] 13.3 Assemble the all-harness fixture set
   Difficulty: medium
   Technology: csharp
   Depends on: 6.3, 7.3, 7.4, 8.3, 8.4, 8.5, 9.2, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 10.10
@@ -553,7 +581,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Command: `dotnet test dash/server.tests/KyberDash.Application.Tests --filter FullyQualifiedName~AllHarnessFixtureSet`
   Acceptance criteria: every mapper's synthetic fixtures load into one `InMemoryRelationalStore` and together produce `llm.invoke`, `tool.invoke` and `agent.invoke`, kinds `internal` and `client`, every candidate harness id with an evidenced format, and the value shapes that broke today's reader.
   - _Requirements: 11.2, 11.3, 11.4_
-- [ ] 13.4 Test `status`, `catalog`, `query` and `search-sessions`
+- [x] 13.4 Test `status`, `catalog`, `query` and `search-sessions`
   Difficulty: medium
   Technology: csharp
   Depends on: 13.2, 13.3
@@ -564,7 +592,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   - Existing tests that mock `IAnalyticsService` stay for routing and no longer count as
     analytics coverage.
   - _Requirements: 5.2, 10.2, 10.3, 11.5_
-- [ ] 13.5 Test `inspect`, `findings`, `compare` and `outcomes`
+- [x] 13.5 Test `inspect`, `findings`, `compare` and `outcomes`
   Difficulty: medium
   Technology: csharp
   Depends on: 13.2, 13.3
@@ -576,7 +604,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
 
 ### 14. Stored-fields view
 
-- [ ] 14.1 Serve `GET /api/sessions/{sessionKey}/stored-fields`
+- [x] 14.1 Serve `GET /api/sessions/{sessionKey}/stored-fields`
   Difficulty: medium
   Technology: csharp
   Depends on: 4.2, 7.3
@@ -585,7 +613,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Command: `dotnet test dash/server.tests/KyberDash.Presentation.Tests --filter FullyQualifiedName~StoredFieldsEndpoint`
   Acceptance criteria: the response lists every catalog column reachable from a Copilot session, labelled `table.column`, with absent child rows marked not reported; a test fails if a reachable column is missing.
   - _Requirements: 9.1, 9.2, 9.3, 9.4_
-- [ ] 14.2 Show the Stored fields panel on the session page
+- [x] 14.2 Show the Stored fields panel on the session page
   Difficulty: medium
   Technology: typescript
   Depends on: 14.1
@@ -597,7 +625,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
 
 ### 15. Field register
 
-- [ ] 15.1 Create the field register and its test
+- [x] 15.1 Create the field register and its test
   Difficulty: medium
   Technology: csharp
   Depends on: 2.2
@@ -609,7 +637,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
 
 ### 16. Schema version, deletion and re-ingest
 
-- [ ] 16.1 Stamp the relational schema version and refuse newer stores
+- [x] 16.1 Stamp the relational schema version and refuse newer stores
   Difficulty: easy
   Technology: csharp
   Depends on: 12.1
@@ -618,7 +646,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Command: `dotnet test dash/server.tests/KyberDash.Data.Tests --filter FullyQualifiedName~SchemaVersion`
   Acceptance criteria: a newer version is refused with the existing message and nothing is deleted.
   - _Requirements: 7.3_
-- [ ] 16.2 Delete an older store and re-ingest
+- [x] 16.2 Delete an older store and re-ingest
   Difficulty: medium
   Technology: csharp
   Depends on: 16.1, 16.3, 0.1, 0.2, 0.3
@@ -631,7 +659,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   - The deletion must not be merged to a release, published or run on any machine until those
     resolutions are recorded (see "Open blockers"). No test touches a real database file.
   - _Requirements: 7.1, 7.2, 7.4, 7.6_
-- [ ] 16.3 Run a full re-ingest with per-harness counts
+- [x] 16.3 Run a full re-ingest with per-harness counts
   Difficulty: medium
   Technology: csharp
   Depends on: 5.2, 13.3
@@ -640,7 +668,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Command: `dotnet test dash/server.tests/KyberDash.Application.Tests --filter FullyQualifiedName~FullReingest`
   Acceptance criteria: a full re-ingest over the refresh history window reports sessions and records stored per harness, tested over a fake file system and the fake store.
   - _Requirements: 6.5, 7.5_
-- [ ] 16.4 Remove the old store code
+- [x] 16.4 Remove the old store code
   Difficulty: medium
   Technology: csharp
   Depends on: 13.4, 13.5, 14.1, 16.3
@@ -652,7 +680,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
 
 ### 17. Documentation
 
-- [ ] 17.1 Update the KyberDash architecture document
+- [x] 17.1 Update the KyberDash architecture document
   Difficulty: easy
   Depends on: 13.2
   Capabilities: technical writing in Markdown and Mermaid
@@ -660,7 +688,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
   Command: `kyber-weave docs validate`
   Acceptance criteria: the document describes the relational schema, the collector boundary and the analytics read path, and docs validate and drift pass.
   - _Requirements: 12.1_
-- [ ] 17.2 Write the ADR
+- [x] 17.2 Write the ADR
   Difficulty: easy
   Depends on: 16.4
   Capabilities: architecture decision records in Markdown
@@ -671,7 +699,7 @@ Each port maps only the fields its deleted TypeScript provider read, from
 
 ### 18. Closeout
 
-- [ ] 18.1 Specification closeout
+- [x] 18.1 Specification closeout
   Difficulty: easy
   Depends on: 0.1, 0.2, 0.3, 14.2, 16.2, 17.1, 17.2
   Capabilities: documentation harvest and specification archiving, assigned to `docs-dev`

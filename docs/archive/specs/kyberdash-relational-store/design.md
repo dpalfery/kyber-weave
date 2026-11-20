@@ -1,10 +1,10 @@
 ---
-id: specs/kyberdash-relational-store/design
+id: archive/specs/kyberdash-relational-store/design
 title: KyberDash relational store design
 doc-type: spec
-status: draft
+status: archived
 owner: dpalfery
-last-reviewed: 2026-11-18
+last-reviewed: 2026-11-20
 component: KyberDash
 documentation-impact: extends-component
 impact-components: [KyberDash]
@@ -23,6 +23,9 @@ keywords:
 ---
 
 # Design Document
+
+**Status:** Archived, 2026-11-20. Superseded by and fully delivered through [the relational-store plan](../../plans/2026-11-19-kyberdash-relational-store.md); every design decision below shipped as plan tasks T1–T56.
+
 
 ## Overview
 
@@ -761,3 +764,26 @@ before the code.
 
 Owner verification is outside the test suite: re-ingest on the owner's machine, then the Stored
 fields panel on a Copilot CLI session (OD-8).
+
+## Decisions
+
+The full decision records are in [Design decisions](#design-decisions) above. This table traces them for closeout.
+
+| ID | Question | Answer / decision | Status |
+|---|---|---|---|
+| DD-1, DD-2, DD-3, DD-4, DD-5, DD-6, DD-7, DD-8, DD-9, DD-10, DD-11, DD-12, DD-13, DD-14, DD-15, DD-16, DD-17 | Design decisions DD-1 to DD-17 as delivered: static schema catalog, NOT NULL columns, JSON-text guard, disjoint token rows, harness-reported cost, Copilot CLI journal mapping, proven spawn/agent joins, unread delete-and-re-ingest, OTLP log removal, test seams, DTO placement, read-time aggregates, exclusive unmeasurable tables, tool-definition columns, evidenced-harness porting, local-shell and tool-result mapping | Closed |
+
+## Design harvest
+
+The specification's items H1–H7 are declared in [the specification](README.md#design-harvest) and mapped there. This row traces this document's own content.
+
+| ID | Design item | Target component | Target doc type | Harvested |
+|---|---|---|---|---|
+| DH-1 | Design decisions DD-1 to DD-17 as delivered, including the reconciled table inventory and the closed defined-field list | KyberDash | architecture | yes |
+
+## Closeout mapping
+
+| ID | Destination | Documentation impact | Status |
+|---|---|---|---|
+| DD-1, DD-2, DD-3, DD-4, DD-5, DD-6, DD-7, DD-8, DD-9, DD-10, DD-11, DD-12, DD-13, DD-14, DD-15, DD-16, DD-17 | [ADR 0090](../../../adr/0090-kyberdash-relational-store.md); [KyberDash architecture](../../../dash/architecture.md) | extends-component | archived |
+| DH-1 | [KyberDash architecture](../../../dash/architecture.md) | extends-component | archived |

@@ -1,10 +1,10 @@
 ---
-id: specs/kyberdash-relational-store/requirements
+id: archive/specs/kyberdash-relational-store/requirements
 title: KyberDash relational store requirements
 doc-type: requirements
-status: draft
+status: archived
 owner: dpalfery
-last-reviewed: 2026-11-18
+last-reviewed: 2026-11-20
 component: KyberDash
 documentation-impact: extends-component
 impact-components: [KyberDash]
@@ -21,6 +21,9 @@ keywords:
 ---
 
 # Requirements Document
+
+**Status:** Archived, 2026-11-20. Superseded by and fully delivered through [the relational-store plan](../../plans/2026-11-19-kyberdash-relational-store.md); every requirement below shipped as plan tasks T1–T56.
+
 
 ## Introduction
 
@@ -436,3 +439,21 @@ autonomous decisions that held.
 
 12.4. WHEN every task is done THEN a final `docs-dev` closeout task SHALL harvest the design into
 canonical documentation and archive this specification.
+
+## Design harvest
+
+The specification's items H1–H7 are declared in [the specification](README.md#design-harvest) and mapped there. This row traces this document's own content.
+
+| ID | Design item | Target component | Target doc type | Harvested |
+|---|---|---|---|---|
+| RH-1 | Requirements 1–12 as delivered: typed collector DTOs, no JSON columns, 3NF child tables, full-table coverage, reader-only analytics, dropped-field register, delete-and-re-ingest | KyberDash | architecture | yes |
+
+## Closeout mapping
+
+| ID | Destination | Documentation impact | Status |
+|---|---|---|---|
+| OD-1, OD-2, OD-3, OD-4, OD-5, OD-6, OD-7, OD-8, OD-9 | [ADR 0090](../../../adr/0090-kyberdash-relational-store.md) | extends-component | archived |
+| RQ-1, RQ-2, RQ-3, RQ-4, RQ-5, RQ-6, RQ-7, RQ-8, RQ-9, RQ-10, RQ-11, RQ-12 | [ADR 0090](../../../adr/0090-kyberdash-relational-store.md) | extends-component | archived |
+| AP-R, AP-D1, AP-D2, AP-D3 | Documentation waiver — requirements, design-review, and drafting approvals consumed during specification authoring; no surviving behavioral invariant | extends-component | archived |
+| BL-1, BL-2, BL-3 | [ADR 0090](../../../adr/0090-kyberdash-relational-store.md); [KyberDash architecture](../../../dash/architecture.md) | extends-component | archived |
+| RH-1 | [KyberDash architecture](../../../dash/architecture.md) | extends-component | archived |
