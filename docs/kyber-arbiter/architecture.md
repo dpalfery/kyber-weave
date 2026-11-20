@@ -472,7 +472,10 @@ places those harnesses report a subagent's calls with its id and type, and it ac
 a Squad subagent. It denies a write into the canonical checkout while a live run works in its own worktree
 (`KW-ARB-CHECKOUT-001`, the same id as the return rule), and a shell command that would run there for the same
 reason: the call's working directory is inside the canonical checkout, or one of its `cd`, `pushd` or `git -C`
-steps moves into it, wherever in the command that step sits. It denies every call of a developer or `docs-dev`
+steps moves into it, wherever in the command that step sits. A call's working directory inside the canonical
+checkout does not count when the command's first step is a `cd` or `pushd` into a directory, because the command
+never runs there; the guard judges that directory instead, and a command whose first step is anything else is
+judged on the working directory as before. It denies every call of a developer or `docs-dev`
 dispatch whose current turn is past `arbiter.dispatch-budget` (`KW-ARB-BUDGET-001`), and denies once the call after a
 process-starting call that ran past `dispatch-budget.call-minutes`, measured as the gap between the dispatch's
 consecutive calls; a file read is never judged, because only a call that started a process, or waited on one,

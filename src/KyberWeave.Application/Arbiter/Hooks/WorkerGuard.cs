@@ -155,9 +155,11 @@ public sealed class WorkerGuard(
     /// <summary>
     /// The canonical-checkout refusal for a shell command, or null. A command is refused when it would run in a
     /// repository's canonical checkout: its working directory is inside one, or it steps into one with a
-    /// <c>cd</c>, <c>pushd</c> or <c>git -C</c>. Only a live run of that repository that works in a worktree of its
-    /// own makes it stray, and a read through a view or grep tool carries no command, so it is never judged here.
-    /// The configuration is read only when there is something to refuse.
+    /// <c>cd</c>, <c>pushd</c> or <c>git -C</c>. A command whose first step is a <c>cd</c> or <c>pushd</c> into a
+    /// directory never runs in the working directory, so that first directory is judged in its place; every later
+    /// directory the command enters is judged either way. Only a live run of that repository that works in a
+    /// worktree of its own makes it stray, and a read through a view or grep tool carries no command, so it is never
+    /// judged here. The configuration is read only when there is something to refuse.
     /// </summary>
     private string? ShellCheckoutRefusal(WorkerGuardRules.ToolCall call, string home)
     {
@@ -166,7 +168,9 @@ public sealed class WorkerGuard(
             return null;
         }
 
-        string? refusal = CheckoutRefusalAt(call.Cwd, workingDirectory: null, home);
+        string? refusal = WorkerGuardRules.LeadingChangeDirectory(call.Command) is null
+            ? CheckoutRefusalAt(call.Cwd, workingDirectory: null, home)
+            : null;
         if (refusal is null)
         {
             foreach (string directory in WorkerGuardRules.EnteredDirectories(call.Command))
