@@ -78,7 +78,7 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
     public void TheToolNamesTheFileForATechnologyOnlyDispatchOnAFallbackHarness()
     {
         string reply = DocsTaskPromptFixture.Tools(_fixture)
-            .BuildTaskPrompt(taskId: null, technology: "csharp", harness: "warp");
+            .BuildTaskPromptForClient("warp", taskId: null, technology: "csharp");
 
         Assert.Contains(
             $"prompt file: {TaskPromptService.ScratchFolder}/csharp/{TaskPromptService.PromptFileName}",
@@ -102,7 +102,7 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
     [Fact]
     public void TheToolGivesThePathOnAFallbackHarnessAndHoldsNoPromptText()
     {
-        string reply = DocsTaskPromptFixture.Tools(_fixture).BuildTaskPrompt(taskId: "T1", harness: "warp");
+        string reply = DocsTaskPromptFixture.Tools(_fixture).BuildTaskPromptForClient("warp", taskId: "T1");
 
         Assert.Contains("prompt file: .agent_scratchpad/t1/prompt.md", reply, StringComparison.Ordinal);
         Assert.Contains("read it first", reply, StringComparison.Ordinal);
@@ -113,9 +113,10 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
     [Fact]
     public void TheToolGivesNoPathOnARewriteHarness()
     {
-        string reply = DocsTaskPromptFixture.Tools(_fixture).BuildTaskPrompt(taskId: "T1", harness: "claude");
+        string reply = DocsTaskPromptFixture.Tools(_fixture).BuildTaskPromptForClient("copilot-cli", taskId: "T1");
 
         Assert.Contains("prompt file: none", reply, StringComparison.Ordinal);
+        Assert.Contains("harness: copilot-cli (from MCP client 'copilot-cli')", reply, StringComparison.Ordinal);
         Assert.DoesNotContain("read it first", reply, StringComparison.Ordinal);
         Assert.False(_fixture.Exists(Path.Combine(TaskPromptService.ScratchFolder, "t1", "prompt.md")));
     }
