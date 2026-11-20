@@ -180,8 +180,8 @@ The reviewer applies the checks no individual lens can, because no lens sees the
   others with `--drop <id>=duplicate of <kept id>`.
 - **Reconcile contradictions** — read the code and resolve, or escalate as unresolved.
 - **Mark pre-existing debt.** A finding about code the change did not touch is dropped with
-  `--drop <id>=pre-existing debt: <one line>`; it blocks nothing and the verdict lists it as
-  follow-up work. Code the change touched or extends is the change's own, and a stale document is
+  `--drop <id>=pre-existing debt: <one line>`; it blocks nothing and the verdict lists it for
+  the pull request notes. Code the change touched or extends is the change's own, and a stale document is
   never pre-existing debt, whatever its origin.
 - **Check the claims against the gates.** Any assertion that something was built, tested, or
   verified, with no corresponding gate result, is a `critical` finding, written in

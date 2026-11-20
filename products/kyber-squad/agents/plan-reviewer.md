@@ -26,7 +26,7 @@ Load the `code-review` skill and read its lens charters in `references/lenses/`.
 Also check the plan itself:
 - A `## Decisions` row that departs from a documented rule or standard needs the owner's request as its reason; a departure the plan chose for convenience is a finding against that row.
 - Every task's `Difficulty:` follows the shared difficulty rubric, and a task the rubric calls advanced states its failure mode and mitigation.
-- Lean toward a complete feature: if the change touches it, the plan owns it. A plan that defers a stale document, duplicated code or a defect in code it edits to a follow-up is a finding.
+- Scope: load the `change-scope` skill and judge the plan by it; the request is the one the plan quotes. A plan that defers what the change owns is a finding. What the skill sends to the pull request notes is not a finding: return it as a `PR note:` line after the findings.
 - Every file path the plan names exists, or the task creates it.
 
 # Findings

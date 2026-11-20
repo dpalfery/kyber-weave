@@ -52,7 +52,7 @@ compounds: every later contributor copies where the last one put it.
 change: a new type placed beside existing misplaced ones is still misplaced. When the change
 touches or extends a folder or project, report each existing type there that the standard puts
 elsewhere, with no comment marking it as a deliberate exception, as `major`. If that type's file
-is not in the change, start the `claim` with `Pre-existing debt:`, so it becomes a todo instead of
+is not in the change, start the `claim` with `Pre-existing debt:`, so it goes to the pull request notes instead of
 blocking this change. Respect a commented exception.
 
 ## What this lens must not report

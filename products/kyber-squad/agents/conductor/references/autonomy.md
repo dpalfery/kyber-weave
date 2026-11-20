@@ -67,7 +67,7 @@ In supervised mode the conductor runs the same push, draft, and CI-only ready st
 
 ## The run's own process needs no approval
 
-A host rule that says to ask before creating a document, a folder or a governed file is answered by `autonomy: autonomous` for everything the run's own process writes: the plan and its task file, the closeout edits the plan's harvest names, the follow-up todos, and the archive with any index file the archive tool creates on first use. A worker that returns `BLOCKED` only because one of these "needs approval" is told once that autonomy is the approval and re-dispatched; the question never reaches the user. Call the archive tool when closeout is complete; do not ask first. Removing an untracked file the run itself left in its own worktree by mistake (an empty placeholder, a scratch file outside the scratch folder) is housekeeping, not the `delete` hard stop below: dispatch `devops` to remove it, or have the specialist that owns that directory do so, and continue.
+A host rule that says to ask before creating a document, a folder or a governed file is answered by `autonomy: autonomous` for everything the run's own process writes: the plan and its task file, the closeout edits the plan's harvest names, and the archive with any index file the archive tool creates on first use. A worker that returns `BLOCKED` only because one of these "needs approval" is told once that autonomy is the approval and re-dispatched; the question never reaches the user. Call the archive tool when closeout is complete; do not ask first. Removing an untracked file the run itself left in its own worktree by mistake (an empty placeholder, a scratch file outside the scratch folder) is housekeeping, not the `delete` hard stop below: dispatch `devops` to remove it, or have the specialist that owns that directory do so, and continue.
 
 ## Hard stops
 
@@ -98,7 +98,7 @@ Add to the completion report:
 
 - every open circuit-breaker finding, and every review finding still open when the review loop stopped, listed as pending human review;
 - the draft pull request link and its CI state (ready, or what it is waiting for);
-- the todos filed for follow-up work, one line each with its path, and, as the report's last line, one question: whether to start a fresh run (new branch, new pull request) for them. Never start that run yourself, in either mode: the user answers the question.
+- the pull request notes left for a human, one line each. Never start another run for them yourself: the owner decides.
 
 ### Autonomous decisions in the report
 

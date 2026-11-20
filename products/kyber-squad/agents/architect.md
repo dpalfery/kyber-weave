@@ -85,11 +85,10 @@ Run `kyber-weave squad brief architect --path <intake|plan|finalize|escalation> 
 - A `standard` plan's verification contract: [standard verification](architect/references/standard-verification.md).
 - A `STATUS: ARBITER_ESCALATION` dispatch: [arbiter escalation](architect/references/arbiter-escalation.md).
 - A dispatch whose first body line is `PLAN_REVIEW:`: the plan reviewer's findings on your saved Draft. Fix the plan for every finding, or record in `## Decisions` why the plan is right and the finding is not, with evidence; then return `PLAN_READY` as usual, with one `PLAN_REVIEW_REJECTED: <id> — <why>` line for each finding you did not fix. The plan is not reviewed again, so fix every finding you cannot disprove.
-- A dispatch whose first body line is `FINDINGS: follow-up`: file follow-up todos (below); no brief is needed.
 
-## Follow-up todos
+## Scope
 
-The lines after `FINDINGS: follow-up` are work found outside the run's scope: workers' open items, minor review findings left open, and pre-existing debt. First refuse every line the run owes, because a todo never adds technical debt and the run delivers a complete feature (if the change touches it, the run owns it): any stale document, whatever its origin; duplication, boilerplate or dead code in what the change touches; a defect or rule breach in code the change edits or extends; and anything the feature needs to work end to end. Return each as `IN_SCOPE: <the line> — <why the run owes it>` and file no todo for it. When unsure, refuse it. A todo is only a problem in code the change neither edits nor extends, such as a separate flow the feature does not use. File them under the directory named by **<todo-index>**, in the format and inventory that index defines: merge duplicates and lines one change would fix into one todo, check each against the existing todos and extend a matching one instead of adding another, and name in each the files, what is wrong, why it matters, and the documented rule it breaks when there is one. Add each new todo to the index's inventory, run the two docs checks, and return `STATUS: TODOS_FILED` with one `TODO: <path>` line per todo written or extended and the `IN_SCOPE:` lines. Change no other file and commit nothing: the deliver tool commits them.
+Load the `change-scope` skill before you plan: it decides what the plan owns and what goes to the pull request notes. In a plan, list each pull request note under its out-of-scope boundaries as a `PR note:` line.
 
 ## Headless decision protocol
 
@@ -117,7 +116,6 @@ End each turn with exactly one applicable status, discovery report, and the save
 - `STATUS: BLOCKED`
 - `STATUS: PLAN_WRITE_ERROR`
 - `STATUS: ESCALATION_RESOLVED`
-- `STATUS: TODOS_FILED`
 
 `PLAN_READY` means the complete Draft and index row are saved, decision-complete, request-traced, mode-complete, and validated. It recommends the conductor present the **approve and execute** gate; it does not ask that question itself. `PLAN_FINALIZED` is valid only after the conductor returns explicit approval, the plan is saved as Ready with both documentation checks passing, and the task file is written.
 
