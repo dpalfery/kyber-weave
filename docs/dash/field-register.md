@@ -605,7 +605,7 @@ Copilot VS Code ingests local VS Code `chatSessions` append/edit journals (`kind
 
 ## antigravity
 
-Antigravity ingests over OTLP through `AntigravityAdapter` (`OtlpSpan`, `OtlpLog`, `OtlpMetric`, `RawSpan`), claiming spans carrying `gen_ai.agent.name = "antigravity"` ahead of `GeminiAdapter`, converting inclusive counts, and mapping `gemini.usage.thoughts_tokens` to reasoning tokens while leaving `cache_creation` unexported.
+Antigravity ingests over OTLP through `AntigravityAdapter` (`OtlpSpan`, `OtlpLog`, `OtlpMetric`, `RawSpan`), claiming spans carrying `gen_ai.agent.name = "antigravity"` ahead of `GeminiAdapter`, converting inclusive counts, and mapping `gemini.usage.thoughts_tokens` to reasoning tokens while leaving `cache_creation` unexported. Local `.gemini/antigravity/brain/<conversationId>/.system_generated/logs/transcript.jsonl` transcripts are mapped by `AntigravityTranscriptMapper` (`PLANNER_RESPONSE.tool_calls` to child `tool.invoke` spans and `view_file` `SKILL.md` reads to `record_skill_invocation.skill_name`; native transcript DTOs are documented under `## antigravity-cli`).
 
 | Native type | Property | Disposition | Target mapping | Reason |
 |---|---|---|---|---|
@@ -658,6 +658,41 @@ Antigravity ingests over OTLP through `AntigravityAdapter` (`OtlpSpan`, `OtlpLog
 | `RawSpan` | `Name` | mapped | `record.name`, `quarantined_span_name.name` | Original span name. |
 | `RawSpan` | `Kind` | mapped | `record.kind` | Normalized OTLP span kind. |
 | `RawSpan` | `Timestamp` | mapped | `record.started_at_utc`, `quarantined_span_timestamp.timestamp_utc` | Optional ISO start timestamp. |
+
+## antigravity-cli
+
+Antigravity CLI ingests local `.gemini/antigravity-cli/brain/<conversationId>/.system_generated/logs/transcript.jsonl` transcripts (`AntigravityTranscriptStep`, `AntigravityTranscriptToolCall`, `AntigravityTranscriptSegment`) and `cache/antigravity-statusline.jsonl` snapshots (`AntigravityStatusLineEntry`) via `AntigravityTranscriptMapper` (`AntigravityParseProblem` diagnostics). `PLANNER_RESPONSE` steps emit `llm.invoke` records with child `tool.invoke` spans for `tool_calls`, inferring `SKILL.md` reads from `view_file` only and withholding JSON object/array payloads; statusline snapshots collapse consecutive duplicate usage runs, skip non-final singletons, delta monotonic cumulative counters, reset on non-monotonic snapshots, and drop unmapped `cwd`, `session_id`, `display_name`, and `context_window_size` fields.
+
+| Native type | Property | Disposition | Target mapping | Reason |
+|---|---|---|---|---|
+| `AntigravityTranscriptStep` | `StepIndex` | mapped | `record.span_id` | Transcript `step_index` anchoring deterministic `synth:<harness>:<session>:step-<stepIndex>` record identity and `agy-step:` segmentation bounds. |
+| `AntigravityTranscriptStep` | `StepType` | mapped | `record.op`, `record.name` | Discriminates `USER_INPUT`, `PLANNER_RESPONSE` (`llm.invoke`), and `GENERIC` tool result steps. |
+| `AntigravityTranscriptStep` | `Source` | dropped | — | Native step source label (`USER_EXPLICIT`, `MODEL`, `SYSTEM`) has no column in `RelationalSchemaCatalog`; role is normalized onto `content_part_role.role_name`. |
+| `AntigravityTranscriptStep` | `Status` | mapped | `record.status` | Maps `DONE`/`OK` to `ok`, `ERROR`/`FAILED` to `error`, and other states to `unspecified`. |
+| `AntigravityTranscriptStep` | `CreatedAt` | mapped | `record.started_at_utc`, `record_end.ended_at_utc`, `record_reported_duration.duration_ms` | ISO-8601 UTC step timestamp used for parent start and paired single-call `GENERIC` end/duration. |
+| `AntigravityTranscriptStep` | `Content` | mapped | `content_part.bucket`, `content_part_text.part_text`, `content_part_withheld.utf8_bytes`, `tool_call_result_text.text`, `tool_call_result_size.utf8_bytes`, `tool_call_result_truncation.original_utf8_bytes` | Measured via `ToolContentMeasurer` into `user_message`, `conversation_history`, or paired single-call `tool_result_content` (JSON documents withheld). |
+| `AntigravityTranscriptStep` | `ToolCalls` | mapped | nested: AntigravityTranscriptToolCall | Tool invocations emitted as child `tool.invoke` records under the `PLANNER_RESPONSE` parent. |
+| `AntigravityTranscriptToolCall` | `CallId` | mapped | `tool_call.call_id` | Explicit `call_id`/`id` or deterministic `step-<index>-call-<ordinal>` correlation identifier. |
+| `AntigravityTranscriptToolCall` | `ToolName` | mapped | `tool_call.tool_name`, `tool_call_mcp.server_name`, `tool_call_mcp.server_tool_name` | Invoked tool name (`mcp__<server>__<tool>` splits into `tool_call_mcp`). |
+| `AntigravityTranscriptToolCall` | `RawArgumentsJson` | mapped | `tool_call_input_size.utf8_bytes`, `tool_call_input_size.characters`, `tool_call_input_fingerprint.sha256` | Decoded arguments JSON object measured via `ToolContentMeasurer` with raw JSON withheld from `tool_call_input_text`. |
+| `AntigravityTranscriptToolCall` | `InferredSkillName` | mapped | `record_skill_invocation.skill_name` | Parent directory skill name inferred exclusively from `view_file` targeting `SKILL.md`. |
+| `AntigravityTranscriptSegment` | `Steps` | mapped | nested: AntigravityTranscriptStep | Transcript steps owned by one `agy-step:<last_step_index>` call segment. |
+| `AntigravityTranscriptSegment` | `Covered` | dropped | — | Transient segment-coverage boolean gating whether transcript activity is attributed (`SegmentTranscript`) rather than stored in SQLite. |
+| `AntigravityTranscriptSegment` | `Result` | mapped | `tool_call_result_text.text`, `tool_call_outcome.succeeded` | Paired `GENERIC` output attached when a segment holds exactly one tool call. |
+| `AntigravityStatusLineEntry` | `Timestamp` | mapped | `record.started_at_utc` | Snapshot timestamp (`at` or `timestamp`, falling back to file mtime or import UTC). |
+| `AntigravityStatusLineEntry` | `ConversationId` | mapped | `session.session_id`, `session.native_session_id`, `record_session_link.session_key`, `record.span_id` | Primary session and deterministic `synth:antigravity-statusline:<conversationId>:...` record anchor (JSON objects withheld). |
+| `AntigravityStatusLineEntry` | `SessionId` | dropped | — | Optional secondary `session_id` / `sessionId` is redundant with `ConversationId` and has no separate column in `RelationalSchemaCatalog`. |
+| `AntigravityStatusLineEntry` | `Model` | mapped | `record_model.model_id`, `record.name` | Resolved model identifier from scalar `model` or `model.id`/`model.display_name` (rejecting `"unknown"` and JSON objects). |
+| `AntigravityStatusLineEntry` | `ModelDisplayName` | dropped | — | Human-readable `model.display_name` is used only as fallback when `model.id` is absent and is not persisted separately. |
+| `AntigravityStatusLineEntry` | `InputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Billable or delta input token count (`token_class = input`). |
+| `AntigravityStatusLineEntry` | `OutputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Aggregate billable or delta output token count (`token_class = output`). |
+| `AntigravityStatusLineEntry` | `CacheCreationInputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Billable or delta cache-write token count (`token_class = cache_write`). |
+| `AntigravityStatusLineEntry` | `CacheReadInputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Billable or delta cache-read token count (`token_class = cache_read`). |
+| `AntigravityStatusLineEntry` | `ContextWindowSize` | dropped | — | Unmapped statusline `context_window.context_window_size` telemetry; context limits are resolved from model pricing metadata. |
+| `AntigravityStatusLineEntry` | `Cwd` | dropped | — | Unmapped workspace path `cwd` on raw statusline payloads is intentionally withheld and never persisted. |
+| `AntigravityParseProblem` | `LineNumber` | mapped | `ingest_problem_location.location`, `ingest_problem.problem_key` | 1-based JSONL line number recorded in non-fatal parse diagnostics. |
+| `AntigravityParseProblem` | `Code` | mapped | `ingest_problem.code` | Diagnostic code (`ANTIGRAVITY_MALFORMED_LINE`). |
+| `AntigravityParseProblem` | `Message` | mapped | `ingest_problem.message` | Sanitized parse failure message containing no raw JSON payload. |
 
 ## gemini
 
