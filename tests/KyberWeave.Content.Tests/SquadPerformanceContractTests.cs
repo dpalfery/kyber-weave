@@ -145,7 +145,6 @@ public sealed class SquadPerformanceContractTests
 
     [Theory]
     [InlineData(SharedExecutionSkillPath)]
-    [InlineData(ConductorAgentPath)]
     public void ConductorSurfacesSpecifyTheArtifactsPathAndTaskGateOutput(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
@@ -169,6 +168,27 @@ public sealed class SquadPerformanceContractTests
         Assert.Matches(@"(?i)\bgit\s+(?:cherry-pick|merge)\s+--abort\b", content);
         Assert.Contains("git worktree remove --force", content, StringComparison.Ordinal);
         Assert.Contains("git worktree prune", content, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     The isolation rules have one home: the <c>## Ready queue</c> section of the shared execution
+    ///     skill. The conductor dispatches every ready task into its own worktree and points at that
+    ///     section instead of restating the rules, so its dispatch bullet has to carry both names.
+    /// </summary>
+    [Fact]
+    public void ConductorPointsAtTheReadyQueueSectionForTheIsolationRules()
+    {
+        string content = ReadRepoFile(ConductorAgentPath);
+        string[] bullets =
+        [
+            .. content.Split('\n').Where(line => line.StartsWith("- Start every ready task at once", StringComparison.Ordinal))
+        ];
+
+        Assert.True(
+            bullets.Length == 1,
+            $"{ConductorAgentPath} must carry exactly one '- Start every ready task at once' bullet; it carries {bullets.Length}.");
+        Assert.Contains("Ready queue", bullets[0], StringComparison.Ordinal);
+        Assert.Contains("delivery-execution", bullets[0], StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -265,7 +285,6 @@ public sealed class SquadPerformanceContractTests
 
     [Theory]
     [InlineData(SharedExecutionSkillPath)]
-    [InlineData(ConductorAgentPath)]
     [InlineData(ArchitectureDocPath)]
     public void SurfacesConsistentlySpecifyArtifactIsolationFlags(string relativePath)
     {
