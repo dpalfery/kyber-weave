@@ -334,18 +334,22 @@ check on the conductor's own `task` calls, and logs instead of denying when it c
 ## Reading a canonical-checkout refusal
 
 A subagent starts in the repository's canonical checkout (its main worktree) and is told the run's worktree
-in prose, so it can write to the wrong one. `KW-ARB-CHECKOUT-001` catches that on machine facts, in two
-places:
+in prose, so it can write to, or run a command in, the wrong one. `KW-ARB-CHECKOUT-001` catches that on machine
+facts, in two places:
 
-- **Before the write, where the harness hooks it.** `kyber-weave-arbiter worker-guard` runs on every Copilot
-  CLI tool call (the user-level `~/.copilot/hooks/kyber-arbiter.json` only, because the CLI runs the project
-  file too and a call would count twice) and every Claude tool call (the user-level settings block), and
-  checks Copilot CLI's `edit` and `create` and Claude's `Edit`, `Write`, `MultiEdit` and `NotebookEdit`. It denies a Squad subagent's write into the canonical
-  checkout while a live run of that repository works in a worktree of its own, and the reason names the same
-  path in the run worktree. A root agent (a person's own session) is never checked, and a project that sets
-  `arbiter.enabled: false` is never refused. The guard reads only the run records and the checkout's git
-  files, starts no process, and allows anything it cannot read. A shell command that writes a file is not
-  seen by it; the return check below catches that.
+- **Before the write or command, where the harness hooks it.** `kyber-weave-arbiter worker-guard` runs on every
+  Copilot CLI tool call (the user-level `~/.copilot/hooks/kyber-arbiter.json` only, because the CLI runs the project
+  file too and a call would count twice) and every Claude tool call (the user-level settings block). It checks
+  Copilot CLI's `edit`, `create`, `bash` and `powershell` and Claude's `Edit`, `Write`, `MultiEdit`,
+  `NotebookEdit` and `Bash`. It denies a Squad subagent's write into the canonical checkout while a live run of
+  that repository works in a worktree of its own, and the reason names the same path in the run worktree. It also
+  denies a shell command that would run there: the call's working directory is inside the canonical checkout, or
+  one of its `cd`, `pushd` or `git -C` steps moves into it, wherever in the command that step sits, and the reason
+  names the canonical checkout and the run worktree. A root agent (a person's own session) is never checked, and a
+  project that sets `arbiter.enabled: false` is never refused. The guard reads only the run records and the
+  checkout's git files, starts no process, and allows anything it cannot read. A read through a view or grep tool
+  carries no command and is never refused. A write a command makes to a path it does not name is left to the
+  return check below.
 - **On the return, everywhere returns are observed.** Before a dispatch to a specialist that writes files,
   the hook snapshots the canonical checkout; on the return it diffs it. Paths that changed are listed in the
   escalation's evidence, and `NEXT` asks for the same specialist to move them into the run worktree and

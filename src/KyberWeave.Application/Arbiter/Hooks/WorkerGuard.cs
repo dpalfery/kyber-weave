@@ -7,23 +7,23 @@ using KyberWeave.Core.Configuration;
 namespace KyberWeave.Arbiter.Hooks;
 
 /// <summary>
-/// The guard on a Squad subagent's own tool calls, from machine facts only. It refuses a write into the
-/// repository's canonical checkout while a live run works in a worktree of its own
+/// The guard on a Squad subagent's own tool calls, from machine facts only. It refuses a write into, or a shell
+/// command that would run in, the repository's canonical checkout while a live run works in a worktree of its own
 /// (<c>KW-ARB-CHECKOUT-001</c>), ends a developer dispatch whose current turn has run past its budget of
 /// tool calls or minutes (<c>KW-ARB-BUDGET-001</c>), and refuses a read-only dispatch's command that the
 /// declared technology folders' <c>worker.command</c> rules do not allow.
 /// </summary>
 /// <remarks>
 /// It runs on every tool call a harness reports, so it starts no process and calls no model: the run records,
-/// the checkout's git files and one append-only counter file per subagent are all it reads for the write and
-/// budget refusals. The command allow-list is the one place it reads the project's configuration and evaluates
+/// the checkout's git files and one append-only counter file per subagent are all it reads for the write, command
+/// and budget refusals. The command allow-list is the one place it reads the project's configuration and evaluates
 /// step 0, and only for a capability profile that may run commands and may not write files; there it also reads
 /// the ledger's dispatch headers, to learn the technology the read-only agent's dispatch named. A root agent (a
 /// person's own session, or the conductor) is never guarded, and neither is an agent outside the Squad
 /// catalog. Any error allows, and the log says why (ADR 0072).
 /// </remarks>
 /// <param name="budgets">The per-subagent budget files.</param>
-/// <param name="checkouts">Tells whether a write lands in a canonical checkout while a run works elsewhere.</param>
+/// <param name="checkouts">Tells whether a write or a shell command lands in a canonical checkout while a run works elsewhere.</param>
 /// <param name="hostConfig">Loads the project's configuration, for the budget it sets and whether it turns the Arbiter off.</param>
 /// <param name="process">The operator's home.</param>
 /// <param name="clock">The clock the budget window is measured on.</param>
@@ -100,6 +100,7 @@ public sealed class WorkerGuard(
                                  (now ?? (() => clock.GetUtcNow()))(),
                                  seat ? seatBudgetLoader ?? LoadSeatBudget : budgetLoader ?? LoadBudget)
                              ?? WriteRefusal(call, home)
+                             ?? ShellCheckoutRefusal(call, home)
                              ?? CommandRefusal(call, home);
             if (reason is not null)
             {
@@ -149,6 +150,67 @@ public sealed class WorkerGuard(
 
         HostConfigLoadResult loaded = hostConfig.TryLoad(workingDirectory);
         return loaded.Success && loaded.Config?.Arbiter.ExplicitlyEnabled == false;
+    }
+
+    /// <summary>
+    /// The canonical-checkout refusal for a shell command, or null. A command is refused when it would run in a
+    /// repository's canonical checkout: its working directory is inside one, or it steps into one with a
+    /// <c>cd</c>, <c>pushd</c> or <c>git -C</c>. Only a live run of that repository that works in a worktree of its
+    /// own makes it stray, and a read through a view or grep tool carries no command, so it is never judged here.
+    /// The configuration is read only when there is something to refuse.
+    /// </summary>
+    private string? ShellCheckoutRefusal(WorkerGuardRules.ToolCall call, string home)
+    {
+        if (call.Command is not { Length: > 0 })
+        {
+            return null;
+        }
+
+        string? refusal = CheckoutRefusalAt(call.Cwd, workingDirectory: null, home);
+        if (refusal is null)
+        {
+            foreach (string directory in WorkerGuardRules.EnteredDirectories(call.Command))
+            {
+                refusal = CheckoutRefusalAt(directory, call.Cwd, home);
+                if (refusal is not null)
+                {
+                    break;
+                }
+            }
+        }
+
+        return refusal is not null && ArbiterTurnedOff(call.Cwd) ? null : refusal;
+    }
+
+    /// <summary>The canonical-checkout refusal for one path, or null when it is outside every canonical checkout or no run is live there.</summary>
+    private string? CheckoutRefusalAt(string? path, string? workingDirectory, string home)
+    {
+        string? absolute = AbsolutePath(path, workingDirectory);
+        if (absolute is null || checkouts.CanonicalCheckoutContaining(absolute) is not { } checkout)
+        {
+            return null;
+        }
+
+        return checkouts.LiveSeparateRuns(home, checkout) is { Count: > 0 } runs
+            ? WorkerGuardRules.StrayCommandRefusal(checkout, runs[0].Worktree)
+            : null;
+    }
+
+    /// <summary>
+    /// The absolute form of a path the command names, resolved against the call's working directory, or null when
+    /// neither names a directory the guard can place.
+    /// </summary>
+    private static string? AbsolutePath(string? path, string? workingDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        string combined = Path.IsPathRooted(path) || string.IsNullOrWhiteSpace(workingDirectory)
+            ? path
+            : Path.Combine(workingDirectory, path);
+        return Path.IsPathRooted(combined) ? Path.GetFullPath(combined) : null;
     }
 
     /// <summary>

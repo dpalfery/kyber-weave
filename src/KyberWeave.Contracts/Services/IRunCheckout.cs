@@ -16,6 +16,14 @@ public interface IRunCheckout
     /// <returns>The runs, or null when the run records could not be read.</returns>
     IReadOnlyList<RunRecord>? LiveSeparateRuns(string homeDirectory, string canonicalCheckout);
 
+    /// <summary>The repository's canonical checkout that holds a path.</summary>
+    /// <param name="path">The path to place, absolute or relative to the current directory.</param>
+    /// <returns>
+    /// The canonical checkout's root when the path is inside one, or null when it is outside every repository or
+    /// inside a linked worktree, whose writes and commands are the run's own.
+    /// </returns>
+    string? CanonicalCheckoutContaining(string path);
+
     /// <summary>The refusal for a write that lands in a canonical checkout while a live run works in a worktree of its own.</summary>
     /// <param name="path">The path the tool writes, absolute or relative to <paramref name="workingDirectory"/>.</param>
     /// <param name="workingDirectory">The tool call's working directory.</param>
