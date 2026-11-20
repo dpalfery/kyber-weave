@@ -306,6 +306,7 @@ public class CopilotCliJournalReader : IHarnessSourceReader
         string? title = ReadString(data, "title") ?? ReadString(data, "summary");
         CopilotCliContextInfo? context = ParseContextInfo(data);
         IReadOnlyList<CopilotCliToolRequest> toolRequests = ParseToolRequests(data);
+        IReadOnlyList<CopilotCliModelUsage> modelMetrics = ParseModelMetrics(data);
 
         return new CopilotCliJournalEvent(
             LineNumber: lineNumber,
@@ -329,7 +330,8 @@ public class CopilotCliJournalReader : IHarnessSourceReader
             DeclaredContextWindow: declaredContextWindow,
             Title: title,
             Context: context,
-            ToolRequests: toolRequests);
+            ToolRequests: toolRequests,
+            ModelMetrics: modelMetrics);
     }
 
     private static string? ReadSessionStartVersion(JsonElement root)
@@ -359,6 +361,87 @@ public class CopilotCliJournalReader : IHarnessSourceReader
         }
 
         return new CopilotCliContextInfo(workingDirectory, repository, branch, gitRoot);
+    }
+
+    private static IReadOnlyList<CopilotCliModelUsage> ParseModelMetrics(JsonElement data)
+    {
+        if (!data.TryGetProperty("modelMetrics", out JsonElement metricsEl)
+            && !data.TryGetProperty("model_metrics", out metricsEl))
+        {
+            return [];
+        }
+
+        if (metricsEl.ValueKind == JsonValueKind.Array)
+        {
+            List<CopilotCliModelUsage> metrics = [];
+            foreach (JsonElement item in metricsEl.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                metrics.Add(ParseSingleModelUsage(item, defaultModel: null));
+            }
+
+            return metrics;
+        }
+
+        if (metricsEl.ValueKind != JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        if (HasModelUsageFields(metricsEl))
+        {
+            return [ParseSingleModelUsage(metricsEl, defaultModel: null)];
+        }
+
+        List<CopilotCliModelUsage> mapped = [];
+        foreach (JsonProperty property in metricsEl.EnumerateObject())
+        {
+            if (property.Value.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            mapped.Add(ParseSingleModelUsage(property.Value, property.Name));
+        }
+
+        return mapped;
+    }
+
+    private static bool HasModelUsageFields(JsonElement element)
+    {
+        return element.TryGetProperty("model", out _)
+            || element.TryGetProperty("modelId", out _)
+            || element.TryGetProperty("model_id", out _)
+            || element.TryGetProperty("inputTokens", out _)
+            || element.TryGetProperty("outputTokens", out _)
+            || element.TryGetProperty("cacheReadTokens", out _)
+            || element.TryGetProperty("cacheWriteTokens", out _)
+            || element.TryGetProperty("cacheCreationTokens", out _)
+            || element.TryGetProperty("reasoningTokens", out _);
+    }
+
+    private static CopilotCliModelUsage ParseSingleModelUsage(JsonElement element, string? defaultModel)
+    {
+        string? model = ReadString(element, "model")
+            ?? ReadString(element, "modelId")
+            ?? ReadString(element, "model_id");
+        if (model is null && !string.IsNullOrWhiteSpace(defaultModel))
+        {
+            model = defaultModel.Trim();
+        }
+
+        return new CopilotCliModelUsage(
+            model,
+            ReadOptionalNonNegativeLong(element, "inputTokens"),
+            ReadOptionalNonNegativeLong(element, "outputTokens"),
+            ReadOptionalNonNegativeLong(element, "cacheReadTokens"),
+            ReadOptionalNonNegativeLong(element, "cacheWriteTokens")
+                ?? ReadOptionalNonNegativeLong(element, "cacheCreationTokens"),
+            ReadOptionalNonNegativeLong(element, "reasoningTokens"));
     }
 
     private static IReadOnlyList<CopilotCliToolRequest> ParseToolRequests(JsonElement data)

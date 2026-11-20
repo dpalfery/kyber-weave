@@ -33,6 +33,23 @@ public record CopilotCliToolRequest(
     string? SkillName);
 
 /// <summary>
+/// Per-model token usage snapshot from a Copilot CLI <c>session.shutdown</c> event's <c>modelMetrics</c>.
+/// </summary>
+/// <param name="Model">Model identifier for this usage snapshot.</param>
+/// <param name="InputTokens">Fresh input token count when reported.</param>
+/// <param name="OutputTokens">Generated output token count when reported.</param>
+/// <param name="CacheReadTokens">Prompt-cache read token count when reported.</param>
+/// <param name="CacheWriteTokens">Prompt-cache creation/write token count when reported.</param>
+/// <param name="ReasoningTokens">Reasoning token count when reported.</param>
+public record CopilotCliModelUsage(
+    string? Model,
+    long? InputTokens,
+    long? OutputTokens,
+    long? CacheReadTokens,
+    long? CacheWriteTokens,
+    long? ReasoningTokens);
+
+/// <summary>
 /// Non-fatal parse problem encountered while reading a Copilot CLI <c>events.jsonl</c> line.
 /// </summary>
 /// <param name="LineNumber">1-based line number within the journal file.</param>
@@ -68,6 +85,7 @@ public record CopilotCliJournalProblem(
 /// <param name="Title">Optional session title carried on the event.</param>
 /// <param name="Context">Optional workspace context snapshot carried on the event.</param>
 /// <param name="ToolRequests">Tool requests attached to an <c>assistant.message</c> event.</param>
+/// <param name="ModelMetrics">Per-model token snapshots from a <c>session.shutdown</c> event's <c>modelMetrics</c>.</param>
 public record CopilotCliJournalEvent(
     int LineNumber,
     string EventType,
@@ -90,7 +108,8 @@ public record CopilotCliJournalEvent(
     long? DeclaredContextWindow,
     string? Title,
     CopilotCliContextInfo? Context,
-    IReadOnlyList<CopilotCliToolRequest> ToolRequests);
+    IReadOnlyList<CopilotCliToolRequest> ToolRequests,
+    IReadOnlyList<CopilotCliModelUsage> ModelMetrics);
 
 /// <summary>
 /// Parsed Copilot CLI session journal produced by <see cref="CopilotCliJournalReader"/>.
@@ -165,6 +184,7 @@ public class CopilotCliMapper : IHarnessMapper
 
         Dictionary<string, string> agentModels = new(StringComparer.Ordinal);
         Dictionary<string, string> latestSystemPrompts = new(StringComparer.Ordinal);
+        List<IReadOnlyList<CopilotCliModelUsage>> shutdownSnapshots = [];
         Dictionary<string, List<string>> pendingUserMessages = new(StringComparer.Ordinal);
         Dictionary<string, List<string>> pendingReasonings = new(StringComparer.Ordinal);
 
@@ -228,6 +248,16 @@ public class CopilotCliMapper : IHarnessMapper
                 if (updatedTitle is not null)
                 {
                     sessionTitle = updatedTitle;
+                }
+
+                continue;
+            }
+
+            if (IsShutdown(evt.EventType))
+            {
+                if (evt.ModelMetrics.Count > 0)
+                {
+                    shutdownSnapshots.Add(evt.ModelMetrics);
                 }
 
                 continue;
@@ -434,7 +464,7 @@ public class CopilotCliMapper : IHarnessMapper
                 NativeSessionId: sessionId,
                 Workspace: workspace,
                 Title: sessionTitle,
-                ReportedUsage: []));
+                ReportedUsage: BuildReportedUsage(shutdownSnapshots, sessionModel)));
         }
 
         List<CollectedProblem> problems = BuildProblems(document.ParseProblems, unit.Unit.SourceKey, sessionId, importedAtUtc);
@@ -446,6 +476,53 @@ public class CopilotCliMapper : IHarnessMapper
 
     private static bool IsModelChange(string eventType) =>
         eventType is "session.model_change" or "session.model_changed" or "model_change" or "model.change";
+
+    private static bool IsShutdown(string eventType) =>
+        eventType is "session.shutdown" or "session_shutdown" or "shutdown";
+
+    private static IReadOnlyList<CollectedModelUsage> BuildReportedUsage(
+        IReadOnlyList<IReadOnlyList<CopilotCliModelUsage>> shutdownSnapshots,
+        string? sessionModel)
+    {
+        if (shutdownSnapshots.Count == 0)
+        {
+            return [];
+        }
+
+        List<CollectedModelUsage> usage = [];
+        for (int position = 0; position < shutdownSnapshots.Count; position++)
+        {
+            foreach (CopilotCliModelUsage metric in shutdownSnapshots[position])
+            {
+                string? model = SafeOptionalText(metric.Model) ?? sessionModel;
+                if (model is null)
+                {
+                    continue;
+                }
+
+                AddModelUsageRow(usage, position, model, TokenClass.Input, metric.InputTokens);
+                AddModelUsageRow(usage, position, model, TokenClass.CacheRead, metric.CacheReadTokens);
+                AddModelUsageRow(usage, position, model, TokenClass.CacheWrite, metric.CacheWriteTokens);
+                AddModelUsageRow(usage, position, model, TokenClass.Output, metric.OutputTokens);
+                AddModelUsageRow(usage, position, model, TokenClass.Reasoning, metric.ReasoningTokens);
+            }
+        }
+
+        return usage;
+    }
+
+    private static void AddModelUsageRow(
+        List<CollectedModelUsage> usage,
+        int snapshotPosition,
+        string model,
+        TokenClass tokenClass,
+        long? count)
+    {
+        if (count is >= 0)
+        {
+            usage.Add(new CollectedModelUsage(snapshotPosition, model, tokenClass, count.Value));
+        }
+    }
 
     private static bool IsContextChange(string eventType) =>
         eventType is "session.context_changed"

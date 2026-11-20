@@ -573,6 +573,13 @@ Copilot CLI ingests local `~/.copilot/session-state/<id>/events.jsonl` session j
 | `CopilotCliJournalEvent` | `Title` | mapped | `session_title.title` | Session title update carried on session/info events. |
 | `CopilotCliJournalEvent` | `Context` | mapped | nested: CopilotCliContextInfo | Workspace context snapshot carried on `session.start` or context-change events. |
 | `CopilotCliJournalEvent` | `ToolRequests` | mapped | nested: CopilotCliToolRequest | Correlates `toolRequests[]` with `tool.execution_start` and `tool.execution_complete` into child `tool.invoke` spans parented to the requesting `llm.invoke` (with JSON-document results retaining `tool_call_result_size` only, incomplete tools omitting `record_end` and `tool_call_outcome`, and MCP metadata populating `tool_call_mcp`) and extracts invoked skills into `record_skill_invocation`. |
+| `CopilotCliJournalEvent` | `ModelMetrics` | mapped | nested: CopilotCliModelUsage | Per-model token snapshots from `session.shutdown` `modelMetrics` (array, single-object, or model-keyed object forms) emitted as ordered `session_model_usage` snapshots. |
+| `CopilotCliModelUsage` | `Model` | mapped | `session_model_usage.model_id` | Model identifier for the usage snapshot, falling back to the session model when the entry omits it; entries without any resolvable model are skipped. |
+| `CopilotCliModelUsage` | `InputTokens` | mapped | `session_model_usage.token_count` | Fresh input token count (`token_class = input`); absent counts emit no row. |
+| `CopilotCliModelUsage` | `OutputTokens` | mapped | `session_model_usage.token_count` | Generated output token count (`token_class = output`); absent counts emit no row. |
+| `CopilotCliModelUsage` | `CacheReadTokens` | mapped | `session_model_usage.token_count` | Prompt-cache read token count (`token_class = cache_read`); absent counts emit no row. |
+| `CopilotCliModelUsage` | `CacheWriteTokens` | mapped | `session_model_usage.token_count` | Prompt-cache creation/write token count (`token_class = cache_write`, accepting `cacheCreationTokens`); absent counts emit no row. |
+| `CopilotCliModelUsage` | `ReasoningTokens` | mapped | `session_model_usage.token_count` | Reasoning token count (`token_class = reasoning`); absent counts emit no row. |
 | `CopilotCliContextInfo` | `WorkingDirectory` | mapped | `session_workspace.working_directory` | Active working directory (`cwd`) merged across context-change events. |
 | `CopilotCliContextInfo` | `Repository` | mapped | `session_repository.repo_name` | Active repository name (`repository`, falling back to `GitRoot` folder name). |
 | `CopilotCliContextInfo` | `Branch` | mapped | `session_branch.branch_name` | Active git branch merged across context-change events. |
