@@ -483,11 +483,23 @@ a variable such as `$WT`) and any other step do run in the working directory, so
 every call of a developer or `docs-dev` dispatch whose current turn is past `arbiter.dispatch-budget`
 (`KW-ARB-BUDGET-001`), and denies once the call after a process-starting call that ran past
 `dispatch-budget.call-minutes`, measured as the gap between the dispatch's consecutive calls; a file read is
-never judged, because only a call that started a process, or waited on one, can hang. It reads the run records, the checkout's git files and
+never judged, because only a call that started a process, or waited on one, can hang. It also denies a call that
+would put a secret into the transcript, which goes to the model provider (`KW-ARB-SECRET-001`): the rule applies to
+every capability profile, reads no file and starts no process, and decides from the call's own command text or from
+the path the harness's `view` or `Read` tool names. It refuses a command that reads a secret file, one that prints a
+secret from a store (`dotnet user-secrets list`, `docker inspect` without a non-environment `--format`, `env` and
+`printenv` with nothing to print or with a secret-named argument, a secret-named variable echoed or printed, `env:`
+listings, the keychain and cloud token lookups, `kubectl get secret … -o yaml|json|jsonpath`, `/proc/*/environ`,
+and a Python or Node one-liner over `os.environ` or `process.env`), and one that carries a literal secret
+(`NAME=value` or `-e`/`--env` `NAME=value`, `Password=`/`Pwd=` in a connection string, `sqlcmd -P`, `mysql -p`,
+`curl -u`, `Authorization: Bearer`). A value passed by reference (`"$VAR"`) is allowed, because it never enters the
+transcript. The whole command text is matched, quotes and nested `bash -c`, `sh -c` and `pwsh -Command` strings
+included, so wrapping a command in a shell escapes nothing, and a command the rule cannot read is refused: this rule
+fails closed, unlike the others. It reads the run records, the checkout's git files and
 one append-only counter file per subagent under `~/.kyber-weave/arbiter/budgets/`, starts no process, calls no
-model, and allows anything it cannot read on the write, command and budget paths. A read through a view or grep
-tool carries no command, so it is never judged; a write a command makes to a file it does not name is left to
-the return rule below.
+model, and allows anything it cannot read on the write, command and budget paths. A read through a grep tool carries
+no command, so the checkout rule never judges it; a read through a `view` or `Read` tool is judged only by the secret
+rule. A write a command makes to a file it does not name is left to the return rule below.
 
 A command from a `platform-reader` dispatch (the `platform-researcher` agent) is seen. The guard raises
 `worker.command` with the command's text, its *form* — the program and leading words, with a leading
