@@ -335,6 +335,10 @@ public class StandardsFolderShapeTests
     private static string SkillsTypedReference(string scope) => Skills(scope).Replace(
         "doc-type: skill", "doc-type: reference", StringComparison.Ordinal);
 
+    /// <summary>A rules file that names a technology other than its folder's.</summary>
+    private static string RulesNamingAnotherTechnology(string scope, string claimed) => Rules(scope).Replace(
+        $"technology: {scope}\n", $"technology: {claimed}\n", StringComparison.Ordinal);
+
     private static string RoleSkills(string scope) => Skills(scope).Replace(
         "technology: " + scope, "role: " + scope, StringComparison.Ordinal);
 
@@ -363,6 +367,32 @@ public class StandardsFolderShapeTests
         Assert.Contains("doc-type: rule", error.Hint, StringComparison.Ordinal);
         Assert.Contains("technology: dotnet", error.Hint, StringComparison.Ordinal);
         Assert.Contains("task prompts", error.Hint, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A scope line that names another technology is as invisible as a missing one: the standards
+    /// lookup matches the value to the folder, so a <c>dotnet</c> rules file claiming
+    /// <c>technology: react</c> is never found. The check must report the value it actually has,
+    /// not call it missing, so the operator sees what to correct.
+    /// </summary>
+    [Fact]
+    public void ARulesFileNamingAnotherTechnologyIsAnErrorNamingTheValueItHas()
+    {
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
+            .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.rules.md", RulesNamingAnotherTechnology("dotnet", "react"))
+            .Write("6-Docs/standards/dotnet/dotnet.skills.md", Skills("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
+
+        DiagnosticReport report = fixture.Validate(DotnetDeclared);
+
+        Diagnostic error = Assert.Single(
+            report.Items, item => item.Code == DocSpecValidator.StandardsFileFrontmatter);
+        Assert.Equal(Severity.Error, error.Severity);
+        Assert.Contains("dotnet.rules.md", error.Message, StringComparison.Ordinal);
+        Assert.Contains("technology 'react'", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("no technology line", error.Message, StringComparison.Ordinal);
+        Assert.Contains("technology: dotnet", error.Hint, StringComparison.Ordinal);
     }
 
     [Fact]

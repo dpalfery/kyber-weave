@@ -652,14 +652,19 @@ public sealed class DocSpecValidator
             : document.Frontmatter.Technology?.Trim();
 
         bool typeWrong = !string.Equals(actualDocType, expectedDocType, StringComparison.OrdinalIgnoreCase);
-        bool scopeMissing = string.IsNullOrWhiteSpace(scopeValue);
-        if (!typeWrong && !scopeMissing) return;
+
+        // The standards lookup matches the value to the folder, so a value naming another
+        // technology hides the file just as a missing line does.
+        bool scopeWrong = !string.Equals(scopeValue, scope, StringComparison.OrdinalIgnoreCase);
+        if (!typeWrong && !scopeWrong) return;
 
         string kind = expectedDocType == "rule" ? "rules" : "skills";
         string hasType = string.IsNullOrWhiteSpace(actualDocType)
             ? "no doc-type"
             : $"doc-type '{actualDocType}'";
-        string hasScope = scopeMissing ? $"no {scopeKey} line" : $"{scopeKey} '{scopeValue}'";
+        string hasScope = string.IsNullOrWhiteSpace(scopeValue)
+            ? $"no {scopeKey} line"
+            : $"{scopeKey} '{scopeValue}'";
 
         report.Add(new Diagnostic(
             StandardsFileFrontmatter, Severity.Error,
