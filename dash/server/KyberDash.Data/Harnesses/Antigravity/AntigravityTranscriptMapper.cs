@@ -1391,22 +1391,8 @@ public partial class AntigravityTranscriptMapper : IHarnessMapper
     private static DateTimeOffset ParseTimestampOrDefault(string? timestamp, DateTimeOffset fallback) =>
         TryParseTimestamp(timestamp, out DateTimeOffset parsed) ? parsed : fallback;
 
-    private static bool TryParseTimestamp(string? timestamp, out DateTimeOffset parsed)
-    {
-        if (!string.IsNullOrWhiteSpace(timestamp)
-            && DateTimeOffset.TryParse(
-                timestamp,
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.RoundtripKind | DateTimeStyles.AssumeUniversal,
-                out DateTimeOffset instant))
-        {
-            parsed = instant.ToUniversalTime();
-            return true;
-        }
-
-        parsed = default;
-        return false;
-    }
+    private static bool TryParseTimestamp(string? timestamp, out DateTimeOffset parsed) =>
+        HarnessJson.TryParseTimestamp(timestamp, out parsed);
 
     private static RecordStatus MapStepStatus(string? status)
     {
@@ -1478,15 +1464,8 @@ public partial class AntigravityTranscriptMapper : IHarnessMapper
         return 0L;
     }
 
-    private static string? ReadOptionalString(JsonElement obj, string propertyName)
-    {
-        if (!obj.TryGetProperty(propertyName, out JsonElement el) || el.ValueKind != JsonValueKind.String)
-        {
-            return null;
-        }
-
-        return el.GetString();
-    }
+    private static string? ReadOptionalString(JsonElement obj, string propertyName) =>
+        HarnessJson.ReadOptionalString(obj, propertyName);
 
     private static string? SafeOptionalText(string? value) =>
         HarnessJson.SafeOptionalText(value);

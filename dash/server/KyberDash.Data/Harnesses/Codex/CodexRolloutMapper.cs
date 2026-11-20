@@ -879,25 +879,8 @@ public class CodexRolloutMapper : IHarnessMapper
         return null;
     }
 
-    private static string EnsureUniqueRecordId(HashSet<string> usedRecordIds, string candidate)
-    {
-        if (usedRecordIds.Add(candidate))
-        {
-            return candidate;
-        }
-
-        int suffix = 2;
-        while (true)
-        {
-            string indexed = string.Create(CultureInfo.InvariantCulture, $"{candidate}-{suffix}");
-            if (usedRecordIds.Add(indexed))
-            {
-                return indexed;
-            }
-
-            suffix++;
-        }
-    }
+    private static string EnsureUniqueRecordId(HashSet<string> usedRecordIds, string candidate) =>
+        HarnessJson.EnsureUniqueRecordId(usedRecordIds, candidate);
 
     private static RecordStatus MapTurnStatus(string? terminationReason, int? exitCode)
     {
@@ -946,22 +929,8 @@ public class CodexRolloutMapper : IHarnessMapper
     private static DateTimeOffset ParseTimestampOrDefault(string? timestamp, DateTimeOffset fallback) =>
         TryParseTimestamp(timestamp, out DateTimeOffset parsed) ? parsed : fallback;
 
-    private static bool TryParseTimestamp(string? timestamp, out DateTimeOffset parsed)
-    {
-        if (!string.IsNullOrWhiteSpace(timestamp)
-            && DateTimeOffset.TryParse(
-                timestamp,
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.RoundtripKind | DateTimeStyles.AssumeUniversal,
-                out DateTimeOffset instant))
-        {
-            parsed = instant.ToUniversalTime();
-            return true;
-        }
-
-        parsed = default;
-        return false;
-    }
+    private static bool TryParseTimestamp(string? timestamp, out DateTimeOffset parsed) =>
+        HarnessJson.TryParseTimestamp(timestamp, out parsed);
 
     private static string ResolveHarnessId(string? unitHarnessId) =>
         HarnessJson.ResolveCodexHarnessId(unitHarnessId);
@@ -1222,16 +1191,8 @@ public class CodexRolloutMapper : IHarnessMapper
         return el.TryGetInt64(out value);
     }
 
-    private static bool TryReadInt(JsonElement obj, string key, out int value)
-    {
-        value = 0;
-        if (!obj.TryGetProperty(key, out JsonElement el) || el.ValueKind != JsonValueKind.Number)
-        {
-            return false;
-        }
-
-        return el.TryGetInt32(out value);
-    }
+    private static bool TryReadInt(JsonElement obj, string key, out int value) =>
+        HarnessJson.TryReadInt(obj, key, out value);
 
     private static long? TryReadNestedExitCode(JsonElement payload)
     {

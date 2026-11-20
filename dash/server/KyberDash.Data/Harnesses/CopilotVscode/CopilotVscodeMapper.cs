@@ -934,15 +934,8 @@ public class CopilotVscodeMapper : IHarnessMapper
         return skills;
     }
 
-    private static string? ReadJsonString(JsonElement obj, string propertyName)
-    {
-        if (!obj.TryGetProperty(propertyName, out JsonElement el) || el.ValueKind != JsonValueKind.String)
-        {
-            return null;
-        }
-
-        return el.GetString();
-    }
+    private static string? ReadJsonString(JsonElement obj, string propertyName) =>
+        HarnessJson.ReadStringOnly(obj, propertyName);
 
     private static CollectedContentPart BuildContentPart(
         int position,
@@ -1102,22 +1095,8 @@ public class CopilotVscodeMapper : IHarnessMapper
         return importedAtUtc.ToUniversalTime();
     }
 
-    private static bool TryParseTimestamp(string? raw, out DateTimeOffset timestampUtc)
-    {
-        if (!string.IsNullOrWhiteSpace(raw)
-            && DateTimeOffset.TryParse(
-                raw,
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.RoundtripKind | DateTimeStyles.AssumeUniversal,
-                out DateTimeOffset parsed))
-        {
-            timestampUtc = parsed.ToUniversalTime();
-            return true;
-        }
-
-        timestampUtc = default;
-        return false;
-    }
+    private static bool TryParseTimestamp(string? raw, out DateTimeOffset timestampUtc) =>
+        HarnessJson.TryParseTimestamp(raw, out timestampUtc);
 
     private static string? ParseTimestampIso(ReplayNode? node)
     {
@@ -1276,16 +1255,8 @@ public class CopilotVscodeMapper : IHarnessMapper
         return (long)d;
     }
 
-    private static string? SafeOptionalText(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        string trimmed = value.Trim();
-        return JsonDocumentText.IsDocument(trimmed) ? null : trimmed;
-    }
+    private static string? SafeOptionalText(string? value) =>
+        HarnessJson.SafeOptionalText(value);
 
     private readonly struct PathSegment
     {

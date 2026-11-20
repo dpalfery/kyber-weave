@@ -299,18 +299,8 @@ public static class CodexToolResultMapper
             ?? ReadNonEmptyString(log.Attributes, ConversationIdKey);
     }
 
-    private static string ResolveHarnessId(string? harnessIdOverride)
-    {
-        if (string.IsNullOrWhiteSpace(harnessIdOverride))
-        {
-            return TranscriptReaderRepository.CodexHarnessId;
-        }
-
-        string normalized = HarnessSourceRegistry.NormalizeHarnessId(harnessIdOverride);
-        return string.Equals(normalized, "codex", StringComparison.Ordinal)
-            ? TranscriptReaderRepository.CodexHarnessId
-            : normalized;
-    }
+    private static string ResolveHarnessId(string? harnessIdOverride) =>
+        HarnessJson.ResolveCodexHarnessId(harnessIdOverride);
 
     private static string ExtractSource(IReadOnlyDictionary<string, JsonElement> resource)
     {

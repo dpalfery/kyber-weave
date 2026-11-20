@@ -310,4 +310,91 @@ public static class HarnessJson
             ? TranscriptReaderRepository.CodexHarnessId
             : normalized;
     }
+    /// <summary>
+    /// Returns <paramref name="candidate"/> when unused, else the first free
+    /// <c><paramref name="candidate"/>:idx-1</c>, <c>:idx-2</c>, ... suffix.
+    /// </summary>
+    /// <param name="seenRecordIds">Record identifiers already emitted for this batch.</param>
+    /// <param name="candidate">Preferred record identifier.</param>
+    /// <returns>A record identifier not present in <paramref name="seenRecordIds"/>.</returns>
+    public static string EnsureUniqueRecordIdWithIndexSuffix(HashSet<string> seenRecordIds, string candidate)
+    {
+        ArgumentNullException.ThrowIfNull(seenRecordIds);
+        ArgumentNullException.ThrowIfNull(candidate);
+
+        if (seenRecordIds.Add(candidate))
+        {
+            return candidate;
+        }
+
+        int suffix = 1;
+        while (true)
+        {
+            string disambiguated = string.Create(
+                CultureInfo.InvariantCulture,
+                $"{candidate}:idx-{suffix.ToString(CultureInfo.InvariantCulture)}");
+            if (seenRecordIds.Add(disambiguated))
+            {
+                return disambiguated;
+            }
+
+            suffix++;
+        }
+    }
+
+    /// <summary>
+    /// Reads an optional 64-bit integer property, accepting finite floating-point values
+    /// by truncation.
+    /// </summary>
+    /// <param name="obj">JSON object carrying the property.</param>
+    /// <param name="key">Property name.</param>
+    /// <param name="value">The parsed value when this method returns <see langword="true"/>.</param>
+    /// <returns><see langword="true"/> when the property is a JSON number that fits in a <see langword="long"/>.</returns>
+    public static bool TryReadLong(JsonElement obj, string key, out long value)
+    {
+        value = 0L;
+        if (!obj.TryGetProperty(key, out JsonElement el) || el.ValueKind != JsonValueKind.Number)
+        {
+            return false;
+        }
+
+        if (el.TryGetInt64(out long i))
+        {
+            value = i;
+            return true;
+        }
+
+        if (el.TryGetDouble(out double d) && double.IsFinite(d))
+        {
+            value = (long)d;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Reads an optional string property verbatim, without trimming or blank filtering.
+    /// </summary>
+    /// <param name="obj">JSON object carrying the property.</param>
+    /// <param name="key">Property name.</param>
+    /// <returns>The raw string value, or <see langword="null"/> when absent or not a JSON string.</returns>
+    public static string? ReadStringOnly(JsonElement obj, string key)
+    {
+        if (!obj.TryGetProperty(key, out JsonElement el) || el.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        return el.GetString();
+    }
+
+    /// <summary>
+    /// Reads an optional string property and sanitizes it via <see cref="SafeOptionalText"/>.
+    /// </summary>
+    /// <param name="obj">JSON object carrying the property.</param>
+    /// <param name="key">Property name.</param>
+    /// <returns>The trimmed text, or <see langword="null"/> when absent, blank, or a JSON document.</returns>
+    public static string? ReadSafeString(JsonElement obj, string key) =>
+        SafeOptionalText(ReadStringOnly(obj, key));
 }

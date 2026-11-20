@@ -92,6 +92,24 @@ public class CursorMapperTests
     }
 
     [Fact]
+    public void Map_BubbleRowWithJsonRequestIdFallsBackToBubbleKeyTail()
+    {
+        string rawText = """
+            [
+              {"bubble_key":"bubbleId:composer-9:33333333-3333-3333-3333-333333333333","input_tokens":60,"output_tokens":10,"model":null,"created_at":"2026-09-22T10:01:00.000Z","request_id":"{\"a\": 1}","user_text":"hello","text_length":5,"bubble_type":1,"context_window":200000,"code_blocks":null}
+            ]
+            """;
+        NativeSourceUnit unit = MakeNativeUnit("/fake/state.vscdb", rawText, "cursor", "cursor-vscdb");
+
+        CollectedBatch batch = new CursorMapper().Map(unit, BaselineUtc);
+
+        CollectedRecord record = Assert.Single(batch.Records);
+        Assert.Equal(
+            "synth:cursor:composer-9:33333333-3333-3333-3333-333333333333",
+            record.RecordId);
+    }
+
+    [Fact]
     public void Map_BubbleRowsWithZeroTokensEstimateUsageFromTextAndSkipEmptyOnes()
     {
         string rawText = """

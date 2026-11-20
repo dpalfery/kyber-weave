@@ -868,22 +868,8 @@ public class WarpMapper : IHarnessMapper
             originalBytes);
     }
 
-    private static string EnsureUniqueRecordId(HashSet<string> seenRecordIds, string candidate, int disambiguator)
-    {
-        if (seenRecordIds.Add(candidate))
-        {
-            return candidate;
-        }
-
-        string suffix = string.Create(CultureInfo.InvariantCulture, $"{candidate}:{disambiguator}");
-        int counter = 1;
-        while (!seenRecordIds.Add(suffix))
-        {
-            suffix = string.Create(CultureInfo.InvariantCulture, $"{candidate}:{disambiguator}-{counter++}");
-        }
-
-        return suffix;
-    }
+    private static string EnsureUniqueRecordId(HashSet<string> seenRecordIds, string candidate, int disambiguator) =>
+        HarnessJson.EnsureUniqueRecordId(seenRecordIds, candidate, disambiguator);
 
     private static List<CollectedProblem> BuildProblems(
         IReadOnlyList<WarpParseProblem> parseProblems,
@@ -922,19 +908,8 @@ public class WarpMapper : IHarnessMapper
         return problems;
     }
 
-    private static string? FirstPresentString(params string?[] values)
-    {
-        foreach (string? value in values)
-        {
-            string? trimmed = value?.Trim();
-            if (!string.IsNullOrEmpty(trimmed))
-            {
-                return trimmed;
-            }
-        }
-
-        return null;
-    }
+    private static string? FirstPresentString(params string?[] values) =>
+        HarnessJson.FirstPresentString(values);
 
     private static long ReadSafeLong(JsonElement obj, string key)
     {
@@ -976,16 +951,8 @@ public class WarpMapper : IHarnessMapper
         return 0;
     }
 
-    private static string? ReadOptionalString(JsonElement obj, string key)
-    {
-        if (!obj.TryGetProperty(key, out JsonElement el) || el.ValueKind != JsonValueKind.String)
-        {
-            return null;
-        }
-
-        string? value = el.GetString()?.Trim();
-        return string.IsNullOrEmpty(value) ? null : value;
-    }
+    private static string? ReadOptionalString(JsonElement obj, string key) =>
+        HarnessJson.ReadOptionalString(obj, key);
 
     private static string ReadStringOrEmpty(JsonElement obj, string key)
     {
@@ -1004,14 +971,6 @@ public class WarpMapper : IHarnessMapper
         };
     }
 
-    private static string? SafeOptionalText(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        string trimmed = value.Trim();
-        return JsonDocumentText.IsDocument(trimmed) ? null : trimmed;
-    }
+    private static string? SafeOptionalText(string? value) =>
+        HarnessJson.SafeOptionalText(value);
 }

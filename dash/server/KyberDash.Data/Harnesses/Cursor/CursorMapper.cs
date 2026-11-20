@@ -786,7 +786,7 @@ public partial class CursorMapper : IHarnessMapper
     }
 
     private static string? SafeOptionalText(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value;
+        HarnessJson.SafeOptionalText(value);
 
     private CollectedBatch MapBubbles(
         NativeSourceUnit unit,
@@ -1152,27 +1152,8 @@ public partial class CursorMapper : IHarnessMapper
             OriginalUtf8BytesWhenTruncated: originalBytes);
     }
 
-    private static string EnsureUniqueRecordId(HashSet<string> seenRecordIds, string candidate)
-    {
-        if (seenRecordIds.Add(candidate))
-        {
-            return candidate;
-        }
-
-        int suffix = 1;
-        while (true)
-        {
-            string disambiguated = string.Create(
-                CultureInfo.InvariantCulture,
-                $"{candidate}:idx-{suffix.ToString(CultureInfo.InvariantCulture)}");
-            if (seenRecordIds.Add(disambiguated))
-            {
-                return disambiguated;
-            }
-
-            suffix++;
-        }
-    }
+    private static string EnsureUniqueRecordId(HashSet<string> seenRecordIds, string candidate) =>
+        HarnessJson.EnsureUniqueRecordIdWithIndexSuffix(seenRecordIds, candidate);
 
     private static string TailSegment(string bubbleKey)
     {

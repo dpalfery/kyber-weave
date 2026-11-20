@@ -636,37 +636,11 @@ public class KimiCodeMapper : IHarnessMapper
         return candidate ?? FallbackAgentId;
     }
 
-    private static string EnsureUniqueRecordId(HashSet<string> seenRecordIds, string candidate, int disambiguator)
-    {
-        if (seenRecordIds.Add(candidate))
-        {
-            return candidate;
-        }
+    private static string EnsureUniqueRecordId(HashSet<string> seenRecordIds, string candidate, int disambiguator) =>
+        HarnessJson.EnsureUniqueRecordId(seenRecordIds, candidate, disambiguator);
 
-        string suffix = string.Create(CultureInfo.InvariantCulture, $"{candidate}:{disambiguator}");
-        int counter = 1;
-        while (!seenRecordIds.Add(suffix))
-        {
-            suffix = string.Create(CultureInfo.InvariantCulture, $"{candidate}:{disambiguator}-{counter++}");
-        }
-
-        return suffix;
-    }
-
-    private static DateTimeOffset? TryParseTimestamp(string? rawTimestamp)
-    {
-        if (!string.IsNullOrWhiteSpace(rawTimestamp)
-            && DateTimeOffset.TryParse(
-                rawTimestamp,
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.RoundtripKind | DateTimeStyles.AssumeUniversal,
-                out DateTimeOffset parsed))
-        {
-            return parsed.ToUniversalTime();
-        }
-
-        return null;
-    }
+    private static DateTimeOffset? TryParseTimestamp(string? rawTimestamp) =>
+        HarnessJson.TryParseTimestamp(rawTimestamp);
 
     private static List<CollectedProblem> BuildProblems(
         IReadOnlyList<KimiCodeParseProblem> parseProblems,
@@ -908,24 +882,9 @@ public class KimiCodeMapper : IHarnessMapper
         return 0;
     }
 
-    private static string? ReadStringOnly(JsonElement obj, string key)
-    {
-        if (!obj.TryGetProperty(key, out JsonElement el) || el.ValueKind != JsonValueKind.String)
-        {
-            return null;
-        }
+    private static string? ReadStringOnly(JsonElement obj, string key) =>
+        HarnessJson.ReadStringOnly(obj, key);
 
-        return el.GetString();
-    }
-
-    private static string? SafeOptionalText(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        string trimmed = value.Trim();
-        return JsonDocumentText.IsDocument(trimmed) ? null : trimmed;
-    }
+    private static string? SafeOptionalText(string? value) =>
+        HarnessJson.SafeOptionalText(value);
 }

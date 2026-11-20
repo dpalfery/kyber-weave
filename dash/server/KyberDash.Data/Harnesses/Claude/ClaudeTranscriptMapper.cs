@@ -1222,47 +1222,14 @@ public class ClaudeTranscriptMapper : IHarnessMapper
             : trimmed;
     }
 
-    private static DateTimeOffset? ParseUtcTimestamp(string? raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return null;
-        }
-
-        return DateTimeOffset.TryParse(
-            raw,
-            CultureInfo.InvariantCulture,
-            DateTimeStyles.RoundtripKind | DateTimeStyles.AssumeUniversal,
-            out DateTimeOffset parsed)
-            ? parsed.ToUniversalTime()
-            : null;
-    }
+    private static DateTimeOffset? ParseUtcTimestamp(string? raw) =>
+        HarnessJson.TryParseTimestamp(raw);
 
     private static long? ReadOptionalNonNegLong(JsonElement obj, string key) =>
         TryReadLong(obj, key, out long val) ? Math.Max(0L, val) : null;
 
-    private static bool TryReadLong(JsonElement obj, string key, out long value)
-    {
-        value = 0L;
-        if (!obj.TryGetProperty(key, out JsonElement el) || el.ValueKind != JsonValueKind.Number)
-        {
-            return false;
-        }
-
-        if (el.TryGetInt64(out long i))
-        {
-            value = i;
-            return true;
-        }
-
-        if (el.TryGetDouble(out double d) && double.IsFinite(d))
-        {
-            value = (long)d;
-            return true;
-        }
-
-        return false;
-    }
+    private static bool TryReadLong(JsonElement obj, string key, out long value) =>
+        HarnessJson.TryReadLong(obj, key, out value);
 
     private static bool TryReadInt(JsonElement obj, string key, out int value) =>
         HarnessJson.TryReadInt(obj, key, out value);

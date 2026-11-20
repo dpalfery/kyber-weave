@@ -542,20 +542,8 @@ public class CopilotCliJournalReader : IHarnessSourceReader
     private static string? ReadString(JsonElement element, string propertyName) =>
         HarnessJson.ReadString(element, propertyName);
 
-    private static long? ReadOptionalNonNegativeLong(JsonElement element, string propertyName)
-    {
-        if (!element.TryGetProperty(propertyName, out JsonElement property))
-        {
-            return null;
-        }
-
-        if (property.ValueKind == JsonValueKind.Number && property.TryGetInt64(out long value) && value >= 0)
-        {
-            return value;
-        }
-
-        return null;
-    }
+    private static long? ReadOptionalNonNegativeLong(JsonElement element, string propertyName) =>
+        HarnessJson.ReadOptionalNonNegativeLong(element, propertyName);
 
     private static long? ReadOptionalPositiveLong(JsonElement element, string propertyName)
     {

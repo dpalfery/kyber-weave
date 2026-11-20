@@ -497,7 +497,7 @@ public static class CanonAdapters
     /// Truncates a finite double counter to <see langword="long"/>, refusing values outside long's
     /// range: the cast itself wraps on x64, and a wrapped counter then reads as a real measurement.
     /// </summary>
-    private static bool TryTruncateToCounter(double value, out long result)
+    public static bool TryTruncateToCounter(double value, out long result)
     {
         const double UpperExclusive = 9223372036854775808d;
         const double LowerInclusive = -9223372036854775808d;
@@ -727,7 +727,13 @@ public static class CanonAdapters
         parts.Add(new ContentPart("tool_definitions", raw, Tokens: reported, Order: order++));
     }
 
-    private static string? ExtractToolServer(JsonElement tool)
+    /// <summary>
+    /// Extracts the MCP/server name from a tool definition entry by scanning
+    /// <see cref="ToolServerFields"/> for the first non-empty string property.
+    /// </summary>
+    /// <param name="tool">Tool definition entry.</param>
+    /// <returns>The server name, or <see langword="null"/> when absent.</returns>
+    public static string? ExtractToolServer(JsonElement tool)
     {
         if (tool.ValueKind != JsonValueKind.Object)
             return null;

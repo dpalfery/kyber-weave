@@ -608,19 +608,8 @@ public record OtlpSpanNative(
     /// <param name="value">Floating-point counter candidate.</param>
     /// <param name="result">The truncated value when this method returns <see langword="true"/>.</param>
     /// <returns><see langword="true"/> when <paramref name="value"/> is finite and in <see cref="long"/> range.</returns>
-    public static bool TryTruncateToCounter(double value, out long result)
-    {
-        const double UpperExclusive = 9223372036854775808d;
-        const double LowerInclusive = -9223372036854775808d;
-        if (!double.IsFinite(value) || value >= UpperExclusive || value < LowerInclusive)
-        {
-            result = 0;
-            return false;
-        }
-
-        result = (long)Math.Truncate(value);
-        return true;
-    }
+    public static bool TryTruncateToCounter(double value, out long result) =>
+        CanonAdapters.TryTruncateToCounter(value, out result);
 
     private static bool? ReadOptionalBool(IReadOnlyDictionary<string, JsonElement> attributes, IReadOnlyList<string> keys)
     {
@@ -906,27 +895,8 @@ public record OtlpSpanNative(
     /// </summary>
     /// <param name="tool">Tool definition entry.</param>
     /// <returns>The server name, or <see langword="null"/> when absent.</returns>
-    public static string? ExtractToolServer(JsonElement tool)
-    {
-        if (tool.ValueKind != JsonValueKind.Object)
-        {
-            return null;
-        }
-
-        foreach (string field in ToolServerFields)
-        {
-            if (tool.TryGetProperty(field, out JsonElement prop) && prop.ValueKind == JsonValueKind.String)
-            {
-                string? value = prop.GetString();
-                if (!string.IsNullOrEmpty(value))
-                {
-                    return value;
-                }
-            }
-        }
-
-        return null;
-    }
+    public static string? ExtractToolServer(JsonElement tool) =>
+        CanonAdapters.ExtractToolServer(tool);
 
     private static void AppendMessageParts(
         IReadOnlyDictionary<string, JsonElement> attributes,

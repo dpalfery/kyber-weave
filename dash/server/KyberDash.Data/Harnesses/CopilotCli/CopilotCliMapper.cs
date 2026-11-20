@@ -775,16 +775,8 @@ public class CopilotCliMapper : IHarnessMapper
         return problems;
     }
 
-    private static string? SafeOptionalText(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        string trimmed = value.Trim();
-        return JsonDocumentText.IsDocument(trimmed) ? null : trimmed;
-    }
+    private static string? SafeOptionalText(string? value) =>
+        HarnessJson.SafeOptionalText(value);
 
     private static string SafeToolErrorMessage(string? rawMessage)
     {
@@ -1959,16 +1951,8 @@ public class CopilotCliMapper : IHarnessMapper
         return null;
     }
 
-    private static string? ReadJsonString(JsonElement element, string propertyName)
-    {
-        if (!element.TryGetProperty(propertyName, out JsonElement property) || property.ValueKind != JsonValueKind.String)
-        {
-            return null;
-        }
-
-        string? value = property.GetString();
-        return string.IsNullOrWhiteSpace(value) ? null : value;
-    }
+    private static string? ReadJsonString(JsonElement element, string propertyName) =>
+        HarnessJson.ReadString(element, propertyName);
 
     private static bool? ReadOptionalBool(JsonElement element, string propertyName)
     {
@@ -1995,11 +1979,8 @@ public class CopilotCliMapper : IHarnessMapper
         return property.TryGetInt64(out long value) ? value : null;
     }
 
-    private static long? ReadOptionalNonNegativeLong(JsonElement element, string propertyName)
-    {
-        long? value = ReadOptionalLong(element, propertyName);
-        return value is >= 0 ? value : null;
-    }
+    private static long? ReadOptionalNonNegativeLong(JsonElement element, string propertyName) =>
+        HarnessJson.ReadOptionalNonNegativeLong(element, propertyName);
 
     private static long? ReadOptionalLongFromNested(JsonElement element, string nestedProperty, string propertyName)
     {
@@ -2011,22 +1992,8 @@ public class CopilotCliMapper : IHarnessMapper
         return ReadOptionalLong(nested, propertyName);
     }
 
-    private static bool TryParseUtcTimestamp(string? rawTimestamp, out DateTimeOffset parsed)
-    {
-        if (!string.IsNullOrWhiteSpace(rawTimestamp)
-            && DateTimeOffset.TryParse(
-                rawTimestamp,
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.RoundtripKind | DateTimeStyles.AssumeUniversal,
-                out DateTimeOffset value))
-        {
-            parsed = value.ToUniversalTime();
-            return true;
-        }
-
-        parsed = default;
-        return false;
-    }
+    private static bool TryParseUtcTimestamp(string? rawTimestamp, out DateTimeOffset parsed) =>
+        HarnessJson.TryParseTimestamp(rawTimestamp, out parsed);
 
     private record ParsedToolRequest(
         int RequestOrder,

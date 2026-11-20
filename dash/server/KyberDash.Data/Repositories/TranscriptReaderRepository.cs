@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector.Sources;
+using KyberDash.Data.Harnesses;
 using KyberDash.Domain;
 
 namespace KyberDash.Data.Repositories;
@@ -990,28 +991,11 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
         return ReadString(block, "text") ?? block.GetRawText();
     }
 
-    private static string? ReadCodexSystemPrompt(JsonElement payload)
-    {
-        string? direct = ReadString(payload, "system_prompt");
-        if (!string.IsNullOrEmpty(direct))
-            return direct;
+    private static string? ReadCodexSystemPrompt(JsonElement payload) =>
+        HarnessJson.ReadCodexSystemPrompt(payload);
 
-        if (payload.TryGetProperty("base_instructions", out JsonElement baseEl) && baseEl.ValueKind == JsonValueKind.Object)
-            return ReadString(baseEl, "text");
-
-        return null;
-    }
-
-    private static string? ReadCodexAgentsMd(JsonElement payload)
-    {
-        if (!payload.TryGetProperty("state", out JsonElement stateEl) || stateEl.ValueKind != JsonValueKind.Object)
-            return null;
-
-        if (!stateEl.TryGetProperty("agents_md", out JsonElement agentsEl) || agentsEl.ValueKind != JsonValueKind.Object)
-            return null;
-
-        return ReadString(agentsEl, "text");
-    }
+    private static string? ReadCodexAgentsMd(JsonElement payload) =>
+        HarnessJson.ReadCodexAgentsMd(payload);
 
     private static long? ReadCodexContextWindow(JsonElement payload)
     {
@@ -1132,45 +1116,15 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
         return true;
     }
 
-    private static string? ReadString(JsonElement obj, string key)
-    {
-        if (!obj.TryGetProperty(key, out JsonElement el) || el.ValueKind != JsonValueKind.String)
-            return null;
-
-        string? val = el.GetString();
-        return string.IsNullOrEmpty(val) ? null : val;
-    }
+    private static string? ReadString(JsonElement obj, string key) =>
+        HarnessJson.ReadString(obj, key);
 
     private static long ReadLong(JsonElement obj, string key) =>
         TryReadLong(obj, key, out long val) ? val : 0L;
 
-    private static bool TryReadLong(JsonElement obj, string key, out long value)
-    {
-        value = 0L;
-        if (!obj.TryGetProperty(key, out JsonElement el) || el.ValueKind != JsonValueKind.Number)
-            return false;
+    private static bool TryReadLong(JsonElement obj, string key, out long value) =>
+        HarnessJson.TryReadLong(obj, key, out value);
 
-        if (el.TryGetInt64(out long i))
-        {
-            value = i;
-            return true;
-        }
-
-        if (el.TryGetDouble(out double d) && double.IsFinite(d))
-        {
-            value = (long)d;
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool TryReadInt(JsonElement obj, string key, out int value)
-    {
-        value = 0;
-        if (!obj.TryGetProperty(key, out JsonElement el) || el.ValueKind != JsonValueKind.Number)
-            return false;
-
-        return el.TryGetInt32(out value);
-    }
+    private static bool TryReadInt(JsonElement obj, string key, out int value) =>
+        HarnessJson.TryReadInt(obj, key, out value);
 }

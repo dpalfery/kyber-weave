@@ -344,18 +344,8 @@ public class CodexSpanMapper : IHarnessMapper
         return true;
     }
 
-    private static string ResolveHarnessId(string? unitHarnessId)
-    {
-        if (string.IsNullOrWhiteSpace(unitHarnessId))
-        {
-            return TranscriptReaderRepository.CodexHarnessId;
-        }
-
-        string normalized = HarnessSourceRegistry.NormalizeHarnessId(unitHarnessId);
-        return string.Equals(normalized, "codex", StringComparison.Ordinal)
-            ? TranscriptReaderRepository.CodexHarnessId
-            : normalized;
-    }
+    private static string ResolveHarnessId(string? unitHarnessId) =>
+        HarnessJson.ResolveCodexHarnessId(unitHarnessId);
 
     private static string? SafeOptionalText(string? value) =>
         string.IsNullOrWhiteSpace(value) || JsonDocumentText.IsDocument(value) ? null : value;

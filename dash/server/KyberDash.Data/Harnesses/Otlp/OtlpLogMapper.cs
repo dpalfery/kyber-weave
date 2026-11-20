@@ -756,7 +756,7 @@ public static class OtlpLogMapper
     };
 
     private static string? SafeOptionalText(string? value) =>
-        string.IsNullOrWhiteSpace(value) || JsonDocumentText.IsDocument(value) ? null : value;
+        HarnessJson.SafeOptionalText(value);
 
     private static string SafeProblemMessage(string? message, string fallback) =>
         string.IsNullOrWhiteSpace(message) || JsonDocumentText.IsDocument(message) ? fallback : message;
