@@ -209,12 +209,12 @@ When T52 ran, six theories asserted the same phrases in **both** `agents/conduct
 2.7 KB the plan estimated: G6 and G7, the two rows no theory pinned there. Those phrase theories
 are deleted now, so the phrase block is lifted. What remains is smaller: catalog rules `G1` to `G5`
 still list the conductor as a home, so a removal drops that home from the catalog in the same
-change, and two token tests still read the conductor (G2 and G4 below).
+change, and one token test still reads the conductor (G4 below).
 
 | ID | Rule — what a worker must do | Current homes (before the trim) | Single home after | Enforced by |
 |---|---|---|---|---|
 | G1 | Send a self-contained packet: inlined entry-file table, acceptance criteria, dependencies, mode, pre-computed test commands, and no plan or spec in the worker's context. | `agents/conductor.md` → `## Shared lifecycle invariants`; `skills/delivery-execution/SKILL.md` → `## Ready queue`, `## Task file and dispatch` | `delivery-execution` | catalog rule `G1`, with both files as homes. **Phrase block lifted** |
-| G2 | Give each parallel worker a worktree or isolated context with per-task artifact paths, and serialize integration before push. | both files | `delivery-execution` → `## Ready queue` | catalog rule `G2`, with `G2-serialized-integration`, `worktree-cleanup` and `integration-conflict-rework`; `SquadPerformanceContractTests.ConductorSurfacesSpecifyTheArtifactsPathAndTaskGateOutput` still requires the artifact-path line in both files, and `SquadWorktreeMcpContractTests` the MCP-setup sentences in the conductor. **Still blocked on those tokens**; `ConductorExecutionContractNamesTheWorktreeCleanupAndConflictAbortCommands` reads only the skill |
+| G2 | Give each parallel worker a worktree or isolated context with per-task artifact paths, and serialize integration before push. | both files | `delivery-execution` → `## Ready queue` | catalog rule `G2`, with `G2-serialized-integration`, `worktree-cleanup` and `integration-conflict-rework`. The conductor's artifact-path and MCP-setup sentences are gone; it keeps its own per-task worktree sentence, which is what rule `G2`'s conductor home covers, and its "- Start every ready task at once" bullet names the skill's `## Ready queue` section, which `ConductorPointsAtTheReadyQueueSectionForTheIsolationRules` holds. `ConductorSurfacesSpecifyTheArtifactsPathAndTaskGateOutput`, `SurfacesConsistentlySpecifyArtifactIsolationFlags` and `SquadWorktreeMcpContractTests` now read only the skill, and `ConductorExecutionContractNamesTheWorktreeCleanupAndConflictAbortCommands` already did |
 | G3 | In test-first mode one worker writes a task's tests and its code in one dispatch, running the tests failing first ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)). Same-role bundling is removed with the split. | `agents/conductor.md` → `## Shared lifecycle invariants` | `delivery-execution` → `## Test-first mode` | catalog rule `G3`, which keeps the retired RED/GREEN separation absent; `G3-bundle-same-role` is removed |
 | G4 | Report discovery before the digest; the two review seats report it above their attestation line instead, and the verdict engine flags a findings or `NO FINDINGS` seat's gaps (`KW-REVIEW-044`; a `SKIPPED` seat is exempt). | both files | `delivery-execution` → `## Developer exit gate` | catalog rule `G4`, with `G4-review-seats`; `SquadPerformanceContractTests.ConductorSurfacesSpecifyTheDiscoveryHeader` still requires the `Discovery:` line in both files. **Still blocked on that token** |
 | G5 | Exempt a valid `STATUS: ESCALATION` from the six-field rejection, and route a tripped breaker to architect mediation. | both files, plus `docs/kyber-squad/requirements.md` | `delivery-execution` → `## Iteration circuit-breaker and loop detection` | catalog rule `G5`, with all three files as homes. **Phrase block lifted** |
@@ -263,15 +263,17 @@ render (so the injected block is what is asserted) or narrow it to the fields th
 per-agent, and drop the agent bodies from catalog rule `D1`'s homes. This is the pin that blocks
 its own removal: the section it protects is the duplicate of the injected block.
 
-**Rows G1 to G5 were deferred on phrase pins; for G1, G3 and G5 that block is lifted.**
+**Rows G1 to G5 were deferred on phrase pins; for G1, G2, G3 and G5 that block is lifted.**
 Six theories in `SquadPerformanceContractTests` asserted the same phrases in `agents/conductor.md`
 and in `skills/delivery-execution/SKILL.md`, so T52 left all five rows. Those theories are deleted.
 Removing the conductor copy of G1, G3 or G5 now means dropping `agents/conductor.md` from that
-catalog rule's homes in the same change; no structural test reads the text. G2 and G4 are still
-blocked on token tests: `ConductorSurfacesSpecifyTheArtifactsPathAndTaskGateOutput` and
-`SquadWorktreeMcpContractTests` read the conductor for G2's artifact-path and MCP-setup sentences,
-and `ConductorSurfacesSpecifyTheDiscoveryHeader` reads it for G4's `Discovery:` line. The removals
-themselves are not done here. The G2 cleanup sentence is read only in the skill, by
+catalog rule's homes in the same change; no structural test reads the text. G2's artifact-path and
+MCP-setup sentences are gone too, and its token tests now read only the skill; the conductor keeps
+its own per-task worktree sentence, which is what catalog rule `G2`'s conductor home still covers,
+and its "- Start every ready task at once" bullet names the skill's `## Ready queue` section, which
+`ConductorPointsAtTheReadyQueueSectionForTheIsolationRules` holds. G4 is still blocked on a token
+test: `ConductorSurfacesSpecifyTheDiscoveryHeader` reads the conductor for the `Discovery:` line.
+The G2 cleanup sentence is read only in the skill, by
 `ConductorExecutionContractNamesTheWorktreeCleanupAndConflictAbortCommands`.
 
 ## The pin conflict T52 resolved

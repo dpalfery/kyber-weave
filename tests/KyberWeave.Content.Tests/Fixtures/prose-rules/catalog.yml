@@ -373,8 +373,6 @@ rules:
   - id: F1
     statement: A worker in a shared checkout isolates its build output per task with --artifacts-path.
     stated-in:
-      - path: products/kyber-squad/agents/conductor.md
-        anchor: "--artifacts-path"
       - path: products/kyber-squad/skills/delivery-execution/SKILL.md
         anchor: "--artifacts-path"
       - path: products/kyber-squad/skills/task-gate/SKILL.md
@@ -1311,8 +1309,6 @@ rules:
   - id: worktree-mcp-canonical-splice
     statement: Worktree MCP setup splices --repo-root and --path to absolute canonical paths, so the MCP servers stay bound to the canonical checkout.
     stated-in:
-      - path: products/kyber-squad/agents/conductor.md
-        anchor: "--repo-root"
       - path: products/kyber-squad/skills/delivery-execution/SKILL.md
         section: Ready queue
       - path: docs/docgraph/mcp-runbook.md
