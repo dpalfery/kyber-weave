@@ -125,6 +125,48 @@ public sealed class WorkerGuardCanonicalCheckoutCommandTests
     }
 
     [Fact]
+    public void ACommandThatStepsIntoTheRunWorktreeFromTheCanonicalCheckoutIsAllowed()
+    {
+        StartRun();
+
+        Assert.Empty(Guard("copilot-cli", Copilot(_repo, $"cd {_worktree} && kyber-weave docs drift .")));
+    }
+
+    [Fact]
+    public void AQuotedChangeDirectoryIntoTheRunWorktreeFromTheCanonicalCheckoutIsAllowed()
+    {
+        StartRun();
+
+        Assert.Empty(Guard(
+            "copilot-cli",
+            Copilot(_repo, $"cd '{_worktree}' && kyber-weave docs tasks x --write && kyber-weave docs tasks x --check")));
+    }
+
+    [Fact]
+    public void ACommandThatStaysInTheCanonicalCheckoutIsStillRefused()
+    {
+        StartRun();
+
+        Assert.NotEmpty(Guard("copilot-cli", Copilot(_repo, "kyber-weave docs drift .")));
+    }
+
+    [Fact]
+    public void ACommandThatStepsBackIntoTheCanonicalCheckoutIsRefused()
+    {
+        StartRun();
+
+        Assert.NotEmpty(Guard("copilot-cli", Copilot(_repo, $"cd {_worktree} && cd {_repo} && ls")));
+    }
+
+    [Fact]
+    public void ACommandWhoseFirstStepIsNotAChangeDirectoryIsStillJudgedOnTheCanonicalCheckout()
+    {
+        StartRun();
+
+        Assert.NotEmpty(Guard("copilot-cli", Copilot(_repo, $"ls && cd {_worktree}")));
+    }
+
+    [Fact]
     public void WithNoLiveRunNothingChanges()
     {
         Assert.Empty(Guard("copilot-cli", Copilot(_repo, $"cd {_repo} && git cherry-pick abc123")));

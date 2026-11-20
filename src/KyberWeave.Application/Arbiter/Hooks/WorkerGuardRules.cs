@@ -236,6 +236,19 @@ internal static class WorkerGuardRules
     /// </summary>
     private static void AddChangeDirectoryArgument(string[] tokens, int index, List<string> directories)
     {
+        if (ChangeDirectoryArgument(tokens, index) is { } directory)
+        {
+            directories.Add(directory);
+        }
+    }
+
+    /// <summary>
+    /// The directory a <c>cd</c> or <c>pushd</c> at <paramref name="index"/> moves into, or null when it names none
+    /// this guard can place: a bare <c>pushd</c> swaps the directory stack, and <c>cd -</c> returns to a directory
+    /// the command does not name.
+    /// </summary>
+    private static string? ChangeDirectoryArgument(string[] tokens, int index)
+    {
         for (int next = index + 1; next < tokens.Length && !IsCommandSeparator(tokens[next]); next++)
         {
             if (tokens[next].StartsWith('-'))
@@ -243,9 +256,42 @@ internal static class WorkerGuardRules
                 continue;
             }
 
-            directories.Add(tokens[next]);
-            return;
+            return tokens[next];
         }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The directory the command's first step moves into when that step is a <c>cd</c> or <c>pushd</c> naming one, or
+    /// null when the command's first step is anything else (including a directory change it cannot place). A command
+    /// that steps into a directory before its first program never runs in the call's own working directory, so the
+    /// caller judges that directory in the working directory's place. The path is returned as the shell wrote it, for
+    /// the caller to resolve against the working directory.
+    /// </summary>
+    internal static string? LeadingChangeDirectory(string command)
+    {
+        string[] tokens = ShellTokens(command);
+        for (int index = 0; index < tokens.Length; index++)
+        {
+            string token = tokens[index];
+            if (IsCommandSeparator(token))
+            {
+                return null;
+            }
+
+            if (IsChangeDirectory(token))
+            {
+                return ChangeDirectoryArgument(tokens, index);
+            }
+
+            if (!IsCommandPrefix(token))
+            {
+                return null;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
