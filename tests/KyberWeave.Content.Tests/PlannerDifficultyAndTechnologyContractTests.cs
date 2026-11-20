@@ -36,6 +36,16 @@ public sealed class PlannerDifficultyAndTechnologyContractTests
     [MemberData(nameof(PlannerFiles))]
     public void EveryPlannerCarriesTheSharedDifficultyRubric(string relativePath)
     {
+        // The architect body sits near the Copilot agent-file cap, so it points at the rubric in its plan-authoring
+        // reference instead of carrying a second copy.
+        if (relativePath == "products/kyber-squad/agents/architect.md")
+        {
+            string architect = Corpus.ReadText(relativePath);
+            Assert.Contains("**Difficulty** rubric in the [plan authoring](architect/references/plan-authoring.md)", architect, StringComparison.Ordinal);
+            Assert.DoesNotContain("pick the higher", architect, StringComparison.OrdinalIgnoreCase);
+            return;
+        }
+
         // One rubric, products/kyber-squad/shared/difficulty-rubric.md, rates every task: the planners carry it word for
         // word and the decision model's agreement check reads the same file, so the two judge by the same text.
         string rubric = Collapse(Corpus.ReadText("products/kyber-squad/shared/difficulty-rubric.md").Split("-->", 2)[1]);
