@@ -104,6 +104,7 @@ public sealed class SquadCanonicalContentTests
         "dev-medium",
         "devops",
         "docs-dev",
+        "plan-reviewer",
         "platform-researcher",
         "product-owner",
         "research-agent",

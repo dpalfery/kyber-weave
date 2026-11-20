@@ -680,7 +680,7 @@ public sealed class CopilotRendererTests
         "conductor",
         "agents: ['architect', 'bug-crusher-investigator', 'code-reviewer', " +
         "'dev-easy', 'dev-hard', 'dev-medium', 'devops', 'docs-dev', " +
-        "'platform-researcher', 'product-owner', " +
+        "'plan-reviewer', 'platform-researcher', 'product-owner', " +
         "'research-agent', 'review-lens', 'review-triage']")]
     [InlineData("product-owner", "agents: ['research-agent']")]
     [InlineData(

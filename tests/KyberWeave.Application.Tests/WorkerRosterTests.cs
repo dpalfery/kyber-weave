@@ -65,7 +65,7 @@ public sealed class WorkerRosterTests
     }
 
     [Fact]
-    public void TheShippedSquadHoldsFifteenAgentsAndNoRemovedAgentBody()
+    public void TheShippedSquadHoldsSixteenAgentsAndNoRemovedAgentBody()
     {
         string[] agentFiles = Directory
             .EnumerateFiles(
@@ -76,7 +76,7 @@ public sealed class WorkerRosterTests
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(15, agentFiles.Length);
+        Assert.Equal(16, agentFiles.Length);
         Assert.Empty(agentFiles.Intersect(RemovedAgents, StringComparer.Ordinal));
 
         ArbiterSquadCatalog catalog = ArbiterSquadCatalog.LoadEmbedded();

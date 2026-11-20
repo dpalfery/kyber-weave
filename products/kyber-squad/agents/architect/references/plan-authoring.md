@@ -17,8 +17,7 @@ A plan is written, not thought through and then typed. Reasoning you do not writ
 1. Send one discovery batch: the code, standards and documents the request lets you name, together.
 2. Write the Draft next, from the skeleton below: frontmatter, problem and goal, and a Decisions row for every choice that batch settled. Never open another plan to copy its shape; the skeleton is the shape.
 3. Every later turn either sends a batch that answers named open questions or writes answers into the plan. Decide each choice once, in its Decisions row.
-4. Before `PLAN_READY`, fill **Review pre-check**: the review council judges the finished change through its lenses, and a finding it raises costs a fix round and a second council cycle, so meet it in the plan instead. For each lens the change can trigger, write one line: the finding that lens would raise against this plan as written, then the task and acceptance line that prevents it, or `n/a: <reason>`. Always cover `correctness` (every path that changes what the feature shows: create, update, delete, retry, reconnect, restart), `performance` (the cost per event and per viewer, fan-out, repeated queries), `supportability` (what an operator sees when it fails), `test-adequacy` (absolute values, the empty and the failure case, not only before-and-after deltas) and `security` with `authz-tenancy` when the change exposes data. Add `blast-radius-revertibility`, `di-composition`, `model-placement` or `documentation-accuracy` when the plan touches what they judge. Write it from your own reasoning: no tool calls and no reviewer dispatch, and put each fix into the task it belongs to rather than adding tasks.
-5. Size the plan as you write it, and never rewrite a saved section only to shorten it. A Decisions cell is one or two sentences. A finding is a fact no task already states. A risk is one line with its mitigation. Cut any sentence a worker or reviewer would not act on.
+4. Size the plan as you write it, and never rewrite a saved section only to shorten it. A Decisions cell is one or two sentences. A finding is a fact no task already states. A risk is one line with its mitigation. Cut any sentence a worker or reviewer would not act on.
 
 Open only active Draft, Ready, In progress, or Blocked plans. Draft supports planning only. Review required, Completed, Superseded, and archived artifacts are not implementation authority.
 
@@ -105,7 +104,6 @@ impact-components:
 
 ## Dependency graph
 ## Risks
-## Review pre-check
 ## Out-of-scope boundaries
 ## Verification gates
 ## Review

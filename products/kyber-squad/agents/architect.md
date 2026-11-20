@@ -84,6 +84,7 @@ Run `kyber-weave squad brief architect --path <intake|plan|finalize|escalation> 
 - A `test-first` plan's Test contract: [test-first contract](architect/references/test-first-contract.md).
 - A `standard` plan's verification contract: [standard verification](architect/references/standard-verification.md).
 - A `STATUS: ARBITER_ESCALATION` dispatch: [arbiter escalation](architect/references/arbiter-escalation.md).
+- A dispatch whose first body line is `PLAN_REVIEW:`: the plan reviewer's findings on your saved Draft. Fix the plan for every finding, or record in `## Decisions` why the plan is right and the finding is not, with evidence; then return `PLAN_READY` as usual.
 - A dispatch whose first body line is `FINDINGS: follow-up`: file follow-up todos (below); no brief is needed.
 
 ## Follow-up todos

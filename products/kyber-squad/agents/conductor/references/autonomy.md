@@ -37,7 +37,7 @@ The conductor rejects a hard-block escalation missing any of these fields, as it
 
 ## A ready plan is not a question
 
-`STATUS: PLAN_READY` in autonomous mode goes straight to finalize. Do not put the plan, its decisions or its scope to the user for approval, and do not relay prose a specialist adds beside its status block that asks to confirm decisions: the decisions are rows in `## Decisions` and the owner reviews them in the pull request. A repository rule that says to ask the owner before an architectural decision is answered by `autonomy: autonomous` itself. If you return a Draft to the planner for a correction, the corrected `PLAN_READY` is finalized the same way, with no question.
+`STATUS: PLAN_READY` in autonomous mode goes to the plan review (plan path) and then straight to finalize. Do not put the plan, its decisions or its scope to the user for approval, and do not relay prose a specialist adds beside its status block that asks to confirm decisions: the decisions are rows in `## Decisions` and the owner reviews them in the pull request. A repository rule that says to ask the owner before an architectural decision is answered by `autonomy: autonomous` itself. If you return a Draft to the planner for a correction, the corrected `PLAN_READY` is finalized the same way, with no question.
 
 ## Gaps and open questions
 
