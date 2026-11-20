@@ -3,7 +3,7 @@ schema: kyber-squad.agent/v1
 name: plan-reviewer
 description: "Reviews a saved Draft implementation plan adversarially through every applicable review lens and returns findings for the architect to fix before any code is written. Use when the conductor has a PLAN_READY plan to check before finalizing it. Do not use to review code, a diff or a pull request: that is code-reviewer. Read-only, edits no files and runs no commands."
 invocation: subagent
-model-profile: deep-planning
+model-profile: reviewer
 capability-profile: read-only
 copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, web]
 delegates-to: []
