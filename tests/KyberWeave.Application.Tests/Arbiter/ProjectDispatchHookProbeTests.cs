@@ -107,6 +107,30 @@ public sealed class ProjectDispatchHookProbeTests
     }
 
     [Fact]
+    public void Antigravity_WhenTheFileIsJsonc_Covers()
+    {
+        Write(
+            AntigravityHookPath,
+            """
+            {
+              // A comment must not hide the hook.
+              "kyber-arbiter": {
+                "PreToolUse": [
+                  {
+                    "matcher": "^invoke_subagent$",
+                    "hooks": [
+                      { "type": "command", "command": "kyber-weave-arbiter hook --harness antigravity" },
+                    ],
+                  },
+                ],
+              },
+            }
+            """);
+
+        Assert.True(_probe.CoversHarness(Root, "antigravity"));
+    }
+
+    [Fact]
     public void Factory_WhenAPreToolUseGroupCarriesTheDispatchHook_Covers()
     {
         Write(FactoryHookPath, FactoryHooks(FactoryProjectHook));
@@ -297,6 +321,26 @@ public sealed class ProjectDispatchHookProbeTests
         Write(CursorHookPath, "not json");
 
         Assert.False(_probe.CoversHarness(Root, "cursor"));
+    }
+
+    [Fact]
+    public void Cursor_WhenTheFileIsJsonc_Covers()
+    {
+        Write(
+            CursorHookPath,
+            """
+            {
+              // A comment must not hide the hook.
+              "version": 1,
+              "hooks": {
+                "preToolUse": [
+                  { "command": "kyber-weave-arbiter hook --harness cursor" },
+                ],
+              },
+            }
+            """);
+
+        Assert.True(_probe.CoversHarness(Root, "cursor"));
     }
 
     [Fact]

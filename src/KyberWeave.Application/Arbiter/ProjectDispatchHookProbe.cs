@@ -16,7 +16,8 @@ namespace KyberWeave.Core.Arbiter;
 /// <c>.factory/hooks.json</c>, falling back to the <c>hooks</c> key of <c>.factory/settings.json</c> when that
 /// file is absent, and dispatches on <c>Task</c>. Cursor keeps a <c>hooks.preToolUse</c> list in
 /// <c>.cursor/hooks.json</c>, also dispatching on <c>Task</c>. A JSON harness is covered when a matching
-/// entry's command runs the project-scope hook. OpenCode keeps the plugin shim at
+/// entry's command runs the project-scope hook. The JSON files are read as JSONC: a comment or a trailing
+/// comma must not hide a hook the file declares. OpenCode keeps the plugin shim at
 /// <c>.opencode/plugins/kyber-arbiter.ts</c> and Pi at <c>.pi/extensions/kyber-arbiter.ts</c>. Every other
 /// harness reports true, which keeps today's deferral. Nothing here throws: an unreadable or malformed file is
 /// a project hook that was not proven.
@@ -49,8 +50,9 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
     // A matcher is a .NET regex in this check. A pattern that stalls must not stall the dispatch.
     private static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(100);
 
-    // Factory may tolerate JSONC, so its files may carry comments and trailing commas.
-    private static readonly JsonDocumentOptions FactoryJsonOptions = new()
+    // A comment or a trailing comma must not hide a declared hook. Factory already tolerates JSONC;
+    // Antigravity and Cursor files are read the same way.
+    private static readonly JsonDocumentOptions HookJsonOptions = new()
     {
         CommentHandling = JsonCommentHandling.Skip,
         AllowTrailingCommas = true,
@@ -100,7 +102,7 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
                 return false;
             }
 
-            if (JsonNode.Parse(files.ReadAllText(path)) is not JsonObject root)
+            if (JsonNode.Parse(files.ReadAllText(path), documentOptions: HookJsonOptions) is not JsonObject root)
             {
                 return false;
             }
@@ -130,7 +132,7 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
             string path = Path.Combine(projectRoot, FactoryHookPath);
             if (files.FileExists(path))
             {
-                return JsonNode.Parse(files.ReadAllText(path), documentOptions: FactoryJsonOptions) is JsonObject events
+                return JsonNode.Parse(files.ReadAllText(path), documentOptions: HookJsonOptions) is JsonObject events
                     && EventMapCoversDispatchTool(events, FactoryDispatchTool, FactoryCommandMarker);
             }
 
@@ -141,7 +143,7 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
                 return false;
             }
 
-            return JsonNode.Parse(files.ReadAllText(settingsPath), documentOptions: FactoryJsonOptions) is JsonObject settings
+            return JsonNode.Parse(files.ReadAllText(settingsPath), documentOptions: HookJsonOptions) is JsonObject settings
                 && settings[FactorySettingsHooksKey] is JsonObject fallback
                 && EventMapCoversDispatchTool(fallback, FactoryDispatchTool, FactoryCommandMarker);
         }
@@ -162,7 +164,7 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
                 return false;
             }
 
-            if (JsonNode.Parse(files.ReadAllText(path)) is not JsonObject root
+            if (JsonNode.Parse(files.ReadAllText(path), documentOptions: HookJsonOptions) is not JsonObject root
                 || root["hooks"] is not JsonObject hooks
                 || hooks["preToolUse"] is not JsonArray entries)
             {
