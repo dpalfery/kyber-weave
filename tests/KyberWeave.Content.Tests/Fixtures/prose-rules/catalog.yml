@@ -77,7 +77,6 @@ rules:
     statement: A parser refuses input it does not recognise with a diagnostic that names it, and never silently drops, defaults or coerces that input.
     stated-in:
       - docs/standards/csharp/csharp.standards.md
-      - docs/standards/go/go.standards.md
       - docs/standards/rust/rust.standards.md
       - docs/standards/typescript/typescript.standards.md
     controls:

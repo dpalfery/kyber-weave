@@ -5,10 +5,27 @@ doc-type: rule
 status: current
 technology: test
 owner: dpalfery
-last-reviewed: 2026-11-16
+last-reviewed: 2026-11-19
 ---
 
 # test rules
+
+## Unit tests by default
+
+- New behaviour gets an in-memory unit test. In C# that test runs against an interface with the
+  shared fakes the seam register names; in a React or TypeScript UI, a Tauri UI included, it
+  renders the component over fixtures and mocked query results, as the React standard says, with
+  the commands that UI's standard gives; in Rust, Tauri's Rust included, it is a `#[cfg(test)]` unit
+  test beside the code it exercises, as the Rust standard says. A GitHub Actions change is pinned by
+  a repository-policy test, as the GitHub Actions standard says; `AGENTS.md` names that project.
+- Integration and end-to-end tests are the exception. A C# integration test proves an adapter or a
+  whole flow against the real resource in the integration project; a browser flow that needs the
+  real browser and server is a Playwright end-to-end test. Both run in CI, never in a developer's
+  task gate or the review council's gates; `AGENTS.md` names their homes.
+- In C#, a behaviour you can only test through a real disk, process or network means a seam is
+  missing: add the seam and unit-test against it. Browser-only behaviour that the React standard
+  sends to Playwright is the sanctioned exception. That standard gives the examples; this rule does
+  not keep a second list.
 
 ## Running tests in this repository
 
@@ -18,7 +35,7 @@ last-reviewed: 2026-11-16
   calling that a pass is a false claim.
 - Never weaken, skip or delete a test to make a gate pass.
 - Tests whose subject is the repository itself (scripts, workflows, gate configuration, docs
-  prose, source scans) live in `tests/KyberWeave.RepoPolicy.Tests`. Tests whose subject is the
-  shipped content (agents, skills, standards, documents) live in `tests/KyberWeave.Content.Tests`,
-  reading it through the corpus seam and writing nothing.
+  prose, source scans) and tests whose subject is shipped content live in their own projects,
+  which the repository's `AGENTS.md` names; content tests read through the corpus seam and write
+  nothing.
 - Fixtures and the targeted commands per area are in the `AGENTS.md` of each test project.
