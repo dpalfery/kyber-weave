@@ -41,8 +41,17 @@ public sealed class PlannerDifficultyAndTechnologyContractTests
         Assert.Contains("an existing pattern covers it", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("the plan leaves open", text, StringComparison.OrdinalIgnoreCase);
         // Hard is for designing security or concurrency; applying an existing pattern of either is never hard.
-        Assert.Contains("the worker designs security or concurrency", text, StringComparison.OrdinalIgnoreCase);
+        // Hard is defined by one question, with the owner's anchors: retries, concurrency and partial failure across
+        // processes, or designing a security control.
+        Assert.Contains("could an ordinary test in one process prove the change right", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("transactional outbox", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("saga", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("idempotent", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("cache busting", text, StringComparison.OrdinalIgnoreCase);
+        // Medium carries the owner's anchors too, so a familiar but non-trivial pattern is not pushed up to hard.
+        Assert.Contains("cursor-based pagination", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("dead-letter queue", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("exponential backoff", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("never `hard`", text, StringComparison.OrdinalIgnoreCase);
         // Size is not difficulty: a rating that rose with the file count sent routine work to the dearest tier.
         Assert.Contains("does not by itself raise the rating", text, StringComparison.OrdinalIgnoreCase);
