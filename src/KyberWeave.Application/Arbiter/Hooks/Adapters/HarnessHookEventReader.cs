@@ -159,15 +159,27 @@ public static class HarnessHookEventReader
     private static string? Workspace(JsonElement payload) =>
         FirstPath(payload, "workspacePaths") ?? FirstPath(payload, "workspace_roots");
 
-    private static string? FirstPath(JsonElement payload, string name) =>
-        payload.TryGetProperty(name, out JsonElement paths)
-        && paths.ValueKind == JsonValueKind.Array
-        && paths.GetArrayLength() > 0
-        && paths[0].ValueKind == JsonValueKind.String
-        && paths[0].GetString() is { } workspace
-        && !string.IsNullOrWhiteSpace(workspace)
-            ? workspace
-            : null;
+    // A leading blank is not a root. Cursor sends no cwd, so stopping at index 0 would
+    // drop a later path and the user-level hook would resolve the repository to ~/.cursor.
+    private static string? FirstPath(JsonElement payload, string name)
+    {
+        if (!payload.TryGetProperty(name, out JsonElement paths) || paths.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        foreach (JsonElement entry in paths.EnumerateArray())
+        {
+            if (entry.ValueKind == JsonValueKind.String
+                && entry.GetString() is { } workspace
+                && !string.IsNullOrWhiteSpace(workspace))
+            {
+                return workspace;
+            }
+        }
+
+        return null;
+    }
 
     private static string? Text(JsonElement element, string name) =>
         element.ValueKind == JsonValueKind.Object

@@ -153,6 +153,18 @@ public sealed class HarnessHookEventReaderTests
         Assert.Equal("/repo", hookEvent.Cwd);
     }
 
+    [Fact]
+    public void ALeadingBlankWorkspaceRoot_UsesTheNextPath()
+    {
+        // Cursor sends no cwd. A blank first entry must not hide the repository that follows it.
+        const string payload = """{ "workspace_roots": ["   ", "/repo"], "tool_name": "Task" }""";
+
+        HookEvent hookEvent = Read("cursor", payload);
+
+        Assert.Equal("/repo", hookEvent.WorkspaceRoot);
+        Assert.Null(hookEvent.Cwd);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("not json")]
