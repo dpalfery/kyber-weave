@@ -4,12 +4,16 @@ using KyberDash.Domain;
 namespace KyberDash.Application;
 
 /// <summary>
-/// Bounded memoized token counter backed by <see cref="IOperationalStore"/>.
+/// Bounded memoized token counter backed by <see cref="IOperationalStore"/> when one is supplied.
 /// </summary>
+/// <remarks>
+/// A <see langword="null"/> store counts without persistence: misses are memoized in process only
+/// and buffered counts are discarded on flush. That mode serves callers that have no operational
+/// store of their own rather than silently inventing one.
+/// </remarks>
 public class CachedTokenCounter
 {
     private readonly IOperationalStore? operationalStore;
-    private readonly ICanonStoreRepository? legacyStore;
     private readonly string model;
     private readonly Func<string, long> countTokens;
     private readonly int minLength;
@@ -24,54 +28,21 @@ public class CachedTokenCounter
     /// <summary>
     /// Initializes a new <see cref="CachedTokenCounter"/> for <paramref name="model"/> backed by <see cref="IOperationalStore"/>.
     /// </summary>
-    /// <param name="store">Operational store backing cache persistence.</param>
+    /// <param name="store">Operational store backing cache persistence; <see langword="null"/> counts without persisting.</param>
     /// <param name="model">Model identifier scoping deterministic cache keys.</param>
     /// <param name="countTokens">Token counting function used on cache misses.</param>
     /// <param name="minLength">Minimum string length consulted in the persistent cache.</param>
     /// <param name="maxMemoEntries">Maximum number of digest keys held in the in-process memo.</param>
     public CachedTokenCounter(
-        IOperationalStore store,
+        IOperationalStore? store,
         string model,
         Func<string, long>? countTokens = null,
         int minLength = CanonTokenCache.MinCachedTextLength,
         int maxMemoEntries = CanonTokenCache.MaxMemoEntries)
-        : this(model, countTokens, minLength, maxMemoEntries)
-    {
-        ArgumentNullException.ThrowIfNull(store);
-        operationalStore = store;
-    }
-
-    /// <summary>
-    /// Initializes a new <see cref="CachedTokenCounter"/> for <paramref name="model"/> backed by the transitional <see cref="ICanonStoreRepository"/>.
-    /// </summary>
-    /// <remarks>
-    /// Retained temporarily until projector and ingest callers finish migrating off <see cref="ICanonStoreRepository"/>.
-    /// </remarks>
-    /// <param name="store">Canonical store repository backing cache persistence.</param>
-    /// <param name="model">Model identifier scoping deterministic cache keys.</param>
-    /// <param name="countTokens">Token counting function used on cache misses.</param>
-    /// <param name="minLength">Minimum string length consulted in the persistent cache.</param>
-    /// <param name="maxMemoEntries">Maximum number of digest keys held in the in-process memo.</param>
-    public CachedTokenCounter(
-        ICanonStoreRepository store,
-        string model,
-        Func<string, long>? countTokens = null,
-        int minLength = CanonTokenCache.MinCachedTextLength,
-        int maxMemoEntries = CanonTokenCache.MaxMemoEntries)
-        : this(model, countTokens, minLength, maxMemoEntries)
-    {
-        ArgumentNullException.ThrowIfNull(store);
-        legacyStore = store;
-    }
-
-    private CachedTokenCounter(
-        string model,
-        Func<string, long>? countTokens,
-        int minLength,
-        int maxMemoEntries)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(model);
 
+        operationalStore = store;
         this.model = model;
         this.countTokens = countTokens ?? CanonTokenCache.ApproximateO200kBase;
         this.minLength = minLength;
@@ -176,30 +147,21 @@ public class CachedTokenCounter
         }
     }
 
-    private long? ReadCachedTokenCount(string key) =>
-        operationalStore is not null
-            ? operationalStore.GetCachedTokenCount(key)
-            : legacyStore is not null
-                ? legacyStore.GetCachedTokenCount(key)
-                : null;
+    private long? ReadCachedTokenCount(string key) => operationalStore?.GetCachedTokenCount(key);
 
     private void FlushPendingBatch(Dictionary<string, long> batch)
     {
-        if (operationalStore is not null)
+        if (operationalStore is null)
         {
-            List<StoredTokenCacheEntry> entries = new(batch.Count);
-            foreach (KeyValuePair<string, long> entry in batch)
-            {
-                entries.Add(new StoredTokenCacheEntry(entry.Key, entry.Value, ModelId: model));
-            }
-
-            operationalStore.PutCachedTokenCounts(entries);
             return;
         }
 
-        if (legacyStore is not null)
+        List<StoredTokenCacheEntry> entries = new(batch.Count);
+        foreach (KeyValuePair<string, long> entry in batch)
         {
-            legacyStore.PutCachedTokenCounts(batch, model);
+            entries.Add(new StoredTokenCacheEntry(entry.Key, entry.Value, ModelId: model));
         }
+
+        operationalStore.PutCachedTokenCounts(entries);
     }
 }

@@ -7,7 +7,7 @@ namespace KyberDash.Data.Tests;
 
 /// <summary>
 /// Polly v8 circuit-breaker behaviour for <see cref="SqliteCircuitBreaker"/> and the way
-/// <see cref="CanonStoreRepository"/> hands every database call to it.
+/// <see cref="SqliteRelationalStore"/> hands every database call to it.
 /// </summary>
 public class CircuitBreakerTests : IDisposable
 {
@@ -147,15 +147,17 @@ public class CircuitBreakerTests : IDisposable
             MinimumThroughput = 5,
             BreakDuration = BreakDuration,
         });
-        CanonStoreRepository store = new(Path.Combine(directory.Path, "tripping.db"), breaker);
+        SqliteRelationalStore store = new(Path.Combine(directory.Path, "tripping.db"), breaker);
         int failures = 0;
 
         for (int attempt = 0; attempt < 10 && breaker.State != DashCircuitState.Open; attempt++)
         {
+            // Removing the database file leaves the store initialized but its tables gone, so the
+            // next write lands in a freshly created empty file and sqlite3 exits non-zero.
             RemoveDatabase(store);
             try
             {
-                store.BumpRecordsWriteMarker();
+                store.SetWriteMarker(attempt + 1);
             }
             catch (SqliteExecutionException)
             {
@@ -167,19 +169,19 @@ public class CircuitBreakerTests : IDisposable
         Assert.InRange(failures, 1, 8);
 
         RemoveDatabase(store);
-        Assert.Throws<CircuitBreakerOpenException>(() => store.BumpRecordsWriteMarker());
+        Assert.Throws<CircuitBreakerOpenException>(() => store.SetWriteMarker(99));
     }
 
     [Fact]
     public void Store_ReportsCircuitBreakerStateWithoutCallingSqlite()
     {
         SqliteCircuitBreaker breaker = NewBreaker();
-        CanonStoreRepository store = new(Path.Combine(directory.Path, "healthy.db"), breaker);
+        SqliteRelationalStore store = new(Path.Combine(directory.Path, "healthy.db"), breaker);
         Trip(breaker);
 
         RemoveDatabase(store);
 
-        Assert.Throws<CircuitBreakerOpenException>(() => store.GetMetadata("schema_version"));
+        Assert.Throws<CircuitBreakerOpenException>(() => store.GetStoreState());
         Assert.Throws<CircuitBreakerOpenException>(() => store.CountRecords());
         Assert.Equal(DashCircuitState.Open, breaker.State);
     }
@@ -227,7 +229,7 @@ public class CircuitBreakerTests : IDisposable
     }
 
     /// <summary>Removes the store's database and sidecars, so the next write fails on the new file.</summary>
-    private static void RemoveDatabase(CanonStoreRepository store)
+    private static void RemoveDatabase(SqliteRelationalStore store)
     {
         foreach (string suffix in new[] { string.Empty, "-wal", "-shm", "-journal" })
         {

@@ -262,13 +262,12 @@ public partial class CanonSessionProjectorEngine
 
     /// <summary>
     /// Builds the engine's cached token counter over <see cref="IOperationalStore"/> on the
-    /// relational path (decision D16); the transitional legacy constructor keeps the
-    /// <see cref="ICanonStoreRepository"/>-backed counter until T45 removes it.
+    /// relational path (decision D16). The legacy path, which has no operational store, counts
+    /// without persisting now that the transitional counter constructor is gone.
     /// </summary>
-    /// <returns>Cached token counter bound to the engine's operational or legacy store.</returns>
-    private CachedTokenCounter CreateTokenCounter() => operationalStore is not null
-        ? new CachedTokenCounter(operationalStore, CanonTokenCache.ApproximateTokenizerName)
-        : new CachedTokenCounter(legacyStore!, CanonTokenCache.ApproximateTokenizerName);
+    /// <returns>Cached token counter bound to the engine's operational store, or a counting-only counter.</returns>
+    private CachedTokenCounter CreateTokenCounter() =>
+        new(operationalStore, CanonTokenCache.ApproximateTokenizerName);
 
     /// <summary>
     /// Derives a complete <see cref="SessionSummaryRow"/> (including <c>summary_json</c>,
@@ -811,7 +810,7 @@ public partial class CanonSessionProjectorEngine
             ? new HashSet<string>(store.GetBuiltSessionIds(), StringComparer.Ordinal)
             : null;
 
-        CachedTokenCounter counter = new(legacyStore!, CanonTokenCache.ApproximateTokenizerName);
+        CachedTokenCounter counter = new(operationalStore, CanonTokenCache.ApproximateTokenizerName);
         SessionIdentities identities = new(store.GetSessionKeyHarnesses());
         IReadOnlyList<string> sessionKeys = store.GetDistinctSessionKeys();
 

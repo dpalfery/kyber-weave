@@ -258,16 +258,15 @@ public class ApplicationParityTests
     [Fact]
     public async Task JobSchedulerDeclinesRefreshWhilePausedButAlwaysImportsHistory()
     {
-        FakeCanonStoreRepository store = new();
+        InMemoryRelationalStore store = new();
         FakeSettingsRepository settings = new();
         FakeServerStateRepository serverState = new();
-        FakeTranscriptReaderRepository transcripts = new();
         FakePricingRepository pricing = new();
-        CanonProjectionService projection = new(store, new CanonSessionProjectorEngine(store, pricing), new CanonRollupsEngine(store, pricing));
-        TranscriptIngestionService ingestion = new(store, transcripts, new CanonRefreshEngine(store, transcripts, pricing, new CanonSessionProjectorEngine(store, pricing), new CanonRollupsEngine(store, pricing)));
+        CanonProjectionService projection = new(store, store, store, new CanonSessionProjectorEngine(store, store, store, pricing), new CanonRollupsEngine(store, store, pricing));
+        TranscriptIngestionService ingestion = new(store, store, new HarnessSourceRegistry());
         DashOptions options = new() { StateDirectory = serverState.DefaultStateDirectory };
 
-        using JobSchedulerService jobs = new(store, projection, ingestion, settings, serverState, options, clock: () => new DateTimeOffset(2026, 11, 15, 0, 0, 0, TimeSpan.Zero));
+        using JobSchedulerService jobs = new(store, store, projection, ingestion, settings, serverState, options, clock: () => new DateTimeOffset(2026, 11, 15, 0, 0, 0, TimeSpan.Zero));
 
         JobOutcome idle = await jobs.TriggerRefreshAsync(TestContext.Current.CancellationToken);
         Assert.Equal("succeeded", idle.Outcome);
@@ -282,20 +281,19 @@ public class ApplicationParityTests
 
         JobOutcome imported = await jobs.TriggerImportHistoryAsync(TestContext.Current.CancellationToken);
         Assert.Equal("succeeded", imported.Outcome);
-        Assert.NotEmpty(transcripts.DiscoverCalls);
     }
 
     [Fact]
     public async Task JobSchedulerReportsHostedElsewhereWhenAnotherProcessHoldsTheLease()
     {
-        FakeCanonStoreRepository store = new();
+        InMemoryRelationalStore store = new();
         FakeSettingsRepository settings = new();
         FakeServerStateRepository serverState = new() { JobsLeaseAvailable = false };
         FakePricingRepository pricing = new();
-        CanonProjectionService projection = new(store, new CanonSessionProjectorEngine(store, pricing), new CanonRollupsEngine(store, pricing));
-        TranscriptIngestionService ingestion = new(store, new FakeTranscriptReaderRepository(), new CanonRefreshEngine(store, new FakeTranscriptReaderRepository(), pricing, new CanonSessionProjectorEngine(store, pricing), new CanonRollupsEngine(store, pricing)));
+        CanonProjectionService projection = new(store, store, store, new CanonSessionProjectorEngine(store, store, store, pricing), new CanonRollupsEngine(store, store, pricing));
+        TranscriptIngestionService ingestion = new(store, store, new HarnessSourceRegistry());
 
-        using JobSchedulerService jobs = new(store, projection, ingestion, settings, serverState, new DashOptions { StateDirectory = serverState.DefaultStateDirectory });
+        using JobSchedulerService jobs = new(store, store, projection, ingestion, settings, serverState, new DashOptions { StateDirectory = serverState.DefaultStateDirectory });
 
         JobOutcome outcome = await jobs.TriggerRefreshAsync(TestContext.Current.CancellationToken);
 
@@ -310,17 +308,10 @@ public class ApplicationParityTests
         FakeSettingsRepository settings = new();
         FakeServerStateRepository serverState = new();
         FailingProjectionService projection = new();
-        TranscriptIngestionService ingestion = new(
-            new FakeCanonStoreRepository(),
-            new FakeTranscriptReaderRepository(),
-            new CanonRefreshEngine(
-                new FakeCanonStoreRepository(),
-                new FakeTranscriptReaderRepository(),
-                new FakePricingRepository(),
-                new CanonSessionProjectorEngine(new FakeCanonStoreRepository(), new FakePricingRepository()),
-                new CanonRollupsEngine(new FakeCanonStoreRepository(), new FakePricingRepository())));
+        InMemoryRelationalStore store = new();
+        TranscriptIngestionService ingestion = new(store, store, new HarnessSourceRegistry());
 
-        using JobSchedulerService jobs = new(new FakeCanonStoreRepository(), projection, ingestion, settings, serverState, new DashOptions { StateDirectory = serverState.DefaultStateDirectory });
+        using JobSchedulerService jobs = new(store, store, projection, ingestion, settings, serverState, new DashOptions { StateDirectory = serverState.DefaultStateDirectory });
 
         JobOutcome outcome = await jobs.TriggerRefreshAsync(TestContext.Current.CancellationToken);
 
@@ -333,13 +324,13 @@ public class ApplicationParityTests
     [Fact]
     public async Task StartAcquiresTheLeaseAndStopReleasesIt()
     {
-        FakeCanonStoreRepository store = new();
+        InMemoryRelationalStore store = new();
         FakeServerStateRepository serverState = new();
         FakePricingRepository pricing = new();
-        CanonProjectionService projection = new(store, new CanonSessionProjectorEngine(store, pricing), new CanonRollupsEngine(store, pricing));
-        TranscriptIngestionService ingestion = new(store, new FakeTranscriptReaderRepository(), new CanonRefreshEngine(store, new FakeTranscriptReaderRepository(), pricing, new CanonSessionProjectorEngine(store, pricing), new CanonRollupsEngine(store, pricing)));
+        CanonProjectionService projection = new(store, store, store, new CanonSessionProjectorEngine(store, store, store, pricing), new CanonRollupsEngine(store, store, pricing));
+        TranscriptIngestionService ingestion = new(store, store, new HarnessSourceRegistry());
 
-        JobSchedulerService jobs = new(store, projection, ingestion, new FakeSettingsRepository(), serverState, new DashOptions { StateDirectory = serverState.DefaultStateDirectory });
+        JobSchedulerService jobs = new(store, store, projection, ingestion, new FakeSettingsRepository(), serverState, new DashOptions { StateDirectory = serverState.DefaultStateDirectory });
         try
         {
             jobs.Start();
@@ -359,7 +350,7 @@ public class ApplicationParityTests
     {
         FakeSettingsRepository settings = new();
         FakeServerStateRepository serverState = new();
-        CaptureService capture = new(settings, new FakeCanonStoreRepository(), serverState);
+        CaptureService capture = new(settings, new InMemoryRelationalStore(), serverState);
         string stateDir = serverState.DefaultStateDirectory;
 
         JsonElement initial = capture.GetCaptureStatus(stateDir);
@@ -379,7 +370,7 @@ public class ApplicationParityTests
     [Fact]
     public void CaptureRejectsNonBooleanConsentValues()
     {
-        CaptureService capture = new(new FakeSettingsRepository(), new FakeCanonStoreRepository(), new FakeServerStateRepository());
+        CaptureService capture = new(new FakeSettingsRepository(), new InMemoryRelationalStore(), new FakeServerStateRepository());
 
         DashValidationException exception = Assert.Throws<DashValidationException>(
             () => capture.ConfigureCapture(Json(new { contentCapture = "yes" }), Path.GetTempPath()));
@@ -391,7 +382,7 @@ public class ApplicationParityTests
     [Fact]
     public void CapturePluginInstallRefusesUnknownHarnessesAndWrongRoots()
     {
-        CaptureService capture = new(new FakeSettingsRepository(), new FakeCanonStoreRepository(), new FakeServerStateRepository());
+        CaptureService capture = new(new FakeSettingsRepository(), new InMemoryRelationalStore(), new FakeServerStateRepository());
 
         (int unknownExitCode, string unknownOutput) = capture.InstallPlugin("nope", ifInstalled: false, configDir: null);
         Assert.Equal(2, unknownExitCode);
@@ -415,7 +406,7 @@ public class ApplicationParityTests
     {
         FakeSettingsRepository settings = new();
         FakeServerStateRepository serverState = new();
-        CaptureService capture = new(settings, new FakeCanonStoreRepository(), serverState);
+        CaptureService capture = new(settings, new InMemoryRelationalStore(), serverState);
 
         (int exitCode, string output) = capture.SetFactoryConsent(true);
 
@@ -428,7 +419,7 @@ public class ApplicationParityTests
     public async Task AntigravityStatusLineRecordsOnlyValidObjectPayloads()
     {
         FakeSettingsRepository settings = new();
-        CaptureService capture = new(settings, new FakeCanonStoreRepository(), new FakeServerStateRepository());
+        CaptureService capture = new(settings, new InMemoryRelationalStore(), new FakeServerStateRepository());
 
         await capture.RecordAntigravityStatusLineAsync("   ", cancellationToken: TestContext.Current.CancellationToken);
         await capture.RecordAntigravityStatusLineAsync("not json", cancellationToken: TestContext.Current.CancellationToken);
@@ -550,11 +541,11 @@ public class ApplicationParityTests
     {
         string canonPath = CanonDbPath.Resolve(null, null, null);
         using TempDirectory directory = new();
-        FakeCanonStoreRepository store = new();
+        InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
-        CanonProjectionService projection = new(store, new CanonSessionProjectorEngine(store, pricing), new CanonRollupsEngine(store, pricing));
-        TranscriptIngestionService ingestion = new(store, new FakeTranscriptReaderRepository(), new CanonRefreshEngine(store, new FakeTranscriptReaderRepository(), pricing, new CanonSessionProjectorEngine(store, pricing), new CanonRollupsEngine(store, pricing)));
-        E2eSeederService seeder = new(ingestion, projection, store);
+        CanonProjectionService projection = new(store, store, store, new CanonSessionProjectorEngine(store, store, store, pricing), new CanonRollupsEngine(store, store, pricing));
+        TranscriptIngestionService ingestion = new(store, store, new HarnessSourceRegistry());
+        E2eSeederService seeder = new(store, store, store, ingestion, projection);
 
         Assert.Equal(E2eSeederService.RefusedExitCode, seeder.SeedWorld(E2eSeederService.HarnessCollectionWorld, canonPath, directory.Path));
         Assert.Equal(E2eSeederService.RefusedExitCode, seeder.SeedWorld("no-such-world", directory.Combine("world.db"), directory.Path));

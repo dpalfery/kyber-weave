@@ -120,7 +120,10 @@ public static class ServiceCollectionExtensions
             new AnalyticsService(provider.GetRequiredService<KyberBridgeEngine>()));
 
         services.TryAddSingleton<ICleanService>(provider => new CleanService(
-            provider.GetRequiredService<ICanonStoreRepository>(),
+            provider.GetRequiredService<IRelationalStoreReader>(),
+            provider.GetRequiredService<IRelationalStoreWriter>(),
+            provider.GetRequiredService<IProjectionStore>(),
+            provider.GetRequiredService<IOperationalStore>(),
             provider.GetRequiredService<ICanonProjectionService>(),
             provider.GetRequiredService<ITranscriptIngestionService>()));
 
@@ -129,11 +132,12 @@ public static class ServiceCollectionExtensions
 
         services.TryAddSingleton<ICaptureService>(provider => new CaptureService(
             provider.GetRequiredService<ISettingsRepository>(),
-            provider.GetRequiredService<ICanonStoreRepository>(),
+            provider.GetRequiredService<IOperationalStore>(),
             provider.GetRequiredService<IServerStateRepository>()));
 
         services.TryAddSingleton<IJobSchedulerService>(provider => new JobSchedulerService(
-            provider.GetRequiredService<ICanonStoreRepository>(),
+            provider.GetRequiredService<IRelationalStoreReader>(),
+            provider.GetRequiredService<IOperationalStore>(),
             provider.GetRequiredService<ICanonProjectionService>(),
             provider.GetRequiredService<ITranscriptIngestionService>(),
             provider.GetRequiredService<ISettingsRepository>(),
@@ -141,12 +145,14 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<DashOptions>()));
 
         services.TryAddSingleton<IDoctorService>(provider => new DoctorService(
-            provider.GetRequiredService<ICanonStoreRepository>(),
+            provider.GetRequiredService<IRelationalStoreReader>(),
+            provider.GetRequiredService<IOperationalStore>(),
             provider.GetRequiredService<KyberDash.Core.Resilience.ICircuitBreaker>()));
 
         services.TryAddSingleton<IReportService>(provider => new ReportService(
             provider.GetRequiredService<IDashboardQueryService>(),
-            provider.GetRequiredService<ICanonStoreRepository>()));
+            provider.GetRequiredService<IProjectionStore>(),
+            provider.GetRequiredService<IRelationalStoreReader>()));
 
         services.TryAddSingleton<IMenubarService>(provider =>
             new MenubarService(provider.GetRequiredService<IServerStateRepository>()));
@@ -156,9 +162,11 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<DashOptions>()));
 
         services.TryAddSingleton<IE2eSeederService>(provider => new E2eSeederService(
+            provider.GetRequiredService<IRelationalStoreWriter>(),
+            provider.GetRequiredService<IProjectionStore>(),
+            provider.GetRequiredService<IOperationalStore>(),
             provider.GetRequiredService<ITranscriptIngestionService>(),
-            provider.GetRequiredService<ICanonProjectionService>(),
-            provider.GetRequiredService<ICanonStoreRepository>()));
+            provider.GetRequiredService<ICanonProjectionService>()));
 
         services.TryAddSingleton<IWebAssetService>(provider => new WebAssetService(
             provider.GetRequiredService<IWebAssetRepository>(),

@@ -3,12 +3,13 @@ using System.Text;
 using System.Text.Json;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
+using KyberDash.Data.Collector;
 using KyberDash.Domain;
 
 namespace KyberDash.Application;
 
 /// <summary>
-/// Seeds an isolated canonical store for a Playwright world through the production ingest,
+/// Seeds an isolated relational store for a Playwright world through the production ingest,
 /// projection, and rollup paths.
 /// </summary>
 /// <remarks>
@@ -28,28 +29,38 @@ public class E2eSeederService : IE2eSeederService
     /// <summary>Exit code reported when the target store is the operator's own store.</summary>
     public const int RefusedExitCode = 2;
 
+    private readonly IRelationalStoreWriter writer;
+    private readonly IProjectionStore projections;
+    private readonly IOperationalStore operationalStore;
     private readonly ITranscriptIngestionService ingestion;
     private readonly ICanonProjectionService projection;
-    private readonly ICanonStoreRepository store;
 
     /// <summary>
     /// Initializes a new <see cref="E2eSeederService"/>.
     /// </summary>
+    /// <param name="writer">Relational writer persisting the rendering-only collected session rows.</param>
+    /// <param name="projections">Projection store receiving the rendering-only projected rows.</param>
+    /// <param name="operationalStore">Operational store backing the seeded world's lifecycle.</param>
     /// <param name="ingestion">Ingestion service accepting the replayed spans.</param>
     /// <param name="projection">Projection service rebuilding sessions and rollups.</param>
-    /// <param name="store">Canonical store repository receiving the rendering-only rows.</param>
     public E2eSeederService(
+        IRelationalStoreWriter writer,
+        IProjectionStore projections,
+        IOperationalStore operationalStore,
         ITranscriptIngestionService ingestion,
-        ICanonProjectionService projection,
-        ICanonStoreRepository store)
+        ICanonProjectionService projection)
     {
+        ArgumentNullException.ThrowIfNull(writer);
+        ArgumentNullException.ThrowIfNull(projections);
+        ArgumentNullException.ThrowIfNull(operationalStore);
         ArgumentNullException.ThrowIfNull(ingestion);
         ArgumentNullException.ThrowIfNull(projection);
-        ArgumentNullException.ThrowIfNull(store);
 
+        this.writer = writer;
+        this.projections = projections;
+        this.operationalStore = operationalStore;
         this.ingestion = ingestion;
         this.projection = projection;
-        this.store = store;
     }
 
     /// <inheritdoc />
@@ -66,7 +77,6 @@ public class E2eSeederService : IE2eSeederService
             return RefusedExitCode;
         }
 
-        store.EnsureInitialized();
         return world switch
         {
             HarnessCollectionWorld => SeedHarnessCollection(repoRoot),
@@ -196,129 +206,132 @@ public class E2eSeederService : IE2eSeederService
 
     private void SeedMeasuredClaudeCode()
     {
-        JsonElement payload = JsonSerializer.SerializeToElement(new
-        {
-            id = "hc-measured-session-1",
-            session_id = "hc-measured-session-1",
-            harness = "claude-code",
-            context = new
-            {
-                measurable = true,
-                contextLimit = 200000,
-                contextLimitSource = "reported",
-                turns = new object[]
-                {
-                    new { pressure = 0.42, headroom = 116000 },
-                    new { pressure = 0.35, headroom = 130000 },
-                },
-            },
-            summary = new
-            {
-                turn_count = 2,
-                total_input = 2000,
-                total_output = 500,
-                total_cache_read = 800,
-                cost = new { status = "priced", value = 0.012, basis = "published", currency = "USD" },
-            },
-        });
+        WriteRenderingOnlySession("hc-measured-session-1", "claude-code", "harness-collection measured session");
 
-        store.PutSession(new SessionSummaryRow(
+        projections.ReplaceSessionProjection(new StoredSessionProjection(
             SessionId: "hc-measured-session-1",
-            Harness: "claude-code",
             Label: "harness-collection measured session",
             IsSubagent: false,
-            ParentSession: null,
+            SpanCount: 2,
+            StartedAtUtc: "2026-09-06T10:00:00.000Z",
+            EndedAtUtc: "2026-09-06T10:05:00.000Z",
+            ParentSessionId: null,
             AgentName: null,
-            Repo: null,
-            Branch: null,
-            Started: "2026-09-06T10:00:00.000Z",
-            Ended: "2026-09-06T10:05:00.000Z",
-            SummaryJson: payload.GetProperty("summary").GetRawText(),
-            ProblemsCount: 0,
-            ContextLimitSource: "reported",
-            Payload: payload));
+            IncludedInParent: false,
+            RequestSpanIds: [],
+            Turns: [],
+            Context: new StoredSessionContext(
+                ContextLimit: 200000,
+                ContextLimitSource: "reported",
+                ResidualTotal: 0,
+                FreshJumpFactor: 0,
+                AccumulationRate: 0,
+                ObservedBuckets: [],
+                DerivedCounts: [],
+                FlaggedTurnIndexes: [],
+                Turns:
+                [
+                    new StoredSessionContextTurn(
+                        Position: 0,
+                        InputTokens: 84000,
+                        BucketedTokens: 0,
+                        ResidualTokens: 0,
+                        ResidualAttribution: "reported",
+                        BuiltinToolDefinitionTokens: 0,
+                        FreshInput: 2000,
+                        Buckets: [],
+                        ServerDefinitions: [],
+                        Headroom: 116000,
+                        Pressure: 0.42),
+                    new StoredSessionContextTurn(
+                        Position: 1,
+                        InputTokens: 130000,
+                        BucketedTokens: 0,
+                        ResidualTokens: 0,
+                        ResidualAttribution: "reported",
+                        BuiltinToolDefinitionTokens: 0,
+                        FreshInput: 2000,
+                        Buckets: [],
+                        ServerDefinitions: [],
+                        Headroom: 130000,
+                        Pressure: 0.35),
+                ])));
     }
 
     private void SeedRenderingOnlyOpencode()
     {
-        JsonElement payload = JsonSerializer.SerializeToElement(new
-        {
-            id = "hc-honest-session-1",
-            session_id = "hc-honest-session-1",
-            harness = "opencode",
-            context = new { measurable = false },
-            summary = new { turn_count = 1 },
-        });
+        WriteRenderingOnlySession("hc-honest-session-1", "opencode", "rendering-only seed — not capture proof");
 
-        store.PutSession(new SessionSummaryRow(
+        projections.ReplaceSessionProjection(new StoredSessionProjection(
             SessionId: "hc-honest-session-1",
-            Harness: "opencode",
             Label: "rendering-only seed — not capture proof",
             IsSubagent: false,
-            ParentSession: null,
+            SpanCount: 1,
+            StartedAtUtc: "2026-09-06T11:00:00.000Z",
+            EndedAtUtc: "2026-09-06T11:02:00.000Z",
+            ParentSessionId: null,
             AgentName: null,
-            Repo: null,
-            Branch: null,
-            Started: "2026-09-06T11:00:00.000Z",
-            Ended: "2026-09-06T11:02:00.000Z",
-            SummaryJson: payload.GetProperty("summary").GetRawText(),
-            ProblemsCount: 0,
-            ContextLimitSource: null,
-            Payload: payload));
+            IncludedInParent: false,
+            RequestSpanIds: [],
+            Turns: [],
+            ContextUnmeasurableReason: "rendering-only seed — context not measured"));
+    }
+
+    /// <summary>Persists one rendering-only collected session row the projections can key into.</summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="harness">Harness attributed to the session.</param>
+    /// <param name="title">Session title.</param>
+    private void WriteRenderingOnlySession(string sessionId, string harness, string title)
+    {
+        writer.WriteBatch(new CollectedBatch(
+            Source: new CollectedSource(harness, SourceKind.Otlp, $"e2e-seed:{sessionId}"),
+            Sessions: [new CollectedSession(sessionId, harness, sessionId, Workspace: null, Title: title, ReportedUsage: [])],
+            Records: [],
+            Problems: []));
     }
 
     private void UpsertExplicitSeedRunsAndExecutions()
     {
-        JsonElement measuredLinkage = JsonSerializer.SerializeToElement(new { status = "measured" });
-
-        store.UpsertRuns(
+        projections.ReplaceRuns(
         [
-            new RunRow(
+            new StoredRun(
                 RunId: "hc-measured-run-1",
-                Harness: "claude-code",
+                HarnessId: "claude-code",
+                GroupingBasis: "explicit",
+                GroupingRule: "explicit_run_id",
+                ExecutionCount: 1,
                 Label: "harness-collection measured run",
-                GroupingBasis: "explicit",
-                GroupingRule: null,
-                WorkingDirectory: null,
-                Started: "2026-09-06T10:00:00.000Z",
-                Ended: "2026-09-06T10:05:00.000Z",
-                ExecutionCount: 1),
-            new RunRow(
+                StartedAtUtc: "2026-09-06T10:00:00.000Z",
+                EndedAtUtc: "2026-09-06T10:05:00.000Z"),
+            new StoredRun(
                 RunId: "hc-honest-run-1",
-                Harness: "opencode",
-                Label: "harness-collection honest-empty run",
+                HarnessId: "opencode",
                 GroupingBasis: "explicit",
-                GroupingRule: null,
-                WorkingDirectory: null,
-                Started: "2026-09-06T11:00:00.000Z",
-                Ended: "2026-09-06T11:02:00.000Z",
-                ExecutionCount: 1),
+                GroupingRule: "explicit_run_id",
+                ExecutionCount: 1,
+                Label: "harness-collection honest-empty run",
+                StartedAtUtc: "2026-09-06T11:00:00.000Z",
+                EndedAtUtc: "2026-09-06T11:02:00.000Z"),
         ]);
 
-        store.UpsertExecutions(
+        projections.ReplaceExecutions(
         [
-            new ExecutionRow(
+            new StoredExecution(
                 ExecutionId: "hc-measured-exec-1",
                 RunId: "hc-measured-run-1",
-                SessionId: "hc-measured-session-1",
-                ParentExecutionId: null,
-                Harness: "claude-code",
-                AgentName: null,
+                HarnessId: "claude-code",
                 IsRoot: true,
-                Started: "2026-09-06T10:00:00.000Z",
-                Ended: "2026-09-06T10:05:00.000Z",
-                ParentLinkage: measuredLinkage),
-            new ExecutionRow(
+                SessionId: "hc-measured-session-1",
+                StartedAtUtc: "2026-09-06T10:00:00.000Z",
+                EndedAtUtc: "2026-09-06T10:05:00.000Z"),
+            new StoredExecution(
                 ExecutionId: "hc-honest-exec-1",
                 RunId: "hc-honest-run-1",
-                SessionId: "hc-honest-session-1",
-                ParentExecutionId: null,
-                Harness: "opencode",
-                AgentName: null,
+                HarnessId: "opencode",
                 IsRoot: true,
-                Started: "2026-09-06T11:00:00.000Z",
-                Ended: "2026-09-06T11:02:00.000Z",
-                ParentLinkage: measuredLinkage),
+                SessionId: "hc-honest-session-1",
+                StartedAtUtc: "2026-09-06T11:00:00.000Z",
+                EndedAtUtc: "2026-09-06T11:02:00.000Z"),
         ]);
     }
 

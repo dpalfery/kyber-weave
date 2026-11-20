@@ -29,11 +29,16 @@ public static class ServiceCollectionExtensions
             new SqliteCircuitBreaker(
                 provider.GetService<DashOptions>()?.CircuitBreaker ?? resolved.CircuitBreaker));
 
+        services.TryAddSingleton<IRelationalStoreFileSystem>(_ => PhysicalRelationalStoreFileSystem.Instance);
+
         services.TryAddSingleton<SqliteRelationalStore>(provider =>
         {
             DashOptions? current = provider.GetService<DashOptions>();
             string databasePath = CanonDbPath.Resolve(current?.DatabasePath, null, null);
-            return new SqliteRelationalStore(databasePath, provider.GetRequiredService<ICircuitBreaker>());
+            return new SqliteRelationalStore(
+                databasePath,
+                provider.GetRequiredService<ICircuitBreaker>(),
+                provider.GetRequiredService<IRelationalStoreFileSystem>());
         });
 
         services.TryAddSingleton<IRelationalStoreWriter>(provider =>
@@ -47,13 +52,6 @@ public static class ServiceCollectionExtensions
 
         services.TryAddSingleton<IOperationalStore>(provider =>
             provider.GetRequiredService<SqliteRelationalStore>());
-
-        services.TryAddSingleton<ICanonStoreRepository>(provider =>
-        {
-            DashOptions? current = provider.GetService<DashOptions>();
-            string databasePath = CanonDbPath.Resolve(current?.DatabasePath, null, null);
-            return new CanonStoreRepository(databasePath, provider.GetRequiredService<ICircuitBreaker>());
-        });
 
         services.TryAddSingleton<ITranscriptReaderRepository>(_ => new TranscriptReaderRepository());
 

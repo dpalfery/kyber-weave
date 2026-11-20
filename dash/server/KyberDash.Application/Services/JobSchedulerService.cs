@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
+using KyberDash.Data.Repositories;
 using KyberDash.Domain;
 
 namespace KyberDash.Application;
@@ -29,7 +30,8 @@ public class JobSchedulerService : IJobSchedulerService
     /// <summary>Maximum characters of a failure message kept in the status snapshot.</summary>
     public const int MaxFailureSummaryLength = 200;
 
-    private readonly ICanonStoreRepository store;
+    private readonly IRelationalStoreReader reader;
+    private readonly IOperationalStore operationalStore;
     private readonly ICanonProjectionService projection;
     private readonly ITranscriptIngestionService ingestion;
     private readonly ISettingsRepository settings;
@@ -52,27 +54,30 @@ public class JobSchedulerService : IJobSchedulerService
     /// <summary>
     /// Initializes a new <see cref="JobSchedulerService"/>.
     /// </summary>
-    /// <param name="store">Canonical store repository the maintenance pass projects.</param>
+    /// <param name="reader">Relational reader the maintenance pass reads the store through.</param>
+    /// <param name="operationalStore">Operational store whose pending rebuild re-ingest flag <see cref="Start"/> consumes.</param>
     /// <param name="projection">Projection service run by each maintenance pass.</param>
     /// <param name="ingestion">Ingestion service run by an import-history pass.</param>
     /// <param name="settings">Settings repository supplying the pause switch and cadence.</param>
     /// <param name="serverState">Server-state repository owning the jobs lease and the state directory.</param>
     /// <param name="options">Composition options naming the state directory.</param>
     public JobSchedulerService(
-        ICanonStoreRepository store,
+        IRelationalStoreReader reader,
+        IOperationalStore operationalStore,
         ICanonProjectionService projection,
         ITranscriptIngestionService ingestion,
         ISettingsRepository settings,
         IServerStateRepository serverState,
         DashOptions options)
-        : this(store, projection, ingestion, settings, serverState, options, clock: null)
+        : this(reader, operationalStore, projection, ingestion, settings, serverState, options, clock: null)
     {
     }
 
     /// <summary>
     /// Initializes a new <see cref="JobSchedulerService"/> with an injectable clock.
     /// </summary>
-    /// <param name="store">Canonical store repository the maintenance pass projects.</param>
+    /// <param name="reader">Relational reader the maintenance pass reads the store through.</param>
+    /// <param name="operationalStore">Operational store whose pending rebuild re-ingest flag <see cref="Start"/> consumes.</param>
     /// <param name="projection">Projection service run by each maintenance pass.</param>
     /// <param name="ingestion">Ingestion service run by an import-history pass.</param>
     /// <param name="settings">Settings repository supplying the pause switch and cadence.</param>
@@ -80,7 +85,8 @@ public class JobSchedulerService : IJobSchedulerService
     /// <param name="options">Composition options naming the state directory.</param>
     /// <param name="clock">Clock used for status timestamps; defaults to UTC now.</param>
     public JobSchedulerService(
-        ICanonStoreRepository store,
+        IRelationalStoreReader reader,
+        IOperationalStore operationalStore,
         ICanonProjectionService projection,
         ITranscriptIngestionService ingestion,
         ISettingsRepository settings,
@@ -88,14 +94,16 @@ public class JobSchedulerService : IJobSchedulerService
         DashOptions options,
         Func<DateTimeOffset>? clock)
     {
-        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(reader);
+        ArgumentNullException.ThrowIfNull(operationalStore);
         ArgumentNullException.ThrowIfNull(projection);
         ArgumentNullException.ThrowIfNull(ingestion);
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(serverState);
         ArgumentNullException.ThrowIfNull(options);
 
-        this.store = store;
+        this.reader = reader;
+        this.operationalStore = operationalStore;
         this.projection = projection;
         this.ingestion = ingestion;
         this.settings = settings;
@@ -161,11 +169,20 @@ public class JobSchedulerService : IJobSchedulerService
     /// <inheritdoc />
     public void Start()
     {
+        bool holdsLease;
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
             lease ??= serverState.TryAcquireJobsLease(stateDir);
             timer ??= Task.Run(() => TimerLoopAsync());
+            holdsLease = lease is not null;
+        }
+
+        // A store rebuilt from an older schema asks for one full import once a host holds the lease.
+        // The check runs outside the gate because RunJob re-enters it.
+        if (holdsLease && (operationalStore as SqliteRelationalStore)?.TryTakePendingRebuildReingest() == true)
+        {
+            _ = RunJob(work: ImportHistory);
         }
     }
 

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using KyberDash.Application;
+using KyberDash.Application.Tests.Fakes;
 using KyberDash.Core.Exceptions;
 using KyberDash.Domain;
 using Xunit;
@@ -432,7 +433,7 @@ public class CanonIngestTests
     [Fact]
     public void CachedTokenCounterFlushesBufferedMissesIntoTheStore()
     {
-        FakeCanonStoreRepository store = new();
+        InMemoryRelationalStore store = new();
         CachedTokenCounter counter = new(store, "model-x", static text => text.Length, maxMemoEntries: 0);
 
         string text = new('b', CanonTokenCache.MinCachedTextLength);

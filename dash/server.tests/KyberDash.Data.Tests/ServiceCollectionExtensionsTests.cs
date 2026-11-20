@@ -11,7 +11,8 @@ namespace KyberDash.Data.Tests;
 
 /// <summary>
 /// Wiring of <see cref="ServiceCollectionExtensions.AddDashDataServices"/>: every contract resolves, the
-/// singletons are shared, and a pre-registered substitute is left in place.
+/// singletons are shared, the filesystem seam is the physical singleton, and a pre-registered substitute
+/// is left in place.
 /// </summary>
 public class ServiceCollectionExtensionsTests : IDisposable
 {
@@ -27,67 +28,52 @@ public class ServiceCollectionExtensionsTests : IDisposable
     [Fact]
     public void AddDashDataServices_ResolvesEveryContract()
     {
-        DashOptions relationalOptions = new() { DatabasePath = Path.Combine(directory.Path, "contracts.db") };
-        using ServiceProvider relationalProvider = BuildProvider(relationalOptions);
+        DashOptions options = new() { DatabasePath = Path.Combine(directory.Path, "contracts.db") };
+        using ServiceProvider provider = BuildProvider(options);
 
-        Assert.NotNull(relationalProvider.GetRequiredService<DashOptions>());
-        Assert.IsType<SqliteCircuitBreaker>(relationalProvider.GetRequiredService<ICircuitBreaker>());
-        Assert.IsType<SqliteRelationalStore>(relationalProvider.GetRequiredService<SqliteRelationalStore>());
-        Assert.IsType<SqliteRelationalStore>(relationalProvider.GetRequiredService<IRelationalStoreWriter>());
-        Assert.IsType<SqliteRelationalStore>(relationalProvider.GetRequiredService<IRelationalStoreReader>());
-        Assert.IsType<SqliteRelationalStore>(relationalProvider.GetRequiredService<IProjectionStore>());
-        Assert.IsType<SqliteRelationalStore>(relationalProvider.GetRequiredService<IOperationalStore>());
-        Assert.IsType<TranscriptReaderRepository>(relationalProvider.GetRequiredService<ITranscriptReaderRepository>());
-        Assert.IsType<PricingRepository>(relationalProvider.GetRequiredService<IPricingRepository>());
-        Assert.IsType<SettingsRepository>(relationalProvider.GetRequiredService<ISettingsRepository>());
-        Assert.IsType<ServerStateRepository>(relationalProvider.GetRequiredService<IServerStateRepository>());
-        Assert.IsType<WebAssetRepository>(relationalProvider.GetRequiredService<IWebAssetRepository>());
-
-        // Transitional ICanonStoreRepository remains registered until T45, tested on its own DB file
-        // because CanonStoreRepository and SqliteRelationalStore define distinct 'session' table schemas.
-        DashOptions legacyOptions = new() { DatabasePath = Path.Combine(directory.Path, "legacy-contracts.db") };
-        using ServiceProvider legacyProvider = BuildProvider(legacyOptions);
-        Assert.IsType<CanonStoreRepository>(legacyProvider.GetRequiredService<ICanonStoreRepository>());
+        Assert.NotNull(provider.GetRequiredService<DashOptions>());
+        Assert.IsType<SqliteCircuitBreaker>(provider.GetRequiredService<ICircuitBreaker>());
+        Assert.IsType<SqliteRelationalStore>(provider.GetRequiredService<SqliteRelationalStore>());
+        Assert.IsType<SqliteRelationalStore>(provider.GetRequiredService<IRelationalStoreWriter>());
+        Assert.IsType<SqliteRelationalStore>(provider.GetRequiredService<IRelationalStoreReader>());
+        Assert.IsType<SqliteRelationalStore>(provider.GetRequiredService<IProjectionStore>());
+        Assert.IsType<SqliteRelationalStore>(provider.GetRequiredService<IOperationalStore>());
+        Assert.IsType<PhysicalRelationalStoreFileSystem>(provider.GetRequiredService<IRelationalStoreFileSystem>());
+        Assert.IsType<TranscriptReaderRepository>(provider.GetRequiredService<ITranscriptReaderRepository>());
+        Assert.IsType<PricingRepository>(provider.GetRequiredService<IPricingRepository>());
+        Assert.IsType<SettingsRepository>(provider.GetRequiredService<ISettingsRepository>());
+        Assert.IsType<ServerStateRepository>(provider.GetRequiredService<IServerStateRepository>());
+        Assert.IsType<WebAssetRepository>(provider.GetRequiredService<IWebAssetRepository>());
     }
 
     [Fact]
     public void AddDashDataServices_RegistersSingletons()
     {
-        DashOptions relationalOptions = new() { DatabasePath = Path.Combine(directory.Path, "singletons.db") };
-        using ServiceProvider relationalProvider = BuildProvider(relationalOptions);
+        DashOptions options = new() { DatabasePath = Path.Combine(directory.Path, "singletons.db") };
+        using ServiceProvider provider = BuildProvider(options);
 
-        SqliteRelationalStore relationalStore = relationalProvider.GetRequiredService<SqliteRelationalStore>();
-        Assert.Same(relationalStore, relationalProvider.GetRequiredService<SqliteRelationalStore>());
-        Assert.Same(relationalStore, relationalProvider.GetRequiredService<IRelationalStoreWriter>());
-        Assert.Same(relationalStore, relationalProvider.GetRequiredService<IRelationalStoreReader>());
-        Assert.Same(relationalStore, relationalProvider.GetRequiredService<IProjectionStore>());
-        Assert.Same(relationalStore, relationalProvider.GetRequiredService<IOperationalStore>());
-        Assert.Same(relationalProvider.GetRequiredService<IPricingRepository>(), relationalProvider.GetRequiredService<IPricingRepository>());
-        Assert.Same(relationalProvider.GetRequiredService<ISettingsRepository>(), relationalProvider.GetRequiredService<ISettingsRepository>());
-
-        DashOptions legacyOptions = new() { DatabasePath = Path.Combine(directory.Path, "legacy-singletons.db") };
-        using ServiceProvider legacyProvider = BuildProvider(legacyOptions);
-        Assert.Same(legacyProvider.GetRequiredService<ICanonStoreRepository>(), legacyProvider.GetRequiredService<ICanonStoreRepository>());
+        SqliteRelationalStore store = provider.GetRequiredService<SqliteRelationalStore>();
+        Assert.Same(store, provider.GetRequiredService<SqliteRelationalStore>());
+        Assert.Same(store, provider.GetRequiredService<IRelationalStoreWriter>());
+        Assert.Same(store, provider.GetRequiredService<IRelationalStoreReader>());
+        Assert.Same(store, provider.GetRequiredService<IProjectionStore>());
+        Assert.Same(store, provider.GetRequiredService<IOperationalStore>());
+        Assert.Same(PhysicalRelationalStoreFileSystem.Instance, provider.GetRequiredService<IRelationalStoreFileSystem>());
+        Assert.Same(provider.GetRequiredService<IPricingRepository>(), provider.GetRequiredService<IPricingRepository>());
+        Assert.Same(provider.GetRequiredService<ISettingsRepository>(), provider.GetRequiredService<ISettingsRepository>());
     }
 
     [Fact]
     public void AddDashDataServices_UsesTheConfiguredDatabasePath()
     {
-        DashOptions relationalOptions = new() { DatabasePath = Path.Combine(directory.Path, "configured.db") };
-        using ServiceProvider relationalProvider = BuildProvider(relationalOptions);
+        DashOptions options = new() { DatabasePath = Path.Combine(directory.Path, "configured.db") };
+        using ServiceProvider provider = BuildProvider(options);
 
-        SqliteRelationalStore relationalStore = relationalProvider.GetRequiredService<SqliteRelationalStore>();
+        SqliteRelationalStore store = provider.GetRequiredService<SqliteRelationalStore>();
 
-        Assert.Equal(Path.GetFullPath(relationalOptions.DatabasePath), relationalStore.DatabasePath);
-        Assert.Equal(SqliteRelationalStore.SchemaVersion, relationalStore.GetStoreState()?.SchemaVersion);
-        Assert.Equal(SettingsRepository.DefaultDashboardPort, relationalProvider.GetRequiredService<ISettingsRepository>().ReadSettings().DashboardPort);
-
-        DashOptions legacyOptions = new() { DatabasePath = Path.Combine(directory.Path, "legacy-configured.db") };
-        using ServiceProvider legacyProvider = BuildProvider(legacyOptions);
-        ICanonStoreRepository legacyStore = legacyProvider.GetRequiredService<ICanonStoreRepository>();
-
-        Assert.Equal(Path.GetFullPath(legacyOptions.DatabasePath), legacyStore.DatabasePath);
-        Assert.Equal("24", legacyStore.GetMetadata("schema_version"));
+        Assert.Equal(Path.GetFullPath(options.DatabasePath), store.DatabasePath);
+        Assert.Equal(SqliteRelationalStore.SchemaVersion, store.GetStoreState()?.SchemaVersion);
+        Assert.Equal(SettingsRepository.DefaultDashboardPort, provider.GetRequiredService<ISettingsRepository>().ReadSettings().DashboardPort);
     }
 
     [Fact]
@@ -130,6 +116,18 @@ public class ServiceCollectionExtensionsTests : IDisposable
             [new StoredModelCatalogVendorStatus("anthropic", "ok", "2026-11-19T12:00:00Z")],
             []));
         Assert.Equal("refreshed", provider.GetRequiredService<IPricingRepository>().GetModelCatalogSnapshot().GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public void AddDashDataServices_LeavesAPreRegisteredFileSystemInPlace()
+    {
+        StubRelationalStoreFileSystem fileSystem = new();
+        ServiceCollection services = new();
+        services.AddSingleton<IRelationalStoreFileSystem>(fileSystem);
+
+        using ServiceProvider provider = services.AddDashDataServices(new DashOptions { DatabasePath = Path.Combine(directory.Path, "fs-override.db") }).BuildServiceProvider();
+
+        Assert.Same(fileSystem, provider.GetRequiredService<IRelationalStoreFileSystem>());
     }
 
     [Fact]
@@ -180,5 +178,19 @@ public class ServiceCollectionExtensionsTests : IDisposable
         public IReadOnlyList<SourceRecordEnvelope> ReadCodexEnvelopes(string filePath, string? sourceKey = null, string? sourceRevision = null, string? importedAt = null, DateTimeOffset? windowStart = null, DateTimeOffset? windowEnd = null) => [];
 
         public IReadOnlyList<RefreshSourceInput> DiscoverLocalSources(DateTimeOffset? sinceUtc = null) => [];
+    }
+
+    /// <summary>Substitute filesystem seam, registered before the data services.</summary>
+    private class StubRelationalStoreFileSystem : IRelationalStoreFileSystem
+    {
+        public bool FileExists(string path) => false;
+
+        public void CreateDirectory(string path)
+        {
+        }
+
+        public void DeleteFile(string path)
+        {
+        }
     }
 }
