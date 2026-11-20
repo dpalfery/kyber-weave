@@ -104,6 +104,8 @@ print(json.dumps({
     "aiUnits": None if nano_aiu is None else round(nano_aiu / 1e9, 2),
     "tokens": dict(tokens) or None,
     "byAgent": agents or None,
+    # More than one plan review round means planning and the reviewer disagree: a tuning signal.
+    "planReviewRounds": sum(1 for n in agent_names.values() if n == "plan-reviewer"),
     "modelCalls": dict(model_calls),
     "toolCalls": sum(tool_calls.values()),
     "toolFailures": dict(tool_failures),
