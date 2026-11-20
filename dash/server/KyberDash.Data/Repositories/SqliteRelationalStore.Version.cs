@@ -102,7 +102,7 @@ public partial class SqliteRelationalStore
         fileSystem.DeleteFile(DatabasePath + "-wal");
         fileSystem.DeleteFile(DatabasePath + "-shm");
 
-        log?.Invoke(
+        log.Invoke(
             $"Deleted incompatible relational store at '{DatabasePath}' with schema version {IntSql(version)} " +
             $"(expected schema version {IntSql(SchemaVersion)}); removed canon.db, -wal, and -shm unread with no backup. " +
             $"Recreated relational schema version {IntSql(SchemaVersion)}; operator settings (operator_setting_*) were reset to defaults. " +
@@ -140,14 +140,14 @@ public partial class SqliteRelationalStore
         if (version <= 0)
         {
             string invalidMessage = $"Relational store at '{DatabasePath}' has invalid schema_version {IntSql(version)}.";
-            log?.Invoke(invalidMessage);
+            log.Invoke(invalidMessage);
             throw new InvalidOperationException(invalidMessage);
         }
 
         if (version > SchemaVersion)
         {
             string refusalMessage = FormatSchemaVersionRefusal(DatabasePath, version);
-            log?.Invoke(refusalMessage);
+            log.Invoke(refusalMessage);
             throw new InvalidOperationException(refusalMessage);
         }
     }
@@ -200,7 +200,7 @@ public partial class SqliteRelationalStore
             if (cols.Length == 0 || !int.TryParse(cols[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int version) || version <= 0)
             {
                 string message = $"Relational store at '{DatabasePath}' has invalid schema_version row '{line}'.";
-                log?.Invoke(message);
+                log.Invoke(message);
                 throw new InvalidOperationException(message);
             }
 
@@ -222,7 +222,7 @@ public partial class SqliteRelationalStore
             if (!int.TryParse(line.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int version) || version <= 0)
             {
                 string message = $"Relational store at '{DatabasePath}' has invalid legacy metadata schema_version '{line}'.";
-                log?.Invoke(message);
+                log.Invoke(message);
                 throw new InvalidOperationException(message);
             }
 
@@ -230,7 +230,7 @@ public partial class SqliteRelationalStore
         }
 
         string missingMessage = $"Relational store at '{DatabasePath}' has a legacy metadata table without a schema_version row.";
-        log?.Invoke(missingMessage);
+        log.Invoke(missingMessage);
         throw new InvalidOperationException(missingMessage);
     }
 
@@ -242,7 +242,7 @@ public partial class SqliteRelationalStore
         {
             string olderMessage =
                 $"Relational store at '{DatabasePath}' is at schema version {IntSql(version)} and requires migration to {IntSql(SchemaVersion)}.";
-            log?.Invoke(olderMessage);
+            log.Invoke(olderMessage);
             throw new InvalidOperationException(olderMessage);
         }
     }

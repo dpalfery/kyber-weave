@@ -32,12 +32,9 @@ public partial class CanonSessionProjectorEngine
     private const string DroidHarness = "droid";
     private const string DroidPluginSource = "kyberdash-factory-plugin";
     private const string SessionLabelKey = "kyber.session.label";
-    private const string RelationalSourceName = "relational";
-    private const string TimestampFormat = "yyyy-MM-dd'T'HH:mm:ss.fff'Z'";
     private const string NoMessageStructureReason = "no_message_structure";
     private const string NoToolDefinitionSchemaReason = "The source did not provide tool-definition schema data.";
     private const string DefaultContextLimitSource = "default";
-    private const int TypedDefinitionOrderBase = 1_000;
 
     private static readonly string[] AgentNameKeys = ["gen_ai.agent.name", "agent.name"];
     private static readonly string[] RepoKeys = ["vcs.repository.name", "repo"];
@@ -2474,7 +2471,7 @@ public partial class CanonSessionProjectorEngine
                 continue;
             }
 
-            List<CanonicalRecord> hydrated = [.. collectedByKey[key].Select(HydrateRecord)];
+            List<CanonicalRecord> hydrated = [.. collectedByKey[key].Select(CanonRecordHydration.Hydrate)];
             hydrated.Sort(CompareRecordTimestamps);
             Dictionary<string, List<CanonicalRecord>> grouped = GroupByCanonicalHarness(hydrated);
             if (grouped.Count == 0)
@@ -3038,157 +3035,6 @@ public partial class CanonSessionProjectorEngine
 
         return [.. byName.Select(static entry => new ToolDefinition(entry.Key, entry.Value.Server, entry.Value.Tokens, entry.Value.TurnsResident))];
     }
-
-    /// <summary>
-    /// Hydrates one relational <see cref="CollectedRecord"/> into the canonical analysis record:
-    /// typed token, part, tool-definition, agent, and declared-window columns become the token
-    /// usage, content parts, and minimal raw attributes the analysis pipeline reads.
-    /// </summary>
-    /// <param name="record">Relational record read through <see cref="IRelationalStoreReader"/>.</param>
-    /// <returns>Hydrated canonical record for the shared analysis pipeline.</returns>
-    private static CanonicalRecord HydrateRecord(CollectedRecord record)
-    {
-        ArgumentNullException.ThrowIfNull(record);
-
-        Dictionary<string, JsonElement> raw = new(StringComparer.Ordinal);
-        if (record.Signals.DeclaredContextWindow is > 0)
-        {
-            raw[CanonPricing.DeclaredContextLimitKey] = JsonSerializer.SerializeToElement(record.Signals.DeclaredContextWindow.Value);
-        }
-
-        if (!string.IsNullOrWhiteSpace(record.Model))
-        {
-            raw["gen_ai.response.model"] = JsonSerializer.SerializeToElement(record.Model);
-        }
-
-        if (!string.IsNullOrWhiteSpace(record.Agent?.AgentName))
-        {
-            raw["gen_ai.agent.name"] = JsonSerializer.SerializeToElement(record.Agent.AgentName);
-        }
-
-        long freshInput = 0;
-        long cacheRead = 0;
-        long cacheCreation = 0;
-        long output = 0;
-        long? reasoning = null;
-        foreach (CollectedTokenCount tokenCount in record.Tokens)
-        {
-            switch (tokenCount.TokenClass)
-            {
-                case TokenClass.Input:
-                    freshInput = tokenCount.Count;
-                    break;
-                case TokenClass.CacheRead:
-                    cacheRead = tokenCount.Count;
-                    break;
-                case TokenClass.CacheWrite:
-                    cacheCreation = tokenCount.Count;
-                    break;
-                case TokenClass.Output:
-                    output = tokenCount.Count;
-                    break;
-                case TokenClass.Reasoning:
-                    reasoning = tokenCount.Count;
-                    break;
-            }
-        }
-
-        List<ContentPart> parts = new(record.Parts.Count + record.ToolDefinitions.Count);
-        foreach (CollectedContentPart part in record.Parts)
-        {
-            parts.Add(new ContentPart(
-                Part: PartKeyOf(part.Bucket),
-                Text: part.PlainText ?? string.Empty,
-                Tokens: part.ReportedTokens ?? part.Withheld?.MeasuredTokens,
-                Server: part.Server,
-                Role: part.Role,
-                Order: part.Position,
-                Resident: part.Resident,
-                Truncated: part.OriginalUtf8BytesWhenTruncated.HasValue));
-        }
-
-        foreach (CollectedToolDefinition definition in record.ToolDefinitions)
-        {
-            parts.Add(new ContentPart(
-                Part: "tool_definitions",
-                Text: definition.ToolName,
-                Tokens: definition.SchemaTokens,
-                Server: definition.Server,
-                Order: TypedDefinitionOrderBase + definition.Position));
-        }
-
-        parts.Sort(static (left, right) => (left.Order ?? 0).CompareTo(right.Order ?? 0));
-
-        return new CanonicalRecord
-        {
-            SpanId = record.RecordId,
-            TraceId = record.TraceId,
-            ParentSpanId = record.ParentRecordId,
-            Source = RelationalSourceName,
-            Harness = record.HarnessId,
-            SessionId = record.SessionKey,
-            Name = record.Name,
-            Op = OpNameOf(record.Op),
-            Kind = KindNameOf(record.Kind),
-            Timestamp = record.StartedAt.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture),
-            DurationMs = record.ReportedDurationMs ?? 0,
-            Status = StatusNameOf(record.Status),
-            Tokens = new TokenUsage(
-                FreshInput: freshInput,
-                CacheRead: cacheRead,
-                CacheCreation: cacheCreation,
-                Output: output,
-                ReportedInput: record.ReportedInputTokens ?? 0,
-                ReportedOutput: record.ReportedOutputTokens ?? 0,
-                Reasoning: reasoning),
-            Content = CanonValidation.ContentFromParts(parts),
-            Parts = parts,
-            Cost = record.ReportedCost is null
-                ? new CostBlock(CostBasis.Unknown, CostStatus.NoRate)
-                : new CostBlock(CostBasis.Harness, CostStatus.Priced, record.ReportedCost.Amount, record.ReportedCost.Currency),
-            Measurability = null,
-            Raw = raw,
-        };
-    }
-
-    private static string OpNameOf(RecordOp op) => op switch
-    {
-        RecordOp.LlmInvoke => "llm.invoke",
-        RecordOp.ToolInvoke => "tool.invoke",
-        RecordOp.AgentInvoke => "agent.invoke",
-        _ => "unspecified",
-    };
-
-    private static string KindNameOf(RecordKind kind) => kind switch
-    {
-        RecordKind.Internal => "internal",
-        RecordKind.Server => "server",
-        RecordKind.Client => "client",
-        RecordKind.Producer => "producer",
-        RecordKind.Consumer => "consumer",
-        _ => "unspecified",
-    };
-
-    private static string StatusNameOf(RecordStatus status) => status switch
-    {
-        RecordStatus.Ok => "ok",
-        RecordStatus.Error => "error",
-        RecordStatus.Unspecified => "unspecified",
-        _ => "unset",
-    };
-
-    private static string PartKeyOf(ContentBucket bucket) => bucket switch
-    {
-        ContentBucket.SystemPrompt => "system_prompt",
-        ContentBucket.ToolDefinitions => "tool_definitions",
-        ContentBucket.ToolDefinition => "tool_definition",
-        ContentBucket.InstructionContext => "instruction_context",
-        ContentBucket.ConversationHistory => "conversation_history",
-        ContentBucket.ToolResultContent => "tool_result_content",
-        ContentBucket.UserPrompt => "user_prompt",
-        ContentBucket.UserMessage => "user_message",
-        _ => "reasoning",
-    };
 
     private sealed record DroidSessionSplit(
         List<CanonicalRecord> TurnRecords,

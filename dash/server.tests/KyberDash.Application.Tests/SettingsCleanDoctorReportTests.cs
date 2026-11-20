@@ -581,6 +581,43 @@ public static class SettingsCleanDoctorReportTests
             Assert.Equal(0, report.Records);
             Assert.Equal(0, report.Sessions);
             Assert.Empty(report.ObservedHarnesses);
+            Assert.Null(report.LastRebuild);
+        }
+
+        [Fact]
+        public void DiagnosticsSurfaceTheLastRebuildOfARebuiltStore()
+        {
+            using TempDirectory directory = new();
+            string databasePath = directory.Combine("rebuilt-doctor.db");
+            FakeRelationalStoreFileSystem fakeFs = new();
+            fakeFs.AddExistingFile(databasePath);
+            ScriptedRelationalStore store = new(
+                databasePath,
+                new SqliteCircuitBreaker(),
+                initialize: false,
+                fakeFs,
+                log: _ => { });
+            store.EnqueueResponse("store_state");
+            store.EnqueueResponse("24\t5");
+            store.EnqueueResponse(string.Empty);
+            store.EnqueueResponse(string.Empty);
+            store.EnsureInitialized();
+            store.EnqueueResponse("0");
+            store.EnqueueResponse(string.Empty);
+            store.EnqueueResponse(string.Empty);
+            Mock<ICircuitBreaker> breaker = new();
+            breaker.SetupGet(candidate => candidate.State).Returns(DashCircuitState.Closed);
+
+            DoctorDiagnosticsReport report = new DoctorService(store, store, breaker.Object).RunDiagnostics();
+
+            Assert.NotNull(report.LastRebuild);
+            Assert.Equal(Path.GetFullPath(databasePath), report.LastRebuild.DatabasePath);
+            Assert.Equal(24, report.LastRebuild.OldSchemaVersion);
+            Assert.Equal(SqliteRelationalStore.SchemaVersion, report.LastRebuild.NewSchemaVersion);
+            Assert.True(report.LastRebuild.SettingsResetToDefaults);
+            Assert.Equal(["OTLP-only", "unevidenced (zcode)"], report.LastRebuild.UnrecoverableHistoryClasses);
+            Assert.False(report.LastRebuild.ReingestTriggered);
+            Assert.True(store.HasPendingRebuildReingest);
         }
 
         [Fact]
@@ -629,6 +666,50 @@ public static class SettingsCleanDoctorReportTests
             AgentInstanceId: null,
             ToolDefinitions: [],
             Signals: new CollectedRecordSignals(ErrorMessage: null, EditFailures: null, CorrectionRule: null, DeclaredContextWindow: null));
+
+        /// <summary>Filesystem fake answering the D15 read-only store seam without touching disk.</summary>
+        private class FakeRelationalStoreFileSystem : IRelationalStoreFileSystem
+        {
+            private readonly HashSet<string> existingFiles = new(StringComparer.Ordinal);
+
+            public void AddExistingFile(string path) => existingFiles.Add(Path.GetFullPath(path));
+
+            public bool FileExists(string path) => existingFiles.Contains(Path.GetFullPath(path));
+
+            public void CreateDirectory(string path)
+            {
+            }
+
+            public void DeleteFile(string path) => existingFiles.Remove(Path.GetFullPath(path));
+        }
+
+        /// <summary>Scripted store answering queued SQLite responses so a rebuild runs without a real database.</summary>
+        private class ScriptedRelationalStore : SqliteRelationalStore
+        {
+            private readonly Queue<string> queuedResponses = new();
+
+            public ScriptedRelationalStore(
+                string databasePath,
+                ICircuitBreaker circuitBreaker,
+                bool initialize,
+                IRelationalStoreFileSystem fileSystem,
+                Action<string>? log = null)
+                : base(databasePath, circuitBreaker, initialize, fileSystem, onRebuiltFromOlderSchema: null, log)
+            {
+            }
+
+            public void EnqueueResponse(string response) => queuedResponses.Enqueue(response);
+
+            protected override string ExecuteSqliteCore(string sql)
+            {
+                if (!FileSystem.FileExists(DatabasePath))
+                {
+                    EnsureDatabaseDirectory();
+                }
+
+                return queuedResponses.Count > 0 ? queuedResponses.Dequeue() : string.Empty;
+            }
+        }
     }
 
     /// <summary>Report rendering over a mocked query service and the relational projection store.</summary>
@@ -806,6 +887,37 @@ public static class SettingsCleanDoctorReportTests
             using JobSchedulerService jobs = new(store, store, projection.Object, ingestion.Object, settings, serverState, Options(serverState));
             jobs.Start();
 
+            ingestion.Verify(service => service.RefreshHarnessSources(CanonRefreshEngine.DefaultHistoryWeeks), Times.Once);
+            Assert.False(store.HasPendingRebuildReingest);
+        }
+
+        [Fact]
+        public void StartLogsTheRebuildReingestItTriggers()
+        {
+            using TempDirectory directory = new();
+            SqliteRelationalStore store = new(directory.Combine("rebuild-logged.db"), new SqliteCircuitBreaker());
+            ArmPendingRebuildReingest(store);
+
+            Mock<ICanonProjectionService> projection = new();
+            Mock<ITranscriptIngestionService> ingestion = new();
+            FakeSettingsRepository settings = new();
+            FakeServerStateRepository serverState = new();
+            List<string> logs = [];
+
+            using JobSchedulerService jobs = new(
+                store,
+                store,
+                projection.Object,
+                ingestion.Object,
+                settings,
+                serverState,
+                Options(serverState),
+                logs.Add);
+            jobs.Start();
+
+            Assert.Single(logs);
+            Assert.Contains("rebuilt its relational store", logs[0], StringComparison.Ordinal);
+            Assert.Contains("import-history", logs[0], StringComparison.Ordinal);
             ingestion.Verify(service => service.RefreshHarnessSources(CanonRefreshEngine.DefaultHistoryWeeks), Times.Once);
             Assert.False(store.HasPendingRebuildReingest);
         }

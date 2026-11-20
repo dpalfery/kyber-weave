@@ -255,6 +255,48 @@ public class StoreRebuildTests
         Assert.False(Directory.Exists(rootDir));
     }
 
+    [Fact]
+    public void EnsureInitialized_RebuildLogsToConsoleErrorByDefaultPerD15()
+    {
+        string rootDir = NewNonExistentRoot();
+        string dbPath = Path.Combine(rootDir, "canon.db");
+        FakeRelationalStoreFileSystem fakeFs = CreateExistingDatabaseSet(dbPath);
+
+        ScriptedSqliteRelationalStore store = new(
+            dbPath,
+            new SqliteCircuitBreaker(),
+            initialize: false,
+            fakeFs);
+        store.EnqueueResponse("store_state");
+        store.EnqueueResponse("24\t5");
+        store.EnqueueResponse(string.Empty);
+        store.EnqueueResponse(string.Empty);
+
+        // D15: the store's diagnostic log defaults to Console.Error, so a destructive rebuild is
+        // never silent even when no host or test supplies a logger.
+        using StringWriter captured = new();
+        TextWriter originalError = Console.Error;
+        Console.SetError(captured);
+        try
+        {
+            store.EnsureInitialized();
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
+
+        Assert.True(store.RebuiltFromOlderSchema);
+        string logged = captured.ToString();
+        Assert.Contains("Deleted incompatible relational store", logged, StringComparison.Ordinal);
+        Assert.Contains("schema version 24", logged, StringComparison.Ordinal);
+        Assert.Contains(
+            $"schema version {SqliteRelationalStore.SchemaVersion.ToString(CultureInfo.InvariantCulture)}",
+            logged,
+            StringComparison.Ordinal);
+        Assert.Contains("re-ingest", logged, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static FakeRelationalStoreFileSystem CreateExistingDatabaseSet(string dbPath)
     {
         FakeRelationalStoreFileSystem fakeFs = new();

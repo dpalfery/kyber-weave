@@ -47,13 +47,7 @@ public class KyberBridgeEngine
     /// <summary>Session marker answered when a single session's projection read fails.</summary>
     private const string ProjectionFailedStatus = "PROJECTION_FAILED";
 
-    /// <summary>Source label recorded on hydrated records; the relational store keeps no raw source string.</summary>
-    private const string RelationalSourceName = "relational";
-
     private const string TimestampFormat = "yyyy-MM-dd'T'HH:mm:ss.fff'Z'";
-
-    /// <summary>Order base placing typed tool definitions after captured content parts.</summary>
-    private const int TypedDefinitionOrderBase = 1_000;
 
     private static readonly JsonSerializerOptions CamelCaseJsonOptions = new()
     {
@@ -405,7 +399,7 @@ public class KyberBridgeEngine
             return null;
         }
 
-        List<CanonicalRecord> records = [.. reader.Records(sessionKey: sessionId).Select(ToCanonicalRecord)];
+        List<CanonicalRecord> records = [.. reader.Records(sessionKey: sessionId).Select(CanonRecordHydration.Hydrate)];
         records.Sort(CompareRecords);
         IEnumerable<CanonicalRecord> filtered = records;
         if (!string.IsNullOrEmpty(spanId))
@@ -506,7 +500,7 @@ public class KyberBridgeEngine
             return null;
         }
 
-        CanonicalRecord hydrated = ToCanonicalRecord(record);
+        CanonicalRecord hydrated = CanonRecordHydration.Hydrate(record);
         return JsonSerializer.SerializeToElement(new
         {
             spanId = hydrated.SpanId,
@@ -1018,7 +1012,7 @@ public class KyberBridgeEngine
         List<object> trees = [];
         foreach (CollectedSession session in sessions)
         {
-            List<CanonicalRecord> records = [.. reader.Records(sessionKey: session.SessionKey).Select(ToCanonicalRecord)];
+            List<CanonicalRecord> records = [.. reader.Records(sessionKey: session.SessionKey).Select(CanonRecordHydration.Hydrate)];
             records.Sort(CompareRecords);
             TimelineNode timeline = CanonContextAnalysis.BuildTimeline(records);
             trees.Add(new { sessionId = session.SessionKey, harness = session.HarnessId, timeline });
@@ -2203,162 +2197,11 @@ public class KyberBridgeEngine
         return (source, "otlp");
     }
 
-    /// <summary>
-    /// Hydrates a typed collected record into the canonical record shape the analysis modules
-    /// (<see cref="CanonContextAnalysis.BuildTimeline"/> and the content reader) consume, naming
-    /// only the attributes the relational store actually kept.
-    /// </summary>
-    /// <param name="record">Typed collected record.</param>
-    /// <returns>Hydrated canonical record.</returns>
-    private static CanonicalRecord ToCanonicalRecord(CollectedRecord record)
-    {
-        ArgumentNullException.ThrowIfNull(record);
-
-        Dictionary<string, JsonElement> raw = new(StringComparer.Ordinal);
-        if (record.Signals.DeclaredContextWindow is > 0)
-        {
-            raw[CanonPricing.DeclaredContextLimitKey] = JsonSerializer.SerializeToElement(record.Signals.DeclaredContextWindow.Value);
-        }
-
-        if (!string.IsNullOrWhiteSpace(record.Model))
-        {
-            raw["gen_ai.response.model"] = JsonSerializer.SerializeToElement(record.Model);
-        }
-
-        if (!string.IsNullOrWhiteSpace(record.Agent?.AgentName))
-        {
-            raw["gen_ai.agent.name"] = JsonSerializer.SerializeToElement(record.Agent.AgentName);
-        }
-
-        long freshInput = 0;
-        long cacheRead = 0;
-        long cacheCreation = 0;
-        long output = 0;
-        long? reasoning = null;
-        foreach (CollectedTokenCount tokenCount in record.Tokens)
-        {
-            switch (tokenCount.TokenClass)
-            {
-                case TokenClass.Input:
-                    freshInput = tokenCount.Count;
-                    break;
-                case TokenClass.CacheRead:
-                    cacheRead = tokenCount.Count;
-                    break;
-                case TokenClass.CacheWrite:
-                    cacheCreation = tokenCount.Count;
-                    break;
-                case TokenClass.Output:
-                    output = tokenCount.Count;
-                    break;
-                case TokenClass.Reasoning:
-                    reasoning = tokenCount.Count;
-                    break;
-            }
-        }
-
-        List<ContentPart> parts = new(record.Parts.Count + record.ToolDefinitions.Count);
-        foreach (CollectedContentPart part in record.Parts)
-        {
-            parts.Add(new ContentPart(
-                Part: PartKeyOf(part.Bucket),
-                Text: part.PlainText ?? string.Empty,
-                Tokens: part.ReportedTokens ?? part.Withheld?.MeasuredTokens,
-                Server: part.Server,
-                Role: part.Role,
-                Order: part.Position,
-                Resident: part.Resident,
-                Truncated: part.OriginalUtf8BytesWhenTruncated.HasValue));
-        }
-
-        foreach (CollectedToolDefinition definition in record.ToolDefinitions)
-        {
-            parts.Add(new ContentPart(
-                Part: "tool_definitions",
-                Text: definition.ToolName,
-                Tokens: definition.SchemaTokens,
-                Server: definition.Server,
-                Order: TypedDefinitionOrderBase + definition.Position));
-        }
-
-        parts.Sort(static (left, right) => (left.Order ?? 0).CompareTo(right.Order ?? 0));
-
-        return new CanonicalRecord
-        {
-            SpanId = record.RecordId,
-            TraceId = record.TraceId,
-            ParentSpanId = record.ParentRecordId,
-            Source = RelationalSourceName,
-            Harness = record.HarnessId,
-            SessionId = record.SessionKey,
-            Name = record.Name,
-            Op = OpNameOf(record.Op),
-            Kind = KindNameOf(record.Kind),
-            Timestamp = record.StartedAt.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture),
-            DurationMs = record.ReportedDurationMs ?? 0,
-            Status = StatusNameOf(record.Status),
-            Tokens = new TokenUsage(
-                FreshInput: freshInput,
-                CacheRead: cacheRead,
-                CacheCreation: cacheCreation,
-                Output: output,
-                ReportedInput: record.ReportedInputTokens ?? 0,
-                ReportedOutput: record.ReportedOutputTokens ?? 0,
-                Reasoning: reasoning),
-            Content = CanonValidation.ContentFromParts(parts),
-            Parts = parts,
-            Cost = record.ReportedCost is null
-                ? new CostBlock(CostBasis.Unknown, CostStatus.NoRate)
-                : new CostBlock(CostBasis.Harness, CostStatus.Priced, record.ReportedCost.Amount, record.ReportedCost.Currency),
-            Measurability = null,
-            Raw = raw,
-        };
-    }
-
     private static int CompareRecords(CanonicalRecord left, CanonicalRecord right)
     {
         int byTimestamp = string.Compare(left.Timestamp, right.Timestamp, StringComparison.Ordinal);
         return byTimestamp != 0 ? byTimestamp : string.Compare(left.SpanId, right.SpanId, StringComparison.Ordinal);
     }
-
-    private static string OpNameOf(RecordOp op) => op switch
-    {
-        RecordOp.LlmInvoke => "llm.invoke",
-        RecordOp.ToolInvoke => "tool.invoke",
-        RecordOp.AgentInvoke => "agent.invoke",
-        _ => "unspecified",
-    };
-
-    private static string KindNameOf(RecordKind kind) => kind switch
-    {
-        RecordKind.Internal => "internal",
-        RecordKind.Server => "server",
-        RecordKind.Client => "client",
-        RecordKind.Producer => "producer",
-        RecordKind.Consumer => "consumer",
-        _ => "unspecified",
-    };
-
-    private static string StatusNameOf(RecordStatus status) => status switch
-    {
-        RecordStatus.Ok => "ok",
-        RecordStatus.Error => "error",
-        RecordStatus.Unspecified => "unspecified",
-        _ => "unset",
-    };
-
-    private static string PartKeyOf(ContentBucket bucket) => bucket switch
-    {
-        ContentBucket.SystemPrompt => "system_prompt",
-        ContentBucket.ToolDefinitions => "tool_definitions",
-        ContentBucket.ToolDefinition => "tool_definition",
-        ContentBucket.InstructionContext => "instruction_context",
-        ContentBucket.ConversationHistory => "conversation_history",
-        ContentBucket.ToolResultContent => "tool_result_content",
-        ContentBucket.UserPrompt => "user_prompt",
-        ContentBucket.UserMessage => "user_message",
-        _ => "reasoning",
-    };
 
     private static bool IsAncestorOrSelf(string candidateId, string parentId, Dictionary<string, SessionNode> byId)
     {

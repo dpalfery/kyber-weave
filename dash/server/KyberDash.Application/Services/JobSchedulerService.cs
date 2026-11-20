@@ -38,6 +38,7 @@ public class JobSchedulerService : IJobSchedulerService
     private readonly IServerStateRepository serverState;
     private readonly string stateDir;
     private readonly Func<DateTimeOffset> clock;
+    private readonly Action<string> log;
     private readonly Lock gate = new();
     private readonly Lock timerGate = new();
     private bool timerStopped;
@@ -61,6 +62,7 @@ public class JobSchedulerService : IJobSchedulerService
     /// <param name="settings">Settings repository supplying the pause switch and cadence.</param>
     /// <param name="serverState">Server-state repository owning the jobs lease and the state directory.</param>
     /// <param name="options">Composition options naming the state directory.</param>
+    /// <param name="log">Diagnostic logger; defaults to <c>Console.Error.WriteLine</c> when <see langword="null"/>.</param>
     public JobSchedulerService(
         IRelationalStoreReader reader,
         IOperationalStore operationalStore,
@@ -68,8 +70,9 @@ public class JobSchedulerService : IJobSchedulerService
         ITranscriptIngestionService ingestion,
         ISettingsRepository settings,
         IServerStateRepository serverState,
-        DashOptions options)
-        : this(reader, operationalStore, projection, ingestion, settings, serverState, options, clock: null)
+        DashOptions options,
+        Action<string>? log = null)
+        : this(reader, operationalStore, projection, ingestion, settings, serverState, options, clock: null, log)
     {
     }
 
@@ -84,6 +87,7 @@ public class JobSchedulerService : IJobSchedulerService
     /// <param name="serverState">Server-state repository owning the jobs lease and the state directory.</param>
     /// <param name="options">Composition options naming the state directory.</param>
     /// <param name="clock">Clock used for status timestamps; defaults to UTC now.</param>
+    /// <param name="log">Diagnostic logger; defaults to <c>Console.Error.WriteLine</c> when <see langword="null"/>.</param>
     public JobSchedulerService(
         IRelationalStoreReader reader,
         IOperationalStore operationalStore,
@@ -92,7 +96,8 @@ public class JobSchedulerService : IJobSchedulerService
         ISettingsRepository settings,
         IServerStateRepository serverState,
         DashOptions options,
-        Func<DateTimeOffset>? clock)
+        Func<DateTimeOffset>? clock,
+        Action<string>? log = null)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(operationalStore);
@@ -109,6 +114,7 @@ public class JobSchedulerService : IJobSchedulerService
         this.settings = settings;
         this.serverState = serverState;
         this.clock = clock ?? (() => DateTimeOffset.UtcNow);
+        this.log = log ?? Console.Error.WriteLine;
 
         string configured = !string.IsNullOrWhiteSpace(options.StateDirectory)
             ? options.StateDirectory
@@ -180,10 +186,30 @@ public class JobSchedulerService : IJobSchedulerService
 
         // A store rebuilt from an older schema asks for one full import once a host holds the lease.
         // The check runs outside the gate because RunJob re-enters it.
-        if (holdsLease && (operationalStore as SqliteRelationalStore)?.TryTakePendingRebuildReingest() == true)
+        if (holdsLease && (operationalStore as SqliteRelationalStore) is { } rebuiltStore
+            && rebuiltStore.TryTakePendingRebuildReingest())
         {
+            log(DescribeRebuildReingest(rebuiltStore.LastRebuildInfo));
             _ = RunJob(work: ImportHistory);
         }
+    }
+
+    /// <summary>
+    /// The support line written when a rebuilt store's pending re-ingest is consumed, naming the
+    /// rebuild that caused it so an operator who lost history can trace why one import ran.
+    /// </summary>
+    /// <param name="rebuild">The rebuild summary recorded by the store, when it is still available.</param>
+    /// <returns>The logged diagnostic line.</returns>
+    private static string DescribeRebuildReingest(StoreRebuildInfo? rebuild)
+    {
+        if (rebuild is not { } info)
+        {
+            return "KyberDash rebuilt its relational store from an older schema; running one full import-history pass.";
+        }
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"KyberDash rebuilt its relational store from schema version {info.OldSchemaVersion} to {info.NewSchemaVersion} at '{info.DatabasePath}'; running one full import-history pass.");
     }
 
     /// <inheritdoc />

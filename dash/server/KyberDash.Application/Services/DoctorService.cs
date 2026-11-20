@@ -12,6 +12,11 @@ namespace KyberDash.Application;
 /// </summary>
 /// <remarks>
 /// <para>
+/// The report surfaces <see cref="DoctorDiagnosticsReport.LastRebuild"/> so an operator whose
+/// history vanished sees that the store rebuilt itself from an older schema — and which history
+/// classes did not survive — instead of diagnosing an empty store from scratch.
+/// </para>
+/// <para>
 /// The circuit-breaker state is reported verbatim rather than translated into a boolean health
 /// verdict: an operator diagnosing a store whose breaker is half-open needs to see that word, and an
 /// <c>isolated</c> breaker is a deliberate maintenance state, not a failure this service can judge.
@@ -47,12 +52,25 @@ public class DoctorService : IDoctorService
     }
 
     /// <inheritdoc />
-    public DoctorDiagnosticsReport RunDiagnostics() => new(
-        DatabasePath: (operationalStore as SqliteRelationalStore)?.DatabasePath ?? string.Empty,
-        Records: reader.CountRecords(),
-        Sessions: reader.Sessions().Count,
-        ObservedHarnesses: reader.Harnesses(),
-        CircuitBreakerState: DescribeState(circuitBreaker.State));
+    public DoctorDiagnosticsReport RunDiagnostics()
+    {
+        SqliteRelationalStore? store = operationalStore as SqliteRelationalStore;
+        return new DoctorDiagnosticsReport(
+            DatabasePath: store?.DatabasePath ?? string.Empty,
+            Records: reader.CountRecords(),
+            Sessions: reader.Sessions().Count,
+            ObservedHarnesses: reader.Harnesses(),
+            CircuitBreakerState: DescribeState(circuitBreaker.State),
+            LastRebuild: store?.LastRebuildInfo is { } rebuild
+                ? new StoreRebuildSummary(
+                    rebuild.DatabasePath,
+                    rebuild.OldSchemaVersion,
+                    rebuild.NewSchemaVersion,
+                    rebuild.SettingsResetToDefaults,
+                    rebuild.UnrecoverableHistoryClasses,
+                    rebuild.ReingestTriggered)
+                : null);
+    }
 
     /// <inheritdoc />
     public void RunVacuum()

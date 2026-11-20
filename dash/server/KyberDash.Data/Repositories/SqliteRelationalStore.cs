@@ -54,7 +54,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     private readonly Lock writeGate = new();
     private readonly IRelationalStoreFileSystem fileSystem;
     private readonly Action? onRebuiltFromOlderSchema;
-    private readonly Action<string>? log;
+    private readonly Action<string> log;
     private bool initialized;
 
     /// <summary>
@@ -76,7 +76,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     /// <param name="circuitBreaker">Circuit breaker guarding every <c>sqlite3</c> invocation.</param>
     /// <param name="fileSystem">Filesystem seam; defaults to <see cref="PhysicalRelationalStoreFileSystem.Instance"/> when <see langword="null"/>.</param>
     /// <param name="onRebuiltFromOlderSchema">Optional callback invoked after an older schema is rebuilt.</param>
-    /// <param name="log">Optional diagnostic logger.</param>
+    /// <param name="log">Optional diagnostic logger; defaults to <c>Console.Error.WriteLine</c> when <see langword="null"/>.</param>
     public SqliteRelationalStore(
         string databasePath,
         ICircuitBreaker circuitBreaker,
@@ -103,7 +103,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     /// <param name="circuitBreaker">Circuit breaker guarding every <c>sqlite3</c> invocation.</param>
     /// <param name="fileSystem">Filesystem seam; defaults to <see cref="PhysicalRelationalStoreFileSystem.Instance"/> when <see langword="null"/>.</param>
     /// <param name="onRebuiltFromOlderSchema">Optional callback invoked after an older schema is rebuilt.</param>
-    /// <param name="log">Optional diagnostic logger.</param>
+    /// <param name="log">Optional diagnostic logger; defaults to <c>Console.Error.WriteLine</c> when <see langword="null"/>.</param>
     public SqliteRelationalStore(
         DashOptions options,
         ICircuitBreaker circuitBreaker,
@@ -135,7 +135,7 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     /// <param name="initialize">Whether to initialize schema and <c>store_state</c> immediately.</param>
     /// <param name="fileSystem">Filesystem seam; defaults to <see cref="PhysicalRelationalStoreFileSystem.Instance"/> when <see langword="null"/>.</param>
     /// <param name="onRebuiltFromOlderSchema">Optional callback invoked after an older schema is rebuilt.</param>
-    /// <param name="log">Optional diagnostic logger.</param>
+    /// <param name="log">Optional diagnostic logger; defaults to <c>Console.Error.WriteLine</c> when <see langword="null"/>.</param>
     protected SqliteRelationalStore(
         string databasePath,
         ICircuitBreaker circuitBreaker,
@@ -152,7 +152,10 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
     {
         this.fileSystem = fileSystem ?? PhysicalRelationalStoreFileSystem.Instance;
         this.onRebuiltFromOlderSchema = onRebuiltFromOlderSchema;
-        this.log = log;
+
+        // D15: the diagnostic log defaults to Console.Error so a destructive rebuild is never
+        // silent, even when a host or test wires the store without a logger.
+        this.log = log ?? Console.Error.WriteLine;
 
         if (initialize)
         {
