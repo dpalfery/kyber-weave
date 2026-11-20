@@ -63,6 +63,28 @@ public sealed class SessionStartIndexHookTests
         }
     }
 
+    /// <summary>
+    /// Antigravity reads a session-start entry as the hook itself. An entry that nests its hook under
+    /// <c>hooks</c>, as the tool events do, makes agy 1.5.12 reject the whole file ("command hook must
+    /// specify 'command'"), which disables every group in it, an Arbiter group included.
+    /// </summary>
+    [Fact]
+    public void AntigravitySessionStartEntryIsTheHookItself()
+    {
+        using JsonDocument doc = Load(".agents/hooks.json");
+        foreach (JsonProperty group in doc.RootElement.EnumerateObject())
+        {
+            if (!group.Value.TryGetProperty("SessionStart", out JsonElement entries))
+                continue;
+            foreach (JsonElement entry in entries.EnumerateArray())
+            {
+                Assert.False(entry.TryGetProperty("hooks", out _), $"group '{group.Name}': a SessionStart entry must not nest 'hooks'.");
+                Assert.Equal("command", entry.GetProperty("type").GetString());
+                Assert.False(string.IsNullOrWhiteSpace(entry.GetProperty("command").GetString()));
+            }
+        }
+    }
+
     /// <summary>The TypeScript hosts load the shim in-process, so it must spawn detached and survive a missing binary.</summary>
     [Theory]
     [MemberData(nameof(Shims))]

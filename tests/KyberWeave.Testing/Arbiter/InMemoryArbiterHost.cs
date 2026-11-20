@@ -71,6 +71,7 @@ internal sealed partial class InMemoryArbiterHost : IDisposable
         _ = services.AddSingleton<IArbiterHttpHandlers>(new FakeArbiterHttpHandlers(UnscriptedHttp));
         _ = services.AddSingleton<IFileStatReader>(new InMemoryFileStatReader(Files));
         _ = services.AddSingleton<IBoundedFileReader>(new InMemoryBoundedFileReader(Files));
+        _ = services.AddSingleton<IProjectDispatchHookProbe>(ProjectHooks);
         _configure?.Invoke(services);
         _ = services.AddArbiterHost();
     }
@@ -116,6 +117,9 @@ internal sealed partial class InMemoryArbiterHost : IDisposable
 
     /// <summary>Gets the operating-system credential store in memory.</summary>
     internal FakeCredentialStore Credentials { get; } = new();
+
+    /// <summary>Gets the project dispatch-hook probe the user-level hook asks whether the project covers a harness.</summary>
+    internal FakeProjectDispatchHookProbe ProjectHooks { get; } = new();
 
     /// <summary>Everything the commands wrote to <see cref="Console"/>.</summary>
     internal string Output => Console.Output;
