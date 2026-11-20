@@ -34,34 +34,22 @@ public sealed class PlannerDifficultyAndTechnologyContractTests
 
     [Theory]
     [MemberData(nameof(PlannerFiles))]
-    public void EveryPlannerGivesOneLineOfGuidanceForEachDifficulty(string relativePath)
+    public void EveryPlannerCarriesTheSharedDifficultyRubric(string relativePath)
     {
-        string text = Corpus.ReadText(relativePath);
+        // One rubric, products/kyber-squad/shared/difficulty-rubric.md, rates every task: the planners carry it word for
+        // word and the decision model's agreement check reads the same file, so the two judge by the same text.
+        string rubric = Collapse(Corpus.ReadText("products/kyber-squad/shared/difficulty-rubric.md").Split("-->", 2)[1]);
+        string text = Collapse(Corpus.ReadText(relativePath));
 
-        Assert.Contains("an existing pattern covers it", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("the plan leaves open", text, StringComparison.OrdinalIgnoreCase);
-        // Hard is for designing security or concurrency; applying an existing pattern of either is never hard.
-        // Hard is defined by one question, with the owner's anchors: retries, concurrency and partial failure across
-        // processes, or designing a security control.
-        Assert.Contains("could an ordinary test in one process prove the change right", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("transactional outbox", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("saga", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("idempotent", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("cache busting", text, StringComparison.OrdinalIgnoreCase);
-        // Medium carries the owner's anchors too, so a familiar but non-trivial pattern is not pushed up to hard.
-        Assert.Contains("cursor-based pagination", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("dead-letter queue", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("exponential backoff", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("never `hard`", text, StringComparison.OrdinalIgnoreCase);
-        // Size is not difficulty: a rating that rose with the file count sent routine work to the dearest tier.
+        Assert.Contains(rubric, text, StringComparison.Ordinal);
         Assert.Contains("does not by itself raise the rating", text, StringComparison.OrdinalIgnoreCase);
-        // The tie-break: guess low, because a failed attempt steps the task up. No exception sends a guess high: an
-        // authorization attribute copied from a neighbour sent a routine endpoint to the dearest tier.
         Assert.Contains("pick the lower", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("moves the task one tier up", text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("pick the higher", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("follows one existing pattern", text, StringComparison.OrdinalIgnoreCase);
     }
+
+    private static string Collapse(string text) =>
+        string.Join(' ', text.Split((char[])[' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries));
 
     [Theory]
     [MemberData(nameof(PlannerFiles))]
