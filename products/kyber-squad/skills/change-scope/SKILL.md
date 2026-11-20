@@ -4,7 +4,7 @@ description: "The one rule for what a change owns and what it leaves to a human:
 license: MIT
 metadata:
   author: dpalfery
-  version: 0.1.0
+  version: 0.2.0
 ---
 
 # Change Scope
@@ -13,6 +13,8 @@ metadata:
 
 - **Own what you touch.** If the change edits or extends code, it fixes the defects, the breaches of a documented rule or standard, the stale documents and the duplication in that code, whatever their origin. Never defer them, and never call them out of scope to keep the change small. A stale document is always this change's work.
 - **Build what was asked.** The change adds new infrastructure, a new test or CI strategy, a new architecture pattern, or a task the request does not need only when the request asks for it. The request is the owner's prompt, or the specification or plan the owner approved.
+- **What counts as new.** Concretely, these need the request to ask for them: a new database, catalog, schema, container or service, test-only or not; a new credential or secret; a new or changed CI or deployment step; a new test fixture strategy or test project; a new messaging event, endpoint or hub method that an operation the request does not name would raise. Rating a task `hard` because of one of these is a sign it is not asked for.
+- **Tests use what exists.** Tests use the repository's existing fixtures, seed data, test database and test setup. When shared data or a parallel writer makes an exact assertion unsafe, assert only what holds despite other writers (rows the test creates itself, found by a unique marker; a count that rose by at least what the test added), or leave the exact case as a `PR note:`; never build new test infrastructure to make it exact.
 - **Follow the patterns that exist.** A fix that departs from the repository's documented patterns without the request asking for it is itself a finding.
 
 ## The pull request notes

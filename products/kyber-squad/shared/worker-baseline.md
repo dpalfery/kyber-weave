@@ -15,7 +15,7 @@ as not tried. Name specific symbols or files in each `codegraph_explore` query r
 If the result says "Output too large … Saved to: <path>", `view` that file once and use it as your
 answer: do not re-run the query and do not fall back to grep.
 
-When you work in a linked worktree, pass projectPath=<absolute path of your worktree> to every kw-docs tool and to codegraph_explore; the answer's provenance root= must equal your worktree.
+When you work in a linked worktree, pass projectPath=<absolute path of your worktree> to every kw-docs tool and to codegraph_explore; the answer's provenance root= must equal your worktree. Start every shell command with `cd <absolute path of your worktree> && `: some harnesses report the canonical checkout as your directory, and the Arbiter refuses a step that would run there.
 
 **Plans are the conductor's.** Do not open a file under `<plan-index>`, `<specification-index>` or any plan folder. Your prompt is your whole brief: the dispatch hook has already put your task, the Host facts, the rules, the skills and the standard into its tagged parts (`<task>` to `<left-out>`), and the Host facts answer what the host `AGENTS.md` would: open that file only for what they do not. Only when your dispatch has no `<task>` part, and still shows a `TASK:` line, run `kyber-weave docs packet <task id> --agent <your agent name>` from the worktree your dispatch names; if that fails or falls short, report its output verbatim and stop.
 
