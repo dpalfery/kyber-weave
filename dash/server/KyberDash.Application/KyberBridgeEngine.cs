@@ -272,6 +272,7 @@ public class KyberBridgeEngine
             ["summary"] = aggregate is null ? null : BuildSessionSummary(aggregate),
             ["problems"] = aggregate?.Problems ?? Array.Empty<Problem>(),
             ["turns"] = turns.Select(ToTurnDto).ToList(),
+            ["tools"] = aggregate is null ? Array.Empty<object>() : ToolRows(aggregate),
         };
 
         if (projectionStatus is not null)
@@ -1516,6 +1517,26 @@ public class KyberBridgeEngine
 
     private static string? ResolveContextLimitSource(StoredSessionProjection projection) =>
         projection.Context?.ContextLimitSource ?? projection.ContextUnmeasurableReason;
+
+    private static List<Dictionary<string, object?>> ToolRows(SessionAggregateView aggregate)
+    {
+        List<Dictionary<string, object?>> rows = new(aggregate.Tools.Count);
+        foreach (ReadTimeSessionToolSummary tool in aggregate.Tools)
+        {
+            rows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["name"] = tool.Name,
+                ["server"] = tool.Server,
+                ["invocations"] = tool.Invocations,
+                ["schema_tokens"] = tool.SchemaTokens,
+                ["turns_resident"] = tool.TurnsResident,
+                ["total_schema_cost"] = tool.TotalSchemaCost,
+                ["invoked"] = tool.Invoked,
+            });
+        }
+
+        return rows;
+    }
 
     private static object BuildSessionSummary(SessionAggregateView aggregate) =>
         new

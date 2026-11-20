@@ -131,16 +131,39 @@ public class RelationalIngestTests
     }
 
     /// <summary>
-    /// An OpenCode replay keeps the session label stamped on the request. The request is not
-    /// always the first span, so a label that arrives later still names the session.
+    /// An OpenCode replay keeps the session label stamped on the request, each tool invocation,
+    /// and a harness-reported cost of zero through projection. Those are the figures the
+    /// harness-collection page renders for the consent-on session.
     /// </summary>
     [Fact]
-    public void IngestBatch_OpenCodeReplay_PreservesSessionLabel()
+    public void IngestBatch_OpenCodeReplay_PreservesLabelToolCallsAndZeroHarnessCost()
     {
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
         const string sessionId = "ses-replay";
 
+        OtlpSpan readTool = OpenCodeSpan(
+            spanId: "aaaaaaaaaaaaaaaa",
+            name: "opencode.tool",
+            attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["opencode.contract_version"] = Element("3"),
+                ["opencode.span.kind"] = Element("tool"),
+                ["opencode.session.id"] = Element(sessionId),
+                ["opencode.tool.name"] = Element("read"),
+                ["opencode.tool.call_id"] = Element("call-read"),
+            });
+        OtlpSpan skillTool = OpenCodeSpan(
+            spanId: "bbbbbbbbbbbbbbbb",
+            name: "opencode.tool",
+            attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["opencode.contract_version"] = Element("3"),
+                ["opencode.span.kind"] = Element("tool"),
+                ["opencode.session.id"] = Element(sessionId),
+                ["opencode.tool.name"] = Element("skill"),
+                ["opencode.tool.call_id"] = Element("call-skill"),
+            });
         OtlpSpan step = OpenCodeSpan(
             spanId: "cccccccccccccccc",
             name: "opencode.step",
@@ -151,6 +174,7 @@ public class RelationalIngestTests
                 ["opencode.session.id"] = Element(sessionId),
                 ["opencode.usage.input"] = Element(10),
                 ["opencode.usage.output"] = Element(2),
+                ["opencode.cost"] = Element(0.0),
             });
         OtlpSpan request = OpenCodeSpan(
             spanId: "dddddddddddddddd",
@@ -163,12 +187,39 @@ public class RelationalIngestTests
                 ["kyber.session.label"] = Element("kw-probe runA shared-service"),
             });
 
-        IngestOutcome outcome = CanonIngestPipeline.IngestBatch([step, request], store, store);
-        Assert.Equal(new IngestOutcome(2, 0, 0), outcome);
+        IngestOutcome outcome = CanonIngestPipeline.IngestBatch([readTool, skillTool, step, request], store, store);
+        Assert.Equal(4, outcome.Accepted);
+        Assert.Equal(0, outcome.Quarantined);
+        Assert.Equal(0, outcome.Rejected);
 
         ProjectionPassReport report = new CanonSessionProjectorEngine(store, store, store, pricing).ProjectIncremental();
         Assert.Equal(1, report.Built);
-        Assert.Equal("kw-probe runA shared-service", store.GetSessionProjection(sessionId)!.Label);
+
+        StoredSessionProjection? projection = store.GetSessionProjection(sessionId);
+        Assert.NotNull(projection);
+        Assert.Equal("kw-probe runA shared-service", projection.Label);
+
+        SessionAggregateView? aggregate = store.GetSessionAggregate(sessionId, pricing.LoadPricingTables());
+        Assert.NotNull(aggregate);
+        Assert.Equal(2, aggregate.ToolCalls);
+        Assert.NotNull(aggregate.ReportedCost);
+        Assert.Equal(CostBasis.Harness, aggregate.ReportedCost.Basis);
+        Assert.Equal(0d, aggregate.ReportedCost.Value);
+        Assert.Contains(aggregate.Tools, static tool => tool.Name == "read" && tool.Invocations == 1);
+        Assert.Contains(aggregate.Tools, static tool => tool.Name == "skill" && tool.Invocations == 1);
+
+        KyberBridgeEngine bridge = new(
+            store,
+            store,
+            store,
+            pricing,
+            new CanonSessionProjectorEngine(store, store, store, pricing),
+            new CanonRollupsEngine(store, store, pricing));
+        JsonElement detail = bridge.GetSessionDetail(sessionId)!.Value;
+        Assert.Contains(
+            detail.GetProperty("tools").EnumerateArray(),
+            static tool => tool.GetProperty("name").GetString() == "read" && tool.GetProperty("invocations").GetInt32() == 1);
+        Assert.Equal(0d, detail.GetProperty("summary").GetProperty("cost_reported").GetProperty("value").GetDouble());
     }
 
     /// <summary>

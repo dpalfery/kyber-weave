@@ -533,7 +533,7 @@ public static class CanonIngestPipeline
             Tokens: tokens,
             ReportedCost: cost,
             Parts: BuildCollectedParts(record),
-            Tool: null,
+            Tool: BuildToolCall(record),
             Agent: null,
             SkillsInvoked: [],
             AgentInstanceId: null,
@@ -541,6 +541,67 @@ public static class CanonIngestPipeline
             Signals: new CollectedRecordSignals(errorMessage, null, null, null),
             ReportedInputTokens: record.Tokens.ReportedInput >= 0 ? record.Tokens.ReportedInput : null,
             ReportedOutputTokens: record.Tokens.ReportedOutput >= 0 ? record.Tokens.ReportedOutput : null);
+    }
+
+    private static readonly string[] ToolNameKeys =
+    [
+        "gen_ai.tool.name",
+        "opencode.tool.name",
+        "factory.tool.name",
+        "tool.name",
+        "tool_name",
+    ];
+
+    private static readonly string[] ToolCallIdKeys =
+    [
+        "opencode.tool.call_id",
+        "gen_ai.tool.call.id",
+        "tool.call_id",
+    ];
+
+    /// <summary>
+    /// Builds the tool-call row for a <c>tool.invoke</c> record. The name is the harness attribute
+    /// when one is present, otherwise the span name the adapter already rewrote to the tool.
+    /// </summary>
+    private static CollectedToolCall? BuildToolCall(CanonicalRecord record)
+    {
+        if (!string.Equals(record.Op, "tool.invoke", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        string? toolName = ExtractSafeAttributeString(record.Raw, ToolNameKeys);
+        if (string.IsNullOrWhiteSpace(toolName)
+            && !string.IsNullOrWhiteSpace(record.Name)
+            && !string.Equals(record.Name, record.Op, StringComparison.Ordinal)
+            && !record.Name.EndsWith(".tool", StringComparison.Ordinal))
+        {
+            toolName = record.Name;
+        }
+
+        if (string.IsNullOrWhiteSpace(toolName))
+        {
+            return null;
+        }
+
+        string? callId = ExtractSafeAttributeString(record.Raw, ToolCallIdKeys);
+        bool? succeeded = record.Status switch
+        {
+            "ok" => true,
+            "error" => false,
+            _ => null,
+        };
+
+        return new CollectedToolCall(
+            CallId: string.IsNullOrWhiteSpace(callId) ? record.SpanId : callId,
+            ToolName: toolName,
+            McpServerName: null,
+            McpToolName: null,
+            Input: null,
+            Result: null,
+            Succeeded: succeeded,
+            Error: null,
+            ExitCode: null);
     }
 
     private static List<CollectedContentPart> BuildCollectedParts(CanonicalRecord record)
