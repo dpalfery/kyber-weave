@@ -43,7 +43,9 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
     private const string AntigravityCommandMarker = "kyber-weave-arbiter hook --harness antigravity";
     private const string FactoryCommandMarker = "kyber-weave-arbiter hook --harness factory";
     private const string CursorCommandMarker = "kyber-weave-arbiter hook --harness cursor";
-    private const string GlobalScopeFlag = "--scope global";
+    private const string ScopeFlag = "--scope";
+    private const string ScopeEqualsGlobal = "--scope=global";
+    private const string GlobalScopeValue = "global";
     private const string ShimMarker = "\"kyber-weave-arbiter\"";
     private const string ShimGlobalScopeMarker = "\"--scope\", \"global\"";
 
@@ -250,7 +252,30 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
 
     private static bool IsProjectHook(string command, string commandMarker) =>
         command.Contains(commandMarker, StringComparison.Ordinal)
-        && !command.Contains(GlobalScopeFlag, StringComparison.Ordinal);
+        && !HasGlobalScope(command);
+
+    // The hook host accepts a separate --scope token or --scope=global. Any whitespace between
+    // --scope and global is the same flag; a substring check misses the double-space form.
+    private static bool HasGlobalScope(string command)
+    {
+        string[] tokens = command.Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+        for (int index = 0; index < tokens.Length; index++)
+        {
+            if (tokens[index].Equals(ScopeEqualsGlobal, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (tokens[index].Equals(ScopeFlag, StringComparison.OrdinalIgnoreCase)
+                && index + 1 < tokens.Length
+                && tokens[index + 1].Equals(GlobalScopeValue, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static string? Text(JsonNode? node) =>
         node is JsonValue value && value.TryGetValue(out string? text) ? text : null;

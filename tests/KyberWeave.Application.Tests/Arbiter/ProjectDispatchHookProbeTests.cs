@@ -94,6 +94,31 @@ public sealed class ProjectDispatchHookProbeTests
         Assert.False(_probe.CoversHarness(Root, "antigravity"));
     }
 
+    [Theory]
+    [InlineData("kyber-weave-arbiter hook --harness antigravity --scope=global")]
+    [InlineData("kyber-weave-arbiter hook --harness antigravity --scope  global")]
+    public void Antigravity_WhenTheCommandIsAGlobalScopeSpelling_DoesNotCover(string command)
+    {
+        Write(
+            AntigravityHookPath,
+            $$"""
+            {
+              "kyber-arbiter": {
+                "PreToolUse": [
+                  {
+                    "matcher": "^invoke_subagent$",
+                    "hooks": [
+                      { "type": "command", "command": "{{command}}" }
+                    ]
+                  }
+                ]
+              }
+            }
+            """);
+
+        Assert.False(_probe.CoversHarness(Root, "antigravity"));
+    }
+
     [Fact]
     public void Antigravity_WhenTheFileIsAbsent_DoesNotCover() =>
         Assert.False(_probe.CoversHarness(Root, "antigravity"));
