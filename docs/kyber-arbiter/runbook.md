@@ -346,9 +346,10 @@ facts, in two places:
   denies a shell command that would run there: the call's working directory is inside the canonical checkout, or
   one of its `cd`, `pushd` or `git -C` steps moves into it, wherever in the command that step sits, and the reason
   names the canonical checkout and the run worktree. A working directory inside the canonical checkout does not
-  count when the command's first step is a `cd` or `pushd` into a directory, because the command never runs there:
-  the guard judges that first directory instead. A command whose first step is anything else is judged on its
-  working directory as before. A root agent (a person's own session) is never checked, and a
+  count when no step of the command runs there: a `cd` or `pushd` into a directory moves the shell before any
+  later step, and a `git` step that names its own directory with `-C` runs there, so the guard judges those
+  directories instead. A `cd` or `pushd` it cannot place (a bare `pushd`, `cd -`) and any other step do run in the
+  working directory, so it is judged on that. A root agent (a person's own session) is never checked, and a
   project that sets `arbiter.enabled: false` is never refused. The guard reads only the run records and the
   checkout's git files, starts no process, and allows anything it cannot read. A read through a view or grep tool
   carries no command and is never refused. A write a command makes to a path it does not name is left to the
