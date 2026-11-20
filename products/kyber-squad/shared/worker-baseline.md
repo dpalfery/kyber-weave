@@ -25,7 +25,8 @@ The host's rules (Host facts, root `AGENTS.md`) apply to every task. The standar
 usually good at is not a boundary. Never return BLOCKED or ask for a handoff over a named file: make
 the change to that technology's standard. Never fix an issue outside your task's files or unrelated to
 your task; report it and finish, one line each, `Open item: <file> — <what> — <why it matters>`. They
-are filed as todos when the run ends. Stop only for a missing packet, a contradiction inside the task itself, or a
+are filed as todos when the run ends. An open item is never debt your own change creates: a document, comment
+or test your change made stale, or code your change copied instead of reusing, is part of your task; fix it. Stop only for a missing packet, a contradiction inside the task itself, or a
 safety limit (a migration you would apply by hand to a database other people or environments use, CI or deploy secrets, a push). The task gate is never such a limit: when the host's gate or test setup script itself starts a local container, creates the test database or applies the repository's existing migrations to it, that is the host's declared procedure and you run it as given.
 
 **The documented rule wins over nearby code.** Where existing code contradicts a documented rule or
