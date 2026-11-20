@@ -2,7 +2,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using KyberWeave.Contracts.Repositories;
-using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter;
 
@@ -19,8 +18,9 @@ namespace KyberWeave.Core.Arbiter;
 /// entry's command runs the project-scope hook. The JSON files are read as JSONC: a comment or a trailing
 /// comma must not hide a hook the file declares. OpenCode keeps the plugin shim at
 /// <c>.opencode/plugins/kyber-arbiter.ts</c> and Pi at <c>.pi/extensions/kyber-arbiter.ts</c>. Every other
-/// harness reports true, which keeps today's deferral. Nothing here throws: an unreadable or malformed file is
-/// a project hook that was not proven.
+/// harness reports true, which keeps today's deferral. A missing or malformed file is not a project hook.
+/// A file that is present but cannot be read throws, so the hook host logs that failure instead of treating
+/// the file as absent.
 /// </remarks>
 /// <param name="files">The file system the project hook files are read through.</param>
 public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispatchHookProbe
@@ -94,130 +94,108 @@ public sealed class ProjectDispatchHookProbe(IFileSystem files) : IProjectDispat
 
     private bool AntigravityCovers(string projectRoot)
     {
-        try
+        if (ReadIfPresent(Path.Combine(projectRoot, AntigravityHookPath)) is not { } text
+            || ParseObject(text) is not { } root)
         {
-            string path = Path.Combine(projectRoot, AntigravityHookPath);
-            if (!files.FileExists(path))
-            {
-                return false;
-            }
-
-            if (JsonNode.Parse(files.ReadAllText(path), documentOptions: HookJsonOptions) is not JsonObject root)
-            {
-                return false;
-            }
-
-            foreach (KeyValuePair<string, JsonNode?> property in root)
-            {
-                if (property.Value is JsonObject group
-                    && EventMapCoversDispatchTool(group, AntigravityDispatchTool, AntigravityCommandMarker))
-                {
-                    return true;
-                }
-            }
-
             return false;
         }
-        catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
+
+        foreach (KeyValuePair<string, JsonNode?> property in root)
         {
-            // A file that cannot be read or parsed proves no project hook.
-            return false;
+            if (property.Value is JsonObject group
+                && EventMapCoversDispatchTool(group, AntigravityDispatchTool, AntigravityCommandMarker))
+            {
+                return true;
+            }
         }
+
+        return false;
     }
 
     private bool FactoryCovers(string projectRoot)
     {
-        try
+        if (ReadIfPresent(Path.Combine(projectRoot, FactoryHookPath)) is { } hooksText)
         {
-            string path = Path.Combine(projectRoot, FactoryHookPath);
-            if (files.FileExists(path))
-            {
-                return JsonNode.Parse(files.ReadAllText(path), documentOptions: HookJsonOptions) is JsonObject events
-                    && EventMapCoversDispatchTool(events, FactoryDispatchTool, FactoryCommandMarker);
-            }
-
-            // Factory reads the settings hooks key only when hooks.json is absent, so hooks.json wins.
-            string settingsPath = Path.Combine(projectRoot, FactorySettingsPath);
-            if (!files.FileExists(settingsPath))
-            {
-                return false;
-            }
-
-            return JsonNode.Parse(files.ReadAllText(settingsPath), documentOptions: HookJsonOptions) is JsonObject settings
-                && settings[FactorySettingsHooksKey] is JsonObject fallback
-                && EventMapCoversDispatchTool(fallback, FactoryDispatchTool, FactoryCommandMarker);
+            return ParseObject(hooksText) is { } events
+                && EventMapCoversDispatchTool(events, FactoryDispatchTool, FactoryCommandMarker);
         }
-        catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
-        {
-            // A file that cannot be read or parsed proves no project hook.
-            return false;
-        }
+
+        // Factory reads the settings hooks key only when hooks.json is absent, so hooks.json wins.
+        return ReadIfPresent(Path.Combine(projectRoot, FactorySettingsPath)) is { } settingsText
+            && ParseObject(settingsText) is { } settings
+            && settings[FactorySettingsHooksKey] is JsonObject fallback
+            && EventMapCoversDispatchTool(fallback, FactoryDispatchTool, FactoryCommandMarker);
     }
 
     private bool CursorCovers(string projectRoot)
     {
-        try
+        if (ReadIfPresent(Path.Combine(projectRoot, CursorHookPath)) is not { } text
+            || ParseObject(text) is not { } root
+            || root["hooks"] is not JsonObject hooks
+            || hooks["preToolUse"] is not JsonArray entries)
         {
-            string path = Path.Combine(projectRoot, CursorHookPath);
-            if (!files.FileExists(path))
-            {
-                return false;
-            }
-
-            if (JsonNode.Parse(files.ReadAllText(path), documentOptions: HookJsonOptions) is not JsonObject root
-                || root["hooks"] is not JsonObject hooks
-                || hooks["preToolUse"] is not JsonArray entries)
-            {
-                return false;
-            }
-
-            foreach (JsonNode? node in entries)
-            {
-                if (node is not JsonObject entry)
-                {
-                    continue;
-                }
-
-                // Cursor treats an entry with no matcher as matching every tool.
-                string? matcher = Text(entry["matcher"]);
-                if (matcher is not null && !Matches(CursorDispatchTool, matcher))
-                {
-                    continue;
-                }
-
-                if (Text(entry["command"]) is { } command && IsProjectHook(command, CursorCommandMarker))
-                {
-                    return true;
-                }
-            }
-
             return false;
         }
-        catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
+
+        foreach (JsonNode? node in entries)
         {
-            // A file that cannot be read or parsed proves no project hook.
-            return false;
+            if (node is not JsonObject entry)
+            {
+                continue;
+            }
+
+            // Cursor treats an entry with no matcher as matching every tool.
+            string? matcher = Text(entry["matcher"]);
+            if (matcher is not null && !Matches(CursorDispatchTool, matcher))
+            {
+                continue;
+            }
+
+            if (Text(entry["command"]) is { } command && IsProjectHook(command, CursorCommandMarker))
+            {
+                return true;
+            }
         }
+
+        return false;
     }
 
     private bool ShimCovers(string projectRoot, string relativePath)
     {
+        if (ReadIfPresent(Path.Combine(projectRoot, relativePath)) is not { } shim)
+        {
+            return false;
+        }
+
+        return shim.Contains(ShimMarker, StringComparison.Ordinal)
+            && !shim.Contains(ShimGlobalScopeMarker, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The file's text, or null when the path is absent. A present file that cannot be read is not absent:
+    /// the exception propagates so the hook host logs it.
+    /// </summary>
+    private string? ReadIfPresent(string path)
+    {
         try
         {
-            string path = Path.Combine(projectRoot, relativePath);
-            if (!files.FileExists(path))
-            {
-                return false;
-            }
-
-            string shim = files.ReadAllText(path);
-            return shim.Contains(ShimMarker, StringComparison.Ordinal)
-                && !shim.Contains(ShimGlobalScopeMarker, StringComparison.Ordinal);
+            return files.ReadAllText(path);
         }
-        catch (Exception ex) when (FileFailure.Is(ex))
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
-            // A shim that cannot be read proves no project hook.
-            return false;
+            return null;
+        }
+    }
+
+    private static JsonObject? ParseObject(string text)
+    {
+        try
+        {
+            return JsonNode.Parse(text, documentOptions: HookJsonOptions) as JsonObject;
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 

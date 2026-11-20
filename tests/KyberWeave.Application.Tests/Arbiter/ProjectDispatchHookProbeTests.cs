@@ -99,6 +99,19 @@ public sealed class ProjectDispatchHookProbeTests
         Assert.False(_probe.CoversHarness(Root, "antigravity"));
 
     [Fact]
+    public void Antigravity_WhenTheFileCannotBeRead_SurfacesTheFailure()
+    {
+        Write(AntigravityHookPath, "{}");
+        _files.FailWhen(
+            operation => operation.Name == nameof(InMemoryFileSystem.ReadAllText),
+            new UnauthorizedAccessException("denied"));
+
+        UnauthorizedAccessException ex = Assert.Throws<UnauthorizedAccessException>(
+            () => _probe.CoversHarness(Root, "antigravity"));
+        Assert.Equal("denied", ex.Message);
+    }
+
+    [Fact]
     public void Antigravity_WhenTheFileIsNotJson_DoesNotCover()
     {
         Write(AntigravityHookPath, "not json");

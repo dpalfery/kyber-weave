@@ -21,5 +21,8 @@ public interface IProjectDispatchHookProbe
     /// True when the project's own hook covers the harness, so the user-level hook defers to it. A harness this
     /// probe does not read returns true: those harnesses keep their existing deferral.
     /// </returns>
+    /// <exception cref="IOException">A hook file is present but could not be read.</exception>
+    /// <exception cref="UnauthorizedAccessException">A hook file is present but the process may not read it.</exception>
+    /// <exception cref="System.Security.SecurityException">A hook file is present but a security check refused the read.</exception>
     bool CoversHarness(string projectRoot, string harnessToken);
 }
