@@ -1102,6 +1102,64 @@ In `WarpMapper`, pending exchanges and exchanges without a parseable start times
 | `WarpParseProblem` | `LineNumber` | mapped | `ingest_problem_location.location`, `ingest_problem.problem_key` | 1-based row index within its section, or 0 for document-level failures. |
 | `WarpParseProblem` | `Code` | mapped | `ingest_problem.code` | Diagnostic code for the failure. |
 | `WarpParseProblem` | `Message` | mapped | `ingest_problem.message` | Sanitized parse failure message. |
+## kilo
+
+Kilo ingests two native surfaces via `KiloMapper` into `CollectedBatch`: `kilo-shared-runtime` (a JSON export of the `kilo.db` `message`/`part` rows read by `dash/src/synth/readers/kilo.ts`, parsed into `KiloSharedRuntimeDocument` over `KiloMessageRow`/`KiloPartRow`; opening SQLite files in unit tests is forbidden under OD-9, so the offline seam parses exported rows directly) and `kilo-vscode-legacy` (the legacy `tasks/<id>/ui_messages.json` tree read by `createClineParser`, parsed into `KiloLegacyDocument` over `KiloLegacyRequest`). Units attributed to `kilo` or `kilo-code` normalize to `kilo-shared-runtime`. Each token-bearing assistant/model message emits one `llm.invoke` record keyed on the Kilo message id (zero-token router messages yield no record), with child `tool.invoke` spans for `callID`-bearing tool parts and child `agent.invoke` spans for `task` tool parts carrying `subagent_type`; `skill` tool parts feed `record_skill_invocation`. The last tool output stays the session's tool-result evidence until a newer one lands. kilo.db stores neither the runtime system prompt nor tool-definition schemas and the offline seam has no capture store, so those buckets stay absent; session-row token rollups and table-cost estimation are discovery/projection concerns with no offline input.
+
+| Native type | Property | Disposition | Target mapping | Reason |
+|---|---|---|---|---|
+| `KiloSharedRuntimeDocument` | `SessionId` | mapped | `session.session_id`, `session.native_session_id`, `record_session_link.session_key` | Root session id the export was lifted for; falls back to the source locator when absent. |
+| `KiloSharedRuntimeDocument` | `Title` | mapped | `session_title.title` | Session title from the `session` row carried on the export. |
+| `KiloSharedRuntimeDocument` | `Messages` | mapped | nested: KiloMessageRow | Message rows in export order, re-sorted by `time_created, id` at map time. |
+| `KiloSharedRuntimeDocument` | `Parts` | mapped | nested: KiloPartRow | Part rows grouped by message at map time. |
+| `KiloSharedRuntimeDocument` | `ParseProblems` | mapped | nested: KiloParseProblem | Document-level parse diagnostics emitted as `ingest_problem` rows. |
+| `KiloMessageRow` | `Id` | mapped | `record.span_id` | Native message id seeding deterministic `synth:kilo-shared-runtime:<session>:<messageId>` record identity (id pairing). |
+| `KiloMessageRow` | `SessionId` | mapped | `record_session_link.session_key` | Owning session (possibly a child session) linking the turn under the root session key. |
+| `KiloMessageRow` | `TimeCreatedMs` | mapped | `record.started_at_utc` | Row creation instant converted to ISO-8601 UTC; null or non-positive values fall back to the source timestamp. |
+| `KiloMessageRow` | `Data` | mapped | nested: KiloMessageData | Parsed message payload. |
+| `KiloPartRow` | `Id` | dropped | — | Part row key orders parts within a message only; tool identity persists via `CallId` on `tool_call.call_id`. |
+| `KiloPartRow` | `MessageId` | dropped | — | Transient message-to-part grouping key consumed during mapping; session linkage persists via `record_session_link.session_key`. |
+| `KiloPartRow` | `TimeCreatedMs` | mapped | `record.started_at_utc`, `record_end.ended_at_utc`, `record_reported_duration.duration_ms` | Part instant anchoring the child tool span start and, with `EndTimeMs`, the reported duration. |
+| `KiloPartRow` | `Data` | mapped | nested: KiloPartData | Parsed part payload. |
+| `KiloMessageData` | `Role` | dropped | — | Role selects the user-accumulation versus turn-emission path; persisted role names live per part on `content_part_role.role_name`. |
+| `KiloMessageData` | `ModelId` | mapped | `record_model.model_id` | Raw `modelID` qualified by `ProviderId` into `ModelText`. |
+| `KiloMessageData` | `ProviderId` | mapped | `record_model.model_id` | Raw `providerID` qualifying `ModelId` (exact-prefix rule, never a substring test). |
+| `KiloMessageData` | `ModelText` | mapped | `record_model.model_id`, `record.name` | Resolved model (`modelID`, `model` string, or `{id, providerID}` pair; `unknown` fallback) naming the record `kilo:<model>`. |
+| `KiloMessageData` | `Cost` | mapped | `record_reported_cost.amount`, `record_reported_cost.currency` | Harness-reported `cost` persisted with `USD` currency only when positive and finite. |
+| `KiloMessageData` | `InputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Exclusive input tokens (`token_class = input`, `direction = input`) across the `tokens`, `usage`, and flat spellings. |
+| `KiloMessageData` | `OutputTokens` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Output tokens (`token_class = output`, `direction = output`) across the `tokens`, `usage`, and flat spellings. |
+| `KiloMessageData` | `ReasoningTokens` | mapped | `record_token_count.token_count` | Reasoning tokens (`token_class = reasoning`); reported totals carry input/output directions only. |
+| `KiloMessageData` | `CacheReadTokens` | mapped | `record_token_count.token_count` | Cache-read tokens (`token_class = cache_read`); reported totals carry input/output directions only. |
+| `KiloMessageData` | `CacheWriteTokens` | mapped | `record_token_count.token_count` | Cache-write tokens (`token_class = cache_write`); reported totals carry input/output directions only. |
+| `KiloMessageData` | `ParentId` | dropped | — | Capture-store join key (`parentID`); with no offline capture store the `system_prompt` and `tool_definitions` buckets stay absent. |
+| `KiloPartData` | `PartType` | mapped | `content_part.bucket` | Selects `conversation_history` (`text`/`markdown`), `tool_result_content` (`tool`), or no bucket. |
+| `KiloPartData` | `Text` | mapped | `content_part.bucket`, `content_part.position`, `content_part_text.part_text`, `content_part_withheld.utf8_bytes`, `content_part_role.role_name`, `content_part_truncation.original_utf8_bytes` | Non-blank `text`/`markdown` payloads measured through `ToolContentMeasurer` into `conversation_history`. |
+| `KiloPartData` | `Tool` | mapped | `tool_call.tool_name`, `record.name` | Raw store tool spelling on the child `tool.invoke` span (`unknown` fallback when absent). |
+| `KiloPartData` | `CallId` | mapped | `tool_call.call_id`, `record.span_id` | Durable tool call identity; parts without one contribute output as content but emit no `tool.invoke` record. |
+| `KiloPartData` | `InputJson` | mapped | `tool_call_input_size.utf8_bytes`, `tool_call_input_size.characters`, `tool_call_input_fingerprint.sha256`, `tool_call_input_text.text`, `tool_call_input_truncation.original_utf8_bytes` | Raw `state.input` JSON measured through `ToolContentMeasurer` with SHA-256 fingerprint. |
+| `KiloPartData` | `OutputText` | mapped | `tool_call_result_size.utf8_bytes`, `tool_call_result_size.characters`, `tool_call_result_text.text`, `tool_call_result_truncation.original_utf8_bytes`, `content_part.bucket`, `content_part.position`, `content_part_text.part_text` | Recorded output (or error fallback) measured into the tool result and the turn's `tool_result_content` evidence. |
+| `KiloPartData` | `ErrorText` | mapped | `tool_call_error.message` | String `state.error` persisted on errored tool calls alongside the carried output text. |
+| `KiloPartData` | `Status` | mapped | `tool_call_outcome.succeeded`, `record.status` | `error` maps to `succeeded = 0` and `error`; any other status maps to `ok` with `succeeded = 1` when output is present. |
+| `KiloPartData` | `StartTimeMs` | mapped | `record.started_at_utc` | Tool start instant anchoring the child span when the part timestamp is absent. |
+| `KiloPartData` | `EndTimeMs` | mapped | `record_end.ended_at_utc`, `record_reported_duration.duration_ms` | Tool end instant; with `StartTimeMs` it derives the reported duration (`end >= start` only). |
+| `KiloPartData` | `SkillName` | mapped | `record_skill_invocation.skill_name` | Invoked skill name from `state.input.name` on `skill` tool parts. |
+| `KiloPartData` | `SubagentType` | mapped | `agent_invocation.agent_name`, `agent_invocation_spawn.spawning_record_id` | Subagent type from `state.input.subagent_type` on `task` tool parts, emitted as a child `agent.invoke` record. |
+| `KiloLegacyDocument` | `TaskId` | mapped | `session.session_id`, `session.native_session_id`, `record_session_link.session_key` | Task directory name owning `ui_messages.json`, falling back to the file stem. |
+| `KiloLegacyDocument` | `UserMessage` | mapped | `content_part.bucket`, `content_part.position`, `content_part_text.part_text`, `content_part_withheld.utf8_bytes`, `content_part_role.role_name`, `content_part_truncation.original_utf8_bytes` | Leading user prompt (500 chars) attached to the first record's `conversation_history` (`role = user`). |
+| `KiloLegacyDocument` | `Model` | mapped | `record_model.model_id` | Companion-history `<model>` tag (last `/` segment) or the shared cline-family fallback. |
+| `KiloLegacyDocument` | `Workspace` | mapped | `session_workspace.working_directory` | Workspace directory from the companion-history `Current Workspace Directory` marker. |
+| `KiloLegacyDocument` | `Requests` | mapped | nested: KiloLegacyRequest | Usage-bearing `api_req_started` entries in file order. |
+| `KiloLegacyDocument` | `ParseProblems` | mapped | nested: KiloParseProblem | Document-level parse diagnostics emitted as `ingest_problem` rows. |
+| `KiloLegacyRequest` | `Index` | mapped | `record.span_id` | Filtered entry position seeding `synth:kilo-vscode-legacy:<task>:req-<index>` record identity. |
+| `KiloLegacyRequest` | `TokensIn` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Input tokens (`token_class = input`, `direction = input`). |
+| `KiloLegacyRequest` | `TokensOut` | mapped | `record_token_count.token_count`, `record_reported_total.token_count` | Output tokens (`token_class = output`, `direction = output`). |
+| `KiloLegacyRequest` | `CacheReads` | mapped | `record_token_count.token_count` | Cache-read tokens (`token_class = cache_read`); reported totals carry input/output directions only. |
+| `KiloLegacyRequest` | `CacheWrites` | mapped | `record_token_count.token_count` | Cache-write tokens (`token_class = cache_write`); reported totals carry input/output directions only. |
+| `KiloLegacyRequest` | `Cost` | mapped | `record_reported_cost.amount`, `record_reported_cost.currency` | Reported `cost` persisted with `USD` currency only when positive and finite. |
+| `KiloLegacyRequest` | `Timestamp` | mapped | `record.started_at_utc` | Entry `ts` normalized to ISO-8601 UTC, falling back to the source timestamp. |
+| `KiloParseProblem` | `LineNumber` | mapped | `ingest_problem_location.location`, `ingest_problem.problem_key` | Always 0 for document-level failures, appended to problem key and locator when positive. |
+| `KiloParseProblem` | `Code` | mapped | `ingest_problem.code` | Diagnostic code (`KILO_MALFORMED_LINE`). |
+| `KiloParseProblem` | `Message` | mapped | `ingest_problem.message` | Sanitized parse failure message. |
 
 ## zcode
 
