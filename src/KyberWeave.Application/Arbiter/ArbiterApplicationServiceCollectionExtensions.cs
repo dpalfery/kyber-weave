@@ -57,6 +57,7 @@ public static class ArbiterApplicationServiceCollectionExtensions
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IClaudeHookCoverage>(sp => new Core.Arbiter.ClaudeHookCoverage(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<IProjectDispatchHookProbe>(sp => new Core.Arbiter.ProjectDispatchHookProbe(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IPlanRootResolver>(sp => new Core.Arbiter.Plans.PlanRootResolver(
             sp.GetRequiredService<IGitRepositoryFacts>(),
             sp.GetRequiredService<IPlanFileResolver>(),
@@ -117,6 +118,7 @@ public static class ArbiterApplicationServiceCollectionExtensions
                 sp.GetRequiredService<IArbiterHostConfig>(),
                 sp.GetRequiredService<IDispatchClaimStore>(),
                 sp.GetRequiredService<IClaudeHookCoverage>(),
+                sp.GetRequiredService<IProjectDispatchHookProbe>(),
                 sp.GetRequiredService<IProcessEnvironment>(),
                 ids,
                 () => ids.NewSortableId(clock.GetUtcNow()),

@@ -42,6 +42,9 @@ internal sealed class ArbiterGlobalHookScenario : IDisposable
     /// <summary>Gets the home directory the user-level hook is told.</summary>
     public string Home => Project.HomeDirectory;
 
+    /// <summary>Gets the project-hook probe the user-level hook asks whether the project covers a harness.</summary>
+    public FakeProjectDispatchHookProbe ProjectHooks => Project.ProjectHooks;
+
     /// <summary>Gets the project root of the twin host.</summary>
     public string TwinRoot => Twin.RepoRoot;
 
