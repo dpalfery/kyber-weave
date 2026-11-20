@@ -477,6 +477,8 @@ OpenCode V2 capture (`kyberdash-opencode`) posts contract-3 OTLP spans (`OtlpSpa
 
 Copilot ingests over OTLP through `CopilotAdapter` (`OtlpSpan`, `OtlpLog`, `OtlpMetric`, `RawSpan`), converting inclusive input counts into disjoint token classes and marking unexported `reasoning` or absent content buckets as unmeasurable.
 
+For OTLP span mapping into static collector DTOs, `CopilotSpanMapper` maps `gen_ai.tool.name` spans to `tool.invoke` `CollectedRecord`s, `invoke_agent` operation or span-name spans to `agent.invoke` `CollectedRecord`s, and usage-bearing spans to `llm.invoke` `CollectedRecord`s with the cache-inclusive token convention, using the canonical session key order (`gen_ai.session.id`, `session.id`, then `copilot_chat.chat_session_id`), and drops unmapped attributes without storing `raw`.
+
 | Native type | Property | Disposition | Target mapping | Reason |
 |---|---|---|---|---|
 | `OtlpSpan` | `TraceId` | mapped | `record_trace.trace_id` | Trace correlation identifier. |
