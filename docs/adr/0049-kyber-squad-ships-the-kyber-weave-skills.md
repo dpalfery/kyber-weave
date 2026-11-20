@@ -26,7 +26,7 @@ Kyber-Squad". The sentence is removed in place, and this record holds the decisi
 
 ## Context
 
-Kyber-Squad deploys its 28 skills from `products/kyber-squad/skills/` into each selected
+Kyber-Squad deploys its skills from `products/kyber-squad/skills/` into each selected
 harness's user-level folder. A global install therefore puts `task-gate` in `~/.claude/skills/`.
 
 Six Kyber-Weave skills live in `.apm/skills/`: `kyber-docs-authoring`,

@@ -193,7 +193,7 @@ apply, which the changed-file list already showed.
     `critical` (failed blocking gates and critical findings), `major` (also majors), `minor` (also
     minors; the default) and `nitpick` (also nitpicks, for a team that wants everything fixed). It
     decides what is fixed, never what blocks: strictness, `major-count-blocks` and `min-confidence`
-    decide that. Findings below the level are listed in the pull request and filed as todos; a nitpick
+    decide that. Findings below the level are listed in the pull request notes; a nitpick
     below it appears only in the review report. The key it replaced, `minor-findings`, never shipped;
     a config that still carries it reads `follow-up` as `major` and `fix` as `minor`. Before this
     amendment an approval got exactly one fix round and the owner had not yet chosen.

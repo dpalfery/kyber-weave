@@ -1,10 +1,10 @@
 ---
 id: adr/0083-a-documented-rule-outranks-the-code-around-it-and-out-of-scope-work-becomes-todos
-title: A documented rule outranks the code around it, and out-of-scope work becomes todos
+title: A documented rule outranks the code around it, and out-of-scope work becomes a pull request note
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-14
+last-reviewed: 2026-11-20
 component: DocGraph
 decided-by: []
 supersedes: []
@@ -14,7 +14,7 @@ code-refs:
   - RunEvidence
 ---
 
-# ADR 0083: A documented rule outranks the code around it, and out-of-scope work becomes todos
+# ADR 0083: A documented rule outranks the code around it, and out-of-scope work becomes a pull request note
 
 ## Status
 
@@ -23,7 +23,7 @@ Accepted, 2026-11-14. Decided by the owner after a live run. It amends the worke
 section to the pull request format of [ADR 0081](0081-the-conductor-delivers-a-run-through-one-docs-tool.md).
 The review-flow side (severity of placement, the fix round) is
 [ADR 0079](0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch.md), decisions 11 to 13.
-Another branch may claim number 0083 first; if so, renumber this record and its links.
+Amended 2026-11-20 by the owner: agents never start a todo. Out-of-scope work, pre-existing debt and risks whose fix the request did not ask for become pull request notes; a todo is written only when a human says so. The `change-scope` skill is the one home of the scope rule.
 
 ## Context
 
@@ -39,28 +39,28 @@ and hides it from the person reviewing the change.
 1. **The documented rule wins over the code around it.** New work follows a documented rule or
    standard even where existing code contradicts it, and never copies the divergent pattern. The
    architect records each divergence (the rule and the offending paths) and decides by the size of
-   the debt: fix it in this plan when it is small and in the same files, otherwise write a todo and
-   link it from the plan. Workers follow the rule and report the conflict as an open item.
+   the debt: fix it in this plan when it is small and in the same files, otherwise list it as a
+   `PR note:` line under the plan's out-of-scope boundaries. Workers follow the rule and report the conflict as an open item.
 2. **Existing code that breaks a documented rule is a finding.** When the change touches or extends
    that area and the code carries no comment marking it as a deliberate exception, a lens reports it
    (`major` for structural placement). One in a file the change did not touch is marked
    `Pre-existing debt:`, and the reviewer drops it as `pre-existing debt`, so it blocks nothing and
-   becomes a todo. A commented exception is respected.
-3. **Out-of-scope work is filed, not done.** A worker never fixes an issue outside its task's files or
+   becomes a pull request note. A commented exception is respected.
+3. **Out-of-scope work is noted, not done.** A worker never fixes an issue outside its task's files or
    unrelated to its task: it reports one `Open item:` line each. It still fixes every diagnostic its
-   own change introduced. The conductor keeps a follow-up collection of open items and the verdict's
-   `follow-up:` lines; when the review loop ends it sends `architect`, the role that already writes
-   todos, one `FINDINGS: follow-up` dispatch that files them as deduplicated todos.
-4. **The pull request lists them and the user decides.** The deliver tool commits the pending todo
-   folder and lists every todo the branch added under a new "Follow-up work filed" section of the one
-   pull request format (the skill asset and the tool's hash-checked copy). The final report ends by
-   asking whether to start a fresh run, on a new branch with a new pull request, for them; in
-   autonomous mode too, the conductor asks and never starts it itself.
+   own change introduced. The conductor keeps a notes collection of open items, the plan's `PR note:` lines and the
+   verdict's `follow-up:` and `open:` lines, deduplicated; an open item naming a stale document goes to
+   `docs-dev` and is fixed in the run. No agent files a todo on its own: a todo is written only when a
+   human says so.
+4. **The pull request lists them and the user decides.** The conductor passes the notes collection
+   in the deliver tool's `notes`, and the final report lists it. A todo a human asked for is still
+   committed by the deliver tool and listed under "Follow-up work filed". The conductor never starts
+   another run for the notes; the owner decides.
 
 ## Consequences
 
 - A run no longer grows to fix whatever its workers happened to see; the debt it found is visible in
-  the pull request and waits for the user's go-ahead.
+  the pull request notes and waits for the user's go-ahead.
 - The deliver tool no longer refuses uncommitted files under the todo folder; it commits them.
-- A todo written during planning is committed by the deliver tool with the run, not by the finalize
-  tool, which commits only the plan, its index row and its task file.
+- A todo a human asked for during planning is committed by the deliver tool with the run, not by the
+  finalize tool, which commits only the plan, its index row and its task file.

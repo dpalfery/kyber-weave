@@ -15,7 +15,7 @@ Accepted, 2026-11-08.
 
 ## Context
 
-Kyber-Weave ships 24 canonical agents and 28 skills to 13 harness targets and into two package
+Kyber-Weave ships its canonical agents and skills to 13 harness targets and into two package
 formats. Every one of those files is re-sent on every round trip of every run, in every repository
 that deploys it. A fact about one repository written into that tree is therefore paid for by all of
 them, and it is wrong in all of them but one.

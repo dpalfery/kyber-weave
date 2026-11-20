@@ -185,7 +185,7 @@ The reviewer applies the checks no individual lens can, because no lens sees the
   never pre-existing debt, whatever its origin.
 - **Mark a pull request note.** A finding the pull request's description should carry rather than a
   code change is dropped with `--drop <id>=pr note: <one line>`; it blocks nothing and the verdict
-  lists it as follow-up work, exactly as pre-existing debt is.
+  lists it for the pull request notes, as it does pre-existing debt.
 - **Check the claims against the gates.** Any assertion that something was built, tested, or
   verified, with no corresponding gate result, is a `critical` finding, written in
   `reviewer.md` in the seats folder.
