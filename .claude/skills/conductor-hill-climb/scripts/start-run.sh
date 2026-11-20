@@ -43,8 +43,14 @@ ARGS=(-p "$(cat "$RUN/prompt.md")" --agent conductor --model "$HC_CONDUCTOR_MODE
 START=$(date +%s)
 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.pushurl GIT_CONFIG_VALUE_0=blocked-by-hill-climb \
     timeout --signal=TERM --kill-after=60 "${HC_RUN_TIMEOUT_MIN}m" copilot "${ARGS[@]}" \
-    >"$RUN/session.jsonl" 2>"$RUN/stderr.log"
-CODE=$?
+    2>>"$RUN/stderr.log" | cat >>"$RUN/session.jsonl"
+CODE=${PIPESTATUS[0]}
+# Run 4 ended with both redirected files emptied; Copilot also keeps the stream in its session store, so fall back
+# to that copy when ours is empty.
+if [ ! -s "$RUN/session.jsonl" ]; then
+    SID=$(ls -td "$HOME"/.copilot/session-state/*/ 2>/dev/null | while read -r d; do grep -qF "$(head -c 60 "$RUN/prompt.md" | tail -c 40)" "$d/events.jsonl" 2>/dev/null && { echo "$d"; break; }; done)
+    [ -n "$SID" ] && cp "$SID/events.jsonl" "$RUN/session.jsonl" && hc_log "session stream was empty; copied Copilot's own copy from $SID"
+fi
 END=$(date +%s)
 OUTCOME=finished; [ "$CODE" -ne 0 ] && OUTCOME=crashed; [ "$CODE" -eq 124 ] || [ "$CODE" -eq 137 ] && OUTCOME=timeout
 printf '{"exitCode": %d, "outcome": "%s", "seconds": %d, "ended": "%s"}\n' "$CODE" "$OUTCOME" $((END - START)) "$(date -u +%FT%TZ)" >"$RUN/exit.json"
