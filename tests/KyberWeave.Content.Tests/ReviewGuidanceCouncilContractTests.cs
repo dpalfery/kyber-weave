@@ -69,7 +69,7 @@ public sealed class ReviewGuidanceCouncilContractTests
     [InlineData("typescript")]
     [InlineData("rust")]
     [InlineData("tauri")]
-    [InlineData("go")]
+    [InlineData("react")]
     public void ATechnologyDeclaresItsCodingStandardInTheRegistryAndItsChecklistExists(string technology)
     {
         string agentsText = ConfigRegBlock(Corpus.ReadText("AGENTS.md"));

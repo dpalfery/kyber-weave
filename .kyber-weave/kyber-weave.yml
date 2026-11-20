@@ -22,9 +22,9 @@ ontology:
     - csharp
     - test
     - typescript
+    - react
     - rust
     - tauri
-    - go
     - github-actions
 
 # This repository has answered the onboarding step, so `run start` does not stop to offer it.
