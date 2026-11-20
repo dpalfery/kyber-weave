@@ -348,13 +348,16 @@ facts, in two places:
   names the canonical checkout and the run worktree and tells the agent to start the command with
   `cd <run worktree> && `, so every step runs in the worktree. A working directory inside the canonical
   checkout does not count when no step of the command runs there: a `cd` or `pushd` into a directory moves the
-  shell before any later step, and a `git` step that names its own directory with `-C` runs there, so the guard
-  judges those directories instead. A `cd` or `pushd` it cannot place (a bare `pushd`, `cd -`) and any other
-  step do run in the working directory, so it is judged on that. A root agent (a person's own session) is never
-  checked, and a project that sets `arbiter.enabled: false` is never refused. The guard reads only the run records
-  and the checkout's git files, starts no process, and allows anything it cannot read. A read through a view or grep tool
-  carries no command and is never refused. A write a command makes to a path it does not name is left to the
-  return check below.
+  shell before every later step, and a `git` step that names its own directory with `-C` runs there, so the guard
+  judges those directories instead. The walk follows the shell: a `cd` inside `( … )` ends at the closing `)`, so
+  a later step still runs in the outer directory; a pipeline stage starts in the directory the pipeline did, so a
+  `cd` in an earlier stage does not carry; and a step after `||` may run in the directory the previous step
+  started in, because the left side may have failed. A `cd` or `pushd` it cannot place (a bare `pushd`, `cd -`, or
+  a variable such as `$WT`) and any other step do run in the working directory, so it is judged on that. A root
+  agent (a person's own session) is never checked, and a project that sets `arbiter.enabled: false` is never
+  refused. The guard reads only the run records and the checkout's git files, starts no process, and allows
+  anything it cannot read. A read through a view or grep tool carries no command and is never refused. A write a
+  command makes to a path it does not name is left to the return check below.
 - **On the return, everywhere returns are observed.** Before a dispatch to a specialist that writes files,
   the hook snapshots the canonical checkout; on the return it diffs it. Paths that changed are listed in the
   escalation's evidence, and `NEXT` asks for the same specialist to move them into the run worktree and

@@ -157,10 +157,12 @@ public sealed class WorkerGuard(
     /// repository's canonical checkout: its working directory is inside one, or it steps into one with a
     /// <c>cd</c>, <c>pushd</c> or <c>git -C</c>. The working directory is judged only when some step of the command
     /// actually runs in it (<see cref="WorkerGuardRules.RunsInWorkingDirectory" />): a <c>cd</c> or <c>pushd</c> that
-    /// names a directory moves the shell, and a <c>git</c> step with <c>-C</c> names its own, so neither runs there.
-    /// Every directory the command enters is judged either way. Only a live run of that repository that works in a
-    /// worktree of its own makes it stray, and a read through a view or grep tool carries no command, so it is never
-    /// judged here. The configuration is read only when there is something to refuse.
+    /// names a placeable directory moves the shell, a <c>git</c> step with <c>-C</c> names its own, a subshell's
+    /// change ends at its closing <c>)</c>, a pipeline stage starts where the pipeline did, and a step after
+    /// <c>||</c> may start where the previous step did. Every directory the command enters is judged either way.
+    /// Only a live run of that repository that works in a worktree of its own makes it stray, and a read through a
+    /// view or grep tool carries no command, so it is never judged here. The configuration is read only when there
+    /// is something to refuse.
     /// </summary>
     private string? ShellCheckoutRefusal(WorkerGuardRules.ToolCall call, string home)
     {
