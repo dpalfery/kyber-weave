@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-15
+last-reviewed: 2026-11-20
 decided-by:
   - adr/0084-kyberdash-csharp-engine
   - adr/0020-kyberdash-one-time-fork
@@ -29,6 +29,7 @@ decided-by:
   - adr/0038-post-run-transcript-sync-subagent-hierarchy
   - adr/0041-kyberdash-retire-legacy-context-schema-routes
   - adr/0043-kyberdash-analysis-mcp-read-only-boundary
+  - adr/0090-kyberdash-relational-store
 keywords:
   - dashboard
   - codeburn
@@ -74,10 +75,7 @@ code-refs:
   - CanonRefreshEngine
   - CleanService
   - SettingsService
-  - CanonStoreRepository
-  - CanonSchema
   - CanonDbPath
-  - CanonCompressedColumn
   - CachedTokenCounter
   - FactoryHookMapper
   - FactoryKeys
@@ -90,11 +88,9 @@ code-refs:
   - IsSupportedDroidEnvelope
   - MapHookEvent
   - DecodeMetricsJson
-  - CommitSourceUnit
   - PurgeExpiredContent
   - ProjectIncremental
   - DedupeTwinTurns
-  - PutSession
   - GetSessionSummary
   - AnalyzeContext
   - DetectFindings

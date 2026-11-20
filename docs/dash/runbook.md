@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-11-15
+last-reviewed: 2026-11-20
 decided-by:
   - adr/0084-kyberdash-csharp-engine
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
@@ -17,7 +17,6 @@ code-refs:
   - DashEndpointMappings
   - KyberBridgeEngine
   - JobSchedulerService
-  - CanonStoreRepository
   - CanonRefreshEngine
   - CanonSessionProjectorEngine
   - CanonPricing

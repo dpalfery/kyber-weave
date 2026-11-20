@@ -4,12 +4,11 @@ title: KyberDash collector, canonical store, and engine ported to C# on .NET 10
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-15
+last-reviewed: 2026-11-20
 component: KyberDash
 decided-by: []
 supersedes: []
 code-refs:
-  - CanonStoreRepository
   - CanonSessionProjectorEngine
   - OtlpCollector
   - BoundedIngestWriter
