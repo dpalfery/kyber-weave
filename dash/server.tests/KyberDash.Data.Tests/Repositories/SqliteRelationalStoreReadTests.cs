@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Core.Resilience;
@@ -16,8 +17,7 @@ namespace KyberDash.Data.Tests.Repositories;
 /// <summary>
 /// Parity and fail-closed read tests for <see cref="SqliteRelationalStore"/> (<c>SqliteRelationalStore.Reader.cs</c>)
 /// verifying identical behavior against <see cref="InMemoryRelationalStore"/> across empty, unfiltered, and
-/// filtered queries via the <see cref="KyberDash.Core.Repositories.BaseSqliteRepository.ExecuteSqliteCore"/> seam,
-/// as well as <see cref="IModelPricingLookup"/> and <see cref="PricingTables"/> overloads on <see cref="CanonPricing"/>.
+/// filtered queries via the <see cref="KyberDash.Core.Repositories.BaseSqliteRepository.ExecuteSqliteCore"/> seam.
 /// </summary>
 public class SqliteRelationalStoreReadTests : IDisposable
 {
@@ -30,84 +30,6 @@ public class SqliteRelationalStoreReadTests : IDisposable
     {
         directory.Dispose();
         GC.SuppressFinalize(this);
-    }
-
-    /// <summary>
-    /// Verifies <see cref="IModelPricingLookup"/> and <see cref="PricingTables"/> overloads on
-    /// <see cref="CanonPricing"/> resolve custom tables, custom namespaces, interface dispatch,
-    /// fallback defaults, and harness-cost preservation.
-    /// </summary>
-    [Fact]
-    public void CanonPricingOverloads_SupportCustomPricingTablesAndIModelPricingLookup()
-    {
-        ModelCosts customRates = new(
-            InputCostPerToken: 0.000002,
-            OutputCostPerToken: 0.000010,
-            CacheWriteCostPerToken: 0.0000025,
-            CacheReadCostPerToken: 0.0000002,
-            WebSearchCostPerRequest: 0.01,
-            FastMultiplier: 1.0,
-            CacheWriteCostIsExplicit: true);
-
-        Dictionary<string, ModelCosts> cache = new(StringComparer.Ordinal)
-        {
-            ["custom-sonnet"] = customRates,
-        };
-        Dictionary<string, ModelCosts> lowercase = new(StringComparer.Ordinal)
-        {
-            ["custom-sonnet"] = customRates,
-        };
-        HashSet<string> namespaces = new(StringComparer.Ordinal)
-        {
-            "mygw",
-        };
-        PricingTables customTables = new(cache, ["custom-sonnet"], lowercase, namespaces);
-        IModelPricingLookup customLookup = new OverridePricingLookup("override-model", customRates);
-
-        Assert.Equal(customRates, CanonPricing.GetModelCosts("mygw/custom-sonnet", customTables));
-        Assert.Equal(customRates, CanonPricing.GetModelCosts("mygw/custom-sonnet", (IModelPricingLookup)customTables));
-        Assert.Null(CanonPricing.GetModelCosts("claude-sonnet-4-5", customTables));
-
-        Assert.Equal(customRates, CanonPricing.GetModelCosts("override-model", customLookup));
-        Assert.Null(CanonPricing.GetModelCosts("custom-sonnet", customLookup));
-        Assert.NotNull(CanonPricing.GetModelCosts("claude-sonnet-4-5", (IModelPricingLookup?)null));
-
-        double directCost = CanonPricing.CalculateCost(
-            "override-model",
-            inputTokens: 1000,
-            outputTokens: 500,
-            cacheCreationTokens: 0,
-            cacheReadTokens: 0,
-            webSearchRequests: 0,
-            fast: false,
-            oneHourCacheCreationTokens: 0,
-            pricing: customLookup);
-        Assert.Equal((1000 * 0.000002) + (500 * 0.000010), directCost, precision: 12);
-
-        TokenUsage usage = new(
-            FreshInput: 1000,
-            CacheRead: 200,
-            CacheCreation: 100,
-            Output: 500,
-            ReportedInput: 1300,
-            ReportedOutput: 500);
-
-        CostBlock publishedViaTables = CanonPricing.PricePublishedTurn(usage, "mygw/custom-sonnet", "claude-code", customTables);
-        Assert.Equal(CostBasis.Published, publishedViaTables.Basis);
-        Assert.Equal(CostStatus.Priced, publishedViaTables.Status);
-        Assert.Equal("USD", publishedViaTables.Currency);
-        double expectedTurnCost = (1000 * 0.000002) + (500 * 0.000010) + (100 * 0.0000025) + (200 * 0.0000002);
-        Assert.NotNull(publishedViaTables.Value);
-        Assert.Equal(expectedTurnCost, publishedViaTables.Value.Value, precision: 12);
-
-        CostBlock noRateTurn = CanonPricing.PriceTurn(usage, "claude-sonnet-4-5", "claude-code", customLookup);
-        Assert.Equal(CostBasis.Published, noRateTurn.Basis);
-        Assert.Equal(CostStatus.NoRate, noRateTurn.Status);
-        Assert.Null(noRateTurn.Value);
-
-        CostBlock harnessExisting = new(CostBasis.Harness, CostStatus.Priced, 0.42, "USD");
-        CostBlock preserved = CanonPricing.PriceTurn(usage, "override-model", "claude-code", customLookup, harnessExisting);
-        Assert.Equal(harnessExisting, preserved);
     }
 
     /// <summary>
@@ -1073,4 +995,163 @@ public class SqliteRelationalStoreReadTests : IDisposable
         public ModelCosts? GetModelCosts(string model) =>
             string.Equals(model, modelId, StringComparison.Ordinal) ? costs : null;
     }
+}
+
+/// <summary>
+/// <see cref="IModelPricingLookup"/> and <see cref="PricingTables"/> overloads on
+/// <see cref="CanonPricing"/>: custom tables, custom namespaces, interface dispatch, the
+/// process-wide fallback, and harness-cost preservation.
+/// </summary>
+/// <remarks>
+/// The null-lookup overload reads the process-wide pricing tables, which parallel test classes
+/// reconfigure per test — and <c>GetTables</c> evaluates a provider under its gate, so a
+/// mid-read install swaps the tables being served. The collection therefore runs while no other
+/// collection does, and the test installs tables it owns for the fallback assertion and restores
+/// the provider it found.
+/// </remarks>
+[Collection(CanonPricingStatics.Name)]
+public class CanonPricingOverloadsTests
+{
+    /// <summary>
+    /// Verifies <see cref="IModelPricingLookup"/> and <see cref="PricingTables"/> overloads on
+    /// <see cref="CanonPricing"/> resolve custom tables, custom namespaces, interface dispatch,
+    /// fallback defaults, and harness-cost preservation.
+    /// </summary>
+    [Fact]
+    public void CanonPricingOverloads_SupportCustomPricingTablesAndIModelPricingLookup()
+    {
+        ModelCosts customRates = new(
+            InputCostPerToken: 0.000002,
+            OutputCostPerToken: 0.000010,
+            CacheWriteCostPerToken: 0.0000025,
+            CacheReadCostPerToken: 0.0000002,
+            WebSearchCostPerRequest: 0.01,
+            FastMultiplier: 1.0,
+            CacheWriteCostIsExplicit: true);
+
+        Dictionary<string, ModelCosts> cache = new(StringComparer.Ordinal)
+        {
+            ["custom-sonnet"] = customRates,
+        };
+        Dictionary<string, ModelCosts> lowercase = new(StringComparer.Ordinal)
+        {
+            ["custom-sonnet"] = customRates,
+        };
+        HashSet<string> namespaces = new(StringComparer.Ordinal)
+        {
+            "mygw",
+        };
+        PricingTables customTables = new(cache, ["custom-sonnet"], lowercase, namespaces);
+        IModelPricingLookup customLookup = new OverridePricingLookup("override-model", customRates);
+
+        Assert.Equal(customRates, CanonPricing.GetModelCosts("mygw/custom-sonnet", customTables));
+        Assert.Equal(customRates, CanonPricing.GetModelCosts("mygw/custom-sonnet", (IModelPricingLookup)customTables));
+        Assert.Null(CanonPricing.GetModelCosts("claude-sonnet-4-5", customTables));
+
+        Assert.Equal(customRates, CanonPricing.GetModelCosts("override-model", customLookup));
+        Assert.Null(CanonPricing.GetModelCosts("custom-sonnet", customLookup));
+
+        // The null-lookup overload falls back to the process-wide pricing tables, which no other
+        // test in this class configures: this test installs its own tables for that one dispatch
+        // and restores the provider it found. ConfigurePricingProvider rejects null, so the
+        // restore writes the private provider fields back directly.
+        (Func<PricingTables>? Provider, PricingTables? Cache) saved = SaveProcessPricingProvider();
+        try
+        {
+            CanonPricing.ConfigurePricingProvider(() => new PricingTables(
+                new Dictionary<string, ModelCosts>(StringComparer.Ordinal) { ["claude-sonnet-4-5"] = customRates },
+                ["claude-sonnet-4-5"],
+                new Dictionary<string, ModelCosts>(StringComparer.Ordinal) { ["claude-sonnet-4-5"] = customRates },
+                new HashSet<string>(StringComparer.Ordinal)));
+            Assert.NotNull(CanonPricing.GetModelCosts("claude-sonnet-4-5", (IModelPricingLookup?)null));
+        }
+        finally
+        {
+            RestoreProcessPricingProvider(saved);
+        }
+
+        double directCost = CanonPricing.CalculateCost(
+            "override-model",
+            inputTokens: 1000,
+            outputTokens: 500,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            webSearchRequests: 0,
+            fast: false,
+            oneHourCacheCreationTokens: 0,
+            pricing: customLookup);
+        Assert.Equal((1000 * 0.000002) + (500 * 0.000010), directCost, precision: 12);
+
+        TokenUsage usage = new(
+            FreshInput: 1000,
+            CacheRead: 200,
+            CacheCreation: 100,
+            Output: 500,
+            ReportedInput: 1300,
+            ReportedOutput: 500);
+
+        CostBlock publishedViaTables = CanonPricing.PricePublishedTurn(usage, "mygw/custom-sonnet", "claude-code", customTables);
+        Assert.Equal(CostBasis.Published, publishedViaTables.Basis);
+        Assert.Equal(CostStatus.Priced, publishedViaTables.Status);
+        Assert.Equal("USD", publishedViaTables.Currency);
+        double expectedTurnCost = (1000 * 0.000002) + (500 * 0.000010) + (100 * 0.0000025) + (200 * 0.0000002);
+        Assert.NotNull(publishedViaTables.Value);
+        Assert.Equal(expectedTurnCost, publishedViaTables.Value.Value, precision: 12);
+
+        CostBlock noRateTurn = CanonPricing.PriceTurn(usage, "claude-sonnet-4-5", "claude-code", customLookup);
+        Assert.Equal(CostBasis.Published, noRateTurn.Basis);
+        Assert.Equal(CostStatus.NoRate, noRateTurn.Status);
+        Assert.Null(noRateTurn.Value);
+
+        CostBlock harnessExisting = new(CostBasis.Harness, CostStatus.Priced, 0.42, "USD");
+        CostBlock preserved = CanonPricing.PriceTurn(usage, "override-model", "claude-code", customLookup, harnessExisting);
+        Assert.Equal(harnessExisting, preserved);
+    }
+
+    /// <summary>
+    /// Reads the process-wide pricing provider state so this class can install its own tables
+    /// and put the process back exactly as it found it.
+    /// </summary>
+    /// <returns>The configured provider and cached tables, either possibly <see langword="null"/>.</returns>
+    private static (Func<PricingTables>? Provider, PricingTables? Cache) SaveProcessPricingProvider() => (
+        PricingField("_pricingProvider").GetValue(null) as Func<PricingTables>,
+        PricingField("_cachedTables").GetValue(null) as PricingTables);
+
+    /// <summary>Restores pricing provider state saved by <see cref="SaveProcessPricingProvider"/>.</summary>
+    /// <param name="saved">The provider and cached tables to write back.</param>
+    private static void RestoreProcessPricingProvider((Func<PricingTables>? Provider, PricingTables? Cache) saved)
+    {
+        PricingField("_pricingProvider").SetValue(null, saved.Provider);
+        PricingField("_cachedTables").SetValue(null, saved.Cache);
+    }
+
+    private static FieldInfo PricingField(string name) =>
+        typeof(CanonPricing).GetField(name, BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException($"CanonPricing.{name} is no longer a private static field.");
+
+    private class OverridePricingLookup : IModelPricingLookup
+    {
+        private readonly string modelId;
+        private readonly ModelCosts costs;
+
+        public OverridePricingLookup(string modelId, ModelCosts costs)
+        {
+            this.modelId = modelId;
+            this.costs = costs;
+        }
+
+        public ModelCosts? GetModelCosts(string model) =>
+            string.Equals(model, modelId, StringComparison.Ordinal) ? costs : null;
+    }
+}
+
+/// <summary>
+/// The collection shared by tests that read <see cref="CanonPricing"/>'s process-wide tables: it
+/// runs exclusively, so no parallel class can reconfigure the provider mid-read.
+/// </summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public static class CanonPricingStatics
+{
+    /// <summary>The name tests use to join the exclusive pricing-statics collection.</summary>
+    public const string Name = "canon-pricing-statics";
 }
