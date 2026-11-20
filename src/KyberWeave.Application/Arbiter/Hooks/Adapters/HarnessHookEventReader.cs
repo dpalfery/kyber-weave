@@ -154,8 +154,13 @@ public static class HarnessHookEventReader
     private static string? ArgText(JsonElement arguments, string name) =>
         arguments.ValueKind == JsonValueKind.Object ? Text(arguments, name) : null;
 
+    // Antigravity names the workspace list workspacePaths; Cursor names it workspace_roots and sends no cwd, so a
+    // user-level Cursor hook, which runs from ~/.cursor, finds the repository only here.
     private static string? Workspace(JsonElement payload) =>
-        payload.TryGetProperty("workspacePaths", out JsonElement paths)
+        FirstPath(payload, "workspacePaths") ?? FirstPath(payload, "workspace_roots");
+
+    private static string? FirstPath(JsonElement payload, string name) =>
+        payload.TryGetProperty(name, out JsonElement paths)
         && paths.ValueKind == JsonValueKind.Array
         && paths.GetArrayLength() > 0
         && paths[0].ValueKind == JsonValueKind.String

@@ -128,6 +128,21 @@ public sealed class HarnessHookEventReaderTests
     }
 
     [Fact]
+    public void ACursorDispatchWithNoCwd_TakesItsWorkspaceRoot()
+    {
+        // Cursor 2026.11 sends workspace_roots and no cwd; the user-level hook runs from ~/.cursor.
+        const string payload = """
+            { "hook_event_name": "preToolUse", "tool_name": "Task", "workspace_roots": ["/repo"],
+              "tool_input": { "subagent_type": "explore", "prompt": "TASK: T1" } }
+            """;
+
+        HookEvent hookEvent = Read("cursor", payload);
+
+        Assert.Equal("/repo", hookEvent.WorkspaceRoot);
+        Assert.Null(hookEvent.Cwd);
+    }
+
+    [Fact]
     public void ABlankWorkspace_IsNoWorkspaceSoTheCwdStands()
     {
         const string payload = """{ "workspacePaths": ["   "], "cwd": "/repo", "tool_name": "view" }""";
