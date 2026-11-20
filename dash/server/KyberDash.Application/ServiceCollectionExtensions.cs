@@ -50,12 +50,11 @@ public static class ServiceCollectionExtensions
             _ = pricing.LoadPricingTables();
             return pricing;
         });
-        services.TryAddSingleton(provider =>
-        {
-            ICanonStoreRepository store = provider.GetRequiredService<ICanonStoreRepository>();
-            IPricingRepository pricing = provider.GetRequiredService<IPricingRepository>();
-            return new CanonSessionProjectorEngine(store, pricing);
-        });
+        services.TryAddSingleton(provider => new CanonSessionProjectorEngine(
+            provider.GetRequiredService<IRelationalStoreReader>(),
+            provider.GetRequiredService<IProjectionStore>(),
+            provider.GetRequiredService<IOperationalStore>(),
+            provider.GetRequiredService<IPricingRepository>()));
 
         services.TryAddSingleton(provider =>
         {
@@ -85,7 +84,9 @@ public static class ServiceCollectionExtensions
     private static void RegisterServices(IServiceCollection services)
     {
         services.TryAddSingleton<CanonProjectionService>(provider => new CanonProjectionService(
-            provider.GetRequiredService<ICanonStoreRepository>(),
+            provider.GetRequiredService<IRelationalStoreReader>(),
+            provider.GetRequiredService<IProjectionStore>(),
+            provider.GetRequiredService<IOperationalStore>(),
             provider.GetRequiredService<CanonSessionProjectorEngine>(),
             provider.GetRequiredService<CanonRollupsEngine>()));
         services.TryAddSingleton<ICanonProjectionService>(provider => provider.GetRequiredService<CanonProjectionService>());

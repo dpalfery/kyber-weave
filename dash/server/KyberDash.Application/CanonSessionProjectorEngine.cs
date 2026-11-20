@@ -3,14 +3,29 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using KyberDash.Contracts.Repositories;
+using KyberDash.Data.Collector;
 using KyberDash.Domain;
 
 namespace KyberDash.Application;
 
 /// <summary>
 /// Incremental session projection, same-turn twin deduplication, turn repricing, and
-/// subagent/finding orchestration over <see cref="ICanonStoreRepository"/>.
+/// subagent/finding orchestration over the relational store contracts.
 /// </summary>
+/// <remarks>
+/// <para>
+/// The primary constructor projects sessions typed: it reads records only through
+/// <see cref="IRelationalStoreReader"/>, counts tokens through <see cref="IOperationalStore"/>
+/// (decision D16), and writes <see cref="StoredSessionProjection"/> rows, typed context and
+/// schema children (with exclusive <c>_unmeasurable</c> rows), and timeline marks through
+/// <see cref="IProjectionStore"/> — no JSON payload column anywhere.
+/// </para>
+/// <para>
+/// A transitional constructor keeps the <see cref="ICanonStoreRepository"/> path for callers not
+/// yet migrated (decision D4's dual-registration pattern); T45/T53 remove it once the last legacy
+/// caller moves over.
+/// </para>
+/// </remarks>
 public partial class CanonSessionProjectorEngine
 {
     /// <summary>Maximum timestamp skew (ms) for exact-counter or Cursor overlap twin collapsing.</summary>
@@ -23,6 +38,12 @@ public partial class CanonSessionProjectorEngine
     private const string SessionLabelKey = "kyber.session.label";
     private const string ProjectionRecordsMarkerKey = "projection_records_marker";
     private const string ProjectionSchemaVersionKey = "projection_schema_version";
+    private const string RelationalSourceName = "relational";
+    private const string TimestampFormat = "yyyy-MM-dd'T'HH:mm:ss.fff'Z'";
+    private const string NoMessageStructureReason = "no_message_structure";
+    private const string NoToolDefinitionSchemaReason = "The source did not provide tool-definition schema data.";
+    private const string DefaultContextLimitSource = "default";
+    private const int TypedDefinitionOrderBase = 1_000;
 
     private static readonly string[] AgentNameKeys = ["gen_ai.agent.name", "agent.name"];
     private static readonly string[] RepoKeys = ["vcs.repository.name", "repo"];
@@ -45,11 +66,40 @@ public partial class CanonSessionProjectorEngine
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    private readonly ICanonStoreRepository store;
+    private readonly IRelationalStoreReader? reader;
+    private readonly IProjectionStore? projections;
+    private readonly IOperationalStore? operationalStore;
+    private readonly ICanonStoreRepository? legacyStore;
     private readonly IPricingRepository pricing;
 
     /// <summary>
-    /// Initializes a new <see cref="CanonSessionProjectorEngine"/>.
+    /// Initializes a relational <see cref="CanonSessionProjectorEngine"/> projecting typed session
+    /// rows from the normalized relational store.
+    /// </summary>
+    /// <param name="reader">Relational reader supplying sessions, records, and typed children.</param>
+    /// <param name="projections">Typed projection store receiving session, context, schema, timeline, and finding rows.</param>
+    /// <param name="operationalStore">Operational store backing the token counter and projection watermarks.</param>
+    /// <param name="pricing">Model rate-table repository used when resolving context windows.</param>
+    public CanonSessionProjectorEngine(
+        IRelationalStoreReader reader,
+        IProjectionStore projections,
+        IOperationalStore operationalStore,
+        IPricingRepository pricing)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+        ArgumentNullException.ThrowIfNull(projections);
+        ArgumentNullException.ThrowIfNull(operationalStore);
+        ArgumentNullException.ThrowIfNull(pricing);
+
+        this.reader = reader;
+        this.projections = projections;
+        this.operationalStore = operationalStore;
+        this.pricing = pricing;
+    }
+
+    /// <summary>
+    /// Initializes a transitional <see cref="CanonSessionProjectorEngine"/> over
+    /// <see cref="ICanonStoreRepository"/> for callers not yet migrated to the relational contracts.
     /// </summary>
     /// <param name="store">Canonical store repository.</param>
     /// <param name="pricing">Model rate-table repository used when repricing turns.</param>
@@ -58,12 +108,12 @@ public partial class CanonSessionProjectorEngine
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(pricing);
 
-        this.store = store;
+        legacyStore = store;
         this.pricing = pricing;
     }
 
-    /// <summary>Canonical store repository backing this engine.</summary>
-    public ICanonStoreRepository Store => store;
+    /// <summary>Canonical store repository backing this engine; <see langword="null"/> on the relational path.</summary>
+    public ICanonStoreRepository? Store => legacyStore;
 
     [GeneratedRegex(@"^invoke_agent(?:[ :]|$)", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
     private static partial Regex InvokeAgentNameRegex();
@@ -204,11 +254,21 @@ public partial class CanonSessionProjectorEngine
     public SessionSummaryRow BuildSessionSummary(string sessionId, IReadOnlyList<CanonicalRecord> records)
     {
         _ = pricing.LoadPricingTables();
-        CachedTokenCounter counter = new(store, CanonTokenCache.ApproximateTokenizerName);
+        CachedTokenCounter counter = CreateTokenCounter();
         SessionSummaryRow row = BuildSessionSummary(sessionId, records, counter.Count);
         counter.Flush();
         return row;
     }
+
+    /// <summary>
+    /// Builds the engine's cached token counter over <see cref="IOperationalStore"/> on the
+    /// relational path (decision D16); the transitional legacy constructor keeps the
+    /// <see cref="ICanonStoreRepository"/>-backed counter until T45 removes it.
+    /// </summary>
+    /// <returns>Cached token counter bound to the engine's operational or legacy store.</returns>
+    private CachedTokenCounter CreateTokenCounter() => operationalStore is not null
+        ? new CachedTokenCounter(operationalStore, CanonTokenCache.ApproximateTokenizerName)
+        : new CachedTokenCounter(legacyStore!, CanonTokenCache.ApproximateTokenizerName);
 
     /// <summary>
     /// Derives a complete <see cref="SessionSummaryRow"/> (including <c>summary_json</c>,
@@ -677,11 +737,33 @@ public partial class CanonSessionProjectorEngine
     /// <returns><see langword="true"/> when stored projections match the current write marker and versions.</returns>
     public bool IsProjectionCurrent()
     {
-        long currentMarker = store.RecordsWriteMarker();
-        string? prevMarkerRaw = store.GetMetadata(ProjectionRecordsMarkerKey);
+        return legacyStore is not null ? IsLegacyProjectionCurrent() : IsRelationalProjectionCurrent();
+    }
+
+    private bool IsRelationalProjectionCurrent()
+    {
+        long currentMarker = operationalStore!.GetWriteMarker();
+        ProjectionStateView? state = operationalStore.GetProjectionState();
+        if (state is null)
+        {
+            return currentMarker == 0 && reader!.CountRecords() == 0 && projections!.ListSessionProjections().Count == 0;
+        }
+
+        if (state.RecordsMarker != currentMarker || !HasCurrentProjectionEnvironment())
+        {
+            return false;
+        }
+
+        return reader!.CountRecords() == 0 || projections!.ListSessionProjections().Count > 0;
+    }
+
+    private bool IsLegacyProjectionCurrent()
+    {
+        long currentMarker = legacyStore!.RecordsWriteMarker();
+        string? prevMarkerRaw = legacyStore.GetMetadata(ProjectionRecordsMarkerKey);
         if (!long.TryParse(prevMarkerRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out long prevMarker))
         {
-            return currentMarker == 0 && store.CountRecords() == 0 && store.ListSessions().Count == 0;
+            return currentMarker == 0 && legacyStore.CountRecords() == 0 && legacyStore.ListSessions().Count == 0;
         }
 
         if (prevMarker != currentMarker || !HasCurrentProjectionEnvironment())
@@ -689,7 +771,7 @@ public partial class CanonSessionProjectorEngine
             return false;
         }
 
-        return store.CountRecords() == 0 || store.ListSessions().Count > 0;
+        return legacyStore.CountRecords() == 0 || legacyStore.ListSessions().Count > 0;
     }
 
     /// <summary>
@@ -699,6 +781,12 @@ public partial class CanonSessionProjectorEngine
     /// <returns>Summary of built, skipped, and pruned sessions plus emitted finding count.</returns>
     public ProjectionPassReport ProjectIncremental()
     {
+        return legacyStore is not null ? ProjectIncrementalLegacy() : ProjectIncrementalRelational();
+    }
+
+    private ProjectionPassReport ProjectIncrementalLegacy()
+    {
+        ICanonStoreRepository store = legacyStore!;
         _ = pricing.LoadPricingTables();
 
         string? prevMarkerRaw = store.GetMetadata(ProjectionRecordsMarkerKey);
@@ -723,7 +811,7 @@ public partial class CanonSessionProjectorEngine
             ? new HashSet<string>(store.GetBuiltSessionIds(), StringComparer.Ordinal)
             : null;
 
-        CachedTokenCounter counter = new(store, CanonTokenCache.ApproximateTokenizerName);
+        CachedTokenCounter counter = new(legacyStore!, CanonTokenCache.ApproximateTokenizerName);
         SessionIdentities identities = new(store.GetSessionKeyHarnesses());
         IReadOnlyList<string> sessionKeys = store.GetDistinctSessionKeys();
 
@@ -910,11 +998,17 @@ public partial class CanonSessionProjectorEngine
 
     private bool HasCurrentProjectionEnvironment()
     {
-        string? recordedSchema = store.GetMetadata(ProjectionSchemaVersionKey);
-        string? storeSchema = store.GetMetadata("schema_version");
-        return store.HasCurrentDetectorVersion()
-            && recordedSchema is not null
-            && string.Equals(recordedSchema, storeSchema, StringComparison.Ordinal);
+        if (legacyStore is not null)
+        {
+            string? recordedSchema = legacyStore.GetMetadata(ProjectionSchemaVersionKey);
+            string? storeSchema = legacyStore.GetMetadata("schema_version");
+            return legacyStore.HasCurrentDetectorVersion()
+                && recordedSchema is not null
+                && string.Equals(recordedSchema, storeSchema, StringComparison.Ordinal);
+        }
+
+        ProjectionStateView? projectionState = operationalStore!.GetProjectionState();
+        return projectionState is not null && projectionState.ProjectionSchemaVersion == CanonSchema.SchemaVersion;
     }
 
     private int RebuildSessionFindings(
@@ -922,6 +1016,7 @@ public partial class CanonSessionProjectorEngine
         IReadOnlyList<CanonicalRecord> sessionRecords,
         SessionIdentities identities)
     {
+        ICanonStoreRepository store = legacyStore!;
         store.DeleteFindingsForSession(sessionId);
         OutcomeBlock outcome = CanonFindings.DeriveOutcome(sessionRecords);
         IReadOnlyList<Finding> findings = CanonFindings.DetectFindings(new DetectFindingsInput(
@@ -948,6 +1043,7 @@ public partial class CanonSessionProjectorEngine
         List<string> builtForKey,
         ref int builtCount)
     {
+        ICanonStoreRepository store = legacyStore!;
         Dictionary<string, string> recordAgentMap = new(StringComparer.Ordinal);
         foreach (CanonicalRecord record in merged)
         {
@@ -1081,6 +1177,7 @@ public partial class CanonSessionProjectorEngine
 
     private List<CanonicalRecord> RepriceTurns(IReadOnlyList<CanonicalRecord> records)
     {
+        ICanonStoreRepository store = legacyStore!;
         Dictionary<string, CostBlock> changes = new(StringComparer.Ordinal);
         List<CanonicalRecord> updated = new(records.Count);
         foreach (CanonicalRecord record in records)
@@ -2761,7 +2858,660 @@ public partial class CanonSessionProjectorEngine
         return value;
     }
 
-    private record DroidSessionSplit(
+    /// <summary>
+    /// Runs an incremental relational session projection pass: rebuilds typed
+    /// <see cref="StoredSessionProjection"/> rows (context, schema, timeline, turns, requests,
+    /// and findings) for session keys dirtied since the previous pass, prunes stored projections
+    /// whose records disappeared, and records the projection watermark.
+    /// </summary>
+    /// <returns>Summary of built, skipped, and pruned sessions plus emitted finding count.</returns>
+    /// <remarks>
+    /// <para>
+    /// A relational projection row keys into the <c>session</c> table, so a session key whose
+    /// canonical identity decorates its identifier (a harness-split key shared by two harnesses)
+    /// is skipped rather than written: the relational ingest schema does not yet model
+    /// harness-split or subagent session rows. Subagent and auxiliary involvement is recorded as
+    /// timeline marks on the parent row instead.
+    /// </para>
+    /// <para>
+    /// Until ingest wiring advances <c>store_write_marker</c> on writes, the watermark comparison
+    /// alone cannot observe new records; callers therefore request a projection after ingest, the
+    /// same flow the projection service already uses.
+    /// </para>
+    /// </remarks>
+    private ProjectionPassReport ProjectIncrementalRelational()
+    {
+        _ = pricing.LoadPricingTables();
+
+        long currentMarker = operationalStore!.GetWriteMarker();
+        ProjectionStateView? previousState = operationalStore.GetProjectionState();
+        DirtyProjectionState? dirtyState = operationalStore.GetProjectionDirtyState();
+        bool environmentCurrent = HasCurrentProjectionEnvironment();
+
+        bool canIncremental = environmentCurrent
+            && previousState is not null
+            && dirtyState is not null
+            && dirtyState.FromSeq == previousState.RecordsMarker
+            && dirtyState.ToSeq == currentMarker
+            && !dirtyState.IsWildcard
+            && dirtyState.Keys is not null;
+
+        HashSet<string>? dirtySet = canIncremental
+            ? new HashSet<string>(dirtyState!.Keys!, StringComparer.Ordinal)
+            : null;
+
+        Dictionary<string, CollectedSession> sessionsByKey = new(StringComparer.Ordinal);
+        foreach (CollectedSession session in reader!.Sessions())
+        {
+            sessionsByKey.TryAdd(session.SessionKey, session);
+        }
+
+        Dictionary<string, List<CollectedRecord>> collectedByKey = new(StringComparer.Ordinal);
+        foreach (CollectedRecord record in reader.Records())
+        {
+            if (string.IsNullOrEmpty(record.SessionKey))
+            {
+                continue;
+            }
+
+            if (!collectedByKey.TryGetValue(record.SessionKey!, out List<CollectedRecord>? list))
+            {
+                list = [];
+                collectedByKey[record.SessionKey!] = list;
+            }
+
+            list.Add(record);
+        }
+
+        List<string> sessionKeys = [.. collectedByKey.Keys.OrderBy(static key => key, StringComparer.Ordinal)];
+        SessionIdentities identities = new(
+            sessionKeys.SelectMany(key => collectedByKey[key].Select(record => (key, record.HarnessId))));
+
+        HashSet<string> storedProjectionIds = new(
+            projections!.ListSessionProjections().Select(static projection => projection.SessionId),
+            StringComparer.Ordinal);
+
+        CachedTokenCounter counter = new(operationalStore, CanonTokenCache.ApproximateTokenizerName);
+
+        int builtCount = 0;
+        int skippedCount = 0;
+        int findingsCount = 0;
+        List<string> rebuiltKeys = [];
+        List<string> skippedKeys = [];
+        HashSet<string> builtSessionIds = new(StringComparer.Ordinal);
+
+        foreach (string key in sessionKeys)
+        {
+            if (canIncremental
+                && dirtySet is not null
+                && !dirtySet.Contains(key)
+                && PriorIdsOf(key, collectedByKey[key], identities).All(storedProjectionIds.Contains))
+            {
+                skippedKeys.Add(key);
+                skippedCount++;
+                continue;
+            }
+
+            List<CanonicalRecord> hydrated = [.. collectedByKey[key].Select(HydrateRecord)];
+            hydrated.Sort(CompareRecordTimestamps);
+            Dictionary<string, List<CanonicalRecord>> grouped = GroupByCanonicalHarness(hydrated);
+            if (grouped.Count == 0)
+            {
+                skippedCount++;
+                continue;
+            }
+
+            foreach (KeyValuePair<string, List<CanonicalRecord>> group in grouped)
+            {
+                string harness = group.Key;
+                List<CanonicalRecord> groupRecords = group.Value;
+                if (groupRecords.Count == 0 || !HasEvidence(groupRecords))
+                {
+                    skippedCount++;
+                    continue;
+                }
+
+                IReadOnlyList<CanonicalRecord> merged = DedupeTwinTurns(groupRecords, key);
+                if (merged.Count == 0 || !HasEvidence(merged))
+                {
+                    skippedCount++;
+                    continue;
+                }
+
+                string sessionId = identities.Claim(key, harness);
+                if (!sessionsByKey.ContainsKey(sessionId))
+                {
+                    skippedCount++;
+                    continue;
+                }
+
+                StoredSessionProjection projection = BuildStoredSessionProjection(
+                    sessionId,
+                    merged,
+                    counter.Count,
+                    sessionsByKey[sessionId].Title);
+                projections.ReplaceSessionProjection(projection);
+                builtSessionIds.Add(sessionId);
+                builtCount++;
+
+                findingsCount += RebuildSessionFindingsRelational(sessionId, merged, identities);
+            }
+
+            rebuiltKeys.Add(key);
+        }
+
+        counter.Flush();
+
+        int prunedCount = 0;
+        foreach (StoredSessionProjection stored in projections.ListSessionProjections())
+        {
+            if (builtSessionIds.Contains(stored.SessionId))
+            {
+                continue;
+            }
+
+            projections.DeleteSessionProjection(stored.SessionId);
+            projections.DeleteFindingsForSession(stored.SessionId);
+            prunedCount++;
+        }
+
+        long finalMarker = operationalStore.GetWriteMarker();
+        operationalStore.SetProjectionState(new ProjectionStateView(CanonSchema.SchemaVersion, finalMarker));
+        operationalStore.ClearProjectionDirtyState();
+
+        return new ProjectionPassReport(
+            Built: builtCount,
+            Skipped: skippedCount,
+            Pruned: prunedCount,
+            Findings: findingsCount,
+            RebuiltKeys: rebuiltKeys,
+            SkippedKeys: skippedKeys);
+    }
+
+    private static IEnumerable<string> PriorIdsOf(
+        string key,
+        IReadOnlyList<CollectedRecord> records,
+        SessionIdentities identities)
+    {
+        HashSet<string> harnesses = new(records.Select(static record => record.HarnessId), StringComparer.Ordinal);
+        foreach (string harness in harnesses)
+        {
+            string? id = identities.IdFor(key, harness);
+            if (id is not null)
+            {
+                yield return id;
+            }
+        }
+    }
+
+    private int RebuildSessionFindingsRelational(
+        string sessionId,
+        IReadOnlyList<CanonicalRecord> sessionRecords,
+        SessionIdentities identities)
+    {
+        projections!.DeleteFindingsForSession(sessionId);
+        OutcomeBlock outcome = CanonFindings.DeriveOutcome(sessionRecords);
+        IReadOnlyList<Finding> findings = CanonFindings.DetectFindings(new DetectFindingsInput(
+            RunId: sessionId,
+            SessionId: sessionId,
+            Records: sessionRecords,
+            Outcome: outcome,
+            SessionIdentityLookup: identities.IdFor));
+        if (findings.Count > 0)
+        {
+            projections.ReplaceFindings(findings.Select(ToStoredFinding));
+        }
+
+        return findings.Count;
+    }
+
+    private static StoredFinding ToStoredFinding(Finding finding)
+    {
+        StoredCompactionHazard? hazard = null;
+        if (finding.Payload is not null
+            && finding.Payload.TryGetValue("contextLimit", out object? limitValue)
+            && finding.Payload.TryGetValue("contextLimitSource", out object? sourceValue)
+            && limitValue is long limit
+            && sourceValue is string limitSource)
+        {
+            hazard = new StoredCompactionHazard(limit, limitSource);
+        }
+
+        return new StoredFinding(
+            FindingId: finding.Id,
+            DetectorId: finding.DetectorId,
+            Title: finding.Title,
+            Mechanism: finding.Mechanism,
+            Confidence: finding.Confidence,
+            Recommendation: finding.Recommendation,
+            OutcomeRiskCaveat: finding.OutcomeRiskCaveat,
+            RankScore: finding.RankScore,
+            EvidenceLinks: finding.EvidenceLinks,
+            EstimatedWasteTokens: finding.EstimatedWasteTokens,
+            ErrorBar: finding.ErrorBar,
+            RunId: finding.RunId,
+            SessionId: finding.SessionId,
+            MeasurementClass: finding.MeasurementClass,
+            ConfidenceBasis: finding.ConfidenceBasis,
+            WhatWouldRaiseIt: finding.WhatWouldRaiseIt,
+            CompactionHazard: hazard);
+    }
+
+    /// <summary>
+    /// Rebuilds one typed <see cref="StoredSessionProjection"/> from a session's deduplicated
+    /// records: context pressure analysis, schema ranking, timeline marks, requests, and turns,
+    /// with exclusive unmeasurable reasons in place of non-measurable figures.
+    /// </summary>
+    /// <param name="sessionId">Canonical session identifier (a <c>session</c> table key).</param>
+    /// <param name="records">Deduplicated session records in timestamp order.</param>
+    /// <param name="countTokens">Token counting callback.</param>
+    /// <param name="title">Session title from the relational <c>session</c> row, when present.</param>
+    /// <returns>Projected typed session row.</returns>
+    private static StoredSessionProjection BuildStoredSessionProjection(
+        string sessionId,
+        IReadOnlyList<CanonicalRecord> records,
+        Func<string, long> countTokens,
+        string? title = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(records);
+        ArgumentNullException.ThrowIfNull(countTokens);
+        if (records.Count == 0)
+        {
+            throw new ArgumentException("At least one record is required to build a session projection.", nameof(records));
+        }
+
+        DroidSessionSplit split = SplitDroidSessionRecords(records);
+        bool paired = split.TurnRecords.Count > 0 && split.CounterRecords.Count > 0;
+        List<CanonicalRecord> turnRecords = paired ? TurnsOf(split.TurnRecords) : TurnsOf(records);
+        IReadOnlyList<CanonicalRecord> structureRecords = paired ? split.TurnRecords : records;
+
+        CanonicalRecord first = records[0];
+        string harness = CanonPricing.NormalizeHarnessName(first.Harness);
+
+        List<CanonicalRecord> mainThreadRecords = turnRecords.Where(static record => !IsSideAgentTurn(record)).ToList();
+        List<CanonicalRecord> contextRecords = mainThreadRecords.Count > 0 ? mainThreadRecords : turnRecords;
+        List<CanonicalRecord> measuredTurns = contextRecords.Where(static record => CanonPricing.MeasuredInput(record.Tokens) > 0).ToList();
+
+        List<ContextTurn> contextTurns = new(measuredTurns.Count);
+        List<ContextPart> lastSystem = [];
+        foreach (CanonicalRecord record in measuredTurns)
+        {
+            List<ContextPart> parts = PartsOf(record);
+            List<ContextPart> ownSystem = parts.Where(static part => string.Equals(part.Part, "system_prompt", StringComparison.Ordinal)).ToList();
+            if (ownSystem.Count > 0)
+            {
+                lastSystem = ownSystem;
+            }
+
+            IReadOnlyList<ContextPart> effective = ownSystem.Count > 0 ? parts : [.. lastSystem, .. parts];
+            contextTurns.Add(new ContextTurn(
+                Parts: effective,
+                InputTokens: CanonPricing.MeasuredInput(record.Tokens),
+                FreshInput: record.Tokens.FreshInput));
+        }
+
+        IReadOnlyList<CanonicalRecord> windowRecords = contextRecords.Count > 0 ? contextRecords : records;
+        ContextWindowResult window = CanonPricing.ContextLimitOf(windowRecords);
+        long analysisLimit = window.ContextLimit > 0 ? window.ContextLimit : CanonPricing.DefaultContextLimit;
+
+        ContextAnalysis context = CanonContextAnalysis.AnalyzeContext(
+            contextTurns,
+            new ContextCountOptions(
+                ContextLimit: analysisLimit,
+                ContextLimitSource: window.ContextLimitSource,
+                CountTokens: countTokens));
+
+        List<ToolDefinition> definitions = [.. TypedToolDefinitionsOf(records)];
+        HashSet<string> knownDefinitions = [.. definitions.Select(static definition => definition.Name)];
+        IReadOnlyList<CanonicalRecord> toolSourceRecords = paired && split.FileToolRecords.Count > 0
+            ? split.FileToolRecords
+            : structureRecords;
+        definitions.AddRange(ToolDefinitionsOf(records, countTokens)
+            .Where(definition => knownDefinitions.Add(definition.Name)));
+        SchemaCostAnalysis schema = CanonContextAnalysis.RankSchemas(
+            definitions,
+            turnRecords.Count,
+            InvocationsOf(toolSourceRecords));
+
+        TimelineNode timeline = CanonContextAnalysis.BuildTimeline(structureRecords);
+
+        List<CanonicalRecord> requestRoots = structureRecords.Where(static record => record.ParentSpanId is null).ToList();
+        (string started, string ended) = TimestampBounds(records);
+
+        string? resolvedAgentName = AttributeOf(first, AgentNameKeys);
+        string resolvedLabel = SessionLabelOf(records, title ?? first.Name, harness, sessionId);
+        string? parentAttr = AttributeOf(first, ParentSessionKeys);
+        bool resolvedIsSubagent = parentAttr is not null || AttributeOf(first, ["gen_ai.is_subagent", "is_subagent"]) is not null;
+
+        List<StoredSessionTurn> turns = new(turnRecords.Count);
+        for (int position = 0; position < turnRecords.Count; position++)
+        {
+            turns.Add(new StoredSessionTurn(sessionId, position, turnRecords[position].SpanId));
+        }
+
+        return new StoredSessionProjection(
+            SessionId: sessionId,
+            Label: resolvedLabel,
+            IsSubagent: resolvedIsSubagent,
+            SpanCount: records.Count,
+            StartedAtUtc: started,
+            EndedAtUtc: ended,
+            ParentSessionId: parentAttr,
+            AgentName: resolvedAgentName,
+            IncludedInParent: false,
+            RequestSpanIds: [.. requestRoots.Select(static record => record.SpanId)],
+            Turns: turns,
+            Context: context.Measurable ? ToStoredContext(context) : null,
+            ContextUnmeasurableReason: context.Measurable ? null : context.Reason ?? NoMessageStructureReason,
+            Schema: schema.Measurable ? ToStoredSchema(schema) : null,
+            SchemaUnmeasurableReason: schema.Measurable ? null : schema.Reason ?? NoToolDefinitionSchemaReason,
+            TimelineSubagentSpanIds: TimelineSubagentSpanIdsOf(timeline),
+            TimelineAuxiliarySpanIds: TimelineAuxiliarySpanIdsOf(timeline));
+    }
+
+    private static StoredSessionContext ToStoredContext(ContextAnalysis context)
+    {
+        List<StoredSessionContextTurn> turns = new(context.Turns.Count);
+        foreach (TurnPressure turn in context.Turns)
+        {
+            turns.Add(new StoredSessionContextTurn(
+                Position: turn.Index - 1,
+                InputTokens: turn.InputTokens,
+                BucketedTokens: turn.BucketedTokens,
+                ResidualTokens: turn.Residual.Tokens,
+                ResidualAttribution: turn.Residual.Attribution,
+                BuiltinToolDefinitionTokens: turn.BuiltinToolDefinitionTokens,
+                FreshInput: turn.FreshInput,
+                Buckets: [.. turn.Buckets
+                    .Where(static entry => entry.Value != 0)
+                    .OrderBy(static entry => entry.Key, StringComparer.Ordinal)
+                    .Select(static entry => new StoredTurnBucketTokens(entry.Key, entry.Value))],
+                ServerDefinitions: [.. turn.ToolDefinitionsByServer
+                    .OrderBy(static entry => entry.Key, StringComparer.Ordinal)
+                    .Select(static entry => new StoredTurnServerDefinitionTokens(entry.Key, entry.Value))],
+                Headroom: turn.Headroom,
+                Pressure: turn.Pressure,
+                AccumulationRate: turn.AccumulationRate,
+                StrippedBlockCount: turn.StrippedInstructionBlocks.Count,
+                StrippedTokens: turn.StrippedInstructionBlocks.Tokens,
+                PreviousFreshInput: turn.FreshInputJump?.Previous,
+                FreshJumpFactor: turn.FreshInputJump is null
+                    ? null
+                    : double.IsFinite(turn.FreshInputJump.Factor) ? turn.FreshInputJump.Factor : null,
+                NonResidentTokens: turn.NonResidentToolDefinitions));
+        }
+
+        return new StoredSessionContext(
+            ContextLimit: context.ContextLimit,
+            ContextLimitSource: context.ContextLimitSource ?? DefaultContextLimitSource,
+            ResidualTotal: context.ResidualTotal,
+            FreshJumpFactor: context.FreshJumpFactor,
+            AccumulationRate: context.SessionAccumulationRate,
+            ObservedBuckets: context.ObservedParts,
+            // The analysis reports only whether some counts were derived; it does not expose
+            // per-counter attribution, so no derived-count rows can be named honestly here.
+            DerivedCounts: [],
+            FlaggedTurnIndexes: [.. context.FlaggedTurns.Select(static index => index - 1)],
+            Turns: turns);
+    }
+
+    private static StoredSessionSchema ToStoredSchema(SchemaCostAnalysis schema)
+    {
+        List<StoredSchemaRankedTool> rankedTools = new(schema.Ranked.Count);
+        for (int position = 0; position < schema.Ranked.Count; position++)
+        {
+            RankedTool tool = schema.Ranked[position];
+            rankedTools.Add(new StoredSchemaRankedTool(
+                Position: position,
+                ToolName: tool.Name,
+                CostTokens: tool.Cost,
+                Invoked: tool.Invoked,
+                ServerName: tool.Server));
+        }
+
+        return new StoredSessionSchema(
+            InvocationCount: schema.InvocationCount,
+            TurnCount: schema.Turns,
+            RankedTools: rankedTools,
+            Servers: [.. schema.ByServer.Select(static entry => new StoredSchemaServerTokens(entry.Key, entry.Value))],
+            UnusedTokenResidencies: schema.UnusedRange?.TokenResidencies);
+    }
+
+    private static IReadOnlyList<string> TimelineSubagentSpanIdsOf(TimelineNode root)
+    {
+        List<string> spanIds = [];
+        void Walk(TimelineNode node)
+        {
+            if (node.IsSubagent && !IsSyntheticTimelineId(node.SpanId))
+            {
+                spanIds.Add(node.SpanId);
+            }
+
+            foreach (TimelineNode child in node.Children)
+            {
+                Walk(child);
+            }
+        }
+
+        Walk(root);
+        return spanIds;
+    }
+
+    private static IReadOnlyList<string> TimelineAuxiliarySpanIdsOf(TimelineNode root)
+    {
+        List<string> spanIds = [];
+        void Walk(TimelineNode node)
+        {
+            if (node.IsAuxiliary && !IsSyntheticTimelineId(node.SpanId))
+            {
+                spanIds.Add(node.SpanId);
+            }
+
+            foreach (TimelineNode child in node.Children)
+            {
+                Walk(child);
+            }
+        }
+
+        Walk(root);
+        return spanIds;
+    }
+
+    private static bool IsSyntheticTimelineId(string spanId) => spanId.StartsWith('(');
+
+    /// <summary>
+    /// Collects the typed tool definitions carried on hydrated records: each relational
+    /// <c>tool_definition</c> row hydrates as a <c>tool_definitions</c> part whose text is the
+    /// tool name and whose token count is the measured <c>schema_tokens</c>.
+    /// </summary>
+    /// <param name="records">Hydrated session records.</param>
+    /// <returns>Distinct tool definitions with residency counts.</returns>
+    private static List<ToolDefinition> TypedToolDefinitionsOf(IReadOnlyList<CanonicalRecord> records)
+    {
+        Dictionary<string, (string? Server, long Tokens, int TurnsResident)> byName = new(StringComparer.Ordinal);
+        foreach (CanonicalRecord record in records)
+        {
+            HashSet<string> seenInRecord = new(StringComparer.Ordinal);
+            foreach (ContentPart part in record.Parts ?? [])
+            {
+                if (!string.Equals(part.Part, "tool_definitions", StringComparison.Ordinal) || part.Tokens is not > 0)
+                {
+                    continue;
+                }
+
+                string name = part.Text.Trim();
+                if (name.Length == 0 || !seenInRecord.Add(name))
+                {
+                    continue;
+                }
+
+                if (byName.TryGetValue(name, out (string? Server, long Tokens, int TurnsResident) existing))
+                {
+                    byName[name] = (existing.Server ?? part.Server, Math.Max(existing.Tokens, part.Tokens.Value), existing.TurnsResident + 1);
+                }
+                else
+                {
+                    byName[name] = (part.Server, part.Tokens.Value, 1);
+                }
+            }
+        }
+
+        return [.. byName.Select(static entry => new ToolDefinition(entry.Key, entry.Value.Server, entry.Value.Tokens, entry.Value.TurnsResident))];
+    }
+
+    /// <summary>
+    /// Hydrates one relational <see cref="CollectedRecord"/> into the canonical analysis record:
+    /// typed token, part, tool-definition, agent, and declared-window columns become the token
+    /// usage, content parts, and minimal raw attributes the analysis pipeline reads.
+    /// </summary>
+    /// <param name="record">Relational record read through <see cref="IRelationalStoreReader"/>.</param>
+    /// <returns>Hydrated canonical record for the shared analysis pipeline.</returns>
+    private static CanonicalRecord HydrateRecord(CollectedRecord record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+
+        Dictionary<string, JsonElement> raw = new(StringComparer.Ordinal);
+        if (record.Signals.DeclaredContextWindow is > 0)
+        {
+            raw[CanonPricing.DeclaredContextLimitKey] = JsonSerializer.SerializeToElement(record.Signals.DeclaredContextWindow.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(record.Model))
+        {
+            raw["gen_ai.response.model"] = JsonSerializer.SerializeToElement(record.Model);
+        }
+
+        if (!string.IsNullOrWhiteSpace(record.Agent?.AgentName))
+        {
+            raw["gen_ai.agent.name"] = JsonSerializer.SerializeToElement(record.Agent.AgentName);
+        }
+
+        long freshInput = 0;
+        long cacheRead = 0;
+        long cacheCreation = 0;
+        long output = 0;
+        long? reasoning = null;
+        foreach (CollectedTokenCount tokenCount in record.Tokens)
+        {
+            switch (tokenCount.TokenClass)
+            {
+                case TokenClass.Input:
+                    freshInput = tokenCount.Count;
+                    break;
+                case TokenClass.CacheRead:
+                    cacheRead = tokenCount.Count;
+                    break;
+                case TokenClass.CacheWrite:
+                    cacheCreation = tokenCount.Count;
+                    break;
+                case TokenClass.Output:
+                    output = tokenCount.Count;
+                    break;
+                case TokenClass.Reasoning:
+                    reasoning = tokenCount.Count;
+                    break;
+            }
+        }
+
+        List<ContentPart> parts = new(record.Parts.Count + record.ToolDefinitions.Count);
+        foreach (CollectedContentPart part in record.Parts)
+        {
+            parts.Add(new ContentPart(
+                Part: PartKeyOf(part.Bucket),
+                Text: part.PlainText ?? string.Empty,
+                Tokens: part.ReportedTokens ?? part.Withheld?.MeasuredTokens,
+                Server: part.Server,
+                Role: part.Role,
+                Order: part.Position,
+                Resident: part.Resident,
+                Truncated: part.OriginalUtf8BytesWhenTruncated.HasValue));
+        }
+
+        foreach (CollectedToolDefinition definition in record.ToolDefinitions)
+        {
+            parts.Add(new ContentPart(
+                Part: "tool_definitions",
+                Text: definition.ToolName,
+                Tokens: definition.SchemaTokens,
+                Server: definition.Server,
+                Order: TypedDefinitionOrderBase + definition.Position));
+        }
+
+        parts.Sort(static (left, right) => (left.Order ?? 0).CompareTo(right.Order ?? 0));
+
+        return new CanonicalRecord
+        {
+            SpanId = record.RecordId,
+            TraceId = record.TraceId,
+            ParentSpanId = record.ParentRecordId,
+            Source = RelationalSourceName,
+            Harness = record.HarnessId,
+            SessionId = record.SessionKey,
+            Name = record.Name,
+            Op = OpNameOf(record.Op),
+            Kind = KindNameOf(record.Kind),
+            Timestamp = record.StartedAt.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture),
+            DurationMs = record.ReportedDurationMs ?? 0,
+            Status = StatusNameOf(record.Status),
+            Tokens = new TokenUsage(
+                FreshInput: freshInput,
+                CacheRead: cacheRead,
+                CacheCreation: cacheCreation,
+                Output: output,
+                ReportedInput: record.ReportedInputTokens ?? 0,
+                ReportedOutput: record.ReportedOutputTokens ?? 0,
+                Reasoning: reasoning),
+            Content = CanonValidation.ContentFromParts(parts),
+            Parts = parts,
+            Cost = record.ReportedCost is null
+                ? new CostBlock(CostBasis.Unknown, CostStatus.NoRate)
+                : new CostBlock(CostBasis.Harness, CostStatus.Priced, record.ReportedCost.Amount, record.ReportedCost.Currency),
+            Measurability = null,
+            Raw = raw,
+        };
+    }
+
+    private static string OpNameOf(RecordOp op) => op switch
+    {
+        RecordOp.LlmInvoke => "llm.invoke",
+        RecordOp.ToolInvoke => "tool.invoke",
+        RecordOp.AgentInvoke => "agent.invoke",
+        _ => "unspecified",
+    };
+
+    private static string KindNameOf(RecordKind kind) => kind switch
+    {
+        RecordKind.Internal => "internal",
+        RecordKind.Server => "server",
+        RecordKind.Client => "client",
+        RecordKind.Producer => "producer",
+        RecordKind.Consumer => "consumer",
+        _ => "unspecified",
+    };
+
+    private static string StatusNameOf(RecordStatus status) => status switch
+    {
+        RecordStatus.Ok => "ok",
+        RecordStatus.Error => "error",
+        RecordStatus.Unspecified => "unspecified",
+        _ => "unset",
+    };
+
+    private static string PartKeyOf(ContentBucket bucket) => bucket switch
+    {
+        ContentBucket.SystemPrompt => "system_prompt",
+        ContentBucket.ToolDefinitions => "tool_definitions",
+        ContentBucket.ToolDefinition => "tool_definition",
+        ContentBucket.InstructionContext => "instruction_context",
+        ContentBucket.ConversationHistory => "conversation_history",
+        ContentBucket.ToolResultContent => "tool_result_content",
+        ContentBucket.UserPrompt => "user_prompt",
+        ContentBucket.UserMessage => "user_message",
+        _ => "reasoning",
+    };
+
+    private sealed record DroidSessionSplit(
         List<CanonicalRecord> TurnRecords,
         List<CanonicalRecord> CounterRecords,
         List<CanonicalRecord> FileToolRecords);
