@@ -32,6 +32,7 @@ public sealed class HookCommand : IArbiterHookHost
     private readonly IArbiterHostConfig _hostConfig;
     private readonly IDispatchClaimStore _claims;
     private readonly IClaudeHookCoverage _coverage;
+    private readonly IProjectDispatchHookProbe _projectHooks;
     private readonly IProcessEnvironment _environment;
     private readonly Func<string> _newDecisionId;
     private readonly ITaskPromptServiceFactory? _promptFactory;
@@ -45,6 +46,7 @@ public sealed class HookCommand : IArbiterHookHost
     /// <param name="hostConfig">Loads the configuration an event is decided under.</param>
     /// <param name="claims">The one-evaluation-per-dispatch claim store.</param>
     /// <param name="coverage">Reads the hook sources a project declares, so the user-level hook can tell whether a project hook covers a dispatch.</param>
+    /// <param name="projectHooks">Tells whether a project carries its own project-scope dispatch hook for a harness.</param>
     /// <param name="environment">The process directory a payload with no <c>cwd</c> falls back to.</param>
     /// <param name="ids">The identifier seam; its GUID, as 32 hex digits, is the decision id when <paramref name="newDecisionId"/> is null.</param>
     /// <param name="newDecisionId">Builds a decision id; null uses <paramref name="ids"/>.</param>
@@ -57,6 +59,7 @@ public sealed class HookCommand : IArbiterHookHost
         IArbiterHostConfig hostConfig,
         IDispatchClaimStore claims,
         IClaudeHookCoverage coverage,
+        IProjectDispatchHookProbe projectHooks,
         IProcessEnvironment environment,
         IIdGenerator ids,
         Func<string>? newDecisionId = null,
@@ -67,12 +70,14 @@ public sealed class HookCommand : IArbiterHookHost
         ArgumentNullException.ThrowIfNull(hostConfig);
         ArgumentNullException.ThrowIfNull(claims);
         ArgumentNullException.ThrowIfNull(coverage);
+        ArgumentNullException.ThrowIfNull(projectHooks);
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(ids);
         _registry = registry;
         _hostConfig = hostConfig;
         _claims = claims;
         _coverage = coverage;
+        _projectHooks = projectHooks;
         _environment = environment;
         _newDecisionId = newDecisionId ?? (() => ids.NewGuid().ToString("N"));
         _promptFactory = prompts;
@@ -155,10 +160,26 @@ public sealed class HookCommand : IArbiterHookHost
                 {
                     if (!string.Equals(adapter.HarnessToken, ClaudeHookAdapter.Token, StringComparison.Ordinal))
                     {
+                        if (_projectHooks.CoversHarness(repoRoot, adapter.HarnessToken))
+                        {
+                            log.WriteLine(
+                                $"Arbiter global scope: deferred-to-project ({adapter.HarnessToken}: no per-dispatch probe; " +
+                                $"the project's own {adapter.HarnessToken} hooks decide).");
+                            return WriteDisabledAllow(adapter, payload, stdout);
+                        }
+
+                        // The project has no hook of its own for this harness, so deferring would leave the worker
+                        // with the header lines only. Prompt insertion is not an Arbiter action: the user-level hook
+                        // inserts the prompt here without evaluating the project's rules (ADR 0070 §5).
                         log.WriteLine(
-                            $"Arbiter global scope: deferred-to-project ({adapter.HarnessToken}: no per-dispatch probe; " +
-                            $"the project's own {adapter.HarnessToken} hooks decide).");
-                        return WriteDisabledAllow(adapter, payload, stdout);
+                            $"Arbiter global scope: no project {adapter.HarnessToken} hook; " +
+                            "inserting the task prompt without evaluation.");
+                        return AllowWithoutEvaluation(
+                            adapter,
+                            payload,
+                            caller,
+                            NewContext(adapter, repoRoot, runContext, home, HookScope.Project, projectConfig, log),
+                            stdout);
                     }
 
                     if (!TakeUserLevelDispatch(adapter, payload, repoRoot, home, log))
