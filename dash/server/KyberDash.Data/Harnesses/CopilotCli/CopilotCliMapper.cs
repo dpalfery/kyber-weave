@@ -414,6 +414,13 @@ public class CopilotCliMapper : IHarnessMapper
             messageByMessageId,
             seenRecordIds);
 
+        records.AddRange(BuildSubagentRecords(
+            sessionId,
+            HarnessId,
+            toolTelemetry,
+            records,
+            seenRecordIds));
+
         List<CollectedSession> sessions = [];
         if (records.Count > 0 || document.Events.Count > 0)
         {
@@ -717,6 +724,7 @@ public class CopilotCliMapper : IHarnessMapper
         List<ParsedToolComplete> toolCompletes = [];
         Dictionary<string, ParsedToolComplete> completeByCallId = new(StringComparer.Ordinal);
         List<ParsedSkillInvoked> skillInvocations = [];
+        List<ParsedSubagentEvent> subagentEvents = [];
 
         using StringReader reader = new(rawText);
         string? line;
@@ -895,6 +903,18 @@ public class CopilotCliMapper : IHarnessMapper
                         ParentId: parentId,
                         AgentKey: agentKey));
                 }
+
+                // Sub-agent runs bracket delegation tool calls. `subagent.selected` is the legacy
+                // sticky label with no spawning call, so it is dropped; started/completed/failed
+                // carry the documented delegation join key (`data.toolCallId`).
+                if (IsSubagentLifecycleEvent(normalizedType))
+                {
+                    ParsedSubagentEvent? subagentEvent = ParseSubagentEvent(lineNumber, normalizedType, root, data);
+                    if (subagentEvent is not null)
+                    {
+                        subagentEvents.Add(subagentEvent);
+                    }
+                }
             }
         }
 
@@ -905,7 +925,8 @@ public class CopilotCliMapper : IHarnessMapper
             StartEventIdToCallId: startEventIdToCallId,
             ToolCompletes: toolCompletes,
             CompleteByCallId: completeByCallId,
-            SkillInvocations: skillInvocations);
+            SkillInvocations: skillInvocations,
+            SubagentEvents: subagentEvents);
     }
 
     private static List<ParsedToolRequest> ParseLineToolRequests(JsonElement data)
@@ -1181,6 +1202,249 @@ public class CopilotCliMapper : IHarnessMapper
         }
 
         list.Add(record);
+    }
+
+    private static bool IsSubagentLifecycleEvent(string eventType) =>
+        eventType is "subagent.started" or "subagent.completed" or "subagent.failed";
+
+    private static ParsedSubagentEvent? ParseSubagentEvent(
+        int lineNumber,
+        string eventType,
+        JsonElement root,
+        JsonElement data)
+    {
+        string outcome = string.Equals(eventType, "subagent.started", StringComparison.Ordinal)
+            ? "started"
+            : string.Equals(eventType, "subagent.completed", StringComparison.Ordinal)
+                ? "completed"
+                : "failed";
+
+        string? agentName = SafeOptionalText(
+            ReadJsonString(data, "agentName")
+            ?? ReadJsonString(data, "agentDisplayName")
+            ?? ReadJsonString(root, "agentName")
+            ?? ReadJsonString(root, "agentDisplayName"));
+        string? toolCallId = SafeOptionalText(
+            ReadJsonString(data, "toolCallId")
+            ?? ReadJsonString(data, "callId")
+            ?? ReadJsonString(root, "toolCallId"));
+        string? timestamp = ReadJsonString(root, "timestamp") ?? ReadJsonString(data, "timestamp");
+
+        string? errorMessage = null;
+        string? errorCode = null;
+        if (string.Equals(outcome, "failed", StringComparison.Ordinal))
+        {
+            (errorMessage, errorCode) = ParseSubagentError(data, root);
+        }
+
+        if (agentName is null && toolCallId is null)
+        {
+            return null;
+        }
+
+        return new ParsedSubagentEvent(
+            LineNumber: lineNumber,
+            Outcome: outcome,
+            AgentName: agentName,
+            ToolCallId: toolCallId,
+            Timestamp: timestamp,
+            ErrorMessage: errorMessage,
+            ErrorCode: errorCode);
+    }
+
+    private static (string? ErrorMessage, string? ErrorCode) ParseSubagentError(JsonElement data, JsonElement root)
+    {
+        foreach (JsonElement container in new[] { data, root })
+        {
+            if (!TryGetNonNullProperty(container, "error", out JsonElement errorEl))
+            {
+                continue;
+            }
+
+            if (errorEl.ValueKind == JsonValueKind.Object)
+            {
+                return (
+                    SafeOptionalText(ReadJsonString(errorEl, "message") ?? ReadJsonString(errorEl, "error")),
+                    SafeOptionalText(ReadJsonString(errorEl, "code") ?? ReadJsonString(errorEl, "type")));
+            }
+
+            if (errorEl.ValueKind == JsonValueKind.String)
+            {
+                return (SafeOptionalText(errorEl.GetString()), null);
+            }
+        }
+
+        return (null, null);
+    }
+
+    private static List<CollectedRecord> BuildSubagentRecords(
+        string sessionId,
+        string harnessId,
+        CopilotCliToolTelemetry telemetry,
+        List<CollectedRecord> correlatedRecords,
+        HashSet<string> seenRecordIds)
+    {
+        if (telemetry.SubagentEvents.Count == 0)
+        {
+            return [];
+        }
+
+        Dictionary<string, CollectedRecord> toolByCallId = new(StringComparer.Ordinal);
+        foreach (CollectedRecord record in correlatedRecords)
+        {
+            if (record.Op != RecordOp.ToolInvoke
+                || record.Tool?.CallId is not { Length: > 0 } callId)
+            {
+                continue;
+            }
+
+            _ = toolByCallId.TryAdd(callId, record);
+        }
+
+        if (toolByCallId.Count == 0)
+        {
+            return [];
+        }
+
+        Dictionary<string, ParsedSubagentEvent> terminalByCallId = new(StringComparer.Ordinal);
+        foreach (ParsedSubagentEvent evt in telemetry.SubagentEvents)
+        {
+            if (!string.Equals(evt.Outcome, "started", StringComparison.Ordinal)
+                && !string.IsNullOrEmpty(evt.ToolCallId))
+            {
+                _ = terminalByCallId.TryAdd(evt.ToolCallId, evt);
+            }
+        }
+
+        List<CollectedRecord> agents = [];
+        foreach (ParsedSubagentEvent started in telemetry.SubagentEvents)
+        {
+            if (!string.Equals(started.Outcome, "started", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            string? spawnCallId = started.ToolCallId;
+            if (string.IsNullOrEmpty(spawnCallId))
+            {
+                continue;
+            }
+
+            // DD-8: the parent is the tool.invoke named by the spawning call id. A started
+            // run without a matching tool record, and a sub-agent envelope agentId with no
+            // documented join to the run, both yield no link rather than an inferred one.
+            if (!toolByCallId.TryGetValue(spawnCallId, out CollectedRecord? parent))
+            {
+                continue;
+            }
+
+            _ = terminalByCallId.TryGetValue(spawnCallId, out ParsedSubagentEvent? terminal);
+            agents.Add(BuildAgentInvokeRecord(sessionId, harnessId, parent, started, terminal, seenRecordIds));
+        }
+
+        return agents;
+    }
+
+    private static CollectedRecord BuildAgentInvokeRecord(
+        string sessionId,
+        string harnessId,
+        CollectedRecord parentTool,
+        ParsedSubagentEvent started,
+        ParsedSubagentEvent? terminal,
+        HashSet<string> seenRecordIds)
+    {
+        string agentName = started.AgentName ?? "subagent";
+        string spawnCallId = started.ToolCallId ?? string.Empty;
+        bool? succeeded = terminal is null
+            ? null
+            : string.Equals(terminal.Outcome, "completed", StringComparison.Ordinal);
+        string? errorMessage = terminal is { Outcome: "failed" }
+            ? SafeOptionalText(terminal.ErrorMessage) ?? "Agent invocation failed."
+            : null;
+
+        DateTimeOffset startedAt = TryParseUtcTimestamp(started.Timestamp, out DateTimeOffset parsedStart)
+            ? parsedStart
+            : parentTool.StartedAt;
+
+        DateTimeOffset? endedAt = null;
+        long? durationMs = null;
+        if (terminal is not null
+            && TryParseUtcTimestamp(terminal.Timestamp, out DateTimeOffset parsedEnd)
+            && parsedEnd >= startedAt)
+        {
+            endedAt = parsedEnd;
+            durationMs = (long)Math.Round((parsedEnd - startedAt).TotalMilliseconds);
+        }
+
+        RecordStatus status = terminal is null
+            ? RecordStatus.Unset
+            : succeeded == true ? RecordStatus.Ok : RecordStatus.Error;
+
+        string recordId = BuildUniqueAgentRecordId(parentTool.RecordId, spawnCallId, agentName, seenRecordIds);
+        CollectedAgentInvocation agent = new(
+            AgentName: agentName,
+            SpawningCallId: spawnCallId,
+            Succeeded: succeeded,
+            Error: errorMessage);
+
+        return new CollectedRecord(
+            RecordId: recordId,
+            HarnessId: harnessId,
+            Op: RecordOp.AgentInvoke,
+            Kind: RecordKind.Internal,
+            Name: agentName,
+            StartedAt: startedAt,
+            Status: status,
+            SessionKey: sessionId,
+            ParentRecordId: parentTool.RecordId,
+            TraceId: parentTool.TraceId,
+            Model: null,
+            EndedAt: endedAt,
+            ReportedDurationMs: durationMs,
+            Tokens: [],
+            ReportedCost: null,
+            Parts: [],
+            Tool: null,
+            Agent: agent,
+            SkillsInvoked: [],
+            AgentInstanceId: null,
+            ToolDefinitions: [],
+            Signals: new CollectedRecordSignals(
+                ErrorMessage: errorMessage,
+                EditFailures: null,
+                CorrectionRule: null,
+                DeclaredContextWindow: null));
+    }
+
+    private static string BuildUniqueAgentRecordId(
+        string parentRecordId,
+        string spawnCallId,
+        string agentName,
+        HashSet<string> seenRecordIds)
+    {
+        string hashInput = string.Create(
+            CultureInfo.InvariantCulture,
+            $"subagent:{spawnCallId}:{agentName}");
+        byte[] hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(hashInput));
+        string agentHash = Convert.ToHexStringLower(hashBytes)[..12];
+        string candidate = string.Create(CultureInfo.InvariantCulture, $"{parentRecordId}-a{agentHash}");
+
+        if (seenRecordIds.Add(candidate))
+        {
+            return candidate;
+        }
+
+        int suffix = 2;
+        while (true)
+        {
+            string disambiguated = string.Create(CultureInfo.InvariantCulture, $"{candidate}:{suffix}");
+            if (seenRecordIds.Add(disambiguated))
+            {
+                return disambiguated;
+            }
+
+            suffix++;
+        }
     }
 
     private static AssistantMessageEntry? ResolveParentMessage(
@@ -1735,6 +1999,15 @@ public class CopilotCliMapper : IHarnessMapper
         string? ParentId,
         string AgentKey);
 
+    private record ParsedSubagentEvent(
+        int LineNumber,
+        string Outcome,
+        string? AgentName,
+        string? ToolCallId,
+        string? Timestamp,
+        string? ErrorMessage,
+        string? ErrorCode);
+
     private record CopilotCliToolTelemetry(
         Dictionary<int, List<ParsedToolRequest>> ToolRequestsByLine,
         List<ParsedToolStart> ToolStarts,
@@ -1742,7 +2015,8 @@ public class CopilotCliMapper : IHarnessMapper
         Dictionary<string, string> StartEventIdToCallId,
         List<ParsedToolComplete> ToolCompletes,
         Dictionary<string, ParsedToolComplete> CompleteByCallId,
-        List<ParsedSkillInvoked> SkillInvocations);
+        List<ParsedSkillInvoked> SkillInvocations,
+        List<ParsedSubagentEvent> SubagentEvents);
 
     private record AssistantMessageEntry(
         int LineNumber,
