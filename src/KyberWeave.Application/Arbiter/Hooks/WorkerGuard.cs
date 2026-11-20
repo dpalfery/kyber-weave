@@ -345,7 +345,11 @@ public sealed class WorkerGuard(
             : WorkerGuardRules.ExhaustedRefusal(seat, writesSeatFile: false, window.Calls, elapsed, window.MaxCalls, window.Minutes);
     }
 
-    /// <summary>The project's budget, or the shipped one; null when the project turns the Arbiter off.</summary>
+    /// <summary>
+    /// The project's budget, or the shipped one; null when the project turns the Arbiter off. The per-call limit is
+    /// raised to cover the longest task gate the project declares, so a gate the repository allows to run is never
+    /// taken for a hung process.
+    /// </summary>
     private ArbiterDispatchBudgetConfig? LoadBudget(string workingDirectory)
     {
         if (string.IsNullOrWhiteSpace(workingDirectory))
@@ -359,7 +363,14 @@ public sealed class WorkerGuard(
             return ArbiterDispatchBudgetConfig.Defaults;
         }
 
-        return loaded.Config.Arbiter.ExplicitlyEnabled == false ? null : loaded.Config.Arbiter.DispatchBudget;
+        if (loaded.Config.Arbiter.ExplicitlyEnabled == false)
+        {
+            return null;
+        }
+
+        ArbiterDispatchBudgetConfig budget = loaded.Config.Arbiter.DispatchBudget;
+        int callMinutes = WorkerGuardRules.EffectiveCallMinutes(budget, loaded.Config.Review);
+        return callMinutes == budget.CallMinutes ? budget : budget with { CallMinutes = callMinutes };
     }
 
     /// <summary>The project's seat budget, or the shipped one; null when the project turns the Arbiter off.</summary>

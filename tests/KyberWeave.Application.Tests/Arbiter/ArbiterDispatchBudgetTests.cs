@@ -210,6 +210,83 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     }
 
     [Fact]
+    public void EffectiveCallMinutes_KeepsTheConfiguredValueWhenTheRepositoryDeclaresNoTaskGates()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 150, CallMinutes: 5);
+
+        Assert.Equal(5, WorkerGuardRules.EffectiveCallMinutes(budget, new ReviewConfig()));
+        Assert.Equal(5, WorkerGuardRules.EffectiveCallMinutes(budget, review: null));
+    }
+
+    [Fact]
+    public void EffectiveCallMinutes_RaisesTheLimitToCoverASixHundredSecondGatePlusTheModelsTurn()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 150, CallMinutes: 5);
+        ReviewConfig review = ReviewWithGates(new ReviewTaskGate("test", [], null, ["dotnet", "test"], [], TimeoutSeconds: 600));
+
+        Assert.Equal(11, WorkerGuardRules.EffectiveCallMinutes(budget, review));
+    }
+
+    [Fact]
+    public void EffectiveCallMinutes_KeepsALongerConfiguredLimitOverAShorterGate()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 150, CallMinutes: 5);
+        ReviewConfig review = ReviewWithGates(new ReviewTaskGate("test", [], null, ["dotnet", "test"], [], TimeoutSeconds: 120));
+
+        Assert.Equal(5, WorkerGuardRules.EffectiveCallMinutes(budget, review));
+    }
+
+    [Fact]
+    public void EffectiveCallMinutes_CountsATechnologyGatesTimeoutToo()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 150, CallMinutes: 5);
+        ReviewConfig review = new()
+        {
+            TechnologyGates = new Dictionary<string, IReadOnlyList<ReviewTaskGate>>(StringComparer.Ordinal)
+            {
+                ["csharp"] = [new ReviewTaskGate("test", [], null, ["dotnet", "test"], [], TimeoutSeconds: 600)],
+            },
+        };
+
+        Assert.Equal(11, WorkerGuardRules.EffectiveCallMinutes(budget, review));
+    }
+
+    [Fact]
+    public void StalledCall_AllowsAGapThatFitsTheLongestDeclaredTaskGate()
+    {
+        _host.Write(
+            _host.InHome(".kyber-weave", "kyber-weave.yml"),
+            TaskGateYaml);
+
+        // The repository allows the gate 10 minutes, so a 7-minute shell call is healthy, not hung.
+        Assert.Empty(HostConfigGuard(Copilot("dev-medium", "agent-1"), Start));
+        Assert.Empty(HostConfigGuard(Copilot("dev-medium", "agent-1"), Start.AddMinutes(7)));
+
+        string directory = Path.Combine(_host.HomeDirectory, ".kyber-weave", "arbiter", "budgets");
+        string file = Assert.Single(_host.Files.EnumerateFiles(directory, "*", recursive: false));
+        string[] lines = [.. _host.Files.ReadLines(file)];
+        Assert.Equal("11", lines[0].Split(' ')[4]);
+    }
+
+    [Fact]
+    public void StalledCall_DeniesAGapPastTheLongestDeclaredTaskGateOnce()
+    {
+        _host.Write(
+            _host.InHome(".kyber-weave", "kyber-weave.yml"),
+            TaskGateYaml);
+
+        Assert.Empty(HostConfigGuard(Copilot("dev-medium", "agent-1"), Start));
+
+        string answer = HostConfigGuard(Copilot("dev-medium", "agent-1"), Start.AddMinutes(12));
+
+        using JsonDocument document = JsonDocument.Parse(answer);
+        Assert.Equal("deny", document.RootElement.GetProperty("permissionDecision").GetString());
+        Assert.Contains("NOT VERIFIED:", document.RootElement.GetProperty("permissionDecisionReason").GetString()!, StringComparison.Ordinal);
+
+        Assert.Empty(HostConfigGuard(Copilot("dev-medium", "agent-1"), Start.AddMinutes(12).AddSeconds(5)));
+    }
+
+    [Fact]
     public void StalledCall_ReadsTheShippedLimitFromACounterFileWrittenBeforeIt()
     {
         string directory = Path.Combine(_host.HomeDirectory, ".kyber-weave", "arbiter", "budgets");
@@ -345,6 +422,32 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
         _host.Get<IWorkerGuard>().Run(harness, json, stdout, TextWriter.Null, _host.HomeDirectory, () => now, _ => budget);
         return stdout.ToString();
     }
+
+    /// <summary>The repository's own task-gate declaration, read from the host configuration the guard loads.</summary>
+    private const string TaskGateYaml =
+        "review:\n" +
+        "  task-gates:\n" +
+        "    csharp-dev:\n" +
+        "      - id: test\n" +
+        "        include: [\"**/*.cs\"]\n" +
+        "        run: [dotnet, test]\n" +
+        "        timeout: 600\n";
+
+    /// <summary>Runs the guard with the configuration on disk, so the budget comes from the host config rather than a loader.</summary>
+    private string HostConfigGuard(string json, DateTimeOffset now)
+    {
+        using StringWriter stdout = new();
+        _host.Get<IWorkerGuard>().Run("copilot-cli", json, stdout, TextWriter.Null, _host.HomeDirectory, () => now);
+        return stdout.ToString();
+    }
+
+    private static ReviewConfig ReviewWithGates(ReviewTaskGate gate) => new()
+    {
+        TaskGates = new Dictionary<string, IReadOnlyList<ReviewTaskGate>>(StringComparer.Ordinal)
+        {
+            ["csharp-dev"] = [gate],
+        },
+    };
 
     private string Copilot(string agentType, string agentId) => JsonSerializer.Serialize(new
     {

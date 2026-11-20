@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Rules;
+using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Arbiter.Hooks;
 
@@ -391,6 +392,34 @@ internal static class WorkerGuardRules
         return $"{BudgetRuleId}: this dispatch has made {calls} tool calls in {(int)elapsed.TotalMinutes} minutes, past its " +
                $"budget of {maxCalls} calls or {minutes} minutes. Stop now: make no more tool calls. Return a report whose " +
                $"first line is {BudgetExceededStatus}, then what is done, what is not, and the last failure you saw.";
+    }
+
+    /// <summary>
+    /// The per-call limit the guard applies: the configured one, or the longest task gate the repository declares plus a
+    /// minute for the model's own turn, whichever is longer. The runner stops a gate at its own timeout, so a limit
+    /// below that would call a healthy gate a hung process.
+    /// </summary>
+    internal static int EffectiveCallMinutes(ArbiterDispatchBudgetConfig budget, ReviewConfig? review)
+    {
+        int longestSeconds = 0;
+        if (review is not null)
+        {
+            foreach (IReadOnlyList<ReviewTaskGate> gates in review.TaskGates.Values.Concat(review.TechnologyGates.Values))
+            {
+                foreach (ReviewTaskGate gate in gates)
+                {
+                    longestSeconds = Math.Max(longestSeconds, gate.TimeoutSeconds);
+                }
+            }
+        }
+
+        if (longestSeconds <= 0)
+        {
+            return budget.CallMinutes;
+        }
+
+        int gateMinutes = (longestSeconds + 59) / 60 + 1;
+        return Math.Max(budget.CallMinutes, gateMinutes);
     }
 
     /// <summary>The header line a budget file opens with.</summary>

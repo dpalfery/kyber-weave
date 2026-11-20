@@ -91,7 +91,9 @@ public sealed record ArbiterCommentTriageConfig(IReadOnlyList<string> BotLogins)
 /// <param name="CallMinutes">
 /// Minutes between two consecutive tool calls of the dispatch, where the earlier call started a process, past which
 /// that call is taken to have hung: the guard sees only the start of each call, so the gap is the earlier call's run
-/// time plus the model's own time. A call that starts no process (a read) cannot hang and is never judged.
+/// time plus the model's own time. A call that starts no process (a read) cannot hang and is never judged. The guard
+/// raises this to the longest timeout declared on any <c>review.task-gates</c> (or <c>review.technology-gates</c>)
+/// entry, plus one minute for the model's turn, so a gate the repository allows to run is never called hung.
 /// </param>
 public sealed record ArbiterDispatchBudgetConfig(int Minutes, int ToolCalls, int CallMinutes = 5)
 {
