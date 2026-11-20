@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Text;
 using System.Threading;
 using KyberDash.Domain.Schema;
@@ -68,14 +69,15 @@ public partial class SqliteRelationalStore
         if (fileSystem.FileExists(DatabasePath))
         {
             int? existingVersion = ProbeExistingDatabaseSchemaVersion();
-            if (existingVersion is int version)
+            if (existingVersion is int version && version != SchemaVersion)
             {
-                ValidateExistingSchemaVersion(version);
+                ThrowWhenInvalidOrNewerSchemaVersion(version);
+                RebuildOlderStoreUnread(version);
             }
 
             ApplyWalPragmasAndStoreState();
             ApplyFullSchemaAndStampState();
-            return RebuiltFromOlderSchema ? onRebuiltFromOlderSchema : null;
+            return ConsumeRebuildCallback();
         }
 
         ApplyWalPragmasAndStoreState();
@@ -86,7 +88,68 @@ public partial class SqliteRelationalStore
         }
 
         ApplyFullSchemaAndStampState();
-        return RebuiltFromOlderSchema ? onRebuiltFromOlderSchema : null;
+        return ConsumeRebuildCallback();
+    }
+
+    /// <summary>
+    /// Deletes an incompatible older store without reading any data rows, recreates the directory
+    /// and schema skeleton state, and records the rebuild so the caller triggers full re-ingest.
+    /// </summary>
+    /// <param name="version">Schema version discovered in the pre-existing store (<c>1 &lt;= version &lt; <see cref="SchemaVersion"/></c>).</param>
+    private void RebuildOlderStoreUnread(int version)
+    {
+        fileSystem.DeleteFile(DatabasePath);
+        fileSystem.DeleteFile(DatabasePath + "-wal");
+        fileSystem.DeleteFile(DatabasePath + "-shm");
+
+        log?.Invoke(
+            $"Deleted incompatible relational store at '{DatabasePath}' with schema version {IntSql(version)} " +
+            $"(expected schema version {IntSql(SchemaVersion)}); removed canon.db, -wal, and -shm unread with no backup. " +
+            $"Recreated relational schema version {IntSql(SchemaVersion)}; operator settings (operator_setting_*) were reset to defaults. " +
+            "Unrecoverable history classes: OTLP-only, unevidenced (zcode). Full source re-ingest triggered.");
+
+        bool reingestTriggered = onRebuiltFromOlderSchema is not null;
+        LastRebuildInfo = new StoreRebuildInfo(
+            Path.GetFullPath(DatabasePath),
+            version,
+            SchemaVersion,
+            SettingsResetToDefaults: true,
+            UnrecoverableHistoryClasses: ["OTLP-only", "unevidenced (zcode)"],
+            ReingestTriggered: reingestTriggered);
+        RebuiltFromOlderSchema = true;
+        RebuiltFromSchemaVersion = version;
+
+        if (!reingestTriggered)
+        {
+            Interlocked.Exchange(ref pendingRebuildReingest, 1);
+        }
+    }
+
+    /// <summary>
+    /// Returns the post-rebuild re-ingest callback when a rebuild occurred, or <see langword="null"/>
+    /// when no rebuild occurred or the pending re-ingest flag was armed instead.
+    /// </summary>
+    private Action? ConsumeRebuildCallback() => RebuiltFromOlderSchema ? onRebuiltFromOlderSchema : null;
+
+    /// <summary>
+    /// Throws when <paramref name="version"/> is invalid or newer than <see cref="SchemaVersion"/>.
+    /// </summary>
+    /// <param name="version">Schema version discovered in the pre-existing store.</param>
+    private void ThrowWhenInvalidOrNewerSchemaVersion(int version)
+    {
+        if (version <= 0)
+        {
+            string invalidMessage = $"Relational store at '{DatabasePath}' has invalid schema_version {IntSql(version)}.";
+            log?.Invoke(invalidMessage);
+            throw new InvalidOperationException(invalidMessage);
+        }
+
+        if (version > SchemaVersion)
+        {
+            string refusalMessage = FormatSchemaVersionRefusal(DatabasePath, version);
+            log?.Invoke(refusalMessage);
+            throw new InvalidOperationException(refusalMessage);
+        }
     }
 
     private int? ProbeExistingDatabaseSchemaVersion()
@@ -173,19 +236,7 @@ public partial class SqliteRelationalStore
 
     private void ValidateExistingSchemaVersion(int version)
     {
-        if (version <= 0)
-        {
-            string invalidMessage = $"Relational store at '{DatabasePath}' has invalid schema_version {IntSql(version)}.";
-            log?.Invoke(invalidMessage);
-            throw new InvalidOperationException(invalidMessage);
-        }
-
-        if (version > SchemaVersion)
-        {
-            string refusalMessage = FormatSchemaVersionRefusal(DatabasePath, version);
-            log?.Invoke(refusalMessage);
-            throw new InvalidOperationException(refusalMessage);
-        }
+        ThrowWhenInvalidOrNewerSchemaVersion(version);
 
         if (version < SchemaVersion)
         {

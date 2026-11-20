@@ -172,13 +172,14 @@ public class SchemaVersionTests
     }
 
     [Theory]
-    [InlineData("store_state", "1\t5")]
-    [InlineData("store_state", "24\t5")]
-    [InlineData("metadata", "1")]
-    [InlineData("metadata", "24")]
-    public void EnsureInitialized_RefusesOlderRelationalOrLegacyStoreUntilRebuild_WithoutDeletingFiles(
+    [InlineData("store_state", "1\t5", 1)]
+    [InlineData("store_state", "24\t5", 24)]
+    [InlineData("metadata", "1", 1)]
+    [InlineData("metadata", "24", 24)]
+    public void EnsureInitialized_RebuildsOlderRelationalOrLegacyStoreUnread_WithoutBackup(
         string discoveredTable,
-        string versionQueryResponse)
+        string versionQueryResponse,
+        int expectedOldVersion)
     {
         string rootDir = NewNonExistentRoot();
         string dbPath = Path.Combine(rootDir, "canon.db");
@@ -193,9 +194,22 @@ public class SchemaVersionTests
             onRebuiltFromOlderSchema: () => rebuildCallbackInvoked = true);
         store.EnqueueResponse(discoveredTable);
         store.EnqueueResponse(versionQueryResponse);
+        store.EnqueueResponse(string.Empty);
+        store.EnqueueResponse(string.Empty);
 
-        Assert.Throws<InvalidOperationException>(() => store.EnsureInitialized());
-        AssertRefusedWithoutSideEffects(store, fakeFs, rootDir, dbPath, expectedQueryCount: 2, rebuildCallbackInvoked);
+        store.EnsureInitialized();
+
+        Assert.False(Directory.Exists(rootDir));
+        Assert.Equal(
+            [Path.GetFullPath(dbPath), Path.GetFullPath(dbPath + "-wal"), Path.GetFullPath(dbPath + "-shm")],
+            fakeFs.DeletedFiles);
+        Assert.True(rebuildCallbackInvoked);
+        Assert.True(store.RebuiltFromOlderSchema);
+        Assert.Equal(expectedOldVersion, store.RebuiltFromSchemaVersion);
+        Assert.NotNull(store.LastRebuildInfo);
+        Assert.Equal(expectedOldVersion, store.LastRebuildInfo.OldSchemaVersion);
+        Assert.Equal(SqliteRelationalStore.SchemaVersion, store.LastRebuildInfo.NewSchemaVersion);
+        Assert.Equal(4, store.ExecutedSql.Count);
     }
 
     [Fact]
