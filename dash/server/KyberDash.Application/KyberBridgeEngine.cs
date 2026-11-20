@@ -47,6 +47,7 @@ public class KyberBridgeEngine
     private readonly Func<DateTimeOffset> clock;
     private readonly string version;
     private readonly string instanceId;
+    private readonly IProjectionStore? predictionStore;
 
     /// <summary>
     /// Initializes a new <see cref="KyberBridgeEngine"/>.
@@ -59,6 +60,10 @@ public class KyberBridgeEngine
     /// <param name="version">Engine build version string.</param>
     /// <param name="clock">Optional UTC clock override for deterministic timestamps.</param>
     /// <param name="instanceId">Optional process instance identifier for analytics freshness metadata.</param>
+    /// <param name="predictionStore">Optional typed prediction store. When provided, predictions persist
+    /// through <see cref="IProjectionStore"/> as <c>prediction</c> rows with optional
+    /// <c>prediction_comparison</c>, <c>prediction_observed_delta</c>, and
+    /// <c>prediction_calibration</c> child rows; otherwise they use the legacy repository.</param>
     public KyberBridgeEngine(
         ICanonStoreRepository store,
         ISettingsRepository settings,
@@ -67,7 +72,8 @@ public class KyberBridgeEngine
         CanonRollupsEngine rollups,
         string version = DefaultVersion,
         Func<DateTimeOffset>? clock = null,
-        string? instanceId = null)
+        string? instanceId = null,
+        IProjectionStore? predictionStore = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(settings);
@@ -86,6 +92,7 @@ public class KyberBridgeEngine
         this.instanceId = string.IsNullOrWhiteSpace(instanceId)
             ? string.Create(CultureInfo.InvariantCulture, $"kyberdash-{Environment.ProcessId}")
             : instanceId;
+        this.predictionStore = predictionStore;
     }
 
     /// <summary>Ensures dirty sessions, runs, executions, and harness rollups are projected up to date.</summary>
@@ -974,8 +981,17 @@ public class KyberBridgeEngine
     /// <summary>Lists recorded predictions.</summary>
     /// <param name="runId">Optional run filter.</param>
     /// <returns>Serialized predictions array.</returns>
-    public JsonElement GetPredictions(string? runId = null) =>
-        JsonSerializer.SerializeToElement(store.ListPredictions(runId), CamelCaseJsonOptions);
+    public JsonElement GetPredictions(string? runId = null)
+    {
+        if (predictionStore is not null)
+        {
+            return JsonSerializer.SerializeToElement(
+                predictionStore.ListPredictions(runId).Select(ToPredictionRow),
+                CamelCaseJsonOptions);
+        }
+
+        return JsonSerializer.SerializeToElement(store.ListPredictions(runId), CamelCaseJsonOptions);
+    }
 
     /// <summary>Records a prediction from a finding/run request body.</summary>
     /// <param name="body">Request JSON body.</param>
@@ -1011,8 +1027,28 @@ public class KyberBridgeEngine
         double confidence = body.TryGetProperty("confidence", out JsonElement cEl) && cEl.TryGetDouble(out double c)
             ? Math.Clamp(c, 0.0, 1.0)
             : 0.5;
+        string? comparisonRunId = body.TryGetProperty("comparisonRunId", out JsonElement cmpEl)
+            && cmpEl.ValueKind == JsonValueKind.String
+            ? cmpEl.GetString()
+            : null;
+        if (string.IsNullOrWhiteSpace(comparisonRunId))
+        {
+            comparisonRunId = null;
+        }
+
+        long? observedDeltaTokens = body.TryGetProperty("observedDeltaTokens", out JsonElement deltaEl)
+            && deltaEl.ValueKind == JsonValueKind.Number
+            && deltaEl.TryGetInt64(out long delta)
+            ? delta
+            : null;
+        double? calibrationScore = body.TryGetProperty("calibrationScore", out JsonElement calEl)
+            && calEl.ValueKind == JsonValueKind.Number
+            && calEl.TryGetDouble(out double score)
+            ? Math.Clamp(score, 0.0, 1.0)
+            : null;
         string id = string.Create(CultureInfo.InvariantCulture, $"pred-{Guid.NewGuid():N}");
         string nowIso = clock().UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+        string tier = confidence >= 0.8 ? "high" : confidence >= 0.5 ? "medium" : "low";
 
         created = new PredictionRow(
             Id: id,
@@ -1020,18 +1056,60 @@ public class KyberBridgeEngine
             RunId: runId,
             PredictedWasteTokens: predictedWaste,
             Confidence: confidence,
-            ConfidenceTier: confidence >= 0.8 ? "high" : confidence >= 0.5 ? "medium" : "low",
+            ConfidenceTier: tier,
             ErrorBar: null,
-            CreatedAt: nowIso);
-        store.PutPrediction(created);
+            CreatedAt: nowIso,
+            ComparisonRunId: comparisonRunId,
+            ObservedDeltaTokens: observedDeltaTokens,
+            CalibrationScore: calibrationScore,
+            Payload: null);
+        if (predictionStore is not null)
+        {
+            predictionStore.ReplacePrediction(new StoredPrediction(
+                PredictionId: id,
+                FindingId: findingId,
+                RunId: runId,
+                PredictedWasteTokens: predictedWaste,
+                Confidence: confidence,
+                ConfidenceTier: tier,
+                CreatedAtUtc: nowIso,
+                ComparisonRunId: comparisonRunId,
+                ObservedDeltaTokens: observedDeltaTokens,
+                CalibrationScore: calibrationScore));
+        }
+        else
+        {
+            store.PutPrediction(created);
+        }
+
         return true;
     }
+
+    /// <summary>Maps a typed prediction row back to the API prediction shape.</summary>
+    /// <param name="prediction">Typed prediction row.</param>
+    /// <returns>API prediction row with absent optionals left unset.</returns>
+    private static PredictionRow ToPredictionRow(StoredPrediction prediction) =>
+        new(
+            Id: prediction.PredictionId,
+            FindingId: prediction.FindingId,
+            RunId: prediction.RunId,
+            PredictedWasteTokens: prediction.PredictedWasteTokens,
+            Confidence: prediction.Confidence,
+            ConfidenceTier: prediction.ConfidenceTier,
+            ErrorBar: null,
+            CreatedAt: prediction.CreatedAtUtc,
+            ComparisonRunId: prediction.ComparisonRunId,
+            ObservedDeltaTokens: prediction.ObservedDeltaTokens,
+            CalibrationScore: prediction.CalibrationScore,
+            Payload: null);
 
     /// <summary>Returns prediction calibration summary across recorded predictions.</summary>
     /// <returns>Calibration summary JSON element.</returns>
     public JsonElement GetCalibration()
     {
-        IReadOnlyList<PredictionRow> predictions = store.ListPredictions();
+        IReadOnlyList<PredictionRow> predictions = predictionStore is not null
+            ? [.. predictionStore.ListPredictions().Select(ToPredictionRow)]
+            : store.ListPredictions();
         List<PredictionRow> scored = [.. predictions.Where(p => p.CalibrationScore.HasValue)];
         double? meanScore = scored.Count > 0 ? Math.Round(scored.Average(p => p.CalibrationScore!.Value), 4) : null;
 
