@@ -37,4 +37,6 @@ they never replace them.
   delay.
 - Unit tests cover domain logic and service classes. Infrastructure, a database and HTTP
   belong to integration tests.
-- A test for a value crossing the trust boundary has one case per input-site column.
+- A test for a value crossing the trust boundary has one case per hostile-input column of the
+  input-site table (absent or null, empty, wrong type, zero or negative, largest value, rejected
+  characters, repeated markers), which the code-review skill's correctness lens defines.
