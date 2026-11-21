@@ -5,7 +5,7 @@
 HC_SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"                      # absolute; scripts cd elsewhere
 : "${HC_KW_REPO:=$(cd "$HC_SCRIPTS/../../../.." && pwd)}"                     # kyber-weave checkout
 : "${HC_DEMO_REPO:=$HOME/git/personal/factory/hotshot-logistics-demo}"       # demo app, canonical checkout
-: "${HC_DEMO_PROMPT:=$HC_DEMO_REPO/6-Docs/demo/Demo-full-prompt.md}"         # the feature prompt
+: "${HC_DEMO_PROMPT:=$HC_DEMO_REPO/6-Docs/demo/user-story.md}"                # the feature request (user story with acceptance criteria)
 : "${HC_HOME:=$(dirname "$HC_KW_REPO")/hill-climb}"                          # runs, ledger, local releases
 : "${HC_CONDUCTOR_MODEL:=gpt-6.2-sol}"      # conductor.agent.md pins no model; the user default may be unavailable
 : "${HC_RUN_TIMEOUT_MIN:=180}"              # a run past this is scored as a hang; healthy runs with three review cycles took over 2 h
