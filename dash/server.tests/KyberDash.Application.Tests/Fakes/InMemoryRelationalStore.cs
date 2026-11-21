@@ -5320,11 +5320,9 @@ public class InMemoryRelationalStore :
     }
 
     /// <summary>
-    /// Prices a turn from the token classes that were stored. A turn with no stored
-    /// class and no reported total is not priced: filling those gaps with zero would
-    /// report a measured zero. A reported total with no class breakdown is billed as
-    /// fresh input and output, because the harness gave a total and no cache split.
-    /// Mirrors <c>SqliteRelationalStore.PriceReportedTokens</c>.
+    /// Prices a turn from the classes and reported totals that were stored.
+    /// Calls <see cref="CanonPricing.PriceStoredTokens"/>, the same rule as
+    /// <c>SqliteRelationalStore.PriceReportedTokens</c>.
     /// </summary>
     private static CostBlock PriceReportedTokens(
         long? freshInput,
@@ -5336,31 +5334,17 @@ public class InMemoryRelationalStore :
         string harnessId,
         IModelPricingLookup? pricing)
     {
-        bool classPresent = freshInput is not null || cacheRead is not null || cacheCreation is not null || output is not null || reasoning is not null;
-        if (!classPresent && record.ReportedInputTokens is null && record.ReportedOutputTokens is null)
-        {
-            return new CostBlock(
-                CostBasis.Published,
-                CanonPricing.IsPublishedTableHarness(harnessId) ? CostStatus.NoRate : CostStatus.OutOfScope);
-        }
-
-        long billedFresh = classPresent ? freshInput ?? 0L : record.ReportedInputTokens ?? 0L;
-        long billedOutput = classPresent ? output ?? 0L : record.ReportedOutputTokens ?? 0L;
-        long? inputTokens = classPresent
-            ? (freshInput.HasValue || cacheRead.HasValue || cacheCreation.HasValue
-                ? (freshInput ?? 0L) + (cacheRead ?? 0L) + (cacheCreation ?? 0L)
-                : null)
-            : record.ReportedInputTokens;
-        TokenUsage usage = new(
-            FreshInput: billedFresh,
-            CacheRead: cacheRead ?? 0L,
-            CacheCreation: cacheCreation ?? 0L,
-            Output: billedOutput,
-            ReportedInput: record.ReportedInputTokens ?? inputTokens ?? 0L,
-            ReportedOutput: record.ReportedOutputTokens ?? billedOutput,
-            Reasoning: reasoning);
-
-        return CanonPricing.PriceTurn(usage, record.Model, harnessId, pricing, existing: null);
+        return CanonPricing.PriceStoredTokens(
+            freshInput,
+            cacheRead,
+            cacheCreation,
+            output,
+            reasoning,
+            record.ReportedInputTokens,
+            record.ReportedOutputTokens,
+            record.Model,
+            harnessId,
+            pricing);
     }
 
     private static long? TryFindTokenCount(IReadOnlyList<CollectedTokenCount> tokens, TokenClass tokenClass)

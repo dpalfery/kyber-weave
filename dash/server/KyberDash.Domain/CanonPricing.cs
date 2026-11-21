@@ -1089,6 +1089,92 @@ public static partial class CanonPricing
             : PricePublishedTurn(tokens, model, harness, pricing, existing);
     }
 
+    /// <summary>
+    /// Prices a turn from the token classes that were stored.
+    /// A reported input total is the checksum <c>fresh + cache read + cache write</c>.
+    /// It is not billed at the fresh rate, and a missing side is not billed as a measured zero.
+    /// A reported output total is one rate and is billed when the output class was not stored.
+    /// Stored classes that sum to the reported input are priced, with the absent input classes
+    /// reconciled to zero. A remainder is priced only for the stored classes and reported as
+    /// <see cref="CostStatus.Partial"/>. A turn with no class and no reported total is not priced.
+    /// </summary>
+    public static CostBlock PriceStoredTokens(
+        long? freshInput,
+        long? cacheRead,
+        long? cacheCreation,
+        long? output,
+        long? reasoning,
+        long? reportedInput,
+        long? reportedOutput,
+        string? model,
+        string? harness,
+        IModelPricingLookup? pricing)
+    {
+        bool canPriceInput = freshInput is not null || cacheRead is not null || cacheCreation is not null;
+        bool canPriceOutput = output is not null || reportedOutput is not null;
+        bool storedClass = canPriceInput || output is not null || reasoning is not null;
+        bool reportedInputOnly = !canPriceInput && !canPriceOutput && reportedInput is not null;
+        if ((!storedClass && reportedInput is null && reportedOutput is null) || reportedInputOnly)
+        {
+            return new CostBlock(
+                CostBasis.Published,
+                IsPublishedTableHarness(harness) ? CostStatus.NoRate : CostStatus.OutOfScope);
+        }
+
+        long billedFresh = freshInput ?? 0L;
+        long billedCacheRead = cacheRead ?? 0L;
+        long billedCacheCreation = cacheCreation ?? 0L;
+        decimal knownInput = (decimal)billedFresh + billedCacheRead + billedCacheCreation;
+        bool inputComplete = reportedInput is not null
+            ? canPriceInput && knownInput == reportedInput.Value
+            : storedClass;
+
+        long billedOutput;
+        bool outputComplete;
+        if (output is not null)
+        {
+            billedOutput = output.Value;
+            outputComplete = reportedOutput is null || reportedOutput.Value == output.Value;
+        }
+        else if (reportedOutput is not null)
+        {
+            billedOutput = reportedOutput.Value;
+            outputComplete = true;
+        }
+        else
+        {
+            billedOutput = 0L;
+            outputComplete = true;
+        }
+
+        TokenUsage usage = new(
+            FreshInput: billedFresh,
+            CacheRead: billedCacheRead,
+            CacheCreation: billedCacheCreation,
+            Output: billedOutput,
+            ReportedInput: reportedInput ?? SaturateToInt64(knownInput),
+            ReportedOutput: reportedOutput ?? billedOutput,
+            Reasoning: reasoning);
+
+        CostBlock priced = PriceTurn(usage, model, harness, pricing, existing: null);
+        if (inputComplete && outputComplete)
+            return priced;
+
+        return priced.Status == CostStatus.Priced
+            ? priced with { Status = CostStatus.Partial }
+            : priced;
+
+        static long SaturateToInt64(decimal total)
+        {
+            if (total > long.MaxValue)
+                return long.MaxValue;
+            if (total < long.MinValue)
+                return long.MinValue;
+
+            return (long)total;
+        }
+    }
+
     /// <summary>Extracts a validated non-negative finite integer/double measurement from JSON or numeric values.</summary>
     public static long? MeasuredCount(object? value)
     {

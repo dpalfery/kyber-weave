@@ -331,20 +331,21 @@ public class RelationalIngestTests
     }
 
     /// <summary>
-    /// A turn that stored no token class and no reported total is not priced. Filling
-    /// the missing classes with zero and calling the rate table reports a measured $0.
-    /// A turn that stored a real zero is priced. A turn that reported totals and no
-    /// class breakdown is priced from those totals.
+    /// A turn that stored no token class and no reported total is not priced. A stored
+    /// zero is priced at zero. A reported input total is not billed at the fresh rate,
+    /// a missing side is not billed as zero, and a class remainder stays partial.
     /// </summary>
     [Fact]
     public void GetSessionAggregate_AbsentTokens_IsNotPricedAsZero()
     {
+        const double inputRate = 0.000003;
+        const double outputRate = 0.000015;
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new(snapshot: new Dictionary<string, ModelCosts>(StringComparer.Ordinal)
         {
             ["claude-sonnet-4-6"] = new ModelCosts(
-                InputCostPerToken: 0.000003,
-                OutputCostPerToken: 0.000015,
+                InputCostPerToken: inputRate,
+                OutputCostPerToken: outputRate,
                 CacheWriteCostPerToken: 0.00000375,
                 CacheReadCostPerToken: 0.0000003,
                 WebSearchCostPerRequest: 0,
@@ -360,19 +361,44 @@ public class RelationalIngestTests
                 new CollectedTokenCount(TokenClass.Input, 0),
                 new CollectedTokenCount(TokenClass.Output, 0),
             ]));
-        store.WriteBatch(PricedTurn("sess-reported", tokens: [], reportedInput: 1_000, reportedOutput: 100));
+        store.WriteBatch(PricedTurn("sess-reported-both", tokens: [], reportedInput: 1_000, reportedOutput: 100));
+        store.WriteBatch(PricedTurn("sess-reported-input", tokens: [], reportedInput: 1_000));
+        store.WriteBatch(PricedTurn("sess-reported-output", tokens: [], reportedOutput: 100));
+        store.WriteBatch(PricedTurn(
+            "sess-remainder",
+            tokens:
+            [
+                new CollectedTokenCount(TokenClass.Input, 100),
+                new CollectedTokenCount(TokenClass.Output, 10),
+            ],
+            reportedInput: 300));
 
         IModelPricingLookup tables = pricing.LoadPricingTables();
-        SessionAggregateView absent = store.GetSessionAggregate("sess-absent", tables)!;
-        SessionAggregateView zero = store.GetSessionAggregate("sess-zero", tables)!;
-        SessionAggregateView reported = store.GetSessionAggregate("sess-reported", tables)!;
+        AssertAggregateCost(store, tables, "sess-absent", CostStatus.NoRate, null);
+        AssertAggregateCost(store, tables, "sess-zero", CostStatus.Priced, 0d);
+        AssertAggregateCost(store, tables, "sess-reported-both", CostStatus.Partial, 100 * outputRate);
+        AssertAggregateCost(store, tables, "sess-reported-input", CostStatus.NoRate, null);
+        AssertAggregateCost(store, tables, "sess-reported-output", CostStatus.Partial, 100 * outputRate);
+        AssertAggregateCost(store, tables, "sess-remainder", CostStatus.Partial, (100 * inputRate) + (10 * outputRate));
+    }
 
-        Assert.Equal(CostStatus.NoRate, absent.PublishedCost.Status);
-        Assert.Null(absent.PublishedCost.Value);
-        Assert.Equal(CostStatus.Priced, zero.PublishedCost.Status);
-        Assert.Equal(0d, zero.PublishedCost.Value);
-        Assert.Equal(CostStatus.Priced, reported.PublishedCost.Status);
-        Assert.Equal((1_000 * 0.000003) + (100 * 0.000015), reported.PublishedCost.Value);
+    private static void AssertAggregateCost(
+        InMemoryRelationalStore store,
+        IModelPricingLookup tables,
+        string sessionKey,
+        CostStatus status,
+        double? value)
+    {
+        SessionAggregateView view = store.GetSessionAggregate(sessionKey, tables)!;
+        Assert.Equal(status, view.PublishedCost.Status);
+        if (value is null)
+        {
+            Assert.Null(view.PublishedCost.Value);
+            return;
+        }
+
+        Assert.NotNull(view.PublishedCost.Value);
+        Assert.Equal(value.Value, view.PublishedCost.Value.Value, precision: 8);
     }
 
     private static CollectedBatch PricedTurn(

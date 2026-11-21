@@ -60,21 +60,26 @@ public class SqliteRelationalStoreReadTests : IDisposable
     }
 
     /// <summary>
-    /// A turn with no token class and no reported total is not priced. A stored zero is priced
-    /// at zero. A turn that reported totals and no class breakdown is priced from those totals.
-    /// The SQLite reader and the in-memory store agree.
+    /// A reported input total is the checksum of fresh, cache-read, and cache-write tokens.
+    /// It is not billed at the fresh rate, and a side the harness did not report is not
+    /// billed as zero. A reported output total is one rate and is billed. A class breakdown
+    /// that matches the reported total is priced; a remainder is a partial price of the
+    /// classes that were stored. Each figure is checked on the SQLite reader and the
+    /// in-memory store separately.
     /// </summary>
     [Fact]
-    public void ReportedOnlyTokens_ArePricedOnSqliteAndInMemory_AndAbsentTokensAreNot()
+    public void ReportedTotals_AreNotBilledAsFreshInputOrAsAMissingZero()
     {
+        const double inputRate = 0.000003;
+        const double outputRate = 0.000015;
         string dbPath = Path.Combine(directory.Path, "reported-only", "canon.db");
         SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
         InMemoryRelationalStore memory = new();
         IModelPricingLookup pricing = new OverridePricingLookup(
             "claude-sonnet-4-6",
             new ModelCosts(
-                InputCostPerToken: 0.000003,
-                OutputCostPerToken: 0.000015,
+                InputCostPerToken: inputRate,
+                OutputCostPerToken: outputRate,
                 CacheWriteCostPerToken: 0.00000375,
                 CacheReadCostPerToken: 0.0000003,
                 WebSearchCostPerRequest: 0,
@@ -93,11 +98,47 @@ public class SqliteRelationalStoreReadTests : IDisposable
             ],
             reportedInput: null,
             reportedOutput: null);
-        WritePricedTurn(sqlite, memory, "sess-reported", tokens: [], reportedInput: 1_000, reportedOutput: 100);
+        WritePricedTurn(sqlite, memory, "sess-reported-both", tokens: [], reportedInput: 1_000, reportedOutput: 100);
+        WritePricedTurn(sqlite, memory, "sess-reported-input", tokens: [], reportedInput: 1_000, reportedOutput: null);
+        WritePricedTurn(sqlite, memory, "sess-reported-output", tokens: [], reportedInput: null, reportedOutput: 100);
+        WritePricedTurn(
+            sqlite,
+            memory,
+            "sess-reconciled",
+            tokens:
+            [
+                new CollectedTokenCount(TokenClass.Input, 100),
+                new CollectedTokenCount(TokenClass.Output, 10),
+            ],
+            reportedInput: 100,
+            reportedOutput: null);
+        WritePricedTurn(
+            sqlite,
+            memory,
+            "sess-remainder",
+            tokens:
+            [
+                new CollectedTokenCount(TokenClass.Input, 100),
+                new CollectedTokenCount(TokenClass.Output, 10),
+            ],
+            reportedInput: 300,
+            reportedOutput: null);
+        WritePricedTurn(
+            sqlite,
+            memory,
+            "sess-reported-output-fills",
+            tokens: [new CollectedTokenCount(TokenClass.Input, 100)],
+            reportedInput: 100,
+            reportedOutput: 40);
 
         AssertPricedAlike(sqlite, memory, pricing, "sess-absent", CostStatus.NoRate, null);
         AssertPricedAlike(sqlite, memory, pricing, "sess-zero", CostStatus.Priced, 0d);
-        AssertPricedAlike(sqlite, memory, pricing, "sess-reported", CostStatus.Priced, (1_000 * 0.000003) + (100 * 0.000015));
+        AssertPricedAlike(sqlite, memory, pricing, "sess-reported-both", CostStatus.Partial, 100 * outputRate);
+        AssertPricedAlike(sqlite, memory, pricing, "sess-reported-input", CostStatus.NoRate, null);
+        AssertPricedAlike(sqlite, memory, pricing, "sess-reported-output", CostStatus.Partial, 100 * outputRate);
+        AssertPricedAlike(sqlite, memory, pricing, "sess-reconciled", CostStatus.Priced, (100 * inputRate) + (10 * outputRate));
+        AssertPricedAlike(sqlite, memory, pricing, "sess-remainder", CostStatus.Partial, (100 * inputRate) + (10 * outputRate));
+        AssertPricedAlike(sqlite, memory, pricing, "sess-reported-output-fills", CostStatus.Priced, (100 * inputRate) + (40 * outputRate));
     }
 
     private static void WritePricedTurn(
@@ -152,10 +193,21 @@ public class SqliteRelationalStoreReadTests : IDisposable
     {
         SessionAggregateView memoryView = memory.GetSessionAggregate(sessionKey, pricing)!;
         SessionAggregateView sqliteView = sqlite.GetSessionAggregate(sessionKey, pricing)!;
-        Assert.Equal(status, memoryView.PublishedCost.Status);
-        Assert.Equal(value, memoryView.PublishedCost.Value);
-        Assert.Equal(memoryView.PublishedCost.Status, sqliteView.PublishedCost.Status);
-        Assert.Equal(memoryView.PublishedCost.Value, sqliteView.PublishedCost.Value);
+        AssertPublishedCost(memoryView, status, value);
+        AssertPublishedCost(sqliteView, status, value);
+    }
+
+    private static void AssertPublishedCost(SessionAggregateView view, CostStatus status, double? value)
+    {
+        Assert.Equal(status, view.PublishedCost.Status);
+        if (value is null)
+        {
+            Assert.Null(view.PublishedCost.Value);
+            return;
+        }
+
+        Assert.NotNull(view.PublishedCost.Value);
+        Assert.Equal(value.Value, view.PublishedCost.Value.Value, precision: 8);
     }
 
     /// <summary>
