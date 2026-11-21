@@ -141,14 +141,15 @@ Single-file packaging (`scripts/release-local.sh` and `.github/workflows/release
 ## Telemetry Ingest, Canonical Store, and CLI Operations
 
 KyberDash maintains all normalized data in SQLite at `~/.kyberdash/canon.db` ([ADR 0008](../adr/0008-kyberdash-single-canonical-store.md)).
-`KYBER_CANON_DB` overrides the store path. Older database schemas migrate in place on open.
+`KYBER_CANON_DB` overrides the store path. A database whose schema version is older than the current store is deleted unread and its history is re-ingested ([ADR 0090](../adr/0090-kyberdash-relational-store.md)).
 
 ### 1. Starting the OTLP Ingest Receiver
 
 There is exactly one KyberDash engine per user ([ADR 0039](../adr/0039-single-instance-engine.md)),
 and the OTLP receiver is its child, listening for OTLP over HTTP on `127.0.0.1:4318` at
-`POST /v1/traces` and `POST /v1/logs`, then persisting to `canon.db`. Logs enrich their
-correlated span-shaped record ([ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md)).
+`POST /v1/traces` and `POST /v1/logs`, then persisting to `canon.db`. A log is mapped to
+collector rows and does not enrich a span-shaped record. [ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md)
+records the earlier span-shaped design; the C# engine does not follow it.
 
 Queue admission is bounded before anything is queued: a batch that alone exceeds the
 count or byte ceiling is refused permanently (HTTP 413 — shrink or split it, retrying
