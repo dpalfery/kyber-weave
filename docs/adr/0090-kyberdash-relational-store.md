@@ -101,7 +101,7 @@ re-ingested from harness files. The owner's store held 17 harness ids
    dropped. The per-record measurability map is gone: presence of the child
    row is the signal (RQ-4).
 
-4. **One static catalog describes all 22 tables and generates the DDL (OD-4, DD-1, DD-9, DD-10, RQ-5, RQ-9).**
+4. **One static catalog describes every relational table and generates the DDL (OD-4, DD-1, DD-9, DD-10, RQ-5, RQ-9).**
    `RelationalSchemaCatalog` is the single source for record, session,
    projection, operational, and catalog tables; the detail view and structure
    tests read it, so hand-written DDL cannot drift. Sessions, runs,
@@ -140,7 +140,7 @@ re-ingested from harness files. The owner's store held 17 harness ids
    non-recoverable over local files. `windsurf` and `aider` are excluded by
    the owner (BL-3): no reader, mapper, or fixture, and their names are
    pruned from `CleanService.KnownHarnesses` and
-   `CanonRollupsEngine.CanonicalRegisteredHarnesses` while
+   `CanonRollupsEngine.PrunedHarnessIdentities` while
    `NormalizeHarnessName` alias folding (`claude-desktop -> claude-code`,
    `cursor-agent -> cursor`) is preserved (D2, D3). `antigravity-cli`
    discovery also reads `cache/antigravity-statusline.jsonl` (D2).
