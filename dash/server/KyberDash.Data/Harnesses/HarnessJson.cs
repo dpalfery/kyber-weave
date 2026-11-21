@@ -137,7 +137,7 @@ public static class HarnessJson
     /// </summary>
     /// <param name="obj">JSON object carrying the property.</param>
     /// <param name="key">Property name.</param>
-    /// <returns>The truncated non-negative value, or <see langword="null"/> when absent or negative.</returns>
+    /// <returns>The truncated non-negative value, or <see langword="null"/> when absent, negative, non-finite, or too large to fit in a signed 64-bit integer.</returns>
     public static long? ReadOptionalNonNegativeLong(JsonElement obj, string key)
     {
         if (!obj.TryGetProperty(key, out JsonElement el) || el.ValueKind != JsonValueKind.Number)
@@ -150,7 +150,12 @@ public static class HarnessJson
             return value;
         }
 
-        if (el.TryGetDouble(out double doubleVal) && double.IsFinite(doubleVal) && doubleVal >= 0)
+        // A double at or above 2^63 does not fit in a signed 64-bit counter. The cast
+        // saturates to long.MaxValue, which would store a measured count the payload never had.
+        if (el.TryGetDouble(out double doubleVal)
+            && double.IsFinite(doubleVal)
+            && doubleVal >= 0
+            && doubleVal < long.MaxValue)
         {
             return (long)doubleVal;
         }
