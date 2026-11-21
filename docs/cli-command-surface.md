@@ -224,6 +224,13 @@ kyber-weave run start --harness claude --type fix --slug arbiter-global-block-id
 kyber-weave run start --harness claude --type feat --slug new-gate --resume <branch>
 ```
 
+**Integrate a finished task** ([`run integrate`](#run--run-integrate)):
+
+```bash
+kyber-weave run integrate --task T3
+kyber-weave run integrate --task T3 --run-worktree ../run --path ../task
+```
+
 The sections that document these sequences in full are
 [Canonical flows](#canonical-flows), [`kyber-weave` reference](#kyber-weave-reference),
 [`kyberdash` reference](#kyberdash-reference), [Exit codes](#exit-codes), and
@@ -357,6 +364,7 @@ with the settings it reads in [Configuration § Onboarding](configuration.md#onb
 |---|---|---|
 | [`run start`](kyber-squad/architecture.md#run-start-fetch-and-branch-first) | `--harness <TOKEN>` (required), `--type <TYPE>` (required), `--slug <SLUG>` (required), `--resume <BRANCH>`, `--failing-version <VERSION>`, `--json`, `--brief`, `--path <PATH>`, `--autonomy <MODE>` | The step before anyone investigates or plans: fetch `origin`, resolve the base, compare the failing build's version against `HEAD` and the base, and put the work on the branch it belongs on — in the checkout or in a worktree of its own. |
 | [`run deliver`](docgraph/mcp-runbook.md#docs_push_run_branch_and_open_draft_pull_requestprojectpath-summary-notes-title-draft-documentationimpact-planfile) | `[path]`, `--summary <TEXT>` (required), `--notes <TEXT>`, `--title <TEXT>`, `--no-draft`, `--documentation-impact <TEXT>`, `--plan <FILE>`, `--docs-root` | The last step of a finished run: commit a still-staged plan archive, push the run branch (never forced), and create or update its draft pull request on GitHub with a description assembled from the run's records. Refuses, changing nothing, off a run branch, with uncommitted changes it does not own, with the plan not archived, or when `gh` is missing or signed out (`KW-DELIVER-*`). The docs server tool `docs_push_run_branch_and_open_draft_pull_request` runs the same step. |
+| [`run integrate`](#run--run-integrate) | `--task <ID>` (required), `--run-worktree <PATH>`, `--path <PATH>` | The last step of a developer task: fast-forward the run branch when it is an ancestor of the task branch, otherwise cherry-pick the task's commits onto it, copy `.agent_scratchpad/<task-id>/` into the run worktree, remove the task worktree and delete its branch, and print `INTEGRATED: <sha>` for the worker's digest. Holds the run worktree's lock as an exclusive operating-system open, so parallel tasks integrate one at a time. |
 
 ```bash
 kyber-weave run start --harness <token> --type <type> --slug <slug> \
@@ -466,6 +474,81 @@ which would refuse the very route the marker exists for: the Arbiter's `TriggerC
 classifies `RUN-START: true` as `investigate`, never `delegate`, so the roster check and
 `KW-ARB-READONLY-001` still apply to the dispatch. See
 [the three-step decision gates](adr/0053-kyber-arbiter-three-step-decision-gates.md).
+
+### `run` — run integrate
+
+A developer task works in its own git worktree, cut from the run worktree, and commits there. Nothing
+carries that commit back to the run branch. `kyber-weave run integrate` is the deterministic last step
+of a developer task: it moves the task's commits onto the run branch, keeps the task's gate report, and
+disposes of the task worktree, so the conductor never spends a dispatch cherry-picking a commit.
+
+| Verb | Flags | What it does |
+|---|---|---|
+| `run integrate` | `--task <ID>` (required), `--run-worktree <PATH>`, `--path <PATH>` | Integrate one task worktree into the run branch. `--task` names `.agent_scratchpad/<ID>/`, the folder copied into the run worktree. `--path` is the task worktree (default: the current directory). `--run-worktree` is the run's worktree (default: the live run record `run start` wrote for this repository). |
+
+```bash
+kyber-weave run integrate --task <id> [--run-worktree <run-worktree>] [--path <task-worktree>]
+```
+
+**What it does, in order.**
+
+1. Resolves the task worktree from `--path` or the current directory, and the run worktree from
+   `--run-worktree` or the live run record for this repository. The canonical check comes first in each
+   worktree, before any other git command runs there: a worktree whose `git rev-parse --absolute-git-dir`
+   equals its `git rev-parse --git-common-dir` (resolved to an absolute path) is the repository's
+   canonical checkout, and a task never commits there and a run never integrates there. Both are refused
+   (exit `2`). A linked worktree's own git directory differs from the common one, so the check never
+   depends on how the folders are named.
+2. When no `--run-worktree` is given and several live runs work in their own worktrees, the one whose run
+   branch is an ancestor of the task branch is used — the branch the task was cut from. When none, or
+   more than one, is an ancestor, it refuses (exit `2`), names every live run's branch and worktree, and
+   says to pass `--run-worktree`. It never falls back to the most recent run.
+3. Refuses (exit `2`) when the task worktree has uncommitted tracked changes, naming the paths, and when it has
+   the run branch itself checked out rather than a task branch, so the cleanup below can never delete the run
+   branch. When the task branch has no commit the run branch lacks, it exits `0` with
+   `INTEGRATED: <run head sha> (nothing to integrate)` — but still finishes the cleanup: the scratchpad is
+   copied, the task worktree removed and its branch deleted, so a retry after a partial first attempt
+   leaves nothing behind.
+4. Takes an exclusive lock for the run worktree: it opens a reused lock file in that worktree's git
+   directory as an exclusive operating-system lock, and holds the open handle for the whole integration.
+   The operating system releases the lock when the process exits or crashes, so there is no stale lock to
+   detect or take over. It waits up to 120 seconds, retrying every 500 ms, then exits `1` naming the lock
+   file. While the lock is held, the file holds the holder's process id, task id and open time for
+   diagnosis only; nothing reads it to decide anything, and the file itself is never deleted.
+5. Under the lock, before anything is applied, refuses (exit `2`) when the run worktree has uncommitted
+   tracked changes, naming the paths. Then fast-forwards the run branch when it is an ancestor of the
+   task branch. Otherwise it cherry-picks the task branch's commits that are not on the run branch, in
+   order, with `--empty=drop`, so a commit the run branch already has under another sha is dropped
+   instead of failing the step. Every git command runs against the task or run worktree, never the
+   canonical checkout.
+6. Copies `.agent_scratchpad/<task-id>/` from the task worktree into the same path in the run worktree,
+   so the task gate report the conductor checks survives the cleanup.
+7. After a successful integration, removes the task worktree and deletes the task branch.
+8. Prints `INTEGRATED: <new run head sha>` as its last line; the worker copies that sha into its
+   completion digest as `COMMIT`.
+
+On a conflict it runs `git cherry-pick --abort` in the run worktree and exits `3` with
+`CONFLICT: <files>`, leaving the task worktree and branch untouched. Every failed cherry-pick is ended
+this way, not only a conflicting one — an untracked file the commit would overwrite fails the pick with
+no conflict at all, yet still leaves `CHERRY_PICK_HEAD` or a `sequencer` directory that would refuse the
+next integration as "already in progress". If `--abort` itself fails, `git cherry-pick --quit` ends the
+sequence. The conductor then dispatches a conflict-reconciliation rework instead of losing the task's
+work.
+
+When the commits are applied but copying the scratchpad fails, the task's work is already on the run
+branch, so the command prints `INTEGRATED: <sha>`, then an error line naming the copy failure, and exits
+`4`. The task worktree is left in place, because removing it would lose the evidence the copy could not
+keep; the conductor saves that folder and removes the worktree itself.
+
+**Exit codes.**
+
+| Exit | Meaning |
+|---|---|
+| `0` | The run branch holds the task's commits, already held them, or the task worktree is the run worktree. |
+| `1` | The lock was still held after 120 seconds, or git failed in a way that is not a conflict. |
+| `2` | Refused input: an unresolvable or ambiguous worktree, the canonical checkout as either worktree, a different repository, no branch checked out, or uncommitted tracked changes in either worktree. |
+| `3` | A conflict. The cherry-pick was aborted, the run branch is unchanged, and the task worktree survives. |
+| `4` | The commits are on the run branch, but the scratchpad could not be copied. `INTEGRATED: <sha>` is printed first; the task worktree is left for the caller to remove. |
 
 ### `arbiter` — Kyber Arbiter decision gates
 
@@ -735,6 +818,7 @@ risk. The three rules below mirror the contract in
 | `doctor` | `0` all checks pass; `1` a check failed; `2` a client-input error or a refused root; `3` the `codegraph` prerequisite is missing and installing it needs user approval. Exit `3` is checked before `1`. See [`doctor`](#doctor--repository-documentation-tooling). |
 | [`run start`](#run--run-start) | `0` the branch is in place; `1` a configuration failure, an unanswered onboarding setting, or a tool failure while `stop-on-tool-failure` is on; `2` refused input (harness token, type, slug, or a `--resume` naming no local or `origin` branch); `3` the `codegraph` prerequisite is missing. Initial argument validation runs before the configuration is loaded, configuration before the onboarding check, and onboarding before the binary is probed, so initial bad input (`2`) outranks configuration and onboarding (`1`), which outrank missing codegraph (`3`); `--resume` validation runs after fetch on the branch resolution path. |
 | `run deliver` | `0` the pull request was created or updated; `1` a refusal (`KW-DELIVER-*`) or a configuration failure. |
+| [`run integrate`](#run--run-integrate) | `0` the run branch holds the task's commits, already held them, or the task worktree is the run worktree; `1` the lock was held for longer than 120 seconds or git failed without a conflict; `2` refused input (an unresolvable or ambiguous worktree, the canonical checkout as either worktree, different repositories, no branch checked out, or uncommitted tracked changes in either worktree); `3` a conflict, aborted so the run branch is unchanged; `4` the commits are integrated but the scratchpad could not be copied, so `INTEGRATED: <sha>` is printed and the task worktree is left for the caller to remove. |
 | `docs onboarding` | `0` the answer is recorded (an answer already holding that value is a no-op at `0`); `2` an answer that is neither `done` nor `declined`, with nothing written; `1` no configuration to edit, or a file that could not be read or written |
 | any command with a config failure | `KW-CONFIG-001`, never an unhandled exception |
 

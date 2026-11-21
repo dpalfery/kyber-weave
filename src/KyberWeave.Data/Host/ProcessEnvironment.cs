@@ -43,6 +43,9 @@ public sealed class ProcessEnvironment : IProcessEnvironment
     public string MachineName => Environment.MachineName;
 
     /// <inheritdoc />
+    public int ProcessId => Environment.ProcessId;
+
+    /// <inheritdoc />
     /// <remarks>
     /// The default rule of this host's platform family. Windows and macOS volumes ignore case; every other family,
     /// FreeBSD and an unidentified one included, is treated as case-sensitive.

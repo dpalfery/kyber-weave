@@ -196,6 +196,8 @@ public sealed class HooksCliTests : IDisposable
 
         public string MachineName => string.Empty;
 
+        public int ProcessId => 4242;
+
         public bool IsFileSystemCaseInsensitive => false;
 
         public bool IsInputRedirected => true;
