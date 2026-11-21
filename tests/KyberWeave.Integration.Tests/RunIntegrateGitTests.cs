@@ -65,14 +65,35 @@ public sealed class RunIntegrateGitTests : IDisposable
             git,
             checkouts,
             files,
-            new ExclusiveFileWriter(),
             environment,
             paths,
-            new SystemIdGenerator(),
             TimeProvider.System);
     }
 
     public void Dispose() => _temp.Dispose();
+
+    /// <summary>
+    /// The integration lock is an open handle the operating system owns: a second exclusive open fails while the
+    /// first is held, and one succeeds once it is disposed, with no stale state left behind.
+    /// </summary>
+    [Fact]
+    public void ASecondExclusiveOpenOfTheLockFileFailsWhileTheFirstIsHeldAndSucceedsAfterItIsDisposed()
+    {
+        string lockPath = Path.Combine(
+            GitOutput(_run, "rev-parse", "--absolute-git-dir").Trim(),
+            RunIntegrateService.LockFileName);
+
+        using (FileStream held = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            _ = Assert.Throws<IOException>(() =>
+            {
+                using FileStream second = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            });
+        }
+
+        using FileStream reopened = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        Assert.True(reopened.CanWrite);
+    }
 
     [Fact]
     public void TwoTaskWorktreesAreIntegratedAndRemovedOneFastForwardThenOneCherryPick()

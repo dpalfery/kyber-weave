@@ -30,7 +30,6 @@ public sealed class RunIntegrateServiceTests
     private readonly ParkObservingTimeProvider _time = new();
     private readonly InMemoryFileSystem _files;
     private readonly FakePathResolver _paths;
-    private readonly FakeIdGenerator _ids = new();
     private readonly FakeProcessEnvironment _environment =
         new(currentDirectory: "/work", homeDirectory: Home, operatingSystem: OperatingSystemKind.Linux);
     private readonly FakeRunCheckout _checkouts = new()
@@ -237,7 +236,7 @@ public sealed class RunIntegrateServiceTests
         Assert.Equal(RunIntegrateStatus.RefusedInput, outcome.Status);
         Assert.Contains("src/Run.cs", outcome.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("merge", StringComparer.Ordinal));
-        Assert.False(_files.FileExists(LockPath));
+        Assert.True(LockIsFree());
     }
 
     [Fact]
@@ -251,7 +250,7 @@ public sealed class RunIntegrateServiceTests
         Assert.Equal(RunIntegrateStatus.RefusedInput, outcome.Status);
         Assert.Contains("src/Run.cs", outcome.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("cherry-pick", StringComparer.Ordinal));
-        Assert.False(_files.FileExists(LockPath));
+        Assert.True(LockIsFree());
     }
 
     [Fact]
@@ -410,139 +409,56 @@ public sealed class RunIntegrateServiceTests
     }
 
     [Fact]
-    public void TheLockIsReleasedAfterASuccessfulIntegration()
+    public void TheLockIsFreeAfterASuccessfulIntegration()
     {
         RunIntegrateOutcome outcome = Integrate(Request());
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
-        Assert.False(_files.FileExists(LockPath));
+        Assert.True(LockIsFree());
     }
 
     [Fact]
-    public void TheLockIsReleasedWhenTheIntegrationFails()
+    public void TheLockIsFreeWhenTheIntegrationFails()
     {
         _mergeSucceeds = false;
 
         RunIntegrateOutcome outcome = Integrate(Request());
 
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
-        Assert.False(_files.FileExists(LockPath));
+        Assert.True(LockIsFree());
     }
 
     [Fact]
-    public void AStaleLockIsTakenOverAndLogged()
+    public void TheLockFileHoldsTheHolderTextForDiagnosticsAndIsNeverDeleted()
     {
-        _files.WriteAllText(LockPath, "another task");
-        _time.Advance(TimeSpan.FromMinutes(11));
-
         RunIntegrateOutcome outcome = Integrate(Request());
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
-        Assert.Contains("stale", Assert.Single(outcome.Notes!), StringComparison.Ordinal);
-        Assert.False(_files.FileExists(LockPath));
-    }
-
-    [Fact]
-    public void ATakerThatLosesTheStaleRenameNeverTakesTheLock()
-    {
-        _files.WriteAllText(LockPath, "stale holder\n");
-        _time.Advance(TimeSpan.FromMinutes(11));
-
-        bool anotherProcessWon = false;
-        _files.FailWhen(operation =>
-        {
-            if (anotherProcessWon || operation.Name != nameof(IWritableFileSystem.GetLastWriteTimeUtc) || operation.Path != LockPath)
-            {
-                return false;
-            }
-
-            // Another waiter reached the same stale lock first: it renames the stale file away and creates the lock
-            // with its own holder text, so this one now sees a fresh lock. Only one taker may hold it.
-            anotherProcessWon = true;
-            _files.MoveFile(LockPath, LockPath + ".other");
-            _files.WriteAllText(LockPath, "other holder\n");
-            return false;
-        });
-
-        RunIntegrateOutcome outcome = _time.RunAdvancingOnParks(
-            () => Service().Integrate(Request()),
-            TimeSpan.FromMilliseconds(500),
-            parkNumber: int.MaxValue,
-            atPark: null);
-
-        Assert.True(anotherProcessWon, "the other taker must have taken the lock first");
-        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
-        Assert.Equal("other holder\n", _files.ReadAllText(LockPath));
-    }
-
-    [Fact]
-    public void AStaleRenameThatFailsLeavesTheLockToItsHolderAndIsRetried()
-    {
-        _files.WriteAllText(LockPath, "stale holder\n");
-        _time.Advance(TimeSpan.FromMinutes(11));
-        int failures = 0;
-        _files.FailWhen(operation =>
-            operation.Name == nameof(IWritableFileSystem.MoveFile) &&
-            operation.Path == LockPath &&
-            failures++ == 0);
-
-        string? heldAfterFirstPass = null;
-        RunIntegrateOutcome outcome = _time.RunAdvancingOnParks(
-            () => Service().Integrate(Request()),
-            TimeSpan.FromMilliseconds(500),
-            parkNumber: 1,
-            atPark: () => heldAfterFirstPass = _files.ReadAllText(LockPath));
-
-        Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
-        Assert.Equal("stale holder\n", heldAfterFirstPass);
-        Assert.False(_files.FileExists(LockPath));
-    }
-
-    [Fact]
-    public void DisposeKeepsALockAnotherProcessHasTakenOver()
-    {
-        _files.WriteAllText(LockPath, "other holder\n");
-
-        using (new RunIntegrateService.IntegrationLock(_files, LockPath, "T3\n2026-01-01T00:00:00.0000000+00:00\n"))
-        {
-        }
-
-        Assert.True(_files.FileExists(LockPath));
-        Assert.Equal("other holder\n", _files.ReadAllText(LockPath));
-    }
-
-    [Fact]
-    public void DisposeRemovesThisProcessesOwnLock()
-    {
-        const string holder = "T3\n2026-01-01T00:00:00.0000000+00:00\n";
-        _files.WriteAllText(LockPath, holder);
-
-        using (new RunIntegrateService.IntegrationLock(_files, LockPath, holder))
-        {
-        }
-
-        Assert.False(_files.FileExists(LockPath));
+        Assert.True(_files.FileExists(LockPath), "the lock file is reused, so it is never deleted");
+        string holder = _files.ReadAllText(LockPath);
+        Assert.Contains(_environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture), holder, StringComparison.Ordinal);
+        Assert.Contains("T3", holder, StringComparison.Ordinal);
     }
 
     [Fact]
     public void AWaitingIntegrationProceedsOnceTheHolderReleasesTheLock()
     {
-        _files.WriteAllText(LockPath, "another task");
+        using Stream held = _files.OpenExclusive(LockPath);
 
         RunIntegrateOutcome outcome = _time.RunAdvancingOnParks(
             () => Service().Integrate(Request()),
             TimeSpan.FromMilliseconds(500),
             parkNumber: 1,
-            atPark: () => _files.DeleteFile(LockPath));
+            atPark: held.Dispose);
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
-        Assert.False(_files.FileExists(LockPath));
+        Assert.True(LockIsFree());
     }
 
     [Fact]
-    public void AHeldLockFailsAfterTheWaitAndNamesTheLockFile()
+    public void ALockThatStaysHeldPastTheWaitFailsAfterTheRetriesAndNamesTheLockFile()
     {
-        _files.WriteAllText(LockPath, "another task");
+        using Stream held = _files.OpenExclusive(LockPath);
 
         RunIntegrateOutcome outcome = _time.RunAdvancingOnParks(
             () => Service().Integrate(Request()),
@@ -553,6 +469,7 @@ public sealed class RunIntegrateServiceTests
         Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
         Assert.Contains(LockPath, outcome.Message!, StringComparison.Ordinal);
         Assert.Contains("120", outcome.Message!, StringComparison.Ordinal);
+        Assert.False(LockIsFree(), "another worker still holds the lock");
     }
 
     [Fact]
@@ -577,11 +494,22 @@ public sealed class RunIntegrateServiceTests
             _git,
             _checkouts,
             _files,
-            new InMemoryExclusiveFileWriter(_files),
             _environment,
             _paths,
-            _ids,
             _time);
+
+    private bool LockIsFree()
+    {
+        try
+        {
+            _files.OpenExclusive(LockPath).Dispose();
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+    }
 
     private static RunIntegrateRequest Request(string? run = Run, string? task = Task) =>
         new("T3", task, run, "/work", Home);

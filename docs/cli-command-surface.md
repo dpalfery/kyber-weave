@@ -364,7 +364,7 @@ with the settings it reads in [Configuration § Onboarding](configuration.md#onb
 |---|---|---|
 | [`run start`](kyber-squad/architecture.md#run-start-fetch-and-branch-first) | `--harness <TOKEN>` (required), `--type <TYPE>` (required), `--slug <SLUG>` (required), `--resume <BRANCH>`, `--failing-version <VERSION>`, `--json`, `--brief`, `--path <PATH>`, `--autonomy <MODE>` | The step before anyone investigates or plans: fetch `origin`, resolve the base, compare the failing build's version against `HEAD` and the base, and put the work on the branch it belongs on — in the checkout or in a worktree of its own. |
 | [`run deliver`](docgraph/mcp-runbook.md#docs_push_run_branch_and_open_draft_pull_requestprojectpath-summary-notes-title-draft-documentationimpact-planfile) | `[path]`, `--summary <TEXT>` (required), `--notes <TEXT>`, `--title <TEXT>`, `--no-draft`, `--documentation-impact <TEXT>`, `--plan <FILE>`, `--docs-root` | The last step of a finished run: commit a still-staged plan archive, push the run branch (never forced), and create or update its draft pull request on GitHub with a description assembled from the run's records. Refuses, changing nothing, off a run branch, with uncommitted changes it does not own, with the plan not archived, or when `gh` is missing or signed out (`KW-DELIVER-*`). The docs server tool `docs_push_run_branch_and_open_draft_pull_request` runs the same step. |
-| [`run integrate`](#run--run-integrate) | `--task <ID>` (required), `--run-worktree <PATH>`, `--path <PATH>` | The last step of a developer task: fast-forward the run branch when it is an ancestor of the task branch, otherwise cherry-pick the task's commits onto it, copy `.agent_scratchpad/<task-id>/` into the run worktree, remove the task worktree and delete its branch, and print `INTEGRATED: <sha>` for the worker's digest. Holds one lock per run worktree, so parallel tasks integrate one at a time. |
+| [`run integrate`](#run--run-integrate) | `--task <ID>` (required), `--run-worktree <PATH>`, `--path <PATH>` | The last step of a developer task: fast-forward the run branch when it is an ancestor of the task branch, otherwise cherry-pick the task's commits onto it, copy `.agent_scratchpad/<task-id>/` into the run worktree, remove the task worktree and delete its branch, and print `INTEGRATED: <sha>` for the worker's digest. Holds the run worktree's lock as an exclusive operating-system open, so parallel tasks integrate one at a time. |
 
 ```bash
 kyber-weave run start --harness <token> --type <type> --slug <slug> \
@@ -509,13 +509,12 @@ kyber-weave run integrate --task <id> [--run-worktree <run-worktree>] [--path <t
    `INTEGRATED: <run head sha> (nothing to integrate)` — but still finishes the cleanup: the scratchpad is
    copied, the task worktree removed and its branch deleted, so a retry after a partial first attempt
    leaves nothing behind.
-4. Takes an exclusive lock for the run worktree — a lock file in that worktree's git directory, created
-   atomically — so parallel tasks integrate one at a time. It waits up to 120 seconds, retrying every
-   500 ms, then exits `1` naming the lock file. A lock older than 10 minutes is taken over with one log
-   line: the taker renames it to a name of its own, which exactly one process can do, and only that one
-   then retries the atomic create. The lock is removed on success, failure and exception alike, and only
-   when the file still holds this process's own holder text, so a lock another process has taken over is
-   left to its new holder.
+4. Takes an exclusive lock for the run worktree: it opens a reused lock file in that worktree's git
+   directory as an exclusive operating-system lock, and holds the open handle for the whole integration.
+   The operating system releases the lock when the process exits or crashes, so there is no stale lock to
+   detect or take over. It waits up to 120 seconds, retrying every 500 ms, then exits `1` naming the lock
+   file. While the lock is held, the file holds the holder's process id, task id and open time for
+   diagnosis only; nothing reads it to decide anything, and the file itself is never deleted.
 5. Under the lock, before anything is applied, refuses (exit `2`) when the run worktree has uncommitted
    tracked changes, naming the paths. Then fast-forwards the run branch when it is an ancestor of the
    task branch. Otherwise it cherry-picks the task branch's commits that are not on the run branch, in

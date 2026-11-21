@@ -133,13 +133,13 @@ public sealed class RunIntegrateCommandTests
         _integrate.Outcome = new RunIntegrateOutcome(
             RunIntegrateStatus.Integrated,
             "abc1234",
-            Notes: ["the integration lock '/work/run/.git/lock' was stale; took it over."]);
+            Notes: ["the task's scratchpad was empty."]);
 
         int exit = Run(new RunIntegrateSettings { Task = "T3" });
 
         Assert.Equal(0, exit);
         Assert.Equal(
-            "  the integration lock '/work/run/.git/lock' was stale; took it over.\n" +
+            "  the task's scratchpad was empty.\n" +
             "INTEGRATED: abc1234\n",
             Output());
     }

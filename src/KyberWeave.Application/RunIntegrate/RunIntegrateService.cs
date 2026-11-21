@@ -1,3 +1,4 @@
+using System.Text;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -24,7 +25,11 @@ namespace KyberWeave.Application.RunIntegrate;
 /// </remarks>
 public sealed class RunIntegrateService : IRunIntegrateService
 {
-    /// <summary>The lock file every integration of one run worktree shares, inside that worktree's git directory.</summary>
+    /// <summary>
+    /// The lock file every integration of one run worktree shares, inside that worktree's git directory. It is
+    /// opened exclusively for the whole integration and never deleted, because the operating system, not the file,
+    /// is what holds the lock.
+    /// </summary>
     public const string LockFileName = "kyber-weave-run-integrate.lock";
 
     private const string ScratchpadFolder = ".agent_scratchpad";
@@ -38,59 +43,40 @@ public sealed class RunIntegrateService : IRunIntegrateService
     /// <summary>How often a waiting integration retries the lock.</summary>
     public static readonly TimeSpan LockRetryInterval = TimeSpan.FromMilliseconds(500);
 
-    /// <summary>How old a lock must be before a waiting integration takes it over.</summary>
-    public static readonly TimeSpan StaleLockAge = TimeSpan.FromMinutes(10);
-
-    /// <summary>
-    /// How many waits a path that cannot be created may last before it is reported as unwritable rather than as
-    /// another worker's lock being taken over at that moment.
-    /// </summary>
-    private const int UncreatableLockAttempts = 3;
-
     private readonly IGitCommandRunner _git;
     private readonly IRunCheckout _checkouts;
     private readonly IWritableFileSystem _files;
-    private readonly IExclusiveFileWriter _exclusive;
     private readonly IProcessEnvironment _environment;
     private readonly IPathResolver _paths;
-    private readonly IIdGenerator _ids;
     private readonly TimeProvider _time;
 
     /// <summary>Creates the integration over the git, file-system and run-record seams.</summary>
     /// <param name="git">Runs every git child, bounded by its own timeout.</param>
     /// <param name="checkouts">Finds the live run record for the task worktree's repository.</param>
-    /// <param name="files">Reads and writes the evidence folder and the lock file.</param>
-    /// <param name="exclusive">Takes the lock with an atomic create, so two workers cannot both win it.</param>
-    /// <param name="environment">The operator's home and the current directory.</param>
+    /// <param name="files">Reads and writes the evidence folder, and opens the integration lock.</param>
+    /// <param name="environment">The operator's home, the current directory and this process's id.</param>
     /// <param name="paths">Turns the paths the caller gave into absolute ones.</param>
-    /// <param name="ids">Names the file a stale lock is moved to when this process takes it over.</param>
-    /// <param name="time">The clock the stale-lock age and the wait use.</param>
+    /// <param name="time">The clock the lock wait uses.</param>
     public RunIntegrateService(
         IGitCommandRunner git,
         IRunCheckout checkouts,
         IWritableFileSystem files,
-        IExclusiveFileWriter exclusive,
         IProcessEnvironment environment,
         IPathResolver paths,
-        IIdGenerator ids,
         TimeProvider time)
     {
         ArgumentNullException.ThrowIfNull(git);
         ArgumentNullException.ThrowIfNull(checkouts);
         ArgumentNullException.ThrowIfNull(files);
-        ArgumentNullException.ThrowIfNull(exclusive);
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(paths);
-        ArgumentNullException.ThrowIfNull(ids);
         ArgumentNullException.ThrowIfNull(time);
 
         _git = git;
         _checkouts = checkouts;
         _files = files;
-        _exclusive = exclusive;
         _environment = environment;
         _paths = paths;
-        _ids = ids;
         _time = time;
     }
 
@@ -224,7 +210,9 @@ public sealed class RunIntegrateService : IRunIntegrateService
         string lockPath = Path.Combine(runGitDirectory, LockFileName);
         try
         {
-            using IntegrationLock held = TakeLock(lockPath, taskId, notes);
+            // The stream is the lock: the operating system releases it when this process exits or crashes, so there
+            // is never a stale file to detect or take over, and the file itself is reused rather than deleted.
+            using Stream held = TakeLock(lockPath, taskId);
             return IntegrateUnderLock(taskWorktree, runWorktree, taskId, taskBranch, runBranch, count, notes);
         }
         catch (TimeoutException timeout)
@@ -491,115 +479,60 @@ public sealed class RunIntegrateService : IRunIntegrateService
     private bool IsAncestor(string worktree, string ancestor, string descendant) =>
         _git.Run(worktree, ["-C", worktree, "merge-base", "--is-ancestor", ancestor, descendant]).Succeeded;
 
-    /// <summary>Takes the lock, waiting for a parallel worker and taking over a stale file.</summary>
-    private IntegrationLock TakeLock(string path, string taskId, List<string> notes)
+    /// <summary>
+    /// Opens the run worktree's lock for exclusive use, waiting for a parallel worker. The open handle is the lock:
+    /// the operating system releases it when the process exits or crashes, so a waiter can never take over a lock
+    /// another live worker still holds.
+    /// </summary>
+    /// <param name="path">The lock file, inside the run worktree's git directory.</param>
+    /// <param name="taskId">The task waiting for the lock, written into the file for diagnostics only.</param>
+    /// <returns>The open stream, which the caller disposes to release the lock.</returns>
+    /// <exception cref="TimeoutException">Another worker held the lock for the whole wait.</exception>
+    private Stream TakeLock(string path, string taskId)
     {
         DateTimeOffset deadline = _time.GetUtcNow() + LockWait;
-        string holder = $"{taskId}\n{_time.GetUtcNow():O}\n";
-        bool staleLogged = false;
-        bool yieldTakeover = false;
-        int uncreatable = 0;
         while (true)
         {
-            if (!yieldTakeover && _exclusive.TryWriteNew(path, holder))
+            Stream? held;
+            try
             {
-                return new IntegrationLock(_files, path, holder);
+                held = _files.OpenExclusive(path);
             }
-
-            bool yielded = yieldTakeover;
-            yieldTakeover = false;
-
-            if (_files.FileExists(path))
+            catch (IOException)
             {
-                uncreatable = 0;
-                if (IsStale(path))
+                if (_time.GetUtcNow() >= deadline)
                 {
-                    bool moved = TryMoveStaleAside(path, out string? aside);
-                    TryDelete(aside);
-                    if (moved)
-                    {
-                        if (!staleLogged)
-                        {
-                            notes.Add($"the integration lock '{path}' was stale; took it over.");
-                            staleLogged = true;
-                        }
-
-                        // Only the process whose rename won may retry the create at once; it is the one that cleared
-                        // the stale file. Losing the create means another waiter was already there, so this one waits.
-                        if (_exclusive.TryWriteNew(path, holder))
-                        {
-                            return new IntegrationLock(_files, path, holder);
-                        }
-                    }
-
-                    // The stale file is briefly gone while its taker-over creates the lock. A failed rename means
-                    // another process won the takeover, so this one keeps waiting rather than racing for the file.
-                    yielded = true;
+                    throw new TimeoutException(
+                        $"the run worktree is locked by '{path}'; another task is still integrating after " +
+                        $"{LockWait.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)} seconds.");
                 }
-            }
-            else if (!yielded && ++uncreatable >= UncreatableLockAttempts)
-            {
-                throw new IOException(
-                    $"the integration lock '{path}' could not be created; check that the run worktree's git " +
-                    "directory is writable.");
-            }
-            else if (yielded)
-            {
-                uncreatable = 0;
+
+                Task.Delay(LockRetryInterval, _time).GetAwaiter().GetResult();
+                continue;
             }
 
-            if (_time.GetUtcNow() >= deadline)
+            try
             {
-                throw new TimeoutException(
-                    $"the run worktree is locked by '{path}'; another task is still integrating after " +
-                    $"{LockWait.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)} seconds.");
+                WriteHolder(held, taskId);
+                return held;
             }
-
-            Task.Delay(LockRetryInterval, _time).GetAwaiter().GetResult();
+            catch
+            {
+                held.Dispose();
+                throw;
+            }
         }
     }
 
-    /// <summary>
-    /// Moves a stale lock to a name of its own, as one rename. Two waiters that both saw the same stale file race
-    /// here, and the file system lets exactly one of them win: the other finds nothing left to move.
-    /// </summary>
-    private bool TryMoveStaleAside(string path, out string? moved)
+    /// <summary>Writes who holds the lock into the open file, for a person diagnosing a stuck run. Nothing reads it.</summary>
+    private void WriteHolder(Stream held, string taskId)
     {
-        moved = path + "." + _ids.NewRandomToken() + ".stale";
-        try
-        {
-            _files.MoveFile(path, moved);
-            return true;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            moved = null;
-            return false;
-        }
-    }
-
-    private bool IsStale(string path)
-    {
-        DateTime lastWrite = _files.GetLastWriteTimeUtc(path);
-        DateTime now = _time.GetUtcNow().UtcDateTime;
-        return now - lastWrite >= StaleLockAge;
-    }
-
-    private void TryDelete(string? path)
-    {
-        if (path is null)
-        {
-            return;
-        }
-
-        try
-        {
-            _files.DeleteFile(path);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            // A lock file that cannot be removed is retried on the next pass and reported as held at the deadline.
-        }
+        byte[] text = Encoding.UTF8.GetBytes(
+            $"pid {_environment.ProcessId}\ntask {taskId}\nopened {_time.GetUtcNow():O}\n");
+        held.SetLength(0);
+        held.Position = 0;
+        held.Write(text);
+        held.Flush();
     }
 
     /// <summary>Copies the task's scratchpad into the run worktree before the task worktree is removed.</summary>
@@ -714,31 +647,4 @@ public sealed class RunIntegrateService : IRunIntegrateService
     /// <param name="CommonDirectory">The repository's common git directory, absolute.</param>
     /// <param name="IsCanonicalCheckout">True when the two are the same directory, which only the canonical checkout is.</param>
     private sealed record WorktreeFacts(string GitDirectory, string CommonDirectory, bool IsCanonicalCheckout);
-
-    /// <summary>The held lock, removed on every path that leaves the integration.</summary>
-    /// <param name="files">The file system holding the lock.</param>
-    /// <param name="path">The lock file.</param>
-    /// <param name="holder">This process's own holder text, which the file must still hold for the removal to happen.</param>
-    internal sealed class IntegrationLock(IWritableFileSystem files, string path, string holder) : IDisposable
-    {
-        /// <inheritdoc />
-        /// <remarks>
-        /// A lock taken over as stale belongs to another process now, and deleting it would let two integrations run
-        /// together. Only a file that still holds this process's own text is this process's to remove.
-        /// </remarks>
-        public void Dispose()
-        {
-            try
-            {
-                if (files.FileExists(path) && string.Equals(files.ReadAllText(path), holder, StringComparison.Ordinal))
-                {
-                    files.DeleteFile(path);
-                }
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                // A lock left behind is taken over as stale by the next integration after ten minutes.
-            }
-        }
-    }
 }
