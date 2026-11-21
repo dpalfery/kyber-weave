@@ -20,19 +20,33 @@ public interface IArbiterLogStore
     Task AppendLineAsync(string directory, string fileName, string line, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Appends the line <paramref name="lineFactory"/> produces, computed while the exclusive lock is held, creating
-    /// the directory when missing.
+    /// Appends the line <paramref name="lineFactory"/> produces, creating the directory when missing, under the
+    /// exclusive lock. The factory is handed the lines that landed after <paramref name="snapshotLength"/> and runs
+    /// under the lock; it is the caller's own lock-free read the line is normally derived from, and this call only
+    /// reconciles it with what landed meanwhile.
     /// </summary>
     /// <remarks>
-    /// The factory runs under the lock, so a line derived from what is already on disk cannot be derived twice from
-    /// the same state.
+    /// The factory runs under the lock, so a line derived from a lock-free read cannot be derived twice from the same
+    /// state: the lines that landed since the snapshot are the ones that would otherwise be missed. The factory must
+    /// be pure over its input, and the caller deduplicates the snapshot lines against these by record id.
     /// </remarks>
     /// <param name="directory">The directory holding the log.</param>
     /// <param name="fileName">The log's file name.</param>
-    /// <param name="lineFactory">Produces the complete line, without its newline.</param>
+    /// <param name="snapshotLength">The log's length when the caller read it, before the lock.</param>
+    /// <param name="lineFactory">Produces the complete line, without its newline, from the lines that landed since the snapshot.</param>
     /// <param name="cancellationToken">Cancels the append.</param>
     /// <exception cref="IOException">The lock was not acquired in time; the append fails closed.</exception>
-    Task AppendLineAsync(string directory, string fileName, Func<string> lineFactory, CancellationToken cancellationToken);
+    Task AppendLineAsync(
+        string directory,
+        string fileName,
+        long snapshotLength,
+        Func<IReadOnlyList<string>, string> lineFactory,
+        CancellationToken cancellationToken);
+
+    /// <summary>The log's length in bytes, taken without a lock; 0 when it is absent or cannot be read.</summary>
+    /// <param name="path">The log file.</param>
+    /// <returns>The length the caller's next read is taken from.</returns>
+    long ByteLength(string path);
 
     /// <summary>Reads the complete lines of a log's newest bytes, in file order, without taking any lock.</summary>
     /// <param name="path">The log file.</param>

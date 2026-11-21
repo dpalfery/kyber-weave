@@ -297,6 +297,56 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     }
 
     /// <summary>
+    /// A global Claude settings file written before the stop registration existed holds only
+    /// PreToolUse. The refresh must add the matcher-less SubagentStop entry Claude fires, and must
+    /// keep the user's own hook beside it.
+    /// </summary>
+    [Fact]
+    public void Refresh_AddsSubagentStopToAnExistingGlobalClaudeSettingsFile()
+    {
+        string home = Path.Combine(_world.Install, "home");
+        _world.Files.CreateDirectory(home);
+        new FileUserHostConfigStore(_world.Files).WriteGlobalTargets(home, ["claude"]);
+        string hookPath = Path.Combine(
+            new SquadGlobalRoots(_ => null, home).ResolveGlobalRoot(SquadTarget.Claude),
+            "settings.json");
+        _world.Files.CreateDirectory(Path.GetDirectoryName(hookPath)!);
+        _world.Files.WriteAllText(hookPath, """
+            {
+              "hooks": {
+                "PreToolUse": [
+                  { "matcher": "^(Agent|Task)$", "hooks": [ { "type": "command", "command": "/legacy/kyber-weave-arbiter hook --harness claude --scope global", "timeout": 5 } ] },
+                  { "matcher": "Read", "hooks": [ { "type": "command", "command": "user-own-linter" } ] }
+                ]
+              }
+            }
+            """);
+
+        Func<string, string?> environment = name => name switch
+        {
+            "HOME" => home,
+            "APPDATA" => Path.Combine(home, ".config"),
+            _ => null,
+        };
+
+        ArbiterHookRefresher refresher = _world.Refresher(environment, _ => { });
+        ArbiterHookRefreshResult outcome = refresher.Refresh([]);
+
+        Assert.Equal(1, outcome.Refreshed);
+        string content = _world.Files.ReadAllText(hookPath);
+        JsonObject root = JsonNode.Parse(content)!.AsObject();
+        JsonArray stops = Assert.IsType<JsonArray>(root["hooks"]!["SubagentStop"]);
+        JsonObject stop = Assert.IsType<JsonObject>(Assert.Single(stops));
+        Assert.False(stop.ContainsKey("matcher"));
+        JsonObject hook = Assert.IsType<JsonObject>(Assert.Single(Assert.IsType<JsonArray>(stop["hooks"])));
+        Assert.Equal(
+            "kyber-weave-arbiter hook --harness claude --scope global",
+            hook["command"]!.GetValue<string>());
+        Assert.DoesNotContain("/legacy/kyber-weave-arbiter hook", content, StringComparison.Ordinal);
+        Assert.Contains("user-own-linter", content, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Update-time refresh follows the user config gate: an already-installed global hook is refreshed
     /// only for harnesses named in <c>arbiter.global.targets</c>, and it never rewrites foreign bytes.
     /// </summary>

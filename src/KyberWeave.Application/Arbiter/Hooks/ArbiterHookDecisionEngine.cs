@@ -35,7 +35,7 @@ namespace KyberWeave.Arbiter.Hooks;
 /// Evaluation is synchronous at this boundary because the adapters are; the wait
 /// stays inside the harness's per-hook timeout.
 /// </remarks>
-public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, IBackgroundDispatchEngine, IArbiterProviderSource
+public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, IBackgroundDispatchEngine, IArbiterProviderSource, ILostReturnRecovery
 {
     private const string ModelTrigger = "delegate.model";
     private const string TriageShortcutTrigger = "triage.shortcut";
@@ -348,6 +348,136 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
 
         return notes;
     }
+
+    /// <inheritdoc/>
+    public int RecoverLostReturn(string harness, string? sessionId, IReadOnlyList<string> agentNames, HookContext context)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(harness);
+        ArgumentNullException.ThrowIfNull(agentNames);
+        ArgumentNullException.ThrowIfNull(context);
+
+        string arbiterDirectory = ResolveArbiterDirectory(context.RepoRoot, context.Scope, context.HomeDirectory);
+        IArbiterLedger ledger = _state.OpenLedger(arbiterDirectory);
+        IReadOnlyList<ArbiterLedgerEvent> events = ledger.ReadAll();
+        string stopEvent = StopEventOf(harness);
+        string agent = agentNames.Count > 0 ? agentNames[0] : "(unnamed)";
+
+        // A pre row written before the hook recorded the session names none, and no stop event can be matched to
+        // it: closing one would guess which session's agent it belonged to.
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            context.Log.WriteLine(
+                $"Arbiter: the {stopEvent} of '{agent}' names no session, so no dispatch is closed. " +
+                "Only a stop event from the same session as the dispatch is evidence about it.");
+            return 0;
+        }
+
+        // The pre must have been written before the stop event: a later row cannot be the dispatch that ended.
+        DateTimeOffset now = _clock.GetUtcNow();
+        HashSet<string> paired = [.. events
+            .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
+            .Select(e => e.PreId!)];
+        List<ArbiterLedgerEvent> open = [.. events.Where(e =>
+            e.Phase == ArbiterLedgerPhases.Pre
+            && e.At < now
+            && !string.IsNullOrWhiteSpace(e.Target)
+            && !paired.Contains(e.Id)
+            && string.Equals(e.Harness, harness, StringComparison.Ordinal)
+            && string.Equals(e.Session, sessionId, StringComparison.Ordinal))];
+
+        if (open.Count == 0)
+        {
+            return 0;
+        }
+
+        if (agentNames.Count == 0)
+        {
+            // Without a name the stop event says only that some agent finished, and closing one of several open
+            // dispatches would attribute work that may not be over.
+            context.Log.WriteLine(
+                $"Arbiter: the {stopEvent} names no agent, so none of the {open.Count} dispatch(es) still in flight " +
+                "is closed. A stop event that cannot name its agent is no evidence about any of them.");
+            return 0;
+        }
+
+        open.RemoveAll(e => !agentNames.Any(name => NamesAgent(e, name)));
+        if (open.Count == 0)
+        {
+            return 0;
+        }
+
+        // A dispatch the rules refused appended its pre event but never ran a worker, so it is not a return waiting
+        // to be closed. The same set keeps it out of the in-flight paths a later dispatch is gated against.
+        if (LedgerFacts.NotDispatchedLedgerIds(_state.OpenDecisionLog(arbiterDirectory)) is { Count: > 0 } notDispatched)
+        {
+            open.RemoveAll(e => notDispatched.Contains(e.Id));
+        }
+
+        if (open.Count == 0)
+        {
+            return 0;
+        }
+
+        if (open.Count > 1)
+        {
+            context.Log.WriteLine(
+                $"Arbiter: the {stopEvent} of '{agent}' matches {open.Count} dispatches still in flight " +
+                $"({string.Join(", ", open.Select(e => $"{e.Target ?? "unknown"} {e.Id}"))}); closing none. " +
+                "A stop event that cannot name one dispatch is no evidence about any of them.");
+            return 0;
+        }
+
+        ArbiterLedgerEvent pre = open[0];
+
+        // A same-target post written after this pre is a dispatch that already finished. A stop event that arrives
+        // after it is the late signal for that finished dispatch, not evidence about the one still open. Only a post
+        // that claims a pre counts: an unpaired one can be the return this very stop handler just wrote, and the
+        // recovery exists for exactly that case.
+        if (events.FirstOrDefault(e =>
+                e.Phase == ArbiterLedgerPhases.Post
+                && e.PreId is not null
+                && e.At > pre.At
+                && string.Equals(e.Session, pre.Session, StringComparison.Ordinal)
+                && string.Equals(e.Target, pre.Target, StringComparison.OrdinalIgnoreCase)) is { } finished)
+        {
+            context.Log.WriteLine(
+                $"Arbiter: the {stopEvent} of '{agent}' is late: dispatch '{finished.Target ?? "unknown"}' " +
+                $"({finished.Id}) returned after '{pre.Target}' ({pre.Id}) was written, so no dispatch is closed. " +
+                "A stop that follows a finished same-target dispatch is evidence about that dispatch alone.");
+            return 0;
+        }
+
+        ledger.AppendAsync(
+            new ArbiterLedgerEvent(
+                _ids.NewSortableId(now),
+                now,
+                ArbiterSources.Hook,
+                pre.Harness,
+                pre.Session,
+                ArbiterLedgerPhases.Post)
+            {
+                PreId = pre.Id,
+                Caller = pre.Caller,
+                CallerSource = pre.CallerSource,
+                Target = pre.Target,
+                Headers = pre.Headers,
+                Recovered = stopEvent,
+            })
+            .GetAwaiter().GetResult();
+        context.Log.WriteLine(
+            $"Arbiter: closed dispatch '{pre.Target ?? "unknown"}' ({pre.Id}) from the {stopEvent} of '{agent}'; " +
+            "it no longer holds its files. A report that arrives later still pairs with it, and this row marks no task complete.");
+        return 1;
+    }
+
+    /// <summary>Whether a ledger event's target is the agent the stop event named.</summary>
+    private static bool NamesAgent(ArbiterLedgerEvent e, string name) =>
+        !string.IsNullOrWhiteSpace(name)
+        && string.Equals(e.Target, name, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The harness's own spelling of its sub-agent stop event.</summary>
+    private static string StopEventOf(string harness) =>
+        harness.StartsWith("copilot", StringComparison.Ordinal) ? "subagentStop" : "SubagentStop";
 
     private HookOutcome Decide(
         string harness,

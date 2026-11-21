@@ -53,7 +53,7 @@ public sealed class ArbiterClaudeHandbackRenderingTests : IDisposable
     [Fact]
     public async Task RenderAsync_DispatchTargets_CarryTheHandbackHook()
     {
-        const int timeoutSeconds = 5;
+        const int timeoutSeconds = 30;
         SquadRenderResult result = await RenderClaudeAsync(
             _fixture.Path,
             SquadDeploymentScope.Project,
@@ -77,7 +77,7 @@ public sealed class ArbiterClaudeHandbackRenderingTests : IDisposable
     [Fact]
     public async Task RenderAsync_HandbackHook_CoexistsWithDispatchAndGuardEntries()
     {
-        const int timeoutSeconds = 5;
+        const int timeoutSeconds = 30;
         SquadRenderResult result = await RenderClaudeAsync(
             _fixture.Path,
             SquadDeploymentScope.Project,

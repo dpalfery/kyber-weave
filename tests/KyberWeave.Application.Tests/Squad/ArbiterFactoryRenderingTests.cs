@@ -19,7 +19,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     private const string BlockPath = ".factory/hooks.json";
     private const string DispatchCommand = "kyber-weave-arbiter hook --harness factory";
     private const string WorkerGuardCommand = "kyber-weave-arbiter worker-guard --harness factory";
-    private const int HookTimeoutSeconds = 5;
+    private const int HookTimeoutSeconds = 30;
 
     private readonly InMemoryFileSystem _files = new();
     private readonly ArbiterSquadFixture _fixture;

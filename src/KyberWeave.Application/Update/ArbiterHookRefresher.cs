@@ -330,18 +330,14 @@ internal sealed class ArbiterHookRefresher(
             return true;
         }
 
-        if (!TryBuildGlobalHookEntries(target, timeoutSeconds, out SquadHookBlockFormat format, out JsonNode[] preToolUse, out JsonNode[] postToolUse))
+        if (!TryBuildGlobalHookEntries(
+                target, timeoutSeconds, out SquadHookBlockFormat format,
+                out JsonNode[] preToolUse, out JsonNode[] postToolUse, out JsonNode[] subagentStop))
             return false;
 
         string existing = files.FileExists(hookPath) ? files.ReadAllText(hookPath) : string.Empty;
         if (string.IsNullOrWhiteSpace(existing))
             return false;
-
-        // Factory's global file also carries the SubagentStop group. Splicing without it would
-        // strip the registration the install wrote, so the refresh writes it again.
-        IReadOnlyList<JsonNode> subagentStop = format == SquadHookBlockFormat.Factory
-            ? [CreateMatcherGroup(null, ArbiterHookWiring.HookCommandLine(SquadTarget.Factory, SquadDeploymentScope.Global), timeoutSeconds)]
-            : [];
 
         // The Factory worker guard joins the session events, since a tool-call payload names no
         // subagent. Refreshing without them would stop the guard from ever learning a child.
@@ -369,13 +365,18 @@ internal sealed class ArbiterHookRefresher(
         int timeoutSeconds,
         out SquadHookBlockFormat format,
         out JsonNode[] preToolUse,
-        out JsonNode[] postToolUse)
+        out JsonNode[] postToolUse,
+        out JsonNode[] subagentStop)
     {
         string commandLine = ArbiterHookWiring.HookCommandLine(target, SquadDeploymentScope.Global);
+        subagentStop = [];
         switch (target)
         {
             case SquadTarget.Claude:
                 format = SquadHookBlockFormat.Claude;
+                // Claude Code fires SubagentStop with no matcher. Splicing without it would strip the
+                // registration the install wrote, so the refresh writes it again.
+                subagentStop = [CreateMatcherGroup(null, commandLine, timeoutSeconds)];
                 preToolUse =
                 [
                     new JsonObject
@@ -454,6 +455,9 @@ internal sealed class ArbiterHookRefresher(
 
             case SquadTarget.Factory:
                 format = SquadHookBlockFormat.Factory;
+                // Factory's global file also carries the SubagentStop group: its launch-time PostToolUse
+                // carries no worker report, so the Arbiter reads the report on this container.
+                subagentStop = [CreateMatcherGroup(null, commandLine, timeoutSeconds)];
                 string factoryWorkerGuard = ArbiterHookWiring.WorkerGuardCommandLine(
                     SquadTargetCatalog.GetToken(SquadTarget.Factory));
                 preToolUse =

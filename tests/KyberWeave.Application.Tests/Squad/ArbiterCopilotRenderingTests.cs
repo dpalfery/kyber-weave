@@ -1,6 +1,7 @@
 using System.Text;
 using KyberWeave.Tests.Fakes;
 using System.Text.Json;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.FileSystem;
@@ -30,7 +31,7 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
     private static readonly string[] ConductorGuardEvents = ["preToolUse", "userPromptTransformed"];
 
     private const string CliHooksFilePath = ".github/hooks/kyber-arbiter.json";
-    private const int HookTimeoutSeconds = 5;
+    private const int HookTimeoutSeconds = 30;
 
     private readonly InMemoryFileSystem _files = new();
     private readonly ArbiterSquadFixture _fixture;
@@ -158,6 +159,34 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
                 frontmatter.Children.ContainsKey(new YamlScalarNode("hooks")),
                 $"Guarded agent '{agentName}' must not carry a hook while the wiring is disabled.");
         }
+    }
+
+    [Fact]
+    public async Task RenderAsync_TheShippedProviderBudget_RendersThirtySecondHooksOnEveryEntry()
+    {
+        // The rendered timeout is derived from the provider budget: the shipped 3 s plus 2 s of headroom used to
+        // render 5 s, and a fan-out of concurrent hooks blew through it (run 13). Every entry the Arbiter owns,
+        // dispatch, stop and worker guard alike, now carries the shared floor.
+        int rendered = ArbiterHookTimeout.SecondsFor(ArbiterProviderConfig.DefaultNone.TimeoutMs);
+        Assert.Equal(30, rendered);
+
+        SquadRenderResult result = await RenderAsync(
+            new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: rendered),
+            SquadDeploymentScope.Project);
+
+        SquadDeploymentFile hooksFile = Assert.Single(result.Files, file => file.RelativePath == CliHooksFilePath);
+        using JsonDocument document = JsonDocument.Parse(hooksFile.Content);
+        List<int> timeouts = [];
+        foreach (JsonProperty container in document.RootElement.GetProperty("hooks").EnumerateObject())
+        {
+            foreach (JsonElement entry in container.Value.EnumerateArray())
+            {
+                timeouts.Add(entry.GetProperty("timeoutSec").GetInt32());
+            }
+        }
+
+        Assert.NotEmpty(timeouts);
+        Assert.All(timeouts, timeout => Assert.Equal(rendered, timeout));
     }
 
     [Fact]

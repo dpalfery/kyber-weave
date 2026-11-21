@@ -45,7 +45,7 @@ public sealed class DecisionLog : IArbiterDecisionLog
     public string LockFilePath => Path.Combine(_directory, ".lock");
 
     /// <summary>Appends one decision as one complete JSON line under the exclusive lock.</summary>
-    /// <exception cref="IOException">Thrown when the lock is not acquired within 500 ms (fail closed).</exception>
+    /// <exception cref="IOException">Thrown when the lock cannot be taken within three 500 ms attempts (fail closed).</exception>
     public async Task AppendAsync(ArbiterDecisionRecord record, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);

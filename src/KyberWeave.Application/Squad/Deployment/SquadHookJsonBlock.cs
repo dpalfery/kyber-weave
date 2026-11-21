@@ -30,8 +30,9 @@ public static class SquadHookJsonBlock
 
     private const string PostToolUseContainer = "PostToolUse";
 
-    // Factory alone fires a hook when a background subagent stops. Its launch-time PostToolUse
-    // carries no worker report, so the Arbiter reads the report on this container.
+    // Factory's launch-time PostToolUse carries no worker report, so the Arbiter reads the
+    // report on this container. Claude Code fires SubagentStop too, with no matcher, and its
+    // entry is what closes a dispatch whose return hook timed out.
     private const string SubagentStopContainer = "SubagentStop";
 
     // Factory's worker guard joins session events, because a tool-call payload names no calling
@@ -42,12 +43,19 @@ public static class SquadHookJsonBlock
 
     private static readonly string[] PreAndPostContainers = [PreToolUseContainer, PostToolUseContainer];
 
+    /// <summary>Claude's containers: the two tool hooks and the matcher-less sub-agent stop.</summary>
+    private static readonly string[] ClaudeContainers =
+        [PreToolUseContainer, PostToolUseContainer, SubagentStopContainer];
+
     private static readonly string[] AllContainers =
         [PreToolUseContainer, PostToolUseContainer, SubagentStopContainer, SessionStartContainer, SessionEndContainer];
 
     /// <summary>The Factory containers Squad writes only when it has an entry for them.</summary>
     private static readonly string[] OptionalFactoryContainers =
         [SubagentStopContainer, SessionStartContainer, SessionEndContainer];
+
+    /// <summary>The Claude containers Squad adds only when it has an entry for them.</summary>
+    private static readonly string[] OptionalClaudeContainers = [SubagentStopContainer];
 
     // The lower-case spellings a Claude settings file held before the PascalCase fix.
     private static readonly string[] LegacyClaudeContainers = ["preToolUse", "postToolUse"];
@@ -389,12 +397,16 @@ public static class SquadHookJsonBlock
 
     public static void RefuseForeignSubagentStop(SquadHookBlockFormat format, IReadOnlyList<JsonNode>? subagentStop)
     {
-        if (format != SquadHookBlockFormat.Factory && subagentStop is { Count: > 0 })
+        if (!SupportsSubagentStop(format) && subagentStop is { Count: > 0 })
         {
             throw new InvalidOperationException(
-                $"Only the Factory hook file holds SubagentStop entries; '{Harness(format)}' does not.");
+                $"Only the Factory and Claude hook files hold SubagentStop entries; '{Harness(format)}' does not.");
         }
     }
+
+    /// <summary>Whether a format's hook file holds the matcher-less <c>SubagentStop</c> container.</summary>
+    public static bool SupportsSubagentStop(SquadHookBlockFormat format) =>
+        format is SquadHookBlockFormat.Factory or SquadHookBlockFormat.Claude;
 
     /// <summary>
     /// Refuses a session-event entry for a format whose file never holds one. Factory alone runs the worker guard
@@ -422,7 +434,7 @@ public static class SquadHookJsonBlock
     /// content is not a usable hook file, leaving the caller to decide how to report it.
     /// </summary>
     /// <remarks>
-    /// <paramref name="subagentStop"/> is accepted for Factory only. Every other format keeps
+    /// <paramref name="subagentStop"/> is accepted for Factory and Claude only. Every other format keeps
     /// its two containers, so its file bytes never change; a non-empty list for any other
     /// format is a caller bug and is refused rather than silently dropped.
     /// </remarks>
@@ -460,9 +472,18 @@ public static class SquadHookJsonBlock
         }
         else
         {
-            // Only Factory's optional containers are created when there is an entry to write, so a
-            // file that never had one gains no key.
-            HashSet<string> hadOptional = [.. OptionalFactoryContainers.Where(root.ContainsKey)];
+            // Only the containers that are optional for the format are created when there is an entry to
+            // write, so a file that never had one gains no key.
+            IReadOnlyList<string> optional = OptionalContainers(format);
+            JsonObject? optionalParent = format switch
+            {
+                SquadHookBlockFormat.Factory => root,
+                SquadHookBlockFormat.Claude => root["hooks"] as JsonObject,
+                _ => null,
+            };
+            HashSet<string> hadOptional = optionalParent is null
+                ? []
+                : [.. optional.Where(optionalParent.ContainsKey)];
             if (format == SquadHookBlockFormat.Claude)
             {
                 RemoveSquadFromLegacyClaudeContainers(root, dropEmptied: true);
@@ -470,10 +491,14 @@ public static class SquadHookJsonBlock
 
             var containers = OwnedArrays(format, root, create: true);
             // Positional with the containers OwnedArrays returns: create: true yields every
-            // container the format holds, in the order listed in RootContainerNames.
-            IReadOnlyList<JsonNode>[] managed = format == SquadHookBlockFormat.Factory
-                ? [preToolUse, postToolUse, stop, start, end]
-                : [preToolUse, postToolUse];
+            // container the format holds, in the order listed in RootContainerNames (or the
+            // Claude containers for that shape).
+            IReadOnlyList<JsonNode>[] managed = format switch
+            {
+                SquadHookBlockFormat.Factory => [preToolUse, postToolUse, stop, start, end],
+                SquadHookBlockFormat.Claude => [preToolUse, postToolUse, stop],
+                _ => [preToolUse, postToolUse],
+            };
             for (int i = 0; i < containers.Count; i++)
             {
                 (string pointer, JsonArray array) = containers[i];
@@ -488,13 +513,20 @@ public static class SquadHookJsonBlock
                 }
             }
 
-            if (format == SquadHookBlockFormat.Factory)
+            // Re-resolved: a file with no hooks object yet gained one above.
+            JsonObject? writtenOptionalParent = format switch
             {
-                foreach (string name in OptionalFactoryContainers)
+                SquadHookBlockFormat.Factory => root,
+                SquadHookBlockFormat.Claude => root["hooks"] as JsonObject,
+                _ => null,
+            };
+            if (writtenOptionalParent is not null)
+            {
+                foreach (string name in optional)
                 {
-                    if (!hadOptional.Contains(name) && root[name] is JsonArray { Count: 0 })
+                    if (!hadOptional.Contains(name) && writtenOptionalParent[name] is JsonArray { Count: 0 })
                     {
-                        root.Remove(name);
+                        writtenOptionalParent.Remove(name);
                     }
                 }
             }
@@ -628,6 +660,14 @@ public static class SquadHookJsonBlock
     private static string[] RootContainerNames(SquadHookBlockFormat format) =>
         format == SquadHookBlockFormat.Factory ? AllContainers : PreAndPostContainers;
 
+    /// <summary>The containers each format adds only when it has an entry for them.</summary>
+    private static IReadOnlyList<string> OptionalContainers(SquadHookBlockFormat format) => format switch
+    {
+        SquadHookBlockFormat.Factory => OptionalFactoryContainers,
+        SquadHookBlockFormat.Claude => OptionalClaudeContainers,
+        _ => [],
+    };
+
     private static List<(string Pointer, JsonArray Array)> CursorArrays(JsonObject root, bool create)
     {
         bool hasRootArrays = root.ContainsKey("preToolUse") || root.ContainsKey("PreToolUse")
@@ -690,17 +730,18 @@ public static class SquadHookJsonBlock
 
     /// <summary>
     /// Claude Code reads only the PascalCase containers under <c>hooks</c>, so those are the only
-    /// containers this shape owns: always the <c>hooks</c> object, always <c>PreToolUse</c> and
-    /// <c>PostToolUse</c>, created when missing. A lower-case spelling a file already holds is
-    /// retired by the callers, not read here.
+    /// containers this shape owns: always the <c>hooks</c> object and <c>PreToolUse</c> and
+    /// <c>PostToolUse</c>, plus the <c>SubagentStop</c> the stop hook is registered on. A lower-case
+    /// spelling a file already holds is retired by the callers, not read here.
     /// </summary>
     private static List<(string Pointer, JsonArray Array)> ClaudeArrays(JsonObject root, bool create) =>
-        PrefixedArrays(root, "/hooks", create);
+        PrefixedArrays(root, "/hooks", create, ClaudeContainers);
 
-    private static List<(string Pointer, JsonArray Array)> PrefixedArrays(JsonObject root, string prefix, bool create)
+    private static List<(string Pointer, JsonArray Array)> PrefixedArrays(
+        JsonObject root, string prefix, bool create, string[]? names = null)
     {
         JsonObject hooks = create ? EnsureObject(root, "hooks") : root["hooks"] as JsonObject ?? new JsonObject();
-        return NamedArrays(hooks, prefix, create, PreAndPostContainers);
+        return NamedArrays(hooks, prefix, create, names ?? PreAndPostContainers);
     }
 
     private static List<(string Pointer, JsonArray Array)> RootArrays(
