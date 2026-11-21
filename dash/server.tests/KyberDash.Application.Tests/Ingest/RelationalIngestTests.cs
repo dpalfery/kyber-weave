@@ -331,6 +331,78 @@ public class RelationalIngestTests
     }
 
     /// <summary>
+    /// A turn that stored no token class is not priced. Filling the missing classes
+    /// with zero and calling the rate table reports a measured $0.
+    /// A turn that stored a real zero is priced.
+    /// </summary>
+    [Fact]
+    public void GetSessionAggregate_AbsentTokens_IsNotPricedAsZero()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new(snapshot: new Dictionary<string, ModelCosts>(StringComparer.Ordinal)
+        {
+            ["claude-sonnet-4-6"] = new ModelCosts(
+                InputCostPerToken: 0.000003,
+                OutputCostPerToken: 0.000015,
+                CacheWriteCostPerToken: 0.00000375,
+                CacheReadCostPerToken: 0.0000003,
+                WebSearchCostPerRequest: 0,
+                FastMultiplier: 1,
+                CacheWriteCostIsExplicit: true),
+        });
+
+        store.WriteBatch(PricedTurn("sess-absent", tokens: []));
+        store.WriteBatch(PricedTurn(
+            "sess-zero",
+            tokens:
+            [
+                new CollectedTokenCount(TokenClass.Input, 0),
+                new CollectedTokenCount(TokenClass.Output, 0),
+            ]));
+
+        SessionAggregateView absent = store.GetSessionAggregate("sess-absent", pricing.LoadPricingTables())!;
+        SessionAggregateView zero = store.GetSessionAggregate("sess-zero", pricing.LoadPricingTables())!;
+
+        Assert.Equal(CostStatus.NoRate, absent.PublishedCost.Status);
+        Assert.Null(absent.PublishedCost.Value);
+        Assert.Equal(CostStatus.Priced, zero.PublishedCost.Status);
+        Assert.Equal(0d, zero.PublishedCost.Value);
+    }
+
+    private static CollectedBatch PricedTurn(string sessionKey, IReadOnlyList<CollectedTokenCount> tokens)
+    {
+        CollectedRecord record = new(
+            RecordId: sessionKey + "-turn",
+            HarnessId: "codex-cli",
+            Op: RecordOp.LlmInvoke,
+            Kind: RecordKind.Client,
+            Name: "codex.turn",
+            StartedAt: BaselineUtc,
+            Status: RecordStatus.Ok,
+            SessionKey: sessionKey,
+            ParentRecordId: null,
+            TraceId: null,
+            Model: "claude-sonnet-4-6",
+            EndedAt: null,
+            ReportedDurationMs: null,
+            Tokens: tokens,
+            ReportedCost: null,
+            Parts: [],
+            Tool: null,
+            Agent: null,
+            SkillsInvoked: [],
+            AgentInstanceId: null,
+            ToolDefinitions: [],
+            Signals: new CollectedRecordSignals(null, null, null, null));
+
+        return new CollectedBatch(
+            Source: new CollectedSource("codex-cli", SourceKind.File, sessionKey),
+            Sessions: [new CollectedSession(sessionKey, "codex-cli", sessionKey, null, null, [])],
+            Records: [record],
+            Problems: []);
+    }
+
+    /// <summary>
     /// Verifies <see cref="CanonIngestPipeline.IngestBatch(IReadOnlyList{OtlpSpan}, IRelationalStoreWriter, IOperationalStore, IReadOnlyList{IHarnessAdapter}?)"/>
     /// persists accepted records, problems, and quarantined spans through the relational contracts.
     /// </summary>

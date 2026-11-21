@@ -5301,16 +5301,7 @@ public class InMemoryRelationalStore :
             reportedCost = ToReadTimeCostSummary(harnessBlock);
         }
 
-        TokenUsage usage = new(
-            FreshInput: freshInput ?? 0L,
-            CacheRead: cacheRead ?? 0L,
-            CacheCreation: cacheCreation ?? 0L,
-            Output: output ?? 0L,
-            ReportedInput: record.ReportedInputTokens ?? inputTokens ?? 0L,
-            ReportedOutput: record.ReportedOutputTokens ?? output ?? 0L,
-            Reasoning: reasoning);
-
-        publishedBlock = CanonPricing.PriceTurn(usage, record.Model, harnessId, pricing, existing: null);
+        publishedBlock = PriceReportedTokens(freshInput, cacheRead, cacheCreation, output, reasoning, record, harnessId, pricing);
 
         return new ReadTimeTurnSummary(
             Position: position,
@@ -5326,6 +5317,43 @@ public class InMemoryRelationalStore :
             DurationMs: durationMs,
             ReportedCost: reportedCost,
             PublishedCost: ToReadTimeCostSummary(publishedBlock));
+    }
+
+    /// <summary>
+    /// Prices a turn from the token classes that were stored. A turn with no stored
+    /// class is not priced: filling the gaps with zero would report a measured zero.
+    /// Mirrors <c>SqliteRelationalStore.PriceReportedTokens</c>.
+    /// </summary>
+    private static CostBlock PriceReportedTokens(
+        long? freshInput,
+        long? cacheRead,
+        long? cacheCreation,
+        long? output,
+        long? reasoning,
+        CollectedRecord record,
+        string harnessId,
+        IModelPricingLookup? pricing)
+    {
+        if (freshInput is null && cacheRead is null && cacheCreation is null && output is null && reasoning is null)
+        {
+            return new CostBlock(
+                CostBasis.Published,
+                CanonPricing.IsPublishedTableHarness(harnessId) ? CostStatus.NoRate : CostStatus.OutOfScope);
+        }
+
+        long? inputTokens = freshInput.HasValue || cacheRead.HasValue || cacheCreation.HasValue
+            ? (freshInput ?? 0L) + (cacheRead ?? 0L) + (cacheCreation ?? 0L)
+            : null;
+        TokenUsage usage = new(
+            FreshInput: freshInput ?? 0L,
+            CacheRead: cacheRead ?? 0L,
+            CacheCreation: cacheCreation ?? 0L,
+            Output: output ?? 0L,
+            ReportedInput: record.ReportedInputTokens ?? inputTokens ?? 0L,
+            ReportedOutput: record.ReportedOutputTokens ?? output ?? 0L,
+            Reasoning: reasoning);
+
+        return CanonPricing.PriceTurn(usage, record.Model, harnessId, pricing, existing: null);
     }
 
     private static long? TryFindTokenCount(IReadOnlyList<CollectedTokenCount> tokens, TokenClass tokenClass)
@@ -5890,19 +5918,7 @@ public class InMemoryRelationalStore :
             long? cacheCreation = TryFindTokenCount(record.Tokens, TokenClass.CacheWrite);
             long? output = TryFindTokenCount(record.Tokens, TokenClass.Output);
             long? reasoning = TryFindTokenCount(record.Tokens, TokenClass.Reasoning);
-            long? inputTokens = freshInput.HasValue || cacheRead.HasValue || cacheCreation.HasValue
-                ? (freshInput ?? 0L) + (cacheRead ?? 0L) + (cacheCreation ?? 0L)
-                : null;
-            TokenUsage usage = new(
-                FreshInput: freshInput ?? 0L,
-                CacheRead: cacheRead ?? 0L,
-                CacheCreation: cacheCreation ?? 0L,
-                Output: output ?? 0L,
-                ReportedInput: record.ReportedInputTokens ?? inputTokens ?? 0L,
-                ReportedOutput: record.ReportedOutputTokens ?? output ?? 0L,
-                Reasoning: reasoning);
-
-            publishedBlocks.Add(CanonPricing.PriceTurn(usage, record.Model, harnessId, pricing, existing: null));
+            publishedBlocks.Add(PriceReportedTokens(freshInput, cacheRead, cacheCreation, output, reasoning, record, harnessId, pricing));
         }
 
         ReadTimeCostSummary? reportedCost = reportedBlocks.Count > 0
