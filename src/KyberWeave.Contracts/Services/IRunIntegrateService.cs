@@ -6,6 +6,12 @@ public enum RunIntegrateStatus
     /// <summary>The task's commits are on the run branch.</summary>
     Integrated,
 
+    /// <summary>
+    /// The task's commits are on the run branch, but its scratchpad could not be copied. The task worktree is left
+    /// in place, because removing it would lose the evidence the copy was meant to keep.
+    /// </summary>
+    IntegratedWithoutEvidence,
+
     /// <summary>The run branch already had every commit the task branch had.</summary>
     NothingToIntegrate,
 

@@ -127,6 +127,7 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IExclusiveFileWriter>(),
             sp.GetRequiredService<IProcessEnvironment>(),
             sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IIdGenerator>(),
             sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<IStatusLineDeploymentService>(sp => new StatusLineDeploymentService(
             sp.GetRequiredService<IStatusLineFiles>(),

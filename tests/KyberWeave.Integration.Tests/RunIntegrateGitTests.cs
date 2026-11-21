@@ -62,7 +62,14 @@ public sealed class RunIntegrateGitTests : IDisposable
         IRunCheckout checkouts = new RunCheckoutGuard(files, store, environment, paths);
 
         _service = new RunIntegrateService(
-            git, checkouts, files, new ExclusiveFileWriter(), environment, paths, TimeProvider.System);
+            git,
+            checkouts,
+            files,
+            new ExclusiveFileWriter(),
+            environment,
+            paths,
+            new SystemIdGenerator(),
+            TimeProvider.System);
     }
 
     public void Dispose() => _temp.Dispose();
@@ -102,6 +109,69 @@ public sealed class RunIntegrateGitTests : IDisposable
     private RunIntegrateOutcome Integrate(string taskId, string taskWorktree) =>
         _service.Integrate(new RunIntegrateRequest(taskId, taskWorktree, _run, _work, _work));
 
+    [Fact]
+    public void ACommitTheRunBranchAlreadyHasUnderAnotherShaIsDroppedAndTheTaskWorktreeRemoved()
+    {
+        Commit(_first, "one.txt", "shared change\n", "feat: the task's change");
+        // The run branch carries the same change under its own sha, so the task's commit applies empty.
+        Commit(_run, "one.txt", "shared change\n", "feat: the same change, recommitted");
+        string runBefore = GitOutput(_run, "rev-parse", "HEAD").Trim();
+
+        RunIntegrateOutcome outcome = Integrate("T1", _first);
+
+        Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
+        Assert.Equal(runBefore, GitOutput(_run, "rev-parse", "HEAD").Trim());
+        Assert.Equal(2, CountCommits(_run, "run/main"));
+        Assert.False(Directory.Exists(_first));
+        Assert.False(BranchExists("task/one"));
+        Assert.False(CherryPickStateExists(), "a dropped commit must leave no cherry-pick state behind");
+    }
+
+    [Fact]
+    public void ACherryPickThatCannotOverwriteAnUntrackedFileIsAbortedAndTheNextIntegrateWorks()
+    {
+        Commit(_second, "two.txt", "second task\n", "feat: second task");
+        // An untracked file at the path the task's commit adds makes git refuse the pick before any conflict.
+        File.WriteAllText(Path.Combine(_run, "two.txt"), "the operator's untracked file\n", Encoding.UTF8);
+
+        RunIntegrateOutcome blocked = Integrate("T2", _second);
+
+        Assert.Equal(RunIntegrateStatus.Failed, blocked.Status);
+        Assert.False(CherryPickStateExists(), "a failed cherry-pick must leave no sequencer or CHERRY_PICK_HEAD behind");
+        Assert.True(Directory.Exists(_second));
+
+        File.Delete(Path.Combine(_run, "two.txt"));
+        RunIntegrateOutcome retried = Integrate("T2", _second);
+
+        Assert.True(retried.Status == RunIntegrateStatus.Integrated, retried.Message);
+        Assert.Contains("feat: second task", GitOutput(_run, "log", "--format=%s", "-1"), StringComparison.Ordinal);
+        Assert.False(Directory.Exists(_second));
+    }
+
+    [Fact]
+    public void TheCanonicalCheckoutIsRefusedAsTheTaskWorktree()
+    {
+        Commit(_work, "canonical.txt", "wrong place\n", "feat: work in the canonical checkout");
+        string canonicalHead = GitOutput(_work, "rev-parse", "HEAD").Trim();
+        string runHead = GitOutput(_run, "rev-parse", "HEAD").Trim();
+
+        RunIntegrateOutcome outcome = Integrate("T1", _work);
+
+        Assert.Equal(RunIntegrateStatus.RefusedInput, outcome.Status);
+        Assert.Contains("canonical checkout", outcome.Message!, StringComparison.Ordinal);
+        Assert.Equal(canonicalHead, GitOutput(_work, "rev-parse", "HEAD").Trim());
+        Assert.Equal(runHead, GitOutput(_run, "rev-parse", "HEAD").Trim());
+    }
+
+    private bool CherryPickStateExists()
+    {
+        string gitDirectory = GitOutput(_run, "rev-parse", "--absolute-git-dir").Trim();
+        return File.Exists(Path.Combine(gitDirectory, "CHERRY_PICK_HEAD"))
+            || Directory.Exists(Path.Combine(gitDirectory, "sequencer"));
+    }
+
+    private int CountCommits(string worktree, string revision) =>
+        int.Parse(GitOutput(worktree, "rev-list", "--count", revision).Trim(), System.Globalization.CultureInfo.InvariantCulture);
     private void Commit(string worktree, string file, string content, string message)
     {
         File.WriteAllText(Path.Combine(worktree, file), content, Encoding.UTF8);

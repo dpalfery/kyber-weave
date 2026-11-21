@@ -12,9 +12,10 @@ namespace KyberWeave.Cli.Commands.Run;
 /// </summary>
 /// <remarks>
 /// Exit codes are the contract the worker branches on: <c>0</c> the run branch holds the task's work (or already
-/// did), <c>1</c> a lock or git failure, <c>2</c> refused input or an unusable worktree, and <c>3</c> a conflict
-/// the conductor reconciles with a rework. The final line is <c>INTEGRATED: &lt;sha&gt;</c>, which the worker copies
-/// into its completion digest as <c>COMMIT</c>.
+/// did), <c>1</c> a lock or git failure, <c>2</c> refused input or an unusable worktree, <c>3</c> a conflict the
+/// conductor reconciles with a rework, and <c>4</c> the commits are integrated but the task's scratchpad could not
+/// be copied and the task worktree was left for the caller to remove. The final line is
+/// <c>INTEGRATED: &lt;sha&gt;</c>, which the worker copies into its completion digest as <c>COMMIT</c>.
 /// </remarks>
 public sealed class RunIntegrateCommand(IRunIntegrateService integrate, IProcessEnvironment environment, IAnsiConsole console)
     : Command<RunIntegrateSettings>
@@ -37,6 +38,9 @@ public sealed class RunIntegrateCommand(IRunIntegrateService integrate, IProcess
 
     /// <summary>A commit could not be applied; the run branch is unchanged and the task worktree survives.</summary>
     private const int Conflict = 3;
+
+    /// <summary>The commits are integrated, but the scratchpad could not be copied and the task worktree survives.</summary>
+    private const int EvidenceFailed = 4;
 
     /// <inheritdoc />
     public override int Execute(CommandContext context, RunIntegrateSettings settings, CancellationToken cancellationToken)
@@ -65,6 +69,15 @@ public sealed class RunIntegrateCommand(IRunIntegrateService integrate, IProcess
             case RunIntegrateStatus.Conflict:
                 console.WriteLine($"CONFLICT: {string.Join(", ", outcome.Files ?? [])}");
                 return Conflict;
+
+            case RunIntegrateStatus.IntegratedWithoutEvidence:
+                // The commits are on the run branch, so the digest line must be printed before the failure: a worker
+                // that retries the whole task would otherwise duplicate work that already landed.
+                console.WriteLine($"INTEGRATED: {outcome.RunHead ?? "unknown"}");
+                console.MarkupLine(
+                    $"[red]{Markup.Escape(CommandName)}: error:[/] " +
+                    Markup.Escape(outcome.Message ?? "the task's scratchpad could not be copied."));
+                return EvidenceFailed;
 
             case RunIntegrateStatus.Failed:
                 return Fail(outcome.Message ?? "the task could not be integrated.");

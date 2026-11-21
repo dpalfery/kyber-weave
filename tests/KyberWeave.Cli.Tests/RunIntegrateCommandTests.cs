@@ -98,6 +98,23 @@ public sealed class RunIntegrateCommandTests
     }
 
     [Fact]
+    public void AnIntegratedTaskWhoseEvidenceCouldNotBeCopiedPrintsTheShaThenTheErrorAndExitsFour()
+    {
+        _integrate.Outcome = new RunIntegrateOutcome(
+            RunIntegrateStatus.IntegratedWithoutEvidence,
+            "abc1234",
+            Message: "the task's commits are integrated at abc1234, but copying its scratchpad failed: disk full");
+
+        int exit = Run(new RunIntegrateSettings { Task = "T3" });
+
+        Assert.Equal(4, exit);
+        Assert.Equal(
+            "INTEGRATED: abc1234\n" +
+            "kyber-weave run integrate: error: the task's commits are integrated at abc1234, but copying its scratchpad failed: disk full\n",
+            Output());
+    }
+
+    [Fact]
     public void ALockOrGitFailureExitsOneWithOneErrorLine()
     {
         _integrate.Outcome = new RunIntegrateOutcome(
