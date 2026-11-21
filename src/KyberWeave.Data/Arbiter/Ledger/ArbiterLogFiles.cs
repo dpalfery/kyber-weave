@@ -17,9 +17,9 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// the append reconciles what landed meanwhile instead of re-reading the log under
 /// the lock. Holding the lock across a whole-log read made twenty concurrent hooks
 /// miss the wait budget and lose their rows. A lock that cannot be taken within
-/// the 500 ms budget is still an internal error: the caller fails closed
-/// (<c>KW-ARB-HOOK-001</c>) rather than writing an unserialized line. Readers,
-/// by contrast, take no lock and tolerate a torn final line, because a writer
+/// three 500 ms attempts fails closed (<c>KW-ARB-HOOK-001</c>) rather than writing an
+/// unserialized line, so a burst retries briefly instead of losing its first row.
+/// Readers, by contrast, take no lock and tolerate a torn final line, because a writer
 /// may be mid-line when they read.
 /// </remarks>
 public sealed class ArbiterLogFiles : IArbiterLogStore
@@ -42,6 +42,15 @@ public sealed class ArbiterLogFiles : IArbiterLogStore
     public const long MaxReadBytes = 8L * 1024 * 1024;
 
     private const int ChunkBytes = 64 * 1024;
+
+    /// <summary>How many times one append tries to take the lock before it fails closed.</summary>
+    private const int LockAttempts = 3;
+
+    /// <summary>How long one attempt waits for the lock.</summary>
+    private static readonly TimeSpan LockWaitBudget = TimeSpan.FromMilliseconds(500);
+
+    /// <summary>How long the append pauses between two attempts.</summary>
+    private static readonly TimeSpan LockRetryPause = TimeSpan.FromMilliseconds(100);
 
     /// <inheritdoc />
     public long ByteLength(string path)
@@ -105,8 +114,41 @@ public sealed class ArbiterLogFiles : IArbiterLogStore
         await target.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Takes the exclusive append lock, waiting with backoff inside the 500 ms budget.</summary>
+    /// <summary>Takes the exclusive append lock: three attempts, each waiting with backoff inside a 500 ms budget.</summary>
+    /// <remarks>
+    /// A burst of concurrent hooks kept losing rows when the wait budget ran out on the first attempt and the append
+    /// failed closed. The lock is held only for one line's write, so a second and third attempt a short pause later
+    /// almost always find it free, without ever waiting an unbounded time.
+    /// </remarks>
     private static async Task<FileStream> AcquireLockAsync(string lockPath, CancellationToken cancellationToken)
+    {
+        IOException? failure = null;
+        for (int attempt = 1; attempt <= LockAttempts; attempt++)
+        {
+            (FileStream? stream, IOException? attemptFailure) =
+                await TryAcquireAsync(lockPath, cancellationToken).ConfigureAwait(false);
+            if (stream is not null)
+            {
+                return stream;
+            }
+
+            failure = attemptFailure;
+            if (attempt < LockAttempts)
+            {
+                await Task.Delay(LockRetryPause, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        throw new IOException(
+            $"Could not acquire the exclusive Arbiter append lock '{lockPath}' within {LockAttempts} attempts of " +
+            $"{LockWaitBudget.TotalMilliseconds:0} ms: the append fails closed (KW-ARB-HOOK-001).",
+            failure);
+    }
+
+    /// <summary>One attempt inside the wait budget: the lock, or the last failure that kept it from being taken.</summary>
+    private static async Task<(FileStream? Stream, IOException? Failure)> TryAcquireAsync(
+        string lockPath,
+        CancellationToken cancellationToken)
     {
         Stopwatch elapsed = Stopwatch.StartNew();
         TimeSpan backoff = TimeSpan.FromMilliseconds(2);
@@ -115,9 +157,9 @@ public sealed class ArbiterLogFiles : IArbiterLogStore
         {
             try
             {
-                return File.Open(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                return (File.Open(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None), null);
             }
-            catch (IOException) when (elapsed.Elapsed < TimeSpan.FromMilliseconds(500))
+            catch (IOException) when (elapsed.Elapsed < LockWaitBudget)
             {
                 // A waiter that is asleep cannot take the lock the moment it frees, and a burst of twenty hooks
                 // spends the whole wait budget trading 50 ms sleeps while the lock sits idle between them. The
@@ -127,9 +169,7 @@ public sealed class ArbiterLogFiles : IArbiterLogStore
             }
             catch (IOException ex)
             {
-                throw new IOException(
-                    $"Could not acquire the exclusive Arbiter append lock '{lockPath}' within 500 ms: the append fails closed (KW-ARB-HOOK-001).",
-                    ex);
+                return (null, ex);
             }
         }
     }

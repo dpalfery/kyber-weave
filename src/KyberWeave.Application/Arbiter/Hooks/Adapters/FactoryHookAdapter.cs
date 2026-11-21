@@ -293,7 +293,11 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
         FactoryBackgroundDispatch? dispatch = FactoryTranscript.FindBackgroundDispatch(_transcripts, transcriptPath, description);
         if (dispatch is null)
         {
-            RecoverLostReturn(payload, description, context);
+            // The description names no dispatch on its own; the transcript's Task call names the agent it ran.
+            RecoverLostReturn(
+                payload,
+                FactoryTranscript.DispatchTargets(_transcripts, transcriptPath, description),
+                context);
             return string.Empty;
         }
 
@@ -307,12 +311,12 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
 
         // A return the rules could not pair leaves the dispatch looking in flight; the stop event itself is the
         // evidence that the agent's work is over, so close the one dispatch it left open.
-        RecoverLostReturn(payload, dispatch.Target, context);
+        RecoverLostReturn(payload, [dispatch.Target], context);
         return string.Empty;
     }
 
     /// <summary>Closes the one dispatch the stopped agent left open when its return hook never reached the ledger.</summary>
-    private void RecoverLostReturn(JsonElement payload, string? agent, HookContext context)
+    private void RecoverLostReturn(JsonElement payload, IReadOnlyList<string> agents, HookContext context)
     {
         if (_engine is not ILostReturnRecovery recovery)
         {
@@ -322,7 +326,7 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
         recovery.RecoverLostReturn(
             Token,
             GetString(payload, "session_id"),
-            string.IsNullOrWhiteSpace(agent) ? [] : [agent],
+            agents,
             context);
     }
 

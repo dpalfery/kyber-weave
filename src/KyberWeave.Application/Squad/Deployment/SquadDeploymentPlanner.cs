@@ -1167,13 +1167,13 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
 
             if (string.Equals(entry.Container, "SubagentStop", StringComparison.OrdinalIgnoreCase))
             {
-                // Only Factory's hook file has this container; a renderer that names it for any
-                // other shape would otherwise write a key that harness never reads.
-                if (block.Format != SquadHookBlockFormat.Factory)
+                // Only Factory's and Claude's hook files have this container; a renderer that names it for
+                // any other shape would otherwise write a key that harness never reads.
+                if (!SquadHookJsonBlock.SupportsSubagentStop(block.Format))
                 {
                     throw new SquadDeploymentConflictException(
                         $"Rendered Squad block '{block.RelativePath}' names SubagentStop, which only " +
-                        "the Factory hook file holds. Fix the upstream render before deploying it.");
+                        "the Factory and Claude hook files hold. Fix the upstream render before deploying it.");
                 }
 
                 subagentStop.Add(entry.Entry);

@@ -52,7 +52,7 @@ public sealed class InFlightLedger : IArbiterLedger
     /// the rows that landed meanwhile, so two concurrent posts still cannot claim one pre. Reading the whole ledger
     /// under the lock was what made a burst of concurrent hooks miss the lock budget and lose their rows.
     /// </remarks>
-    /// <exception cref="IOException">Thrown when the lock is not acquired within 500 ms (fail closed).</exception>
+    /// <exception cref="IOException">Thrown when the lock cannot be taken within three 500 ms attempts (fail closed).</exception>
     public Task AppendAsync(ArbiterLedgerEvent record, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);

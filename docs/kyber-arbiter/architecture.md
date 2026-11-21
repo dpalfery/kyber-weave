@@ -218,7 +218,8 @@ appends; the CLI only reads. The lock is held for the append alone: each line is
 `O_APPEND` descriptor, and a post's pairing is resolved from a lock-free read, then reconciled under
 the lock against the lines that landed meanwhile. A fan-out of concurrent hooks therefore queues for
 milliseconds per row rather than for one whole-ledger read each; while that read was under the lock,
-twenty hooks in the same second exhausted the 500 ms wait budget and lost their rows. A pre event's
+twenty hooks in the same second exhausted the 500 ms wait budget and lost their rows. An append now
+makes three 500 ms attempts, 100 ms apart, before it fails closed. A pre event's
 `headers` carry the dispatch's `plan-file`, `task`,
 `lens`, `refute` and `technology` values, which the worker guard reads to scope a read-only
 dispatch's command allow-list. Prompts and code are logged as digests, never in full.
@@ -1192,6 +1193,14 @@ The harness's stop event is the evidence that the agent's work is over: `subagen
 always wins. The recovery writes one post row for the one still-open pre event of that agent in the same
 session, and marks it:
 
+- The match is on the dispatch's **target** agent, never its caller, and only a pre row carrying the
+  stop event's own session id. A pre row written before the session was recorded names none, and is
+  never recovered: the stop event cannot say which session's agent it belonged to.
+- The pre must be older than the stop event. A same-target post in the same session that claims a pre
+  and was written after the pre is a dispatch that already finished, so a stop arriving then is that
+  finished dispatch's late signal and nothing is closed — the dispatches still open may be different
+  workers still running. A post that claims no pre is not that evidence: it can be the unpaired return
+  the stop handler itself just recorded, which is the case recovery exists for.
 - `recovered` names the stop event (`subagentStop` or `SubagentStop`), so nothing reads the row as a
   worker's report.
 - It carries the pre event's caller, target and headers, pairs by its `pre-id`, and has no
@@ -1207,6 +1216,9 @@ session, and marks it:
 - When several dispatches of the agent are still open the stop event cannot say which one ended: none
   is closed, and one line names how many matched. Closing the wrong one would report work as finished
   that never ran.
+- Factory's `SubagentStop` names the dispatch only by `task_name`, which is a description rather than
+  an agent. The target comes from the transcript's `Task` call, the same place the dispatch path reads
+  it, so recovery matches the agent the dispatch actually named.
 
 ### Attestation scope
 
@@ -1422,7 +1434,9 @@ skills outrank project skills). Two points are not documented and are the design
 invoked. The claim keeps one evaluation whichever way those points fall. The rationale and rejected
 alternatives are in [ADR 0070](../adr/0070-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md).
 
-Claude's user-level block is written only under `hooks.PreToolUse` and `hooks.PostToolUse`. See
+Claude's user-level block is written under `hooks.PreToolUse`, `hooks.PostToolUse` and the
+matcher-less `hooks.SubagentStop`. The stop entry runs the same Arbiter command with the same
+timeout, and is what lets a dispatch whose return hook timed out stop holding its task's files. See
 [Squad architecture](../kyber-squad/architecture.md) for the owned-block rule.
 
 The architect's shell guard is not in this block. It is a `PreToolUse` entry with matcher `^(Bash|PowerShell)$`

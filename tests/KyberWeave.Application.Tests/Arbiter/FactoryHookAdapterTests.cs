@@ -145,8 +145,58 @@ public sealed class FactoryHookAdapterTests
         }
     }
 
+    /// <summary>Records what a stop event asks recovery to close, and decides nothing else.</summary>
+    private sealed class RecoveryEngine : IContextualHookDecisionEngine, ILostReturnRecovery
+    {
+        public string? RecoveredHarness { get; private set; }
+
+        public string? RecoveredSession { get; private set; }
+
+        public IReadOnlyList<string> RecoveredNames { get; private set; } = [];
+
+        public HookOutcome DecidePreDispatch(string caller, string? target, string prompt, KyberWeaveConfig config) =>
+            new(HookOutcomeKind.Allow);
+
+        public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config) =>
+            new(HookOutcomeKind.Allow);
+
+        public HookOutcome DecidePreDispatch(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId = null,
+            string? sessionId = null) => new(HookOutcomeKind.Allow);
+
+        public HookOutcome DecidePostDispatch(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            string toolOutput,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId = null,
+            string? sessionId = null) => new(HookOutcomeKind.Allow);
+
+        public int RecoverLostReturn(
+            string harness,
+            string? sessionId,
+            IReadOnlyList<string> agentNames,
+            HookContext context)
+        {
+            RecoveredHarness = harness;
+            RecoveredSession = sessionId;
+            RecoveredNames = agentNames;
+            return 0;
+        }
+    }
+
     private static KyberWeaveConfig EnabledConfig() =>
         new() { Arbiter = new ArbiterConfig { Enabled = true } };
+
 
     private static string Fixture(string name) =>
         ArbiterHookFixtures.Factory(name);
@@ -643,6 +693,53 @@ public sealed class FactoryHookAdapterTests
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
         Assert.Equal(0, engine.PostCalls);
+    }
+
+    [Fact]
+    public void SubagentStop_WithNoLaunch_RecoversByTheTranscriptsTargetAgent()
+    {
+        // task_name is a description, not an agent. The dispatch's target is what a stop event can identify, and
+        // the transcript's Task call is where the dispatch path reads it from too.
+        string transcript = TemporaryTranscript(FirstTranscriptLine());
+        try
+        {
+            RecoveryEngine engine = new();
+
+            Run(SubagentStop(transcript), null, engine);
+
+            Assert.Equal("factory", engine.RecoveredHarness);
+            Assert.Equal("session-factory-capture", engine.RecoveredSession);
+            Assert.Equal(["echoer"], engine.RecoveredNames);
+        }
+        finally
+        {
+            _files.DeleteFile(transcript);
+        }
+    }
+
+    [Fact]
+    public void SubagentStop_WithADescriptionNoTaskUses_RecoversNothing()
+    {
+        string transcript = TemporaryTranscript(FirstTranscriptLine());
+        try
+        {
+            RecoveryEngine engine = new();
+
+            Run(SubagentStop(transcript, "no such description"), null, engine);
+
+            Assert.Empty(engine.RecoveredNames);
+        }
+        finally
+        {
+            _files.DeleteFile(transcript);
+        }
+    }
+
+    /// <summary>The transcript's dispatch line alone: the Task call, with no launch result after it.</summary>
+    private static string FirstTranscriptLine()
+    {
+        string transcript = ArbiterHookFixtures.Factory(TranscriptFixtureName);
+        return transcript[..transcript.IndexOf('\n', StringComparison.Ordinal)] + "\n";
     }
 
     [Fact]

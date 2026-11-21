@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
@@ -51,6 +52,32 @@ public sealed class ArbiterGlobalClaudeCopilotRenderingTests : IDisposable
             block => block.Target == "claude" &&
                     block.RelativePath == "settings.json" &&
                     block.Entries.Count > 0);
+    }
+
+    [Fact]
+    public async Task RenderAsync_EnabledArbiterUnderGlobalScope_ClaudeRegistersSubagentStop()
+    {
+        // Claude Code fires SubagentStop with no matcher. Its Arbiter entry is what lets the hook close a dispatch
+        // whose return hook timed out, and the block owns it so install, update and uninstall carry it.
+        SquadRenderResult result = await new ClaudeRenderer().RenderAsync(new SquadRenderRequest(
+            SourceDirectory: _fixture.Path,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Global,
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds)).Prepared(_fixture));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadRenderedBlock block = Assert.Single(
+            result.Blocks!,
+            candidate => candidate.Target == "claude" && candidate.RelativePath == "settings.json");
+        SquadRenderedBlockEntry stop = Assert.Single(block.Entries, entry => entry.Container == "SubagentStop");
+        JsonObject group = Assert.IsType<JsonObject>(stop.Entry);
+        Assert.False(group.ContainsKey("matcher"));
+        JsonObject hook = Assert.IsType<JsonObject>(Assert.Single(Assert.IsType<JsonArray>(group["hooks"])));
+        Assert.Equal("command", hook["type"]!.GetValue<string>());
+        Assert.Equal(
+            "kyber-weave-arbiter hook --harness claude --scope global",
+            hook["command"]!.GetValue<string>());
+        Assert.Equal(HookTimeoutSeconds, hook["timeout"]!.GetValue<int>());
     }
 
     [Fact]

@@ -218,7 +218,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         {
             return contextual.DecidePreDispatch(
                 harness, caller, target, prompt, config, context,
-                CliCallId(payload), sessionId: null, dispatchModel: null, deliveredPrompt: deliveredPrompt);
+                CliCallId(payload), sessionId: GetString(payload, "sessionId"), dispatchModel: null, deliveredPrompt: deliveredPrompt);
         }
 
         return _engine.DecidePreDispatch(caller, target, prompt, config);
@@ -238,7 +238,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         {
             return contextual.DecidePostDispatch(
                 harness, caller, target, prompt, toolOutput, config, context,
-                CliCallId(payload), sessionId: null);
+                CliCallId(payload), sessionId: GetString(payload, "sessionId"));
         }
 
         return _engine.DecidePostDispatch(caller, target, toolOutput, config);

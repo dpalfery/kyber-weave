@@ -713,8 +713,8 @@ public sealed class SquadHarnessRenderContext
     /// <param name="matcher">The tool-name matcher for the <c>PreToolUse</c> and <c>PostToolUse</c> groups.</param>
     /// <param name="includeSubagentStop">
     /// Adds a <c>SubagentStop</c> entry: a matcher-less group with the same command and timeout.
-    /// Only Factory asks for it, because only Factory fires a hook when a background subagent
-    /// stops.
+    /// Factory asks for it because it fires a hook when a background subagent stops; Claude
+    /// renders its own global block with the same entry, because it fires the event too.
     /// </param>
     /// <param name="installWhenDisabled">
     /// Installs the block even with the Arbiter off, for the harness whose adapter also inserts a dispatch prompt.
