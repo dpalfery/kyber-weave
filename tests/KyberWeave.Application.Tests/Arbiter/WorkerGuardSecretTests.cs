@@ -1,5 +1,6 @@
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Data.Hooks.Arbiter;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
@@ -19,6 +20,7 @@ public sealed class WorkerGuardSecretTests
 
     private readonly InMemoryFileSystem _files = new();
     private readonly FakeProcessEnvironment _environment;
+    private readonly FileWorkerSessionStore _sessions;
     private readonly string _home;
     private readonly string _repo;
 
@@ -28,6 +30,7 @@ public sealed class WorkerGuardSecretTests
         _repo = Path.Combine(_files.Root, "kw", "repo");
         _files.CreateDirectory(_home);
         _files.CreateDirectory(_repo);
+        _sessions = new FileWorkerSessionStore(_files);
         _environment = new FakeProcessEnvironment(
             currentDirectory: _repo,
             homeDirectory: _home,
@@ -202,16 +205,100 @@ public sealed class WorkerGuardSecretTests
         Assert.Contains("would put a secret into the transcript", reason, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void AFactoryChildsSecretCommandIsRefusedWithFactorysDenyDocument()
+    {
+        FactoryChild();
+
+        string answer = Guard("factory", FactoryExecute("cat ~/.config/x/sa-password"));
+
+        using JsonDocument document = JsonDocument.Parse(answer);
+        JsonElement output = document.RootElement.GetProperty("hookSpecificOutput");
+        Assert.Equal("PreToolUse", output.GetProperty("hookEventName").GetString());
+        Assert.Equal("deny", output.GetProperty("permissionDecision").GetString());
+        Assert.StartsWith(RuleId, output.GetProperty("permissionDecisionReason").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AFactoryChildsReadOfASecretFileIsRefused()
+    {
+        FactoryChild();
+
+        string answer = Guard("factory", FactoryRead("/home/operator/.config/x/sa-password"));
+
+        Assert.StartsWith(RuleId, DenialReason(answer), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AFactoryRootSessionsSecretCommandIsNeverGuarded()
+    {
+        Guard("factory", JsonSerializer.Serialize(new
+        {
+            session_id = "root-1",
+            hook_event_name = "SessionStart",
+            source = "startup",
+            cwd = _repo,
+        }));
+
+        Assert.Empty(Guard("factory", FactoryExecute("cat ~/.config/x/sa-password", sessionId: "root-1")));
+    }
+
+    private void FactoryChild()
+    {
+        Guard("factory", JsonSerializer.Serialize(new
+        {
+            session_id = "root-1",
+            hook_event_name = "SessionStart",
+            source = "startup",
+            cwd = _repo,
+        }));
+        Guard("factory", JsonSerializer.Serialize(new
+        {
+            session_id = "root-1",
+            hook_event_name = "PreToolUse",
+            tool_name = "Task",
+            tool_input = new { subagent_type = "dev-medium", description = "work", prompt = "do it" },
+            cwd = _repo,
+        }));
+        Guard("factory", JsonSerializer.Serialize(new
+        {
+            session_id = "child-1",
+            hook_event_name = "SessionStart",
+            source = "startup",
+            calling_session_id = "root-1",
+            cwd = _repo,
+        }));
+    }
+
+    private static string FactoryExecute(string command, string sessionId = "child-1") => JsonSerializer.Serialize(new
+    {
+        session_id = sessionId,
+        hook_event_name = "PreToolUse",
+        tool_name = "Execute",
+        tool_input = new { command, summary = "run", riskLevel = "low" },
+        cwd = "/kw/repo",
+    });
+
+    private static string FactoryRead(string path) => JsonSerializer.Serialize(new
+    {
+        session_id = "child-1",
+        hook_event_name = "PreToolUse",
+        tool_name = "Read",
+        tool_input = new { file_path = path, line_numbers = true },
+        cwd = "/kw/repo",
+    });
+
     private string Guard(string harness, string json)
     {
         WorkerGuard guard = new(
-            new NoBudgets(),
+            new FileWorkerBudgetStore(_files),
             new NoCheckouts(),
             new NoConfig(),
             _environment,
             TimeProvider.System,
             new NoState(),
-            _files);
+            _files,
+            _sessions);
         using StringWriter stdout = new();
         guard.Run(harness, json, stdout, TextWriter.Null, _home);
         return stdout.ToString();

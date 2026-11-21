@@ -1,6 +1,7 @@
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Core.RunStart;
 
@@ -40,6 +41,37 @@ internal sealed class NoBudgets : IWorkerBudgetStore
     public void TryCreate(string home, string key, string content) => throw new NotSupportedException();
 
     public void Append(string home, string key, string content) => throw new NotSupportedException();
+
+    public void Sweep(string home, DateTimeOffset now, TimeSpan retention) => throw new NotSupportedException();
+}
+
+/// <summary>
+/// The worker guard's Factory session-ledger seam when a test has no ledger: no child is ever recorded, so no call
+/// is guarded, and every write throws.
+/// </summary>
+internal sealed class NoSessions : IWorkerSessionStore
+{
+    public void EnsureDirectory(string home) => throw new NotSupportedException();
+
+    public bool Exists(string home, string key) => false;
+
+    public WorkerSessionEntry? Read(string home, string key) => null;
+
+    public WorkerSessionEntry? AwaitType(string home, string key, TimeSpan timeout) => null;
+
+    public void AppendParent(string home, string key, string parentSessionId) => throw new NotSupportedException();
+
+    public void AppendGuess(string home, string key, string agentType) => throw new NotSupportedException();
+
+    public void AppendType(string home, string key, string agentType) => throw new NotSupportedException();
+
+    public void Delete(string home, string key) => throw new NotSupportedException();
+
+    public void DeletePending(string home, string key) => throw new NotSupportedException();
+
+    public string[] ReadPending(string home, string key) => [];
+
+    public void AppendPending(string home, string key, string entry) => throw new NotSupportedException();
 
     public void Sweep(string home, DateTimeOffset now, TimeSpan retention) => throw new NotSupportedException();
 }

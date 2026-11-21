@@ -34,9 +34,20 @@ public static class SquadHookJsonBlock
     // carries no worker report, so the Arbiter reads the report on this container.
     private const string SubagentStopContainer = "SubagentStop";
 
+    // Factory's worker guard joins session events, because a tool-call payload names no calling
+    // subagent. The listener learns a child from its session start and forgets it at the end.
+    private const string SessionStartContainer = "SessionStart";
+
+    private const string SessionEndContainer = "SessionEnd";
+
     private static readonly string[] PreAndPostContainers = [PreToolUseContainer, PostToolUseContainer];
 
-    private static readonly string[] AllContainers = [PreToolUseContainer, PostToolUseContainer, SubagentStopContainer];
+    private static readonly string[] AllContainers =
+        [PreToolUseContainer, PostToolUseContainer, SubagentStopContainer, SessionStartContainer, SessionEndContainer];
+
+    /// <summary>The Factory containers Squad writes only when it has an entry for them.</summary>
+    private static readonly string[] OptionalFactoryContainers =
+        [SubagentStopContainer, SessionStartContainer, SessionEndContainer];
 
     // The lower-case spellings a Claude settings file held before the PascalCase fix.
     private static readonly string[] LegacyClaudeContainers = ["preToolUse", "postToolUse"];
@@ -386,6 +397,23 @@ public static class SquadHookJsonBlock
     }
 
     /// <summary>
+    /// Refuses a session-event entry for a format whose file never holds one. Factory alone runs the worker guard
+    /// from session events, because its tool-call payload names no calling subagent.
+    /// </summary>
+    public static void RefuseForeignSessionEvents(
+        SquadHookBlockFormat format,
+        IReadOnlyList<JsonNode>? sessionStart,
+        IReadOnlyList<JsonNode>? sessionEnd)
+    {
+        if (format != SquadHookBlockFormat.Factory
+            && ((sessionStart?.Count ?? 0) > 0 || (sessionEnd?.Count ?? 0) > 0))
+        {
+            throw new InvalidOperationException(
+                $"Only the Factory hook file holds SessionStart and SessionEnd entries; '{Harness(format)}' does not.");
+        }
+    }
+
+    /// <summary>
     /// Splices Squad's entries into hook-file <paramref name="existing"/> content without
     /// touching the disk: the single implementation behind both <c>SquadHookJsonFile.SpliceFile</c> and
     /// the deployment plan, so a dry run and a real install can never disagree. A missing
@@ -403,10 +431,15 @@ public static class SquadHookJsonBlock
         string? existing,
         IReadOnlyList<JsonNode> preToolUse,
         IReadOnlyList<JsonNode> postToolUse,
-        IReadOnlyList<JsonNode>? subagentStop = null)
+        IReadOnlyList<JsonNode>? subagentStop = null,
+        IReadOnlyList<JsonNode>? sessionStart = null,
+        IReadOnlyList<JsonNode>? sessionEnd = null)
     {
         RefuseForeignSubagentStop(format, subagentStop);
+        RefuseForeignSessionEvents(format, sessionStart, sessionEnd);
         IReadOnlyList<JsonNode> stop = subagentStop ?? [];
+        IReadOnlyList<JsonNode> start = sessionStart ?? [];
+        IReadOnlyList<JsonNode> end = sessionEnd ?? [];
 
         JsonObject root = ParseOrMinimal(format, existing);
         List<SquadHookOwnedEntry> owned = [];
@@ -427,9 +460,9 @@ public static class SquadHookJsonBlock
         }
         else
         {
-            // Only Factory's SubagentStop container is optional: a file without it gets one only
-            // when there is a stop entry to write, so a Factory file that never had one gains no key.
-            bool hadStopContainer = root.ContainsKey(SubagentStopContainer);
+            // Only Factory's optional containers are created when there is an entry to write, so a
+            // file that never had one gains no key.
+            HashSet<string> hadOptional = [.. OptionalFactoryContainers.Where(root.ContainsKey)];
             if (format == SquadHookBlockFormat.Claude)
             {
                 RemoveSquadFromLegacyClaudeContainers(root, dropEmptied: true);
@@ -439,7 +472,7 @@ public static class SquadHookJsonBlock
             // Positional with the containers OwnedArrays returns: create: true yields every
             // container the format holds, in the order listed in RootContainerNames.
             IReadOnlyList<JsonNode>[] managed = format == SquadHookBlockFormat.Factory
-                ? [preToolUse, postToolUse, stop]
+                ? [preToolUse, postToolUse, stop, start, end]
                 : [preToolUse, postToolUse];
             for (int i = 0; i < containers.Count; i++)
             {
@@ -455,10 +488,15 @@ public static class SquadHookJsonBlock
                 }
             }
 
-            if (format == SquadHookBlockFormat.Factory && stop.Count == 0 && !hadStopContainer
-                && root[SubagentStopContainer] is JsonArray { Count: 0 })
+            if (format == SquadHookBlockFormat.Factory)
             {
-                root.Remove(SubagentStopContainer);
+                foreach (string name in OptionalFactoryContainers)
+                {
+                    if (!hadOptional.Contains(name) && root[name] is JsonArray { Count: 0 })
+                    {
+                        root.Remove(name);
+                    }
+                }
             }
 
             if (format == SquadHookBlockFormat.Cursor && !root.ContainsKey("version"))

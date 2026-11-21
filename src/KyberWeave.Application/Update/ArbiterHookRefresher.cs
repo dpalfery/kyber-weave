@@ -342,7 +342,19 @@ internal sealed class ArbiterHookRefresher(
         IReadOnlyList<JsonNode> subagentStop = format == SquadHookBlockFormat.Factory
             ? [CreateMatcherGroup(null, ArbiterHookWiring.HookCommandLine(SquadTarget.Factory, SquadDeploymentScope.Global), timeoutSeconds)]
             : [];
-        (string spliced, IReadOnlyList<SquadHookOwnedEntry> owned) = SquadHookJsonBlock.SpliceContent(format, existing, preToolUse, postToolUse, subagentStop);
+
+        // The Factory worker guard joins the session events, since a tool-call payload names no
+        // subagent. Refreshing without them would stop the guard from ever learning a child.
+        string factoryWorkerGuard = ArbiterHookWiring.WorkerGuardCommandLine(SquadTargetCatalog.GetToken(SquadTarget.Factory));
+        IReadOnlyList<JsonNode> sessionStart = format == SquadHookBlockFormat.Factory
+            ? [CreateMatcherGroup(null, factoryWorkerGuard, timeoutSeconds)]
+            : [];
+        IReadOnlyList<JsonNode> sessionEnd = format == SquadHookBlockFormat.Factory
+            ? [CreateMatcherGroup(null, factoryWorkerGuard, timeoutSeconds)]
+            : [];
+
+        (string spliced, IReadOnlyList<SquadHookOwnedEntry> owned) = SquadHookJsonBlock.SpliceContent(
+            format, existing, preToolUse, postToolUse, subagentStop, sessionStart, sessionEnd);
         if (string.Equals(existing, spliced, StringComparison.Ordinal))
             return false;
 
@@ -442,8 +454,18 @@ internal sealed class ArbiterHookRefresher(
 
             case SquadTarget.Factory:
                 format = SquadHookBlockFormat.Factory;
-                preToolUse = [CreateMatcherGroup("Task", commandLine, timeoutSeconds)];
-                postToolUse = [CreateMatcherGroup("Task", commandLine, timeoutSeconds)];
+                string factoryWorkerGuard = ArbiterHookWiring.WorkerGuardCommandLine(
+                    SquadTargetCatalog.GetToken(SquadTarget.Factory));
+                preToolUse =
+                [
+                    CreateMatcherGroup("Task", commandLine, timeoutSeconds),
+                    CreateMatcherGroup("*", factoryWorkerGuard, timeoutSeconds)
+                ];
+                postToolUse =
+                [
+                    CreateMatcherGroup("Task", commandLine, timeoutSeconds),
+                    CreateMatcherGroup("Task", factoryWorkerGuard, timeoutSeconds)
+                ];
                 return true;
 
             case SquadTarget.Devin:

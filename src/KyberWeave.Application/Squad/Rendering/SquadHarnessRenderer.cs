@@ -721,11 +721,17 @@ public sealed class SquadHarnessRenderContext
     /// A harness whose adapter cannot rewrite the dispatch keeps its disabled render unchanged and takes the prompt
     /// file instead.
     /// </param>
+    /// <param name="includeWorkerGuardHooks">
+    /// Adds the worker guard's own groups: a <c>PreToolUse</c> group matching every tool, a <c>SessionStart</c> and
+    /// <c>SessionEnd</c> with no matcher, and a second <c>PostToolUse</c> group on the dispatch matcher. Factory needs
+    /// the session events because its tool-call payload names no calling sub-agent.
+    /// </param>
     public void AddArbiterMatcherGroupBlock(
         SquadHookBlockFormat format,
         string matcher,
         bool includeSubagentStop = false,
-        bool installWhenDisabled = false)
+        bool installWhenDisabled = false,
+        bool includeWorkerGuardHooks = false)
     {
         if (EnabledArbiter is null && !(installWhenDisabled && DispatchHooks))
         {
@@ -746,6 +752,23 @@ public sealed class SquadHarnessRenderContext
             entries.Add(new SquadRenderedBlockEntry(
                 "SubagentStop",
                 MatcherGroup(matcher: null, commandLine, timeoutSeconds)));
+        }
+
+        if (includeWorkerGuardHooks)
+        {
+            string workerGuard = ArbiterHookWiring.WorkerGuardCommandLine(Token);
+            entries.Add(new SquadRenderedBlockEntry(
+                "PreToolUse",
+                MatcherGroup(matcher: "*", workerGuard, timeoutSeconds)));
+            entries.Add(new SquadRenderedBlockEntry(
+                "PostToolUse",
+                MatcherGroup(matcher, workerGuard, timeoutSeconds)));
+            entries.Add(new SquadRenderedBlockEntry(
+                "SessionStart",
+                MatcherGroup(matcher: null, workerGuard, timeoutSeconds)));
+            entries.Add(new SquadRenderedBlockEntry(
+                "SessionEnd",
+                MatcherGroup(matcher: null, workerGuard, timeoutSeconds)));
         }
 
         Blocks.Add(new SquadRenderedBlock(Token, relativePath, format, entries));

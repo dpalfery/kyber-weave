@@ -65,7 +65,8 @@ public sealed class WorkerGuardRepositoryRootTests
             new FakeProcessEnvironment(currentDirectory: "/kw/work"),
             TimeProvider.System,
             state,
-            _files);
+            _files,
+            new NoSessions());
         string json = JsonSerializer.Serialize(new
         {
             cwd,

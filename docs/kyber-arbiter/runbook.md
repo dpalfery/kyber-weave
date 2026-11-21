@@ -372,8 +372,8 @@ A run that branched in place works in the canonical checkout, so neither check a
 ## Reading a secret refusal
 
 `KW-ARB-SECRET-001` stops a subagent's call that would put a secret into the transcript, which the model provider
-receives. It runs in the same worker-guard hook as the two rules above, on every Copilot CLI and Claude tool call
-from a Squad subagent, for every capability profile; a root agent is never checked, and `arbiter.enabled: false`
+receives. It runs in the same worker-guard hook as the two rules above, on every Copilot CLI, Claude and
+Factory tool call from a Squad subagent, for every capability profile; a root agent is never checked, and `arbiter.enabled: false`
 turns it off with the rest of the Arbiter. It reads no file and starts no process: the call's own text decides it,
 and a command whose text it cannot read is refused rather than allowed. It refuses three things:
 
@@ -441,8 +441,15 @@ ladder rule reads `STATUS: BUDGET_EXCEEDED` as `fail`, so under `model-targeting
 dispatch climbs one rung, but only where the harness takes a per-dispatch model (Claude); elsewhere the
 conductor's prose carries the escalation.
 
-Only Copilot CLI and Claude run the worker guard: they are the harnesses whose user-level hooks see a
-subagent's own tool calls with its id and type. Every other harness hooks only the dispatch and its return.
+Copilot CLI, Claude and Factory run the worker guard: they are the harnesses whose user-level hooks see a
+subagent's own tool calls. Claude and Copilot name the subagent in the payload. Factory does not, so the guard
+joins three events in a small session ledger under `~/.kyber-weave/arbiter/sessions/` (swept after two days):
+the root's `Task` dispatch names the type it started, the child's `SessionStart` names the parent through
+`calling_session_id`, and the dispatch's `PostToolUse` text names the child session and its type, which also
+corrects a guess taken when two dispatches were in flight. The child's entry is removed at `SessionEnd`. A
+child whose type is still unknown after three seconds is guarded by `KW-ARB-SECRET-001` and
+`KW-ARB-CHECKOUT-001` only; the profile-specific rules are skipped and one log line says so. Every other
+harness hooks only the dispatch and its return.
 
 ## Reading a planner refusal
 

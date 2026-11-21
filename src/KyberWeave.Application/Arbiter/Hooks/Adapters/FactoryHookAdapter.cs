@@ -403,16 +403,7 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
         return updated;
     }
 
-    private static string RenderPreDeny(string reason) =>
-        new JsonObject
-        {
-            ["hookSpecificOutput"] = new JsonObject
-            {
-                ["hookEventName"] = "PreToolUse",
-                ["permissionDecision"] = "deny",
-                ["permissionDecisionReason"] = reason,
-            },
-        }.ToJsonString();
+    private static string RenderPreDeny(string reason) => HookDecisionDocuments.PreToolUsePermissionDeny(reason);
 
     private static string RenderPreAllowStrip(JsonElement toolInput, string prompt) =>
         RenderPreAllow(JsonNode.Parse(toolInput.GetRawText()) as JsonObject

@@ -15,12 +15,14 @@ namespace KyberWeave.Arbiter.Hooks;
 /// declared technology folders' <c>worker.command</c> rules do not allow.
 /// </summary>
 /// <remarks>
-/// It runs on every tool call a harness reports, so it starts no process and calls no model: the run records,
+/// It runs on every Copilot CLI, Claude and Factory tool call, so it starts no process and calls no model: the run records,
 /// the checkout's git files and one append-only counter file per subagent are all it reads for the write, command
 /// and budget refusals. The command allow-list is the one place it reads the project's configuration and evaluates
 /// step 0, and only for a capability profile that may run commands and may not write files; there it also reads
 /// the ledger's dispatch headers, to learn the technology the read-only agent's dispatch named. The secret rule
 /// reads nothing: it decides from the call's own command text or read path, and applies to every capability profile.
+/// Factory names no subagent in its payload, so a small session ledger joins the dispatch, the child's session start and
+/// the dispatch's return; a child whose type is still unknown after a short wait gets the secret and checkout rules only.
 /// A root agent (a person's own session, or the conductor) is never guarded, and neither is an agent outside the
 /// Squad catalog. Any error allows, and the log says why (ADR 0072), except in the secret rule, which refuses a
 /// command whose text it cannot read.
@@ -32,6 +34,7 @@ namespace KyberWeave.Arbiter.Hooks;
 /// <param name="clock">The clock the budget window is measured on.</param>
 /// <param name="state">Opens the ledgers whose dispatch headers the command allow-list reads.</param>
 /// <param name="files">Probes for the <c>.git</c> entry that marks a repository root.</param>
+/// <param name="sessions">The Factory session ledger that names a child sub-agent, since Factory's payload does not.</param>
 public sealed class WorkerGuard(
     IWorkerBudgetStore budgets,
     IRunCheckout checkouts,
@@ -39,7 +42,8 @@ public sealed class WorkerGuard(
     IProcessEnvironment process,
     TimeProvider clock,
     IArbiterStateFactory state,
-    IFileSystem files) : IWorkerGuard
+    IFileSystem files,
+    IWorkerSessionStore sessions) : IWorkerGuard
 {
     /// <summary>The rule id a stray write is refused under.</summary>
     public const string CheckoutRuleId = WorkerGuardRules.CheckoutRuleId;
@@ -68,6 +72,18 @@ public sealed class WorkerGuard(
     /// <returns>False only when the guard would allow without reading a file.</returns>
     public static bool NeedsDecision(string harness, string stdin) => WorkerGuardRules.NeedsDecision(harness, stdin);
 
+    /// <summary>
+    /// As <see cref="NeedsDecision(string, string)"/>, and for a Factory tool call only when the session ledger holds an
+    /// entry for the event's session. The check is one plain file-existence test, so a Factory root session's call — most
+    /// of the guard's traffic — ends before a container is built.
+    /// </summary>
+    /// <param name="harness">The harness token.</param>
+    /// <param name="stdin">The hook event as JSON.</param>
+    /// <param name="home">The operator's home, where the ledger lives.</param>
+    /// <returns>False only when the guard would allow without reading the ledger.</returns>
+    public static bool NeedsDecision(string harness, string stdin, string home) =>
+        WorkerGuardRules.NeedsDecision(harness, stdin, home);
+
     /// <inheritdoc/>
     public int Run(
         string harness,
@@ -87,13 +103,21 @@ public sealed class WorkerGuard(
         try
         {
             string home = homeDirectory ?? process.HomeDirectory;
+            if (WorkerSessionLedger.Handles(harness, stdin))
+            {
+                // Factory's session events are what identify a child sub-agent; none of them carries
+                // a tool call the guard refuses.
+                WorkerSessionLedger.Apply(harness, stdin, home, sessions);
+                return 0;
+            }
+
             if (WorkerGuardEventReader.TurnEndOf(harness, stdin) is { } ended)
             {
                 EndTurn(harness, ended, home);
                 return 0;
             }
 
-            WorkerGuardRules.ToolCall? call = WorkerGuardEventReader.Read(harness, stdin);
+            WorkerGuardRules.ToolCall? call = WorkerGuardEventReader.Read(harness, stdin, sessions, home, log);
             if (call is null)
             {
                 return 0;
@@ -408,6 +432,10 @@ public sealed class WorkerGuard(
             }
 
             budgets.Sweep(home, now, WorkerGuardRules.BudgetRetention);
+
+            // The ledger is swept on the same clock and the same age rule: an entry whose child never resolved
+            // and never ended is left behind by a crashed hook, and this is where it is cleared.
+            sessions.Sweep(home, now, WorkerGuardRules.BudgetRetention);
             budgets.TryCreate(home, key, WorkerGuardRules.HeaderLine(now, budget, call.Agent.Name));
         }
 
