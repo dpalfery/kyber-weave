@@ -14,8 +14,9 @@ last-reviewed: 2026-11-20
 
 - SQL in this repository is SQLite, reached through the system `sqlite3` CLI.
   `Microsoft.Data.Sqlite` and `SQLitePCLRaw` are not added.
-- `canon.db` is the KyberDash product database. The CodeGraph index and the docs
-  analysis cache are not that database and are not a source of its history.
+- `canon.db` is the KyberDash product database. The docs analysis cache is a local
+  cache and is not a source of canon history.
+- `.codegraph/codegraph.db` belongs to the CodeGraph tool. Leave it alone.
 
 ## Schema changes
 

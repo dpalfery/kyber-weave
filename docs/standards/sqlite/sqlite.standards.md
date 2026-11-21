@@ -24,18 +24,18 @@ own documentation.
 
 ### Which files are SQLite
 
-Three SQLite files exist, and they are not interchangeable.
+Two SQLite databases belong to this repository.
 
 - **KyberDash canon store.** `canon.db`, resolved by `CanonDbPath.Resolve`: an explicit
   path, then the `KYBER_CANON_DB` environment variable, then `~/.kyberdash/canon.db`.
   This is the product database. The migration rules below apply to it.
-- **CodeGraph index.** `.codegraph/codegraph.db`, read through `CodeGraphResolverAdapter`.
-  This repository does not own its schema and does not migrate it. `kyber-weave doctor
-  --ensure .` rebuilds the index.
 - **Docs analysis cache.** `cache/docs-analysis.sqlite3`, written by
   `SqliteAnalysisPersistence`. It is a local cache at `PRAGMA user_version` 1. A cache
-  newer than that version is refused. It is not `canon.db`, and it does not use the
-  delete-and-reingest rule.
+  newer than that version is refused. It follows its own version check, and the
+  delete-and-reingest rule below applies to `canon.db`.
+
+`.codegraph/codegraph.db` belongs to the CodeGraph tool. Leave it alone: do not open it,
+query it, migrate it, copy it, or describe its schema.
 
 ### Where the canon schema lives
 
@@ -108,8 +108,7 @@ Schema and version behaviour run through `RelationalSchemaCatalog` and the in-me
 file-system seam. `RelationalSchemaCatalogTests` checks the catalog and the generated
 DDL. `SchemaVersionTests` checks version stamping and the refusal of a newer, invalid,
 or older store. A test that needs a real `sqlite3` process belongs in the integration
-project, as the [test standard](../test/test.standards.md) describes for
-`CodeGraphFixtureDb`.
+project, as the [test standard](../test/test.standards.md) describes.
 
 ## Commands
 
@@ -138,8 +137,8 @@ A value from a harness, a request, or a file is treated as data. It enters SQL o
 through `TextExpr` or a blob literal. A path from a caller is not concatenated into a
 `sqlite3` argument list.
 
-The analysis cache and the CodeGraph index are local to the machine. They are not a
-second source of canon history, and they are not copied into `canon.db`.
+The analysis cache is local to the machine. It is not a source of canon history, and it
+is not copied into `canon.db`. `.codegraph/codegraph.db` stays with the CodeGraph tool.
 
 ## Done checklist
 

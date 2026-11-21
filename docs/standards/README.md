@@ -31,8 +31,9 @@ This repository declares [C#](csharp/csharp.standards.md),
 [Go](go/go.standards.md) standard for Go code that does not exist yet, and a
 [GitHub Actions](github-actions/github-actions.standards.md) standard for the workflows under
 `.github/workflows/`. Rust and Tauri cover the KyberDash tray crate; Tauri covers only the
-Tauri layer and defers language rules to Rust. SQLite covers every database in this
-repository, including the KyberDash canon store and how its schema changes. The
+Tauri layer and defers language rules to Rust. SQLite covers the databases this
+repository owns: the KyberDash canon store, how its schema changes, and the docs
+analysis cache. The CodeGraph database belongs to that tool and is left alone. The
 authoritative list is the Config Reg block
 in the repository root [`AGENTS.md`](../../AGENTS.md), which is regenerated on every
 `docs init` run — this file is not.
