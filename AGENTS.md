@@ -282,6 +282,7 @@ references that belong to this repository.
 - **<rust-coding-standard>**: `docs/standards/rust/rust.standards.md`
 - **<tauri-coding-standard>**: `docs/standards/tauri/tauri.standards.md`
 - **<github-actions-coding-standard>**: `docs/standards/github-actions/github-actions.standards.md`
+- **<sqlite-coding-standard>**: `docs/standards/sqlite/sqlite.standards.md`
 - **<plan-index>**: `docs/plans/README.md`
 - **<specification-index>**: `docs/specs/README.md`
 - **<todo-index>**: `docs/todo/README.md`
