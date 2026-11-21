@@ -112,6 +112,8 @@ impact-components:
 
 Where the host declares task gates, a task's **Commands** are the task-gate runs only, exactly as the worker's packet prints them (test-first: the failing run with `--red`, then the passing run; standard mode: the one passing run): the gate runs the Test contract's runner command, so listing that command as a step of its own makes the worker run every test twice.
 
+**Verification gates use what the host already runs.** The plan proves the request with the host's declared gates and tests, including database-backed tests that start the host's local container or test database through its own script: that is the host's procedure, so the plan runs it as given. Never plan a step an autonomous run cannot do alone: a person's confirmation or reservation, an "exclusive window" on a shared environment, a manual check in a browser, or a run that only happens when someone opts in. Where the request asks for proof a gate cannot give, the plan says so in a `PR note:` under out-of-scope boundaries instead of a step that will be skipped.
+
 Every task that changes files carries a `Difficulty:` line and a `Technology:` line.
 
 `Difficulty:` is the architect's rating, one of three values:
