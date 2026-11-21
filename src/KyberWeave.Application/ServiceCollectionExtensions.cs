@@ -11,6 +11,7 @@ using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Mcp;
 using KyberWeave.Application.Review;
 using KyberWeave.Application.RunStart;
+using KyberWeave.Application.RunIntegrate;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Validation;
@@ -119,6 +120,14 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IEmbeddedResources>()));
         services.TryAddSingleton<IRunDeliveryRunner, RunDeliveryRunner>();
+        services.TryAddSingleton<IRunIntegrateService>(sp => new RunIntegrateService(
+            sp.GetRequiredService<IGitCommandRunner>(),
+            sp.GetRequiredService<IRunCheckout>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IExclusiveFileWriter>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<IStatusLineDeploymentService>(sp => new StatusLineDeploymentService(
             sp.GetRequiredService<IStatusLineFiles>(),
             sp.GetRequiredService<IFileSystemPathSemantics>()));

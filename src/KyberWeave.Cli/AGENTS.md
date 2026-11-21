@@ -41,6 +41,7 @@ Exit codes are deliberately not uniform, because the branches carry different ri
 | `route` | accuracy below `--min-accuracy` |
 | `docs mcp-migrate` | `1` when any named target was refused — a slug the catalog does not know, a symlink, a denied file, a malformed or foreign document, conflicting old and new entries, or an unrecordable receipt. A refused target writes zero bytes and the other named targets still proceed; a preview, a completed migration, and nothing-to-do exit `0` |
 | `run start` | `1` when a tool it depends on fails and `stop-on-tool-failure` is on, or the configuration does not load; `2` when refused input — a harness token, type, slug, or `--resume` naming no local or `origin` branch; `3` when the `codegraph` binary is missing. The name is resolved before the configuration is loaded, and the configuration before the binary is probed, so `2` outranks `1` outranks `3` |
+| `run integrate` | `1` when the run worktree's integration lock is still held after 120 seconds or git fails without a conflict; `2` when refused input — an unresolvable worktree, the canonical checkout as the run worktree, different repositories, no branch checked out, or uncommitted tracked changes; `3` on a conflict, after `git cherry-pick --abort` leaves the run branch unchanged |
 
 Scanning gates on `Critical` alone by default so that adopting it does not immediately
 break every host build. Do not tighten that default.
