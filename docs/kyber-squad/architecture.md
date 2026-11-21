@@ -260,7 +260,8 @@ accepted widening where it is made, not folded into the taxonomy.
 The shared `architect` capability profile holds `process.execute: allow` on every target
 (changed 2026-11-09; it was `deny`). The shell exists because the MCP servers stay bound to the
 canonical checkout and cannot see a plan written into a run's worktree. In the worktree the
-architect runs `kyber-weave docs validate . --merge-ready`, `kyber-weave docs drift .` and
+architect runs `kyber-weave docs validate .` (without `--merge-ready`, which is the
+pull-request gate and fails while the plan is an open Draft), `kyber-weave docs drift .` and
 `codegraph explore "…"` itself, and reads `git` state. It is not permission to implement:
 `filesystem.write` stays instruction-scoped to the plan, spec and todo directories, the agent
 body enumerates the only commands it may run and forbids edits to code, tests, configuration and
