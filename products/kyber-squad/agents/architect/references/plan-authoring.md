@@ -30,6 +30,7 @@ Frontmatter `status` is `draft` while the plan is Draft and `current` from Ready
 Every plan contains:
 
 - governed frontmatter including `development-mode: test-first | standard`, `documentation-impact: new-component | extends-component | no-design-change`, and `impact-components` (catalog component names; required and non-empty for `new-component` and `extends-component`);
+- a `## Request` section quoting the user's request verbatim, as the dispatch carried it, so every later dispatch and the plan review read it from the plan;
 - problem and goal;
 - a `## Request trace` table mapping every explicit instruction in the request to the plan section, task or out-of-scope boundary that covers it;
 - a permanent Decisions section recording all material choices, alternatives, questions, and approvals;
@@ -225,13 +226,13 @@ Under `autonomy: autonomous`, decide per the autonomous-decisions reference and 
 
 ## Documentation gates after plan writes
 
-After every plan save, obtain the two checks. Leave `mergeReady` false while the plan is in the active plans folder. A shell is not permission to implement.
+After every plan save, obtain the two checks. Leave `mergeReady` false while the plan is in the active plans folder, and never validate with `--merge-ready`: that mode is the pull-request gate and always rejects an open Draft (`KW-DOC-LIFECYCLE-003`). A shell is not permission to implement.
 
 Fix every finding a check reports in the plan — errors and warnings alike — and re-check until the only findings left are the standards warning period below. The standards warning period (`KW-DOC-SPEC-012`, `KW-DOC-SPEC-013`, `KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`) is outside your write boundary and does not stop the plan: `docs-dev` clears it at closeout with `kyber-weave docs standards migrate`, committed with the closeout. Do not list it as a risk, an accepted warning or out of scope. Any other finding outside your write boundary is `STATUS: BLOCKED`, and then name the finding, why you cannot fix it, and who can.
 
 ### With a shell
 
-Run `kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .` in the checkout that holds your plan (the worktree when the run uses one) and report `DOCS_VALIDATE: pass (cli, <path>)`. You may use the kw-docs MCP tools `docs_validate_governed_document_schema` and `docs_detect_drift_between_documents_and_code` instead, only in the canonical checkout and only when each response has `rev=` and `branch=` equal to your `RUN_BASE` and `RUN_BRANCH` and `repo=` equal to `git rev-parse --git-common-dir` in your checkout. `repo=` is the git directory, so a different value is another repository, and a matching one proves nothing alone because every worktree shares it. On any mismatch, or when the result is missing, run the CLI commands.
+Run `kyber-weave docs validate .` and `kyber-weave docs drift .` in the checkout that holds your plan (the worktree when the run uses one) and report `DOCS_VALIDATE: pass (cli, <path>)`. You may use the kw-docs MCP tools `docs_validate_governed_document_schema` and `docs_detect_drift_between_documents_and_code` instead, only in the canonical checkout and only when each response has `rev=` and `branch=` equal to your `RUN_BASE` and `RUN_BRANCH` and `repo=` equal to `git rev-parse --git-common-dir` in your checkout. `repo=` is the git directory, so a different value is another repository, and a matching one proves nothing alone because every worktree shares it. On any mismatch, or when the result is missing, run the CLI commands.
 
 ### With no shell
 
