@@ -329,7 +329,8 @@ public static class CodexToolResultMapper
             JsonValueKind.True => true,
             JsonValueKind.False => false,
             JsonValueKind.Number when element.TryGetInt64(out long integer) => integer != 0,
-            JsonValueKind.Number => element.GetDouble() != 0,
+            JsonValueKind.Number when element.TryGetDouble(out double number) && double.IsFinite(number) => number != 0,
+            JsonValueKind.Number => null,
             JsonValueKind.String => bool.TryParse(element.GetString(), out bool parsed) ? parsed : null,
             _ => null,
         };

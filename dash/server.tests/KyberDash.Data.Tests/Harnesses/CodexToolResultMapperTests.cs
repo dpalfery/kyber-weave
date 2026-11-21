@@ -126,6 +126,33 @@ public class CodexToolResultMapperTests
         Assert.Null(record.Tool.ExitCode);
     }
 
+    /// <summary>
+    /// A non-finite numeric <c>success</c> flag is not a result. IEEE says NaN and
+    /// Infinity compare unequal to zero, so a bare <c>!= 0</c> would record success.
+    /// </summary>
+    [Fact]
+    public void TryMap_NonFiniteSuccess_LeavesSucceededUnset()
+    {
+        using JsonDocument document = JsonDocument.Parse("{\"success\":1e309}");
+        OtlpLog log = ToolResultLog(
+            logId: "log-tool-result-nonfinite-1",
+            attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["event.name"] = Element("codex.tool_result"),
+                ["tool_name"] = Element("shell"),
+                ["call_id"] = Element("call_shell_nan"),
+                ["success"] = document.RootElement.GetProperty("success").Clone(),
+            });
+
+        bool handled = CodexToolResultMapper.TryMap(log, ImportedAtUtc, null, out CollectedRecord? record, out CollectedProblem? problem);
+
+        Assert.True(handled);
+        Assert.Null(problem);
+        Assert.NotNull(record);
+        Assert.NotNull(record.Tool);
+        Assert.Null(record.Tool.Succeeded);
+    }
+
     [Fact]
     public void TryMap_FailureEvent_MapsErrorStatusWithoutPayload()
     {
