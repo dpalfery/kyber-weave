@@ -1,4 +1,5 @@
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Hooks.Arbiter;
 using KyberWeave.Tests.FileSystem;
 using Microsoft.Extensions.Time.Testing;
@@ -32,7 +33,8 @@ public sealed class FileWorkerSessionStoreTests
     [Fact]
     public void ARecordedChildKeepsItsParentAndType()
     {
-        _store.Write(Home, "child", new WorkerSessionEntry("parent", "dev-medium"));
+        _store.AppendParent(Home, "child", "parent");
+        _store.AppendType(Home, "child", "dev-medium");
 
         Assert.True(_store.Exists(Home, "child"));
         WorkerSessionEntry entry = Assert.IsType<WorkerSessionEntry>(_store.Read(Home, "child"));
@@ -41,19 +43,48 @@ public sealed class FileWorkerSessionStoreTests
     }
 
     [Fact]
-    public void TheTypeResolvedAfterTheParentReplacesTheUnresolvedEntry()
+    public void TheTypeResolvedAfterTheParentIsAppendedRatherThanReplacingTheFile()
     {
-        _store.Write(Home, "child", new WorkerSessionEntry("parent", null));
-        _store.Write(Home, "child", new WorkerSessionEntry("parent", "platform-researcher"));
+        _store.AppendParent(Home, "child", "parent");
+        _store.AppendType(Home, "child", "platform-researcher");
 
         WorkerSessionEntry entry = Assert.IsType<WorkerSessionEntry>(_store.Read(Home, "child"));
+        Assert.Equal("parent", entry.ParentSessionId);
         Assert.Equal("platform-researcher", entry.AgentType);
+    }
+
+    [Fact]
+    public void ACorrectionStandsOverAGuessWhateverOrderTheTwoWereAppendedIn()
+    {
+        _store.AppendParent(Home, "guessed-first", "parent");
+        _store.AppendGuess(Home, "guessed-first", "dev-medium");
+        _store.AppendType(Home, "guessed-first", "platform-researcher");
+
+        _store.AppendParent(Home, "corrected-first", "parent");
+        _store.AppendType(Home, "corrected-first", "platform-researcher");
+        _store.AppendGuess(Home, "corrected-first", "dev-medium");
+
+        Assert.Equal("platform-researcher", _store.Read(Home, "guessed-first")?.AgentType);
+        Assert.Equal("platform-researcher", _store.Read(Home, "corrected-first")?.AgentType);
+    }
+
+    [Fact]
+    public void ABlankTypeIsNeverWrittenOverOneThatAlreadyStands()
+    {
+        _store.AppendParent(Home, "child", "parent");
+        _store.AppendType(Home, "child", "dev-medium");
+
+        _store.AppendGuess(Home, "child", " ");
+        _store.AppendType(Home, "child", string.Empty);
+
+        Assert.Equal("dev-medium", _store.Read(Home, "child")?.AgentType);
     }
 
     [Fact]
     public void AwaitedTypeReturnsATypeAlreadyRecorded()
     {
-        _store.Write(Home, "child", new WorkerSessionEntry("parent", "dev-medium"));
+        _store.AppendParent(Home, "child", "parent");
+        _store.AppendType(Home, "child", "dev-medium");
 
         WorkerSessionEntry? entry = _store.AwaitType(Home, "child", TimeSpan.FromSeconds(3));
 
@@ -63,7 +94,7 @@ public sealed class FileWorkerSessionStoreTests
     [Fact]
     public void AwaitedTypeAnswersNullForAChildWhoseTypeNeverArrives()
     {
-        _store.Write(Home, "child", new WorkerSessionEntry("parent", null));
+        _store.AppendParent(Home, "child", "parent");
 
         WorkerSessionEntry? entry = _store.AwaitType(Home, "child", TimeSpan.FromMilliseconds(10));
 
@@ -73,14 +104,28 @@ public sealed class FileWorkerSessionStoreTests
     [Fact]
     public void DeletingRemovesOnlyThatChildAndAMissingOneIsNotAnError()
     {
-        _store.Write(Home, "gone", new WorkerSessionEntry("parent", "dev-medium"));
-        _store.Write(Home, "kept", new WorkerSessionEntry("parent", "dev-medium"));
+        _store.AppendParent(Home, "gone", "parent");
+        _store.AppendType(Home, "gone", "dev-medium");
+        _store.AppendParent(Home, "kept", "parent");
+        _store.AppendType(Home, "kept", "dev-medium");
 
         _store.Delete(Home, "gone");
         _store.Delete(Home, "never-existed");
 
         Assert.False(_store.Exists(Home, "gone"));
         Assert.True(_store.Exists(Home, "kept"));
+    }
+
+    [Fact]
+    public void DeletingAPendingListLeavesTheChildEntriesAlone()
+    {
+        _store.AppendParent(Home, "child", "parent");
+        _store.AppendPending(Home, "pending-parent", "+dev-medium");
+
+        _store.DeletePending(Home, "pending-parent");
+
+        Assert.Empty(_store.ReadPending(Home, "pending-parent"));
+        Assert.True(_store.Exists(Home, "child"));
     }
 
     [Fact]
@@ -95,15 +140,25 @@ public sealed class FileWorkerSessionStoreTests
     [Fact]
     public void SweepingRemovesSessionsOlderThanTheRetentionAndKeepsTheRest()
     {
-        _store.Write(Home, "old", new WorkerSessionEntry("parent", "dev-medium"));
+        _store.AppendParent(Home, "old", "parent");
         _store.AppendPending(Home, "old-pending", "+dev-medium");
         _time.Advance(TimeSpan.FromDays(3));
-        _store.Write(Home, "recent", new WorkerSessionEntry("parent", "dev-medium"));
+        _store.AppendParent(Home, "recent", "parent");
 
         _store.Sweep(Home, _time.GetUtcNow(), TimeSpan.FromDays(2));
 
         Assert.False(_store.Exists(Home, "old"));
         Assert.Empty(_store.ReadPending(Home, "old-pending"));
         Assert.True(_store.Exists(Home, "recent"));
+    }
+
+    [Fact]
+    public void ASweepOfALedgerThatWasNeverWrittenCreatesNothing()
+    {
+        string untouched = Path.Combine(Home, "never-written");
+
+        _store.Sweep(untouched, DateTimeOffset.UtcNow, TimeSpan.FromDays(2));
+
+        Assert.False(_files.DirectoryExists(Path.Combine(untouched, ".kyber-weave", "arbiter", "sessions")));
     }
 }

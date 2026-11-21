@@ -72,6 +72,18 @@ public sealed class WorkerGuard(
     /// <returns>False only when the guard would allow without reading a file.</returns>
     public static bool NeedsDecision(string harness, string stdin) => WorkerGuardRules.NeedsDecision(harness, stdin);
 
+    /// <summary>
+    /// As <see cref="NeedsDecision(string, string)"/>, and for a Factory tool call only when the session ledger holds an
+    /// entry for the event's session. The check is one plain file-existence test, so a Factory root session's call — most
+    /// of the guard's traffic — ends before a container is built.
+    /// </summary>
+    /// <param name="harness">The harness token.</param>
+    /// <param name="stdin">The hook event as JSON.</param>
+    /// <param name="home">The operator's home, where the ledger lives.</param>
+    /// <returns>False only when the guard would allow without reading the ledger.</returns>
+    public static bool NeedsDecision(string harness, string stdin, string home) =>
+        WorkerGuardRules.NeedsDecision(harness, stdin, home);
+
     /// <inheritdoc/>
     public int Run(
         string harness,
@@ -420,6 +432,10 @@ public sealed class WorkerGuard(
             }
 
             budgets.Sweep(home, now, WorkerGuardRules.BudgetRetention);
+
+            // The ledger is swept on the same clock and the same age rule: an entry whose child never resolved
+            // and never ended is left behind by a crashed hook, and this is where it is cleared.
+            sessions.Sweep(home, now, WorkerGuardRules.BudgetRetention);
             budgets.TryCreate(home, key, WorkerGuardRules.HeaderLine(now, budget, call.Agent.Name));
         }
 

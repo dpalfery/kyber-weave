@@ -35,6 +35,21 @@ public static class Composition
         TextWriter stderr,
         Func<TextWriter, HookCommand>? commandFactory)
     {
+        return await DispatchAsync(args, stdin, stdout, stderr, commandFactory, services: null).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// As the overload above, with an injectable guard provider too. A test passes a factory that records the call to
+    /// prove an event the guard cannot refuse builds no container.
+    /// </summary>
+    internal static async Task<int> DispatchAsync(
+        string[] args,
+        TextReader stdin,
+        TextWriter stdout,
+        TextWriter stderr,
+        Func<TextWriter, HookCommand>? commandFactory,
+        Func<IServiceProvider>? services)
+    {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(stdin);
         ArgumentNullException.ThrowIfNull(stdout);
@@ -136,7 +151,7 @@ public static class Composition
             IConductorGuard guard;
             try
             {
-                guard = ArbiterContainer.CreateGuards().GetRequiredService<IConductorGuard>();
+                guard = (services ?? ArbiterContainer.CreateGuards).Invoke().GetRequiredService<IConductorGuard>();
             }
             catch (Exception ex)
             {
@@ -174,16 +189,17 @@ public static class Composition
                 return 0;
             }
 
-            if (!WorkerGuard.NeedsDecision(harness, stdinText))
+            if (!WorkerGuard.NeedsDecision(harness, stdinText, HomeDirectory(OptionValue(args, "--home"))))
             {
-                // A root agent, an agent outside the Squad catalog or a call that writes no file is never refused.
+                // A root agent, an agent outside the Squad catalog, a call that writes no file, or a Factory root
+                // session's call, which the ledger has no child entry for: never refused, so nothing is built.
                 return 0;
             }
 
             IWorkerGuard worker;
             try
             {
-                worker = ArbiterContainer.CreateGuards().GetRequiredService<IWorkerGuard>();
+                worker = (services ?? ArbiterContainer.CreateGuards).Invoke().GetRequiredService<IWorkerGuard>();
             }
             catch (Exception ex)
             {
@@ -314,6 +330,15 @@ public static class Composition
             // The log is best effort.
         }
     }
+
+    /// <summary>
+    /// The operator's home the ledger lives under: the <c>--home</c> the run names, or the profile directory the
+    /// environment seam reads when it names none. The composition root is where that ambient read belongs.
+    /// </summary>
+    private static string HomeDirectory(string? configured) =>
+        string.IsNullOrWhiteSpace(configured)
+            ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            : configured;
 
     private static string? OptionValue(string[] args, string name)
     {

@@ -157,8 +157,7 @@ public sealed partial class PhysicalFileSystem : IWritableFileSystem
     private static partial int Close(int descriptor);
 
     /// <inheritdoc />
-    public Stream OpenAppendShared(string path) =>
-        new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+    public Stream OpenAppendShared(string path) => AppendFile.Open(path);
 
     /// <inheritdoc />
     public void MoveDirectory(string sourcePath, string destinationPath) => Directory.Move(sourcePath, destinationPath);

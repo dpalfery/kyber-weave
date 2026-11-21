@@ -59,9 +59,15 @@ internal sealed class NoSessions : IWorkerSessionStore
 
     public WorkerSessionEntry? AwaitType(string home, string key, TimeSpan timeout) => null;
 
-    public void Write(string home, string key, WorkerSessionEntry entry) => throw new NotSupportedException();
+    public void AppendParent(string home, string key, string parentSessionId) => throw new NotSupportedException();
+
+    public void AppendGuess(string home, string key, string agentType) => throw new NotSupportedException();
+
+    public void AppendType(string home, string key, string agentType) => throw new NotSupportedException();
 
     public void Delete(string home, string key) => throw new NotSupportedException();
+
+    public void DeletePending(string home, string key) => throw new NotSupportedException();
 
     public string[] ReadPending(string home, string key) => [];
 

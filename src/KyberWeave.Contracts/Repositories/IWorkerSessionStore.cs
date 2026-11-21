@@ -7,9 +7,10 @@ namespace KyberWeave.Contracts.Repositories;
 /// the parent that dispatched it and the Squad agent type it runs as, plus one append-only in-flight list per parent.
 /// </summary>
 /// <remarks>
-/// The budget files' pattern, one file per key, is reused so parallel hook processes never lose an entry. The ledger
-/// exists because a Factory tool-call payload names no calling sub-agent: the root's <c>Task</c> dispatch, the child's
-/// <c>SessionStart</c> and the dispatch's <c>PostToolUse</c> text are joined here.
+/// The budget files' pattern, one append-only file per key, is reused so parallel hook processes never lose an entry:
+/// a child's file is a <c>parent</c> line and then type lines, and the last authoritative <c>type</c> line is the one
+/// that stands. The ledger exists because a Factory tool-call payload names no calling sub-agent: the root's
+/// <c>Task</c> dispatch, the child's <c>SessionStart</c> and the dispatch's <c>PostToolUse</c> text are joined here.
 /// </remarks>
 public interface IWorkerSessionStore
 {
@@ -22,7 +23,7 @@ public interface IWorkerSessionStore
     /// <param name="key">The child session's key.</param>
     bool Exists(string home, string key);
 
-    /// <summary>Reads one child session's entry.</summary>
+    /// <summary>Reads one child session's entry, with the last type line standing.</summary>
     /// <param name="home">The operator's home.</param>
     /// <param name="key">The child session's key.</param>
     /// <returns>The entry; null when the child was never recorded.</returns>
@@ -35,16 +36,39 @@ public interface IWorkerSessionStore
     /// <returns>The entry when its type arrived in time; null otherwise.</returns>
     WorkerSessionEntry? AwaitType(string home, string key, TimeSpan timeout);
 
-    /// <summary>Writes one child session's entry, replacing an earlier one.</summary>
+    /// <summary>Appends one parent line, so a child file is never replaced and parallel hook processes cannot lose a write.</summary>
     /// <param name="home">The operator's home.</param>
     /// <param name="key">The child session's key.</param>
-    /// <param name="entry">The parent and, once known, the agent type.</param>
-    void Write(string home, string key, WorkerSessionEntry entry);
+    /// <param name="parentSessionId">The session id of the parent that dispatched the child.</param>
+    void AppendParent(string home, string key, string parentSessionId);
+
+    /// <summary>
+    /// Appends a guessed type line, which a dispatch's return may later correct. A blank type is not written, so a
+    /// guess can never erase a type another process already recorded.
+    /// </summary>
+    /// <param name="home">The operator's home.</param>
+    /// <param name="key">The child session's key.</param>
+    /// <param name="agentType">The Squad agent type the child's start suggests.</param>
+    void AppendGuess(string home, string key, string agentType);
+
+    /// <summary>
+    /// Appends the type line the dispatch's return names. It is authoritative, and it stands over any guess whatever
+    /// order the two processes appended in. A blank type is not written.
+    /// </summary>
+    /// <param name="home">The operator's home.</param>
+    /// <param name="key">The child session's key.</param>
+    /// <param name="agentType">The Squad agent type the dispatch returned.</param>
+    void AppendType(string home, string key, string agentType);
 
     /// <summary>Deletes one child session's entry.</summary>
     /// <param name="home">The operator's home.</param>
     /// <param name="key">The child session's key.</param>
     void Delete(string home, string key);
+
+    /// <summary>Deletes one parent's in-flight list.</summary>
+    /// <param name="home">The operator's home.</param>
+    /// <param name="key">The parent session's pending key.</param>
+    void DeletePending(string home, string key);
 
     /// <summary>Reads a parent's in-flight list.</summary>
     /// <param name="home">The operator's home.</param>

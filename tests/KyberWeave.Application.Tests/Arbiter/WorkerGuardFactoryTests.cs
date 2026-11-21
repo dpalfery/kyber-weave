@@ -2,9 +2,13 @@ using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.FileSystem;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Hooks.Arbiter;
+using KyberWeave.Tests;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace KyberWeave.Application.Tests.Arbiter;
@@ -22,7 +26,8 @@ public sealed class WorkerGuardFactoryTests
     private const string RootSession = "root-0001";
     private const string ChildSession = "child-0002";
 
-    private readonly InMemoryFileSystem _files = new();
+    private readonly FakeTimeProvider _time = new(DateTimeOffset.UtcNow);
+    private readonly InMemoryFileSystem _files;
     private readonly FakeProcessEnvironment _environment;
     private readonly FileWorkerSessionStore _sessions;
     private readonly string _home;
@@ -30,6 +35,7 @@ public sealed class WorkerGuardFactoryTests
 
     public WorkerGuardFactoryTests()
     {
+        _files = new InMemoryFileSystem(_time);
         _home = Path.Combine(_files.Root, "kw", "home");
         _repo = Path.Combine(_files.Root, "kw", "repo");
         _files.CreateDirectory(_home);
@@ -150,6 +156,87 @@ public sealed class WorkerGuardFactoryTests
     }
 
     [Fact]
+    public void ASessionEndRemovesTheRootsPendingList()
+    {
+        string pendingKey = WorkerSessionLedger.PendingKey(RootSession);
+        Guard(RootStart());
+        Guard(TaskPre("dev-medium"));
+        Guard(TaskPre("platform-researcher"));
+        Assert.NotEmpty(_sessions.ReadPending(_home, pendingKey));
+
+        Guard(SessionEvent("SessionEnd", RootSession));
+
+        Assert.Empty(_sessions.ReadPending(_home, pendingKey));
+    }
+
+    [Fact]
+    public void AnEntryThatNeverResolvedAndNeverEndedIsRemovedByTheSweep()
+    {
+        string staleKey = WorkerSessionLedger.ChildKey("stale-child");
+        Guard(RootStart());
+        _sessions.EnsureDirectory(_home);
+        _sessions.AppendParent(_home, staleKey, RootSession);
+        Assert.True(_sessions.Exists(_home, staleKey));
+
+        _time.Advance(TimeSpan.FromDays(3));
+
+        // A budgeted child's first tool call is where the budget files and the ledger are swept together.
+        Guard(TaskPre("dev-medium"));
+        Guard(ChildStart());
+        Guard(Execute("ls"));
+
+        Assert.False(_sessions.Exists(_home, staleKey));
+        Assert.True(_sessions.Exists(_home, WorkerSessionLedger.ChildKey(ChildSession)));
+    }
+
+    [Fact]
+    public void AReturnForAChildThatAlreadyStandsForATypeTakesNoSecondPendingEntry()
+    {
+        // Two same-type dispatches: the first child takes its entry from the list when it starts, so its
+        // return must not take the second dispatch's entry, which would leave the second child waiting.
+        Guard(RootStart());
+        Guard(TaskPre("dev-medium"));
+        Guard(ChildStart());
+        Guard(TaskPre("dev-medium"));
+
+        Guard(TaskPost(ChildSession, "dev-medium"));
+
+        Assert.Equal(
+            "dev-medium",
+            Assert.Single(WorkerSessionLedger.PendingTypes(_sessions.ReadPending(_home, WorkerSessionLedger.PendingKey(RootSession)))));
+    }
+
+    [Fact]
+    public void TheCorrectionAfterTheChildStartStandsOnTheRealLedger()
+    {
+        using TempDirectory temp = new();
+        string home = Path.Combine(temp.Path, "home");
+        FileWorkerSessionStore store = new(new PhysicalFileSystem());
+
+        Apply(home, store, RootStart());
+        Apply(home, store, TaskPre("dev-medium"));
+        Apply(home, store, ChildStart());
+        Apply(home, store, TaskPost(ChildSession, "platform-researcher"));
+
+        Assert.Equal("platform-researcher", store.Read(home, WorkerSessionLedger.ChildKey(ChildSession))?.AgentType);
+    }
+
+    [Fact]
+    public void AChildStartAfterTheCorrectionKeepsTheCorrectionOnTheRealLedger()
+    {
+        using TempDirectory temp = new();
+        string home = Path.Combine(temp.Path, "home");
+        FileWorkerSessionStore store = new(new PhysicalFileSystem());
+
+        Apply(home, store, RootStart());
+        Apply(home, store, TaskPre("platform-researcher"));
+        Apply(home, store, TaskPost(ChildSession, "platform-researcher"));
+        Apply(home, store, ChildStart());
+
+        Assert.Equal("platform-researcher", store.Read(home, WorkerSessionLedger.ChildKey(ChildSession))?.AgentType);
+    }
+
+    [Fact]
     public void TheCheapDecisionReadsOnlyTheEvent()
     {
         Assert.True(WorkerGuard.NeedsDecision(Harness, ChildStart()));
@@ -179,9 +266,13 @@ public sealed class WorkerGuardFactoryTests
             _files,
             sessions ?? _sessions);
         using StringWriter stdout = new();
-        guard.Run(Harness, json, stdout, log ?? TextWriter.Null, _home);
+        guard.Run(Harness, json, stdout, log ?? TextWriter.Null, _home, now: () => _time.GetUtcNow());
         return stdout.ToString();
     }
+
+    /// <summary>Feeds one Factory event to the ledger alone, keeping the guard out of the real-store tests.</summary>
+    private static void Apply(string home, IWorkerSessionStore sessions, string json) =>
+        WorkerSessionLedger.Apply(Harness, json, home, sessions);
 
     private static string Reason(string answer)
     {
@@ -272,9 +363,15 @@ public sealed class WorkerGuardFactoryTests
 
         public WorkerSessionEntry? AwaitType(string home, string key, TimeSpan timeout) => inner.Read(home, key);
 
-        public void Write(string home, string key, WorkerSessionEntry entry) => inner.Write(home, key, entry);
+        public void AppendParent(string home, string key, string parentSessionId) => inner.AppendParent(home, key, parentSessionId);
+
+        public void AppendGuess(string home, string key, string agentType) => inner.AppendGuess(home, key, agentType);
+
+        public void AppendType(string home, string key, string agentType) => inner.AppendType(home, key, agentType);
 
         public void Delete(string home, string key) => inner.Delete(home, key);
+
+        public void DeletePending(string home, string key) => inner.DeletePending(home, key);
 
         public string[] ReadPending(string home, string key) => inner.ReadPending(home, key);
 

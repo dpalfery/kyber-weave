@@ -6,57 +6,64 @@ using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Data.Hooks.Arbiter;
 
-/// <summary>The Factory session ledger as files that parallel hook processes share, beside the budget files.</summary>
+/// <summary>The Factory session ledger as append-only files that parallel hook processes share, beside the budget files.</summary>
+/// <remarks>
+/// A child's file is never replaced: a <c>parent</c> line names the dispatching session, a <c>guess</c> line holds the
+/// type a child's start suggests, and a <c>type</c> line holds the type the dispatch's return names. The reads take
+/// the last of each, and the last <c>type</c> line outranks every guess, so a correction wins whatever order the hook
+/// processes appended in.
+/// </remarks>
 public sealed class FileWorkerSessionStore(IWritableFileSystem files) : IWorkerSessionStore
 {
-    private const string SessionDirectoryName = "sessions";
-    private const string SessionSuffix = ".session";
-    private const string PendingSuffix = ".list";
     private const string ParentPrefix = "parent";
+    private const string GuessPrefix = "guess";
     private const string TypePrefix = "type";
 
     /// <summary>How often <see cref="AwaitType" /> re-reads the entry while a dispatch is still in flight.</summary>
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(50);
 
     /// <inheritdoc/>
-    public void EnsureDirectory(string home) => files.CreateDirectory(DirectoryOf(home));
+    public void EnsureDirectory(string home) => files.CreateDirectory(WorkerSessionPaths.DirectoryOf(home));
 
     /// <inheritdoc/>
-    public bool Exists(string home, string key) => files.FileExists(SessionPathOf(home, key));
+    public bool Exists(string home, string key) => files.FileExists(WorkerSessionPaths.ChildPathOf(home, key));
 
     /// <inheritdoc/>
     public WorkerSessionEntry? Read(string home, string key)
     {
-        string path = SessionPathOf(home, key);
+        string path = WorkerSessionPaths.ChildPathOf(home, key);
         if (!files.FileExists(path))
         {
             return null;
         }
 
         string? parent = null;
+        string? guess = null;
         string? type = null;
         foreach (string line in files.ReadLines(path))
         {
-            int space = line.IndexOf(' ', StringComparison.Ordinal);
-            if (space <= 0)
+            if (SplitLine(line) is not { } entry)
             {
                 continue;
             }
 
-            string name = line[..space];
-            string value = line[(space + 1)..];
-            if (string.Equals(name, ParentPrefix, StringComparison.Ordinal))
+            if (string.Equals(entry.Name, ParentPrefix, StringComparison.Ordinal))
             {
-                parent = value;
+                parent = entry.Value;
             }
-            else if (string.Equals(name, TypePrefix, StringComparison.Ordinal))
+            else if (string.Equals(entry.Name, GuessPrefix, StringComparison.Ordinal))
+            {
+                guess = entry.Value;
+            }
+            else if (string.Equals(entry.Name, TypePrefix, StringComparison.Ordinal))
             {
                 // A corrected type is appended after the first: the last one stands.
-                type = value;
+                type = entry.Value;
             }
         }
 
-        return parent is null ? null : new WorkerSessionEntry(parent, type);
+        // A corrected type outranks a guess, so the two lines can arrive in either order.
+        return parent is null ? null : new WorkerSessionEntry(parent, NonBlank(type) ?? NonBlank(guess));
     }
 
     /// <inheritdoc/>
@@ -76,40 +83,58 @@ public sealed class FileWorkerSessionStore(IWritableFileSystem files) : IWorkerS
     }
 
     /// <inheritdoc/>
-    public void Write(string home, string key, WorkerSessionEntry entry)
-    {
-        ArgumentNullException.ThrowIfNull(entry);
-        StringBuilder content = new StringBuilder()
-            .Append(ParentPrefix).Append(' ').Append(OneLine(entry.ParentSessionId)).Append('\n');
-        if (entry.AgentType is not null)
-        {
-            content.Append(TypePrefix).Append(' ').Append(OneLine(entry.AgentType)).Append('\n');
-        }
+    public void AppendParent(string home, string key, string parentSessionId) =>
+        Append(home, key, ParentPrefix + " " + OneLine(parentSessionId));
 
-        files.WriteAllTextAtomic(SessionPathOf(home, key), content.ToString());
+    /// <inheritdoc/>
+    public void AppendGuess(string home, string key, string agentType)
+    {
+        if (NonBlank(agentType) is not null)
+        {
+            Append(home, key, GuessPrefix + " " + OneLine(agentType));
+        }
     }
 
     /// <inheritdoc/>
-    public void Delete(string home, string key) => files.DeleteFile(SessionPathOf(home, key));
+    public void AppendType(string home, string key, string agentType)
+    {
+        if (NonBlank(agentType) is not null)
+        {
+            Append(home, key, TypePrefix + " " + OneLine(agentType));
+        }
+    }
+
+    /// <inheritdoc/>
+    public void Delete(string home, string key) => files.DeleteFile(WorkerSessionPaths.ChildPathOf(home, key));
+
+    /// <inheritdoc/>
+    public void DeletePending(string home, string key) => files.DeleteFile(WorkerSessionPaths.PendingPathOf(home, key));
 
     /// <inheritdoc/>
     public string[] ReadPending(string home, string key)
     {
-        string path = PendingPathOf(home, key);
+        string path = WorkerSessionPaths.PendingPathOf(home, key);
         return files.FileExists(path) ? [.. files.ReadLines(path)] : [];
     }
 
     /// <inheritdoc/>
     public void AppendPending(string home, string key, string entry)
     {
-        using Stream append = files.OpenAppendShared(PendingPathOf(home, key));
+        using Stream append = files.OpenAppendShared(WorkerSessionPaths.PendingPathOf(home, key));
         append.Write(Encoding.UTF8.GetBytes(OneLine(entry) + "\n"));
     }
 
     /// <inheritdoc/>
     public void Sweep(string home, DateTimeOffset now, TimeSpan retention)
     {
-        foreach (string file in files.EnumerateFiles(DirectoryOf(home), "*", recursive: false))
+        string directory = WorkerSessionPaths.DirectoryOf(home);
+        if (!files.DirectoryExists(directory))
+        {
+            // Nothing was ever recorded, so there is nothing to sweep and no directory to create.
+            return;
+        }
+
+        foreach (string file in files.EnumerateFiles(directory, "*", recursive: false))
         {
             try
             {
@@ -125,13 +150,23 @@ public sealed class FileWorkerSessionStore(IWritableFileSystem files) : IWorkerS
         }
     }
 
+    /// <summary>Appends one line to a child's file, creating it when it is missing.</summary>
+    private void Append(string home, string key, string line)
+    {
+        using Stream append = files.OpenAppendShared(WorkerSessionPaths.ChildPathOf(home, key));
+        append.Write(Encoding.UTF8.GetBytes(line + "\n"));
+    }
+
+    /// <summary>Splits one ledger line into its name and value, or null when it holds neither.</summary>
+    private static (string Name, string Value)? SplitLine(string line)
+    {
+        int space = line.IndexOf(' ', StringComparison.Ordinal);
+        return space <= 0 ? null : (line[..space], line[(space + 1)..]);
+    }
+
+    private static string? NonBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
     /// <summary>A session id or type is written as one line, so a value carrying a newline cannot forge an entry.</summary>
     private static string OneLine(string value) =>
         value.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\n', ' ').Replace('\r', ' ');
-
-    private static string DirectoryOf(string home) => Path.Combine(home, ".kyber-weave", "arbiter", SessionDirectoryName);
-
-    private static string SessionPathOf(string home, string key) => Path.Combine(DirectoryOf(home), key + SessionSuffix);
-
-    private static string PendingPathOf(string home, string key) => Path.Combine(DirectoryOf(home), key + PendingSuffix);
 }

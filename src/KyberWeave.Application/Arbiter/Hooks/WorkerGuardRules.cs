@@ -1,11 +1,11 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Arbiter.Hooks;
 
@@ -134,6 +134,55 @@ internal static class WorkerGuardRules
         }
         catch (Exception)
         {
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Whether the event can need a refusal once the ledger is consulted: as
+    /// <see cref="NeedsDecision(string, string)"/>, and for a Factory tool call only when the ledger holds an entry for
+    /// its session. A Factory root session's calls are most of the guard's traffic and are never guarded, so the
+    /// caller learns it from one file-existence test and builds nothing for them.
+    /// </summary>
+    /// <param name="harness">The harness token.</param>
+    /// <param name="stdin">The hook event as JSON.</param>
+    /// <param name="home">The operator's home, where the ledger lives.</param>
+    /// <returns>False only when the guard would allow without reading a file; true when it must decide, and when the event is unreadable, so the guard reports it.</returns>
+    internal static bool NeedsDecision(string harness, string stdin, string home)
+    {
+        try
+        {
+            if (!NeedsDecision(harness, stdin))
+            {
+                return false;
+            }
+
+            if (!string.Equals(harness, FactoryHarness, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            using JsonDocument document = JsonDocument.Parse(stdin);
+            JsonElement root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !string.Equals(FactoryText(root, "hook_event_name"), "PreToolUse", StringComparison.Ordinal))
+            {
+                // The ledger's own events always run: they are what records a child in the first place.
+                return true;
+            }
+
+            string? tool = FactoryText(root, "tool_name");
+            if (tool is null || !FactoryGuardedTools.Contains(tool))
+            {
+                return true;
+            }
+
+            string? sessionId = FactoryText(root, "session_id");
+            return sessionId is null || WorkerSessionPaths.ChildEntryExists(home, harness, sessionId);
+        }
+        catch (Exception)
+        {
+            // An unreadable event is left to the guard, which reports it.
             return true;
         }
     }
@@ -819,7 +868,7 @@ internal static class WorkerGuardRules
     }
 
     internal static string KeyOf(string harness, string agentId) =>
-        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(harness + "\n" + agentId)))[..24];
+        WorkerSessionPaths.KeyOf(harness, agentId);
 
     /// <summary>The refusal an exhausted budget answers with.</summary>
     internal static string ExhaustedRefusal(bool seat, bool writesSeatFile, int calls, TimeSpan elapsed, int maxCalls, int minutes)

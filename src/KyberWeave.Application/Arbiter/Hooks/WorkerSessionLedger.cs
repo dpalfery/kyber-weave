@@ -1,6 +1,7 @@
 using System.Text.Json;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Arbiter.Hooks;
 
@@ -10,15 +11,15 @@ namespace KyberWeave.Arbiter.Hooks;
 /// <c>SessionStart</c>, and the dispatch's <c>PostToolUse</c> text, and forgets it when the child session ends.
 /// </summary>
 /// <remarks>
-/// The in-flight list is append-only, like the budget files: a <c>+</c> line records a dispatched type and a <c>-</c>
-/// line takes one back, so parallel hook processes never lose an entry. A child's type is authoritative once the
-/// dispatch's <c>PostToolUse</c> names it, which corrects a guess taken when the child started.
+/// Every file is append-only, like the budget files: a <c>+</c> line records a dispatched type and a <c>-</c> line
+/// takes one back, and a child's file gains lines rather than being replaced, so parallel hook processes never lose an
+/// entry. The type a dispatch's <c>PostToolUse</c> names is authoritative and outranks the guess a child's start takes,
+/// whatever order the two processes append in.
 /// </remarks>
 internal static class WorkerSessionLedger
 {
     private const string AddPrefix = "+";
     private const string TakePrefix = "-";
-    private const string PendingKeyPrefix = "pending-";
     private const string SessionIdLine = "session_id:";
     private const string AgentTypeLine = "subagent_type:";
 
@@ -69,6 +70,8 @@ internal static class WorkerSessionLedger
                 StartChild(root, home, sessions);
                 break;
             case "SessionEnd":
+                EndSession(root, home, sessions);
+                break;
             case "Stop":
                 EndChild(root, home, sessions);
                 break;
@@ -82,11 +85,12 @@ internal static class WorkerSessionLedger
     }
 
     /// <summary>The key one child session is recorded under.</summary>
-    internal static string ChildKey(string sessionId) => WorkerGuardRules.KeyOf(WorkerGuardRules.FactoryHarness, sessionId);
+    internal static string ChildKey(string sessionId) =>
+        WorkerSessionPaths.KeyOf(WorkerGuardRules.FactoryHarness, sessionId);
 
     /// <summary>The key one parent's in-flight list is recorded under.</summary>
     internal static string PendingKey(string parentSessionId) =>
-        PendingKeyPrefix + WorkerGuardRules.KeyOf(WorkerGuardRules.FactoryHarness, parentSessionId);
+        WorkerSessionPaths.PendingKeyOf(WorkerGuardRules.FactoryHarness, parentSessionId);
 
     /// <summary>The types still in flight after the append-only list's <c>+</c> and <c>-</c> lines are counted.</summary>
     internal static IReadOnlyList<string> PendingTypes(IEnumerable<string> lines)
@@ -131,20 +135,15 @@ internal static class WorkerSessionLedger
         sessions.EnsureDirectory(home);
         string key = ChildKey(childId);
         WorkerSessionEntry? existing = sessions.Read(home, key);
-        if (existing is null)
+        if (existing is null || !string.Equals(existing.ParentSessionId, parentId, StringComparison.Ordinal))
         {
-            existing = new WorkerSessionEntry(parentId, AgentType: null);
-            sessions.Write(home, key, existing);
-        }
-        else if (!string.Equals(existing.ParentSessionId, parentId, StringComparison.Ordinal))
-        {
-            existing = existing with { ParentSessionId = parentId };
-            sessions.Write(home, key, existing);
+            sessions.AppendParent(home, key, parentId);
         }
 
-        if (existing.AgentType is not null)
+        if (existing?.AgentType is not null)
         {
-            // The dispatch's return already named the type; it is authoritative.
+            // A type already stands for this child, from an earlier start or from the dispatch's return, which is
+            // authoritative: this start has nothing to add.
             return;
         }
 
@@ -157,15 +156,26 @@ internal static class WorkerSessionLedger
             return;
         }
 
-        sessions.Write(home, key, existing with { AgentType = pending[0] });
+        sessions.AppendGuess(home, key, pending[0]);
         sessions.AppendPending(home, pendingKey, TakePrefix + pending[0]);
     }
 
     private static void EndChild(JsonElement root, string home, IWorkerSessionStore sessions)
     {
-        if (Text(root, "session_id") is { } childId)
+        if (Text(root, "session_id") is { } sessionId)
         {
-            sessions.Delete(home, ChildKey(childId));
+            sessions.Delete(home, ChildKey(sessionId));
+        }
+    }
+
+    /// <summary>Ends a session and its in-flight list: a root's dispatches cannot outlive the session that made them.</summary>
+    private static void EndSession(JsonElement root, string home, IWorkerSessionStore sessions)
+    {
+        EndChild(root, home, sessions);
+        if (Text(root, "session_id") is { } sessionId)
+        {
+            // A child holds no list of its own, and deleting one that is not there is not an error.
+            sessions.DeletePending(home, PendingKey(sessionId));
         }
     }
 
@@ -199,12 +209,20 @@ internal static class WorkerSessionLedger
         }
 
         sessions.EnsureDirectory(home);
-        sessions.Write(home, ChildKey(childId), new WorkerSessionEntry(parentId, type));
+        string key = ChildKey(childId);
+        WorkerSessionEntry? existing = sessions.Read(home, key);
+        if (existing is null || !string.Equals(existing.ParentSessionId, parentId, StringComparison.Ordinal))
+        {
+            sessions.AppendParent(home, key, parentId);
+        }
 
-        // The type may already have been taken when the child started, or may still be in flight
-        // for another child of the same type; taking it again leaves the count correct either way.
+        sessions.AppendType(home, key, type);
+
+        // A child that already stood for a type took its entry from the in-flight list when it started.
+        // Taking another for it would leave a same-type sibling without one, waiting the full type wait.
         string pendingKey = PendingKey(parentId);
-        if (PendingTypes(sessions.ReadPending(home, pendingKey)).Contains(type, StringComparer.Ordinal))
+        if (existing?.AgentType is null
+            && PendingTypes(sessions.ReadPending(home, pendingKey)).Contains(type, StringComparer.Ordinal))
         {
             sessions.AppendPending(home, pendingKey, TakePrefix + type);
         }
