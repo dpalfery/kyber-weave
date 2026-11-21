@@ -1,6 +1,7 @@
 using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Cli;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
@@ -51,8 +52,8 @@ public sealed class SquadArbiterCliTests
         SquadRenderRequest request = Assert.Single(renderer.RenderRequests);
         Assert.NotNull(request.Arbiter);
         Assert.True(request.Arbiter.Enabled);
-        // ceil(1500 / 1000) + 2 == 4 (Req 22.2, 5.3).
-        Assert.Equal(4, request.Arbiter.HookTimeoutSeconds);
+        // 1500 ms plus two seconds of headroom is under the 30 s floor every rendered hook carries.
+        Assert.Equal(ArbiterHookTimeout.MinimumRenderedSeconds, request.Arbiter.HookTimeoutSeconds);
     }
 
     [Fact]
@@ -84,7 +85,7 @@ public sealed class SquadArbiterCliTests
         SquadRenderRequest request = Assert.Single(renderer.RenderRequests);
         Assert.NotNull(request.Arbiter);
         Assert.True(request.Arbiter.Enabled);
-        Assert.Equal(4, request.Arbiter.HookTimeoutSeconds);
+        Assert.Equal(ArbiterHookTimeout.MinimumRenderedSeconds, request.Arbiter.HookTimeoutSeconds);
     }
 
     [Fact]

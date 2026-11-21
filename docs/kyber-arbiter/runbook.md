@@ -4,7 +4,7 @@ title: Kyber Arbiter runbook
 doc-type: runbook
 component: KyberArbiter
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-20
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -250,10 +250,27 @@ with it and never retries the blocked dispatch unchanged. The exception is a ref
 work instead of sending it to architect.
 
 Timeouts are bounded by `provider.timeout-ms` plus the harness budget. The hook timeout is rendered
-as `ceil(timeout-ms / 1000) + 2` seconds from the repository's configuration; a user override that
+as `ceil(timeout-ms / 1000) + 2` seconds from the repository's configuration, and never below 30
+seconds. The floor is what a burst needs: a hook also starts a process, reads a plan and the git facts,
+and appends to the project ledger, and a fan-out of review lenses runs twelve to twenty at once on a
+machine that is already building. The shipped 3-second budget used to render 5 seconds, and a live run
+logged 55 hook timeouts, almost all in same-second bursts. A user override that
 raises `timeout-ms` without re-rendering the hooks makes the hook log, and `arbiter doctor` report,
 `KW-ARB-CONFIG-016`. A hook the harness kills mid-evaluation still leaves its ledger event, which
 `audit` reports as a decision-less entry, and the dispatch proceeds as the harness treats a killed hook.
+
+The project ledger's lock is held for the append alone, so a burst of hooks queues for milliseconds per
+row. A killed return hook used to leave its dispatch in flight with no way to close it, and
+`KW-ARB-READY-001` then answered `overlaps-in-flight` for every later attempt at that task. The
+harness's stop event now closes that one dispatch with a post row marked `recovered`, and a report that
+arrives after the stop still pairs with the same dispatch, so the row never steals a real return; see
+[Recovered returns](architecture.md#recovered-returns). If the same agent has several dispatches still
+open, the hook logs how many matched and closes none, because it cannot tell which one ended.
+
+If a hook still times out, check the machine first: the hook log says which phase was killed and the
+decision log says whether that dispatch's return was recorded. Do not raise the harness timeout by hand
+in the hook file; re-render it with `kyber-weave squad update` or `kyber-weave arbiter install` so the
+recorded block and the config agree.
 
 Pre-dispatch denies block on every target. Post-dispatch limits differ by harness: some
 targets deliver outcomes only as context, and Antigravity and Devin deliver none. The

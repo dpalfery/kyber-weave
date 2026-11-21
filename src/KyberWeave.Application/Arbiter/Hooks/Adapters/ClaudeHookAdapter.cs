@@ -166,6 +166,12 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         string? tool = GetString(payload, "tool_name");
         string caller = ResolveCaller(payload, renderedCaller) ?? "unidentified";
 
+        if (string.Equals(eventName, "SubagentStop", StringComparison.Ordinal))
+        {
+            HandleSubagentStop(payload, context);
+            return string.Empty;
+        }
+
         if (string.Equals(eventName, "PreToolUse", StringComparison.Ordinal))
         {
             return HandlePre(payload, tool, caller, config, context);
@@ -178,6 +184,25 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
 
         throw new InvalidOperationException(
             $"Malformed Claude hook event: unknown hook_event_name '{eventName ?? "<missing>"}'.");
+    }
+
+    /// <summary>
+    /// The end of a sub-agent's turn: the agent's work is over, so one dispatch it left open is closed when its
+    /// return hook never reached the ledger. Writes nothing to the harness.
+    /// </summary>
+    private void HandleSubagentStop(JsonElement payload, HookContext context)
+    {
+        if (_engine is not ILostReturnRecovery recovery)
+        {
+            return;
+        }
+
+        string? agent = GetString(payload, "agent_type") ?? GetString(payload, "agent_name");
+        recovery.RecoverLostReturn(
+            Token,
+            GetString(payload, "session_id"),
+            string.IsNullOrWhiteSpace(agent) ? [] : [agent],
+            context);
     }
 
     /// <summary>Resolves the caller: the payload's <c>agent_type</c> outranks <c>--caller</c>.</summary>

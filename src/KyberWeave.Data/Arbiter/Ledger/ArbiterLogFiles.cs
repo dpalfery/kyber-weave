@@ -12,8 +12,12 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// <remarks>
 /// The lock is taken with <see cref="FileShare.None"/>, which .NET enforces at
 /// the OS level between processes (and between handles), so mutual exclusion
-/// holds across hook processes, not just threads. A lock that cannot be taken
-/// within the 500 ms budget is an internal error: the caller fails closed
+/// holds across hook processes, not just threads. Only the write itself is under
+/// the lock: a line derived from the log is computed from a lock-free read, and
+/// the append reconciles what landed meanwhile instead of re-reading the log under
+/// the lock. Holding the lock across a whole-log read made twenty concurrent hooks
+/// miss the wait budget and lose their rows. A lock that cannot be taken within
+/// the 500 ms budget is still an internal error: the caller fails closed
 /// (<c>KW-ARB-HOOK-001</c>) rather than writing an unserialized line. Readers,
 /// by contrast, take no lock and tolerate a torn final line, because a writer
 /// may be mid-line when they read.
@@ -21,7 +25,14 @@ namespace KyberWeave.Core.Arbiter.Facts;
 public sealed class ArbiterLogFiles : IArbiterLogStore
 {
     private const string LockFileName = ".lock";
+
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+
+    /// <summary>
+    /// How far before the caller's snapshot the reconcile read reaches: enough to include the whole line a snapshot
+    /// taken mid-write would have cut, so the line is parsed whole rather than dropped as a fragment.
+    /// </summary>
+    private const long ReconcileLookbackBytes = 64 * 1024;
 
     /// <summary>
     /// The most bytes one read of an append-only Arbiter log looks at, taken from the end. A log is never swept, so
@@ -33,41 +44,86 @@ public sealed class ArbiterLogFiles : IArbiterLogStore
     private const int ChunkBytes = 64 * 1024;
 
     /// <inheritdoc />
-    public Task AppendLineAsync(
-        string directory,
-        string fileName,
-        string line,
-        CancellationToken cancellationToken) =>
-        AppendLineAsync(directory, fileName, (Func<string>)(() => line), cancellationToken);
+    public long ByteLength(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        try
+        {
+            return File.Exists(path) ? new FileInfo(path).Length : 0;
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            return 0;
+        }
+    }
 
     /// <inheritdoc />
     public async Task AppendLineAsync(
         string directory,
         string fileName,
-        Func<string> lineFactory,
+        string line,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(line);
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory, fileName);
+        using FileStream lockFile = await AcquireLockAsync(
+            Path.Combine(directory, LockFileName), cancellationToken).ConfigureAwait(false);
+        await WriteLineAsync(path, line, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task AppendLineAsync(
+        string directory,
+        string fileName,
+        long snapshotLength,
+        Func<IReadOnlyList<string>, string> lineFactory,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(lineFactory);
+        ArgumentOutOfRangeException.ThrowIfNegative(snapshotLength);
         Directory.CreateDirectory(directory);
-        string lockPath = Path.Combine(directory, LockFileName);
+        string path = Path.Combine(directory, fileName);
+        using FileStream lockFile = await AcquireLockAsync(
+            Path.Combine(directory, LockFileName), cancellationToken).ConfigureAwait(false);
+
+        // The reconcile read is bounded by what landed since the snapshot, so the critical section stays the
+        // append alone. Another appender can only land before this lock is taken, and must release it first.
+        IReadOnlyList<string> landed = ReadSince(path, snapshotLength);
+        await WriteLineAsync(path, lineFactory(landed), cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Writes one line as one append. One write per line under an O_APPEND descriptor: the kernel places it at the
+    /// end, so parallel processes append whole lines and never write over each other's.
+    /// </summary>
+    private static async Task WriteLineAsync(string path, string line, CancellationToken cancellationToken)
+    {
+        using Stream target = AppendFile.Open(path);
+        byte[] bytes = Utf8NoBom.GetBytes(line + "\n");
+        await target.WriteAsync(bytes.AsMemory(), cancellationToken).ConfigureAwait(false);
+        await target.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Takes the exclusive append lock, waiting with backoff inside the 500 ms budget.</summary>
+    private static async Task<FileStream> AcquireLockAsync(string lockPath, CancellationToken cancellationToken)
+    {
         Stopwatch elapsed = Stopwatch.StartNew();
-        TimeSpan backoff = TimeSpan.FromMilliseconds(5);
+        TimeSpan backoff = TimeSpan.FromMilliseconds(2);
 
         while (true)
         {
-            FileStream lockFile;
             try
             {
-                lockFile = File.Open(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                return File.Open(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             }
             catch (IOException) when (elapsed.Elapsed < TimeSpan.FromMilliseconds(500))
             {
-                // Exponential backoff; the retry window stays inside the hook
-                // budget, and a lock that is still held when it expires throws
-                // rather than writes.
-                await Task.Delay(backoff, cancellationToken);
-                backoff = TimeSpan.FromMilliseconds(Math.Min(50, backoff.TotalMilliseconds * 2));
-                continue;
+                // A waiter that is asleep cannot take the lock the moment it frees, and a burst of twenty hooks
+                // spends the whole wait budget trading 50 ms sleeps while the lock sits idle between them. The
+                // backoff is short and capped low instead, so the lock is taken as soon as it is released.
+                await Task.Delay(backoff, cancellationToken).ConfigureAwait(false);
+                backoff = TimeSpan.FromMilliseconds(Math.Min(5, backoff.TotalMilliseconds * 2));
             }
             catch (IOException ex)
             {
@@ -75,26 +131,35 @@ public sealed class ArbiterLogFiles : IArbiterLogStore
                     $"Could not acquire the exclusive Arbiter append lock '{lockPath}' within 500 ms: the append fails closed (KW-ARB-HOOK-001).",
                     ex);
             }
+        }
+    }
 
-            try
+    /// <summary>
+    /// The complete lines that landed after <paramref name="snapshotLength"/>, read from a small lookback so a line
+    /// the snapshot cut in half is still parsed whole. A caller that read the log before taking the snapshot sees
+    /// its rows twice; the caller deduplicates by record id.
+    /// </summary>
+    private IReadOnlyList<string> ReadSince(string path, long snapshotLength)
+    {
+        try
+        {
+            using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            long length = stream.Length;
+            if (length <= snapshotLength)
             {
-                // Resolved under the lock, not before it: a post's pairing decision depends
-                // on which pre events are still unpaired, so deciding it outside the lock
-                // lets racing posts all claim the same pre and double-book a dispatch.
-                string line = lineFactory();
-                await using FileStream target = File.Open(
-                    Path.Combine(directory, fileName), FileMode.Append, FileAccess.Write, FileShare.Read);
-                await using StreamWriter writer = new(target, Utf8NoBom);
-                await writer.WriteAsync(line.AsMemory(), cancellationToken);
-                await writer.WriteAsync("\n".AsMemory(), cancellationToken);
-                await writer.FlushAsync(cancellationToken);
-            }
-            finally
-            {
-                await lockFile.DisposeAsync();
+                return [];
             }
 
-            return;
+            long window = Math.Min(length, length - snapshotLength + ReconcileLookbackBytes);
+            return ReadTail(stream, window, keepUnterminatedFinalLine: true).Lines;
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return [];
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            return [];
         }
     }
 

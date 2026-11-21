@@ -19,7 +19,7 @@ namespace KyberWeave.Tests;
 public sealed class ArbiterKiloRenderingTests : IDisposable
 {
     private const string ShimFilePath = ".kilo/plugin/kyber-arbiter.ts";
-    private const int HookTimeoutSeconds = 5;
+    private const int HookTimeoutSeconds = 30;
 
     private readonly InMemoryFileSystem _files = new();
     private readonly ArbiterSquadFixture _fixture;

@@ -15,7 +15,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ArbiterGlobalClaudeCopilotRenderingTests : IDisposable
 {
-    private const int HookTimeoutSeconds = 5;
+    private const int HookTimeoutSeconds = 30;
 
     private readonly InMemoryFileSystem _files = new();
     private readonly ArbiterSquadFixture _fixture;

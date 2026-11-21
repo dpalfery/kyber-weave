@@ -968,7 +968,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     private const string ShellMatcher = "^(Bash|PowerShell)$";
     private const string TaskDispatchMatcher = "^(Agent|Task)$";
     private const string SubagentHandbackMatcher = "^SubagentHandback$";
-    private const int ShellHookTimeoutSeconds = 5;
+    private const int ShellHookTimeoutSeconds = 30;
 
     private static async Task<SquadRenderResult> RenderClaudeArbiterAsync(
         string sourceDirectory,
@@ -1165,13 +1165,13 @@ public sealed class ClaudeRendererContractTests : IDisposable
             result.Blocks!,
             candidate => candidate.Target == "claude" && candidate.RelativePath == "settings.json");
 
-        const string hooks = "[{\"type\":\"command\",\"command\":\"kyber-weave-arbiter hook --harness claude --scope global\",\"timeout\":5}]";
+        string hooks = "[{\"type\":\"command\",\"command\":\"kyber-weave-arbiter hook --harness claude --scope global\",\"timeout\":" + ShellHookTimeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}]";
         string[] expected =
         [
             "PreToolUse {\"matcher\":\"^(Agent|Task)$\",\"hooks\":" + hooks + "}",
             "PreToolUse {\"matcher\":\"" + SubagentHandbackMatcher + "\",\"hooks\":" + hooks + "}",
             "PreToolUse {\"matcher\":\"*\",\"hooks\":" +
-            "[{\"type\":\"command\",\"command\":\"kyber-weave-arbiter worker-guard --harness claude\",\"timeout\":5}]}",
+            "[{\"type\":\"command\",\"command\":\"kyber-weave-arbiter worker-guard --harness claude\",\"timeout\":30}]}",
             "PostToolUse {\"matcher\":\"^(Agent|Task)$\",\"hooks\":" + hooks + "}",
         ];
 

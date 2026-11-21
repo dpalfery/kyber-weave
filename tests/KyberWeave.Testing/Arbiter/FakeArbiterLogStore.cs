@@ -66,11 +66,27 @@ public sealed class FakeArbiterLogStore : IArbiterLogStore
     }
 
     /// <inheritdoc />
-    public Task AppendLineAsync(string directory, string fileName, string line, CancellationToken cancellationToken) =>
-        AppendLineAsync(directory, fileName, (Func<string>)(() => line), cancellationToken);
+    public long ByteLength(string path)
+    {
+        lock (_gate)
+        {
+            return _lines.TryGetValue(path, out List<string>? lines)
+                ? lines.Sum(line => Encoding.UTF8.GetByteCount(line) + 1)
+                : 0;
+        }
+    }
 
     /// <inheritdoc />
-    public Task AppendLineAsync(string directory, string fileName, Func<string> lineFactory, CancellationToken cancellationToken)
+    public Task AppendLineAsync(string directory, string fileName, string line, CancellationToken cancellationToken) =>
+        AppendLineAsync(directory, fileName, snapshotLength: 0, _ => line, cancellationToken);
+
+    /// <inheritdoc />
+    public Task AppendLineAsync(
+        string directory,
+        string fileName,
+        long snapshotLength,
+        Func<IReadOnlyList<string>, string> lineFactory,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(lineFactory);
         cancellationToken.ThrowIfCancellationRequested();
@@ -80,12 +96,26 @@ public sealed class FakeArbiterLogStore : IArbiterLogStore
         }
 
         string path = Path.Combine(directory, fileName);
-        string line = lineFactory();
+        string line;
         lock (_gate)
         {
-            if (!_lines.TryGetValue(path, out List<string>? lines))
+            // The adapter's contract: the factory sees the lines that ended after the snapshot, and the write is one
+            // more line after whatever is already stored.
+            List<string> lines = _lines.TryGetValue(path, out List<string>? existing) ? existing : [];
+            List<string> landed = [];
+            long offset = 0;
+            foreach (string stored in lines)
             {
-                lines = [];
+                offset += Encoding.UTF8.GetByteCount(stored) + 1;
+                if (offset > snapshotLength)
+                {
+                    landed.Add(stored);
+                }
+            }
+
+            line = lineFactory(landed);
+            if (!_lines.ContainsKey(path))
+            {
                 _lines[path] = lines;
             }
 

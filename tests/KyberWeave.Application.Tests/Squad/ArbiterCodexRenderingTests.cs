@@ -21,7 +21,7 @@ public sealed class ArbiterCodexRenderingTests : IDisposable
     private const string BlockPath = ".codex/hooks.json";
     private const string Matcher = "^(Agent|(.*[._:/])?spawn_agent)$";
     private const string Command = "kyber-weave-arbiter hook --harness codex";
-    private const int HookTimeoutSeconds = 5;
+    private const int HookTimeoutSeconds = 30;
 
     private readonly InMemoryFileSystem _files = new();
     private readonly ArbiterSquadFixture _fixture;

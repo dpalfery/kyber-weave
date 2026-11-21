@@ -20,7 +20,7 @@ namespace KyberWeave.Tests;
 public sealed class ArbiterOpenCodeRenderingTests : IDisposable
 {
     private const string ShimFilePath = ".opencode/plugins/kyber-arbiter.ts";
-    private const int HookTimeoutSeconds = 5;
+    private const int HookTimeoutSeconds = 30;
 
     private readonly InMemoryFileSystem _files = new();
     private readonly ArbiterSquadFixture _fixture;

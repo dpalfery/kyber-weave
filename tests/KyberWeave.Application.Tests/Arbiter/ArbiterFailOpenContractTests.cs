@@ -213,11 +213,15 @@ public sealed class ArbiterFailOpenContractTests
     }
 
     [Fact]
-    public void TheHookTimeoutFormulaIsUnchanged()
+    public void TheHookTimeoutFormulaKeepsItsFloor()
     {
-        Assert.Equal(5, ArbiterHookTimeout.SecondsFor(3000));
-        Assert.Equal(6, ArbiterHookTimeout.SecondsFor(3001));
-        Assert.Equal(3, ArbiterHookTimeout.SecondsFor(0));
+        Assert.Equal(30, ArbiterHookTimeout.SecondsFor(3000));
+        Assert.Equal(30, ArbiterHookTimeout.SecondsFor(3001));
+        Assert.Equal(30, ArbiterHookTimeout.SecondsFor(0));
+
+        // Above the floor the provider budget plus two seconds still decides it.
+        Assert.Equal(31, ArbiterHookTimeout.SecondsFor(29000));
+        Assert.Equal(32, ArbiterHookTimeout.SecondsFor(30000));
     }
 
     [Fact]
@@ -225,12 +229,14 @@ public sealed class ArbiterFailOpenContractTests
     {
         ArbiterProviderConfig repository = new(ArbiterProviderKind.Systemone, "https://api.typesafe.ai", "jev-1.14.0", 3000);
 
+        // The rendered hook is the 30 s floor, so a 29 s budget plus two seconds of headroom no longer fits.
         Diagnostic warning = Assert.Single(
-            RuleValidator.CheckProviderTimeout(repository, repository with { TimeoutMs = 10000 }));
+            RuleValidator.CheckProviderTimeout(repository, repository with { TimeoutMs = 29000 }));
         Assert.Equal(RuleValidator.ProviderTimeoutExceedsHook, warning.Code);
         Assert.Equal(Severity.Warning, warning.Severity);
 
         Assert.Empty(RuleValidator.CheckProviderTimeout(repository, repository));
-        Assert.Empty(RuleValidator.CheckProviderTimeout(repository, repository with { Kind = ArbiterProviderKind.None, TimeoutMs = 10000 }));
+        Assert.Empty(RuleValidator.CheckProviderTimeout(repository, repository with { TimeoutMs = 10000 }));
+        Assert.Empty(RuleValidator.CheckProviderTimeout(repository, repository with { Kind = ArbiterProviderKind.None, TimeoutMs = 29000 }));
     }
 }

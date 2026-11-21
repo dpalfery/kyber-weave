@@ -25,7 +25,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
 {
     private const string BlockPath = ".factory/hooks.json";
     private const string ExpectedCommand = "kyber-weave-arbiter hook --harness factory";
-    private const int HookTimeoutSeconds = 5;
+    private const int HookTimeoutSeconds = 30;
 
     private static readonly FactoryHooksShadowing HooksShadowing = new(new PhysicalFileSystem());
 

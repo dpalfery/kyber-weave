@@ -174,6 +174,13 @@ public sealed record ArbiterLedgerEvent(
     [JsonPropertyName("body-names-planning-path")]
     public bool? BodyNamesPlanningPath { get; init; }
 
+    /// <summary>
+    /// On a post event written for a return that was lost: the stop event that closed the dispatch, such as
+    /// <c>subagentStop</c>. Absent on every post event a real return wrote.
+    /// </summary>
+    [JsonPropertyName("recovered")]
+    public string? Recovered { get; init; }
+
     /// <summary>The decision record for this event.</summary>
     [JsonPropertyName("decision-id")]
     public string? DecisionId { get; init; }

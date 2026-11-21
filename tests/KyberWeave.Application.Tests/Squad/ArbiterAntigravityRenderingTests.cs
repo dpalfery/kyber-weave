@@ -25,7 +25,7 @@ public sealed class ArbiterAntigravityRenderingTests : IDisposable
     private const string GroupKey = "kyber-arbiter";
     private const string Matcher = "^invoke_subagent$";
     private const string Command = "kyber-weave-arbiter hook --harness antigravity";
-    private const int HookTimeoutSeconds = 5;
+    private const int HookTimeoutSeconds = 30;
 
     private readonly InMemoryFileSystem _files = new();
     private readonly ArbiterSquadFixture _fixture;

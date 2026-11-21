@@ -48,22 +48,61 @@ public sealed class InFlightLedger : IArbiterLedger
     /// first) and stored with the match.
     /// </summary>
     /// <remarks>
-    /// Pairing happens inside the append lock. It reads the ledger, so resolving it
-    /// before taking the lock would let two concurrent posts both match the same
-    /// unpaired pre and both claim it.
+    /// The match is resolved from a lock-free read of the ledger, and the append reconciles it under the lock with
+    /// the rows that landed meanwhile, so two concurrent posts still cannot claim one pre. Reading the whole ledger
+    /// under the lock was what made a burst of concurrent hooks miss the lock budget and lose their rows.
     /// </remarks>
     /// <exception cref="IOException">Thrown when the lock is not acquired within 500 ms (fail closed).</exception>
     public Task AppendAsync(ArbiterLedgerEvent record, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);
-        bool needsMatch = record.Phase == ArbiterLedgerPhases.Post && record.PreId is null;
+        if (record.Phase != ArbiterLedgerPhases.Post || record.PreId is not null)
+        {
+            return _log.AppendLineAsync(_directory, FileName, ArbiterJson.Serialize(record), cancellationToken);
+        }
+
+        long snapshot = _log.ByteLength(FilePath);
+        IReadOnlyList<ArbiterLedgerEvent> events = ReadAll();
+        string? match = ArbiterLedgerQueries.MatchPre(events, record);
         return _log.AppendLineAsync(
             _directory,
             FileName,
-            needsMatch
-                ? () => ArbiterJson.Serialize(record with { PreId = MatchPre(record) })
-                : () => ArbiterJson.Serialize(record),
+            snapshot,
+            landed =>
+            {
+                string? paired = match;
+                if (landed.Count > 0)
+                {
+                    // The ledger moved between the read and the lock: another post may have claimed the pre this
+                    // one matched, or a twin dispatch may have landed. Recompute over both, so a pre is claimed
+                    // once and a twin is not mistaken for the one already paired.
+                    paired = ArbiterLedgerQueries.MatchPre(MergeWithLanded(events, landed), record);
+                }
+
+                return ArbiterJson.Serialize(record with { PreId = paired });
+            },
             cancellationToken);
+    }
+
+    /// <summary>
+    /// The events read before the lock, followed by the lines that landed since. A line the earlier read already
+    /// covered (the two reads can overlap around the snapshot) is kept once, by id, so a pre is not counted twice.
+    /// </summary>
+    private static IReadOnlyList<ArbiterLedgerEvent> MergeWithLanded(
+        IReadOnlyList<ArbiterLedgerEvent> events,
+        IReadOnlyList<string> landed)
+    {
+        HashSet<string> known = [.. events.Select(e => e.Id)];
+        List<ArbiterLedgerEvent> merged = [.. events];
+        foreach (string line in landed)
+        {
+            if (TryDeserialize(line) is { } record && known.Add(record.Id))
+            {
+                merged.Add(record);
+            }
+        }
+
+        return merged;
     }
 
     /// <summary>Reads every complete event in the newest bytes, in append order. Takes no lock.</summary>
