@@ -60,6 +60,105 @@ public class SqliteRelationalStoreReadTests : IDisposable
     }
 
     /// <summary>
+    /// A turn with no token class and no reported total is not priced. A stored zero is priced
+    /// at zero. A turn that reported totals and no class breakdown is priced from those totals.
+    /// The SQLite reader and the in-memory store agree.
+    /// </summary>
+    [Fact]
+    public void ReportedOnlyTokens_ArePricedOnSqliteAndInMemory_AndAbsentTokensAreNot()
+    {
+        string dbPath = Path.Combine(directory.Path, "reported-only", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+        IModelPricingLookup pricing = new OverridePricingLookup(
+            "claude-sonnet-4-6",
+            new ModelCosts(
+                InputCostPerToken: 0.000003,
+                OutputCostPerToken: 0.000015,
+                CacheWriteCostPerToken: 0.00000375,
+                CacheReadCostPerToken: 0.0000003,
+                WebSearchCostPerRequest: 0,
+                FastMultiplier: 1,
+                CacheWriteCostIsExplicit: true));
+
+        WritePricedTurn(sqlite, memory, "sess-absent", tokens: [], reportedInput: null, reportedOutput: null);
+        WritePricedTurn(
+            sqlite,
+            memory,
+            "sess-zero",
+            tokens:
+            [
+                new CollectedTokenCount(TokenClass.Input, 0),
+                new CollectedTokenCount(TokenClass.Output, 0),
+            ],
+            reportedInput: null,
+            reportedOutput: null);
+        WritePricedTurn(sqlite, memory, "sess-reported", tokens: [], reportedInput: 1_000, reportedOutput: 100);
+
+        AssertPricedAlike(sqlite, memory, pricing, "sess-absent", CostStatus.NoRate, null);
+        AssertPricedAlike(sqlite, memory, pricing, "sess-zero", CostStatus.Priced, 0d);
+        AssertPricedAlike(sqlite, memory, pricing, "sess-reported", CostStatus.Priced, (1_000 * 0.000003) + (100 * 0.000015));
+    }
+
+    private static void WritePricedTurn(
+        SqliteRelationalStore sqlite,
+        InMemoryRelationalStore memory,
+        string sessionKey,
+        IReadOnlyList<CollectedTokenCount> tokens,
+        long? reportedInput,
+        long? reportedOutput)
+    {
+        CollectedRecord record = new(
+            RecordId: sessionKey + "-turn",
+            HarnessId: "codex-cli",
+            Op: RecordOp.LlmInvoke,
+            Kind: RecordKind.Client,
+            Name: "codex.turn",
+            StartedAt: new DateTimeOffset(2026, 11, 19, 12, 0, 0, TimeSpan.Zero),
+            Status: RecordStatus.Ok,
+            SessionKey: sessionKey,
+            ParentRecordId: null,
+            TraceId: null,
+            Model: "claude-sonnet-4-6",
+            EndedAt: null,
+            ReportedDurationMs: null,
+            Tokens: tokens,
+            ReportedCost: null,
+            Parts: [],
+            Tool: null,
+            Agent: null,
+            SkillsInvoked: [],
+            AgentInstanceId: null,
+            ToolDefinitions: [],
+            Signals: new CollectedRecordSignals(null, null, null, null),
+            ReportedInputTokens: reportedInput,
+            ReportedOutputTokens: reportedOutput);
+        CollectedBatch batch = new(
+            Source: new CollectedSource("codex-cli", SourceKind.File, sessionKey),
+            Sessions: [new CollectedSession(sessionKey, "codex-cli", sessionKey, null, null, [])],
+            Records: [record],
+            Problems: []);
+        sqlite.WriteBatch(batch);
+        memory.WriteBatch(batch);
+    }
+
+    private static void AssertPricedAlike(
+        SqliteRelationalStore sqlite,
+        InMemoryRelationalStore memory,
+        IModelPricingLookup pricing,
+        string sessionKey,
+        CostStatus status,
+        double? value)
+    {
+        SessionAggregateView memoryView = memory.GetSessionAggregate(sessionKey, pricing)!;
+        SessionAggregateView sqliteView = sqlite.GetSessionAggregate(sessionKey, pricing)!;
+        Assert.Equal(status, memoryView.PublishedCost.Status);
+        Assert.Equal(value, memoryView.PublishedCost.Value);
+        Assert.Equal(memoryView.PublishedCost.Status, sqliteView.PublishedCost.Status);
+        Assert.Equal(memoryView.PublishedCost.Value, sqliteView.PublishedCost.Value);
+    }
+
+    /// <summary>
     /// Verifies complete parity between <see cref="SqliteRelationalStore"/> and
     /// <see cref="InMemoryRelationalStore"/> across multi-harness batches, special characters,
     /// filtered and unfiltered queries, <c>StoredFields</c> parent-key diagnostics, and all

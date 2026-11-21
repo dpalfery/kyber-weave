@@ -331,9 +331,10 @@ public class RelationalIngestTests
     }
 
     /// <summary>
-    /// A turn that stored no token class is not priced. Filling the missing classes
-    /// with zero and calling the rate table reports a measured $0.
-    /// A turn that stored a real zero is priced.
+    /// A turn that stored no token class and no reported total is not priced. Filling
+    /// the missing classes with zero and calling the rate table reports a measured $0.
+    /// A turn that stored a real zero is priced. A turn that reported totals and no
+    /// class breakdown is priced from those totals.
     /// </summary>
     [Fact]
     public void GetSessionAggregate_AbsentTokens_IsNotPricedAsZero()
@@ -359,17 +360,26 @@ public class RelationalIngestTests
                 new CollectedTokenCount(TokenClass.Input, 0),
                 new CollectedTokenCount(TokenClass.Output, 0),
             ]));
+        store.WriteBatch(PricedTurn("sess-reported", tokens: [], reportedInput: 1_000, reportedOutput: 100));
 
-        SessionAggregateView absent = store.GetSessionAggregate("sess-absent", pricing.LoadPricingTables())!;
-        SessionAggregateView zero = store.GetSessionAggregate("sess-zero", pricing.LoadPricingTables())!;
+        IModelPricingLookup tables = pricing.LoadPricingTables();
+        SessionAggregateView absent = store.GetSessionAggregate("sess-absent", tables)!;
+        SessionAggregateView zero = store.GetSessionAggregate("sess-zero", tables)!;
+        SessionAggregateView reported = store.GetSessionAggregate("sess-reported", tables)!;
 
         Assert.Equal(CostStatus.NoRate, absent.PublishedCost.Status);
         Assert.Null(absent.PublishedCost.Value);
         Assert.Equal(CostStatus.Priced, zero.PublishedCost.Status);
         Assert.Equal(0d, zero.PublishedCost.Value);
+        Assert.Equal(CostStatus.Priced, reported.PublishedCost.Status);
+        Assert.Equal((1_000 * 0.000003) + (100 * 0.000015), reported.PublishedCost.Value);
     }
 
-    private static CollectedBatch PricedTurn(string sessionKey, IReadOnlyList<CollectedTokenCount> tokens)
+    private static CollectedBatch PricedTurn(
+        string sessionKey,
+        IReadOnlyList<CollectedTokenCount> tokens,
+        long? reportedInput = null,
+        long? reportedOutput = null)
     {
         CollectedRecord record = new(
             RecordId: sessionKey + "-turn",
@@ -393,7 +403,9 @@ public class RelationalIngestTests
             SkillsInvoked: [],
             AgentInstanceId: null,
             ToolDefinitions: [],
-            Signals: new CollectedRecordSignals(null, null, null, null));
+            Signals: new CollectedRecordSignals(null, null, null, null),
+            ReportedInputTokens: reportedInput,
+            ReportedOutputTokens: reportedOutput);
 
         return new CollectedBatch(
             Source: new CollectedSource("codex-cli", SourceKind.File, sessionKey),
