@@ -370,16 +370,12 @@ public class CanonSynthTests
     }
 
     [Fact]
-    public void SchemaVersionAndHistoryNormalizationRejectOutOfRangeValues()
+    public void HistoryNormalizationRejectsOutOfRangeValues()
     {
-        Assert.Equal(2, CanonSchema.NormalizeHistoryWeeks(2));
-        Assert.Null(CanonSchema.NormalizeHistoryWeeks(0));
-        Assert.Null(CanonSchema.NormalizeHistoryWeeks(-3));
-        Assert.Null(CanonSchema.NormalizeHistoryWeeks(null));
-        Assert.Null(CanonSchema.NormalizeHistoryWeeks(long.MaxValue));
-
-        Assert.Equal("otlp", CanonSchema.NormalizeIngestSource(null));
-        Assert.Equal("otlp", CanonSchema.NormalizeIngestSource("   "));
-        Assert.Equal("otlp-json", CanonSchema.NormalizeIngestSource("  otlp-json  "));
+        Assert.Equal(2, CanonRefreshEngine.NormalizeHistoryWeeks(2));
+        Assert.Null(CanonRefreshEngine.NormalizeHistoryWeeks(0));
+        Assert.Null(CanonRefreshEngine.NormalizeHistoryWeeks(-3));
+        Assert.Null(CanonRefreshEngine.NormalizeHistoryWeeks(null));
+        Assert.Null(CanonRefreshEngine.NormalizeHistoryWeeks(long.MaxValue));
     }
 }

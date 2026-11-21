@@ -768,6 +768,23 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
     expect(tile).not.toContain('published rates')
   })
 
+  it('shows a harness-reported zero instead of an unpriced published block', () => {
+    const reportedZero: AgentSessionPayload = {
+      ...sampleSession,
+      harness: 'opencode',
+      summary: {
+        ...sampleSession.summary,
+        cost: { basis: 'published', status: 'out_of_scope' },
+        cost_reported: { basis: 'harness', status: 'priced', value: 0, currency: 'USD' },
+      },
+    }
+    const tile = costTile(renderHtml(<AgentSessionDashboard session={reportedZero} />))
+    expect(tile).toContain('$0.00')
+    expect(tile).toContain('>reported<')
+    expect(tile).toContain('reported by harness')
+    expect(tile).not.toContain('published rates')
+  })
+
   it('labels a published cost basis as published rates, not reported', () => {
     const publishedSession: AgentSessionPayload = {
       ...sampleSession,

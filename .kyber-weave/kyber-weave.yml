@@ -10,8 +10,9 @@ ontology:
   # repository. An empty list clears them rather than carrying dead exclusions forward.
   excluded-files: []
 
-  # This repository writes C#, TypeScript, the tests that pin them, and the GitHub Actions
-  # workflows under .github/workflows/. The list creates docs/standards/<technology>/,
+  # This repository writes C#, TypeScript, SQLite (the KyberDash store and the local
+  # indexes), the tests that pin them, and the GitHub Actions workflows under
+  # .github/workflows/. The list creates docs/standards/<technology>/,
   # publishes <technology-coding-standard> in the registry, and legalizes the technology
   # value in that standard's frontmatter.
   #
@@ -26,6 +27,7 @@ ontology:
     - rust
     - tauri
     - github-actions
+    - sqlite
 
 # This repository has answered the onboarding step, so `run start` does not stop to offer it.
 # An absent value is the unanswered state, which stops every start until someone records one.

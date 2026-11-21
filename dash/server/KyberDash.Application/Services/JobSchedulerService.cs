@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
+using KyberDash.Data.Repositories;
 using KyberDash.Domain;
 
 namespace KyberDash.Application;
@@ -29,13 +30,15 @@ public class JobSchedulerService : IJobSchedulerService
     /// <summary>Maximum characters of a failure message kept in the status snapshot.</summary>
     public const int MaxFailureSummaryLength = 200;
 
-    private readonly ICanonStoreRepository store;
+    private readonly IRelationalStoreReader reader;
+    private readonly IOperationalStore operationalStore;
     private readonly ICanonProjectionService projection;
     private readonly ITranscriptIngestionService ingestion;
     private readonly ISettingsRepository settings;
     private readonly IServerStateRepository serverState;
     private readonly string stateDir;
     private readonly Func<DateTimeOffset> clock;
+    private readonly Action<string> log;
     private readonly Lock gate = new();
     private readonly Lock timerGate = new();
     private bool timerStopped;
@@ -52,55 +55,66 @@ public class JobSchedulerService : IJobSchedulerService
     /// <summary>
     /// Initializes a new <see cref="JobSchedulerService"/>.
     /// </summary>
-    /// <param name="store">Canonical store repository the maintenance pass projects.</param>
+    /// <param name="reader">Relational reader the maintenance pass reads the store through.</param>
+    /// <param name="operationalStore">Operational store whose pending rebuild re-ingest flag <see cref="Start"/> consumes.</param>
     /// <param name="projection">Projection service run by each maintenance pass.</param>
     /// <param name="ingestion">Ingestion service run by an import-history pass.</param>
     /// <param name="settings">Settings repository supplying the pause switch and cadence.</param>
     /// <param name="serverState">Server-state repository owning the jobs lease and the state directory.</param>
     /// <param name="options">Composition options naming the state directory.</param>
+    /// <param name="log">Diagnostic logger; defaults to <c>Console.Error.WriteLine</c> when <see langword="null"/>.</param>
     public JobSchedulerService(
-        ICanonStoreRepository store,
+        IRelationalStoreReader reader,
+        IOperationalStore operationalStore,
         ICanonProjectionService projection,
         ITranscriptIngestionService ingestion,
         ISettingsRepository settings,
         IServerStateRepository serverState,
-        DashOptions options)
-        : this(store, projection, ingestion, settings, serverState, options, clock: null)
+        DashOptions options,
+        Action<string>? log = null)
+        : this(reader, operationalStore, projection, ingestion, settings, serverState, options, clock: null, log)
     {
     }
 
     /// <summary>
     /// Initializes a new <see cref="JobSchedulerService"/> with an injectable clock.
     /// </summary>
-    /// <param name="store">Canonical store repository the maintenance pass projects.</param>
+    /// <param name="reader">Relational reader the maintenance pass reads the store through.</param>
+    /// <param name="operationalStore">Operational store whose pending rebuild re-ingest flag <see cref="Start"/> consumes.</param>
     /// <param name="projection">Projection service run by each maintenance pass.</param>
     /// <param name="ingestion">Ingestion service run by an import-history pass.</param>
     /// <param name="settings">Settings repository supplying the pause switch and cadence.</param>
     /// <param name="serverState">Server-state repository owning the jobs lease and the state directory.</param>
     /// <param name="options">Composition options naming the state directory.</param>
     /// <param name="clock">Clock used for status timestamps; defaults to UTC now.</param>
+    /// <param name="log">Diagnostic logger; defaults to <c>Console.Error.WriteLine</c> when <see langword="null"/>.</param>
     public JobSchedulerService(
-        ICanonStoreRepository store,
+        IRelationalStoreReader reader,
+        IOperationalStore operationalStore,
         ICanonProjectionService projection,
         ITranscriptIngestionService ingestion,
         ISettingsRepository settings,
         IServerStateRepository serverState,
         DashOptions options,
-        Func<DateTimeOffset>? clock)
+        Func<DateTimeOffset>? clock,
+        Action<string>? log = null)
     {
-        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(reader);
+        ArgumentNullException.ThrowIfNull(operationalStore);
         ArgumentNullException.ThrowIfNull(projection);
         ArgumentNullException.ThrowIfNull(ingestion);
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(serverState);
         ArgumentNullException.ThrowIfNull(options);
 
-        this.store = store;
+        this.reader = reader;
+        this.operationalStore = operationalStore;
         this.projection = projection;
         this.ingestion = ingestion;
         this.settings = settings;
         this.serverState = serverState;
         this.clock = clock ?? (() => DateTimeOffset.UtcNow);
+        this.log = log ?? Console.Error.WriteLine;
 
         string configured = !string.IsNullOrWhiteSpace(options.StateDirectory)
             ? options.StateDirectory
@@ -161,12 +175,41 @@ public class JobSchedulerService : IJobSchedulerService
     /// <inheritdoc />
     public void Start()
     {
+        bool holdsLease;
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
             lease ??= serverState.TryAcquireJobsLease(stateDir);
             timer ??= Task.Run(() => TimerLoopAsync());
+            holdsLease = lease is not null;
         }
+
+        // A store rebuilt from an older schema asks for one full import once a host holds the lease.
+        // The check runs outside the gate because RunJob re-enters it.
+        if (holdsLease && (operationalStore as SqliteRelationalStore) is { } rebuiltStore
+            && rebuiltStore.TryTakePendingRebuildReingest())
+        {
+            log(DescribeRebuildReingest(rebuiltStore.LastRebuildInfo));
+            _ = RunJob(work: ImportHistory);
+        }
+    }
+
+    /// <summary>
+    /// The support line written when a rebuilt store's pending re-ingest is consumed, naming the
+    /// rebuild that caused it so an operator who lost history can trace why one import ran.
+    /// </summary>
+    /// <param name="rebuild">The rebuild summary recorded by the store, when it is still available.</param>
+    /// <returns>The logged diagnostic line.</returns>
+    private static string DescribeRebuildReingest(StoreRebuildInfo? rebuild)
+    {
+        if (rebuild is not { } info)
+        {
+            return "KyberDash rebuilt its relational store from an older schema; running one full import-history pass.";
+        }
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"KyberDash rebuilt its relational store from schema version {info.OldSchemaVersion} to {info.NewSchemaVersion} at '{info.DatabasePath}'; running one full import-history pass.");
     }
 
     /// <inheritdoc />

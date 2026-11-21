@@ -84,6 +84,7 @@ public class PresentationBuilder
         Query.Setup(q => q.GetTurnFigures(It.IsAny<string>(), It.IsAny<int>())).Returns((JsonElement?)null);
         Query.Setup(q => q.GetTurnContent(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>())).Returns((JsonElement?)null);
         Query.Setup(q => q.GetSpanAttributes(It.IsAny<string>())).Returns((JsonElement?)null);
+        Query.Setup(q => q.GetStoredFields(It.IsAny<string>())).Returns((JsonElement?)null);
         Query.Setup(q => q.GetCompare()).Returns(empty);
         Query.Setup(q => q.GetCompareRuns(It.IsAny<string>(), It.IsAny<string>())).Returns((JsonElement?)null);
         Query.Setup(q => q.GetQuarantinePage(It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>())).Returns(empty);

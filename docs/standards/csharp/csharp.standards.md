@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: csharp
 owner: dpalfery
-last-reviewed: 2026-11-15
+last-reviewed: 2026-11-20
 ---
 
 # C# coding standard
@@ -94,6 +94,13 @@ alerts key on. Add new ids; never reuse or renumber one.
 CLI output goes through `AnsiConsole`, never `Console.WriteLine`. Any value that came from a
 file, a configuration, or an operator is passed through `Markup.Escape` before it reaches
 markup — a path containing brackets otherwise corrupts the render or throws.
+
+### SQLite
+
+SQL in this repository is SQLite. How a database is opened, how the KyberDash canon
+schema changes, and how values are bound is the
+[SQLite coding standard](../sqlite/sqlite.standards.md), resolved as
+`<sqlite-coding-standard>`.
 
 ## Testing
 

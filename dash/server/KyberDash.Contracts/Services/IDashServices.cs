@@ -208,6 +208,9 @@ public interface IDashboardQueryService
 
     /// <summary>Returns model context-window catalog payload.</summary>
     JsonElement GetModelCatalog();
+
+    /// <summary>Returns the catalog-driven stored-fields view for a session, or <see langword="null"/> when unknown.</summary>
+    JsonElement? GetStoredFields(string sessionKey);
 }
 
 /// <summary>Shared contract-v1 analytics service powering both HTTP analytics endpoints and <c>kyberdash-mcp</c>.</summary>
