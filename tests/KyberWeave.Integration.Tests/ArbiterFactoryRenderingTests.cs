@@ -212,12 +212,11 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     [InlineData(SquadHookBlockFormat.Devin)]
     [InlineData(SquadHookBlockFormat.Cursor)]
     [InlineData(SquadHookBlockFormat.Codex)]
-    [InlineData(SquadHookBlockFormat.Claude)]
     [InlineData(SquadHookBlockFormat.Antigravity)]
-    public void SpliceContent_NonFactoryFormat_RefusesASubagentStopEntry(SquadHookBlockFormat format)
+    public void SpliceContent_FormatWithoutASubagentStopContainer_RefusesOne(SquadHookBlockFormat format)
     {
-        // Only Factory's file has this container. Any other shape receiving one is a caller bug,
-        // refused rather than written under a key that harness never reads.
+        // Only the Factory and Claude files hold this container. Any of these shapes receiving one is a
+        // caller bug, refused rather than written under a key that harness never reads.
         Assert.Throws<InvalidOperationException>(() => SquadHookJsonBlock.SpliceContent(
             format,
             null,
