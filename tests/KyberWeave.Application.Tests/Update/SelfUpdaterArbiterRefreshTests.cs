@@ -287,6 +287,10 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         Assert.Equal(1, outcome.Refreshed);
         string content = _world.Files.ReadAllText(hookPath);
         Assert.Contains("\"SubagentStop\"", content, StringComparison.Ordinal);
+        Assert.Contains("\"SessionStart\"", content, StringComparison.Ordinal);
+        Assert.Contains("\"SessionEnd\"", content, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-arbiter worker-guard --harness factory", content, StringComparison.Ordinal);
+        Assert.Contains("\"matcher\": \"*\"", content, StringComparison.Ordinal);
         Assert.Contains("kyber-weave-arbiter hook --harness factory --scope global", content, StringComparison.Ordinal);
         Assert.DoesNotContain("/legacy/kyber-weave-arbiter hook", content, StringComparison.Ordinal);
         Assert.Contains("user-own-linter", content, StringComparison.Ordinal);

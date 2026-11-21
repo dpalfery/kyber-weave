@@ -353,7 +353,8 @@ public sealed class WorkerGuardCanonicalCheckoutCommandTests
             _environment,
             TimeProvider.System,
             new NoState(),
-            _files);
+            _files,
+            new NoSessions());
         using StringWriter stdout = new();
         guard.Run(harness, json, stdout, TextWriter.Null, _home);
         return stdout.ToString();

@@ -154,6 +154,7 @@ public static class ArbiterApplicationServiceCollectionExtensions
                 sp.GetRequiredService<IPathResolver>(),
                 sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IWorkerBudgetStore, FileWorkerBudgetStore>();
+        services.TryAddSingleton<IWorkerSessionStore, FileWorkerSessionStore>();
         services.TryAddSingleton<IFileLinkProbe, FileLinkProbe>();
         services.TryAddSingleton<IGitRepositoryFacts, GitFacts>();
         services.TryAddSingleton<IArbiterStateFactory>(sp => new FileArbiterStateFactory(

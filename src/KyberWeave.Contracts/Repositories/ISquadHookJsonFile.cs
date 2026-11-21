@@ -12,13 +12,17 @@ public interface ISquadHookJsonFile
     /// <param name="preToolUse">The pre-tool-use entries.</param>
     /// <param name="postToolUse">The post-tool-use entries.</param>
     /// <param name="subagentStop">The subagent-stop entries, for Factory.</param>
+    /// <param name="sessionStart">The session-start entries, for Factory's worker guard.</param>
+    /// <param name="sessionEnd">The session-end entries, for Factory's worker guard.</param>
     /// <returns>The owned entries written.</returns>
     IReadOnlyList<SquadHookOwnedEntry> SpliceFile(
         SquadHookBlockFormat format,
         string filePath,
         IReadOnlyList<JsonNode> preToolUse,
         IReadOnlyList<JsonNode> postToolUse,
-        IReadOnlyList<JsonNode>? subagentStop = null);
+        IReadOnlyList<JsonNode>? subagentStop = null,
+        IReadOnlyList<JsonNode>? sessionStart = null,
+        IReadOnlyList<JsonNode>? sessionEnd = null);
 
     /// <summary>Removes Squad's entries from a hook file, restoring the user's content. A missing file needs no work.</summary>
     /// <param name="format">The harness's hook file format.</param>

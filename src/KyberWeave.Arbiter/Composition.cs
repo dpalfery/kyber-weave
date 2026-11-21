@@ -157,7 +157,7 @@ public static class Composition
             if (string.IsNullOrWhiteSpace(harness))
             {
                 await stderr.WriteLineAsync(
-                    "Usage: kyber-weave-arbiter worker-guard --harness <copilot-cli|claude> [--home <path>]. " +
+                    "Usage: kyber-weave-arbiter worker-guard --harness <copilot-cli|claude|factory> [--home <path>]. " +
                     "The tool-call event is read on stdin.").ConfigureAwait(false);
                 return 1;
             }

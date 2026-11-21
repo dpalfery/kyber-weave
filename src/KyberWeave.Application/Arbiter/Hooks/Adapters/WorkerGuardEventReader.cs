@@ -1,24 +1,43 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter;
 
 namespace KyberWeave.Arbiter.Hooks;
 
 /// <summary>
 /// Reads a harness's own tool-call payload into the worker guard's typed call. This is the adapter boundary for the
-/// guard: Claude's <c>tool_name</c>/<c>tool_input</c> and Copilot CLI's <c>toolName</c>/<c>toolArgs</c> and subagent
-/// fields end here, so the guard and its rules never parse a harness payload.
+/// guard: Claude's <c>tool_name</c>/<c>tool_input</c>, Copilot CLI's <c>toolName</c>/<c>toolArgs</c> and subagent
+/// fields, and Factory's <c>tool_name</c>/<c>tool_input</c> joined through the session ledger all end here, so the
+/// guard and its rules never parse a harness payload.
 /// </summary>
 internal static class WorkerGuardEventReader
 {
     private const string CopilotCliHarness = WorkerGuardRules.CopilotCliHarness;
     private const string ClaudeHarness = WorkerGuardRules.ClaudeHarness;
+    private const string FactoryHarness = WorkerGuardRules.FactoryHarness;
+
+    /// <summary>How long a Factory child whose type is not known yet is given to resolve before its profile rules are skipped.</summary>
+    private static readonly TimeSpan FactoryTypeWait = TimeSpan.FromSeconds(3);
+
+    /// <summary>
+    /// The stand-in agent a Factory child carries while its type is unresolved: a capability profile no rule budgets,
+    /// judges by a technology allow-list, or counts as a review seat, so only the every-profile rules apply.
+    /// </summary>
+    private static readonly ArbiterSquadAgent UnresolvedFactoryAgent =
+        new("unresolved-factory-sub-agent", "A Factory child whose agent type is not known yet.", [], "unresolved", "unresolved");
 
     /// <summary>
     /// Reads one tool call. A root agent, an agent outside the Squad catalog, and an event with no tool are not
-    /// guarded, so they read as null.
+    /// guarded, so they read as null. Factory passes the session ledger it needs to tell a child from a root; the
+    /// other harnesses read it from the payload alone.
     /// </summary>
-    internal static WorkerGuardRules.ToolCall? Read(string harness, string stdin)
+    internal static WorkerGuardRules.ToolCall? Read(
+        string harness,
+        string stdin,
+        IWorkerSessionStore? sessions = null,
+        string? home = null,
+        TextWriter? log = null)
     {
         using JsonDocument document = JsonDocument.Parse(stdin);
         JsonElement root = document.RootElement;
@@ -28,6 +47,11 @@ internal static class WorkerGuardEventReader
         }
 
         string? cwd = Text(root, "cwd");
+        if (string.Equals(harness, FactoryHarness, StringComparison.Ordinal))
+        {
+            return ReadFactory(root, cwd, sessions, home, log);
+        }
+
         if (string.Equals(harness, CopilotCliHarness, StringComparison.Ordinal))
         {
             // A subagent's call carries the runtime's subagent fields at the top level; a root call carries none.
@@ -89,6 +113,118 @@ internal static class WorkerGuardEventReader
 
         return null;
     }
+
+    /// <summary>
+    /// Reads a Factory PreToolUse event, but only for a session the ledger knows as a child. Factory's payload names
+    /// no agent, so the type comes from the joined session events; a child whose type is still unresolved is polled
+    /// for a short while, and then guarded by the every-profile rules only.
+    /// </summary>
+    private static WorkerGuardRules.ToolCall? ReadFactory(
+        JsonElement root,
+        string? cwd,
+        IWorkerSessionStore? sessions,
+        string? home,
+        TextWriter? log)
+    {
+        if (sessions is null
+            || string.IsNullOrWhiteSpace(home)
+            || !string.Equals(Text(root, "hook_event_name"), "PreToolUse", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        string? tool = Text(root, "tool_name");
+        string? sessionId = Text(root, "session_id");
+        if (tool is null || sessionId is null)
+        {
+            return null;
+        }
+
+        string key = WorkerSessionLedger.ChildKey(sessionId);
+        WorkerSessionEntry? entry = sessions.Read(home, key);
+        if (entry is null)
+        {
+            // A root session, or a child whose start has not arrived: never guarded.
+            return null;
+        }
+
+        string? type = entry.AgentType;
+        string parentSessionId = entry.ParentSessionId;
+        if (type is null)
+        {
+            entry = sessions.AwaitType(home, key, FactoryTypeWait);
+            if (entry is null)
+            {
+                // The child's entry went away while this call waited: it is no longer a known child.
+                return null;
+            }
+
+            type = entry.AgentType;
+            if (type is null)
+            {
+                LogSkippedProfileRules(log, sessionId);
+                return CallOf(FactoryHarness, sessionId, UnresolvedFactoryAgent, parentSessionId, root, cwd, tool);
+            }
+        }
+
+        return SquadAgentOf(type) is { } agent
+            ? CallOf(FactoryHarness, sessionId, agent, parentSessionId, root, cwd, tool)
+            : null;
+    }
+
+    private static void LogSkippedProfileRules(TextWriter? log, string sessionId)
+    {
+        if (log is null)
+        {
+            return;
+        }
+
+        try
+        {
+            log.WriteLine(
+                $"arbiter: Factory session '{sessionId}' was still unresolved after 3 seconds; " +
+                "KW-ARB-SECRET-001 and KW-ARB-CHECKOUT-001 still apply, and the profile-specific " +
+                "worker guard rules were skipped for this call.");
+        }
+        catch (Exception)
+        {
+            // The log is best effort.
+        }
+    }
+
+    private static WorkerGuardRules.ToolCall CallOf(
+        string harness,
+        string sessionId,
+        ArbiterSquadAgent agent,
+        string parentSessionId,
+        JsonElement root,
+        string? cwd,
+        string tool)
+    {
+        JsonObject? input = ArgumentsOf(root, "tool_input");
+        string? path = input is null ? null : PathOf(input);
+        string? writePath = tool is "Edit" or "Create" or "ApplyPatch" ? path : null;
+        string? readPath = tool is "Read" ? path : null;
+        string? command = tool is "Execute" && input is not null ? NodeText(input, "command") : null;
+
+        return new WorkerGuardRules.ToolCall(
+            harness,
+            sessionId,
+            agent,
+            cwd,
+            writePath,
+            command,
+            StartedProcess: tool is "Execute",
+            SessionId: parentSessionId,
+            ReadPath: readPath);
+    }
+
+    /// <summary>
+    /// The path a Factory file tool names. The hooks reference documents <c>file_path</c> for <c>Read</c>,
+    /// <c>Edit</c> and <c>Create</c>; <c>path</c> is accepted too, and <c>ApplyPatch</c> documents neither, so a patch
+    /// carrying no path is not judged by the path rules.
+    /// </summary>
+    private static string? PathOf(JsonObject input) => NodeText(input, "file_path") ?? NodeText(input, "path");
 
     /// <summary>
     /// The agent whose turn a Copilot CLI <c>subagentStop</c> event ends, or null for any other event. The event

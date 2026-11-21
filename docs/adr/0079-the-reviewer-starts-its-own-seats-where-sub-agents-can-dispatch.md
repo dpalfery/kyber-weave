@@ -247,8 +247,8 @@ header infers `code-reviewer`.
   rather than everything it would have found. The line makes the gap visible; it does not close it.
 - **The file patterns can be wrong in one direction.** They are wide so that a lens is seated when in
   doubt; an infrastructure change in a folder no pattern names would leave `infra-workflow` unseated.
-- **The budget is enforced only where the worker guard runs** (Copilot CLI and Claude Code with the
-  Arbiter on). Elsewhere it is the seat's own instruction.
+- **The budget is enforced only where the worker guard runs** (Copilot CLI, Claude Code and Factory with
+  the Arbiter on). Elsewhere it is the seat's own instruction.
 - **The decision model judges text, not code paths.** A confident "supports" spares a refuter on the
   cited lines and the lines the evidence cites; a claim about something no line shows (a folder that
   holds no file) stays with the refuter only because the model is then unsure. The nitpick and

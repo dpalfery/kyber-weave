@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Security.Cryptography;
 using System.Text;
@@ -68,6 +69,13 @@ internal static class WorkerGuardRules
     /// <summary>The Claude Code harness token.</summary>
     internal const string ClaudeHarness = "claude";
 
+    /// <summary>The Factory Droid harness token.</summary>
+    internal const string FactoryHarness = "factory";
+
+    /// <summary>The tool names a Factory PreToolUse call can carry into the guard.</summary>
+    private static readonly HashSet<string> FactoryGuardedTools =
+        new(StringComparer.Ordinal) { "Execute", "Read", "Edit", "Create", "ApplyPatch" };
+
     /// <summary>The closing line a seat stopped by its budget writes, naming what it did not examine.</summary>
     internal const string SeatBudgetLine = "Budget reached, not examined:";
 
@@ -105,6 +113,11 @@ internal static class WorkerGuardRules
     {
         try
         {
+            if (string.Equals(harness, FactoryHarness, StringComparison.Ordinal))
+            {
+                return FactoryNeedsDecision(stdin);
+            }
+
             if (WorkerGuardEventReader.TurnEndOf(harness, stdin) is not null)
             {
                 return true;
@@ -124,6 +137,48 @@ internal static class WorkerGuardRules
             return true;
         }
     }
+
+    /// <summary>
+    /// Whether a Factory event needs the guard process at all, from the event alone. The ledger events always do,
+    /// because they are what identifies a child; a pre-tool call of a tool the guard judges does too, because only
+    /// the ledger can say whether its session is a child.
+    /// </summary>
+    private static bool FactoryNeedsDecision(string stdin)
+    {
+        using JsonDocument document = JsonDocument.Parse(stdin);
+        JsonElement root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        string? eventName = FactoryText(root, "hook_event_name");
+        if (eventName is "SessionStart" or "SessionEnd" or "Stop")
+        {
+            return true;
+        }
+
+        if (eventName is not ("PreToolUse" or "PostToolUse"))
+        {
+            return false;
+        }
+
+        string? tool = FactoryText(root, "tool_name");
+        if (string.Equals(tool, "Task", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return string.Equals(eventName, "PreToolUse", StringComparison.Ordinal)
+            && tool is not null
+            && FactoryGuardedTools.Contains(tool);
+    }
+
+    private static string? FactoryText(JsonElement element, string name) =>
+        element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String
+        && value.GetString() is { Length: > 0 } text
+            ? text
+            : null;
 
     /// <summary>Whether a dispatch with this capability profile carries a budget.</summary>
     internal static bool IsBudgeted(string capabilityProfile) => BudgetedProfiles.Contains(capabilityProfile);
@@ -828,16 +883,8 @@ internal static class WorkerGuardRules
             $"{now.ToUnixTimeMilliseconds()} {(startedProcess ? ProcessCallMarker : NoProcessCallMarker)}\n");
 
     internal static string Deny(string harness, string reason) =>
-        string.Equals(harness, ClaudeHarness, StringComparison.Ordinal)
-            ? new JsonObject
-            {
-                ["hookSpecificOutput"] = new JsonObject
-                {
-                    ["hookEventName"] = "PreToolUse",
-                    ["permissionDecision"] = "deny",
-                    ["permissionDecisionReason"] = reason,
-                },
-            }.ToJsonString()
+        harness is ClaudeHarness or FactoryHarness
+            ? HookDecisionDocuments.PreToolUsePermissionDeny(reason)
             : new JsonObject
             {
                 ["permissionDecision"] = "deny",
