@@ -121,26 +121,17 @@ public sealed class SquadCanonicalContentTests
         "code-review",
         "code-review-loop",
         "create-pull-request",
-        "csharp-dev",
-        "csp-security",
-        "dal-dev",
         "delivery-execution",
         "dp-code-reviewer",
         "github-cli",
-        "github-devops",
-        "go-dev",
         "kilo-review-loop",
         "lm-studio-cli",
-        "maui-dev",
         "pr-review-fix-comments",
         "product-owner",
-        "python-dev",
         "review-council",
-        "rust-dev",
         "security-review",
         "setup-dev-environment",
-        "task-gate",
-        "typescript-dev"
+        "task-gate"
     ];
 
     /// <summary>

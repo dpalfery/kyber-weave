@@ -350,7 +350,7 @@ public class ApplicationParityTests
         JsonElement initial = capture.GetCaptureStatus(stateDir);
         Assert.False(initial.GetProperty("receiverHosted").GetBoolean());
         Assert.False(initial.GetProperty("contentCapture").GetBoolean());
-        Assert.Equal(CaptureService.OtlpEndpointLabel, initial.GetProperty("otlpEndpoint").GetString());
+        Assert.Equal("the configured collector port", initial.GetProperty("otlpEndpoint").GetString());
 
         JsonElement updated = capture.ConfigureCapture(
             Json(new { receiverHosted = true, contentCapture = true }),

@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-11-15
+last-reviewed: 2026-11-22
 ---
 
 # Installing Kyber-Weave
@@ -578,10 +578,28 @@ rm -rf ".claude/skills/second-brain" ".agents/skills/second-brain"
 kyber-weave squad update   # reconcile the receipt once the stale directory is gone
 ```
 
-`kyber-weave squad doctor` warns about a stale `second-brain` directory in a
-deployed target tree, and about a deployment receipt that still claims its
-files, in both cases printing the delete-then-`squad update` steps and pointing
-at the Kyber-Docs skills (`kyber-docs-*`, see `kyber-docs-onboarding-and-assessment`).
+The nine technology skills — `csharp-dev`, `dal-dev`, `maui-dev`, `typescript-dev`,
+`rust-dev`, `python-dev`, `go-dev`, `github-devops` and `csp-security` — were retired the
+same way: their rules moved into the Kyber Squad standards templates (`github-devops`
+split across `github-actions` and `csharp`; `csp-security` moved into `csharp`).
+`squad update` deletes a receipt-owned copy that is unchanged, but keeps one you edited
+and never removes one no receipt owns. Delete the stale directory under the skills root
+that holds it — `~/.claude/skills/csharp-dev` for a user-level Claude deployment, for
+example — then run `kyber-weave squad update` again.
+
+```bash
+rm -rf ~/.claude/skills/csharp-dev
+kyber-weave squad update
+```
+
+`kyber-weave squad doctor` warns about a stale directory for every retired skill, in a
+project skills root or in a target's user-level skills directory, and about a project or
+global deployment receipt that still claims its files; in every case it prints the
+delete-then-`squad update` steps. For `second-brain` it points at the Kyber-Docs skills
+(`kyber-docs-*`, see `kyber-docs-onboarding-and-assessment`). For a retired technology
+skill it names the standards template whose rules replaced it (the nine above), which a
+worker receives through `docs_get_coding_standard_for_technology`; a repository adopts
+one with `kyber-weave docs init . --standards <tech>`.
 
 It also warns (`KW-SQUAD-SHADOW-001`, exit code unchanged) when a skill folder the repository keeps
 for itself, in any location a renderer writes skills to (`.agents/skills`, `.github/skills`,

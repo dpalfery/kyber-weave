@@ -5,7 +5,7 @@ doc-type: rule
 status: current
 technology: csharp
 owner: dpalfery
-last-reviewed: 2026-11-19
+last-reviewed: 2026-11-22
 ---
 
 # csharp rules
@@ -44,3 +44,10 @@ register wins.
 - Public APIs carry XML doc comments. A public type or member without one is incomplete.
 - The rule ids in this repository (`KW-*`) are permanent. Add a new id; never reuse or
   renumber one.
+
+## Logging and untrusted input
+
+- Never log tokens, secrets, connection strings, raw PII or prompts; log with message templates
+  and strip newlines from a user-supplied value.
+- Never build a path from a client-supplied filename, and never add a wildcard CORS origin or an
+  `unsafe-inline` / `unsafe-eval` CSP.

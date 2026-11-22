@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using KyberDash.Contracts.Repositories;
+using KyberDash.Contracts.Services;
 using KyberDash.Core.Exceptions;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Repositories;
@@ -85,6 +86,9 @@ public class KyberBridgeEngine
     private readonly string version;
     private readonly string instanceId;
     private readonly string storePath;
+    private readonly DashOptions? dashOptions;
+    private readonly IOtlpCollectorService? collector;
+    private readonly IOtlpListenerState? listener;
     private readonly Lock projectionFailureLock = new();
     private readonly Dictionary<string, string> projectionFailures = new(StringComparer.Ordinal);
     private string? lastProjectionPassFault;
@@ -102,6 +106,9 @@ public class KyberBridgeEngine
     /// <param name="clock">Optional UTC clock override for deterministic timestamps.</param>
     /// <param name="instanceId">Optional process instance identifier for analytics freshness metadata.</param>
     /// <param name="storePath">Optional backing store path surfaced in report coverage metadata.</param>
+    /// <param name="options">Composition options carrying the configured collector port, when the host has one.</param>
+    /// <param name="collector">Live collector, when this process hosts one. Absent means admission failures are unknown.</param>
+    /// <param name="listener">Bind record for this process's collector socket. Absent means the listener was not observed.</param>
     public KyberBridgeEngine(
         IRelationalStoreReader reader,
         IProjectionStore projections,
@@ -112,7 +119,10 @@ public class KyberBridgeEngine
         string version = DefaultVersion,
         Func<DateTimeOffset>? clock = null,
         string? instanceId = null,
-        string? storePath = null)
+        string? storePath = null,
+        DashOptions? options = null,
+        IOtlpCollectorService? collector = null,
+        IOtlpListenerState? listener = null)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(projections);
@@ -136,6 +146,9 @@ public class KyberBridgeEngine
         this.storePath = string.IsNullOrWhiteSpace(storePath)
             ? CanonDbPath.Resolve()
             : storePath.Trim();
+        dashOptions = options;
+        this.collector = collector;
+        this.listener = listener;
     }
 
     /// <summary>Ensures dirty sessions, runs, executions, and harness rollups are projected up to date.</summary>
@@ -961,22 +974,41 @@ public class KyberBridgeEngine
             .Select(static g => new { reason = g.Key, count = g.Count() })
             .OrderByDescending(static x => x.count)
             .ThenBy(static x => x.reason, StringComparer.Ordinal)];
-        bool receiverEnabled = operationalStore.ReadSettings().ReceiverHosted;
+        SettingsView settingsSnapshot = operationalStore.ReadSettings();
+        bool receiverEnabled = settingsSnapshot.ReceiverHosted;
+        bool jobsPaused = settingsSnapshot.JobsPaused;
+        bool collectorPaused = collector?.IsPaused == true;
+        bool isPaused = jobsPaused || collectorPaused;
+        bool? listening = listener is null ? null : listener.IsListening;
+        bool? hostedByUs = listener is null ? null : listener.IsListening;
+        int? boundOrConfiguredPort = listener?.BoundPort
+            ?? (receiverEnabled ? dashOptions?.OtlpPort : null);
+        string? endpoint = boundOrConfiguredPort is > 0
+            ? string.Create(CultureInfo.InvariantCulture, $"http://127.0.0.1:{boundOrConfiguredPort.Value}")
+            : null;
+        int? failures5m = collector?.CountFailuresSince(clock().Subtract(TimeSpan.FromMinutes(5)));
+        string? checkedAt = listening == true
+            ? clock().UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture)
+            : null;
+        bool healthy = listening == true && !isPaused && failures5m == 0;
+        string status = listening == true
+            ? isPaused ? "paused" : "listening"
+            : receiverEnabled ? "unknown" : "disabled";
         object receiver = new
         {
             enabled = receiverEnabled,
-            endpoint = (string?)null,
-            status = "unknown",
-            listening = (bool?)null,
-            hostedByUs = (bool?)null,
-            paused = (bool?)null,
-            checkedAt = (string?)null,
-            lastAcceptedAt = (string?)null,
-            failures5m = (int?)null,
-            lastError = (string?)null,
-            lastCode = (string?)null,
-            lastErrorAt = (string?)null,
-            healthy = false,
+            endpoint,
+            status,
+            listening,
+            hostedByUs,
+            paused = isPaused,
+            checkedAt,
+            lastAcceptedAt = collector?.LastAcceptedAt,
+            failures5m,
+            lastError = collector?.LastError,
+            lastCode = collector?.LastErrorCode,
+            lastErrorAt = collector?.LastErrorAt,
+            healthy,
         };
         object projectionHealth = BuildProjectionHealth();
 

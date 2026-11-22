@@ -6,12 +6,13 @@ namespace KyberWeave.Tests;
 
 /// <summary>
 /// The removal phase deletes fourteen agents, and no shipped source file may still name one except the two maps
-/// that resolve a host's leftover reference. A name left in shipped code is a route to an agent that is not
-/// installed: a help string that offers it, a dispatch example that uses it, or a validator that branches on it.
+/// that resolve a host's leftover reference and the retired-skill map <c>squad doctor</c> reads to warn about
+/// leftover installed copies. A name left in shipped code is a route to an agent that is not installed: a help
+/// string that offers it, a dispatch example that uses it, or a validator that branches on it.
 /// </summary>
 /// <remarks>
 /// The scan walks <c>git ls-files</c>, so a tracked file is what a reader, an installer or a rendered agent
-/// receives; untracked build output is out of bounds by design. The three exempt paths are named exactly, never as
+/// receives; untracked build output is out of bounds by design. The four exempt paths are named exactly, never as
 /// prefixes, so a new file beside one of them is scanned rather than silently covered.
 /// </remarks>
 public sealed class RemovedAgentNameRepoGuardTests
@@ -41,14 +42,17 @@ public sealed class RemovedAgentNameRepoGuardTests
 
     /// <summary>
     /// The shipped files that must carry a removed name: the removal map every reader resolves through, the pick
-    /// that maps a removed name to its replacement, and the shipped technology map a host's agent-keyed task
-    /// gates keep resolving through for two minor releases.
+    /// that maps a removed name to its replacement, the shipped technology map a host's agent-keyed task gates keep
+    /// resolving through for two minor releases, and the retired-skill map <c>squad doctor</c> reads to warn about
+    /// leftover installed copies of a retired skill. That last file names retired skills, not agents, and its
+    /// exemption goes when the retired-skill warning is removed.
     /// </summary>
     private static readonly string[] ExemptPaths =
     [
         "src/KyberWeave.Application/Docs/Validation/PlanTaskAgentPick.cs",
         "src/KyberWeave.Application/Review/Catalogue/GateCatalogueRenderer.cs",
-        "src/KyberWeave.Application/Review/Catalogue/RemovedAgentMap.cs"
+        "src/KyberWeave.Application/Review/Catalogue/RemovedAgentMap.cs",
+        "src/KyberWeave.Application/Squad/Deployment/SquadRetiredSkills.cs"
     ];
 
     [Fact]

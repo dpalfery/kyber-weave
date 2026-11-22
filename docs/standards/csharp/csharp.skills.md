@@ -5,7 +5,7 @@ doc-type: skill
 status: current
 technology: csharp
 owner: dpalfery
-last-reviewed: 2026-11-16
+last-reviewed: 2026-11-22
 ---
 
 # csharp skills
