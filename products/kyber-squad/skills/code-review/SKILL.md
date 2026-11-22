@@ -181,7 +181,8 @@ The reviewer applies the checks no individual lens can, because no lens sees the
 - **Reconcile contradictions** — read the code and resolve, or escalate as unresolved.
 - **Mark pre-existing debt.** A finding about code the change did not touch is dropped with
   `--drop <id>=pre-existing debt: <one line>`; it blocks nothing and the verdict lists it for
-  the pull request notes. Code the change touched or extends is the change's own, and a stale document is
+  the pull request notes. The verdict drops a finding whose `claim` starts `Pre-existing debt:`
+  itself; drop by hand only the ones a seat did not mark. Code the change touched or extends is the change's own, and a stale document is
   never pre-existing debt, whatever its origin.
 - **Mark a pull request note.** A finding the pull request's description should carry rather than a
   code change is dropped with `--drop <id>=pr note: <one line>`; it blocks nothing and the verdict
