@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-20
+last-reviewed: 2026-11-22
 decided-by:
   - adr/0084-kyberdash-csharp-engine
   - adr/0020-kyberdash-one-time-fork
@@ -52,6 +52,8 @@ sections:
 code-refs:
   - DashEndpointMappings
   - KyberBridgeEngine
+  - DashboardQueryService
+  - IDashboardQueryService
   - JobSchedulerService
   - JobsLease
   - OtlpCollector
@@ -100,6 +102,7 @@ code-refs:
   - LegacyTableReplacementMap
   - SqliteRelationalStore
   - OtlpLogMapper
+  - PiSpanMapper
   - TranscriptIngestionService
   - IRelationalStoreReader
   - IRelationalStoreWriter
@@ -1396,6 +1399,8 @@ There is no `canon.db` schema change. The session payload is a JSON blob that is
 projection, so a session row stored before this change has no `skills` key and renders
 "not yet projected" until it is rebuilt ([runbook §2g](runbook.md#2g-skills-view-rebuild-and-capture-fixtures)).
 
+In the C# engine, `CanonIngestPipeline.ToCollectedRecord` (`dash/server/KyberDash.Application/CanonIngestPipeline.cs`) and `OtlpLogMapper.ToCollectedRecord` (`dash/server/KyberDash.Data/Harnesses/Otlp/OtlpLogMapper.cs`) populate `SkillsInvoked` from `gen_ai.skill.name`, `skill.name`, `skill_name`, `kyber.skills.invoked`, and `Skill`/`skill` tool call arguments. `KyberBridgeEngine.BuildSkillsPayload` projects `{ measurable: true, rows }` with `listed` marked `{ availability: 'not_measurable', reason }` when invocations exist without a listing export, or `{ availability: 'not_measurable', reason }` when neither side is recorded.
+
 **Measurability.** Listing and invocation are measured separately, and an unmeasured side is
 never reported as zero. It is declared in one of two ways: a key is absent (the `summary` and
 per-turn keys), or it carries `{availability: 'not_measurable', reason}` (the whole `skills`
@@ -2114,7 +2119,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridgeEngine`:
 | `/api/kyber/runs` | `GET` | `{ runs: RunRow[] }` | List runs newest-first; supports `?harness=`. Each row carries `started`, `harness`, measured `turnCount` when derivable, and optional `label` for Compare inventory labels. |
 | `/api/kyber/run/:id` | `GET` | `{ run, executionTree, executions, findings, turns, scorecard }` | Complete run detail with parent/child execution tree, executions enriched with `turnCount` and `costUsd`, `turns` list (`RunTurnRow[]` with model, tokens, pressure, `cacheHitRatio`, timestamp, and per-turn `costUsd`), and run-scoped `scorecard` (`RunScorecard`). |
 | `/api/kyber/sessions` | `GET` | `{ sessions: SessionSummary[] }` | List sessions; supports `?limit=` and `?harness=`. |
-| `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload with turns, context, tools, and timeline. Summary emits `cache_hit_ratio` and `cache_creation_coverage` from single engine writer. Additively carries `summary.skills_listed`, `summary.skills_invoked`, `skills`, and per-turn `turns[i].skills_listed` / `turns[i].skills_invoked` ([skills view contract](#skills-view-contract)). The served document is assembled — the session aggregate plus one ordered `session_turn` scan via `IRelationalStoreReader.SessionTurnSummaries` — with identical content and unchanged `_clip` bounds. |
+| `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload assembled by `KyberBridgeEngine.GetSessionDetail`: top-level `span_count`, `servers`, `notes`, `costBasisMismatch`, complete `summary` (`span_count`, `tools_offered`, `has_tool_definitions`, `skills_invoked`, `cost_basis_mismatch`, `coverage`, `cache_hit_ratio`, `cache_creation_coverage`), dual-key `turns[]` (camelCase `turnIndex`/`inputTokens`/`outputTokens` alongside UI keys `index`/`input`/`output`/`fresh`/`fresh_input`/`cache_read`/`cache_creation`/`reasoning`), 1-based `context` (with map-shaped `toolDefinitionsByServer`, `{ tokens, attribution }` `residual`, `first`/`last`, or `{ measurable: false, reason }`), `schema` (`ranked`, `neverInvoked`, `byServer`, `unusedRange`, or `{ measurable: false, reason }`), `tools[]` (`in_definitions`, `is_mcp`), snake-case `reconciliation` (omitting rows with null `InputMatch` or `OutputMatch`), `skills` (`{ measurable: true, rows }` or `{ availability: 'not_measurable', reason }`), `timeline`, and `requests`. |
 | `/api/kyber/session/:id/summary` | `GET` | Bounded session summary (`session_id`, `harness`, `label`, `is_subagent`, `parent_session`, `agent_name`, `started`, `ended`, `summary`, `problems_count`) | Bounded ancestry lookup served from the read-time session aggregate without touching stored turns; 404 for an unknown id. No run or execution linkage is served, deliberately. |
 | `/api/kyber/session/:id/turn/:index` | `GET` | Bounded per-turn figures | One turn's figures served from a single `session_turn` row — 404 for an unknown turn under the strict 0-based identity lookup. The turn page's counters query reads kilobytes here instead of the whole payload (up to 10,933 turns) it once fetched for one row's counters. |
 | `/api/kyber/timeline` | `GET` | Session timeline | The stored session `timeline` served from the payload directly, without reassembling the whole session payload; the shape the client already parses is unchanged. |
@@ -2135,7 +2140,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridgeEngine`:
 | `/api/kyber/meta` | `GET` | `MetaResult` | Tokenizer configuration, rates, span counts, and sources. |
 | `/api/kyber/version` | `GET` | `{ version, apiVersion }` | The engine's version (`KYBERDASH_VERSION`, read from `dash/package.json`, which a release stamps with the release version) and the report schema version (`apiVersion`). Store-free on purpose: it never reads `canon.db`, so it stays fast while a projection runs, where `/api/kyber/meta` measured 23 s. The web Settings drawer reads it once on open, with no polling. The tray core fetches it on its existing poll and carries it as `ViewState.kyberdashVersion`, passed through unchanged, or `null` when the fetch fails, so the tray shows `unknown`. Non-GET methods answer 405. |
 | `/api/kyber/coverage` | `GET` | `{ refresh, ingest, quarantineByReason, checkpoints }` | Ingest coverage: persisted refresh window (`history_weeks`, null = unknown), per-source ingest activity (`records` counts joined with `ingest_log` sums and `lastReceivedAt`; `{ status: 'unknown' }` when nothing is recorded), per-reason quarantine counts, and `source_checkpoint` statuses including `partial` and the persisted zero-record reason (`lastErrorCode`). |
-| `/api/kyber/report` | `GET` | `ContextReport` | The versioned context report for the query scope (`harness`, `session`, `run`, `days`); the same document `kyberdash report` prints. |
+| `/api/kyber/report` | `GET` | `ContextReport` | The versioned context report for the query scope (`harness`, `session`, `run`, `limit` 1..200 default `50`, `days` positive integer default `7`; HTTP 400 on invalid `days` or `limit`), excluding `gemini` and unprojected sessions and emitting `kyberdashVersion`, `scope`, `coverage` (`storePath`, `harnesses`, `refresh`, `quarantineCount`, `problemCount`, `hints`), `findings`, `harnesses[].dimensions`, `latestSession`, and non-blended `cost[]`; the same document `kyberdash report` prints. |
 | `/api/kyber/settings` | `GET`, `PUT` | `SettingsView` | The four shared switches as JSON booleans and a number: `folderImportScheduled`, `jobsPaused`, `refreshCadenceMinutes`, `receiverHosted` ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)). A `PUT` is partial; an unknown key or a value of the wrong type is refused whole (400), leaving every switch as it was. |
 | `/api/kyber/jobs` | `GET` | `{ refresh, paused, storeGeneration, hostedElsewhere }` | What the job host is actually doing — state, last success, last failure, next due, whether it is paused, and whether another process holds `jobs.lock`. The flat host status is mapped here once, so both surfaces read the same shape. |
 | `/api/kyber/capture` | `GET`, `POST` | `GET`: `{ platform, receiver: { hosted, liveness, detail }, harnesses: CaptureHarnessStatus[] }` · `POST`: `{ action, harness, dryRun, outcome, events, harnessState, receiver: { hosted, willEnable, enabled, enableFailed, lastManagedHarnessDisabled } }` | Harness OpenTelemetry collection ([ADR 0031](../adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys.md)). `GET` is read-only: per-harness `state` (`on` / `off` / `partial` / `unknown` / `not-applicable`), install detection, files with expected and present keys, drift, warnings, manual steps, and receiver liveness probed at `/healthz` (`unknown`, not probed, when this server does not host the receiver). `POST` body is exactly `{ action: 'enable' \| 'disable', harness, dryRun }` for a managed harness (Copilot, Claude Code, OpenCode); any other key or harness is 400. A dry run returns the exact per-file changes and writes nothing. A real `enable` that ends `wrote` or `noop`, or that wrote at least one file before a later file refused, turns `settings.receiver.hosted` on afterwards; `disable` never turns it off and only reports `lastManagedHarnessDisabled`. 200 result; 400 invalid payload; 404 when the server has no store; 405 other methods; 409 `{ error, outcome: 'refused', reason, events }` on drift, conflict, unparseable, unreadable or busy; a refusal before any write changes no files (a drift refusal on disable says so), but files are written one at a time, so a later file's refusal or host error can follow earlier files already written, and `events` keeps those `wrote` events; 413 body over 64KB; 415 non-JSON content type; 500 fixed `{ error: 'Capture failed' }` (no path or host error text crosses the wire). |
@@ -2329,6 +2334,19 @@ scheduled refresh and the receiver — is superseded by
 The one seam every surface depends on is the `ContextReport` itself. The tray, the web
 dashboard, and the CLI render the same document, so parity is structural; CLI and REST `/api/kyber/report`
 parity is pinned by `dash/server.tests/KyberDash.Presentation.Tests/MinimalApiEndpointTests.cs` (Requirement 11.14).
+
+### Collector attribution and read-side API projection
+
+The OTLP ingest seam and read-side query engine align raw harness telemetry with both Web Dashboard and Tray UI display contracts:
+
+- **Pi session correlation (`PiAdapter` and `PiSpanMapper`):** Both `PiAdapter.Normalize` (`dash/server/KyberDash.Domain/CanonAdapters.cs`) and `PiSpanMapper.Parse` (`dash/server/KyberDash.Data/Harnesses/Otlp/PiSpanMapper.cs`) fall back to a trimmed non-whitespace `pi.session.id` attribute when standard session keys (`CanonicalSessionId` / `OtlpSpanNative.SessionId`) are absent; whitespace-only values resolve to `null`.
+- **OTLP `SkillsInvoked` ingest (`CanonIngestPipeline` and `OtlpLogMapper`):** `CanonIngestPipeline.ToCollectedRecord` and `OtlpLogMapper.ToCollectedRecord` populate `CollectedRecord.SkillsInvoked` from `gen_ai.skill.name`, `skill.name`, `skill_name`, and `kyber.skills.invoked` (scalar string, JSON array string, or string array) plus `Skill`/`skill` tool call argument properties (`skill`, `skill_name`, `name` across `ToolArgumentKeys`) instead of leaving `SkillsInvoked` empty.
+- **Web Dashboard session detail projection (`GET /api/kyber/session/:id`):** `KyberBridgeEngine.GetSessionDetail` (`dash/server/KyberDash.Application/KyberBridgeEngine.cs`) emits `span_count`, `servers`, `notes`, top-level `costBasisMismatch`, complete `summary`, additive dual-key `turns[]` (preserving camelCase `turnIndex`, `inputTokens`, `outputTokens`, `freshInputTokens`, `cacheReadTokens`, `cacheCreationTokens`, `reasoningTokens` alongside UI keys `index`, `input`, `output`, `fresh`, `fresh_input`, `cache_read`, `cache_creation`, `reasoning`), 1-based `context` (`turns[].index = Position + 1`, 1-based `flaggedTurns`, map-shaped `toolDefinitionsByServer`, `{ tokens, attribution }` `residual`, `first`/`last`, or `{ measurable: false, reason }`), `schema` (`ranked`, `neverInvoked`, `byServer`, `unusedRange`, or `{ measurable: false, reason }`), `tools[]` (`in_definitions`, `is_mcp`), snake-case `reconciliation` (omitting rows lacking both `InputMatch` and `OutputMatch`), and `skills` (`{ measurable: true, rows }` or `{ availability: 'not_measurable', reason }`).
+- **Tray `ContextReport` alignment and windowing (`GET /api/kyber/report`):**
+  - `IDashboardQueryService` (`dash/server/KyberDash.Contracts/Services/IDashServices.cs`) and `DashboardQueryService` preserve the 4-argument `GetReport(harness, sessionId, runId, limit)` signature (defaulting `days: 7`) for CLI `ReportService` and test mock compatibility while adding a 5-argument overload `GetReport(harness, sessionId, runId, limit, days)`.
+  - `DashEndpointMappings.ReportAsync` (`dash/server/KyberDash.Api/Endpoints/DashEndpointMappings.cs`) trims `harness`/`session`/`run` (normalizing `harness`), clamps `limit` to `1..200` (default `50`), parses optional positive whole-number `days` (blank/whitespace treated as unset `7`), and returns HTTP 400 (`"days must be a positive whole number"` / `"limit must be a positive whole number"`) on invalid values.
+  - `ServiceCollectionExtensions.RegisterEngines` passes `DashOptions.DatabasePath` as `storePath` into `KyberBridgeEngine` (defaulting to `CanonDbPath.Resolve()`), emitted at `coverage.storePath`.
+  - `KyberBridgeEngine.GetReport` excludes excluded harnesses (`CanonPricing.CanonicalHarnessId(...) is null`, including `gemini`) and unprojected sessions, scopes sessions/runs/findings to the `days` window, preserves compatibility scalars (`schemaVersion`, `generatedAt`, `storeGeneration`, `sessionCount`, `findingCount`, `harnessCount`), emits `kyberdashVersion`, `scope`, `coverage` (`storePath`, `refresh`, `harnesses`, `quarantineCount`, `problemCount`, `hints`), `findings` (`recoverableTokens`, `view`, `errorBar`, `evidenceIds`), `harnesses[].dimensions` via `CanonRollupsEngine.BuildHarnessScorecard` from `StoredHarnessRollup` or bounded window rollups without N+1 `ReadSessionFigures` scans, `latestSession` (hydrating `ReadSessionFigures` at most once for that single newest session with `latestTurn` buckets, pressure, and residual or honest absent reasons), and non-blended `cost[]`.
 
 ## Parity suite and C# engine verification (R15)
 
