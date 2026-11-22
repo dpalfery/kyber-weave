@@ -48,6 +48,7 @@ internal static class FixPacketWriter
         4. Fixed means the finding's whole class is fixed: name the class in one line for each finding in your digest.
         5. Each fix of a finding that is not a nitpick ships with a test that fails without it.
         6. The fix edits the current tree; never restore a file to base and re-apply.
+        7. A test you add or change is deterministic: it controls time and ordering (fake clocks, awaited events, explicit waits on a condition) and never depends on a sleep, a fixed timeout or a race with a timer.
         """;
 
     /// <summary>Writes the fix packets of one fix round and returns their dispatch blocks.</summary>
@@ -81,6 +82,7 @@ internal static class FixPacketWriter
             RemoveStalePackets(folder, names.Values, files, notes);
 
             List<string> blocks = [];
+            bool wroteOtherBlocks = false;
             foreach (Packet packet in packets)
             {
                 string name = names[packet];
@@ -88,7 +90,8 @@ internal static class FixPacketWriter
                 try
                 {
                     files.WriteAllText(path, Text(packet, earlier, input.Tree, git));
-                    blocks.Add(DispatchBlock(packet, plan, path));
+                    blocks.Add(DispatchBlock(packet, plan, path, afterOtherBlocks: wroteOtherBlocks));
+                    wroteOtherBlocks |= packet.Kind != PacketKind.Docs;
                 }
                 catch (Exception ex) when (FileFailure.Is(ex))
                 {
@@ -277,7 +280,10 @@ internal static class FixPacketWriter
         return [.. folders.OrderBy(entry => entry.Number)];
     }
 
-    /// <summary>The packets of one round: each task with findings, in plan order, then <c>docs</c>, then <c>unassigned</c>.</summary>
+    /// <summary>
+    /// The packets of one round: each task with findings, in plan order, then <c>unassigned</c>, then <c>docs</c>, so
+    /// the documentation fix is dispatched after every code fix it describes.
+    /// </summary>
     private static List<Packet> Group(
         IReadOnlyList<ReviewFinding> findings,
         IReadOnlyList<GateResult> gates,
@@ -324,10 +330,10 @@ internal static class FixPacketWriter
                 packets.Add(packet);
         }
 
-        if (docs.Count > 0)
-            packets.Add(new Packet(PacketKind.Docs, DocsGroup, docs, []));
         if (unassigned.Count > 0 || unassignedGates.Count > 0)
             packets.Add(new Packet(PacketKind.Unassigned, UnassignedGroup, unassigned, unassignedGates));
+        if (docs.Count > 0)
+            packets.Add(new Packet(PacketKind.Docs, DocsGroup, docs, []));
         return packets;
     }
 
@@ -559,8 +565,12 @@ internal static class FixPacketWriter
         message.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .FirstOrDefault() ?? "no reason reported";
 
-    /// <summary>The block the conductor sends unchanged: the group, its plan and task, and the packet's path.</summary>
-    private static string DispatchBlock(Packet packet, string? plan, string path)
+    /// <summary>
+    /// The block the conductor sends unchanged: the group, its plan and task, and the packet's path. The documentation
+    /// block waits for the round's other fixes when there are any, because a docs fix describes the tree the code fixes
+    /// have already changed.
+    /// </summary>
+    private static string DispatchBlock(Packet packet, string? plan, string path, bool afterOtherBlocks)
     {
         StringBuilder block = new();
         block.Append("--- fix ").Append(packet.Group).Append(" ---\n");
@@ -574,6 +584,8 @@ internal static class FixPacketWriter
                 break;
             case PacketKind.Docs:
                 block.Append("Agent: docs-dev\n");
+                if (afterOtherBlocks)
+                    block.Append("After: every other fix block of this round is integrated\n");
                 break;
             default:
                 block.Append("Assign: the task that owns these files' component\n");

@@ -57,7 +57,7 @@ public sealed class FixPacketWriterTests : IDisposable
             ],
             [new GateResult("test", true, 1, "3 failed")]);
 
-        Assert.Equal(["T1", "T2", "docs", "unassigned"], outcome.DispatchBlocks.Select(GroupOf));
+        Assert.Equal(["T1", "T2", "unassigned", "docs"], outcome.DispatchBlocks.Select(GroupOf));
         string t1 = Read("task-T1");
         Assert.Contains("### correctness/a", t1, StringComparison.Ordinal);
         Assert.DoesNotContain("correctness/b", t1, StringComparison.Ordinal);
@@ -69,7 +69,7 @@ public sealed class FixPacketWriterTests : IDisposable
         Assert.Contains("- summary: 3 failed", unassigned, StringComparison.Ordinal);
     }
 
-    /// <summary>The header's rules are written once, in the packet, so each worker reads the same six instructions.</summary>
+    /// <summary>The header's rules are written once, in the packet, so each worker reads the same seven instructions.</summary>
     [Fact]
     public void EveryPacketCarriesTheFixedHeaderRules()
     {
@@ -82,6 +82,7 @@ public sealed class FixPacketWriterTests : IDisposable
         Assert.Contains("1. Make one design that satisfies all of these findings together, and the earlier ones in the history, not one patch per finding.", packet, StringComparison.Ordinal);
         Assert.Contains("3. Do not change an approved plan decision unless a finding here is a regression that decision caused: then fix the regression and name the decision you overrode in your digest. A finding that only disagrees with a plan decision never reaches this packet.", packet, StringComparison.Ordinal);
         Assert.Contains("6. The fix edits the current tree; never restore a file to base and re-apply.", packet, StringComparison.Ordinal);
+        Assert.Contains("7. A test you add or change is deterministic: it controls time and ordering (fake clocks, awaited events, explicit waits on a condition) and never depends on a sleep, a fixed timeout or a race with a timer.", packet, StringComparison.Ordinal);
     }
 
     /// <summary>Every earlier cycle's finding on a file of the packet is in its history, oldest cycle first.</summary>
@@ -202,14 +203,57 @@ public sealed class FixPacketWriterTests : IDisposable
             []);
 
         Assert.Equal(2, outcome.DispatchBlocks.Count);
-        string docs = outcome.DispatchBlocks[0];
+        string unassigned = outcome.DispatchBlocks[0];
+        Assert.Contains("Assign: the task that owns these files' component\n", unassigned, StringComparison.Ordinal);
+        Assert.DoesNotContain("TASK:", unassigned, StringComparison.Ordinal);
+        string docs = outcome.DispatchBlocks[1];
         Assert.Contains("--- fix docs ---\n", docs, StringComparison.Ordinal);
         Assert.Contains("Agent: docs-dev\n", docs, StringComparison.Ordinal);
         Assert.DoesNotContain("TASK:", docs, StringComparison.Ordinal);
         Assert.DoesNotContain("PLAN_FILE:", docs, StringComparison.Ordinal);
-        string unassigned = outcome.DispatchBlocks[1];
-        Assert.Contains("Assign: the task that owns these files' component\n", unassigned, StringComparison.Ordinal);
-        Assert.DoesNotContain("TASK:", unassigned, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The documentation fix describes the tree after the round's code fixes, so its block is written and dispatched
+    /// last and tells the conductor to integrate every other block of the round first.
+    /// </summary>
+    [Fact]
+    public void ACodeRoundWritesTheDocumentationBlockLastAndItWaitsForTheOtherBlocks()
+    {
+        WritePlan("""
+            schema-version: 1
+            plan: docs/plans/demo.md
+            tasks:
+              - id: T1
+                files:
+                  - src/Core/A.cs
+            """);
+        ScriptChange(Plan, "src/Core/A.cs", "docs/guide.md");
+
+        FixPacketOutcome outcome = Write(
+            [Finding("correctness/a", "src/Core/A.cs"), Finding("documentation-accuracy/guide", "docs/guide.md")],
+            []);
+
+        Assert.Equal(["T1", "docs"], outcome.DispatchBlocks.Select(GroupOf));
+        Assert.Equal(
+            $"--- fix docs ---\nKYBER-ARBITER: true\nPLAN_FILE: {Plan}\nAgent: docs-dev\n" +
+            "After: every other fix block of this round is integrated\n" +
+            $"Fix packet: {Path.Combine(_cycle, "fix-packets", "docs.md")}\n--- end ---",
+            outcome.DispatchBlocks[1]);
+    }
+
+    /// <summary>A round whose only packet is the documentation one has nothing to wait for, so it carries no <c>After:</c> line.</summary>
+    [Fact]
+    public void ADocumentationOnlyRoundHasNoAfterLine()
+    {
+        ScriptChange("docs/guide.md");
+
+        FixPacketOutcome outcome = Write([Finding("documentation-accuracy/guide", "docs/guide.md")], []);
+
+        string docs = Assert.Single(outcome.DispatchBlocks);
+        Assert.StartsWith("--- fix docs ---\n", docs, StringComparison.Ordinal);
+        Assert.Contains("Agent: docs-dev\n", docs, StringComparison.Ordinal);
+        Assert.DoesNotContain("After:", docs, StringComparison.Ordinal);
     }
 
     /// <summary>
