@@ -1145,7 +1145,9 @@ same files (`## Earlier cycles' findings on these files (line numbers are from t
 necessarily still open)`) and the commits already made there since the first cycle it could read
 (`git --literal-pathspecs log --oneline <that cycle's head>..HEAD -- <files>`). The block
 names the plan, the task, the `docs-dev` agent for `docs`, or who must assign `unassigned`, and the
-packet's absolute path. The conductor sends that block unchanged, so a fix worker reads the findings
+packet's absolute path. The `docs` block is printed last and, when the round has other blocks, carries
+`After: every other fix block of this round is integrated`, so the documentation fix describes the
+fixed code; the packet's rules include that a test the fix adds or changes is deterministic. The conductor sends that block unchanged, so a fix worker reads the findings
 themselves rather than a paraphrase of the `fix:` lines; `FixPacketWriter` is the one writer. When the
 round continues but no cycle folder can be named, it writes no packet and warns instead, so the
 conductor dispatches from the `fix:` lines and `findings.json`; every degraded path — a change git could
@@ -1164,7 +1166,10 @@ Each cycle keeps its record in `.agent_scratchpad/<task-id>/review/cycle-<n>/` �
 folder, `gates.json`, the `findings.json` the verdict command writes, and `cycle.json` — until the run
 ends.
 
-**Kind routing.** The verdict routes each finding by its `kind:` as well as its severity. A
+**Kind routing.** Before any kind is read, a finding whose `claim` starts `Pre-existing debt:` is
+dropped as pre-existing debt (`pre-existing debt: <the rest of the claim's first line>`), in every
+cycle, so it reaches the pull request notes even when the reviewer passed no `--drop` for it.
+The verdict then routes each finding by its `kind:` as well as its severity. A
 `defect`, and a finding whose seat wrote no kind (read as a defect, with a `KW-REVIEW-063` warning
 per finding), follows the severity and fix-level rules above; a finding from the `security` lens is
 always a defect whatever kind it carries. A `plan-objection` never takes a fix round: it is dropped
