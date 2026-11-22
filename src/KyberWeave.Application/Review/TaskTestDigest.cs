@@ -30,45 +30,76 @@ public static class TaskTestDigest
         ArgumentException.ThrowIfNullOrWhiteSpace(gateId);
         ArgumentNullException.ThrowIfNull(output);
 
-        List<string> lines = [];
-        IReadOnlyList<CompileError> errors = passed ? [] : RedClassifier.ParseErrors(output);
-        RedLanguage? runner = RedLanguages.All.FirstOrDefault(language => language.ReadTests(output) is not null);
-        TestRunSummary? run = runner?.ReadTests(output);
-
-        if (errors.Count > 0)
-        {
-            lines.Add($"{gateId}: FAIL — the build failed with {errors.Count} compile error{(errors.Count == 1 ? string.Empty : "s")}, so no test ran");
-            lines.AddRange(errors.Take(MaxItems).Select(error => Item($"{error.File}: {error.Code} {error.Message}")));
-            AddRemainder(lines, errors.Count);
-        }
-        else if (passed && (run is { Total: 0 } || RedLanguages.All.Any(language => language.ZeroTests(0, output))))
-        {
-            lines.Add($"{gateId}: NO TESTS RAN — its filter matched no test, so nothing is verified; check the test class names");
-        }
-        else if (run is not null && runner is not null)
-        {
-            lines.Add($"{gateId}: {(passed ? "PASS" : "FAIL")} — tests: total={run.Total} failed={run.Failed} passed={run.Total - run.Failed}");
-            IReadOnlyList<string> failing = passed ? [] : runner.FailedTests(output);
-            string[] outputLines = output.Split('\n');
-            foreach (string name in failing.Take(MaxItems))
-                lines.Add(Item(FirstErrorLine(outputLines, name) is { } error ? $"{name} — {error}" : name));
-            AddRemainder(lines, failing.Count);
-        }
-        else if (!passed)
-        {
-            lines.Add($"{gateId}: FAIL — no test summary or compile error in its output; its last lines:");
-            lines.AddRange(output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).TakeLast(3).Select(Item));
-        }
-        else
-        {
-            lines.Add($"{gateId}: PASS");
-        }
+        List<string> lines = Body(gateId, passed, output, Parse(output, passed));
 
         if (logPath is not null)
             lines.Add(Item("full output: " + logPath));
 
         return lines;
     }
+
+    /// <summary>
+    ///     What a failed gate's recorded summary says: the same totals and each failing test with the first line of its
+    ///     error, or the compile errors, joined onto one line because a gate result's summary is one line in
+    ///     <c>gates.json</c> and in the printed report. Null when the output names neither a failing test nor a compile
+    ///     error, so the caller keeps the summary it had.
+    /// </summary>
+    /// <param name="output">What the gate's command printed, standard output then standard error.</param>
+    public static string? FailingSummary(string output)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+
+        Parsed parsed = Parse(output, passed: false);
+        return parsed.Errors.Count == 0 && parsed.Run is null
+            ? null
+            : string.Join(" | ", Body(gateId: null, passed: false, output, parsed).Select(line => line.Trim()));
+    }
+
+    private static List<string> Body(string? gateId, bool passed, string output, Parsed parsed)
+    {
+        string name = gateId is null ? string.Empty : gateId + ": ";
+        List<string> lines = [];
+
+        if (parsed.Errors.Count > 0)
+        {
+            lines.Add($"{name}FAIL — the build failed with {parsed.Errors.Count} compile error{(parsed.Errors.Count == 1 ? string.Empty : "s")}, so no test ran");
+            lines.AddRange(parsed.Errors.Take(MaxItems).Select(error => Item($"{error.File}: {error.Code} {error.Message}")));
+            AddRemainder(lines, parsed.Errors.Count);
+        }
+        else if (passed && (parsed.Run is { Total: 0 } || RedLanguages.All.Any(language => language.ZeroTests(0, output))))
+        {
+            lines.Add($"{name}NO TESTS RAN — its filter matched no test, so nothing is verified; check the test class names");
+        }
+        else if (parsed.Run is not null && parsed.Runner is not null)
+        {
+            lines.Add($"{name}{(passed ? "PASS" : "FAIL")} — tests: total={parsed.Run.Total} failed={parsed.Run.Failed} passed={parsed.Run.Total - parsed.Run.Failed}");
+            IReadOnlyList<string> failing = passed ? [] : parsed.Runner.FailedTests(output);
+            string[] outputLines = output.Split('\n');
+            foreach (string testName in failing.Take(MaxItems))
+                lines.Add(Item(FirstErrorLine(outputLines, testName) is { } error ? $"{testName} — {error}" : testName));
+            AddRemainder(lines, failing.Count);
+        }
+        else if (!passed)
+        {
+            lines.Add($"{name}FAIL — no test summary or compile error in its output; its last lines:");
+            lines.AddRange(output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).TakeLast(3).Select(Item));
+        }
+        else
+        {
+            lines.Add($"{name}PASS");
+        }
+
+        return lines;
+    }
+
+    private static Parsed Parse(string output, bool passed)
+    {
+        IReadOnlyList<CompileError> errors = passed ? [] : RedClassifier.ParseErrors(output);
+        RedLanguage? runner = RedLanguages.All.FirstOrDefault(language => language.ReadTests(output) is not null);
+        return new Parsed(errors, runner, runner?.ReadTests(output));
+    }
+
+    private sealed record Parsed(IReadOnlyList<CompileError> Errors, RedLanguage? Runner, TestRunSummary? Run);
 
     /// <summary>
     /// The first line after the one naming <paramref name="name"/> that says what went wrong: runners print the test's
