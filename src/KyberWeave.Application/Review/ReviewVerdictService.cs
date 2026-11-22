@@ -188,7 +188,7 @@ public sealed partial class ReviewVerdictService(
             $"{outcome.Accepted.Count} finding(s) accepted, {outcome.Dropped.Count} dropped.",
             Subject));
 
-        ReportFixRound(outcome, gateResults, config.Review.Policy, PriorFixCounts(root, request, config), report);
+        ReportFixRound(root, request, config, outcome, gateResults, PriorFixCounts(root, request, config), report);
 
         report.AddMetric("verdict", outcome.Verdict.ToString());
         report.AddMetric("risk", outcome.Risk.ToString());
@@ -210,13 +210,23 @@ public sealed partial class ReviewVerdictService(
     /// finding at or above <c>review.policy.fix-level</c>. Any <c>fix:</c> line gets a fix round and then a
     /// verifier cycle, an APPROVE included, until a cycle prints none or a cap in <see cref="ReviewLoop"/> stops the
     /// loop; the findings still to fix are then <c>open:</c> lines for human review. <c>follow-up:</c> lines are the
-    /// findings below the level and each finding dropped as pre-existing debt or a pull request note.
+    /// findings below the level and each finding dropped as pre-existing debt or a pull request note. A continuing
+    /// round also writes one ready fix packet per owning group and prints its dispatch block after the <c>fix:</c> lines.
     /// </summary>
-    private static void ReportFixRound(
-        ReviewOutcome outcome, IReadOnlyList<GateResult> gates, ReviewPolicy policy, List<int> priorCounts, DiagnosticReport report)
+    private void ReportFixRound(
+        string root,
+        ReviewVerdictRequest request,
+        KyberWeaveConfig config,
+        ReviewOutcome outcome,
+        IReadOnlyList<GateResult> gates,
+        List<int> priorCounts,
+        DiagnosticReport report)
     {
-        List<string> fix = [.. FailedGates(gates).Select(gate => $"gate {gate.Id}")];
-        fix.AddRange(outcome.Accepted.Where(policy.FixRoundTakes).Select(Line));
+        ReviewPolicy policy = config.Review.Policy;
+        IReadOnlyList<GateResult> failedGates = [.. FailedGates(gates)];
+        List<string> fix = [.. failedGates.Select(gate => $"gate {gate.Id}")];
+        ReviewFinding[] fixFindings = [.. outcome.Accepted.Where(policy.FixRoundTakes)];
+        fix.AddRange(fixFindings.Select(Line));
         List<string> followUp = [.. outcome.Accepted.Where(finding => !policy.FixRoundTakes(finding)).Select(Line)];
         followUp.AddRange(outcome.Dropped
             .Select(drop => (Drop: drop, Reason: FollowUpReason(drop.Reason)))
@@ -228,6 +238,8 @@ public sealed partial class ReviewVerdictService(
         bool stopped = state is ReviewLoopState.CycleCap or ReviewLoopState.NoProgress;
         foreach (string line in fix)
             report.Add(new Diagnostic(FixRoundCode, Severity.Info, $"{(stopped ? "open" : "fix")}: {line}", Subject));
+        if (state == ReviewLoopState.Continue)
+            ReportFixPackets(root, request, config, fixFindings, failedGates, report);
         foreach (string line in followUp)
             report.Add(new Diagnostic(FixRoundCode, Severity.Info, $"follow-up: {line}", Subject));
         report.Add(new Diagnostic(
@@ -258,6 +270,43 @@ public sealed partial class ReviewVerdictService(
 
         static string? FollowUpReason(string dropReason) =>
             FollowUpReasons.FirstOrDefault(reason => dropReason.StartsWith(reason, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Writes one ready fix packet per owning group into the cycle folder and prints its dispatch block, so the
+    /// conductor sends the findings themselves instead of paraphrasing the <c>fix:</c> lines.
+    /// </summary>
+    private void ReportFixPackets(
+        string root,
+        ReviewVerdictRequest request,
+        KyberWeaveConfig config,
+        IReadOnlyList<ReviewFinding> findings,
+        IReadOnlyList<GateResult> gates,
+        DiagnosticReport report)
+    {
+        if (CurrentCycleFolder(request) is not { } folder)
+            return;
+
+        FixPacketOutcome outcome = FixPacketWriter.Write(
+            new FixPacketInput(
+                trees.Containing(root),
+                folder,
+                request.Prior,
+                request.BaseRef,
+                ChangePlanLookup.PlanFolder(config),
+                findings,
+                gates),
+            cycles,
+            git,
+            files);
+        if (outcome.Problem is { } problem)
+        {
+            report.Add(new Diagnostic(FixRoundCode, Severity.Warning, problem, Subject));
+            return;
+        }
+
+        foreach (string block in outcome.DispatchBlocks)
+            report.Add(new Diagnostic(FixRoundCode, Severity.Info, block, Subject));
     }
 
     /// <summary>The blocking gates that failed and are not just stopped for time or not applicable.</summary>

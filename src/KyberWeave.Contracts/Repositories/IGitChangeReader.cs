@@ -35,4 +35,13 @@ public interface IGitChangeReader
 
     /// <summary>The unified diff from <paramref name="commit"/> to the files on disk; untracked files are not in it.</summary>
     string DiffSince(string workingDirectory, string commit);
+
+    /// <summary>
+    /// Lists the one-line commits from <paramref name="fromCommit"/> to <c>HEAD</c> that touched any of
+    /// <paramref name="paths"/>, newest first, as <c>git log --oneline</c> writes them.
+    /// </summary>
+    /// <param name="workingDirectory">The repository root.</param>
+    /// <param name="fromCommit">The commit the history starts after, the change's first review cycle.</param>
+    /// <param name="paths">The repository-relative paths the commits must have touched.</param>
+    IReadOnlyList<string> LogOneline(string workingDirectory, string fromCommit, IReadOnlyList<string> paths);
 }

@@ -168,6 +168,29 @@ public sealed class GitChangeReader(IProgramRunner programs) : IGitChangeReader
     }
 
     /// <summary>
+    /// Lists the one-line commits from <paramref name="fromCommit"/> to <c>HEAD</c> that touched any of
+    /// <paramref name="paths"/>, newest first.
+    /// </summary>
+    /// <remarks>
+    /// The path list is given after <c>--</c>, so a path that begins with a dash is a path and never an option.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">git could not list the commits.</exception>
+    public IReadOnlyList<string> LogOneline(string workingDirectory, string fromCommit, IReadOnlyList<string> paths)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fromCommit);
+        ArgumentNullException.ThrowIfNull(paths);
+
+        List<string> arguments = ["log", "--oneline", "--no-color", $"{fromCommit}..HEAD", "--"];
+        arguments.AddRange(paths);
+        string output = RunGit(workingDirectory, [.. arguments]);
+        return
+        [
+            .. output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        ];
+    }
+
+    /// <summary>
     /// Resolves the merge base of <paramref name="baseRef"/> and <c>HEAD</c>, failing
     /// closed with a fetch hint when the history on disk cannot answer.
     /// </summary>
