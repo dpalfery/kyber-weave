@@ -38,6 +38,7 @@ public sealed class SkillResourceDispositionAuditTests
     private const string NoDestination = "—";
     private const string RemovedWithSkill = "removed-with-skill";
     private const string DestinationSeparator = " § ";
+    private const string RulesSuffix = ".rules";
 
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UsePipeTables()
@@ -285,7 +286,8 @@ public sealed class SkillResourceDispositionAuditTests
     /// <summary>
     /// Prevents a ledger row from pointing at a template section or anchor text that does not
     /// actually exist: the Destination's <c>##</c>/<c>###</c> heading must exist in that
-    /// technology's standard, and the heading's own section must contain the Anchor verbatim.
+    /// technology's standard — or, for a <c>&lt;technology&gt;.rules</c> destination, in its rules
+    /// file — and the heading's own section must contain the Anchor verbatim.
     /// </summary>
     [Fact]
     public void LedgerDestinationsNameExistingTemplateSectionsContainingTheirAnchor()
@@ -298,28 +300,29 @@ public sealed class SkillResourceDispositionAuditTests
         else
         {
             IReadOnlyList<LedgerRow> ledger = ParseLedgerRows(Corpus.ReadText(RelativeAuditPath));
-            Dictionary<string, Section[]?> sectionsByTechnology = new(StringComparer.Ordinal);
+            Dictionary<string, Section[]?> sectionsByFile = new(StringComparer.Ordinal);
 
             foreach (LedgerRow row in ledger)
             {
-                (string technology, string heading) = SplitDestination(row.Destination);
-                if (technology.Length == 0)
+                (string rawTechnology, string heading) = SplitDestination(row.Destination);
+                if (rawTechnology.Length == 0)
                 {
                     continue;
                 }
 
-                if (!sectionsByTechnology.TryGetValue(technology, out Section[]? sections))
+                (string technology, bool rules) = ResolveDestinationTechnology(rawTechnology);
+                string templatePath = DestinationFilePath(technology, rules);
+                if (!sectionsByFile.TryGetValue(templatePath, out Section[]? sections))
                 {
-                    string standardPath = $"{ProductRoot}/standards/{technology}/{technology}.standards.md";
-                    sections = Corpus.Exists(standardPath) ? HeadingSections(Corpus.ReadText(standardPath)) : null;
-                    sectionsByTechnology[technology] = sections;
+                    sections = Corpus.Exists(templatePath) ? HeadingSections(Corpus.ReadText(templatePath)) : null;
+                    sectionsByFile[templatePath] = sections;
                 }
 
                 if (sections is null)
                 {
                     findings.Add(
-                        $"{row.Source}:{row.Line}: destination technology '{technology}' has no " +
-                        $"'standards/{technology}/README.md'.");
+                        $"{row.Source}:{row.Line}: destination technology '{rawTechnology}' has no " +
+                        $"'{templatePath}'.");
                     continue;
                 }
 
@@ -329,7 +332,7 @@ public sealed class SkillResourceDispositionAuditTests
                 {
                     findings.Add(
                         $"{row.Source}:{row.Line}: no '## {heading}' or '### {heading}' heading in " +
-                        $"standards/{technology}/{technology}.standards.md.");
+                        $"'{templatePath}'.");
                     continue;
                 }
 
@@ -344,7 +347,7 @@ public sealed class SkillResourceDispositionAuditTests
                 {
                     findings.Add(
                         $"{row.Source}:{row.Line}: Anchor '{row.Anchor}' does not appear in " +
-                        $"standards/{technology}/{technology}.standards.md § {heading}.");
+                        $"'{templatePath}' § {heading}.");
                 }
             }
         }
@@ -437,7 +440,8 @@ public sealed class SkillResourceDispositionAuditTests
                 }
 
                 string[] technologies = ledgerBySource[row.Resource]
-                    .Select(row2 => SplitDestination(row2.Destination).Technology)
+                    .Select(row2 => ResolveDestinationTechnology(
+                        SplitDestination(row2.Destination).Technology).Technology)
                     .Where(technology => technology.Length > 0)
                     .Distinct(StringComparer.Ordinal)
                     .ToArray();
@@ -528,7 +532,8 @@ public sealed class SkillResourceDispositionAuditTests
     /// <summary>
     /// Prevents a ledger Anchor from citing template wording that <c>docs init --kyber-standards</c>
     /// never actually seeds: the embedded <see cref="IKyberStandardsTemplates.Render"/> output for
-    /// the anchor's technology must contain it verbatim.
+    /// the anchor's technology — or <see cref="IKyberStandardsTemplates.RenderPart"/> for its rules
+    /// file, when the Destination names one — must contain it verbatim.
     /// </summary>
     [Fact]
     public void DocsInitSeedsEveryLedgerTemplateAnchor()
@@ -545,19 +550,26 @@ public sealed class SkillResourceDispositionAuditTests
 
             foreach (LedgerRow row in ledger.Where(candidate => candidate.Anchor.Length > 0))
             {
-                (string technology, _) = SplitDestination(row.Destination);
-                if (technology.Length == 0)
+                (string rawTechnology, _) = SplitDestination(row.Destination);
+                if (rawTechnology.Length == 0)
                 {
                     findings.Add(
                         $"{row.Source}:{row.Line}: Anchor '{row.Anchor}' has no Destination technology to render.");
                     continue;
                 }
 
-                if (!rendered.TryGetValue(technology, out string? template))
+                (string technology, bool rules) = ResolveDestinationTechnology(rawTechnology);
+                string templateKey = DestinationFilePath(technology, rules);
+                string renderedBy = rules
+                    ? $"Templates.RenderPart(\"{technology}\", Part.Rules, ...)"
+                    : $"Templates.Render(\"{technology}\", ...)";
+                if (!rendered.TryGetValue(templateKey, out string? template))
                 {
                     try
                     {
-                        template = Templates.Render(technology, "dpalfery", "2026-09-28");
+                        template = rules
+                            ? Templates.RenderPart(technology, KyberStandardsTemplates.Part.Rules, "dpalfery", "2026-09-28")
+                            : Templates.Render(technology, "dpalfery", "2026-09-28");
                     }
                     catch (ArgumentException exception)
                     {
@@ -565,14 +577,13 @@ public sealed class SkillResourceDispositionAuditTests
                         continue;
                     }
 
-                    rendered[technology] = template;
+                    rendered[templateKey] = template;
                 }
 
                 if (!CollapsedWhitespace(template).Contains(CollapsedWhitespace(row.Anchor), StringComparison.Ordinal))
                 {
                     findings.Add(
-                        $"{row.Source}:{row.Line}: Anchor '{row.Anchor}' does not appear in " +
-                        $"Templates.Render(\"{technology}\", ...).");
+                        $"{row.Source}:{row.Line}: Anchor '{row.Anchor}' does not appear in {renderedBy}.");
                 }
             }
         }
@@ -652,6 +663,19 @@ public sealed class SkillResourceDispositionAuditTests
             ? (string.Empty, string.Empty)
             : (destination[..separator].Trim(), destination[(separator + DestinationSeparator.Length)..].Trim());
     }
+
+    /// <summary>
+    /// Resolves the technology a Destination names, and whether its <c>.rules</c> suffix points at
+    /// that technology's rules file rather than its standard.
+    /// </summary>
+    private static (string Technology, bool Rules) ResolveDestinationTechnology(string destinationTechnology) =>
+        destinationTechnology.EndsWith(RulesSuffix, StringComparison.Ordinal)
+            ? (destinationTechnology[..^RulesSuffix.Length], true)
+            : (destinationTechnology, false);
+
+    /// <summary>The path of the template file a destination's technology and part name.</summary>
+    private static string DestinationFilePath(string technology, bool rules) =>
+        $"{ProductRoot}/standards/{technology}/{technology}{(rules ? RulesSuffix : ".standards")}.md";
 
     private static string CollapsedWhitespace(string text)
     {
