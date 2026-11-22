@@ -407,6 +407,15 @@ would otherwise bind whichever came last: names match ignoring case, and a seat'
 `failure_scenario` and the document's `failureScenario` count as one name. Objects inside
 properties the command does not know are not walked.
 
+A finding may also write `kind:` and `basis:`. The kind is exactly `defect`, `hardening` or
+`plan-objection` (in any letter case), or the seat is refused (`KW-REVIEW-040`): a defect breaks a
+stated acceptance criterion, a plan contract or base behaviour (any security, data-loss or
+corruption risk is always a defect), hardening meets the request, the plan and base behaviour and
+only makes the code sturdier, and a plan objection disagrees with an approved plan decision. The
+basis is what the finding breaks, quoted: the acceptance criterion, the plan line or the base
+behaviour. Both are optional, are recorded in `findings.json` under the same names, and a
+findings.json written before them still reads.
+
 A findings or `NO FINDINGS` seat that wrote no `Discovery:` line, read files directly with no index lookup and no
 `Index fallback:` line, wrote an `Index fallback:` value outside the three modes, or wrote two
 different `Index fallback:` lines (the first is kept), draws a
