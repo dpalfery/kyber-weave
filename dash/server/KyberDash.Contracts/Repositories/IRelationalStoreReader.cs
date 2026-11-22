@@ -72,6 +72,12 @@ public record StoredRecordSignals(string SpanId, CollectedRecordSignals Signals)
 /// <param name="Usage">Static model usage snapshot.</param>
 public record StoredSessionModelUsage(string SessionId, CollectedModelUsage Usage);
 
+/// <summary>Per-session-key, per-harness record attribution over <c>record</c> joined to <c>record_session_link</c>.</summary>
+/// <param name="SessionKey">Linked canonical session key (<c>record_session_link.session_key</c>).</param>
+/// <param name="HarnessId">Raw harness identifier of the attributed records (<c>record.harness_id</c>).</param>
+/// <param name="RecordCount">Number of records attributed to the session key and harness.</param>
+public record StoredSessionAttribution(string SessionKey, string HarnessId, int RecordCount);
+
 /// <summary>Strongly typed cell value from a catalog-driven stored-fields inspection.</summary>
 /// <param name="ColumnName">Exact catalog column name.</param>
 /// <param name="ColumnType">SQLite storage affinity of the column.</param>
@@ -361,6 +367,36 @@ public interface IRelationalStoreReader
         string? sessionKey = null,
         string? harnessId = null,
         string? sourceId = null);
+
+    /// <summary>
+    /// Lists per-session-key, per-harness record attributions — one grouped query over
+    /// <c>record</c> joined to <c>record_session_link</c> — so a projection pass can plan
+    /// identities, skip decisions, and per-session record budgets without materializing any
+    /// record content.
+    /// </summary>
+    /// <remarks>
+    /// Rows are ordered by session key then harness identifier (ordinal), the order
+    /// attribution-driven session-id claiming depends on to keep assigned ids stable.
+    /// </remarks>
+    IReadOnlyList<StoredSessionAttribution> SessionAttributions();
+
+    /// <summary>
+    /// Queries the full records (<c>record</c> and child tables) linked to
+    /// <paramref name="sessionKey"/>, the read a projection pass uses to rebuild that one
+    /// session.
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key to rebuild.</param>
+    IReadOnlyList<CollectedRecord> SessionRecordsForRebuild(string sessionKey);
+
+    /// <summary>
+    /// Reads every stored record and child row in one whole-store query.
+    /// </summary>
+    /// <remarks>
+    /// Reserved for maintenance paths only — the <c>kyber build</c> command, a wildcard
+    /// projection rebuild, and doctor — and must never be called from a request path: on a
+    /// large store this read is the very stall the purpose-named reads exist to remove.
+    /// </remarks>
+    IReadOnlyList<CollectedRecord> AllSessionRecordsForMaintenance();
 
     /// <summary>Queries per-class token counts (<c>record_token_count</c>).</summary>
     /// <param name="spanId">Optional record span identifier filter.</param>

@@ -150,7 +150,7 @@ public class KyberBridgeEngine
         {
             try
             {
-                ProjectionPassReport report = projector.ProjectIncremental();
+                ProjectionPassReport report = projector.ProjectIncrementalForReads();
                 builtOrPruned = report.Built > 0 || report.Pruned > 0;
             }
             catch (Exception ex) when (IsTransientStoreFault(ex))
@@ -1533,11 +1533,20 @@ public class KyberBridgeEngine
             failedSessions = [.. projectionFailures.Keys.Order(StringComparer.Ordinal)];
         }
 
+        // A read-path pass writes deferred keys back as still dirty, so the dirty state names
+        // exactly the sessions whose projections lag the store; a wildcard dirty state carries
+        // no keys and is reported by the marker instead of this list.
+        DirtyProjectionState? dirtyState = operationalStore.GetProjectionDirtyState();
+        List<string> deferredSessions = dirtyState is not null && !dirtyState.IsWildcard && dirtyState.Keys is not null
+            ? [.. dirtyState.Keys.Order(StringComparer.Ordinal)]
+            : [];
+
         return new
         {
             status = lastError is null ? "ok" : ProjectionFailedStatus,
             lastError,
             failedSessions,
+            deferredSessions,
         };
     }
 

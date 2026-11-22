@@ -60,6 +60,42 @@ public class SqliteRelationalStoreReadTests : IDisposable
     }
 
     /// <summary>
+    /// Verifies <see cref="IRelationalStoreReader.SessionAttributions"/> over the SQLite adapter:
+    /// one grouped query over <c>record</c> joined to <c>record_session_link</c>, returning
+    /// session keys, raw harness ids, and exact record counts ordered by session key then
+    /// harness — the order attribution-driven session-id claiming depends on — and matching
+    /// <see cref="InMemoryRelationalStore"/> row for row. An empty store returns empty.
+    /// </summary>
+    [Fact]
+    public void SessionAttributionsMatchTheInMemoryStore()
+    {
+        string emptyPath = Path.Combine(directory.Path, "attributions-empty", "canon.db");
+        SeamSqliteRelationalStore emptySqlite = new(emptyPath, new SqliteCircuitBreaker());
+        Assert.Empty(emptySqlite.SessionAttributions());
+
+        string dbPath = Path.Combine(directory.Path, "attributions", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+
+        WriteAttributionTurn(sqlite, memory, "span-alpha-1", "alpha", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-alpha-2", "alpha", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-shared-1", "shared", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-shared-2", "shared", "codex");
+        WriteAttributionTurn(sqlite, memory, "span-zeta-1", "zeta", "codex");
+
+        Assert.Equal(
+            new StoredSessionAttribution[]
+            {
+                new("alpha", "claude-code", 2),
+                new("shared", "claude-code", 1),
+                new("shared", "codex", 1),
+                new("zeta", "codex", 1),
+            },
+            sqlite.SessionAttributions());
+        Assert.Equal(memory.SessionAttributions(), sqlite.SessionAttributions());
+    }
+
+    /// <summary>
     /// A reported input total is the checksum of fresh, cache-read, and cache-write tokens.
     /// It is not billed at the fresh rate, and a side the harness did not report is not
     /// billed as zero. A reported output total is one rate and is billed. A class breakdown
@@ -201,6 +237,47 @@ public class SqliteRelationalStoreReadTests : IDisposable
         CollectedBatch batch = new(
             Source: new CollectedSource("codex-cli", SourceKind.File, sessionKey),
             Sessions: [new CollectedSession(sessionKey, "codex-cli", sessionKey, null, null, [])],
+            Records: [record],
+            Problems: []);
+        sqlite.WriteBatch(batch);
+        memory.WriteBatch(batch);
+    }
+
+    private static void WriteAttributionTurn(
+        SqliteRelationalStore sqlite,
+        InMemoryRelationalStore memory,
+        string spanId,
+        string sessionKey,
+        string harnessId)
+    {
+        CollectedRecord record = new(
+            RecordId: spanId,
+            HarnessId: harnessId,
+            Op: RecordOp.LlmInvoke,
+            Kind: RecordKind.Client,
+            Name: "chat.turn",
+            StartedAt: new DateTimeOffset(2026, 11, 19, 12, 0, 0, TimeSpan.Zero),
+            Status: RecordStatus.Ok,
+            SessionKey: sessionKey,
+            ParentRecordId: null,
+            TraceId: null,
+            Model: null,
+            EndedAt: null,
+            ReportedDurationMs: null,
+            Tokens: [new CollectedTokenCount(TokenClass.Input, 100), new CollectedTokenCount(TokenClass.Output, 10)],
+            ReportedCost: null,
+            Parts: [],
+            Tool: null,
+            Agent: null,
+            SkillsInvoked: [],
+            AgentInstanceId: null,
+            ToolDefinitions: [],
+            Signals: new CollectedRecordSignals(null, null, null, null),
+            ReportedInputTokens: 100,
+            ReportedOutputTokens: 10);
+        CollectedBatch batch = new(
+            Source: new CollectedSource(harnessId, SourceKind.Otlp, "otlp:" + harnessId),
+            Sessions: [new CollectedSession(sessionKey, harnessId, sessionKey, null, null, [])],
             Records: [record],
             Problems: []);
         sqlite.WriteBatch(batch);
@@ -419,7 +496,9 @@ public class SqliteRelationalStoreReadTests : IDisposable
         Assert.Equal(memoryReader.Harnesses(), sqliteReader.Harnesses());
         Assert.Equivalent(memoryReader.Sources(), sqliteReader.Sources(), strict: true);
         Assert.Equal(memoryReader.CountRecords(), sqliteReader.CountRecords());
+        Assert.Equal(memoryReader.SessionAttributions(), sqliteReader.SessionAttributions());
         Assert.Equivalent(memoryReader.Records(), sqliteReader.Records(), strict: true);
+        Assert.Equivalent(memoryReader.AllSessionRecordsForMaintenance(), sqliteReader.AllSessionRecordsForMaintenance(), strict: true);
         Assert.Equivalent(memoryReader.Sessions(), sqliteReader.Sessions(), strict: true);
         Assert.Equivalent(memoryReader.SessionModelUsages(), sqliteReader.SessionModelUsages(), strict: true);
         Assert.Equivalent(memoryReader.ListSessionAggregates(), sqliteReader.ListSessionAggregates(), strict: true);
@@ -457,6 +536,7 @@ public class SqliteRelationalStoreReadTests : IDisposable
         {
             Assert.Equivalent(memoryReader.GetSession(sessionKey), sqliteReader.GetSession(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.Records(sessionKey: sessionKey), sqliteReader.Records(sessionKey: sessionKey), strict: true);
+            Assert.Equivalent(memoryReader.SessionRecordsForRebuild(sessionKey), sqliteReader.SessionRecordsForRebuild(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.SessionModelUsages(sessionKey), sqliteReader.SessionModelUsages(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.StoredFields(sessionKey), sqliteReader.StoredFields(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.GetSessionAggregate(sessionKey), sqliteReader.GetSessionAggregate(sessionKey), strict: true);

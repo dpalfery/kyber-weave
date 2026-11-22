@@ -37,6 +37,53 @@ public class InMemoryRelationalStore :
 
     private readonly Lock syncRoot = new();
     private StoreState state = StoreState.CreateEmpty();
+    private readonly List<string> readLog = [];
+    private long materializedContentBytes;
+
+    /// <summary>
+    /// Names of the <see cref="IRelationalStoreReader"/> methods invoked since the read log was
+    /// last cleared, in call order, so tests can assert which reads a code path issued.
+    /// </summary>
+    public IReadOnlyList<string> ReadLog
+    {
+        get
+        {
+            lock (syncRoot)
+            {
+                return [.. readLog];
+            }
+        }
+    }
+
+    /// <summary>
+    /// Total UTF-8 content bytes materialized by record, content-part, and tool-call reads since
+    /// the read log was last cleared, so tests can assert how much content a code path pulled
+    /// out of the store.
+    /// </summary>
+    public long MaterializedContentBytes
+    {
+        get
+        {
+            lock (syncRoot)
+            {
+                return materializedContentBytes;
+            }
+        }
+    }
+
+    /// <summary>Clears the instrumented read log and the materialized content byte counter.</summary>
+    public void ClearReadLog()
+    {
+        lock (syncRoot)
+        {
+            readLog.Clear();
+            materializedContentBytes = 0;
+        }
+    }
+
+    /// <summary>Records that one <see cref="IRelationalStoreReader"/> method ran. Caller holds <see cref="syncRoot"/>.</summary>
+    /// <param name="methodName">Name of the reader method invoked.</param>
+    private void NoteRead(string methodName) => readLog.Add(methodName);
 
     /// <summary>Returns the number of persisted rows in <paramref name="tableName"/>.</summary>
     /// <param name="tableName">Catalog table name.</param>
@@ -197,6 +244,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(Harnesses));
             TableMetadata meta = GetTableMetadata("harness");
             int col = meta.ColumnIndices["harness_id"];
             return [.. state.GetRows("harness").Select(row => (string)row[col]!).OrderBy(static id => id, StringComparer.Ordinal)];
@@ -208,6 +256,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(Sources));
             TableMetadata meta = GetTableMetadata("source");
             List<StoredSource> results = [];
             foreach (object?[] row in state.GetRows("source"))
@@ -233,6 +282,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(CountRecords));
             if (harnessId is null)
             {
                 return state.GetRows("record").Count;
@@ -259,8 +309,16 @@ public class InMemoryRelationalStore :
 
         lock (syncRoot)
         {
+            NoteRead(nameof(GetRecord));
             object?[]? row = FindRowByKey(state, "record", [("span_id", spanId)]);
-            return row is null ? null : MaterializeRecord(state, row);
+            if (row is null)
+            {
+                return null;
+            }
+
+            CollectedRecord record = MaterializeRecord(state, row);
+            materializedContentBytes += ContentBytesOf(record);
+            return record;
         }
     }
 
@@ -272,29 +330,46 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
-            HashSet<string>? sessionSpans = sessionKey is null ? null : ResolveSessionSpanIds(state, sessionKey);
-            TableMetadata meta = GetTableMetadata("record");
-            List<CollectedRecord> results = [];
+            NoteRead(nameof(Records));
+            return CollectReaderRecords(sessionKey, harnessId, sourceId);
+        }
+    }
 
-            foreach (object?[] row in state.GetRows("record"))
+    /// <inheritdoc />
+    public IReadOnlyList<StoredSessionAttribution> SessionAttributions()
+    {
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionAttributions));
+            TableMetadata linkMeta = GetTableMetadata("record_session_link");
+            Dictionary<string, Dictionary<string, int>> countsByKey = new(StringComparer.Ordinal);
+            foreach (object?[] linkRow in state.GetRows("record_session_link"))
             {
-                string spanId = GetString(meta, row, "span_id");
-                if (sessionSpans is not null && !sessionSpans.Contains(spanId))
+                string spanId = GetString(linkMeta, linkRow, "span_id");
+                object?[]? recordRow = FindRowByKey(state, "record", [("span_id", spanId)]);
+                if (recordRow is null)
                 {
                     continue;
                 }
 
-                if (harnessId is not null && !string.Equals(GetString(meta, row, "harness_id"), harnessId, StringComparison.Ordinal))
+                string sessionKey = GetString(linkMeta, linkRow, "session_key");
+                string harnessId = GetString(GetTableMetadata("record"), recordRow, "harness_id");
+                if (!countsByKey.TryGetValue(sessionKey, out Dictionary<string, int>? byHarness))
                 {
-                    continue;
+                    byHarness = new Dictionary<string, int>(StringComparer.Ordinal);
+                    countsByKey[sessionKey] = byHarness;
                 }
 
-                if (sourceId is not null && !string.Equals(GetString(meta, row, "source_id"), sourceId, StringComparison.Ordinal))
-                {
-                    continue;
-                }
+                byHarness[harnessId] = byHarness.TryGetValue(harnessId, out int count) ? count + 1 : 1;
+            }
 
-                results.Add(MaterializeRecord(state, row));
+            List<StoredSessionAttribution> results = [];
+            foreach (KeyValuePair<string, Dictionary<string, int>> byKey in countsByKey.OrderBy(static kv => kv.Key, StringComparer.Ordinal))
+            {
+                foreach (KeyValuePair<string, int> byHarness in byKey.Value.OrderBy(static kv => kv.Key, StringComparer.Ordinal))
+                {
+                    results.Add(new StoredSessionAttribution(byKey.Key, byHarness.Key, byHarness.Value));
+                }
             }
 
             return results;
@@ -302,10 +377,98 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
+    public IReadOnlyList<CollectedRecord> SessionRecordsForRebuild(string sessionKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionRecordsForRebuild));
+            return CollectReaderRecords(sessionKey, null, null);
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<CollectedRecord> AllSessionRecordsForMaintenance()
+    {
+        lock (syncRoot)
+        {
+            NoteRead(nameof(AllSessionRecordsForMaintenance));
+            return CollectReaderRecords(null, null, null);
+        }
+    }
+
+    /// <summary>Filters and materializes records for a reader call, counting materialized content bytes. Caller holds <see cref="syncRoot"/>.</summary>
+    /// <param name="sessionKey">Optional session key filter.</param>
+    /// <param name="harnessId">Optional harness identifier filter.</param>
+    /// <param name="sourceId">Optional source identifier filter.</param>
+    private List<CollectedRecord> CollectReaderRecords(string? sessionKey, string? harnessId, string? sourceId)
+    {
+        HashSet<string>? sessionSpans = sessionKey is null ? null : ResolveSessionSpanIds(state, sessionKey);
+        TableMetadata meta = GetTableMetadata("record");
+        List<CollectedRecord> results = [];
+
+        foreach (object?[] row in state.GetRows("record"))
+        {
+            string spanId = GetString(meta, row, "span_id");
+            if (sessionSpans is not null && !sessionSpans.Contains(spanId))
+            {
+                continue;
+            }
+
+            if (harnessId is not null && !string.Equals(GetString(meta, row, "harness_id"), harnessId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (sourceId is not null && !string.Equals(GetString(meta, row, "source_id"), sourceId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            CollectedRecord record = MaterializeRecord(state, row);
+            materializedContentBytes += ContentBytesOf(record);
+            results.Add(record);
+        }
+
+        return results;
+    }
+
+    /// <summary>Counts the UTF-8 content bytes a materialized record carries. Caller holds <see cref="syncRoot"/>.</summary>
+    /// <param name="record">Materialized record.</param>
+    private static long ContentBytesOf(CollectedRecord record)
+    {
+        long bytes = 0;
+        foreach (CollectedContentPart part in record.Parts)
+        {
+            bytes += ContentBytesOf(part);
+        }
+
+        if (record.Tool is not null)
+        {
+            bytes += ContentBytesOf(record.Tool.Input);
+            bytes += ContentBytesOf(record.Tool.Result);
+        }
+
+        return bytes;
+    }
+
+    /// <summary>Counts the UTF-8 bytes of a content part's plain text payload.</summary>
+    /// <param name="part">Materialized content part, when present.</param>
+    private static long ContentBytesOf(CollectedContentPart? part) =>
+        part?.PlainText is null ? 0 : Encoding.UTF8.GetByteCount(part.PlainText);
+
+    /// <summary>Counts the UTF-8 bytes of a tool-call payload's plain text.</summary>
+    /// <param name="content">Tool input or result payload, when present.</param>
+    private static long ContentBytesOf(CollectedToolContent? content) =>
+        content?.PlainText is null ? 0 : Encoding.UTF8.GetByteCount(content.PlainText);
+
+    /// <inheritdoc />
     public IReadOnlyList<StoredTokenCount> TokenCounts(string? spanId = null, string? sessionKey = null)
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(TokenCounts));
             HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, spanId, sessionKey);
             TableMetadata meta = GetTableMetadata("record_token_count");
             List<StoredTokenCount> results = [];
@@ -333,6 +496,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(ReportedTotals));
             HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, spanId, sessionKey);
             TableMetadata meta = GetTableMetadata("record_reported_total");
             List<StoredReportedTotal> results = [];
@@ -360,6 +524,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(ReportedCosts));
             HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, spanId, sessionKey);
             TableMetadata meta = GetTableMetadata("record_reported_cost");
             List<StoredReportedCost> results = [];
@@ -387,6 +552,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(SkillsInvoked));
             HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, spanId, sessionKey);
             TableMetadata meta = GetTableMetadata("record_skill_invocation");
             List<StoredSkillInvocation> results = [];
@@ -411,6 +577,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(ToolCalls));
             HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, spanId, sessionKey);
             TableMetadata meta = GetTableMetadata("tool_call");
             List<StoredToolCall> results = [];
@@ -426,6 +593,8 @@ public class InMemoryRelationalStore :
                 CollectedToolCall? call = MaterializeToolCall(state, rowSpan);
                 if (call is not null)
                 {
+                    materializedContentBytes += ContentBytesOf(call.Input);
+                    materializedContentBytes += ContentBytesOf(call.Result);
                     results.Add(new StoredToolCall(rowSpan, call));
                 }
             }
@@ -439,6 +608,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(ContentParts));
             HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, spanId, sessionKey);
             TableMetadata meta = GetTableMetadata("content_part");
             List<StoredContentPart> results = [];
@@ -453,7 +623,9 @@ public class InMemoryRelationalStore :
                     continue;
                 }
 
-                results.Add(new StoredContentPart(rowSpan, MaterializeContentPart(state, row)));
+                CollectedContentPart part = MaterializeContentPart(state, row);
+                materializedContentBytes += ContentBytesOf(part);
+                results.Add(new StoredContentPart(rowSpan, part));
             }
 
             return results;
@@ -465,6 +637,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(ToolDefinitions));
             HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, spanId, sessionKey);
             TableMetadata meta = GetTableMetadata("tool_definition");
             List<StoredToolDefinition> results = [];
@@ -491,6 +664,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(AgentInvocations));
             HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, spanId, sessionKey);
             TableMetadata meta = GetTableMetadata("agent_invocation");
             List<StoredAgentInvocation> results = [];
@@ -519,6 +693,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(RecordSignals));
             HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, spanId, sessionKey);
             HashSet<string> candidateSpans = new(StringComparer.Ordinal);
 
@@ -549,6 +724,7 @@ public class InMemoryRelationalStore :
 
         lock (syncRoot)
         {
+            NoteRead(nameof(GetSession));
             object?[]? row = FindRowByKey(state, "session", [("session_id", sessionKey)]);
             return row is null ? null : MaterializeSession(state, row);
         }
@@ -559,6 +735,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(Sessions));
             TableMetadata meta = GetTableMetadata("session");
             List<CollectedSession> results = [];
             foreach (object?[] row in state.GetRows("session"))
@@ -580,6 +757,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(SessionModelUsages));
             TableMetadata meta = GetTableMetadata("session_model_usage");
             List<StoredSessionModelUsage> results = [];
             foreach (object?[] row in state.GetRows("session_model_usage")
@@ -614,6 +792,7 @@ public class InMemoryRelationalStore :
 
         lock (syncRoot)
         {
+            NoteRead(nameof(StoredFields));
             return BuildStoredFieldsView(state, sessionKey);
         }
     }
@@ -625,6 +804,7 @@ public class InMemoryRelationalStore :
 
         lock (syncRoot)
         {
+            NoteRead(nameof(GetSessionAggregate));
             return BuildSessionAggregateView(state, sessionKey, pricing);
         }
     }
@@ -634,6 +814,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(ListSessionAggregates));
             TableMetadata sessionMeta = GetTableMetadata("session");
             List<SessionAggregateView> results = [];
             foreach (object?[] row in state.GetRows("session"))
@@ -662,6 +843,7 @@ public class InMemoryRelationalStore :
 
         lock (syncRoot)
         {
+            NoteRead(nameof(SessionTurnSummaries));
             return BuildSessionTurnSummaries(state, sessionKey, pricing);
         }
     }

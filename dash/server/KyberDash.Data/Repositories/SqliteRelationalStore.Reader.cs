@@ -98,7 +98,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         List<string> predicates = [];
         if (sessionKey is not null)
         {
-            predicates.Add($"EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = r.span_id AND rsl.session_key = {TextExpr(sessionKey)})");
+            predicates.Add(RecordSessionLinkPredicate(sessionKey));
         }
 
         if (harnessId is not null)
@@ -114,6 +114,44 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         string? whereClause = predicates.Count > 0 ? string.Join(" AND ", predicates) : null;
         return QueryRecords(whereClause);
     }
+
+    /// <inheritdoc />
+    public IReadOnlyList<StoredSessionAttribution> SessionAttributions()
+    {
+        string sql = TabReadScriptHeader +
+                     "SELECT hex(CAST(rsl.session_key AS BLOB)), hex(CAST(r.harness_id AS BLOB)), COUNT(*) " +
+                     "FROM record r JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
+                     "GROUP BY rsl.session_key, r.harness_id " +
+                     "ORDER BY rsl.session_key ASC, r.harness_id ASC;\n";
+
+        string output = ExecuteSqlite(sql);
+        List<StoredSessionAttribution> results = [];
+        foreach (string line in TabLines(output))
+        {
+            string[] cols = SplitTabLine(line, 3, "record attribution");
+            results.Add(new StoredSessionAttribution(
+                ParseHexRequired(cols[0], "record_session_link.session_key"),
+                ParseHexRequired(cols[1], "record.harness_id"),
+                ParseInt32Required(cols[2], "record attribution count")));
+        }
+
+        return results;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<CollectedRecord> SessionRecordsForRebuild(string sessionKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        return QueryRecords(RecordSessionLinkPredicate(sessionKey));
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<CollectedRecord> AllSessionRecordsForMaintenance() => QueryRecords(null);
+
+    /// <summary>Builds the <c>record_session_link</c> existence predicate selecting a session key's records.</summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    private static string RecordSessionLinkPredicate(string sessionKey) =>
+        $"EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = r.span_id AND rsl.session_key = {TextExpr(sessionKey)})";
 
     /// <inheritdoc />
     public IReadOnlyList<StoredTokenCount> TokenCounts(string? spanId = null, string? sessionKey = null)
