@@ -183,19 +183,37 @@ public static partial class Program
             runtime.OtlpPort = 0;
         }
 
-        BindEndpoints(app, runtime);
-
-        IJobSchedulerService jobs = app.Services.GetRequiredService<IJobSchedulerService>();
-        IOtlpCollectorService collector = app.Services.GetRequiredService<IOtlpCollectorService>();
-
-        try
+        IJobSchedulerService jobs;
+        IOtlpCollectorService collector;
+        bool retriedEphemeral = false;
+        while (true)
         {
-            await app.StartAsync(shutdown.Token).ConfigureAwait(false);
-        }
-        catch (IOException ex) when (LoopbackBinding.IsBindFailure(ex))
-        {
-            await Console.Error.WriteLineAsync(LoopbackBinding.DescribeBindFailure(ex, runtime)).ConfigureAwait(false);
-            return 1;
+            BindEndpoints(app, runtime);
+            jobs = app.Services.GetRequiredService<IJobSchedulerService>();
+            collector = app.Services.GetRequiredService<IOtlpCollectorService>();
+
+            try
+            {
+                await app.StartAsync(shutdown.Token).ConfigureAwait(false);
+                break;
+            }
+            catch (IOException ex) when (LoopbackBinding.IsBindFailure(ex))
+            {
+                // The pre-bind probe can lose a race. A non-explicit collector port gets one
+                // more start on an ephemeral port; a web-port failure does not move.
+                if (!retriedEphemeral && LoopbackBinding.ShouldRetryOtlpBindOnEphemeral(ex, runtime))
+                {
+                    retriedEphemeral = true;
+                    await app.DisposeAsync().ConfigureAwait(false);
+                    runtime.OtlpPort = 0;
+                    app = BuildApplication(runtime);
+                    lifecycle = app.Services.GetRequiredService<IEngineLifecycleService>();
+                    continue;
+                }
+
+                await Console.Error.WriteLineAsync(LoopbackBinding.DescribeBindFailure(ex, runtime)).ConfigureAwait(false);
+                return 1;
+            }
         }
 
         jobs.Start();

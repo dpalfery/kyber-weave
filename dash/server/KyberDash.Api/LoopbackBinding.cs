@@ -97,6 +97,36 @@ public static class LoopbackBinding
         otlpEnabled && !otlpPortExplicit && !preferredPortFree;
 
     /// <summary>
+    /// Whether a failed start should be tried again with an ephemeral collector port. An explicit
+    /// port never moves, and a failure that names only the web port is not a collector collision.
+    /// </summary>
+    /// <param name="exception">The exception <c>StartAsync</c> threw.</param>
+    /// <param name="runtime">Transport settings at the moment of the failure.</param>
+    /// <returns><see langword="true"/> when the host should rebuild on collector port <c>0</c>.</returns>
+    public static bool ShouldRetryOtlpBindOnEphemeral(Exception exception, DashRuntimeSettings runtime)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        ArgumentNullException.ThrowIfNull(runtime);
+
+        if (!runtime.OtlpEnabled || runtime.OtlpPortExplicit || runtime.OtlpPort <= 0 || runtime.OtlpPort == runtime.WebPort)
+            return false;
+
+        if (!IsBindFailure(exception))
+            return false;
+
+        string? url = ExtractUrl(exception);
+        if (url is null)
+            return true;
+
+        bool namesWeb = UrlNamesPort(url, runtime.WebPort);
+        bool namesOtlp = UrlNamesPort(url, runtime.OtlpPort);
+        if (namesWeb && !namesOtlp)
+            return false;
+
+        return namesOtlp || !namesWeb;
+    }
+
+    /// <summary>
     /// Walks <paramref name="exception"/> for a socket bind failure, including Kestrel's
     /// <see cref="AddressInUseException"/> wrapped around <see cref="SocketException"/>.
     /// </summary>
@@ -212,6 +242,16 @@ public static class LoopbackBinding
 
         uri = null!;
         return false;
+    }
+
+    private static bool UrlNamesPort(string url, int port)
+    {
+        if (port <= 0)
+            return false;
+
+        string marker = string.Create(CultureInfo.InvariantCulture, $":{port}");
+        return url.EndsWith(marker, StringComparison.Ordinal)
+            || url.Contains(marker + "/", StringComparison.Ordinal);
     }
 
     private static string? ExtractUrl(Exception exception)

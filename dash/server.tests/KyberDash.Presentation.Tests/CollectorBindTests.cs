@@ -82,6 +82,24 @@ public class CollectorBindTests
     }
 
     [Fact]
+    public void CollectorBindFailureRetriesOnAnEphemeralPortUnlessThePortWasExplicit()
+    {
+        SocketException socket = new((int)SocketError.AddressAlreadyInUse);
+        IOException collectorFailure = new("Failed to bind to address http://127.0.0.1:4318: address already in use.", socket);
+        IOException webFailure = new("Failed to bind to address http://127.0.0.1:4747: address already in use.", socket);
+        DashRuntimeSettings runtime = new() { WebPort = 4747, OtlpPort = 4318, OtlpEnabled = true };
+
+        Assert.True(LoopbackBinding.ShouldRetryOtlpBindOnEphemeral(collectorFailure, runtime));
+        Assert.False(LoopbackBinding.ShouldRetryOtlpBindOnEphemeral(webFailure, runtime));
+        Assert.True(LoopbackBinding.ShouldRetryOtlpBindOnEphemeral(
+            new IOException("address already in use.", socket),
+            runtime));
+
+        runtime.OtlpPortExplicit = true;
+        Assert.False(LoopbackBinding.ShouldRetryOtlpBindOnEphemeral(collectorFailure, runtime));
+    }
+
+    [Fact]
     public void OccupiedLoopbackPortIsNotFree()
     {
         using Socket socket = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
