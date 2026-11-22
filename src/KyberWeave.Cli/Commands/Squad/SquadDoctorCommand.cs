@@ -252,8 +252,8 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         // looks for are what an installed workspace holds, not what the source would render.
         ReportDevinImportOverlap(workingDirectory);
 
-        // 5b. Retired skills. A stale second-brain directory or a receipt that still
-        // claims it is a warning, not a failure: the stale copy works.
+        // 5b. Retired skills. A stale directory at project or user level, or a receipt that
+        // still claims one, is a warning, not a failure: the stale copy works.
         ReportRetiredSkills(workingDirectory, homeStateStore);
 
         // 5c. Project skills that hide an installed squad skill. A warning: the shadowing copy works,
@@ -617,57 +617,64 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     }
 
     /// <summary>
-    /// Warns about the retired <c>second-brain</c> skill, whether it survives as an
-    /// unmanaged directory in a deployed target tree or as a retained entry in the
-    /// project deployment receipt.
+    /// Warns about retired skills that survive as unmanaged directories in a deployed target
+    /// tree, at project or user level, or as retained entries in a project or user-level
+    /// deployment receipt.
     /// </summary>
     /// <remarks>
-    /// A warning rather than a failure: the stale copy works. Each warning names the
-    /// remedy: delete the stale directory, then run <c>squad update</c> to reconcile
-    /// the receipt. The workflow moved to the Kyber-Docs skills deployed by
-    /// <c>docs init</c>, so the warning points there.
+    /// A warning rather than a failure: the stale copy works. Squad deploys at user level by
+    /// default, so both scopes are scanned. Each warning names the skill, its path, and where
+    /// its content went, because a stale technology skill keeps feeding workers rules that now
+    /// live in a standards template. The remedy is the same for every retired skill: delete the
+    /// stale directory, then run <c>squad update</c> to reconcile the receipt.
     /// </remarks>
     private void ReportRetiredSkills(string workingDirectory, ISquadStateStore stateStore)
     {
-        List<string> staleDirs = [];
-        string[] skillsRoots = [Path.Combine(".claude", "skills"), Path.Combine(".agents", "skills")];
-        foreach (string skillsRoot in skillsRoots)
+        List<(SquadRetiredSkill Skill, string Path)> staleDirs = [];
+        foreach (string skillsRoot in RetiredSkillSearchRoots(workingDirectory))
         {
-            foreach (string retired in SquadRetiredSkills.RetiredSkillNames)
+            foreach (SquadRetiredSkill skill in SquadRetiredSkills.RetiredSkills)
             {
-                string staleDir = Path.Combine(workingDirectory, skillsRoot, retired);
+                string staleDir = Path.Combine(skillsRoot, skill.Name);
                 if (_files.DirectoryExists(staleDir))
                 {
-                    staleDirs.Add(staleDir);
+                    staleDirs.Add((skill, staleDir));
                 }
             }
         }
 
-        List<string> retained = [];
-        string? receiptError = null;
-        try
+        List<(SquadDeploymentScope Scope, SquadRetiredSkillClaim Claim)> retained = [];
+        List<(SquadDeploymentScope Scope, string Message)> receiptErrors = [];
+        foreach (SquadDeploymentScope scope in new[] { SquadDeploymentScope.Project, SquadDeploymentScope.Global })
         {
-            SquadReceipt? receipt = stateStore.ReadReceipt(workingDirectory, SquadDeploymentScope.Project);
-            if (receipt is not null)
+            try
             {
-                retained.AddRange(SquadRetiredSkills.FindRetainedReceiptPaths(receipt));
+                SquadReceipt? receipt = stateStore.ReadReceipt(workingDirectory, scope);
+                if (receipt is not null)
+                {
+                    retained.AddRange(
+                        SquadRetiredSkills.FindRetainedReceiptPaths(receipt)
+                            .Select(claim => (scope, claim)));
+                }
+            }
+            catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
+            {
+                // An unreadable receipt is state this check could not read. Warn with the
+                // reason rather than reporting healthy over unknown state; the registry
+                // check below still applies, so this stays a warning, not a failure.
+                receiptErrors.Add((scope, ex.Message));
             }
         }
-        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
-        {
-            // An unreadable receipt is state this check could not read. Warn with the
-            // reason rather than reporting healthy over unknown state; the registry
-            // check below still applies, so this stays a warning, not a failure.
-            receiptError = ex.Message;
-        }
 
-        if (receiptError is not null)
+        foreach ((SquadDeploymentScope scope, string message) in receiptErrors)
         {
-            string message = receiptError;
+            string receiptLabel = scope == SquadDeploymentScope.Project
+                ? "Deployment receipt"
+                : "Global deployment receipt";
             _console.WriteUnfolded(() =>
             {
                 _console.Ansi.MarkupLine(
-                    $"  [yellow]warn[/] Deployment receipt is unreadable: {Markup.Escape(message)}");
+                    $"  [yellow]warn[/] {receiptLabel} is unreadable: {Markup.Escape(message)}");
                 _console.Ansi.MarkupLine(
                     "         Delete the receipt and lock, then run [grey]squad update[/] to reconcile them.");
             });
@@ -680,24 +687,88 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 
         _console.WriteUnfolded(() =>
         {
-            foreach (string staleDir in staleDirs)
+            foreach (SquadRetiredSkill skill in SquadRetiredSkills.RetiredSkills)
             {
-                _console.Ansi.MarkupLine(
-                    $"  [yellow]warn[/] Retired skill '{Markup.Escape(SquadRetiredSkills.SecondBrain)}' still present at [bold]{Markup.Escape(staleDir)}[/].");
-            }
+                bool reported = false;
+                foreach (string staleDir in staleDirs
+                    .Where(entry => entry.Skill == skill)
+                    .Select(entry => entry.Path))
+                {
+                    _console.Ansi.MarkupLine(
+                        $"  [yellow]warn[/] Retired skill '{Markup.Escape(skill.Name)}' still present at [bold]{Markup.Escape(staleDir)}[/].");
+                    reported = true;
+                }
 
-            if (retained.Count > 0)
-            {
-                _console.Ansi.MarkupLine(
-                    $"  [yellow]warn[/] Deployment receipt still claims retired '{Markup.Escape(SquadRetiredSkills.SecondBrain)}' files: [bold]{Markup.Escape(string.Join(", ", retained))}[/].");
+                foreach (SquadDeploymentScope scope in new[] { SquadDeploymentScope.Project, SquadDeploymentScope.Global })
+                {
+                    string[] paths =
+                    [
+                        .. retained
+                            .Where(entry => entry.Scope == scope && entry.Claim.Skill == skill)
+                            .Select(entry => entry.Claim.RelativePath)
+                    ];
+                    if (paths.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    string receiptLabel = scope == SquadDeploymentScope.Project
+                        ? "Deployment receipt"
+                        : "Global deployment receipt";
+                    _console.Ansi.MarkupLine(
+                        $"  [yellow]warn[/] {receiptLabel} still claims retired '{Markup.Escape(skill.Name)}' files: [bold]{Markup.Escape(string.Join(", ", paths))}[/].");
+                    reported = true;
+                }
+
+                if (reported)
+                {
+                    _console.Ansi.MarkupLine($"         {Markup.Escape(skill.NewHome)}");
+                }
             }
 
             _console.Ansi.MarkupLine(
                 "         Delete the stale directory, then run [grey]squad update[/] to reconcile the receipt.");
-            _console.Ansi.MarkupLine(
-                $"         The workflow moved to the Kyber-Docs skills ([grey]{Markup.Escape(SquadRetiredSkills.NewHomeSkillPrefix)}*[/], " +
-                $"see [grey]{Markup.Escape(SquadRetiredSkills.NewHomeSkill)}[/]); run [grey]docs init[/] to deploy them.");
         });
+    }
+
+    /// <summary>
+    /// The skills directories this check reads: the two project roots a deployment can write to,
+    /// then each known target's user-level skills directory.
+    /// </summary>
+    /// <remarks>
+    /// Squad deploys at user level by default, and a renderer installs skills under
+    /// <c>&lt;global root&gt;/skills</c>. A target whose global root cannot be resolved holds no
+    /// copy this check could name, so it is skipped rather than failing the warning.
+    /// </remarks>
+    private List<string> RetiredSkillSearchRoots(string workingDirectory)
+    {
+        List<string> roots =
+        [
+            Path.Combine(workingDirectory, ".claude", "skills"),
+            Path.Combine(workingDirectory, ".agents", "skills")
+        ];
+        HashSet<string> seen = new(roots, StringComparer.Ordinal);
+
+        foreach (SquadTarget target in _renderer.SupportedTargets)
+        {
+            string globalRoot;
+            try
+            {
+                globalRoot = _globalRoots.ResolveGlobalRoot(target);
+            }
+            catch (ArgumentException)
+            {
+                continue;
+            }
+
+            string skillsRoot = Path.Combine(globalRoot, "skills");
+            if (seen.Add(skillsRoot))
+            {
+                roots.Add(skillsRoot);
+            }
+        }
+
+        return roots;
     }
 
     /// <summary>

@@ -81,6 +81,66 @@ public sealed class SquadDoctorSeamTests
     }
 
     /// <summary>
+    /// A retired technology skill under a project skills root warns with the standards
+    /// template its rules moved into, so the operator sees the replacement, not just a name.
+    /// </summary>
+    [Fact]
+    public void Execute_RetiredTechnologySkillInAProjectRoot_WarnsWithItsStandardsTemplate()
+    {
+        _files.CreateDirectory($"{Workspace}/.claude/skills/csharp-dev");
+
+        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
+
+        Assert.Contains("Retired skill 'csharp-dev' still present at", output, StringComparison.Ordinal);
+        Assert.Contains("`csharp` standards template", output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A retired skill in a target's user-level skills directory warns too: a user-level
+    /// deployment is Squad's default, so the project tree alone would miss it.
+    /// </summary>
+    [Fact]
+    public void Execute_RetiredTechnologySkillUnderAGlobalRoot_WarnsWithItsStandardsTemplate()
+    {
+        _files.CreateDirectory("/doctor-home/skills/rust-dev");
+
+        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
+
+        Assert.Contains("Retired skill 'rust-dev' still present at", output, StringComparison.Ordinal);
+        Assert.Contains("`rust` standards template", output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A copy the global receipt still claims is reported by its own skill's name and new
+    /// home, not under <c>second-brain</c>: that is the retained case <c>squad update</c>
+    /// leaves behind when the operator edited the file.
+    /// </summary>
+    [Fact]
+    public void Execute_GlobalReceiptClaimsARetiredTechnologySkill_WarnsWithItsNewHome()
+    {
+        _state.GlobalReceipt = Receipt(
+            SquadDeploymentScope.Global,
+            new SquadOwnedFile("skills/dal-dev/SKILL.md", new string('0', 64), "claude", Adopted: false));
+
+        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
+
+        Assert.Contains("Global deployment receipt still claims retired 'dal-dev' files", output, StringComparison.Ordinal);
+        Assert.Contains("`data-access-layer` standards template", output, StringComparison.Ordinal);
+    }
+
+    /// <summary>A lookalike directory is a different skill, so no retired-skill warning appears.</summary>
+    [Fact]
+    public void Execute_LookalikeRetiredSkillName_WarnsAboutNothing()
+    {
+        _files.CreateDirectory($"{Workspace}/.claude/skills/csharp-dev-extra");
+        _files.CreateDirectory("/doctor-home/skills/csharp-dev-extra");
+
+        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
+
+        Assert.DoesNotContain("Retired skill", output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A receipt-owned hook block whose file exists only in the injected file system is read through the seam: the
     /// reported drift is what the fake file holds, not what the developer's disk does.
     /// </summary>
@@ -186,6 +246,9 @@ public sealed class SquadDoctorSeamTests
             ]
         };
 
+    private static SquadReceipt Receipt(SquadDeploymentScope scope, params SquadOwnedFile[] files) =>
+        new("kyber-squad.receipt/v3", scope, "/doctor-home", DateTimeOffset.UnixEpoch, [], files);
+
     private SquadDoctorCommand Doctor()
     {
         FakeProcessExecutor executor = new();
@@ -221,6 +284,8 @@ public sealed class SquadDoctorSeamTests
     {
         public SquadReceipt? Receipt { get; set; }
 
+        public SquadReceipt? GlobalReceipt { get; set; }
+
         public ISquadUserPaths UserPaths { get; } = new FakeSquadUserPaths("/doctor-state");
 
         public string ResolveStateDirectory(string targetRoot, SquadDeploymentScope scope) => throw Unused();
@@ -249,7 +314,8 @@ public sealed class SquadDoctorSeamTests
 
         public SquadReceipt DeserializeReceipt(string json) => throw Unused();
 
-        public SquadReceipt? ReadReceipt(string targetRoot, SquadDeploymentScope scope) => Receipt;
+        public SquadReceipt? ReadReceipt(string targetRoot, SquadDeploymentScope scope) =>
+            scope == SquadDeploymentScope.Global ? GlobalReceipt : Receipt;
 
         public SquadLock? ReadLock(string targetRoot, SquadDeploymentScope scope) => null;
 
