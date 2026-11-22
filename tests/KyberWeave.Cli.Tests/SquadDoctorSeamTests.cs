@@ -22,6 +22,9 @@ public sealed class SquadDoctorSeamTests
 {
     private const string Workspace = "/doctor-work";
 
+    /// <summary>The user-level root <see cref="FixedGlobalRoots"/> answers for every target.</summary>
+    private const string GlobalRoot = "/doctor-home";
+
     private readonly TestConsole _ansi = new() { EmitAnsiSequences = false };
     private readonly FakeConsole _streams = new();
     private readonly InMemoryFileSystem _files = new();
@@ -125,19 +128,24 @@ public sealed class SquadDoctorSeamTests
         _ = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
 
         Assert.Contains("Global deployment receipt still claims retired 'dal-dev' files", output, StringComparison.Ordinal);
-        Assert.Contains("`data-access-layer` standards template", output, StringComparison.Ordinal);
+        Assert.Contains("`data-access-layer` and `sql-server` standards templates", output, StringComparison.Ordinal);
     }
 
-    /// <summary>A lookalike directory is a different skill, so no retired-skill warning appears.</summary>
+    /// <summary>
+    /// A lookalike directory is a different skill, so no warning names it. The real retired skill
+    /// beside it still warns, which proves the lookalike check is not passing because nothing ran.
+    /// </summary>
     [Fact]
-    public void Execute_LookalikeRetiredSkillName_WarnsAboutNothing()
+    public void Execute_LookalikeRetiredSkillName_WarnsOnlyAboutTheRealSkill()
     {
         _files.CreateDirectory($"{Workspace}/.claude/skills/csharp-dev-extra");
         _files.CreateDirectory("/doctor-home/skills/csharp-dev-extra");
+        _files.CreateDirectory($"{Workspace}/.claude/skills/csharp-dev");
 
         _ = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
 
-        Assert.DoesNotContain("Retired skill", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("'csharp-dev-extra'", output, StringComparison.Ordinal);
+        Assert.Contains("Retired skill 'csharp-dev' still present at", output, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -247,7 +255,7 @@ public sealed class SquadDoctorSeamTests
         };
 
     private static SquadReceipt Receipt(SquadDeploymentScope scope, params SquadOwnedFile[] files) =>
-        new("kyber-squad.receipt/v3", scope, "/doctor-home", DateTimeOffset.UnixEpoch, [], files);
+        new(SquadStateSchemas.ReceiptSchemaV3, scope, GlobalRoot, DateTimeOffset.UnixEpoch, [], files);
 
     private SquadDoctorCommand Doctor()
     {
@@ -315,7 +323,9 @@ public sealed class SquadDoctorSeamTests
         public SquadReceipt DeserializeReceipt(string json) => throw Unused();
 
         public SquadReceipt? ReadReceipt(string targetRoot, SquadDeploymentScope scope) =>
-            scope == SquadDeploymentScope.Global ? GlobalReceipt : Receipt;
+            scope == SquadDeploymentScope.Global
+                ? (string.Equals(targetRoot, GlobalRoot, StringComparison.Ordinal) ? GlobalReceipt : null)
+                : Receipt;
 
         public SquadLock? ReadLock(string targetRoot, SquadDeploymentScope scope) => null;
 
@@ -359,7 +369,9 @@ public sealed class SquadDoctorSeamTests
 
     private sealed class FixedGlobalRoots : ISquadGlobalRootResolver
     {
-        public string ResolveGlobalRoot(SquadTarget target) => "/doctor-home";
+        public string? HomeDirectory => GlobalRoot;
+
+        public string ResolveGlobalRoot(SquadTarget target) => GlobalRoot;
     }
 
     private sealed class EmptyPresetStore : ISquadModelPresetStore
