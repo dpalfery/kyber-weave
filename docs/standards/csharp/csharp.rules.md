@@ -5,7 +5,7 @@ doc-type: rule
 status: current
 technology: csharp
 owner: dpalfery
-last-reviewed: 2026-11-19
+last-reviewed: 2026-11-22
 ---
 
 # csharp rules
@@ -44,3 +44,16 @@ register wins.
 - Public APIs carry XML doc comments. A public type or member without one is incomplete.
 - The rule ids in this repository (`KW-*`) are permanent. Add a new id; never reuse or
   renumber one.
+
+## Security floors
+
+- Never use a wildcard CORS origin (or `AllowAnyOrigin()` with `AllowCredentials()`), or
+  `unsafe-inline` / `unsafe-eval` in a CSP, on any policy the dashboard host sets.
+- Never trust client-side validation as the only validation; the server validates what it accepts.
+- Never persist or build a path from a client-supplied filename.
+- Never log tokens, secrets, connection strings, PII, prompts or raw user queries.
+
+## Build files
+
+- Never write generated files into the source tree during a build, or leave a property
+  condition unquoted (`'$(Prop)' == 'true'`).

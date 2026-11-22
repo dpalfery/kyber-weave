@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: github-actions
 owner: dpalfery
-last-reviewed: 2026-11-15
+last-reviewed: 2026-11-22
 ---
 
 # GitHub Actions coding standard
@@ -151,6 +151,21 @@ which selects on the same paths as `build`.
   workflow itself.** The repository's former watchdog helper for this (`scripts/proc-guard.sh
   check-leftovers`) is retired, so a job that starts a server, a watcher or a browser states its
   bound in the step's own timeout and cleans up in an `if: always()` step.
+
+### Build diagnostics
+
+- **CI captures no MSBuild binary log today.** A failed .NET step is reproduced by building the
+  failing project alone with `/bl:app.binlog` and replaying the log (the github-actions skills
+  file has the procedure). A workflow step that starts capturing one follows the rest of this
+  list.
+- A captured binlog is named uniquely so parallel jobs never overwrite each other: `/bl:{}` on
+  .NET 8 SDK or MSBuild 17.8+, `-bl:{{}}` on a `pwsh` runner, an explicit `/bl:build.binlog` on
+  an older SDK. This repository's SDK is 10, so `/bl:{}` applies.
+- A binlog is uploaded on failure only: `if: failure()`, `actions/upload-artifact` with a
+  `**/*.binlog` path, a name that includes `github.run_id`, and an explicit `retention-days`. A
+  clean step keeps binlogs: `git clean -fdx -e "*.binlog"`.
+- `-v:diagnostic` is not a default. It writes 10-50 MB per project; a binlog and a replay is
+  cheaper.
 
 ### The workflow runs the commands a contributor runs
 

@@ -14,7 +14,7 @@ using KyberWeave.Tests.Corpus;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the eight-part content-preservation audit contract for the 95 skill resources under
+/// Pins the eight-part content-preservation audit contract for the resources under
 /// <c>products/kyber-squad/skills/</c>: every resource has exactly one disposition row, the
 /// disposition and delivery vocabularies are closed and self-consistent with the policy-line
 /// ledger, every ledger destination names a real template section containing its anchor, every
@@ -23,13 +23,10 @@ namespace KyberWeave.Tests;
 /// skill resource resolves, and every ledger anchor is seeded by <c>docs init</c>.
 /// </summary>
 /// <remarks>
-/// This is the RED half of a test-first task: the audit document
-/// <c>docs/kyber-squad/skill-resource-dispositions.md</c> does not exist yet, so A1 through A6
-/// and A8 fail here by design, each naming the missing document. A7 is the exception — it checks
-/// the real skill tree directly, not the audit doc, so its real-tree case is a passing baseline
-/// rather than a RED failure. Its fixture case, <see cref="ADanglingLocalLinkInASkillResourceIsReported"/>,
-/// proves the shared checker actually detects a dangling link rather than passing vacuously
-/// because the real tree at the base commit has none.
+/// The document records two kinds of row. A row for a resource that still ships describes that
+/// file. A row for one of the deleted technology skills — <c>removed-with-skill</c> — records
+/// where the deleted file's content went; the file no longer exists, so its source cannot be
+/// read and its delivery is <c>—</c>.
 /// </remarks>
 public sealed class SkillResourceDispositionAuditTests
 {
@@ -39,7 +36,9 @@ public sealed class SkillResourceDispositionAuditTests
 
     private const string RelativeAuditPath = "docs/kyber-squad/skill-resource-dispositions.md";
     private const string NoDestination = "—";
+    private const string RemovedWithSkill = "removed-with-skill";
     private const string DestinationSeparator = " § ";
+    private const string RulesSuffix = ".rules";
 
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UsePipeTables()
@@ -47,18 +46,19 @@ public sealed class SkillResourceDispositionAuditTests
 
     private static readonly HashSet<string> ContentClassVocabulary = new(StringComparer.Ordinal)
     {
-        "policy-bearing", "technique", "procedure", "lens-criteria", "review-pointer",
+        "policy", "policy-bearing", "mixed", "technique", "procedure", "lens-criteria", "review-pointer",
         "provider-guidance", "script", "template", "inventory", "metadata"
     };
 
     private static readonly HashSet<string> DispositionVocabulary = new(StringComparer.Ordinal)
     {
-        "retain-in-place", "policy-migrated-to-template", "superseded-intentionally", "pointer-already-#126"
+        "retain-in-place", "policy-migrated-to-template", "superseded-intentionally", "pointer-already-#126",
+        RemovedWithSkill
     };
 
     private static readonly HashSet<string> DeliveryVocabulary = new(StringComparer.Ordinal)
     {
-        "rendered", "packaged-only"
+        "rendered", "packaged-only", NoDestination
     };
 
     private static readonly HashSet<string> LedgerDispositionVocabulary = new(StringComparer.Ordinal)
@@ -74,8 +74,9 @@ public sealed class SkillResourceDispositionAuditTests
 
     /// <summary>
     /// Prevents a resource from being silently dropped, duplicated, or invented in the audit: the
-    /// table's Resource column must equal, one-for-one, the 95 files on disk under
-    /// <c>products/kyber-squad/skills/**</c> other than <c>SKILL.md</c>.
+    /// table's Resource column must equal, one-for-one, the files on disk under
+    /// <c>products/kyber-squad/skills/**</c> other than <c>SKILL.md</c>, plus one
+    /// <c>removed-with-skill</c> record for each technology-skill file that was deleted.
     /// </summary>
     [Fact]
     public void EveryCanonicalSkillResourceHasExactlyOneDispositionRow()
@@ -102,19 +103,31 @@ public sealed class SkillResourceDispositionAuditTests
             duplicates.Length == 0,
             "'Resource dispositions' has duplicate Resource rows: " + string.Join(", ", duplicates));
 
-        HashSet<string> tableSet = rows.Select(row => row.Resource).ToHashSet(StringComparer.Ordinal);
+        Dictionary<string, DispositionRow> table = rows.ToDictionary(row => row.Resource, StringComparer.Ordinal);
         HashSet<string> diskSet = onDisk.ToHashSet(StringComparer.Ordinal);
-        string[] missing = diskSet.Where(path => !tableSet.Contains(path)).Order(StringComparer.Ordinal).ToArray();
-        string[] extra = tableSet.Where(path => !diskSet.Contains(path)).Order(StringComparer.Ordinal).ToArray();
+        string[] missing = diskSet.Where(path => !table.ContainsKey(path)).Order(StringComparer.Ordinal).ToArray();
+        // A row with no file on disk is allowed only as a record of a deleted technology skill;
+        // any other invented path stays a finding.
+        string[] extra = table.Keys
+            .Where(path => !diskSet.Contains(path) &&
+                !string.Equals(table[path].Disposition, RemovedWithSkill, StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        string[] stillShipped = table.Keys
+            .Where(path => diskSet.Contains(path) &&
+                string.Equals(table[path].Disposition, RemovedWithSkill, StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
 
         Assert.True(
-            missing.Length == 0 && extra.Length == 0,
+            missing.Length == 0 && extra.Length == 0 && stillShipped.Length == 0,
             $"'Resource dispositions' does not match disk. Missing: [{string.Join(", ", missing)}]. " +
-            $"Extra: [{string.Join(", ", extra)}].");
+            $"Extra: [{string.Join(", ", extra)}]. " +
+            $"Recorded as removed but still on disk: [{string.Join(", ", stillShipped)}].");
         // The count is exact on purpose: a resource added without a row, or a row without a
         // resource, is already caught by the comparison above, so this catches the other
         // failure — a row added twice under different spellings of the same path.
-        Assert.Equal(89, rows.Count);
+        Assert.Equal(98, rows.Count);
     }
 
     /// <summary>
@@ -245,9 +258,19 @@ public sealed class SkillResourceDispositionAuditTests
             foreach (DispositionRow row in dispositions)
             {
                 (string skillName, string withinSkillPath) = SplitSkillResource(row.Resource);
-                bool rendered = renderedBySkill.TryGetValue(skillName, out HashSet<string>? resources) &&
-                                resources.Contains(withinSkillPath);
-                string expected = rendered ? "rendered" : "packaged-only";
+                string expected;
+                if (!Corpus.Exists(ResourceFilePath(row.Resource)))
+                {
+                    // A removed technology skill ships nothing, so it has no delivery.
+                    expected = NoDestination;
+                }
+                else
+                {
+                    bool rendered = renderedBySkill.TryGetValue(skillName, out HashSet<string>? resources) &&
+                                    resources.Contains(withinSkillPath);
+                    expected = rendered ? "rendered" : "packaged-only";
+                }
+
                 if (!string.Equals(expected, row.Delivery, StringComparison.Ordinal))
                 {
                     findings.Add(
@@ -263,7 +286,8 @@ public sealed class SkillResourceDispositionAuditTests
     /// <summary>
     /// Prevents a ledger row from pointing at a template section or anchor text that does not
     /// actually exist: the Destination's <c>##</c>/<c>###</c> heading must exist in that
-    /// technology's standard, and the heading's own section must contain the Anchor verbatim.
+    /// technology's standard — or, for a <c>&lt;technology&gt;.rules</c> destination, in its rules
+    /// file — and the heading's own section must contain the Anchor verbatim.
     /// </summary>
     [Fact]
     public void LedgerDestinationsNameExistingTemplateSectionsContainingTheirAnchor()
@@ -276,28 +300,29 @@ public sealed class SkillResourceDispositionAuditTests
         else
         {
             IReadOnlyList<LedgerRow> ledger = ParseLedgerRows(Corpus.ReadText(RelativeAuditPath));
-            Dictionary<string, Section[]?> sectionsByTechnology = new(StringComparer.Ordinal);
+            Dictionary<string, Section[]?> sectionsByFile = new(StringComparer.Ordinal);
 
             foreach (LedgerRow row in ledger)
             {
-                (string technology, string heading) = SplitDestination(row.Destination);
-                if (technology.Length == 0)
+                (string rawTechnology, string heading) = SplitDestination(row.Destination);
+                if (rawTechnology.Length == 0)
                 {
                     continue;
                 }
 
-                if (!sectionsByTechnology.TryGetValue(technology, out Section[]? sections))
+                (string technology, bool rules) = ResolveDestinationTechnology(rawTechnology);
+                string templatePath = DestinationFilePath(technology, rules);
+                if (!sectionsByFile.TryGetValue(templatePath, out Section[]? sections))
                 {
-                    string standardPath = $"{ProductRoot}/standards/{technology}/{technology}.standards.md";
-                    sections = Corpus.Exists(standardPath) ? HeadingSections(Corpus.ReadText(standardPath)) : null;
-                    sectionsByTechnology[technology] = sections;
+                    sections = Corpus.Exists(templatePath) ? HeadingSections(Corpus.ReadText(templatePath)) : null;
+                    sectionsByFile[templatePath] = sections;
                 }
 
                 if (sections is null)
                 {
                     findings.Add(
-                        $"{row.Source}:{row.Line}: destination technology '{technology}' has no " +
-                        $"'standards/{technology}/README.md'.");
+                        $"{row.Source}:{row.Line}: destination technology '{rawTechnology}' has no " +
+                        $"'{templatePath}'.");
                     continue;
                 }
 
@@ -307,7 +332,7 @@ public sealed class SkillResourceDispositionAuditTests
                 {
                     findings.Add(
                         $"{row.Source}:{row.Line}: no '## {heading}' or '### {heading}' heading in " +
-                        $"standards/{technology}/{technology}.standards.md.");
+                        $"'{templatePath}'.");
                     continue;
                 }
 
@@ -322,7 +347,7 @@ public sealed class SkillResourceDispositionAuditTests
                 {
                     findings.Add(
                         $"{row.Source}:{row.Line}: Anchor '{row.Anchor}' does not appear in " +
-                        $"standards/{technology}/{technology}.standards.md § {heading}.");
+                        $"'{templatePath}' § {heading}.");
                 }
             }
         }
@@ -359,7 +384,8 @@ public sealed class SkillResourceDispositionAuditTests
 
                 if (content is null)
                 {
-                    findings.Add($"{row.Source}:{row.Line}: source file does not exist.");
+                    // A deleted technology skill keeps its ledger rows as a record of the wording
+                    // the file held; there is no source left to compare them against.
                     continue;
                 }
 
@@ -407,8 +433,15 @@ public sealed class SkillResourceDispositionAuditTests
 
             foreach (DispositionRow row in dispositions.Where(candidate => candidate.ContentClass == "policy-bearing"))
             {
+                if (!Corpus.Exists(ResourceFilePath(row.Resource)))
+                {
+                    // A removed technology skill's rows are records; there is no file to token-check.
+                    continue;
+                }
+
                 string[] technologies = ledgerBySource[row.Resource]
-                    .Select(row2 => SplitDestination(row2.Destination).Technology)
+                    .Select(row2 => ResolveDestinationTechnology(
+                        SplitDestination(row2.Destination).Technology).Technology)
                     .Where(technology => technology.Length > 0)
                     .Distinct(StringComparer.Ordinal)
                     .ToArray();
@@ -499,7 +532,8 @@ public sealed class SkillResourceDispositionAuditTests
     /// <summary>
     /// Prevents a ledger Anchor from citing template wording that <c>docs init --kyber-standards</c>
     /// never actually seeds: the embedded <see cref="IKyberStandardsTemplates.Render"/> output for
-    /// the anchor's technology must contain it verbatim.
+    /// the anchor's technology — or <see cref="IKyberStandardsTemplates.RenderPart"/> for its rules
+    /// file, when the Destination names one — must contain it verbatim.
     /// </summary>
     [Fact]
     public void DocsInitSeedsEveryLedgerTemplateAnchor()
@@ -516,19 +550,26 @@ public sealed class SkillResourceDispositionAuditTests
 
             foreach (LedgerRow row in ledger.Where(candidate => candidate.Anchor.Length > 0))
             {
-                (string technology, _) = SplitDestination(row.Destination);
-                if (technology.Length == 0)
+                (string rawTechnology, _) = SplitDestination(row.Destination);
+                if (rawTechnology.Length == 0)
                 {
                     findings.Add(
                         $"{row.Source}:{row.Line}: Anchor '{row.Anchor}' has no Destination technology to render.");
                     continue;
                 }
 
-                if (!rendered.TryGetValue(technology, out string? template))
+                (string technology, bool rules) = ResolveDestinationTechnology(rawTechnology);
+                string templateKey = DestinationFilePath(technology, rules);
+                string renderedBy = rules
+                    ? $"Templates.RenderPart(\"{technology}\", Part.Rules, ...)"
+                    : $"Templates.Render(\"{technology}\", ...)";
+                if (!rendered.TryGetValue(templateKey, out string? template))
                 {
                     try
                     {
-                        template = Templates.Render(technology, "dpalfery", "2026-09-28");
+                        template = rules
+                            ? Templates.RenderPart(technology, KyberStandardsTemplates.Part.Rules, "dpalfery", "2026-09-28")
+                            : Templates.Render(technology, "dpalfery", "2026-09-28");
                     }
                     catch (ArgumentException exception)
                     {
@@ -536,14 +577,13 @@ public sealed class SkillResourceDispositionAuditTests
                         continue;
                     }
 
-                    rendered[technology] = template;
+                    rendered[templateKey] = template;
                 }
 
                 if (!CollapsedWhitespace(template).Contains(CollapsedWhitespace(row.Anchor), StringComparison.Ordinal))
                 {
                     findings.Add(
-                        $"{row.Source}:{row.Line}: Anchor '{row.Anchor}' does not appear in " +
-                        $"Templates.Render(\"{technology}\", ...).");
+                        $"{row.Source}:{row.Line}: Anchor '{row.Anchor}' does not appear in {renderedBy}.");
                 }
             }
         }
@@ -582,6 +622,11 @@ public sealed class SkillResourceDispositionAuditTests
     /// <summary>Implements the D5 disposition-derivation table.</summary>
     private static string DeriveDisposition(string resource, IEnumerable<LedgerRow> ledgerRowsForResource)
     {
+        if (!Corpus.Exists(ResourceFilePath(resource)))
+        {
+            return RemovedWithSkill;
+        }
+
         LedgerRow[] rows = ledgerRowsForResource.ToArray();
         if (rows.Any(row => row.Disposition is "migrated" or "duplicate"))
         {
@@ -618,6 +663,19 @@ public sealed class SkillResourceDispositionAuditTests
             ? (string.Empty, string.Empty)
             : (destination[..separator].Trim(), destination[(separator + DestinationSeparator.Length)..].Trim());
     }
+
+    /// <summary>
+    /// Resolves the technology a Destination names, and whether its <c>.rules</c> suffix points at
+    /// that technology's rules file rather than its standard.
+    /// </summary>
+    private static (string Technology, bool Rules) ResolveDestinationTechnology(string destinationTechnology) =>
+        destinationTechnology.EndsWith(RulesSuffix, StringComparison.Ordinal)
+            ? (destinationTechnology[..^RulesSuffix.Length], true)
+            : (destinationTechnology, false);
+
+    /// <summary>The path of the template file a destination's technology and part name.</summary>
+    private static string DestinationFilePath(string technology, bool rules) =>
+        $"{ProductRoot}/standards/{technology}/{technology}{(rules ? RulesSuffix : ".standards")}.md";
 
     private static string CollapsedWhitespace(string text)
     {

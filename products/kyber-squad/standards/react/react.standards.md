@@ -6,7 +6,7 @@ status: draft
 technology: react
 builds-on: typescript
 owner: unassigned
-last-reviewed: 2026-08-16
+last-reviewed: 2026-11-22
 ---
 
 # react coding standard
