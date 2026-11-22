@@ -71,8 +71,7 @@ pub struct Listening {
 /// loopback, and this is where a hijacked or confused server would try.
 pub fn parse_listening_line(line: &str) -> Option<Listening> {
     let value: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
-    let event = value.get("event")?.as_str()?;
-    if event != "kyberdash.web.listening" && event != "kyberdash.web.attached" {
+    if value.get("event")?.as_str()? != "kyberdash.web.listening" {
         return None;
     }
 
@@ -82,18 +81,8 @@ pub fn parse_listening_line(line: &str) -> Option<Listening> {
     Some(Listening {
         url,
         pid: u32::try_from(value.get("pid")?.as_u64()?).ok()?,
-        version: value
-            .get("version")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
-        api_version: u32::try_from(
-            value
-                .get("apiVersion")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(1),
-        )
-        .ok()?,
+        version: value.get("version")?.as_str()?.to_string(),
+        api_version: u32::try_from(value.get("apiVersion")?.as_u64()?).ok()?,
     })
 }
 
@@ -170,10 +159,7 @@ pub fn discover(state_dir: &Path) -> Option<Listening> {
 
 fn parse_server_record(text: &str) -> Option<Listening> {
     let value: serde_json::Value = serde_json::from_str(text).ok()?;
-    let api_version = match value.get("apiVersion").and_then(|v| v.as_u64()) {
-        Some(version) => u32::try_from(version).ok()?,
-        None => 1,
-    };
+    let api_version = u32::try_from(value.get("apiVersion")?.as_u64()?).ok()?;
     if api_version < crate::cli::MIN_API_VERSION {
         return None;
     }
@@ -187,11 +173,7 @@ fn parse_server_record(text: &str) -> Option<Listening> {
         url: api::loopback_origin(&url_str).ok()?,
         pid: u32::try_from(value.get("pid")?.as_u64()?).ok()?,
         // The record does not carry a release number; nothing reads it.
-        version: value
-            .get("version")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
+        version: String::new(),
         api_version,
     })
 }
@@ -872,14 +854,13 @@ mod tests {
 
         assert_eq!(parse_listening_line("  KyberDash dashboard at ..."), None);
         assert_eq!(parse_listening_line(r#"{"event":"something.else"}"#), None);
+        assert_eq!(
+            parse_listening_line(
+                r#"{"event":"kyberdash.web.attached","url":"http://127.0.0.1:4747","pid":4242,"version":"0.21.0","apiVersion":1}"#
+            ),
+            None
+        );
         assert_eq!(parse_listening_line(""), None);
-
-        let attached = parse_listening_line(
-            r#"{"event":"kyberdash.web.attached","url":"http://127.0.0.1:4747","pid":4242,"version":"0.21.0","apiVersion":1}"#,
-        )
-        .expect("attached event line parses");
-        assert_eq!(attached.url, "http://127.0.0.1:4747");
-        assert_eq!(attached.pid, 4242);
     }
 
     /// Requirement 6.10 allows loopback and nothing else, and the URL arrives
@@ -915,7 +896,7 @@ mod tests {
         assert_eq!(good.url, "http://127.0.0.1:4747");
         assert_eq!(good.pid, own_pid);
 
-        let with_port_only = format!(r#"{{"pid":{own_pid},"port":4747}}"#);
+        let with_port_only = format!(r#"{{"pid":{own_pid},"port":4747,"apiVersion":1}}"#);
         let port_parsed = parse_server_record(&with_port_only).expect("port-only record parses");
         assert_eq!(port_parsed.url, "http://127.0.0.1:4747");
         assert_eq!(port_parsed.pid, own_pid);

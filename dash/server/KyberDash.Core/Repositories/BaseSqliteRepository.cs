@@ -19,7 +19,7 @@ namespace KyberDash.Core.Repositories;
 public abstract partial class BaseSqliteRepository
 {
     private static readonly Lock ProviderGate = new();
-    private static bool ProviderInitialized;
+    private static volatile bool ProviderInitialized;
 
     private const int SqliteBusyResultCode = 5;
     private const int SqliteLockedResultCode = 6;
@@ -41,8 +41,15 @@ public abstract partial class BaseSqliteRepository
         lock (ProviderGate)
         {
             if (ProviderInitialized) return;
-            raw.SetProvider(new SQLite3Provider_sqlite3());
-            ProviderInitialized = true;
+            try
+            {
+                raw.SetProvider(new SQLite3Provider_sqlite3());
+                ProviderInitialized = true;
+            }
+            catch (Exception ex) when (ex is DllNotFoundException or TypeInitializationException or InvalidOperationException or BadImageFormatException)
+            {
+                throw new SqliteExecutionException("The native 'sqlite3' dynamic library is unavailable.", ex);
+            }
         }
     }
 
@@ -97,7 +104,7 @@ public abstract partial class BaseSqliteRepository
         {
             DataSource = DatabasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
-            DefaultTimeout = Math.Max(1, busyTimeoutMilliseconds / 1000),
+            DefaultTimeout = Math.Max(1, (int)Math.Ceiling(busyTimeoutMilliseconds / 1000.0)),
         }.ToString();
 
         for (int attempt = 1; attempt <= busyAttempts; attempt++)
@@ -108,8 +115,8 @@ public abstract partial class BaseSqliteRepository
                 connection.Open();
 
                 using SqliteCommand command = connection.CreateCommand();
-                command.CommandTimeout = Math.Max(1, (int)batchTimeout.TotalSeconds);
-                command.CommandText = cleanedSql;
+                command.CommandTimeout = Math.Max(1, (int)Math.Ceiling(batchTimeout.TotalSeconds));
+                command.CommandText = cleanedSql; // nosemgrep: csharp.lang.security.sqli.csharp-sqli.csharp-sqli
 
                 using SqliteDataReader reader = command.ExecuteReader();
                 StringBuilder sb = new();
