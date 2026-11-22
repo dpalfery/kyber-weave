@@ -253,23 +253,35 @@ internal static class WorkerGuardRules
         "the run worktree; the canonical checkout stays untouched for the whole run.";
 
     /// <summary>
-    /// The directories a command moves into before it acts: every <c>cd</c> or <c>pushd</c> argument and every
-    /// <c>git -C</c> argument, as the shell wrote the path. A relative path is resolved against the call's working
-    /// directory by the caller, which is the only place that knows it.
+    /// The refusal a command earns when a <c>cd</c> or <c>pushd</c> names a directory the guard cannot place, because
+    /// the shell, not the command, decides where it points.
     /// </summary>
-    /// <remarks>
-    /// Every segment is scanned, including the parts after a <c>&amp;&amp;</c>, <c>;</c> or <c>|</c> and inside a
-    /// subshell, because a command can step into the canonical checkout at any point. A word only counts as the
-    /// program where a program can stand, so a quoted argument that happens to read <c>cd</c> is not mistaken for
-    /// one, and quoted text stays a single word, so a path is taken whole. A path the shell expands at run time,
-    /// such as a variable, is not one the guard can place, so it is not named here; <see cref="RunsInWorkingDirectory" />
-    /// treats that step as running in the working directory instead.
-    /// </remarks>
-    internal static IReadOnlyList<string> EnteredDirectories(string command) =>
-        Walk(command).EnteredDirectories;
+    internal static string UnplaceableDirectoryRefusal() =>
+        $"{CheckoutRuleId}: this command changes directory to one the guard cannot place, because the shell expands " +
+        "the path at run time. Nothing ran. Start the command with `cd <absolute path> && ` naming the directory, " +
+        "so every step runs where the guard can check it.";
 
-    /// <summary>The reading of one command: the directories it enters, and whether a step of it runs in the working directory.</summary>
-    private readonly record struct CommandWalk(bool RunsInWorkingDirectory, IReadOnlyList<string> EnteredDirectories);
+    /// <summary>
+    /// The refusal a command earns when a step runs in the shell's working directory and the event named no directory
+    /// the guard can resolve.
+    /// </summary>
+    internal static string UnknownWorkingDirectoryRefusal() =>
+        $"{CheckoutRuleId}: this command would run in the shell's working directory, but the event named no directory " +
+        "the guard can resolve, so it cannot tell whether that directory is the repository's canonical checkout. " +
+        "Nothing ran. Start the command with `cd <absolute path> && ` naming the run worktree, so every step runs " +
+        "where the guard can check it.";
+
+    /// <summary>
+    /// The reading of one command: the directories it enters, whether a step of it runs in the working directory,
+    /// and whether a change directory names a place the guard cannot judge.
+    /// </summary>
+    /// <param name="RunsInWorkingDirectory">True when some step runs in the call's own working directory.</param>
+    /// <param name="HasUnplaceableDirectory">True when a <c>cd</c> or <c>pushd</c> names a directory the guard cannot place.</param>
+    /// <param name="EnteredDirectories">Every directory the command moves into, as a path the guard can place.</param>
+    internal readonly record struct CommandWalk(
+        bool RunsInWorkingDirectory,
+        bool HasUnplaceableDirectory,
+        IReadOnlyList<string> EnteredDirectories);
 
     /// <summary>The words that end one command and begin the next, kept as words of their own by <see cref="ShellTokens" />.</summary>
     private static readonly string[] CommandSeparators = ["&&", "||", "|", ";", "&", "(", ")"];
@@ -308,8 +320,8 @@ internal static class WorkerGuardRules
     /// <summary>
     /// The directory a <c>cd</c> or <c>pushd</c> at <paramref name="index"/> moves into, or null when it names none:
     /// a bare <c>pushd</c> swaps the directory stack, and <c>cd -</c> returns to a directory the command does not
-    /// name. The argument it does return may still be one the guard cannot place, such as a variable, which the
-    /// caller checks with <see cref="IsPlaceableDirectory" />.
+    /// name. The argument it does return may still be one the guard cannot place, such as a variable, which
+    /// <see cref="PlaceDirectory" /> rejects.
     /// </summary>
     private static string? ChangeDirectoryArgument(string[] tokens, int index)
     {
@@ -327,33 +339,34 @@ internal static class WorkerGuardRules
     }
 
     /// <summary>
-    /// Whether any step of the command runs in the call's own working directory, which is the only case where the
-    /// caller judges that directory. The walk follows the shell: a <c>cd</c> or <c>pushd</c> naming a placeable
-    /// directory moves the shell before later steps, a subshell's changes end at its closing <c>)</c>, a pipeline
-    /// stage starts in the directory the pipeline did, and a step after <c>||</c> may run in the directory the
-    /// previous step started in. A <c>git</c> step with <c>-C</c> runs in that directory and leaves the shell where
-    /// it was. A <c>cd</c> or <c>pushd</c> naming no directory the guard can place, a path it cannot resolve, and
-    /// any other step run in the working directory. A command with no step at all reports true, the fail-closed
-    /// reading.
+    /// Walks the command's steps once in shell order, tracking the directory each step runs in and every directory
+    /// the command moves into. The working directory is the initial one and the value no step can name: a directory
+    /// change the guard cannot place falls back to it, so the caller judges the safer path.
     /// </summary>
     /// <remarks>
-    /// The walk is the one <see cref="EnteredDirectories" /> reads, so the two always agree on which words are
-    /// programs and where each step runs. Every directory the command enters is still judged by
-    /// <see cref="EnteredDirectories" />, whether or not this returns false.
+    /// Every segment is scanned, including the parts after a <c>&amp;&amp;</c>, <c>;</c> or <c>|</c> and inside a
+    /// subshell, because a command can step into the canonical checkout at any point. A word only counts as the
+    /// program where a program can stand, so a quoted argument that happens to read <c>cd</c> is not mistaken for
+    /// one, and quoted text stays a single word, so a path is taken whole. A leading <c>~</c> is expanded to
+    /// <paramref name="home" />. A path the shell expands at run time, such as a variable or a glob, is not one the
+    /// guard can place, and a change directory that names one is reported through
+    /// <see cref="CommandWalk.HasUnplaceableDirectory" />, which the caller refuses. A subshell's changes end at its
+    /// closing <c>)</c>, a pipeline stage starts in the directory the pipeline did, and a step after <c>||</c> may
+    /// run in the directory the previous step started in. A <c>git</c> step runs in the directory its <c>-C</c>,
+    /// <c>--work-tree</c> or <c>--git-dir</c> names, and leaves the shell where it was; a <c>git</c> step naming no
+    /// directory, and any other step at the shell's own level, runs in the working directory. A command with no step
+    /// at all reports true, the fail-closed reading.
     /// </remarks>
-    internal static bool RunsInWorkingDirectory(string command) => Walk(command).RunsInWorkingDirectory;
-
-    /// <summary>
-    /// Walks the command's steps once in shell order, tracking the directory each step runs in. The working
-    /// directory is the initial one, and the value no step can name: a directory change the guard cannot place
-    /// falls back to it, so the caller judges the safer path.
-    /// </summary>
-    private static CommandWalk Walk(string command)
+    /// <param name="command">The command as the harness reported it.</param>
+    /// <param name="home">The operator's home, which a leading <c>~</c> expands to; null when the caller has none.</param>
+    /// <returns>The reading described above.</returns>
+    internal static CommandWalk Walk(string command, string? home)
     {
         string[] tokens = ShellTokens(command);
         List<string> entered = [];
         Stack<(string? Current, string? PipelineBase, string? BeforeLastStep, bool InPipeline)> subshells = [];
         bool runsInWorkingDirectory = false;
+        bool hasUnplaceableDirectory = false;
         bool sawStep = false;
         string? current = null;
         string? pipelineBase = null;
@@ -416,13 +429,17 @@ internal static class WorkerGuardRules
             beforeLastStep = current;
             if (IsChangeDirectory(token))
             {
-                if (ChangeDirectoryArgument(tokens, index) is { } directory && IsPlaceableDirectory(directory))
+                string? target = ChangeDirectoryArgument(tokens, index);
+                if (PlaceDirectory(target, home) is { } directory)
                 {
                     entered.Add(directory);
                     current = directory;
                 }
                 else
                 {
+                    // A change directory the guard cannot place may run in the canonical checkout, so the caller
+                    // refuses the command rather than judging the working directory alone.
+                    hasUnplaceableDirectory = true;
                     runsInWorkingDirectory = true;
                     current = null;
                 }
@@ -432,21 +449,25 @@ internal static class WorkerGuardRules
             }
             else if (IsGitProgram(token))
             {
-                if (GitChangeDirectory(tokens, index) is { } directory)
+                IReadOnlyList<string> directories = GitDirectories(tokens, index);
+                if (directories.Count > 0)
                 {
-                    if (IsPlaceableDirectory(directory))
+                    foreach (string directory in directories)
                     {
-                        entered.Add(directory);
-                    }
-                    else
-                    {
-                        // The step names a directory this guard cannot place, so it may run anywhere: judge the cwd.
-                        runsInWorkingDirectory = true;
+                        if (PlaceDirectory(directory, home) is { } placed)
+                        {
+                            entered.Add(placed);
+                        }
+                        else
+                        {
+                            // The step names a directory this guard cannot place, so it may run anywhere: judge the cwd.
+                            runsInWorkingDirectory = true;
+                        }
                     }
                 }
                 else if (current is null)
                 {
-                    // git with no -C runs where the shell stands.
+                    // git naming no directory of its own runs where the shell stands.
                     runsInWorkingDirectory = true;
                 }
 
@@ -465,46 +486,83 @@ internal static class WorkerGuardRules
             }
         }
 
-        return new CommandWalk(runsInWorkingDirectory || !sawStep, entered);
+        return new CommandWalk(runsInWorkingDirectory || !sawStep, hasUnplaceableDirectory, entered);
     }
 
     /// <summary>
-    /// Whether the guard can place a directory a command names as written: a path, not a shell expansion such as a
-    /// variable, a glob or a home-directory shorthand the command does not spell out.
+    /// The directory <paramref name="directory" /> names, when the guard can place it, or null when the shell
+    /// decides it: a variable, a glob or a command substitution. A leading <c>~</c> expands to
+    /// <paramref name="home" />, and a path it cannot expand is not placeable.
     /// </summary>
-    private static bool IsPlaceableDirectory(string directory) =>
-        !string.IsNullOrWhiteSpace(directory)
-        && !directory.StartsWith('~')
-        && !directory.Contains('$', StringComparison.Ordinal)
-        && !directory.Contains('`', StringComparison.Ordinal)
-        && !directory.Contains('*', StringComparison.Ordinal)
-        && !directory.Contains('?', StringComparison.Ordinal);
+    private static string? PlaceDirectory(string? directory, string? home)
+    {
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return null;
+        }
+
+        string? placed = directory;
+        if (placed.StartsWith('~'))
+        {
+            if (string.IsNullOrWhiteSpace(home))
+            {
+                return null;
+            }
+
+            placed = placed.Length == 1
+                ? home
+                : placed[1] is '/' or '\\'
+                    ? Path.Combine(home, placed[2..])
+                    : null;
+        }
+
+        return placed is not null
+            && !placed.Contains('$', StringComparison.Ordinal)
+            && !placed.Contains('`', StringComparison.Ordinal)
+            && !placed.Contains('*', StringComparison.Ordinal)
+            && !placed.Contains('?', StringComparison.Ordinal)
+                ? placed
+                : null;
+    }
 
     /// <summary>
-    /// The directory a <c>git</c> step at <paramref name="index"/> names with <c>-C</c>, or null when it names none.
+    /// The directories a <c>git</c> step at <paramref name="index" /> runs in, as the command names them: a
+    /// <c>-C</c> or <c>--work-tree</c> directory, and the parent of a <c>--git-dir</c> that ends in <c>.git</c>.
     /// Only git's global options, which come before its subcommand, are read, so a subcommand's own <c>-C</c> is
-    /// never taken for a directory change.
+    /// never taken for a directory change. An empty list means the step names no directory of its own.
     /// </summary>
-    private static string? GitChangeDirectory(string[] tokens, int index)
+    private static IReadOnlyList<string> GitDirectories(string[] tokens, int index)
     {
+        List<string> directories = [];
         for (int next = index + 1; next < tokens.Length && !IsCommandSeparator(tokens[next]); next++)
         {
             string option = tokens[next];
             if (!option.StartsWith('-') || string.Equals(option, "--", StringComparison.Ordinal))
             {
-                return null;
+                break;
             }
 
-            if (string.Equals(option, "-C", StringComparison.Ordinal))
+            if (option is "-C" or "--work-tree" or "--git-dir")
             {
-                return next + 1 < tokens.Length && !IsCommandSeparator(tokens[next + 1])
-                    ? tokens[next + 1]
-                    : null;
+                if (next + 1 < tokens.Length && !IsCommandSeparator(tokens[next + 1]))
+                {
+                    AddGitDirectory(directories, option, tokens[++next]);
+                }
+
+                continue;
             }
 
             if (option.StartsWith("-C", StringComparison.Ordinal) && option.Length > 2)
             {
-                return option[2..].TrimStart('=');
+                directories.Add(option[2..].TrimStart('='));
+                continue;
+            }
+
+            int equals = option.IndexOf('=', StringComparison.Ordinal);
+            if (equals > 0 && option[..equals] is "--work-tree" or "--git-dir")
+            {
+                AddGitDirectory(directories, option[..equals], option[(equals + 1)..]);
+                continue;
             }
 
             if (GitOptionTakesValue(option))
@@ -513,7 +571,32 @@ internal static class WorkerGuardRules
             }
         }
 
-        return null;
+        return directories;
+    }
+
+    /// <summary>
+    /// Adds the directory one git option names: the value itself for <c>-C</c> and <c>--work-tree</c>, and the
+    /// parent of a git directory that ends in <c>.git</c>, which is the directory git then runs in.
+    /// </summary>
+    private static void AddGitDirectory(List<string> directories, string option, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        if (!string.Equals(option, "--git-dir", StringComparison.Ordinal))
+        {
+            directories.Add(value);
+            return;
+        }
+
+        string trimmed = value.TrimEnd('/', '\\');
+        if (string.Equals(Path.GetFileName(trimmed), ".git", StringComparison.Ordinal)
+            && Path.GetDirectoryName(trimmed) is { Length: > 0 } parent)
+        {
+            directories.Add(parent);
+        }
     }
 
     /// <summary>The git global options that take a separate value, so the word after one is not a subcommand.</summary>
@@ -915,8 +998,9 @@ internal static class WorkerGuardRules
             return budget.CallMinutes;
         }
 
-        int gateMinutes = (longestSeconds + 59) / 60 + 1;
-        return Math.Max(budget.CallMinutes, gateMinutes);
+        // A very large timeout overflows int arithmetic, which would turn a huge limit into a small or negative one.
+        long gateMinutes = ((long)longestSeconds + 59) / 60 + 1;
+        return Math.Max(budget.CallMinutes, (int)Math.Min(gateMinutes, int.MaxValue));
     }
 
     /// <summary>The header line a budget file opens with.</summary>
@@ -969,9 +1053,11 @@ internal static class WorkerGuardRules
                 return null;
             }
 
-            // A header written before the per-call limit existed has four fields; it gets the shipped limit.
+            // The per-call limit is the header's last field, because the agent's name before it can contain spaces and
+            // so cannot be skipped by counting. A header written before the per-call limit existed has four fixed
+            // fields, ends in (part of) the name, and gets the shipped limit.
             int callMinutes = header.Length >= 5
-                && int.TryParse(header[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedCall)
+                && int.TryParse(header[^1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedCall)
                 && parsedCall > 0
                     ? parsedCall
                     : ArbiterDispatchBudgetConfig.Defaults.CallMinutes;

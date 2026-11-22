@@ -501,10 +501,24 @@ internal static partial class SecretRules
             .Where(word => word.Length > 0)];
 
     /// <summary>
-    /// The command split into the steps a shell would run: a separator outside quotes ends one, and a separator
-    /// inside a quote belongs to the text a nested shell, a query or a value carries.
+    /// The command split into the steps a shell would run: a separator outside quotes ends one, a separator inside
+    /// a quote belongs to the text a nested shell, a query or a value carries, and the command inside a
+    /// <c>$(...)</c> or backtick substitution is a step of its own, because the shell runs it as one.
     /// </summary>
     private static IEnumerable<string> Steps(string command)
+    {
+        foreach (string step in SplitSteps(command))
+        {
+            yield return step;
+            foreach (string substituted in SubstitutedCommands(step))
+            {
+                yield return substituted;
+            }
+        }
+    }
+
+    /// <summary>The text split into steps at each separator outside quotes, before substitutions are unpacked.</summary>
+    private static List<string> SplitSteps(string command)
     {
         List<string> steps = [];
         StringBuilder step = new();
@@ -553,7 +567,106 @@ internal static partial class SecretRules
         }
 
         steps.Add(step.ToString());
-        return steps.Where(candidate => candidate.Trim().Length > 0);
+        return steps.Where(candidate => candidate.Trim().Length > 0).ToList();
+    }
+
+    /// <summary>
+    /// The commands this step runs inside a <c>$(...)</c> or a backtick substitution, each read as a step of its
+    /// own. A substitution runs inside double quotes too, so only single-quoted text is skipped as literal.
+    /// </summary>
+    private static IEnumerable<string> SubstitutedCommands(string step)
+    {
+        List<string> commands = [];
+        char quote = '\0';
+        for (int index = 0; index < step.Length; index++)
+        {
+            char current = step[index];
+            if (quote == '\'')
+            {
+                if (current == '\'')
+                {
+                    quote = '\0';
+                }
+
+                continue;
+            }
+
+            if (quote == '"' && current == '"')
+            {
+                quote = '\0';
+                continue;
+            }
+
+            if (quote == '\0' && current is '"' or '\'')
+            {
+                quote = current;
+                continue;
+            }
+
+            if (current == '$' && index + 1 < step.Length && step[index + 1] == '(')
+            {
+                int close = MatchingParenthesis(step, index + 1);
+                if (close < 0)
+                {
+                    break;
+                }
+
+                commands.Add(step[(index + 2)..close]);
+                index = close;
+                continue;
+            }
+
+            if (current == '`')
+            {
+                int close = step.IndexOf('`', index + 1);
+                if (close < 0)
+                {
+                    break;
+                }
+
+                commands.Add(step[(index + 1)..close]);
+                index = close;
+            }
+        }
+
+        return commands.SelectMany(Steps);
+    }
+
+    /// <summary>The index of the <c>)</c> closing the <c>(</c> at this index, or -1 when it never closes.</summary>
+    private static int MatchingParenthesis(string text, int open)
+    {
+        int depth = 0;
+        char quote = '\0';
+        for (int index = open; index < text.Length; index++)
+        {
+            char current = text[index];
+            if (quote != '\0')
+            {
+                if (current == quote)
+                {
+                    quote = '\0';
+                }
+
+                continue;
+            }
+
+            if (current is '"' or '\'')
+            {
+                quote = current;
+                continue;
+            }
+
+            if (current == '(')
+            {
+                depth++;
+            }
+            else if (current == ')' && --depth == 0)
+            {
+                return index;
+            }
+        }
+
+        return -1;
     }
 
     /// <summary>The three cases the rule refuses, plus the unreadable command it fails closed on.</summary>
@@ -620,8 +733,8 @@ internal static partial class SecretRules
     [GeneratedRegex(@"(?i)\b(?:echo|printf|write-output|write-host)\b")]
     private static partial Regex PrintingWord();
 
-    /// <summary>A variable reference whose name says it holds a secret.</summary>
-    [GeneratedRegex(@"\$\{?(?:env:)?[A-Za-z_][A-Za-z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|APIKEY|API_KEY|CREDENTIAL)[A-Za-z0-9_]*\}?")]
+    /// <summary>A variable reference whose name says it holds a secret, whichever part of the name says so.</summary>
+    [GeneratedRegex(@"(?i)\$\{?(?:env:)?[A-Za-z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|APIKEY|API_KEY|CREDENTIAL)[A-Za-z0-9_]*\}?")]
     private static partial Regex SecretVariable();
 
     /// <summary>Every <c>NAME=value</c> the step carries, which is a bare assignment or a tool's <c>-e</c> option.</summary>
