@@ -53,9 +53,11 @@ public sealed class GitCheckoutProbe(IFileSystem files, IProcessRunner process, 
                 long pointerStamp = (files.GetLastWriteTimeUtc(gitPath).Ticks * 31) + files.GetLength(gitPath);
 
                 // Worktree / submodule indirection: the file itself notices a retarget.
-                return GitDirectoryFor(root) is { } worktree
-                    ? MixFile(pointerStamp, Path.Combine(worktree, "HEAD"))
-                    : pointerStamp;
+                if (GitDirectoryFor(root) is not { } worktree) return pointerStamp;
+
+                long linked = MixFile(pointerStamp, Path.Combine(worktree, "HEAD"));
+                linked = MixFile(linked, Path.Combine(worktree, "index"));
+                return MixRefs(linked, worktree);
             }
 
             if (!files.DirectoryExists(gitPath)) return 0;
@@ -63,7 +65,7 @@ public sealed class GitCheckoutProbe(IFileSystem files, IProcessRunner process, 
             long stamp = 17;
             stamp = MixFile(stamp, Path.Combine(gitPath, "HEAD"));
             stamp = MixFile(stamp, Path.Combine(gitPath, "index"));
-            return stamp;
+            return MixRefs(stamp, gitPath);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -145,6 +147,34 @@ public sealed class GitCheckoutProbe(IFileSystem files, IProcessRunner process, 
 
         // Anything left is a commit id: the checkout is detached, which is a real answer.
         return head.Length == 0 ? CorpusProvenance.Unavailable : CorpusProvenance.Detached;
+    }
+
+    /// <summary>
+    /// Mixes the files that hold the tip a symbolic <c>HEAD</c> names: the loose ref and
+    /// <c>packed-refs</c> under the git directory the repository's worktrees share. A commit, merge,
+    /// <c>update-ref</c> or <c>pack-refs</c> moves one of them without touching this checkout's
+    /// <c>HEAD</c>, which only names the branch.
+    /// </summary>
+    private long MixRefs(long stamp, string gitDirectory)
+    {
+        string? name = SymbolicRefName(Path.Combine(gitDirectory, "HEAD"));
+        if (name is null) return stamp;
+
+        string common = CommonGitDirectory(gitDirectory);
+        stamp = MixFile(stamp, Path.Combine(common, name));
+        return MixFile(stamp, Path.Combine(common, "packed-refs"));
+    }
+
+    /// <summary>The ref a symbolic <c>HEAD</c> names, or <c>null</c> when it is detached or unreadable.</summary>
+    private string? SymbolicRefName(string headPath)
+    {
+        if (!files.FileExists(headPath)) return null;
+
+        const string refPrefix = "ref:";
+        string head = files.ReadAllText(headPath).Trim();
+        return head.StartsWith(refPrefix, StringComparison.Ordinal)
+            ? head[refPrefix.Length..].Trim()
+            : null;
     }
 
     private long MixFile(long stamp, string path)
