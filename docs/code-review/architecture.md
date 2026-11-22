@@ -831,6 +831,12 @@ reviewer installs what the hint names and re-runs that one gate with `--gate`. T
 refuses an empty list, an empty entry, an absolute path, and a `..` escape where the operator
 wrote them, so an entry that could never name something inside the repository never reaches a run.
 
+A failed gate's summary says what failed rather than ending with the last lines the command
+printed: the test totals and each failing test with the first line of its error, or the compile
+errors, in the same short form a task gate prints (`TaskTestDigest`), capped at 10 items of 200
+characters each. It reads the command's standard output and standard error together, so a test
+host's logging cannot hide the runner's own summary. A passing gate's summary stays `passed`.
+
 The changed set is `--paths` when given, else the diff from the merge base of `--base`
 to the working tree. `--base` and `--paths` scope the council gates too — they are
 accepted without `--agent` (the default ref is `origin/HEAD`). The set is only computed
