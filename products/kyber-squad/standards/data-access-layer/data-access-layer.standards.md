@@ -13,7 +13,7 @@ last-reviewed: 2026-11-22
 
 How persistence code is written in this repository. Agents and skills resolve this
 document as `<data-access-layer-coding-standard>`. Language-level C# is in the path
-declared as **<csharp-coding-standard>**; SQL shape is in **<sql-coding-standard>**.
+declared as **<csharp-coding-standard>**; SQL shape is in **<sql-server-coding-standard>**.
 Those three must not disagree. Where they would, this document yields to them.
 
 
@@ -109,10 +109,12 @@ _Nothing specific yet._
 - Use `WithDefaultValue(SystemMethods.CurrentUTCDateTime)` for audit timestamp columns, never a
   hardcoded date.
 - Make `Up()` safe to re-run with FluentMigrator's `IfTableDoesNotExist` /
-  `IfIndexDoesNotExist` / `IfColumnDoesNotExist` guards, per **<sql-coding-standard>**.
+  `IfIndexDoesNotExist` / `IfColumnDoesNotExist` guards, per **<sql-server-coding-standard>**.
+- Schema-qualify every table reference in migration SQL and in FluentMigrator calls
+  (`WithSchema` / `InSchema`).
 - After applying a migration, verify the result against the schema project's `.dacpac`.
 - Down() is a host decision: implementing it is optional, and a production correction is
-  always a forward migration, per **<sql-coding-standard>**.
+  always a forward migration, per **<sql-server-coding-standard>**.
 
 ## Security and data handling
 

@@ -90,7 +90,8 @@ The shipped binaries build for:
 
 ### Context
 
-- `ctx context.Context` is the first parameter of every function that does I/O or blocks.
+- `ctx context.Context` is the first parameter of every function that does I/O, blocks, or
+  calls something that does.
 - `context.Background()` appears only in `main`, tests, and the root of a background job.
 - A timeout is set where the budget is known. Long loops check `ctx.Err()` or `<-ctx.Done()`
   so cancellation is prompt.
@@ -102,8 +103,10 @@ The shipped binaries build for:
   `sync.WaitGroup` or `golang.org/x/sync/errgroup`.
 - Channels are unbuffered unless a buffer size has a stated reason. Function signatures use
   directional channel types.
+- Every blocking point selects on `ctx.Done()`.
 - Shared mutable state is guarded by a `sync.Mutex` or confined to one goroutine — one or the
-  other per piece of state.
+  other per piece of state. Hold a mutex for the shortest span.
+- `http.ErrServerClosed` from `ListenAndServe` after `Shutdown` is not a failure.
 - `go test -race` passes. A data race is a bug even when the test is green.
 - Fan-out with errors uses `errgroup.WithContext` and `g.SetLimit(n)`; the first error cancels
   the context for the rest, and `g.Wait()` returns it wrapped. Below Go 1.22 the loop variable

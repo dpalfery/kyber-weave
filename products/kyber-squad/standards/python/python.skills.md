@@ -32,7 +32,9 @@ Use the lightest evidence that settles the question, and escalate when it does n
    input/output case.
 4. Debugger facts (`pylancePythonDebug`) for a branch, exception, loop iteration, closure,
    subprocess, mutable state or frame-local value.
-5. Check generated code with `pylanceSyntaxErrors` / `pylanceFileSyntaxErrors` before calling
+5. Reasoning yields hypotheses; name an assumption as a hypothesis until a tool or test
+   has verified it.
+6. Check generated code with `pylanceSyntaxErrors` / `pylanceFileSyntaxErrors` before calling
    it ready. To explain a diagnostic, fetch the exact rule code first.
 
 ## Automated refactoring
@@ -47,10 +49,19 @@ many single-file calls.
   `source.addTypeAnnotation`, `source.fixAll.pylance`. Compose by running one pass across
   the whole set, for example `convertImportStar` then `unusedImports`.
 - Modes: `mode="edits"` or `"string"` previews without changing files; `"update"` (the
-  default) applies. Preview first for a broad or ambiguous request.
+  default) applies. Preview first for a broad or ambiguous request. A preview-only request
+  ("show me", "what would change") summarizes the would-be edits and waits for confirmation;
+  apply with `update` only when the user clearly asked.
+- `source.fixAll.pylance` applies whatever the Pylance settings configure; use the settings
+  and diagnostics tools to answer what fix-all includes.
 - Track changed, no-op and error files separately; a file with no edits is a no-op, not a
   manual cleanup.
-- In a VS Code chat, `update` edits editor buffers, not disk: save before a terminal check.
+- In a VS Code chat, `update` edits editor buffers, not disk: save before a terminal check,
+  and use Pylance or editor-visible tools for immediate checks.
+- After a larger refactor run the most relevant validation, then report the names used, the
+  scope, changed/no-op/error counts, files saved before terminal validation, and files
+  skipped by the user's filter.
+- A manual edit after an automated refactoring stays separate and is explained.
 - Do not use it for semantic rename, reference search or signature-impact analysis.
 
 ## Pylance documentation
@@ -58,7 +69,9 @@ many single-file calls.
 For a claim about Pylance settings, diagnostics or behaviour, call `pylanceDocuments` with
 `action="search"`, then `action="fetch"` on the best result and on each referenced document
 you need (never read referenced paths from disk). Use `pylanceSettings` for effective
-settings and `pylanceLSP` for a specific Problems entry. Say when the docs do not cover it.
+settings and `pylanceLSP` for a specific Problems entry. Say when the docs do not cover it. Source search is not official product guidance: Pylance
+claims come from its docs. Name the setting, diagnostic code or feature that changed the
+answer.
 
 ## Hand-off
 

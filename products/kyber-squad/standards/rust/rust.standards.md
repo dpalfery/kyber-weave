@@ -36,7 +36,8 @@ best available guidance and names the draft standard it relied on in one line of
 - **Lockfile:** `Cargo.lock` is committed. Builds and tests run with `--locked`, which fails
   if the lockfile would change.
 - **Async runtime:** tokio, and only tokio. A library crate does not start a runtime; a binary
-  starts exactly one, in `main`.
+  starts exactly one, in `main`. Enable only the tokio features the crate uses; `full` is for
+  prototypes.
 
 Application code consumes collaborators through parameters or trait objects. It does not
 construct clients, connections, or clocks internally, and it does not reach for a global for
@@ -45,7 +46,8 @@ something a caller could pass.
 ### Dependencies
 
 - Prefer crates.io releases. A git dependency is pinned with `rev = "<full commit SHA>"`, never
-  `branch` or `tag`, and carries a comment saying why it is not from crates.io.
+  `branch` or `tag`, and carries a comment saying why it is not from crates.io
+  and when it can move back.
 - **TLS is rustls.** Select it through features (`default-features = false`,
   `features = ["rustls-tls"]`); `openssl-sys` and `native-tls` do not appear in
   `cargo tree`, checked with `cargo tree -i openssl-sys --target all` (no output) and the same

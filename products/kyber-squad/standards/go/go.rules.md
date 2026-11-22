@@ -14,7 +14,7 @@ last-reviewed: 2026-11-22
 - Never store a `context.Context` in a struct, and never ship `context.TODO()`.
 - Every `WithTimeout` / `WithCancel` is followed by `defer cancel()`.
 - Never start a goroutine without a defined exit and an owner that waits for it.
-- Only the sender closes a channel, exactly once.
+- Only the sender closes a channel, exactly once, and only when no other sender remains.
 - Never bound a graceful shutdown with an unbounded context.
 - Never copy a struct that contains a `sync.Mutex`.
 - Never commit a `replace` directive pointing at a local path, hand-edit `go.sum`, or add a

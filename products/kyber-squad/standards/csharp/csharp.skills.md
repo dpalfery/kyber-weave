@@ -27,6 +27,9 @@ The standard holds the decisions; this file holds the commands.
   search for `Building target '<T>' completely` and `Input file ... is newer than output file`.
 - Slow build: `dotnet build -fl -flp:logfile=perf.log;performancesummary` for target and task
   timings, or `dotnet build /bl:build.binlog` and open it in the MSBuild Structured Log Viewer.
+- Several CLI commands in one CI job: set `DOTNET_CLI_USE_MSBUILD_SERVER=1` so MSBuild Server
+  stays warm between them. It is opt-in before the .NET 11 SDK, and gains little in a job
+  that runs one command.
 - Disable the Visual Studio fast up-to-date check (`DisableFastUpToDateCheck`) only while
   diagnosing a discrepancy.
 - No spans: check `AddSource` matches the source name, the OTLP endpoint is reachable, and

@@ -41,6 +41,9 @@ the `csharp` folder.
 
 4. When a solution build fails deep in one project, build that project alone with
    `/bl:app.binlog` for a smaller log.
+5. For a quick ad-hoc run with no binlog, write a diagnostic text log directly:
+   `dotnet build -v:diagnostic -fl -flp:logfile=build-diag.log;verbosity=diagnostic`. It runs
+   10–50 MB per project, so use it sparingly; a binlog and replay is cheaper when iterating.
 
 | Symptom | Check |
 |---|---|

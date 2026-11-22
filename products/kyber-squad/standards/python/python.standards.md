@@ -95,8 +95,8 @@ do.
 - Start from a repro: a failing test, command or snippet.
 - Run the focused check that would have caught the original mistake. If a verification tool
   is unavailable, keep the change narrow and say what remains uncertain.
-- Report the facts that changed the decision (diagnostic code, type, call site, failing
-  input, test result), not speculation.
+- Report the facts that changed the decision (diagnostic code, Pylance setting or feature,
+  type, call site, failing input, test result), not speculation.
 
 ### Errors
 
