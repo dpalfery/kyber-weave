@@ -253,12 +253,15 @@ public class KyberBridgeEngine
         IModelPricingLookup lookup = pricing.LoadPricingTables();
         (SessionAggregateView? aggregate, IReadOnlyList<ReadTimeTurnSummary> turns, string? projectionStatus) =
             ReadSessionFigures(sessionId, lookup);
+        string harness = ResolveHarness(aggregate, session);
+        (IReadOnlyList<string> distinctSkills, IReadOnlyDictionary<string, int> skillCounts) =
+            CollectSkillCounts(reader.SkillsInvoked(sessionKey: sessionId));
 
         Dictionary<string, object?> root = new(StringComparer.Ordinal)
         {
             ["session_id"] = projection.SessionId,
             ["sessionId"] = projection.SessionId,
-            ["harness"] = ResolveHarness(aggregate, session),
+            ["harness"] = harness,
             ["label"] = projection.Label,
             ["is_subagent"] = projection.IsSubagent,
             ["parent_session"] = projection.ParentSessionId,
@@ -267,12 +270,20 @@ public class KyberBridgeEngine
             ["branch"] = session?.Workspace?.Branch,
             ["started"] = projection.StartedAtUtc,
             ["ended"] = projection.EndedAtUtc,
+            ["span_count"] = projection.SpanCount,
             ["problems_count"] = aggregate?.Problems.Count ?? 0,
             ["context_limit_source"] = ResolveContextLimitSource(projection),
-            ["summary"] = aggregate is null ? null : BuildSessionSummary(aggregate),
+            ["costBasisMismatch"] = BuildCostBasisMismatchObject(aggregate?.CostBasisMismatch),
+            ["summary"] = aggregate is null ? null : BuildSessionSummary(aggregate, projection, harness, distinctSkills),
             ["problems"] = aggregate?.Problems ?? Array.Empty<Problem>(),
             ["turns"] = turns.Select(ToTurnDto).ToList(),
             ["tools"] = aggregate is null ? Array.Empty<object>() : ToolRows(aggregate),
+            ["servers"] = aggregate is null ? Array.Empty<object>() : ServerRows(aggregate),
+            ["skills"] = BuildSkillsPayload(distinctSkills, skillCounts, harness),
+            ["reconciliation"] = aggregate is null ? Array.Empty<object>() : ReconciliationRows(aggregate),
+            ["context"] = BuildContextPayload(projection, aggregate, turns),
+            ["schema"] = BuildSchemaPayload(projection, aggregate),
+            ["notes"] = BuildNotes(projection, aggregate, turns, distinctSkills),
             ["timeline"] = TimelineChildren(projection.SessionId),
             ["requests"] = aggregate is null ? Array.Empty<object>() : RequestRows(aggregate),
         };
@@ -300,11 +311,14 @@ public class KyberBridgeEngine
         CollectedSession? session = reader.GetSession(sessionId);
         IModelPricingLookup lookup = pricing.LoadPricingTables();
         (SessionAggregateView? aggregate, _, string? projectionStatus) = ReadSessionFigures(sessionId, lookup);
+        string harness = ResolveHarness(aggregate, session);
+        (IReadOnlyList<string> distinctSkills, _) =
+            CollectSkillCounts(reader.SkillsInvoked(sessionKey: sessionId));
 
         Dictionary<string, object?> payload = new(StringComparer.Ordinal)
         {
             ["session_id"] = projection.SessionId,
-            ["harness"] = ResolveHarness(aggregate, session),
+            ["harness"] = harness,
             ["label"] = projection.Label,
             ["is_subagent"] = projection.IsSubagent,
             ["parent_session"] = projection.ParentSessionId,
@@ -313,9 +327,11 @@ public class KyberBridgeEngine
             ["branch"] = session?.Workspace?.Branch,
             ["started"] = projection.StartedAtUtc,
             ["ended"] = projection.EndedAtUtc,
+            ["span_count"] = projection.SpanCount,
             ["problems"] = aggregate?.Problems.Count ?? 0,
             ["context_limit_source"] = ResolveContextLimitSource(projection),
-            ["summary"] = aggregate is null ? null : BuildSessionSummary(aggregate),
+            ["costBasisMismatch"] = BuildCostBasisMismatchObject(aggregate?.CostBasisMismatch),
+            ["summary"] = aggregate is null ? null : BuildSessionSummary(aggregate, projection, harness, distinctSkills),
         };
 
         if (projectionStatus is not null)
@@ -1603,67 +1619,560 @@ public class KyberBridgeEngine
 
     private static List<Dictionary<string, object?>> ToolRows(SessionAggregateView aggregate)
     {
+        HashSet<string> offeredTools = new(aggregate.ToolsOffered, StringComparer.Ordinal);
         List<Dictionary<string, object?>> rows = new(aggregate.Tools.Count);
         foreach (ReadTimeSessionToolSummary tool in aggregate.Tools)
         {
+            bool inDefinitions = offeredTools.Contains(tool.Name)
+                || tool.TurnsResident > 0
+                || tool.SchemaTokens > 0
+                || tool.TotalSchemaCost > 0;
+            bool isMcp = !string.IsNullOrWhiteSpace(tool.Server);
+
             rows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
             {
                 ["name"] = tool.Name,
                 ["server"] = tool.Server,
                 ["invocations"] = tool.Invocations,
-                ["schema_tokens"] = tool.SchemaTokens,
-                ["turns_resident"] = tool.TurnsResident,
-                ["total_schema_cost"] = tool.TotalSchemaCost,
+                ["schema_tokens"] = inDefinitions ? tool.SchemaTokens : null,
+                ["turns_resident"] = inDefinitions ? tool.TurnsResident : null,
+                ["total_schema_cost"] = inDefinitions ? tool.TotalSchemaCost : null,
                 ["invoked"] = tool.Invoked,
+                ["in_definitions"] = inDefinitions,
+                ["is_mcp"] = isMcp,
             });
         }
 
         return rows;
     }
 
-    private static object BuildSessionSummary(SessionAggregateView aggregate) =>
-        new
+    private static List<Dictionary<string, object?>> ServerRows(SessionAggregateView aggregate)
+    {
+        Dictionary<string, long> schemaCostByServer = new(StringComparer.Ordinal);
+        foreach (ReadTimeSessionToolSummary tool in aggregate.Tools)
         {
-            turn_count = aggregate.TurnCount,
-            request_count = aggregate.RequestCount,
-            total_input = aggregate.TotalInput,
-            total_output = aggregate.TotalOutput,
-            total_cache_read = aggregate.TotalCacheRead,
-            total_cache_creation = aggregate.TotalCacheCreation,
-            duration_ms = aggregate.DurationMs,
-            models = aggregate.Models,
-            cache_hit_ratio = aggregate.CacheHitRatio,
-            cache_creation_coverage = aggregate.CacheCreationCoverage,
-            tool_calls = aggregate.ToolCalls,
-            tools_invoked = aggregate.ToolsInvoked,
-            tools_offered = aggregate.ToolsOffered,
-            has_tool_definitions = aggregate.HasToolDefinitions,
-            cost = aggregate.PublishedCost,
-            cost_reported = aggregate.ReportedCost,
-            cost_basis_mismatch = aggregate.CostBasisMismatch,
-            coverage = new
+            if (string.IsNullOrWhiteSpace(tool.Server))
             {
-                schema_measurable = aggregate.Coverage.SchemaMeasurable,
-                context_measurable = aggregate.Coverage.ContextMeasurable,
-            },
-            problems = aggregate.Problems,
+                continue;
+            }
+
+            schemaCostByServer[tool.Server] = schemaCostByServer.GetValueOrDefault(tool.Server) + tool.TotalSchemaCost;
+        }
+
+        List<Dictionary<string, object?>> rows = new(aggregate.Servers.Count);
+        foreach (ReadTimeSessionServerSummary server in aggregate.Servers)
+        {
+            long totalSchemaCost = schemaCostByServer.TryGetValue(server.Server, out long sum)
+                ? sum
+                : server.UnusedCost;
+
+            rows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["server"] = server.Server,
+                ["is_mcp"] = server.IsMcp,
+                ["tools"] = server.Tools,
+                ["schema_tokens"] = server.SchemaTokens,
+                ["total_schema_cost"] = totalSchemaCost,
+                ["invocations"] = server.Invocations,
+                ["unused_tools"] = server.UnusedTools,
+                ["unused_cost"] = server.UnusedCost,
+            });
+        }
+
+        return rows;
+    }
+
+    private static List<Dictionary<string, object?>> ReconciliationRows(SessionAggregateView aggregate)
+    {
+        List<Dictionary<string, object?>> rows = [];
+        foreach (ReadTimeTurnReconciliation row in aggregate.Reconciliation)
+        {
+            if (!row.InputMatch.HasValue || !row.OutputMatch.HasValue)
+            {
+                continue;
+            }
+
+            rows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["request"] = row.RequestSpanId,
+                ["root_input"] = row.RootInput,
+                ["sum_chat_input"] = row.SumChatInput,
+                ["input_match"] = row.InputMatch.Value,
+                ["root_output"] = row.RootOutput,
+                ["sum_chat_output"] = row.SumChatOutput,
+                ["output_match"] = row.OutputMatch.Value,
+            });
+        }
+
+        return rows;
+    }
+
+    private static Dictionary<string, object?>? BuildCostBasisMismatchObject(ReadTimeCostBasisMismatch? mismatch)
+    {
+        if (mismatch is null)
+        {
+            return null;
+        }
+
+        Dictionary<string, double?> totalsByBasis = new(StringComparer.Ordinal);
+        foreach (ReadTimeBasisTotal entry in mismatch.TotalsByBasis)
+        {
+            totalsByBasis[entry.Basis] = entry.Total;
+        }
+
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["code"] = mismatch.Code,
+            ["message"] = mismatch.Message,
+            ["bases"] = mismatch.Bases,
+            ["totalsByBasis"] = totalsByBasis,
         };
+    }
+
+    private static (IReadOnlyList<string> DistinctSkills, IReadOnlyDictionary<string, int> Counts) CollectSkillCounts(
+        IReadOnlyList<StoredSkillInvocation> rows)
+    {
+        List<string> distinct = [];
+        Dictionary<string, int> counts = new(StringComparer.Ordinal);
+        foreach (StoredSkillInvocation row in rows)
+        {
+            if (string.IsNullOrWhiteSpace(row.SkillName))
+            {
+                continue;
+            }
+
+            if (counts.TryGetValue(row.SkillName, out int existing))
+            {
+                counts[row.SkillName] = existing + 1;
+            }
+            else
+            {
+                counts[row.SkillName] = 1;
+                distinct.Add(row.SkillName);
+            }
+        }
+
+        return (distinct, counts);
+    }
+
+    private static Dictionary<string, object?> BuildSkillsPayload(
+        IReadOnlyList<string> distinctSkills,
+        IReadOnlyDictionary<string, int> skillCounts,
+        string harness)
+    {
+        if (distinctSkills.Count == 0)
+        {
+            return NotMeasurableBlock($"{harness} did not record skill invocations or listed skills for this session.");
+        }
+
+        List<Dictionary<string, object?>> rows = new(distinctSkills.Count);
+        foreach (string skillName in distinctSkills)
+        {
+            rows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["name"] = skillName,
+                ["listed"] = NotMeasurableBlock($"{harness} did not export the session's listed skills."),
+                ["invocations"] = skillCounts[skillName],
+                ["turns_listed"] = Array.Empty<int>(),
+            });
+        }
+
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["measurable"] = true,
+            ["rows"] = rows,
+        };
+    }
+
+    private static Dictionary<string, object?> BuildContextPayload(
+        StoredSessionProjection projection,
+        SessionAggregateView? aggregate,
+        IReadOnlyList<ReadTimeTurnSummary> turns)
+    {
+        int unmeasuredTurns = turns.Count(static t => !t.InputTokens.HasValue);
+
+        if (projection.Context is not StoredSessionContext ctx)
+        {
+            string reason = !string.IsNullOrWhiteSpace(projection.ContextUnmeasurableReason)
+                ? projection.ContextUnmeasurableReason
+                : "Session turns did not carry message parts or context token measurements.";
+
+            return new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["measurable"] = false,
+                ["reason"] = reason,
+                ["turns"] = turns.Count,
+                ["contextLimit"] = 0L,
+                ["first"] = aggregate?.FirstContextBucket is ReadTimeContextBucketSummary firstOnly
+                    ? BuildContextEdge(firstOnly, storedTurn: null)
+                    : null,
+                ["last"] = aggregate?.LastContextBucket is ReadTimeContextBucketSummary lastOnly
+                    ? BuildContextEdge(lastOnly, storedTurn: null)
+                    : null,
+                ["unmeasuredTurns"] = unmeasuredTurns,
+            };
+        }
+
+        Dictionary<string, long> derivedCounts = new(StringComparer.Ordinal);
+        foreach (StoredSessionContextDerivedCount counter in ctx.DerivedCounts)
+        {
+            derivedCounts[counter.Counter] = counter.Count;
+        }
+
+        List<int> flaggedTurns = new(ctx.FlaggedTurnIndexes.Count);
+        foreach (int zeroBasedIdx in ctx.FlaggedTurnIndexes)
+        {
+            flaggedTurns.Add(zeroBasedIdx + 1);
+        }
+
+        List<Dictionary<string, object?>> contextTurns = new(ctx.Turns.Count);
+        foreach (StoredSessionContextTurn turn in ctx.Turns)
+        {
+            Dictionary<string, long> buckets = new(StringComparer.Ordinal);
+            foreach (StoredTurnBucketTokens bucket in turn.Buckets)
+            {
+                buckets[bucket.Bucket] = bucket.Tokens;
+            }
+
+            Dictionary<string, long> toolDefsByServer = new(StringComparer.Ordinal);
+            foreach (StoredTurnServerDefinitionTokens serverDef in turn.ServerDefinitions)
+            {
+                toolDefsByServer[serverDef.Server] = serverDef.Tokens;
+            }
+
+            contextTurns.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["index"] = turn.Position + 1,
+                ["inputTokens"] = turn.InputTokens,
+                ["reported_input"] = turn.InputTokens,
+                ["buckets"] = buckets,
+                ["toolDefinitionsByServer"] = toolDefsByServer,
+                ["builtinToolDefinitionTokens"] = turn.BuiltinToolDefinitionTokens,
+                ["strippedInstructionBlocks"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["count"] = turn.StrippedBlockCount ?? 0L,
+                    ["tokens"] = turn.StrippedTokens ?? 0L,
+                },
+                ["bucketedTokens"] = turn.BucketedTokens,
+                ["residual"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["tokens"] = turn.ResidualTokens,
+                    ["attribution"] = turn.ResidualAttribution,
+                },
+                ["headroom"] = turn.Headroom,
+                ["pressure"] = turn.Pressure,
+                ["accumulationRate"] = turn.AccumulationRate,
+                ["freshInput"] = turn.FreshInput,
+                ["previousFreshInput"] = turn.PreviousFreshInput,
+                ["freshJumpFactor"] = turn.FreshJumpFactor,
+                ["nonResidentTokens"] = turn.NonResidentTokens,
+            });
+        }
+
+        StoredSessionContextTurn? firstStored = ctx.Turns.Count > 0 ? ctx.Turns[0] : null;
+        StoredSessionContextTurn? lastStored = ctx.Turns.Count > 0 ? ctx.Turns[^1] : null;
+
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["measurable"] = true,
+            ["contextLimit"] = ctx.ContextLimit,
+            ["contextLimitSource"] = ctx.ContextLimitSource,
+            ["residualTotal"] = ctx.ResidualTotal,
+            ["freshJumpFactor"] = ctx.FreshJumpFactor,
+            ["accumulationRate"] = ctx.AccumulationRate,
+            ["observedBuckets"] = ctx.ObservedBuckets,
+            ["derivedCounts"] = derivedCounts,
+            ["flaggedTurns"] = flaggedTurns,
+            ["unmeasuredTurns"] = unmeasuredTurns,
+            ["turns"] = contextTurns,
+            ["first"] = BuildContextEdge(aggregate?.FirstContextBucket, firstStored),
+            ["last"] = BuildContextEdge(aggregate?.LastContextBucket, lastStored),
+        };
+    }
+
+    private static Dictionary<string, object?>? BuildContextEdge(
+        ReadTimeContextBucketSummary? edge,
+        StoredSessionContextTurn? storedTurn)
+    {
+        if (edge is not null)
+        {
+            Dictionary<string, long> buckets = new(StringComparer.Ordinal);
+            foreach (ReadTimeContextBucketTokens bucket in edge.Buckets)
+            {
+                buckets[bucket.Bucket] = bucket.Tokens;
+            }
+
+            return new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["turn"] = storedTurn is not null ? storedTurn.Position + 1 : 1,
+                ["buckets"] = buckets,
+                ["reported_input"] = edge.ReportedInput,
+            };
+        }
+
+        if (storedTurn is not null)
+        {
+            Dictionary<string, long> buckets = new(StringComparer.Ordinal);
+            foreach (StoredTurnBucketTokens bucket in storedTurn.Buckets)
+            {
+                buckets[bucket.Bucket] = bucket.Tokens;
+            }
+
+            return new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["turn"] = storedTurn.Position + 1,
+                ["buckets"] = buckets,
+                ["reported_input"] = storedTurn.InputTokens,
+            };
+        }
+
+        return null;
+    }
+
+    private static Dictionary<string, object?> BuildSchemaPayload(
+        StoredSessionProjection projection,
+        SessionAggregateView? aggregate)
+    {
+        if (projection.Schema is not StoredSessionSchema schema)
+        {
+            string reason = !string.IsNullOrWhiteSpace(projection.SchemaUnmeasurableReason)
+                ? projection.SchemaUnmeasurableReason
+                : "Session did not export tool schema definitions.";
+
+            return new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["measurable"] = false,
+                ["invocationCount"] = aggregate?.ToolCalls ?? 0,
+                ["reason"] = reason,
+            };
+        }
+
+        List<Dictionary<string, object?>> ranked = [];
+        List<Dictionary<string, object?>> neverInvoked = [];
+        foreach (StoredSchemaRankedTool tool in schema.RankedTools.OrderBy(static t => t.Position))
+        {
+            Dictionary<string, object?> dto = ToRankedToolDto(tool);
+            ranked.Add(dto);
+            if (!tool.Invoked)
+            {
+                neverInvoked.Add(dto);
+            }
+        }
+
+        Dictionary<string, long> byServer = new(StringComparer.Ordinal);
+        foreach (StoredSchemaServerTokens server in schema.Servers)
+        {
+            byServer[server.ServerName] = byServer.GetValueOrDefault(server.ServerName) + server.Tokens;
+        }
+
+        Dictionary<string, object?> unusedRange;
+        if (aggregate?.UnusedRange is UnusedSchemaRange range)
+        {
+            unusedRange = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["tokenResidencies"] = range.TokenResidencies,
+                ["floor"] = range.Floor,
+                ["ceiling"] = range.Ceiling,
+                ["currency"] = range.Currency,
+            };
+        }
+        else
+        {
+            long residencies = schema.UnusedTokenResidencies
+                ?? schema.RankedTools.Where(static t => !t.Invoked).Sum(static t => t.CostTokens);
+            unusedRange = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["tokenResidencies"] = residencies,
+                ["floor"] = 0.0,
+                ["ceiling"] = (double)residencies,
+                ["currency"] = null,
+            };
+        }
+
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["measurable"] = true,
+            ["invocationCount"] = schema.InvocationCount,
+            ["turns"] = schema.TurnCount,
+            ["ranked"] = ranked,
+            ["neverInvoked"] = neverInvoked,
+            ["byServer"] = byServer,
+            ["unusedRange"] = unusedRange,
+        };
+    }
+
+    private static Dictionary<string, object?> ToRankedToolDto(StoredSchemaRankedTool tool)
+    {
+        Dictionary<string, object?> dto = new(StringComparer.Ordinal)
+        {
+            ["name"] = tool.ToolName,
+            ["cost"] = tool.CostTokens,
+            ["invoked"] = tool.Invoked,
+        };
+
+        if (!string.IsNullOrWhiteSpace(tool.ServerName))
+        {
+            dto["server"] = tool.ServerName;
+        }
+
+        return dto;
+    }
+
+    private static List<string> BuildNotes(
+        StoredSessionProjection projection,
+        SessionAggregateView? aggregate,
+        IReadOnlyList<ReadTimeTurnSummary> turns,
+        IReadOnlyList<string> distinctSkills)
+    {
+        List<string> notes = [];
+        HashSet<string> seen = new(StringComparer.Ordinal);
+
+        void AddNote(string? note)
+        {
+            if (!string.IsNullOrWhiteSpace(note) && seen.Add(note))
+            {
+                notes.Add(note);
+            }
+        }
+
+        if (projection.Context is null)
+        {
+            AddNote(!string.IsNullOrWhiteSpace(projection.ContextUnmeasurableReason)
+                ? projection.ContextUnmeasurableReason
+                : "Context breakdown is not measurable because turns did not export message parts.");
+        }
+
+        if (projection.Schema is null)
+        {
+            AddNote(!string.IsNullOrWhiteSpace(projection.SchemaUnmeasurableReason)
+                ? projection.SchemaUnmeasurableReason
+                : "Schema residency is not measurable because tool definitions were not exported.");
+        }
+
+        if (aggregate is not null)
+        {
+            if (!aggregate.HasToolDefinitions && aggregate.Tools.Count > 0)
+            {
+                AddNote("Tool definitions were not exported; tool residency and schema costs are marked unmeasured.");
+            }
+
+            if (aggregate.ReportedCost is null && aggregate.TurnCount > 0)
+            {
+                AddNote("Harness-reported cost was not exported; published pricing estimates are shown separately.");
+            }
+
+            if (aggregate.CostBasisMismatch is not null)
+            {
+                AddNote(aggregate.CostBasisMismatch.Message);
+            }
+
+            if (!aggregate.TotalCacheCreation.HasValue && aggregate.TurnCount > 0)
+            {
+                AddNote("Cache creation tokens were not reported for this session.");
+            }
+
+            if (turns.Any(static t => !t.InputTokens.HasValue))
+            {
+                AddNote("One or more turns lack input token counts.");
+            }
+        }
+
+        AddNote(distinctSkills.Count > 0
+            ? "Skill listings were not exported; only invoked skills are shown."
+            : "No skill listings or skill invocations were recorded for this session.");
+
+        return notes;
+    }
+
+    private static Dictionary<string, object?> NotMeasurableBlock(string reason) => new(StringComparer.Ordinal)
+    {
+        ["availability"] = "not_measurable",
+        ["reason"] = reason,
+    };
+
+    private static Dictionary<string, object?> BuildSessionSummary(
+        SessionAggregateView aggregate,
+        StoredSessionProjection projection,
+        string harness,
+        IReadOnlyList<string> distinctSkills)
+    {
+        bool hasToolDefinitions = aggregate.HasToolDefinitions || projection.Schema is not null;
+        object toolsOffered;
+        if (aggregate.HasToolDefinitions)
+        {
+            toolsOffered = aggregate.ToolsOffered;
+        }
+        else if (projection.Schema is StoredSessionSchema schema)
+        {
+            toolsOffered = schema.RankedTools
+                .OrderBy(static t => t.Position)
+                .Select(static t => t.ToolName)
+                .ToList();
+        }
+        else
+        {
+            toolsOffered = NotMeasurableBlock($"{harness} did not export tool definitions for this session.");
+        }
+
+        Dictionary<string, object?> summary = new(StringComparer.Ordinal)
+        {
+            ["turn_count"] = aggregate.TurnCount,
+            ["request_count"] = aggregate.RequestCount,
+            ["span_count"] = projection.SpanCount,
+            ["total_input"] = aggregate.TotalInput,
+            ["total_output"] = aggregate.TotalOutput,
+            ["total_cache_read"] = aggregate.TotalCacheRead,
+            ["total_cache_creation"] = aggregate.TotalCacheCreation,
+            ["duration_ms"] = aggregate.DurationMs,
+            ["models"] = aggregate.Models,
+            ["cache_hit_ratio"] = aggregate.CacheHitRatio,
+            ["cache_creation_coverage"] = aggregate.CacheCreationCoverage,
+            ["tool_calls"] = aggregate.ToolCalls,
+            ["tools_invoked"] = aggregate.ToolsInvoked,
+            ["tools_offered"] = toolsOffered,
+            ["has_tool_definitions"] = hasToolDefinitions,
+            ["cost"] = aggregate.PublishedCost,
+            ["cost_reported"] = aggregate.ReportedCost,
+            ["cost_basis_mismatch"] = aggregate.CostBasisMismatch,
+            ["coverage"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["schema_measurable"] = aggregate.Coverage.SchemaMeasurable,
+                ["context_measurable"] = aggregate.Coverage.ContextMeasurable,
+            },
+            ["problems"] = aggregate.Problems,
+        };
+
+        if (distinctSkills.Count > 0)
+        {
+            summary["skills_invoked"] = distinctSkills;
+        }
+
+        return summary;
+    }
 
     private static Dictionary<string, object?> ToTurnDto(ReadTimeTurnSummary turn) => new(StringComparer.Ordinal)
     {
         ["turnIndex"] = turn.Position,
+        ["index"] = turn.Position,
         ["spanId"] = turn.SpanId,
         ["timestamp"] = turn.TimestampUtc,
         ["model"] = turn.Model,
         ["inputTokens"] = turn.InputTokens,
+        ["input"] = turn.InputTokens,
         ["outputTokens"] = turn.OutputTokens,
+        ["output"] = turn.OutputTokens,
         ["tokens"] = turn.InputTokens.HasValue && turn.OutputTokens.HasValue
             ? turn.InputTokens.Value + turn.OutputTokens.Value
             : null,
         ["freshInputTokens"] = turn.FreshInputTokens,
+        ["fresh"] = turn.FreshInputTokens,
+        ["fresh_input"] = turn.FreshInputTokens,
         ["cacheReadTokens"] = turn.CacheReadTokens,
+        ["cache_read"] = turn.CacheReadTokens,
         ["cacheCreationTokens"] = turn.CacheCreationTokens,
+        ["cache_creation"] = turn.CacheCreationTokens,
         ["reasoningTokens"] = turn.ReasoningTokens,
+        ["reasoning"] = turn.ReasoningTokens,
         ["durationMs"] = turn.DurationMs,
         ["cost"] = turn.PublishedCost,
         ["costUsd"] = ExtractUsdCost(turn.PublishedCost),

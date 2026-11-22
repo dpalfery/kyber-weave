@@ -535,6 +535,277 @@ public sealed class AnalyticsReadPathTests
         Assert.Contains("sess-broken", [.. projectionHealth.GetProperty("failedSessions").EnumerateArray().Select(static s => s.GetString())], StringComparer.Ordinal);
     }
 
+    /// <summary>Session detail projects 1-based context, schema, skills, servers, reconciliation, notes, costBasisMismatch, and dual turn keys.</summary>
+    [Fact]
+    public void GetSessionDetailProjectsMultiTurnOtlpContextSchemaSkillsServersReconciliationAndDualTurnKeys()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new(snapshot: new Dictionary<string, ModelCosts>(StringComparer.Ordinal)
+        {
+            ["claude-sonnet-4-6"] = new ModelCosts(
+                InputCostPerToken: 0.000003,
+                OutputCostPerToken: 0.000015,
+                CacheWriteCostPerToken: 0.00000375,
+                CacheReadCostPerToken: 0.0000003,
+                WebSearchCostPerRequest: 0,
+                FastMultiplier: 1,
+                CacheWriteCostIsExplicit: true),
+        });
+
+        string toolDefsJson = JsonSerializer.Serialize(new object[]
+        {
+            new { name = "search_docs", server = "docs-mcp", description = "Search documentation repository for relevant sections." },
+            new { name = "unused_mcp_tool", server = "docs-mcp", description = "An unused MCP tool schema carried across turns." },
+            new { name = "Bash", server = (string?)null, description = "Run a shell command." },
+        });
+
+        OtlpSpan turn1 = MakeOtlpSpan(
+            spanId: "otlp-turn-1",
+            traceId: "11111111111111111111111111111111",
+            serviceName: "claude-host",
+            name: "chat",
+            kind: "client",
+            timestamp: "2026-11-19T10:00:00.000Z",
+            attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["claude.deployment_mode"] = Json("1p"),
+                ["session.id"] = Json("sess-otlp-rich"),
+                ["gen_ai.response.model"] = Json("claude-sonnet-4-6"),
+                ["gen_ai.usage.input_tokens"] = Json(100),
+                ["gen_ai.usage.cache_read.input_tokens"] = Json(200),
+                ["gen_ai.usage.cache_creation.input_tokens"] = Json(50),
+                ["gen_ai.usage.output_tokens"] = Json(40),
+                ["gen_ai.usage.reasoning_tokens"] = Json(10),
+                ["cost_usd"] = Json(0.12),
+                ["gen_ai.system_instructions"] = Json("You are a helpful coding assistant."),
+                ["gen_ai.tool.definitions"] = Json(toolDefsJson),
+                ["gen_ai.input.messages"] = Json("[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"text\":\"Check docs\"}]}]"),
+                ["gen_ai.request.max_context_tokens"] = Json(2000),
+            });
+
+        OtlpSpan turn2 = MakeOtlpSpan(
+            spanId: "otlp-turn-2",
+            traceId: "11111111111111111111111111111111",
+            serviceName: "claude-host",
+            name: "chat",
+            kind: "client",
+            timestamp: "2026-11-19T10:01:00.000Z",
+            attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["claude.deployment_mode"] = Json("1p"),
+                ["session.id"] = Json("sess-otlp-rich"),
+                ["gen_ai.response.model"] = Json("claude-sonnet-4-6"),
+                ["gen_ai.usage.input_tokens"] = Json(1500),
+                ["gen_ai.usage.cache_read.input_tokens"] = Json(100),
+                ["gen_ai.usage.cache_creation.input_tokens"] = Json(0),
+                ["gen_ai.usage.output_tokens"] = Json(30),
+                ["gen_ai.tool.definitions"] = Json(toolDefsJson),
+                ["gen_ai.input.messages"] = Json("[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"text\":\"Run search\"}]}]"),
+                ["gen_ai.request.max_context_tokens"] = Json(2000),
+            });
+
+        OtlpSpan toolCall = MakeOtlpSpan(
+            spanId: "otlp-tool-1",
+            traceId: "11111111111111111111111111111111",
+            serviceName: "claude-host",
+            name: "execute_tool",
+            kind: "internal",
+            timestamp: "2026-11-19T10:00:30.000Z",
+            attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["claude.deployment_mode"] = Json("1p"),
+                ["session.id"] = Json("sess-otlp-rich"),
+                ["gen_ai.operation.name"] = Json("execute_tool"),
+                ["gen_ai.tool.name"] = Json("search_docs"),
+                ["gen_ai.tool.call.id"] = Json("call-1"),
+            });
+
+        OtlpSpan skillCall = MakeOtlpSpan(
+            spanId: "otlp-skill-1",
+            traceId: "11111111111111111111111111111111",
+            serviceName: "claude-host",
+            name: "execute_tool",
+            kind: "internal",
+            timestamp: "2026-11-19T10:00:45.000Z",
+            attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["claude.deployment_mode"] = Json("1p"),
+                ["session.id"] = Json("sess-otlp-rich"),
+                ["gen_ai.operation.name"] = Json("execute_tool"),
+                ["gen_ai.tool.name"] = Json("Skill"),
+                ["gen_ai.tool.call.id"] = Json("call-skill-1"),
+                ["gen_ai.tool.call.arguments"] = Json("{\"skill\":\"docs\"}"),
+            });
+
+        IngestOutcome outcome = CanonIngestPipeline.IngestBatch([turn1, turn2, toolCall, skillCall], store, store);
+        Assert.Equal(new IngestOutcome(4, 0, 0), outcome);
+
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
+
+        JsonElement detail = bridge.GetSessionDetail("sess-otlp-rich")!.Value;
+
+        Assert.Equal(4, detail.GetProperty("span_count").GetInt32());
+
+        JsonElement mismatch = detail.GetProperty("costBasisMismatch");
+        Assert.Equal("COST_BASIS_MISMATCH", mismatch.GetProperty("code").GetString());
+        Assert.Equal(JsonValueKind.Object, mismatch.GetProperty("totalsByBasis").ValueKind);
+        Assert.True(mismatch.GetProperty("totalsByBasis").TryGetProperty("harness", out _));
+        Assert.True(mismatch.GetProperty("totalsByBasis").TryGetProperty("published", out _));
+
+        List<JsonElement> turnDtos = [.. detail.GetProperty("turns").EnumerateArray()];
+        Assert.Equal(2, turnDtos.Count);
+        JsonElement firstTurn = turnDtos[0];
+        Assert.Equal(0, firstTurn.GetProperty("turnIndex").GetInt32());
+        Assert.Equal(0, firstTurn.GetProperty("index").GetInt32());
+        Assert.Equal(350, firstTurn.GetProperty("inputTokens").GetInt64());
+        Assert.Equal(350, firstTurn.GetProperty("input").GetInt64());
+        Assert.Equal(40, firstTurn.GetProperty("outputTokens").GetInt64());
+        Assert.Equal(40, firstTurn.GetProperty("output").GetInt64());
+        Assert.Equal(100, firstTurn.GetProperty("fresh").GetInt64());
+        Assert.Equal(100, firstTurn.GetProperty("fresh_input").GetInt64());
+        Assert.Equal(200, firstTurn.GetProperty("cache_read").GetInt64());
+        Assert.Equal(50, firstTurn.GetProperty("cache_creation").GetInt64());
+        Assert.Equal(10, firstTurn.GetProperty("reasoning").GetInt64());
+
+        JsonElement context = detail.GetProperty("context");
+        Assert.True(context.GetProperty("measurable").GetBoolean());
+        List<JsonElement> contextTurns = [.. context.GetProperty("turns").EnumerateArray()];
+        Assert.Equal(2, contextTurns.Count);
+        Assert.Equal(1, contextTurns[0].GetProperty("index").GetInt32());
+        Assert.Equal(2, contextTurns[1].GetProperty("index").GetInt32());
+        Assert.Equal(JsonValueKind.Object, contextTurns[0].GetProperty("toolDefinitionsByServer").ValueKind);
+        Assert.True(contextTurns[0].GetProperty("toolDefinitionsByServer").GetProperty("docs-mcp").GetInt64() > 0);
+        Assert.Equal(JsonValueKind.Object, contextTurns[0].GetProperty("residual").ValueKind);
+        Assert.True(contextTurns[0].GetProperty("residual").TryGetProperty("tokens", out _));
+        Assert.True(contextTurns[0].GetProperty("residual").TryGetProperty("attribution", out _));
+        Assert.True(context.TryGetProperty("first", out JsonElement firstEdge));
+        Assert.True(firstEdge.TryGetProperty("buckets", out _));
+        Assert.True(firstEdge.TryGetProperty("reported_input", out _));
+        Assert.True(context.TryGetProperty("last", out JsonElement lastEdge));
+        Assert.True(lastEdge.TryGetProperty("buckets", out _));
+        Assert.True(lastEdge.TryGetProperty("reported_input", out _));
+        foreach (JsonElement flagged in context.GetProperty("flaggedTurns").EnumerateArray())
+        {
+            Assert.True(flagged.GetInt32() >= 1);
+        }
+
+        JsonElement schema = detail.GetProperty("schema");
+        Assert.True(schema.GetProperty("measurable").GetBoolean());
+        Assert.Equal(3, schema.GetProperty("ranked").GetArrayLength());
+        Assert.Contains(schema.GetProperty("neverInvoked").EnumerateArray(), static t => t.GetProperty("name").GetString() == "unused_mcp_tool");
+        Assert.True(schema.GetProperty("byServer").GetProperty("docs-mcp").GetInt64() > 0);
+        Assert.True(schema.GetProperty("unusedRange").GetProperty("tokenResidencies").GetInt64() > 0);
+
+        List<JsonElement> tools = [.. detail.GetProperty("tools").EnumerateArray()];
+        JsonElement mcpTool = Assert.Single(tools, static t => t.GetProperty("name").GetString() == "search_docs");
+        Assert.True(mcpTool.GetProperty("in_definitions").GetBoolean());
+        Assert.True(mcpTool.GetProperty("is_mcp").GetBoolean());
+        JsonElement builtinTool = Assert.Single(tools, static t => t.GetProperty("name").GetString() == "Bash");
+        Assert.True(builtinTool.GetProperty("in_definitions").GetBoolean());
+        Assert.False(builtinTool.GetProperty("is_mcp").GetBoolean());
+
+        JsonElement server = Assert.Single(detail.GetProperty("servers").EnumerateArray());
+        Assert.Equal("docs-mcp", server.GetProperty("server").GetString());
+        Assert.True(server.GetProperty("is_mcp").GetBoolean());
+        Assert.Equal(2, server.GetProperty("tools").GetInt32());
+
+        JsonElement skills = detail.GetProperty("skills");
+        Assert.True(skills.GetProperty("measurable").GetBoolean());
+        JsonElement docsSkill = Assert.Single(skills.GetProperty("rows").EnumerateArray());
+        Assert.Equal("docs", docsSkill.GetProperty("name").GetString());
+        Assert.Equal("not_measurable", docsSkill.GetProperty("listed").GetProperty("availability").GetString());
+        Assert.Equal(1, docsSkill.GetProperty("invocations").GetInt32());
+        Assert.Equal(["docs"], [.. detail.GetProperty("summary").GetProperty("skills_invoked").EnumerateArray().Select(static s => s.GetString())]);
+
+        List<JsonElement> reconciliation = [.. detail.GetProperty("reconciliation").EnumerateArray()];
+        Assert.Equal(2, reconciliation.Count);
+        Assert.All(reconciliation, static row =>
+        {
+            Assert.Equal(JsonValueKind.True, row.GetProperty("input_match").ValueKind);
+            Assert.Equal(JsonValueKind.True, row.GetProperty("output_match").ValueKind);
+            Assert.True(row.TryGetProperty("request", out _));
+            Assert.True(row.TryGetProperty("root_input", out _));
+            Assert.True(row.TryGetProperty("sum_chat_input", out _));
+            Assert.True(row.TryGetProperty("root_output", out _));
+            Assert.True(row.TryGetProperty("sum_chat_output", out _));
+        });
+
+        Assert.True(detail.GetProperty("notes").GetArrayLength() > 0);
+    }
+
+    /// <summary>Pi OTLP session without schemas, message parts, or skill listings projects honest not_measurable blocks.</summary>
+    [Fact]
+    public void GetSessionDetailReportsHonestNotMeasurableGapsForPiOtlpSession()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+
+        OtlpSpan piTurn = MakeOtlpSpan(
+            spanId: "pi-turn-1",
+            traceId: "22222222222222222222222222222222",
+            serviceName: "pi-host",
+            name: "pi.agent.chat",
+            kind: "client",
+            timestamp: "2026-11-19T11:00:00.000Z",
+            attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["pi.session.id"] = Json("  sess-pi-gap  "),
+                ["gen_ai.usage.input_tokens"] = Json(100),
+                ["gen_ai.usage.output_tokens"] = Json(25),
+            });
+
+        OtlpSpan piTool = MakeOtlpSpan(
+            spanId: "pi-tool-1",
+            traceId: "22222222222222222222222222222222",
+            serviceName: "pi-host",
+            name: "pi.tool",
+            kind: "internal",
+            timestamp: "2026-11-19T11:00:10.000Z",
+            attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["pi.session.id"] = Json("  sess-pi-gap  "),
+                ["gen_ai.operation.name"] = Json("execute_tool"),
+                ["gen_ai.tool.name"] = Json("Bash"),
+                ["gen_ai.tool.call.id"] = Json("pi-call-1"),
+            });
+
+        IngestOutcome outcome = CanonIngestPipeline.IngestBatch([piTurn, piTool], store, store);
+        Assert.Equal(new IngestOutcome(2, 0, 0), outcome);
+
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
+
+        JsonElement detail = bridge.GetSessionDetail("sess-pi-gap")!.Value;
+
+        Assert.Equal("pi", detail.GetProperty("harness").GetString());
+        Assert.Equal(2, detail.GetProperty("span_count").GetInt32());
+        Assert.Equal(JsonValueKind.Null, detail.GetProperty("costBasisMismatch").ValueKind);
+
+        JsonElement context = detail.GetProperty("context");
+        Assert.False(context.GetProperty("measurable").GetBoolean());
+        Assert.False(string.IsNullOrWhiteSpace(context.GetProperty("reason").GetString()));
+
+        JsonElement schema = detail.GetProperty("schema");
+        Assert.False(schema.GetProperty("measurable").GetBoolean());
+        Assert.Equal(1, schema.GetProperty("invocationCount").GetInt32());
+        Assert.False(string.IsNullOrWhiteSpace(schema.GetProperty("reason").GetString()));
+
+        JsonElement skills = detail.GetProperty("skills");
+        Assert.Equal("not_measurable", skills.GetProperty("availability").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(skills.GetProperty("reason").GetString()));
+
+        JsonElement bashTool = Assert.Single(detail.GetProperty("tools").EnumerateArray());
+        Assert.Equal("Bash", bashTool.GetProperty("name").GetString());
+        Assert.False(bashTool.GetProperty("in_definitions").GetBoolean());
+        Assert.False(bashTool.GetProperty("is_mcp").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, bashTool.GetProperty("total_schema_cost").ValueKind);
+
+        Assert.Equal("not_measurable", detail.GetProperty("summary").GetProperty("tools_offered").GetProperty("availability").GetString());
+        Assert.True(detail.GetProperty("notes").GetArrayLength() > 0);
+        Assert.Null(bridge.GetSessionDetail("nonexistent-pi-session"));
+    }
+
     private static CanonProjectionService CreateProjection(InMemoryRelationalStore store, FakePricingRepository pricing) =>
         new(
             store,
@@ -655,6 +926,32 @@ public sealed class AnalyticsReadPathTests
             OriginalUtf8BytesWhenTruncated: null);
 
     private static JsonElement Json(object value) => JsonSerializer.SerializeToElement(value);
+
+    private static OtlpSpan MakeOtlpSpan(
+        string spanId,
+        string traceId,
+        string serviceName,
+        string name,
+        string kind,
+        string timestamp,
+        IReadOnlyDictionary<string, JsonElement> attributes) =>
+        new(
+            TraceId: traceId,
+            SpanId: spanId,
+            ParentSpanId: null,
+            Name: name,
+            Kind: kind,
+            StartTimeUnixNano: "1760000000000000000",
+            EndTimeUnixNano: "1760000000100000000",
+            Timestamp: timestamp,
+            DurationMs: 100.0,
+            Status: new OtlpStatus("ok"),
+            Attributes: attributes,
+            Resource: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["service.name"] = Json(serviceName),
+            },
+            Scope: new OtlpScope("test-scope", "1.0.0"));
 
     /// <summary>
     /// Reader decorator that fails every aggregate read for one session key, standing in for a

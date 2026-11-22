@@ -172,11 +172,24 @@ public class CanonIngestTests
             kind: "client",
             attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
             {
-                ["pi.session.id"] = Element("sess-pi"),
+                ["pi.session.id"] = Element("  sess-pi  "),
                 ["gen_ai.usage.input_tokens"] = Element(50),
                 ["gen_ai.usage.cache_read.input_tokens"] = Element(200),
                 ["gen_ai.usage.output_tokens"] = Element(30),
                 ["pi.skills"] = Element("debugging"),
+            });
+
+        OtlpSpan piBlankSession = MakeOtlpSpan(
+            spanId: "2222222222222223",
+            traceId: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbc",
+            serviceName: "pi-host-blank",
+            name: "pi.agent.chat",
+            kind: "client",
+            attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["pi.session.id"] = Element("   \t  "),
+                ["gen_ai.usage.input_tokens"] = Element(10),
+                ["gen_ai.usage.output_tokens"] = Element(5),
             });
 
         OtlpSpan badClaudeOutput = MakeOtlpSpan(
@@ -218,11 +231,11 @@ public class CanonIngestTests
             });
 
         IngestOutcome outcome = CanonIngestPipeline.IngestBatch(
-            [copilotTurn, piTurn, badClaudeOutput, structuralSpan, badOpencodeVersion],
+            [copilotTurn, piTurn, piBlankSession, badClaudeOutput, structuralSpan, badOpencodeVersion],
             store,
             store);
 
-        Assert.Equal(2, outcome.Accepted);
+        Assert.Equal(3, outcome.Accepted);
         Assert.Equal(2, outcome.Quarantined);
         Assert.Equal(1, outcome.Rejected);
 
@@ -243,13 +256,18 @@ public class CanonIngestTests
         CollectedRecord? loadedPi = store.GetRecord("2222222222222222");
         Assert.NotNull(loadedPi);
         Assert.Equal("pi", loadedPi.HarnessId);
-        Assert.Null(loadedPi.SessionKey);
+        Assert.Equal("sess-pi", loadedPi.SessionKey);
         Assert.Equal(50, TokenCount(loadedPi, TokenClass.Input));
         Assert.Equal(200, TokenCount(loadedPi, TokenClass.CacheRead));
         Assert.Equal(250, loadedPi.ReportedInputTokens);
         Assert.Contains(
             loadedPi.Parts,
             static part => part.Bucket == ContentBucket.InstructionContext && part.PlainText == "debugging");
+
+        CollectedRecord? loadedPiBlank = store.GetRecord("2222222222222223");
+        Assert.NotNull(loadedPiBlank);
+        Assert.Equal("pi", loadedPiBlank.HarnessId);
+        Assert.Null(loadedPiBlank.SessionKey);
 
         Assert.Null(store.GetRecord("3333333333333333"));
         StoredIngestProblem problem = Assert.Single(store.ListIngestProblems(spanId: "3333333333333333"));

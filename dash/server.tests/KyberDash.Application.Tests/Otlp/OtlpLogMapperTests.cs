@@ -258,4 +258,100 @@ public class OtlpLogMapperTests
         Assert.Equal(1, store.CountRecords("copilot"));
         Assert.Equal(1, store.CountIngestProblems());
     }
+
+    [Fact]
+    public void Map_PiLogWithPiSessionId_TrimsNonWhitespaceAndRejectsWhitespace()
+    {
+        OtlpLog trimmedLog = new(
+            LogId: "log-pi-trimmed",
+            TraceId: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            SpanId: null,
+            SessionId: null,
+            Timestamp: "2026-11-19T12:25:00.000Z",
+            Body: "pi turn",
+            Attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["pi.session.id"] = JsonSerializer.SerializeToElement("  sess-pi  "),
+                ["gen_ai.usage.input_tokens"] = JsonSerializer.SerializeToElement(20),
+                ["gen_ai.usage.output_tokens"] = JsonSerializer.SerializeToElement(10),
+            },
+            Resource: new Dictionary<string, JsonElement>(StringComparer.Ordinal),
+            Scope: new OtlpScope("pi", "1.0.0"));
+
+        OtlpLog whitespaceLog = new(
+            LogId: "log-pi-whitespace",
+            TraceId: "ffffffffffffffffffffffffffffffff",
+            SpanId: null,
+            SessionId: null,
+            Timestamp: "2026-11-19T12:26:00.000Z",
+            Body: "pi blank",
+            Attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["pi.session.id"] = JsonSerializer.SerializeToElement("   \t  "),
+                ["gen_ai.usage.input_tokens"] = JsonSerializer.SerializeToElement(10),
+                ["gen_ai.usage.output_tokens"] = JsonSerializer.SerializeToElement(5),
+            },
+            Resource: new Dictionary<string, JsonElement>(StringComparer.Ordinal),
+            Scope: new OtlpScope("pi", "1.0.0"));
+
+        OtlpLogMapResult result = OtlpLogMapper.Map([trimmedLog, whitespaceLog]);
+
+        Assert.Equal(new IngestOutcome(2, 0, 0), result.Outcome);
+        CollectedBatch batch = Assert.Single(result.Batches);
+        Assert.Equal("pi", batch.Source.HarnessId);
+        Assert.Equal("sess-pi", Assert.Single(batch.Sessions).SessionKey);
+        Assert.Equal("sess-pi", Assert.Single(batch.Records, static r => r.RecordId == "log-pi-trimmed").SessionKey);
+        Assert.Null(Assert.Single(batch.Records, static r => r.RecordId == "log-pi-whitespace").SessionKey);
+    }
+
+    [Fact]
+    public void Map_LogWithSkillAttributesAndSkillToolCall_PopulatesSkillsInvoked()
+    {
+        OtlpLog attrLog = new(
+            LogId: "log-skill-attrs",
+            TraceId: null,
+            SpanId: null,
+            SessionId: "sess-pi-skills",
+            Timestamp: "2026-11-19T12:30:00.000Z",
+            Body: "skill attrs",
+            Attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["pi.session.id"] = JsonSerializer.SerializeToElement("sess-pi-skills"),
+                ["gen_ai.skill.name"] = JsonSerializer.SerializeToElement("docs"),
+                ["skill.name"] = JsonSerializer.SerializeToElement("deploy"),
+                ["skill_name"] = JsonSerializer.SerializeToElement("lint"),
+                ["kyber.skills.invoked"] = JsonSerializer.SerializeToElement(new List<string> { "release-notes", "docs" }),
+                ["gen_ai.usage.input_tokens"] = JsonSerializer.SerializeToElement(15),
+                ["gen_ai.usage.output_tokens"] = JsonSerializer.SerializeToElement(5),
+            },
+            Resource: new Dictionary<string, JsonElement>(StringComparer.Ordinal),
+            Scope: new OtlpScope("pi", "1.0.0"));
+
+        OtlpLog toolLog = new(
+            LogId: "log-skill-tool",
+            TraceId: null,
+            SpanId: null,
+            SessionId: "sess-pi-skills",
+            Timestamp: "2026-11-19T12:31:00.000Z",
+            Body: "skill tool",
+            Attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["pi.session.id"] = JsonSerializer.SerializeToElement("sess-pi-skills"),
+                ["gen_ai.tool.name"] = JsonSerializer.SerializeToElement("Skill"),
+                ["gen_ai.tool.call.arguments"] = JsonSerializer.SerializeToElement("{\"skill\":\"triage\"}"),
+                ["gen_ai.usage.input_tokens"] = JsonSerializer.SerializeToElement(10),
+                ["gen_ai.usage.output_tokens"] = JsonSerializer.SerializeToElement(2),
+            },
+            Resource: new Dictionary<string, JsonElement>(StringComparer.Ordinal),
+            Scope: new OtlpScope("pi", "1.0.0"));
+
+        OtlpLogMapResult result = OtlpLogMapper.Map([attrLog, toolLog]);
+
+        Assert.Equal(new IngestOutcome(2, 0, 0), result.Outcome);
+        CollectedBatch batch = Assert.Single(result.Batches);
+        CollectedRecord first = Assert.Single(batch.Records, static r => r.RecordId == "log-skill-attrs");
+        Assert.Equal(["docs", "deploy", "lint", "release-notes"], first.SkillsInvoked);
+        CollectedRecord second = Assert.Single(batch.Records, static r => r.RecordId == "log-skill-tool");
+        Assert.Equal(["triage"], second.SkillsInvoked);
+    }
 }
