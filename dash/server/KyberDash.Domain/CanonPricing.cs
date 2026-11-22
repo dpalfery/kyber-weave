@@ -1096,7 +1096,9 @@ public static partial class CanonPricing
     /// A reported output total is one rate and is billed when the output class was not stored.
     /// Stored classes that sum to the reported input are priced, with the absent input classes
     /// reconciled to zero. A remainder is priced only for the stored classes and reported as
-    /// <see cref="CostStatus.Partial"/>. A turn with no class and no reported total is not priced.
+    /// <see cref="CostStatus.Partial"/>. When no reported input was stored, the input side is
+    /// complete only if an input class was stored. A turn with no class and no reported total
+    /// is not priced.
     /// </summary>
     public static CostBlock PriceStoredTokens(
         long? freshInput,
@@ -1127,7 +1129,7 @@ public static partial class CanonPricing
         decimal knownInput = (decimal)billedFresh + billedCacheRead + billedCacheCreation;
         bool inputComplete = reportedInput is not null
             ? canPriceInput && knownInput == reportedInput.Value
-            : storedClass;
+            : canPriceInput;
 
         long billedOutput;
         bool outputComplete;
