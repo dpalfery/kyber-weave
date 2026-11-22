@@ -3,17 +3,18 @@ using KyberWeave.Core.Configuration;
 namespace KyberWeave.Core.Review;
 
 /// <summary>
-/// Routes a finding by its kind and by the number of the review cycle being decided.
+/// Routes a finding by its kind, by the claim its seat wrote, and by the number of the review cycle being decided.
 /// </summary>
 /// <remarks>
-/// Severity and the fix level still decide a defect, and a seat that wrote no kind is read as a defect. A plan
-/// objection never reaches a fix round, and a hardening survives only inside a shrinking window: cycle 1 keeps a
-/// major or critical one the fix level would take, cycle 2 keeps only a critical one, and later cycles keep none.
-/// Anything this drops becomes pull request follow-up work, never a <c>fix:</c> line.
+/// A finding whose claim opens with the pre-existing debt marker is dropped before any kind is read: it is about code
+/// the change did not cause. Otherwise severity and the fix level decide a defect, and a seat that wrote no kind is
+/// read as a defect. A plan objection never reaches a fix round, and a hardening survives only inside a shrinking
+/// window: cycle 1 keeps a major or critical one the fix level would take, cycle 2 keeps only a critical one, and later
+/// cycles keep none. Anything this drops becomes pull request follow-up work, never a <c>fix:</c> line.
 /// </remarks>
 public static class FindingKindRouting
 {
-    /// <summary>The diagnostic code the kind routing reports its drops and its missing kinds under.</summary>
+    /// <summary>The diagnostic code the routing reports its drops and its missing kinds under.</summary>
     public const string Code = "KW-REVIEW-063";
 
     /// <summary>The lens whose findings are always defects, whatever kind the seat wrote.</summary>
@@ -21,6 +22,36 @@ public static class FindingKindRouting
 
     /// <summary>What a plan objection with no quoted basis is recorded as breaking.</summary>
     public const string NoBasisQuoted = "no basis quoted";
+
+    /// <summary>The drop reason that marks a finding about pre-existing code the change did not touch.</summary>
+    public const string PreExistingDebt = "pre-existing debt";
+
+    /// <summary>The marker a seat writes at the start of a claim about code the change did not cause.</summary>
+    public const string PreExistingDebtClaim = "Pre-existing debt:";
+
+    /// <summary>
+    /// The reason a finding is dropped as pre-existing debt, or null when its claim carries no such marker.
+    /// </summary>
+    /// <param name="finding">The finding whose claim to read.</param>
+    /// <remarks>
+    /// The seat states it in the claim, so the drop no longer depends on the reviewer remembering to pass
+    /// <c>--drop</c>. The reason keeps the shape a manual drop records: <c>pre-existing debt: &lt;why&gt;</c>.
+    /// </remarks>
+    public static string? PreExistingDebtDropReason(ReviewFinding finding)
+    {
+        ArgumentNullException.ThrowIfNull(finding);
+
+        string claim = (finding.Claim ?? string.Empty).TrimStart();
+        if (!claim.StartsWith(PreExistingDebtClaim, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        string rest = claim[PreExistingDebtClaim.Length..];
+        int lineEnd = rest.IndexOfAny(['\r', '\n']);
+        if (lineEnd >= 0)
+            rest = rest[..lineEnd];
+
+        return rest.Trim() is { Length: > 0 } detail ? $"{PreExistingDebt}: {detail}" : PreExistingDebt;
+    }
 
     /// <summary>The kind the verdict routes <paramref name="finding"/> as: a security finding is always a defect.</summary>
     /// <param name="finding">The finding to read.</param>

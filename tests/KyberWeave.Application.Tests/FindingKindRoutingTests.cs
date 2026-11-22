@@ -16,7 +16,8 @@ public sealed class FindingKindRoutingTests
         ReviewSeverity severity,
         FindingKind? kind,
         string lens = "correctness",
-        string? basis = null) =>
+        string? basis = null,
+        string? claim = "The loop bound excludes the final element.") =>
         new(
             "correctness/off-by-one",
             lens,
@@ -25,7 +26,7 @@ public sealed class FindingKindRoutingTests
             "src/Foo.cs",
             12,
             "if (i < count)",
-            "The loop bound excludes the final element.",
+            claim,
             "src/Foo.cs:12",
             "The last element is never processed.",
             "Use <= or count + 1.",
@@ -105,4 +106,39 @@ public sealed class FindingKindRoutingTests
     [Fact]
     public void ADefectIsNeverDroppedByAKindSchedule() =>
         Assert.Null(FindingKindRouting.DropReason(Finding(ReviewSeverity.Critical, FindingKind.Defect), MinorLevel, cycle: 3));
+
+    /// <summary>
+    /// A claim that opens with the marker is dropped as pre-existing debt whatever its kind and cycle, with the rest of
+    /// the claim's first line as the reason a manual <c>--drop</c> would have recorded.
+    /// </summary>
+    [Fact]
+    public void APreExistingDebtClaimIsDroppedWhateverItsKind() =>
+        Assert.Equal(
+            "pre-existing debt: the file is not in this change.",
+            FindingKindRouting.PreExistingDebtDropReason(Finding(
+                ReviewSeverity.Major,
+                FindingKind.Hardening,
+                claim: "Pre-existing debt: the file is not in this change.")));
+
+    /// <summary>The marker is matched whatever its case and leading whitespace, and only the first line is recorded.</summary>
+    [Fact]
+    public void APreExistingDebtClaimIsMatchedByPrefixAndFirstLine() =>
+        Assert.Equal(
+            "pre-existing debt: not touched here",
+            FindingKindRouting.PreExistingDebtDropReason(Finding(
+                ReviewSeverity.Minor,
+                FindingKind.Defect,
+                claim: "  \n pre-existing DEBT:   not touched here\nIt predates the branch.")));
+
+    /// <summary>A claim that only mentions the marker later is an ordinary finding.</summary>
+    [Fact]
+    public void APreExistingDebtMarkerThatDoesNotOpenTheClaimIsIgnored()
+    {
+        Assert.Null(FindingKindRouting.PreExistingDebtDropReason(Finding(
+            ReviewSeverity.Major,
+            FindingKind.Hardening,
+            claim: "This is not a Pre-existing debt: it is in this change.")));
+        Assert.Null(FindingKindRouting.PreExistingDebtDropReason(Finding(
+            ReviewSeverity.Major, FindingKind.Hardening, claim: null)));
+    }
 }

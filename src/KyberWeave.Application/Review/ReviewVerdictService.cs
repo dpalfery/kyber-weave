@@ -59,7 +59,7 @@ public sealed partial class ReviewVerdictService(
     TimeProvider clock) : IReviewVerdictService
 {
     /// <summary>The drop reason that marks a finding about pre-existing code the change did not touch.</summary>
-    public const string PreExistingDebt = "pre-existing debt";
+    public const string PreExistingDebt = FindingKindRouting.PreExistingDebt;
 
     /// <summary>The drop reason that marks a finding the reviewer leaves for the pull request's own review notes.</summary>
     public const string PullRequestNote = "pr note";
@@ -139,6 +139,10 @@ public sealed partial class ReviewVerdictService(
         List<ReviewFinding> findings = ApplyDrops(input.Findings, request.Drop, report, dropped);
         if (report.HasErrors)
             return Failed(report);
+
+        // A seat that says its finding is about code this change did not cause cannot send it to a fix round by
+        // forgetting --drop: it is dropped here, after the reviewer's own --drop above so that one still wins.
+        findings = DropPreExistingDebtClaims(findings, dropped, report);
 
         findings = CheckCitedLines(root, findings, report, dropped);
 
@@ -1086,6 +1090,41 @@ public sealed partial class ReviewVerdictService(
                 ReviewVerdictRules.Code,
                 Severity.Info,
                 $"Dropped as nitpick (fix level {policy.FixLevelName}): '{finding.Id}'",
+                finding.Lens,
+                finding.File,
+                StartLine: finding.Line));
+        }
+
+        return kept;
+    }
+
+    /// <summary>
+    /// Drops each finding whose claim states that the code it is about predates the change, before any kind or cycle
+    /// is read, with the reason a reviewer's own <c>--drop</c> would have recorded. Its drops are pull request
+    /// follow-up work, so they reach no <c>fix:</c> line, no fix count and no recheck.
+    /// </summary>
+    /// <param name="findings">The findings the verdict would otherwise decide.</param>
+    /// <param name="dropped">The dropped findings the report and the follow-up lines read.</param>
+    /// <param name="report">The report the drop lines are written to.</param>
+    private static List<ReviewFinding> DropPreExistingDebtClaims(
+        List<ReviewFinding> findings,
+        List<DroppedFinding> dropped,
+        DiagnosticReport report)
+    {
+        List<ReviewFinding> kept = [];
+        foreach (ReviewFinding finding in findings)
+        {
+            if (FindingKindRouting.PreExistingDebtDropReason(finding) is not { } reason)
+            {
+                kept.Add(finding);
+                continue;
+            }
+
+            dropped.Add(new DroppedFinding(finding, FindingKindRouting.Code, reason));
+            report.Add(new Diagnostic(
+                FindingKindRouting.Code,
+                Severity.Info,
+                $"Dropped '{finding.Id}': {reason}.",
                 finding.Lens,
                 finding.File,
                 StartLine: finding.Line));
