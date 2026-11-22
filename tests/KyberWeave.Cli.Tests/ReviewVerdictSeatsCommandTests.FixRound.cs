@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
 using Xunit;
 using static KyberWeave.Tests.ReviewDiagnosticAssert;
@@ -283,7 +284,150 @@ public sealed partial class ReviewVerdictSeatsCommandTests
         Assert.Contains($"fix round: none (fix level {level}); review clean: proceed to archive.", lines);
     }
 
+    private const string KindRouting = "KW-REVIEW-063";
+
+    /// <summary>
+    /// A plan objection never takes a fix round: it becomes follow-up work, and its quoted basis is the recorded reason.
+    /// </summary>
+    [Fact]
+    public void APlanObjectionIsFollowUpWorkAndItsBasisIsTheReason()
+    {
+        WriteSeat("documentation-accuracy", FindingSeat(
+            lens: "documentation-accuracy",
+            id: "documentation-accuracy/plan-t2",
+            severity: "critical",
+            kind: "plan-objection",
+            basis: "plan T2 says the selector stays in Application."));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("documentation-accuracy")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains(
+            MessagesWithCode(run.Output, KindRouting),
+            line => line.Contains(
+                "'documentation-accuracy/plan-t2': pr note: plan objection: plan T2 says the selector stays in Application.",
+                StringComparison.Ordinal));
+        IReadOnlyList<string> lines = MessagesWithCode(run.Output, FixRound);
+        Assert.Contains("follow-up: documentation-accuracy/plan-t2 (critical) src/Foo.cs:12 (pr note)", lines);
+        Assert.DoesNotContain(lines, line => line.StartsWith("fix:", StringComparison.Ordinal));
+        Assert.Contains("fix round: none (fix level minor); review clean: proceed to archive.", lines);
+    }
+
+    /// <summary>
+    /// A cycle 3 hardening is dropped whatever its severity, so a change whose only findings are a hardening and a plan
+    /// objection is approved, with both listed as follow-up work and neither as a fix.
+    /// </summary>
+    [Fact]
+    public void OnlyDroppedFindingsLeaveTheVerdictApprove()
+    {
+        string cycle = OutCycleFolder(3);
+        _services.Files.CreateDirectory(cycle);
+        WriteSeat("correctness", FindingSeat(severity: "critical", kind: "hardening"));
+        WriteSeat("documentation-accuracy", FindingSeat(
+            lens: "documentation-accuracy",
+            id: "documentation-accuracy/plan-d4",
+            severity: "major",
+            kind: "plan-objection",
+            basis: "plan D4 names the decision model as optional."));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--out", Path.Combine(cycle, "findings.json"), .. NotSeatedExcept("correctness", "documentation-accuracy")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains(MessagesWithCode(run.Output, "KW-REVIEW-024"), line => line.StartsWith("APPROVE", StringComparison.Ordinal));
+        IReadOnlyList<string> lines = MessagesWithCode(run.Output, FixRound);
+        Assert.Contains("follow-up: correctness/off-by-one (critical) src/Foo.cs:12 (pr note)", lines);
+        Assert.Contains("follow-up: documentation-accuracy/plan-d4 (major) src/Foo.cs:12 (pr note)", lines);
+        Assert.DoesNotContain(lines, line => line.StartsWith("fix:", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A security lens finding is always a defect, so a critical hardening it reports is still fixed in cycle 3, when
+    /// the same kind from any other lens would be dropped.
+    /// </summary>
+    [Fact]
+    public void ASecurityHardeningIsKeptAsADefectInCycle3()
+    {
+        string cycle = OutCycleFolder(3);
+        _services.Files.CreateDirectory(cycle);
+        WriteSeat("security", FindingSeat(lens: "security", id: "security/key-in-argv", severity: "critical", kind: "hardening"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--out", Path.Combine(cycle, "findings.json"), .. NotSeatedExcept("security")]);
+
+        Assert.Equal(1, run.Result);
+        Assert.DoesNotContain(MessagesWithCode(run.Output, KindRouting), line => line.StartsWith("Dropped", StringComparison.Ordinal));
+        IReadOnlyList<string> lines = MessagesWithCode(run.Output, FixRound);
+        Assert.Contains("fix: security/key-in-argv (critical) src/Foo.cs:12", lines);
+    }
+
+    /// <summary>A seat that wrote no kind is read as a defect, and each such finding draws its own warning.</summary>
+    [Fact]
+    public void AFindingsWithNoKindIsKeptWithAWarning()
+    {
+        WriteSeat("correctness", FindingSeat(severity: "major"));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains(
+            MessagesWithCode(run.Output, KindRouting),
+            line => line == "'correctness/off-by-one': the seat wrote no kind; read as a defect.");
+        Assert.Contains(
+            MessagesWithCode(run.Output, KindRouting),
+            line => line.Contains("routed as cycle 1", StringComparison.Ordinal));
+        Assert.Contains("fix: correctness/off-by-one (major) src/Foo.cs:12", MessagesWithCode(run.Output, FixRound));
+    }
+
+    /// <summary>With no cycle path of its own, the verdict reads the cycle number from the <c>--prior</c> folder.</summary>
+    [Fact]
+    public void APriorCycleNamesTheCurrentCycleWhenNoOutPathDoes()
+    {
+        WriteCycles(Minors(0), Minors(0));
+        WriteSeat("correctness", FindingSeat(severity: "critical", kind: "hardening"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", CycleFolder(2), .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains(
+            MessagesWithCode(run.Output, KindRouting),
+            line => line.Contains("pr note: hardening outside the cycle 3 schedule.", StringComparison.Ordinal));
+        Assert.Contains(MessagesWithCode(run.Output, "KW-REVIEW-024"), line => line.StartsWith("APPROVE", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The findings document keeps only what the verdict kept, so the next cycle's recheck, which reads it and filters
+    /// by the fix level, never re-checks a finding dropped by its kind.
+    /// </summary>
+    [Fact]
+    public void TheNextCycleRecheckExcludesADroppedHardeningAndPlanObjection()
+    {
+        string cycle = OutCycleFolder(1);
+        _services.Files.CreateDirectory(cycle);
+        string outPath = Path.Combine(cycle, "findings.json");
+        WriteSeat("correctness", FindingSeat(severity: "minor", kind: "hardening"));
+        WriteSeat("documentation-accuracy", FindingSeat(
+            lens: "documentation-accuracy",
+            id: "documentation-accuracy/plan-t2",
+            severity: "major",
+            kind: "plan-objection",
+            basis: "plan T2 says the selector stays in Application."));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--out", outPath, .. NotSeatedExcept("correctness", "documentation-accuracy")]);
+
+        Assert.Equal(0, run.Result);
+        FindingsReport stored = ReviewJson.ReadFindings(_services.Files.ReadAllText(outPath));
+        // The next cycle's recheck is this document filtered by the fix level (ReviewCycleSelector.ReadRecheck).
+        Assert.Empty(stored.Findings);
+        Assert.DoesNotContain(stored.Findings, new ReviewPolicy().FixRoundTakes);
+    }
+
     private string CycleFolder(int number) => Path.Combine(_services.Root, "cycles", $"cycle-{number}");
+
+    /// <summary>A cycle folder the verdict can name its cycle from: its parent is the review folder.</summary>
+    private string OutCycleFolder(int number) => Path.Combine(_services.Root, "review", $"cycle-{number}");
 
     /// <summary>The ids of <paramref name="count"/> distinct minor findings.</summary>
     private static string[] Minors(int count) => [.. Enumerable.Range(1, count).Select(index => $"security/m{index}")];
