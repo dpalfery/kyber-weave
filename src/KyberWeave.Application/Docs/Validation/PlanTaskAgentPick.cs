@@ -293,12 +293,12 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
             agreement = new DifficultyAgreement(verdict, Math.Round(agreementConfidence, 3));
         }
 
-        // The pick stays optional: a missing answer, or one below the floor, writes no agent and leaves the
-        // conductor to choose from the capabilities.
+        // The pick stays optional: a missing answer, a confidence that is not a finite number, or one below the
+        // floor writes no agent and leaves the conductor to choose from the capabilities.
         double? confidence = result.ScoresByRule is not null && result.ScoresByRule.TryGetValue(id, out ArbiterStep1Score? score)
             ? score.Confidence
             : null;
-        if (answer is null || confidence is not { } sure || sure < ConfidenceFloor)
+        if (answer is null || confidence is not { } sure || !double.IsFinite(sure) || sure < ConfidenceFloor)
         {
             return new PlanTaskAgentChoice(null, 0, agreement);
         }

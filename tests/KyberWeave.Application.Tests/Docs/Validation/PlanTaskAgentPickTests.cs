@@ -95,6 +95,17 @@ public sealed class PlanTaskAgentPickTests : IDisposable
         Assert.DoesNotContain("agent=", PlanTaskPacket.ReadyQueue(file.Tasks), StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void ANonFiniteConfidence_IsNoPickRatherThanAStoredOne(double confidence)
+    {
+        PlanTaskFile file = Write(Picker(new StubProvider("dev-medium", confidence)));
+
+        Assert.Null(file.Tasks![0].Agent);
+        Assert.Null(file.Tasks[0].AgentConfidence);
+    }
+
     [Fact]
     public void AModelFault_WritesTheFileWithNoPick()
     {

@@ -548,6 +548,33 @@ public sealed class ReviewGatesService(
     private string FullPath(string path) => pathResolver.GetFullPath(path, environment.CurrentDirectory);
 
     /// <summary>
+    ///     Whether two report paths name the same file, so a run that writes both the file <c>--out</c> names and the
+    ///     task's own report writes each one once. A path that cannot be resolved is compared as spelled.
+    /// </summary>
+    /// <param name="left">One report path, or null.</param>
+    /// <param name="right">The other report path.</param>
+    private bool SamePath(string? left, string right)
+    {
+        if (left is null)
+            return false;
+
+        StringComparison comparison = environment.IsFileSystemCaseInsensitive
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        try
+        {
+            return string.Equals(
+                pathResolver.GetFullPath(left, environment.CurrentDirectory),
+                pathResolver.GetFullPath(right, environment.CurrentDirectory),
+                comparison);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return string.Equals(left, right, comparison);
+        }
+    }
+
+    /// <summary>
     ///     The content of every changed file, read before and after a <c>--fix</c> run to tell whether a fix command
     ///     changed one. A missing file, and one this process cannot read, is recorded as null.
     /// </summary>
@@ -732,9 +759,13 @@ public sealed class ReviewGatesService(
             plan.Gates, root, request.Fix, request.StopOnFailure && !request.Red, observer);
         bool fixChangedFiles = request.Fix && Snapshot(root, changed).Any(file => file.Value != before[file.Key]);
 
-        // The counting --fix run writes the report a plain run writes, because the Arbiter reads that path as evidence.
-        if (outPath is null && !fixChangedFiles && taskSlug is not null && !request.Red)
-            outPath = Path.Combine(root, TaskGateNextStep.PassingReportPath(taskSlug));
+        // The counting --fix run writes the report a plain run writes, because the report reader finds the task's
+        // evidence there. An explicit --out names an extra file, not a replacement, so the rule holds either way.
+        string? countingReport = !fixChangedFiles && taskSlug is not null && !request.Red
+            ? Path.Combine(root, TaskGateNextStep.PassingReportPath(taskSlug))
+            : null;
+        if (outPath is null)
+            outPath = countingReport;
 
         GateReport finalReport = run.Report;
         RedOutcome? redOutcome = null;
@@ -762,8 +793,12 @@ public sealed class ReviewGatesService(
         report.AddMetric("gates", finalReport.Gates.Count);
         report.AddMetric("failed", finalReport.Gates.Count(g => !g.Passed && !g.NotApplicable));
 
+        string content = ReviewJson.Write(finalReport);
         ReviewReportWriter.TryWrite(
-            files, pathResolver, environment, outPath, ReviewJson.Write(finalReport), ReviewGateReporting.ReportWriteFailed, report);
+            files, pathResolver, environment, outPath, content, ReviewGateReporting.ReportWriteFailed, report);
+        if (countingReport is not null && !SamePath(outPath, countingReport))
+            ReviewReportWriter.TryWrite(
+                files, pathResolver, environment, countingReport, content, ReviewGateReporting.ReportWriteFailed, report);
 
         // The run as it happened, not as --red re-judged it: an accepted compile failure is still a failed build to read.
         IReadOnlyList<string> digest = TestDigest(root, taskSlug, request.Red, plan.Gates, run.Report, outputs);

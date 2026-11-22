@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Review;
+using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
 using Xunit;
 
@@ -83,8 +84,45 @@ public sealed class ReviewGatesTaskGateNextStepTests
         IReadOnlyList<string> lines = TaskGateNextStep.AfterFailingRun(accepted: true, "react-dev", Paths, "T3");
 
         Assert.Equal(
-            "  kyber-weave review gates . --agent react-dev --paths src/A.cs --paths tests/ATests.cs --task T3 --out .agent_scratchpad/T3/task-gate.json",
+            "  kyber-weave review gates . --agent react-dev --paths src/A.cs --paths tests/ATests.cs --task t3 --out .agent_scratchpad/t3/task-gate.json",
             lines[^1]);
+    }
+
+    [Fact]
+    public void AnAcceptedFailingRunQuotesEachChangedPathSoTheCopiedLineRunsOneCommand()
+    {
+        IReadOnlyList<string> lines = TaskGateNextStep.AfterFailingRun(
+            accepted: true, "react-dev", ["a; rm -rf /", "it's.cs"], "t3");
+
+        string command = lines[^1];
+        Assert.Contains("--paths " + ShellQuote.Quote("a; rm -rf /"), command, StringComparison.Ordinal);
+        Assert.Contains("--paths " + ShellQuote.Quote("it's.cs"), command, StringComparison.Ordinal);
+        Assert.DoesNotContain("--paths a; rm -rf /", command, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("../../evil", "evil")]
+    [InlineData("t1\nSTATUS: PASS", "t1-status-pass")]
+    public void AReportPathNormalisesTheTaskSlugSoItCannotLeaveTheScratchFolderOrForgeALine(string task, string slug)
+    {
+        Assert.Equal($".agent_scratchpad/{slug}/task-gate.json", TaskGateNextStep.PassingReportPath(task));
+        Assert.Equal($".agent_scratchpad/{slug}/task-gate-red.json", TaskGateNextStep.FailingReportPath(task));
+    }
+
+    [Fact]
+    public void AnAcceptedFailingRunWritesTheReportUnderTheNormalisedSlug()
+    {
+        IReadOnlyList<string> lines = TaskGateNextStep.AfterFailingRun(accepted: true, "react-dev", Paths, "../../evil");
+
+        Assert.Contains("--out .agent_scratchpad/evil/task-gate.json", lines[^1], StringComparison.Ordinal);
+        Assert.DoesNotContain("..", lines[^1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AReportPathRefusesATaskThatLeavesNothingToName()
+    {
+        Assert.Throws<ArgumentException>(() => TaskGateNextStep.PassingReportPath("!!!"));
+        Assert.Throws<ArgumentException>(() => TaskGateNextStep.FailingReportPath("!!!"));
     }
 
     [Fact]
