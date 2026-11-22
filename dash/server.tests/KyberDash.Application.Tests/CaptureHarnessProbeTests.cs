@@ -162,6 +162,8 @@ public class CaptureHarnessProbeTests
 
         Assert.Equal("unknown", status.GetProperty("receiver").GetProperty("liveness").GetString());
         Assert.Equal("http://127.0.0.1:4319", status.GetProperty("otlpEndpoint").GetString());
+        string unconfigured = capture.GetCaptureStatus("/tmp/kw-capture-state").GetProperty("otlpEndpoint").GetString() ?? string.Empty;
+        Assert.DoesNotContain("4318", unconfigured, StringComparison.Ordinal);
         Assert.Contains("127.0.0.1:4319", status.GetProperty("receiver").GetProperty("detail").GetString(), StringComparison.Ordinal);
         Assert.DoesNotContain("4318", status.GetProperty("receiver").GetProperty("detail").GetString(), StringComparison.Ordinal);
         Assert.DoesNotContain("is listening", status.GetProperty("receiver").GetProperty("detail").GetString(), StringComparison.Ordinal);
