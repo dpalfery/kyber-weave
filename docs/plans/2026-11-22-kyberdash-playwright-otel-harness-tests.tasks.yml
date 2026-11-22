@@ -1,0 +1,394 @@
+schema-version: 2
+plan: docs/plans/2026-11-22-kyberdash-playwright-otel-harness-tests.md
+execution-digest: f00ad2d8ffc1120498209f2d88c7373fa05a873f427a2ac3e7db06272bbe23c0
+tasks:
+  - id: T1
+    capabilities: C# domain adapter attribution, OTLP mappers, and Clean Architecture query projection updates with xUnit tests
+    depends-on: []
+    files:
+      - dash/server/KyberDash.Domain/CanonAdapters.cs
+      - dash/server/KyberDash.Data/Harnesses/Otlp/PiSpanMapper.cs
+      - dash/server/KyberDash.Application/CanonIngestPipeline.cs
+      - dash/server/KyberDash.Data/Harnesses/Otlp/OtlpLogMapper.cs
+      - dash/server/KyberDash.Application/KyberBridgeEngine.cs
+      - dash/server.tests/KyberDash.Domain.Tests/CanonIngestTests.cs
+      - dash/server.tests/KyberDash.Data.Tests/Harnesses/DroidPiSpanMapperTests.cs
+      - dash/server.tests/KyberDash.Application.Tests/Otlp/OtlpLogMapperTests.cs
+      - dash/server.tests/KyberDash.Application.Tests/Analytics/AnalyticsReadPathTests.cs
+    session: csharp-api
+    prompt: >
+      Task T1: Fix Pi OTLP session attribution, OTLP skill ingest, and Web Dashboard session detail projection
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Extract trimmed non-whitespace Pi session identifier (`pi.session.id`) in both `PiAdapter` and `PiSpanMapper`, populate OTLP `SkillsInvoked`, and extend `KyberBridgeEngine.GetSessionDetail` so all `AgentSessionDashboard` sections (`span_count`, `context`, `schema`, `skills`, `servers`, `reconciliation`, `notes`, `costBasisMismatch`, tool residency columns, and reconciled summary/turn metrics) render from real OTLP telemetry.
+
+      - **Capabilities:** C# domain adapter attribution, OTLP mappers, and Clean Architecture query projection updates with xUnit tests
+
+      - **Difficulty:** medium
+
+      - **Technology:** csharp
+
+      - **Session:** `csharp-api`
+
+      - **Depends on:** none
+
+      - **Failure mode:** OTLP spans routed via `PiSpanMapper` drop `pi.session.id` or keep untrimmed whitespace, `CanonIngestPipeline`/`OtlpLogMapper` leave `SkillsInvoked` empty, or mismatched field shapes (`0`-based `context` indices, null `reconciliation` rows, camelCase-only turns) make `AgentSessionDashboard.tsx` render missing or false-mismatch warnings.
+
+      - **Mitigations:**
+        - Read `pi.session.id` with `!string.IsNullOrWhiteSpace(v)` + `.Trim()` in both `PiAdapter.Normalize` (`CanonAdapters.cs`) and `PiSpanMapper.Parse` (`PiSpanMapper.cs`), rejecting whitespace-only strings as `null`.
+        - Populate `SkillsInvoked` in `CanonIngestPipeline.ToCollectedRecord` and `OtlpLogMapper.ToCollectedRecord` from `gen_ai.skill.name` / `skill.name` / `skill_name` / `kyber.skills.invoked` attributes and `Skill`/`skill` tool call arguments; emit `KyberSkillsBlock` matching `dash/web/src/components/fixtures/skills-payload.json` or `{ availability: "not_measurable", reason }`.
+        - Keep existing camelCase fields on `ToTurnDto` (`turnIndex`, `inputTokens`, `outputTokens`, ...) while additively emitting UI keys (`index`, `input`, `output`, `fresh`, `fresh_input`, `cache_read`, `cache_creation`, `reasoning`).
+        - Normalize 0-based `StoredSessionContext.Turns[].Position` and `FlaggedTurnIndexes` to 1-based (`+ 1`), convert `ServerDefinitions` to map-shaped `toolDefinitionsByServer`, filter out `Reconciliation` rows lacking both `InputMatch.HasValue && OutputMatch.HasValue` before snake-case serialization, and project `Schema` (`neverInvoked`, `byServer`, `unusedRange`, `ranked`), `tools[]` (`in_definitions`, `is_mcp`), `span_count`, `servers`, `notes`, and top-level `costBasisMismatch`.
+      - **Files:**
+        - `dash/server/KyberDash.Domain/CanonAdapters.cs`: `PiAdapter.Normalize` — fall back to trimmed non-whitespace Pi session identifier attribute when `CanonicalSessionId` returns null (instead of untrimmed `ReadNonEmptyString`)
+        - `dash/server/KyberDash.Data/Harnesses/Otlp/PiSpanMapper.cs`: `PiSpanMapper` `Parse` — fall back to trimmed non-whitespace Pi session identifier attribute when `SessionId` is null
+        - `dash/server/KyberDash.Application/CanonIngestPipeline.cs`: `ToCollectedRecord` — extract `SkillsInvoked` from skill attributes and `Skill` / `skill` tool arguments instead of `[]`
+        - `dash/server/KyberDash.Data/Harnesses/Otlp/OtlpLogMapper.cs`: `ToCollectedRecord` — extract `SkillsInvoked` from log skill attributes and `Skill` / `skill` tool calls instead of `[]`
+        - `dash/server/KyberDash.Application/KyberBridgeEngine.cs`: `GetSessionDetail`, `GetSessionSummary`, `BuildSessionSummary`, `ToTurnDto`, `ToolRows`, `RequestRows`, plus helpers for 1-based `context`, `schema` (`neverInvoked` / `byServer` / `unusedRange`), `skills` (`KyberSkillsBlock`), `servers`, `reconciliation` (snake-case, non-null matches only), `notes`, `costBasisMismatch`, and `span_count`
+        - `dash/server.tests/KyberDash.Domain.Tests/CanonIngestTests.cs`: `CanonIngestTests` — update Pi span assertion to expect trimmed `SessionKey` and verify whitespace-only Pi session attribute yields `null`
+        - `dash/server.tests/KyberDash.Data.Tests/Harnesses/DroidPiSpanMapperTests.cs`: `DroidPiSpanMapperTests` — verify `PiSpanMapper` extracts trimmed Pi session identifier and yields `null` for whitespace
+        - `dash/server.tests/KyberDash.Application.Tests/Otlp/OtlpLogMapperTests.cs`: `OtlpLogMapperTests` — verify OTLP log `SkillsInvoked` extraction and Pi session attribute trim/whitespace handling
+        - `dash/server.tests/KyberDash.Application.Tests/Analytics/AnalyticsReadPathTests.cs`: `AnalyticsReadPathTests` — add multi-turn OTLP session detail (`skills`, 1-based `context`, `schema`, `reconciliation`, `notes`, `span_count`, `costBasisMismatch`) and honest `not_measurable` gap tests
+      - **Commands:**
+        - `dotnet test dash/server.tests/KyberDash.Domain.Tests/KyberDash.Domain.Tests.csproj --filter "FullyQualifiedName~KyberDash.Domain.Tests.CanonIngestTests" -c Release && dotnet test dash/server.tests/KyberDash.Data.Tests/KyberDash.Data.Tests.csproj --filter "FullyQualifiedName~KyberDash.Data.Tests.Harnesses.DroidPiSpanMapperTests" -c Release && dotnet test dash/server.tests/KyberDash.Application.Tests/KyberDash.Application.Tests.csproj --filter "FullyQualifiedName~KyberDash.Application.Tests.Otlp.OtlpLogMapperTests|FullyQualifiedName~KyberDash.Application.Tests.Analytics.AnalyticsReadPathTests" -c Release` (RED before implementation, then GREEN after implementation per D9)
+        - `dotnet format dash/server/KyberDash.sln whitespace --verify-no-changes -v minimal && dotnet format dash/server/KyberDash.sln style --verify-no-changes --severity warn -v minimal && dotnet build dash/server/KyberDash.sln -c Release --no-incremental -nr:false -p:UseSharedCompilation=false`
+        - `kyber-weave review gates . --agent dev-medium --task T1`
+      - **Acceptance:**
+        - `PiAdapter.Normalize`, `PiSpanMapper.Parse`, and `OtlpLogMapper` resolve trimmed `pi.session.id` when standard session keys are absent and treat whitespace-only values as `null`.
+        - `GetSessionDetail` emits `span_count`, `servers`, `notes`, top-level `costBasisMismatch`, complete `summary`, dual-key `turns`, 1-based `context`, `schema` (`neverInvoked`, `byServer`, `unusedRange`, `ranked`), `tools[]` (`in_definitions`, `is_mcp`), snake-case `reconciliation` (omitting null-match rows), and `skills` (`KyberSkillsBlock` / `not_measurable`) matching `AgentSessionDashboard.tsx` while retaining existing camelCase turn fields.
+        - Filtered tests, `dash/server/KyberDash.sln` format/build checks, and `kyber-weave review gates . --agent dev-medium --task T1` pass after the final edit.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T1
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T1 | `dash/server.tests/KyberDash.Domain.Tests/CanonIngestTests.cs`, `dash/server.tests/KyberDash.Data.Tests/Harnesses/DroidPiSpanMapperTests.cs`, `dash/server.tests/KyberDash.Application.Tests/Otlp/OtlpLogMapperTests.cs`, `dash/server.tests/KyberDash.Application.Tests/Analytics/AnalyticsReadPathTests.cs` | `dotnet test dash/server.tests/KyberDash.Domain.Tests/KyberDash.Domain.Tests.csproj --filter "FullyQualifiedName~KyberDash.Domain.Tests.CanonIngestTests" -c Release && dotnet test dash/server.tests/KyberDash.Data.Tests/KyberDash.Data.Tests.csproj --filter "FullyQualifiedName~KyberDash.Data.Tests.Harnesses.DroidPiSpanMapperTests" -c Release && dotnet test dash/server.tests/KyberDash.Application.Tests/KyberDash.Application.Tests.csproj --filter "FullyQualifiedName~KyberDash.Application.Tests.Otlp.OtlpLogMapperTests|FullyQualifiedName~KyberDash.Application.Tests.Analytics.AnalyticsReadPathTests" -c Release` | Pi OTLP spans/logs (`PiAdapter` and `PiSpanMapper`) resolve trimmed/non-whitespace `pi.session.id` to `SessionKey` (`"sess-pi"`) while blank/whitespace resolves `null`; `CanonIngestPipeline` & `OtlpLogMapper` populate `SkillsInvoked`; `GetSessionDetail` returns `span_count`, `servers`, `notes`, top-level `costBasisMismatch`, complete `summary`, dual-key `turns`, 1-based `context` (with map-shaped `toolDefinitionsByServer`, `{ tokens, attribution }` `residual`, `first`/`last`), `schema` (`neverInvoked`, `byServer`, `unusedRange`, `ranked`), `tools[]` (`in_definitions`, `is_mcp`), snake-case `reconciliation` (omitting null-match rows), and `skills` (`KyberSkillsBlock`), or explicit `measurable: false` / `not_measurable` with reason for gaps, and `null` (HTTP 404 at `SessionDetailAsync`, read-only GET with no caller denial policy) when missing | Failing `CanonIngestTests` & `DroidPiSpanMapperTests` asserting `"sess-pi"` and whitespace `null` + failing `OtlpLogMapperTests` asserting `SkillsInvoked` + failing `AnalyticsReadPathTests` asserting `GetSessionDetail` blocks (`skills`, 1-based `context`, `schema`, `reconciliation`, `notes`, `span_count`, `costBasisMismatch`) | All filtered `CanonIngestTests`, `DroidPiSpanMapperTests`, `OtlpLogMapperTests`, and `AnalyticsReadPathTests` pass in Release with zero skipped tests |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D9 | How do `test-first` RED/GREEN checks work when `.kyber-weave/kyber-weave.yml` task gates exclude `dash/server` and Playwright? | Explicitly exempt `T1`–`T4` from `kyber-weave review gates . ... --red` (exception to `plan-authoring.md:113` and `--red` gate enforcement): `T1`–`T4` list and run their Test contract runner commands directly for RED (before implementation) and GREEN + `dash/AGENTS.md` checks (`dotnet build`/`format` on `dash/server/KyberDash.sln`; `npm --prefix dash run check:reachable`), followed by passing `kyber-weave review gates . --agent <tier> --task <id>` (no `--red`) to record the Arbiter gate report; `T5` runs only `kyber-weave review gates . --agent devops --task T5` because `technology-gates.github-actions` already includes `actionlint`. | `review.technology-gates.csharp` runs `KyberWeave.sln` only (never `dash/server.tests`), and `review.technology-gates.typescript` runs `dash-typecheck` + `dash-lint` only (pinned by `ReviewTaskGatesRepositoryConfigTests.cs:61` and `docs/standards/test/test.rules.md:21-24` forbidding Playwright in task gates), so `--red` fails unconditionally with `KW-REVIEW-052`. Do not modify `.kyber-weave/kyber-weave.yml`; `KW-ARB-MODE-002` permits missing `--red` with warning (`effects: { no-failing-run: allow }`). | ANSWERED — autonomous: recommendation accepted (`.kyber-weave/kyber-weave.yml`, `ReviewTaskGatesRepositoryConfigTests.cs`, `docs/standards/test/test.rules.md`, `conductor.arbiter-rules.yml`) |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-medium
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+    technology: csharp
+  - id: T2
+    capabilities: C# Contracts, DI composition, Minimal API binding, and bounded dashboard report projection updates with xUnit tests
+    depends-on:
+      - T1
+    files:
+      - dash/server/KyberDash.Contracts/Services/IDashServices.cs
+      - dash/server/KyberDash.Application/ServiceCollectionExtensions.cs
+      - dash/server/KyberDash.Application/Services/DashboardQueryService.cs
+      - dash/server/KyberDash.Api/Endpoints/DashEndpointMappings.cs
+      - dash/server/KyberDash.Application/KyberBridgeEngine.cs
+      - dash/server.tests/KyberDash.Application.Tests/SettingsCleanDoctorReportTests.cs
+      - dash/server.tests/KyberDash.Presentation.Tests/MinimalApiEndpointTests.cs
+    session: csharp-api
+    prompt: >
+      Task T2: Align GET /api/kyber/report, storePath injection, and ?days= window with Tray ContextReport
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Bind `?days=` on `GET /api/kyber/report`, inject `storePath` into `KyberBridgeEngine`, add a 5-argument `GetReport` overload preserving 4-argument callers/mocks, and emit the full `ContextReport` contract without N+1 projection scans (per D6, D9).
+
+      - **Capabilities:** C# Contracts, DI composition, Minimal API binding, and bounded dashboard report projection updates with xUnit tests
+
+      - **Difficulty:** hard
+
+      - **Technology:** csharp
+
+      - **Session:** `csharp-api`
+
+      - **Depends on:** T1 (`KyberBridgeEngine.cs` shared edit scope)
+
+      - **Failure mode:** Adding an optional parameter to `IDashboardQueryService.GetReport` triggers `CS0854` in `Moq` expression trees, missing `storePath` leaves `coverage.storePath` wrong for custom DBs, or looping `ReadSessionFigures` per session creates an N+1 scan bottleneck.
+
+      - **Mitigations:**
+        - Preserve `GetReport(string? harness = null, string? sessionId = null, string? runId = null, int limit = 50)` delegating with `days = 7`, and add a distinct 5-arg overload `GetReport(string? harness, string? sessionId, string? runId, int limit, int days)` on `IDashboardQueryService`, `DashboardQueryService`, and `KyberBridgeEngine`.
+        - Add optional `string? storePath = null` at the end of `KyberBridgeEngine`'s constructor (defaulting to `CanonDbPath.Resolve()`) and wire `options.DatabasePath` in `ServiceCollectionExtensions.RegisterEngines` (`coverage.storePath` reports `this.storePath`).
+        - Retain C# scalar parity fields (`schemaVersion`, `generatedAt`, `storeGeneration`, `sessionCount`, `findingCount`, `harnessCount`) while emitting `ContextReport` fields (`kyberdashVersion`, `scope`, `coverage`, `findings`, `harnesses[].dimensions`, `latestSession`, non-blended `cost[]`) and rejecting invalid/non-positive `days` or `limit` with HTTP 400 (`"days must be a positive whole number"` / `"limit must be a positive whole number"`).
+        - Compute `harnesses[].dimensions` from `StoredHarnessRollup` / bounded window rollups via `CanonRollupsEngine.BuildHarnessScorecard` without per-session `ReadSessionFigures` loops, and call `ReadSessionFigures` at most once for the single newest `latestSession` (`latestTurn` buckets/pressure/residual).
+      - **Files:**
+        - `dash/server/KyberDash.Contracts/Services/IDashServices.cs`: `IDashboardQueryService` — add 5-arg `GetReport(string? harness, string? sessionId, string? runId, int limit, int days)` overload alongside existing 4-arg method
+        - `dash/server/KyberDash.Application/ServiceCollectionExtensions.cs`: `RegisterEngines` — pass `options.DatabasePath` as `storePath` when constructing `KyberBridgeEngine`
+        - `dash/server/KyberDash.Application/Services/DashboardQueryService.cs`: `DashboardQueryService.GetReport` — implement both 4-arg (defaulting `days = 7`) and 5-arg overloads forwarding to `KyberBridgeEngine`
+        - `dash/server/KyberDash.Api/Endpoints/DashEndpointMappings.cs`: `DashEndpointMappings.ReportAsync` — parse optional `days` query string (blank/whitespace treated as unset `7`; non-positive or non-numeric returns HTTP 400 `"days must be a positive whole number"`), trim optional `harness`/`session`/`run`, and invoke 5-arg `GetReport`
+        - `dash/server/KyberDash.Application/KyberBridgeEngine.cs`: constructor (`string? storePath = null`) + 4-arg/5-arg `GetReport` — emit `ContextReport` shape (`schemaVersion`, `generatedAt`, `kyberdashVersion`, `scope`, `coverage`, `findings`, `harnesses` dimensions, single-hydration `latestSession`, `cost`) plus compatibility scalar counts
+        - `dash/server.tests/KyberDash.Application.Tests/SettingsCleanDoctorReportTests.cs`: `SettingsCleanDoctorReportTests` — add tests for `storePath`, `days` window filtering, empty store, unexported dimensions, single-session turn hydration, and CLI `ReportService` parity
+        - `dash/server.tests/KyberDash.Presentation.Tests/MinimalApiEndpointTests.cs`: `MinimalApiEndpointTests` — add HTTP endpoint tests for `/api/kyber/report` with valid/default/whitespace/invalid `days` (`"days must be a positive whole number"`), `limit` errors/clamping, and `harness` filter
+      - **Commands:**
+        - `dotnet test dash/server.tests/KyberDash.Application.Tests/KyberDash.Application.Tests.csproj --filter "FullyQualifiedName~KyberDash.Application.Tests.SettingsCleanDoctorReportTests" -c Release && dotnet test dash/server.tests/KyberDash.Presentation.Tests/KyberDash.Presentation.Tests.csproj --filter "FullyQualifiedName~KyberDash.Presentation.Tests.MinimalApiEndpointTests" -c Release` (RED before implementation, then GREEN after implementation per D9)
+        - `dotnet format dash/server/KyberDash.sln whitespace --verify-no-changes -v minimal && dotnet format dash/server/KyberDash.sln style --verify-no-changes --severity warn -v minimal && dotnet build dash/server/KyberDash.sln -c Release --no-incremental -nr:false -p:UseSharedCompilation=false`
+        - `kyber-weave review gates . --agent dev-hard --task T2`
+      - **Acceptance:**
+        - `GET /api/kyber/report?days=7&harness=<id>` serializes valid `ContextReport` JSON (`scope`, `kyberdashVersion`, `coverage.storePath`, `coverage.harnesses`, `harnesses[].dimensions`, `latestSession.latestTurn`, `findings[].recoverableTokens`/`view`, `cost[]`) alongside compatibility scalars, and rejects invalid `days`/`limit` with HTTP 400.
+        - Filtered `SettingsCleanDoctorReportTests` and `MinimalApiEndpointTests`, existing `ReportService` / Moq setups, `dash/server/KyberDash.sln` format/build checks, and `kyber-weave review gates . --agent dev-hard --task T2` pass with zero skipped tests.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T2
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T2 | `dash/server.tests/KyberDash.Application.Tests/SettingsCleanDoctorReportTests.cs`, `dash/server.tests/KyberDash.Presentation.Tests/MinimalApiEndpointTests.cs` | `dotnet test dash/server.tests/KyberDash.Application.Tests/KyberDash.Application.Tests.csproj --filter "FullyQualifiedName~KyberDash.Application.Tests.SettingsCleanDoctorReportTests" -c Release && dotnet test dash/server.tests/KyberDash.Presentation.Tests/KyberDash.Presentation.Tests.csproj --filter "FullyQualifiedName~KyberDash.Presentation.Tests.MinimalApiEndpointTests" -c Release` | 4-arg `GetReport` defaults `days=7` preserving CLI `ReportService` & existing Moq tests; `KyberBridgeEngine` emits injected `coverage.storePath`; `GET /api/kyber/report` supports `harness`/`session`/`run` set & unset (blank/whitespace treated as absent), `days` unset (`7`) vs set (`days=30`), `limit` defaulted (`50`) & clamped (`1..200`), empty store (`latestSession: null`, `findings: []`, `cost: []`), `harnesses[].dimensions` from `StoredHarnessRollup`/`BuildHarnessScorecard` without N+1 `ReadSessionFigures` scans across sessions, single `latestSession` hydration, unexported dimensions as `{ value: null, reason }`, and refuses invalid `days`/`limit` (`<= 0` or non-integer) with HTTP 400 (`"days must be a positive whole number"` / `"limit must be a positive whole number"`); read-only GET allows loopback read with no origin denial | Failing `SettingsCleanDoctorReportTests` & `MinimalApiEndpointTests` asserting `storePath` injection, 5-arg `days` filtering, 400 error strings, and `ContextReport` sections (`scope`, `kyberdashVersion`, `coverage.harnesses`, `harnesses[].dimensions`, `latestSession.latestTurn.buckets`, `cost`) | Filtered `SettingsCleanDoctorReportTests` and `MinimalApiEndpointTests` pass in Release with zero skipped tests |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D6 | How should `GET /api/kyber/report` be aligned with Tray `ContextReport` without breaking `ReportService` or existing callers? | Preserve the 4-arg `IDashboardQueryService.GetReport(...)` signature (defaulting `days` to `7`) and add a 5-arg overload `GetReport(string? harness, string? sessionId, string? runId, int limit, int days)` across `IDashboardQueryService`, `DashboardQueryService`, and `KyberBridgeEngine` (wired with optional `storePath` from `ServiceCollectionExtensions.RegisterEngines`); preserve scalar parity keys (`schemaVersion`, `generatedAt`, `storeGeneration`, `sessionCount`, `findingCount`, `harnessCount`) while emitting `kyberdashVersion`, `scope`, `coverage`, `findings` (`ReportFinding`), `harnesses` (`ReportHarness` dimensions derived from `StoredHarnessRollup` / bounded window rollups via `CanonRollupsEngine.BuildHarnessScorecard`), `latestSession` (hydrated via `ReadSessionFigures` for at most that single newest session in scope), and non-blended `cost[]`. | Adding a 5th optional parameter to the existing method breaks `Moq` expression trees (`CS0854`) in `SettingsCleanDoctorReportTests` and `PresentationBuilder`; adding an explicit 5-arg overload preserves CLI `ReportService` and tests untouched. Computing harness scorecards from `StoredHarnessRollup` / bounded window data and hydrating full turns only for `latestSession` avoids `ReadSessionFigures` N+1 projection scans. | ANSWERED — autonomous: recommendation accepted (`IDashServices.cs`, `ServiceCollectionExtensions.cs`, `DashEndpointMappings.cs`, `KyberBridgeEngine.cs`, `CanonRollupsEngine.cs`, `dash/tray/ui/src/report-types.ts`) |
+
+      | D9 | How do `test-first` RED/GREEN checks work when `.kyber-weave/kyber-weave.yml` task gates exclude `dash/server` and Playwright? | Explicitly exempt `T1`–`T4` from `kyber-weave review gates . ... --red` (exception to `plan-authoring.md:113` and `--red` gate enforcement): `T1`–`T4` list and run their Test contract runner commands directly for RED (before implementation) and GREEN + `dash/AGENTS.md` checks (`dotnet build`/`format` on `dash/server/KyberDash.sln`; `npm --prefix dash run check:reachable`), followed by passing `kyber-weave review gates . --agent <tier> --task <id>` (no `--red`) to record the Arbiter gate report; `T5` runs only `kyber-weave review gates . --agent devops --task T5` because `technology-gates.github-actions` already includes `actionlint`. | `review.technology-gates.csharp` runs `KyberWeave.sln` only (never `dash/server.tests`), and `review.technology-gates.typescript` runs `dash-typecheck` + `dash-lint` only (pinned by `ReviewTaskGatesRepositoryConfigTests.cs:61` and `docs/standards/test/test.rules.md:21-24` forbidding Playwright in task gates), so `--red` fails unconditionally with `KW-REVIEW-052`. Do not modify `.kyber-weave/kyber-weave.yml`; `KW-ARB-MODE-002` permits missing `--red` with warning (`effects: { no-failing-run: allow }`). | ANSWERED — autonomous: recommendation accepted (`.kyber-weave/kyber-weave.yml`, `ReviewTaskGatesRepositoryConfigTests.cs`, `docs/standards/test/test.rules.md`, `conductor.arbiter-rules.yml`) |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-hard
+    agent-confidence: 1
+    difficulty: hard
+    difficulty-source: architect
+    technology: csharp
+  - id: T3
+    capabilities: TypeScript OTLP fixture engineering and Playwright end-to-end tests for React web UI
+    depends-on:
+      - T1
+    files:
+      - dash/e2e/otel-harness-payloads.ts
+      - dash/e2e/harness-collection-world.ts
+      - dash/e2e/otel-web-dashboard.spec.ts
+      - dash/playwright.isolated.config.ts
+    session: ts-e2e-web
+    prompt: >
+      Task T3: Build emulated multi-turn OTLP harness payloads and Web Dashboard Playwright suite
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Implement authentic multi-turn OTLP trace/log payload builders (up to 12 turns per harness) and an isolated Playwright test suite that ingests into `/v1/traces` and `/v1/logs` and validates every Web Dashboard section for each harness (per D1, D3, D7, D9).
+
+      - **Capabilities:** TypeScript OTLP fixture engineering and Playwright end-to-end tests for React web UI
+
+      - **Difficulty:** easy
+
+      - **Technology:** typescript
+
+      - **Session:** `ts-e2e-web`
+
+      - **Depends on:** T1 (`PiAdapter`/`PiSpanMapper` attribution, `SkillsInvoked`, and complete `GetSessionDetail` API contract)
+
+      - **Files:**
+        - `dash/e2e/otel-harness-payloads.ts`: exported multi-turn OTLP trace and log payload generators for `claude-code`, `opencode`, `droid`, `codex`, `copilot`, `pi`, `antigravity`, and `gemini`, plus per-harness expected-vs-gap contract definitions
+        - `dash/e2e/harness-collection-world.ts`: exported `startIsolatedServer`, `postOtlpTraces`, `postOtlpLogs`, and deterministic `waitForOtlpIngest` polling helper with bounded startup/poll timeouts, `killSignal: 'SIGKILL'` process teardown on exit/cleanup, and temp directory cleanup
+        - `dash/e2e/otel-web-dashboard.spec.ts`: Playwright E2E spec (`test.setTimeout(180_000)` with deterministic `afterAll` server stop) posting up-to-12-turn OTLP telemetry per harness and verifying all Web Dashboard (`AgentSessionDashboard`, `ContextDoctor`, `HarnessDetail`, `Sessions`) sections and honest gap rendering
+        - `dash/playwright.isolated.config.ts`: `testMatch` array extended to include `dash/e2e/otel-web-dashboard.spec.ts` (basename entry inside `testMatch`)
+      - **Commands:**
+        - `npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/otel-web-dashboard.spec.ts` (RED before implementation, then GREEN after implementation per D9)
+        - `npm --prefix dash run check:reachable`
+        - `kyber-weave review gates . --agent dev-easy --task T3`
+      - **Acceptance:**
+        - All 7 stored OTLP harnesses ingest up to 12 turns via `/v1/traces` (and `/v1/logs` where native), while `gemini` remains excluded from stored harness tabs.
+        - Web Dashboard Playwright tests validate every populated form section and explicit gap indicator across each harness within bounded timeouts and clean process teardown; `typecheck`, `lint`, `check:reachable`, `otel-web-dashboard.spec.ts`, and `kyber-weave review gates . --agent dev-easy --task T3` pass.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T3
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T3 | `dash/e2e/otel-web-dashboard.spec.ts` | `npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/otel-web-dashboard.spec.ts` | Boots isolated `kyberdash web` with bounded startup/test timeouts (`180_000` ms) and teardown, POSTs emulated multi-turn (up to 12 turns) OTLP payloads for `claude-code`, `opencode`, `droid`, `codex`, `copilot`, `pi`, `antigravity` + `gemini` check to `/v1/traces` and `/v1/logs`, and asserts all Web Dashboard sections render measured values or explicit gap banners/reasons across every stored harness (filtered harness view & unfiltered All Harnesses view, empty-filter state where `gemini` is excluded) | Test fails against unimplemented spec / missing multi-turn OTLP harness helpers or failing assertions before implementation | `otel-web-dashboard.spec.ts` passes all multi-harness specs plus `npm --prefix dash run typecheck`, `lint`, and `check:reachable` |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D1 | Where should Playwright tests send OTLP telemetry and connect for dashboard reads? | Boot an isolated `kyberdash web --no-open --port 0 --db <temp> --state-dir <temp>` instance per suite and post OTLP/HTTP JSON payloads to its bound `/v1/traces` and `/v1/logs` endpoints, polling `/api/kyber/sessions` and `/api/kyber/coverage` until flushed. | `KyberDash.Api/Program.cs` mounts `MapDashApiEndpoints()` and `MapOtlpEndpoints()` on the same port and runs `OtlpCollectorService`. `dash/AGENTS.md` and `docs/dash/runbook.md` forbid touching `:4747` or `~/.kyberdash/canon.db`. | ANSWERED — autonomous: recommendation accepted (`dash/server/KyberDash.Api/Program.cs`, `dash/AGENTS.md`, `dash/e2e/harness-collection-world.ts`) |
+
+      | D3 | Which harnesses receive up-to-12-turn OTLP telemetry and how are harness gaps asserted? | Emulate all 7 stored OTLP harnesses in `CanonAdapters.DefaultAdapters` with up to 12 turns (`claude-code` spans+logs 12t, `opencode` v3 12t, `droid` Factory v1 8t/12t, `codex` spans+logs 12t, `copilot` 12t, `pi` 12t, `antigravity` 10t), plus a `gemini` attribution check confirming exclusion from stored rollups. Assert a per-harness contract: measured sections populated, documented unexported fields rendered honestly as `not_measurable` / `— (<reason>)` never zero. | Matches `CanonAdapters.DefaultAdapters`, `OtlpLogMapper`, `CanonPricing.IsExcludedHarnessIdentity`, `docs/rules/kyberdash-harness-collection.md`, and `docs/dash/telemetry-inventory.md`. Non-OTLP file-only harnesses (`cursor`, `kilo`, `commandcode`) do not ingest via `/v1/traces`. | ANSWERED — autonomous: recommendation accepted (`CanonAdapters.cs`, `docs/rules/kyberdash-harness-collection.md`) |
+
+      | D7 | How should the isolated Playwright specs be configured and wired into CI? | Add `otel-web-dashboard.spec.ts` and `otel-tray-dashboard.spec.ts` to `dash/playwright.isolated.config.ts` (`testMatch`, keeping `workers: 1`), and update `.github/workflows/ci.yml`'s `dash-e2e` job in a separate `github-actions` task to include `dash/tray/ui/package-lock.json` in `setup-node` `cache-dependency-path`, run `npm --prefix tray/ui ci && npm --prefix tray/ui run build`, and execute `--config dash/playwright.isolated.config.ts`. | Keeps all self-booting suites isolated behind `dash/playwright.isolated.config.ts` per `dash/AGENTS.md` and ensures fresh CI runners install/build `dash/tray/ui` before running Tray Playwright E2E tests. | ANSWERED — autonomous: recommendation accepted (`dash/AGENTS.md`, `dash/playwright.isolated.config.ts`, `.github/workflows/ci.yml`) |
+
+      | D9 | How do `test-first` RED/GREEN checks work when `.kyber-weave/kyber-weave.yml` task gates exclude `dash/server` and Playwright? | Explicitly exempt `T1`–`T4` from `kyber-weave review gates . ... --red` (exception to `plan-authoring.md:113` and `--red` gate enforcement): `T1`–`T4` list and run their Test contract runner commands directly for RED (before implementation) and GREEN + `dash/AGENTS.md` checks (`dotnet build`/`format` on `dash/server/KyberDash.sln`; `npm --prefix dash run check:reachable`), followed by passing `kyber-weave review gates . --agent <tier> --task <id>` (no `--red`) to record the Arbiter gate report; `T5` runs only `kyber-weave review gates . --agent devops --task T5` because `technology-gates.github-actions` already includes `actionlint`. | `review.technology-gates.csharp` runs `KyberWeave.sln` only (never `dash/server.tests`), and `review.technology-gates.typescript` runs `dash-typecheck` + `dash-lint` only (pinned by `ReviewTaskGatesRepositoryConfigTests.cs:61` and `docs/standards/test/test.rules.md:21-24` forbidding Playwright in task gates), so `--red` fails unconditionally with `KW-REVIEW-052`. Do not modify `.kyber-weave/kyber-weave.yml`; `KW-ARB-MODE-002` permits missing `--red` with warning (`effects: { no-failing-run: allow }`). | ANSWERED — autonomous: recommendation accepted (`.kyber-weave/kyber-weave.yml`, `ReviewTaskGatesRepositoryConfigTests.cs`, `docs/standards/test/test.rules.md`, `conductor.arbiter-rules.yml`) |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-easy
+    agent-confidence: 0.96
+    difficulty: easy
+    difficulty-source: architect
+    technology: typescript
+  - id: T4
+    capabilities: TypeScript Playwright end-to-end tests, same-origin Node HTTP proxy, and Tauri v2 event/IPC emulation for Tray web UI
+    depends-on:
+      - T2
+      - T3
+    files:
+      - dash/e2e/otel-tray-bridge.ts
+      - dash/e2e/otel-tray-dashboard.spec.ts
+      - dash/playwright.isolated.config.ts
+    session: ts-e2e-tray
+    prompt: >
+      Task T4: Build same-origin Tray HTTP/IPC bridge and Tray UI Playwright OTLP suite
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Implement a same-origin Node HTTP server (`dash/e2e/otel-tray-bridge.ts`) proxying live `/api/kyber/*` calls without an `Origin` header plus a full `@tauri-apps/api` v2 `window.__TAURI_INTERNALS__` + event bridge and an isolated Playwright test suite verifying every Tray UI section against live multi-turn (up to 12 turns) OTLP telemetry across all 7 stored harnesses (`claude-code`, `opencode`, `droid`, `codex`, `copilot`, `pi`, `antigravity`, with `gemini` excluded).
+
+      - **Capabilities:** TypeScript Playwright end-to-end tests, same-origin Node HTTP proxy, and Tauri v2 event/IPC emulation for Tray web UI
+
+      - **Difficulty:** hard
+
+      - **Technology:** typescript
+
+      - **Session:** `ts-e2e-tray`
+
+      - **Depends on:** T2 (`GET /api/kyber/report` `ContextReport` contract), T3 (multi-turn OTLP payload builder and bounded `startIsolatedServer`/`postOtlp*` helpers)
+
+      - **Failure mode:** Cross-origin browser PUT/POST mutations fail HTTP 403 (`DashHttp.IsAllowedMutation`), `@tauri-apps/api` v2 drops state updates when `transformCallback`/`view-state-changed` listeners are incomplete across all 9 Rust commands, or `tray/ui` build/server child processes leak or hang on missing dependencies.
+
+      - **Mitigations:**
+        - Serve built `dash/tray/ui/dist` and same-origin `POST /tray/invoke` (plus `GET /tray/state`) from Node HTTP in `dash/e2e/otel-tray-bridge.ts`, proxying `/api/kyber/*` requests server-side over loopback HTTP without an `Origin` header (`DashHttp.IsAllowedMutation` compliance).
+        - Implement `window.__TAURI_INTERNALS__` (`invoke`, `transformCallback`, `plugin:event|listen`, `plugin:event|unlisten`) and all 9 commands from `dash/tray/src-tauri/src/lib.rs` (`get_view_state`, `refresh_now`, `open_view`, `set_settings`, `quit`, `hide_popover`, `clean_database`, `import_folder_history`, `set_shared_settings`), translating `CleanDatabaseScope` (`{ kind, harnesses, reingestWeeks }` -> `{ scope, harnesses, confirm: true, reingestWeeks }`), composing full `ViewState` from `/api/kyber/{report,coverage,jobs,settings,version}`, and pushing `view-state-changed` after mutating actions.
+        - Verify `dash/tray/ui/node_modules` readiness (failing fast with actionable message if missing) before running bounded `spawnSync('npm', ['--prefix', 'dash/tray/ui', 'run', 'build'], { timeout: 120_000, killSignal: 'SIGKILL' })` when `dist` is absent, and set `test.setTimeout(180_000)` in `otel-tray-dashboard.spec.ts`.
+        - Guarantee deterministic close/kill of the Node HTTP server, isolated `kyberdash` child, and temp directory inside `test.afterAll` and `process.on('exit', ...)`.
+      - **Files:**
+        - `dash/e2e/otel-tray-bridge.ts`: same-origin static Tray server + `/tray/invoke` loopback proxy without `Origin` header, bounded optional Tray bundle build, `installTrayTauriBridge` (`window.__TAURI_INTERNALS__` for all 9 IPC commands + Tauri event `view-state-changed` dispatch), and teardown handle
+        - `dash/e2e/otel-tray-dashboard.spec.ts`: Playwright E2E spec (`test.setTimeout(180_000)`) ingesting multi-turn OTLP batches (up to 12 turns) and validating `HarnessSelector`, `SessionPanel` (`composition-bar`, `bucket-list`, `residual`, `pressure`), `FindingsList`, `HealthFooter`, `SettingsView` day-window updates, `open_view`/`hide_popover`/`quit` IPC invocations, `Maintenance`, and `CleanDatabase`
+        - `dash/playwright.isolated.config.ts`: `testMatch` array extended to include `dash/e2e/otel-tray-dashboard.spec.ts` (basename entry inside `testMatch`)
+      - **Commands:**
+        - `npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/otel-tray-dashboard.spec.ts` (RED before implementation, then GREEN after implementation per D9)
+        - `npm --prefix dash run check:reachable`
+        - `kyber-weave review gates . --agent dev-hard --task T4`
+      - **Acceptance:**
+        - Tray Playwright suite exercises every harness in the Tray UI backed by real OTLP-ingested `canon.db` data via same-origin `/tray/invoke` without HTTP 403 errors or mocked report fixtures.
+        - `npm --prefix dash run typecheck`, `lint`, `check:reachable`, `otel-tray-dashboard.spec.ts`, and `kyber-weave review gates . --agent dev-hard --task T4` pass with clean teardown.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T4
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T4 | `dash/e2e/otel-tray-dashboard.spec.ts` | `npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/otel-tray-dashboard.spec.ts` | Boots isolated `kyberdash web` + same-origin Node HTTP Tray server (`/tray/invoke` loopback proxy without `Origin` header, satisfying `DashHttp.IsAllowedMutation`), verifies all 9 Tauri IPC commands + `view-state-changed` event dispatch, POSTs up-to-12-turn OTLP telemetry for all 7 stored harnesses, and validates Tray `HarnessSelector` (switching individual harnesses & All), `SessionPanel`, `FindingsList`, `HealthFooter`, `SettingsView` (`?days=` update), and `Maintenance`/`CleanDatabase` within `180_000` ms timeout and deterministic teardown | Test fails before Tray bridge & spec implementation (missing bridge/spec or unrendered live telemetry) | `otel-tray-dashboard.spec.ts` passes all Tray specs plus `npm --prefix dash run typecheck`, `lint`, and `check:reachable` |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D9 | How do `test-first` RED/GREEN checks work when `.kyber-weave/kyber-weave.yml` task gates exclude `dash/server` and Playwright? | Explicitly exempt `T1`–`T4` from `kyber-weave review gates . ... --red` (exception to `plan-authoring.md:113` and `--red` gate enforcement): `T1`–`T4` list and run their Test contract runner commands directly for RED (before implementation) and GREEN + `dash/AGENTS.md` checks (`dotnet build`/`format` on `dash/server/KyberDash.sln`; `npm --prefix dash run check:reachable`), followed by passing `kyber-weave review gates . --agent <tier> --task <id>` (no `--red`) to record the Arbiter gate report; `T5` runs only `kyber-weave review gates . --agent devops --task T5` because `technology-gates.github-actions` already includes `actionlint`. | `review.technology-gates.csharp` runs `KyberWeave.sln` only (never `dash/server.tests`), and `review.technology-gates.typescript` runs `dash-typecheck` + `dash-lint` only (pinned by `ReviewTaskGatesRepositoryConfigTests.cs:61` and `docs/standards/test/test.rules.md:21-24` forbidding Playwright in task gates), so `--red` fails unconditionally with `KW-REVIEW-052`. Do not modify `.kyber-weave/kyber-weave.yml`; `KW-ARB-MODE-002` permits missing `--red` with warning (`effects: { no-failing-run: allow }`). | ANSWERED — autonomous: recommendation accepted (`.kyber-weave/kyber-weave.yml`, `ReviewTaskGatesRepositoryConfigTests.cs`, `docs/standards/test/test.rules.md`, `conductor.arbiter-rules.yml`) |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-hard
+    agent-confidence: 0.98
+    difficulty: hard
+    difficulty-source: architect
+    technology: typescript
+  - id: T5
+    capabilities: GitHub Actions CI/CD workflow configuration
+    depends-on:
+      - T3
+      - T4
+    files:
+      - .github/workflows/ci.yml
+    session: ci-workflow
+    prompt: >
+      Task T5: Wire Web and Tray isolated OTLP Playwright specs into CI dash-e2e
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Update the GitHub Actions `dash-e2e` job so CI caches `dash/tray/ui/package-lock.json`, installs/builds `dash/tray/ui`, and executes all specs declared in `dash/playwright.isolated.config.ts` (per D7, D8).
+
+      - **Capabilities:** GitHub Actions CI/CD workflow configuration
+
+      - **Difficulty:** easy
+
+      - **Technology:** github-actions
+
+      - **Session:** `ci-workflow`
+
+      - **Depends on:** T3 (Web OTLP Playwright spec exists), T4 (Tray OTLP Playwright spec exists)
+
+      - **Files:**
+        - `.github/workflows/ci.yml`: `jobs.dash-e2e` — extend Node setup lockfile cache path with tray UI lockfile, add `npm --prefix tray/ui ci --no-audit --no-fund && npm --prefix tray/ui run build` alongside `web` install/build with bounded `timeout-minutes`, and invoke Playwright against the isolated Playwright config across all isolated specs
+      - **Commands:**
+        - `kyber-weave review gates . --agent devops --task T5`
+      - **Acceptance:**
+        - `jobs.dash-e2e` in `.github/workflows/ci.yml` caches and builds `dash/tray/ui`, `dash/web`, and `dash/server/KyberDash.sln`, and runs all isolated Playwright specs via `--config dash/playwright.isolated.config.ts`.
+        - `kyber-weave review gates . --agent devops --task T5` passes (`workflow-lint` / `actionlint`, `dotnet-build`, and format gates).
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T5
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T5 | `.github/workflows/ci.yml` | `kyber-weave review gates . --agent devops --task T5` | No-test CI workflow configuration task: CI `dash-e2e` job caches `dash/tray/ui/package-lock.json`, runs `npm --prefix tray/ui ci --no-audit --no-fund && npm --prefix tray/ui run build` alongside `web`, and runs all isolated Playwright specs (`--config dash/playwright.isolated.config.ts`) | Read-only baseline check: inspect `jobs.dash-e2e` in `.github/workflows/ci.yml` showing missing `tray/ui` lockfile cache/build and single-spec invocation (`harness-collection.spec.ts`) | `kyber-weave review gates . --agent devops --task T5` passes (`actionlint`, `dotnet-build`, and format gates) |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D7 | How should the isolated Playwright specs be configured and wired into CI? | Add `otel-web-dashboard.spec.ts` and `otel-tray-dashboard.spec.ts` to `dash/playwright.isolated.config.ts` (`testMatch`, keeping `workers: 1`), and update `.github/workflows/ci.yml`'s `dash-e2e` job in a separate `github-actions` task to include `dash/tray/ui/package-lock.json` in `setup-node` `cache-dependency-path`, run `npm --prefix tray/ui ci && npm --prefix tray/ui run build`, and execute `--config dash/playwright.isolated.config.ts`. | Keeps all self-booting suites isolated behind `dash/playwright.isolated.config.ts` per `dash/AGENTS.md` and ensures fresh CI runners install/build `dash/tray/ui` before running Tray Playwright E2E tests. | ANSWERED — autonomous: recommendation accepted (`dash/AGENTS.md`, `dash/playwright.isolated.config.ts`, `.github/workflows/ci.yml`) |
+
+      | D8 | Which declared technologies and task boundaries govern execution? | Separate tasks by declared technology and dependency order: `csharp` (`T1` -> `T2`), `typescript` (`T3`, `T4`), and `github-actions` (`T5`), assigning `Difficulty` and `--agent` tiers per the `plan-authoring.md` rubric (`T1`: `medium`/`dev-medium`, `T2`: `hard`/`dev-hard`, `T3`: `easy`/`dev-easy`, `T4`: `hard`/`dev-hard`, `T5`: `easy`/`devops`). | Follows `.kyber-weave/kyber-weave.yml` `ontology.technologies` / `PlanTaskAgentPick`, serializes edits to `KyberBridgeEngine.cs`, and supplies failure modes and mitigations for intermediate/advanced tasks. | ANSWERED — autonomous: recommendation accepted (`.kyber-weave/kyber-weave.yml`, `plan-authoring.md`) |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: devops
+    agent-confidence: 1
+    difficulty: easy
+    difficulty-source: architect
+    technology: github-actions
+worker-roster: tiered

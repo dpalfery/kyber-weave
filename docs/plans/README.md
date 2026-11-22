@@ -64,7 +64,9 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plans are open.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-11-22-kyberdash-playwright-otel-harness-tests.md](2026-11-22-kyberdash-playwright-otel-harness-tests.md) | Ready | 2026-11-22 | Fix KyberDash OTLP collector/API gaps and add multi-turn Playwright E2E tests for Web Dashboard and Tray UI |
 
 ## Archived Plans
 
