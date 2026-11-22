@@ -171,7 +171,8 @@ Ninety-eight rows: 47 `removed-with-skill` (the deleted technology skills, D2), 
 ## Policy-line ledger
 
 Line numbers are as of base commit `611862e` prior to the policy migration. `Destination`
-is `<technology> § <heading>`; `—` where none applies. `Anchor` is set only where `Destination`
+is `<technology> § <heading>`, or `<technology>.rules § <heading>` when the rule's home is that
+technology's rules file; `—` where none applies. `Anchor` is set only where `Destination`
 is set. `Reason` is required, and shown, only for `superseded` and `retained` rows.
 
 This table covers every normative line — `use`, `never`, `always`, `must`, `do not`, `prefer`,
@@ -195,7 +196,7 @@ in the three policy-bearing maui-dev references. One hundred sixteen rows: 20 `m
 | `skills/dal-dev/references/adonet-repository.md` | 116 | `On failure, log with structured properties` | duplicate | data-access-layer § Hard rules | `Do not swallow database exceptions` | — |
 | `skills/dal-dev/references/schema-design.md` | 10 | `Before asserting a best practice, version-specific behavior, or syntax, verify against Microsoft Learn` | retained | — | | Procedure: Microsoft Learn verification workflow (the Prime Directive), not a host-reversible policy (D2). |
 | `skills/dal-dev/references/schema-design.md` | 16 | `build T-SQL by concatenating unvalidated input. Use parameterized commands and` | retained | — | | Security floor: SQL-injection prevention is a defect regardless of host preference (D2). |
-| `skills/dal-dev/references/schema-design.md` | 17 | `Use SQLCLR or an external process instead` | migrated | sql-server § Least privilege | `SQLCLR or an external process instead of `xp_cmdshell`` | — |
+| `skills/dal-dev/references/schema-design.md` | 17 | `Use SQLCLR or an external process instead` | migrated | sql-server.rules § Security and data handling | `Recommend SQLCLR or an external process instead` | — |
 | `skills/dal-dev/references/schema-design.md` | 18 | `Apply **least privilege**: grant minimum permissions` | duplicate | sql-server § Least privilege | `get the permissions the application uses, and no more` | — |
 | `skills/dal-dev/references/schema-design.md` | 19 | `Prefer **Microsoft Entra ID / Kerberos authentication**` | migrated | sql-server § Least privilege | `Prefer Microsoft Entra ID or Kerberos authentication over SQL authentication` | — |
 | `skills/dal-dev/references/schema-design.md` | 20 | `Never hardcode credentials, connection strings, or secrets` | retained | — | | Security floor: credential hardcoding is a defect regardless of host preference (D2). |
@@ -249,14 +250,14 @@ in the three policy-bearing maui-dev references. One hundred sixteen rows: 20 `m
 | `skills/csharp-dev/references/aspnetcore-webapi.md` | 125 | `not bare strings` | duplicate | csharp § Errors | `not a bare string` | — |
 | `skills/csharp-dev/references/aspnetcore-webapi.md` | 144 | `Use route constraints` | migrated | csharp § HTTP pipeline | `Use route constraints to prevent wrong-type requests from reaching action logic` | — |
 | `skills/csharp-dev/references/aspnetcore-webapi.md` | 150 | `Always accept and forward` | duplicate | csharp § Async | `including controller actions — and pass it through` | — |
-| `skills/csharp-dev/references/bff-yarp.md` | 32 | `The browser never sees or stores access tokens` | migrated | csharp § Backend-for-frontend | `The browser never sees or stores access tokens` | — |
+| `skills/csharp-dev/references/bff-yarp.md` | 32 | `The browser never sees or stores access tokens` | migrated | csharp.rules § Security floors | `Never expose access tokens to the browser` | — |
 | `skills/csharp-dev/references/bff-yarp.md` | 97 | `do not restate the exact scope URIs here, they evolve independently of this skill` | retained | — | | Procedure: already defers to the host's Auth Design registry property rather than stating policy itself (D2). |
 | `skills/csharp-dev/references/bff-yarp.md` | 98 | `Azure App Configuration + Key Vault process — never via environment variables` | duplicate | csharp § Safety | `Secrets come from User Secrets locally and Key Vault` | — |
-| `skills/csharp-dev/references/bff-yarp.md` | 99 | `Server-side in encrypted cookies (never exposed to browser)` | migrated | csharp § Backend-for-frontend | `The browser never sees or stores access tokens` | — |
+| `skills/csharp-dev/references/bff-yarp.md` | 99 | `Server-side in encrypted cookies (never exposed to browser)` | migrated | csharp § Backend-for-frontend | `Keep access tokens server-side in encrypted cookies` | — |
 | `skills/csharp-dev/references/bff-yarp.md` | 120 | `for React HMR` | retained | — | | Technique: development-only CSP relaxation required for React HMR, not a host-reversible policy (D2). |
 | `skills/csharp-dev/references/bff-yarp.md` | 121 | `Pigment CSS is CSP-compliant` | superseded | — | | One host's taste (CSS choice), not portable policy (D4). |
 | `skills/csharp-dev/references/bff-yarp.md` | 124 | `headers against an allowlist to prevent injection attacks` | migrated | csharp § Backend-for-frontend | `Validate incoming Host headers against an allowlist to prevent header injection` | — |
-| `skills/csharp-dev/references/bff-yarp.md` | 129 | `No wildcard origins` | migrated | csharp § Backend-for-frontend | `CORS uses explicit frontend origins, never a wildcard` | — |
+| `skills/csharp-dev/references/bff-yarp.md` | 129 | `No wildcard origins` | migrated | csharp.rules § Security floors | `use a wildcard CORS origin` | — |
 | `skills/csharp-dev/references/bff-yarp.md` | 133 | `Fallback route serves` | migrated | csharp § Backend-for-frontend | `The BFF serves a fallback route for client-side routing` | — |
 | `skills/csharp-dev/references/bff-yarp.md` | 138 | `MotorcycleRag.WebUI.BFF.csproj` | superseded | — | | Host project fact (project file name), not portable policy (D4). |
 | `skills/csharp-dev/references/bff-yarp.md` | 139 | `Yarp.ReverseProxy` | superseded | — | | Host project facts (package version, .NET version, lines 139-141), not portable policy (D4). |
@@ -273,12 +274,12 @@ in the three policy-bearing maui-dev references. One hundred sixteen rows: 20 `m
 | `skills/csharp-dev/references/azure-ai-rag.md` | 92 | `Microsoft.SemanticKernel` | superseded | — | | Host project fact (same rule as :25), not portable policy (D4). |
 | `skills/csharp-dev/references/azure-ai-rag.md` | 93 | `Use direct Azure SDK calls outside the persistence wrapper layer` | superseded | — | | Host wrapper-layer names, not portable policy (D4). |
 | `skills/csharp-dev/references/azure-ai-rag.md` | 94 | `Hardcode Azure endpoints, keys, or connection strings` | duplicate | csharp § Safety | `Secrets come from User Secrets locally and Key Vault` | — |
-| `skills/maui-dev/references/data-binding.md` | 11 | `faster than reflection-based bindings` | duplicate | maui § MVVM | `to its ViewModel so bindings compile` | — |
+| `skills/maui-dev/references/data-binding.md` | 11 | `faster than reflection-based bindings` | duplicate | maui § MVVM | `to the ViewModel type so bindings compile` | — |
 | `skills/maui-dev/references/data-binding.md` | 27 | `this re-enables reflection and defeats compile-time checking` | retained | — | | Technique: framework-correctness detail about `x:DataType` scope, distinct from the policy choice already ledgered at :11 (D2). |
-| `skills/maui-dev/references/collectionview.md` | 25 | `enables compiled bindings and catches typos at build time` | duplicate | maui § MVVM | `to its ViewModel so bindings compile` | — |
+| `skills/maui-dev/references/collectionview.md` | 25 | `enables compiled bindings and catches typos at build time` | duplicate | maui § MVVM | `to the ViewModel type so bindings compile` | — |
 | `skills/maui-dev/references/collectionview.md` | 69 | `Do NOT use both` | retained | — | | Technique: a framework-correctness pitfall (double-execution on tap), not a host-reversible policy (D2). |
 | `skills/maui-dev/references/collectionview.md` | 147 | `fires multiple times while the user scrolls through the threshold band` | retained | — | | Technique: a framework-correctness pitfall in incremental loading, not a host-reversible policy (D2). |
-| `skills/maui-dev/references/collectionview.md` | 199 | `Compiled bindings skip reflection per-cell` | duplicate | maui § MVVM | `to its ViewModel so bindings compile` | — |
+| `skills/maui-dev/references/collectionview.md` | 199 | `Compiled bindings skip reflection per-cell` | duplicate | maui § MVVM | `to the ViewModel type so bindings compile` | — |
 | `skills/maui-dev/references/dependency-injection.md` | 50 | `Never register a ViewModel as Singleton` | duplicate | maui § Dependency injection | `AddTransient<LoginViewModel>` | — |
 | `skills/maui-dev/references/dependency-injection.md` | 112 | `to prevent null dependency injection on unexpected platforms` | retained | — | | Technique: a framework-correctness pitfall in conditional platform registration, not a host-reversible policy (D2). |
 | `skills/maui-dev/references/dependency-injection.md` | 120 | `retains stale data between navigations` | duplicate | maui § Dependency injection | `AddTransient<LoginViewModel>` | — |

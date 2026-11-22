@@ -73,8 +73,11 @@ is a requirement, not a polish step.
 
 ### Hygiene
 
-Prettier decides formatting, and code that fails it does not merge. No `console.log` or
-commented-out blocks in merged code.
+ESLint and Prettier decide formatting and the mechanical rules; do not restate them here, and
+do not merge code that fails them. No `console.log` or commented-out blocks in merged code.
+
+New dependencies need a reason: what it does, why the existing stack cannot, and who
+maintains it.
 
 Do not query or manipulate the DOM directly (`document.getElementById` and the like); use state
 and effects. A React ref is allowed where accessibility requires moving focus, and for nothing

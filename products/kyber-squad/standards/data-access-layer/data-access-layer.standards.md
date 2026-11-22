@@ -49,15 +49,22 @@ best available guidance and names the draft standard it relied on in one line of
 | Persistence row | `<Solution>.Persistence` (private) |
 | FluentMigrator scripts | `<Solution>.Persistence` (or the host's migrations project) |
 
+Application and API code consumes `IRepository<T>`. It does not open connections or
+write SQL.
+
 ## Coding standards
 
 ### Hard rules
 
+- Parameterized `SqlCommand` / `SqlParameter` only. String concatenation into SQL is an
+  injection, including in a migration.
 - List columns explicitly. `SELECT *` is a contract with tomorrow's schema.
+- Dispose connections, commands, and readers with `using` / `await using`.
 - Multi-statement work that must be atomic runs in one transaction, with an explicit
   rollback path. Do not nest transactions.
 - Connection strings and credentials come from configuration / Key Vault / managed
-  identity, as declared by the **Configuration Policy** registry property.
+  identity, as declared by the **Configuration Policy** registry property — never a
+  literal, never a committed file, never a log line.
 - Register the factory as Singleton and repositories as Scoped in
   `ServiceCollectionExtensions.AddSqlPersistenceServices()` (or the host's equivalent).
 
@@ -83,6 +90,7 @@ best available guidance and names the draft standard it relied on in one line of
 
 - Log the failure with structured properties (operation, entity, id) and rethrow, wrapping
   the original exception as the inner exception when the caller needs a domain-level type.
+  Do not swallow database exceptions.
 
 ## Testing
 
