@@ -1044,20 +1044,38 @@ public class KyberBridgeEngine
 
         Dictionary<string, string> sessionHarnessById = new(storeSessions.Count, StringComparer.Ordinal);
         Dictionary<string, int> totalHarnessCounts = new(StringComparer.Ordinal);
+        List<(CollectedSession Session, StoredSessionProjection Projection, string Harness)> projectedSessions =
+            new(storeSessions.Count);
         foreach (CollectedSession session in storeSessions)
         {
-            string norm = CanonPricing.NormalizeHarnessName(session.HarnessId);
-            sessionHarnessById[session.SessionKey] = norm;
-            totalHarnessCounts[norm] = totalHarnessCounts.GetValueOrDefault(norm) + 1;
+            string? canonicalHarness = CanonPricing.CanonicalHarnessId(session.HarnessId);
+            if (canonicalHarness is null)
+            {
+                continue;
+            }
+
+            if (!projectionById.TryGetValue(session.SessionKey, out StoredSessionProjection? projection))
+            {
+                continue;
+            }
+
+            sessionHarnessById[session.SessionKey] = canonicalHarness;
+            totalHarnessCounts[canonicalHarness] = totalHarnessCounts.GetValueOrDefault(canonicalHarness) + 1;
+            projectedSessions.Add((session, projection, canonicalHarness));
         }
 
         Dictionary<string, string> runHarnessById = new(allRuns.Count, StringComparer.Ordinal);
         HashSet<string> inWindowRunIds = new(StringComparer.Ordinal);
         foreach (StoredRun run in allRuns)
         {
-            runHarnessById[run.RunId] = CanonPricing.NormalizeHarnessName(run.HarnessId);
-            if (!TryParseReportTimestamp(run.EndedAtUtc ?? run.StartedAtUtc, out DateTimeOffset runTime)
-                || runTime >= cutoff)
+            string? canonicalRunHarness = CanonPricing.CanonicalHarnessId(run.HarnessId);
+            if (canonicalRunHarness is null)
+            {
+                continue;
+            }
+
+            runHarnessById[run.RunId] = canonicalRunHarness;
+            if (IsRunInWindow(run, cutoff))
             {
                 _ = inWindowRunIds.Add(run.RunId);
             }
@@ -1080,15 +1098,13 @@ public class KyberBridgeEngine
         Dictionary<string, int> inWindowHarnessCounts = new(StringComparer.Ordinal);
         HashSet<string> inWindowSessionIds = new(StringComparer.Ordinal);
 
-        foreach (CollectedSession session in storeSessions)
+        foreach ((CollectedSession session, StoredSessionProjection projection, string sessionHarness) in projectedSessions)
         {
-            StoredSessionProjection? projection = projectionById.GetValueOrDefault(session.SessionKey);
             if (!IsSessionInWindow(projection, cutoff, out DateTimeOffset? activityTime))
             {
                 continue;
             }
 
-            string sessionHarness = sessionHarnessById[session.SessionKey];
             ReportSessionEntry entry = new(session, projection, sessionHarness, activityTime);
             _ = inWindowSessionIds.Add(session.SessionKey);
             inWindowHarnessCounts[sessionHarness] = inWindowHarnessCounts.GetValueOrDefault(sessionHarness) + 1;
@@ -1126,7 +1142,13 @@ public class KyberBridgeEngine
         Dictionary<string, StoredHarnessRollup> storedRollupsByHarness = new(StringComparer.Ordinal);
         foreach (StoredHarnessRollup rollup in storedRollups)
         {
-            storedRollupsByHarness[CanonPricing.NormalizeHarnessName(rollup.HarnessId)] = rollup;
+            string? canonicalHarness = CanonPricing.CanonicalHarnessId(rollup.HarnessId);
+            if (canonicalHarness is null || !totalHarnessCounts.ContainsKey(canonicalHarness))
+            {
+                continue;
+            }
+
+            storedRollupsByHarness[canonicalHarness] = rollup;
         }
 
         List<StoredFinding> candidateFindings =
@@ -3127,20 +3149,42 @@ public class KyberBridgeEngine
             out timestamp);
     }
 
+    private static bool TryGetProjectionActivityTime(StoredSessionProjection? projection, out DateTimeOffset timestamp)
+    {
+        if (projection is null)
+        {
+            timestamp = default;
+            return false;
+        }
+
+        return TryParseReportTimestamp(projection.EndedAtUtc, out timestamp)
+            || TryParseReportTimestamp(projection.StartedAtUtc, out timestamp);
+    }
+
     private static bool IsSessionInWindow(
         StoredSessionProjection? projection,
         DateTimeOffset cutoff,
         out DateTimeOffset? activityTime)
     {
-        string? activityRaw = projection?.EndedAtUtc ?? projection?.StartedAtUtc;
-        if (TryParseReportTimestamp(activityRaw, out DateTimeOffset parsed))
+        if (TryGetProjectionActivityTime(projection, out DateTimeOffset parsed))
         {
             activityTime = parsed;
             return parsed >= cutoff;
         }
 
         activityTime = null;
-        return true;
+        return false;
+    }
+
+    private static bool IsRunInWindow(StoredRun run, DateTimeOffset cutoff)
+    {
+        if (TryParseReportTimestamp(run.EndedAtUtc, out DateTimeOffset ended)
+            || TryParseReportTimestamp(run.StartedAtUtc, out ended))
+        {
+            return ended >= cutoff;
+        }
+
+        return cutoff == DateTimeOffset.MinValue;
     }
 
     private static string? ResolveFindingHarness(
@@ -3200,17 +3244,7 @@ public class KyberBridgeEngine
         IReadOnlyDictionary<string, int> totalHarnessCounts,
         IReadOnlyDictionary<string, int> inWindowHarnessCounts)
     {
-        SortedSet<string> allHarnesses = new(StringComparer.Ordinal);
-        foreach (string harnessId in storedRollupsByHarness.Keys)
-        {
-            _ = allHarnesses.Add(harnessId);
-        }
-
-        foreach (string harnessId in totalHarnessCounts.Keys)
-        {
-            _ = allHarnesses.Add(harnessId);
-        }
-
+        List<string> allHarnesses = [.. totalHarnessCounts.Keys.OrderBy(static harnessId => harnessId, StringComparer.Ordinal)];
         List<object> entries = new(allHarnesses.Count);
         foreach (string harnessId in allHarnesses)
         {
@@ -3303,6 +3337,7 @@ public class KyberBridgeEngine
             StoredHarnessRollup? fullRollup = null;
             bool matchesStoredAllTime = unfilteredSessionsAndRuns
                 && storedRollupsByHarness.TryGetValue(harnessId, out fullRollup)
+                && fullRollup.SessionCount == harnessSessions.Count
                 && inWindowHarnessCounts.GetValueOrDefault(harnessId, 0) == totalHarnessCounts.GetValueOrDefault(harnessId, 0)
                 && harnessSessions.Count == totalHarnessCounts.GetValueOrDefault(harnessId, 0);
 
@@ -3513,8 +3548,12 @@ public class KyberBridgeEngine
             ReadSessionFigures(newest.Session.SessionKey, pricingLookup);
 
         StoredSessionProjection? projection = newest.Projection;
-        string harness = ResolveHarness(aggregate, newest.Session);
-        string lastActivityAt = projection?.EndedAtUtc ?? projection?.StartedAtUtc ?? generatedAt;
+        string harness = newest.Harness;
+        string lastActivityAt = !string.IsNullOrWhiteSpace(projection?.EndedAtUtc)
+            ? projection.EndedAtUtc
+            : !string.IsNullOrWhiteSpace(projection?.StartedAtUtc)
+                ? projection.StartedAtUtc
+                : generatedAt;
         int turnCount = aggregate?.TurnCount ?? Math.Max(turns.Count, projection?.Context?.Turns.Count ?? 0);
 
         object latestTurn;
