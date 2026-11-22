@@ -66,13 +66,15 @@ The shipped binaries build for:
 - Pure Go cross-compiles with environment variables alone, for example
   `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o dist/app-linux-amd64 ./cmd/app`
   (PowerShell sets each variable first: `$env:GOOS='linux'; $env:GOARCH='amd64';
-  $env:CGO_ENABLED='0'`).
+  $env:CGO_ENABLED='0'`, and clears them afterwards with
+  `Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED`).
   `CGO_ENABLED=0` gives a static binary and needs no cross C toolchain; prefer pure-Go
   dependencies (`modernc.org/sqlite` over `mattn/go-sqlite3`) so that stays true.
 - If cgo is unavoidable, each target needs a C cross-compiler (`zig cc` is common); say so
   when handing the build to `devops`.
 - Check the other OS without a second machine: `GOOS=windows go vet ./...` and
-  `GOOS=linux go build ./...` (PowerShell: `$env:GOOS='windows'; go vet ./...`).
+  `GOOS=linux go build ./...` (PowerShell: `$env:GOOS='windows'; go vet ./...`, then
+  `Remove-Item Env:GOOS`).
 
 ## Coding standards
 
@@ -105,8 +107,9 @@ The shipped binaries build for:
   `sync.WaitGroup` or `golang.org/x/sync/errgroup`.
 - Channels are unbuffered unless a buffer size has a stated reason. Function signatures use
   directional channel types.
-- Every channel send, receive or wait that can block selects on `ctx.Done()`. A mutex is
-  not a select point: keep its critical section short and never block inside it.
+- Every channel send or receive that can block sits in a `select` with `ctx.Done()`.
+  `WaitGroup.Wait` and `Mutex.Lock` cannot select: make the goroutines they wait on exit on
+  cancellation, and keep a mutex's critical section short with nothing blocking inside it.
 - Shared mutable state is guarded by a `sync.Mutex` or confined to one goroutine — one or the
   other per piece of state. Hold a mutex for the shortest span.
 - `http.ErrServerClosed` from `ListenAndServe` after `Shutdown` is not a failure.

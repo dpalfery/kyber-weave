@@ -44,7 +44,7 @@ many single-file calls.
 
 - Scope: take files the user named, or get `pylanceWorkspaceRoots` then
   `pylanceWorkspaceUserFiles` and filter to the requested folder. Keep the scope exact. A
-  workspace-wide pass runs in batches (for example 50 files) and reports after each one; when
+  workspace-wide pass runs in batches (for example 50 files) and reports after each batch; when
   the filtered set is far larger than the request implies, confirm the scope before the first
   call.
 - Names: `source.unusedImports`, `source.convertImportFormat`, `source.convertImportStar`,

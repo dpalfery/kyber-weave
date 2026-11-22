@@ -75,7 +75,8 @@ write SQL.
 - Map an absent value to `DBNull.Value` explicitly (`optional ?? (object)DBNull.Value`).
 - Keep the SQL text in a `const` string beside the method that runs it. A `MERGE` or other
   multi-statement batch adds each distinct parameter name once, with one type, however many
-  times the SQL uses it.
+  times the SQL uses it. A value that needs a different type or length in two places gets two
+  parameter names.
 - Pass the `CancellationToken` to every `...Async` call that opens, executes, reads or commits.
   Roll back with `CancellationToken.None`, so a cancelled token cannot replace the original
   error with an `OperationCanceledException`.

@@ -128,8 +128,10 @@ the way to the surface that displays it.
   columns are read only by the query that needs them.
 - **No N+1.** A query inside a loop over rows from another query is a defect; join, use
   `IN (...)` with bound parameters, or load the set once and index it in a `Map`. Build the
-  placeholder list from `?` marks only and bind the values; an empty id set matches nothing, so return the
-  empty result early without querying (`IN ()` is a syntax error); chunk id sets past the driver's bound-parameter cap (32,766 by
+  placeholder list from `?` marks only and bind the values; an empty id set given to an `IN (...)`
+  lookup matches nothing, so return the empty result early without querying (`IN ()` is a
+  syntax error); an optional filter where empty means "no filter" is a separate parameter and
+  says so; chunk id sets past the driver's bound-parameter cap (32,766 by
   default in SQLite), or use a join or temporary table.
 - **Bound every read.** A query whose result can grow with history takes a `LIMIT`, a time
   window, or a cursor. Reading a whole table or file into memory needs a stated upper bound.

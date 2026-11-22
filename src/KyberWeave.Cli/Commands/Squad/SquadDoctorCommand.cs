@@ -657,7 +657,9 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         List<(SquadDeploymentScope Scope, string Message)> receiptErrors = [];
         // A global receipt is one home-level record, so it is read where the resolver anchors
         // user-level deployments rather than at the project whose copies are being diagnosed.
-        string globalReceiptRoot = _globalRoots.HomeDirectory ?? workingDirectory;
+        string globalReceiptRoot = string.IsNullOrWhiteSpace(_globalRoots.HomeDirectory)
+            ? workingDirectory
+            : _globalRoots.HomeDirectory;
         foreach (SquadDeploymentScope scope in new[] { SquadDeploymentScope.Project, SquadDeploymentScope.Global })
         {
             try
@@ -780,8 +782,11 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         return roots;
     }
 
-    /// <summary>Adds the canonical spelling of one skills root, once. A root the file system cannot take is skipped.</summary>
-    private static void AddSkillRoot(string root, List<string> roots, HashSet<string> seen)
+    /// <summary>
+    /// Adds the canonical spelling of one skills root, once. A root the file system cannot take is
+    /// skipped with a warning, so the check never reports healthy over a folder it could not read.
+    /// </summary>
+    private void AddSkillRoot(string root, List<string> roots, HashSet<string> seen)
     {
         try
         {
@@ -793,7 +798,10 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {
-            // One unusable spelling is not a reason to fail the warning for every other target.
+            // One unusable spelling is not a reason to fail the check for every other target,
+            // but the skipped folder is named so its state is not taken as healthy.
+            _console.WriteUnfolded(() => _console.Ansi.MarkupLine(
+                $"  [yellow]warn[/] Skills folder {Markup.Escape(root)} could not be checked for retired skills: {Markup.Escape(ex.Message)}"));
         }
     }
 

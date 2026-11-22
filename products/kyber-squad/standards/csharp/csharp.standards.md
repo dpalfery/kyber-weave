@@ -229,7 +229,8 @@ Use `[ApiController]` and `[Route("api/[controller]")]`.
   a vision-capable model when diagrams carry meaning) and keep section hierarchy and page,
   section or figure references so answers cite their source.
 - Fuse results by de-duplicating on document id, then re-rank. One failed source does not fail the
-  answer: the answer says it is partial and names the missing source, and the failure is logged. Azure calls retry transient failures, with a circuit breaker
+  answer: the answer says it is partial and names the missing source, and the failure is logged.
+  When every source fails, the request fails with an error; it never returns an empty answer. Azure calls retry transient failures, with a circuit breaker
   where call volume warrants one, and health checks cover the Azure services the app uses.
 - Web sources need credibility validation and a rate limit. Agent tool definitions are
   parameterized, and every agent operation is logged with structured operation context.
@@ -271,7 +272,9 @@ Middleware order is:
 
 Security headers → host-header validation → `UseHttpsRedirection` / `UseHsts` → `UseCors` →
 `UseStaticFiles` → `UseAuthentication` → `UseAuthorization` → `UseRateLimiter` →
-`UseOutputCaching` / `UseResponseCaching` → endpoints. That `UseRateLimiter` position is for a
+`UseOutputCaching` / `UseResponseCaching` → endpoints. `UseStaticFiles` serves everything under
+`wwwroot` without authorization, so a file that needs it lives outside `wwwroot` and is served by an
+authorized endpoint. That `UseRateLimiter` position is for a
 limiter that partitions by user identity, which needs the authenticated user. A limiter that
 partitions only by client IP goes before `UseAuthentication` instead, so a flood is rejected
 before any authentication work runs.
