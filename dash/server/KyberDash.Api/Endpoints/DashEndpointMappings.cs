@@ -562,19 +562,13 @@ public static class DashEndpointMappings
         return await ModelCatalogAsync(query, cancellationToken).ConfigureAwait(false);
     }
 
-    private static IResult CaptureStatus(ISettingsService settings, ICaptureService capture, DashRuntimeSettings runtime)
+    private static IResult CaptureStatus(ICaptureService capture, DashRuntimeSettings runtime)
     {
-        ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(capture);
         ArgumentNullException.ThrowIfNull(runtime);
 
-        SettingsView current = settings.GetSettings();
-        return DashHttp.NoStoreJson(StatusCodes.Status200OK, new
-        {
-            ok = true,
-            receiverHosted = current.ReceiverHosted,
-            jobsPaused = current.JobsPaused,
-        });
+        int? otlpPort = runtime.CaptureStatusOtlpPort();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, capture.GetCaptureStatus(runtime.StateDirectory, otlpPort));
     }
 
     private static async Task<IResult> CaptureConfigureAsync(
