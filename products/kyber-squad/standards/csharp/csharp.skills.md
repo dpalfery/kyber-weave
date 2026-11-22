@@ -14,10 +14,10 @@ last-reviewed: 2026-11-22
 
 The standard holds the decisions; this file holds the commands.
 
-- Layout, web API surface, build files, BFF: `standards` Naming and layout and Coding standards.
-- File upload, observability, Azure AI, MSBuild correctness: Coding standards.
-- Build speed: Commands. Security headers, authorization, rate limiting, logging: Security and
-  data handling.
+- Layout, build files, MSBuild correctness, BFF: `standards` Naming and layout.
+- Web API surface, observability, Azure AI: Coding standards.
+- Build speed: Commands. HTTP pipeline, security headers, authorization, rate limiting,
+  logging, file upload: Security and data handling.
 
 ## Commands
 
@@ -25,7 +25,7 @@ The standard holds the decisions; this file holds the commands.
   the tests covering your change; a bare `dotnet test` is the council and CI gate.
 - Rebuilds with nothing changed: `dotnet build -v:diagnostic -fl -flp:logfile=diag.log`, then
   search for `Building target '<T>' completely` and `Input file ... is newer than output file`.
-- Slow build: `dotnet build -fl -flp:logfile=perf.log;performancesummary` for target and task
+- Slow build: `dotnet build -fl -flp:"logfile=perf.log;performancesummary"` for target and task
   timings, or `dotnet build /bl:build.binlog` and open it in the MSBuild Structured Log Viewer.
 - Several CLI commands in one CI job: set `DOTNET_CLI_USE_MSBUILD_SERVER=1` so MSBuild Server
   stays warm between them. It is opt-in before the .NET 11 SDK, and gains little in a job

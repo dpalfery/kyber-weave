@@ -28,7 +28,9 @@ last-reviewed: 2026-11-22
 - A passing test run has a non-zero test count. Never run the full suite; the review council
   and CI do.
 - On Windows run the same commands in PowerShell. To check the other OS without a second
-  machine, run `GOOS=windows go vet ./...` and `GOOS=linux go build ./...`.
+  machine, run `GOOS=windows go vet ./...` and `GOOS=linux go build ./...` (PowerShell:
+  `$env:GOOS='windows'; go vet ./...`, then `$env:GOOS='linux'; go build ./...`, then
+  `Remove-Item Env:GOOS`).
 - Before an upgrade, run `govulncheck ./...` to see whether a known vulnerability is reachable.
 
 ## Hand-off

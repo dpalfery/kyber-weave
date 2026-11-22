@@ -228,8 +228,8 @@ Use `[ApiController]` and `[Route("api/[controller]")]`.
 - Chunk by structure (rows grouped by natural key; layout-aware PDF chunks with overlap, using
   a vision-capable model when diagrams carry meaning) and keep section hierarchy and page,
   section or figure references so answers cite their source.
-- Fuse results by de-duplicating on document id, then re-rank. One failed source degrades the
-  answer; it does not fail it. Azure calls retry transient failures, with a circuit breaker
+- Fuse results by de-duplicating on document id, then re-rank. One failed source does not fail the
+  answer: the answer says it is partial and names the missing source, and the failure is logged. Azure calls retry transient failures, with a circuit breaker
   where call volume warrants one, and health checks cover the Azure services the app uses.
 - Web sources need credibility validation and a rate limit. Agent tool definitions are
   parameterized, and every agent operation is logged with structured operation context.
@@ -270,9 +270,11 @@ Do not merge code that fails the build, and do not restate analyzer rules here.
 Middleware order is:
 
 Security headers → host-header validation → `UseHttpsRedirection` / `UseHsts` → `UseCors` →
-`UseAuthentication` → `UseAuthorization` → `UseRateLimiter` → `UseOutputCaching` /
-`UseResponseCaching` → endpoints. The rate limiter follows authorization when it partitions by
-user identity; an IP-only limiter may sit before `UseAuthentication`.
+`UseStaticFiles` → `UseAuthentication` → `UseAuthorization` → `UseRateLimiter` →
+`UseOutputCaching` / `UseResponseCaching` → endpoints. That `UseRateLimiter` position is for a
+limiter that partitions by user identity, which needs the authenticated user. A limiter that
+partitions only by client IP goes before `UseAuthentication` instead, so a flood is rejected
+before any authentication work runs.
 
 Version the API; emit OpenAPI with `Microsoft.AspNetCore.OpenApi` (`AddOpenApi` /
 `MapOpenApi`) and serve the UI with Swashbuckle.

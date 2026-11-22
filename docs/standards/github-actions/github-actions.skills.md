@@ -37,16 +37,16 @@ CI uploads no binlog, so reproduce first: build the failing project alone with `
 
    ```bash
    dotnet msbuild app.binlog -noconlog \
-     -fl  -flp:v=diag;logfile=full.log;performancesummary \
-     -fl1 -flp1:errorsonly;logfile=errors.log \
-     -fl2 -flp2:warningsonly;logfile=warnings.log
+     -fl  -flp:"v=diag;logfile=full.log;performancesummary" \
+     -fl1 -flp1:"errorsonly;logfile=errors.log" \
+     -fl2 -flp2:"warningsonly;logfile=warnings.log"
    grep -n "error " errors.log | head -30        # root error, ignore cascades
    grep -n "Target.*FAILED" full.log             # failing target
    grep "Time Elapsed" full.log | sort -t= -k2 -rn | head -20   # slowest targets
    ```
 
 3. For a quick run with no binlog, `dotnet build -v:diagnostic -fl
-   -flp:logfile=build-diag.log;verbosity=diagnostic` works, at 10-50 MB per project.
+   -flp:"logfile=build-diag.log;verbosity=diagnostic"` works, at 10-50 MB per project.
 
 | Symptom | Check |
 |---|---|

@@ -27,4 +27,5 @@ rustup target add <triple>
 cargo build --release --locked --target <triple> --manifest-path dash/tray/src-tauri/Cargo.toml
 ```
 
-The bundled triples are the three the standard names under Cross-platform.
+The standard's bundle names map to these triples: `darwin-arm64` is `aarch64-apple-darwin`,
+`darwin-x64` is `x86_64-apple-darwin`, and `win-x64` is `x86_64-pc-windows-msvc`.

@@ -163,7 +163,8 @@ statement or stored procedure will do.
 
 Application accounts get the permissions the application uses, and no more. Nothing routine
 runs as `sa`, `root`, or the schema owner. Map Entra or Windows groups to roles, and do not
-hand out `sysadmin` by default.
+hand out `sysadmin` by default. Never enable `xp_cmdshell`: it runs operating-system commands
+from SQL.
 
 Prefer Microsoft Entra ID or Kerberos authentication over SQL authentication for application and
 pipeline connections; keep SQL authentication disabled unless there is a justified need.

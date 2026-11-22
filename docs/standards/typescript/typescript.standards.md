@@ -117,8 +117,9 @@ for unexpected failures. If an optional feature has a fallback, state when it is
 so callers do not confuse fallback output with a complete result: an unparseable file yields
 "not parsed", not "zero rows". Read a Node error code through a guard
 (`err instanceof Error && 'code' in err`), never `catch (e: any)`; `ENOENT` returns absent
-only when absence is the answer, and every other code is rethrown. `void promise` needs a
-comment saying why the result is ignored. Run independent awaits concurrently (`Promise.all`,
+only when absence is the answer, and every other code is rethrown. `void promise` is allowed
+only when the promise already ends in a `.catch` that reports its failure, with a comment
+saying why the result is ignored. Run independent awaits concurrently (`Promise.all`,
 `Promise.allSettled`, which reports each rejected entry) and cap concurrency over an unbounded
 set. Pass the `AbortSignal` to `fetch`, streams and `node:timers/promises`; in a wait loop only
 an abort ends the wait quietly. A module that starts an interval or listener returns a way to

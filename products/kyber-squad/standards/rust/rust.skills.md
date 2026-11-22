@@ -13,8 +13,8 @@ last-reviewed: 2026-11-22
 ## What this folder covers
 
 - Standards, in `rust.standards.md`: errors and crate boundaries, and async and tokio (Coding
-  standards); dependencies, TLS, targets and cross-platform (Naming and layout); `unsafe`
-  (Security and data handling); the gates and per-platform notes (Commands).
+  standards); dependencies, TLS, targets and cross-platform (Naming and layout); the gates
+  (Commands); `unsafe` and the per-platform toolchain notes (Security and data handling).
 - Cross-build procedure: `rustup target add <triple>`, then
   `cargo build --release --target <triple> --locked`; confirm no OpenSSL with
   `cargo tree -i openssl-sys --target all`.

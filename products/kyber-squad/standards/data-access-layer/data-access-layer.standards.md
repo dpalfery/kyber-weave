@@ -74,9 +74,11 @@ write SQL.
   `command.Parameters.Add("@Name", SqlDbType.NVarChar, 200).Value = name;`.
 - Map an absent value to `DBNull.Value` explicitly (`optional ?? (object)DBNull.Value`).
 - Keep the SQL text in a `const` string beside the method that runs it. A `MERGE` or other
-  multi-statement batch types every parameter the same way.
-- Pass the `CancellationToken` to every `...Async` call (open, execute, read, commit,
-  rollback).
+  multi-statement batch adds each distinct parameter name once, with one type, however many
+  times the SQL uses it.
+- Pass the `CancellationToken` to every `...Async` call that opens, executes, reads or commits.
+  Roll back with `CancellationToken.None`, so a cancelled token cannot replace the original
+  error with an `OperationCanceledException`.
 - Open the connection as late as possible and release it as early as possible: one
   `await using` connection per repository method, not one held across calls.
 - A lookup that finds nothing returns `null` (or an empty collection), not an exception.
@@ -113,8 +115,9 @@ _Nothing specific yet._
 - Schema-qualify every table reference in migration SQL and in FluentMigrator calls
   (`WithSchema` / `InSchema`).
 - After applying a migration, verify the result against the schema project's `.dacpac`.
-- Down() is a host decision: implementing it is optional, and a production correction is
-  always a forward migration, per **<sql-server-coding-standard>**.
+- Down() is a host decision: implementing it is optional. Migrations are forward-only, per
+  **<sql-server-coding-standard>**: a production correction is always a new forward migration,
+  and a `Down()` is never run against production.
 
 ## Security and data handling
 
