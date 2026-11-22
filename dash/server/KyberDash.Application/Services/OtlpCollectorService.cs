@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
+using KyberDash.Core.Exceptions;
 using KyberDash.Domain;
 
 namespace KyberDash.Application;
@@ -38,9 +39,15 @@ public class OtlpCollectorService : IOtlpCollectorService
     private readonly Lock stateGate = new();
     private readonly CancellationTokenSource flushShutdown = new();
     private readonly SemaphoreSlim flushWake = new(0, 1);
+    private const int FailureWindowCapacity = 1024;
+
+    private readonly Queue<DateTimeOffset> failureTimes = new();
     private Task? flushLoop;
     private bool paused;
     private string? lastAcceptedAt;
+    private string? lastErrorCode;
+    private string? lastError;
+    private string? lastErrorAt;
 
     /// <summary>
     /// Initializes a new <see cref="OtlpCollectorService"/>.
@@ -93,7 +100,7 @@ public class OtlpCollectorService : IOtlpCollectorService
     /// <inheritdoc />
     public event EventHandler? StoreUpdated;
 
-    /// <summary>UTC ISO-8601 timestamp of the most recent persisted batch, when any.</summary>
+    /// <inheritdoc />
     public string? LastAcceptedAt
     {
         get
@@ -102,6 +109,59 @@ public class OtlpCollectorService : IOtlpCollectorService
             {
                 return lastAcceptedAt;
             }
+        }
+    }
+
+    /// <inheritdoc />
+    public string? LastErrorCode
+    {
+        get
+        {
+            lock (stateGate)
+            {
+                return lastErrorCode;
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public string? LastError
+    {
+        get
+        {
+            lock (stateGate)
+            {
+                return lastError;
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public string? LastErrorAt
+    {
+        get
+        {
+            lock (stateGate)
+            {
+                return lastErrorAt;
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public int CountFailuresSince(DateTimeOffset cutoff)
+    {
+        lock (stateGate)
+        {
+            PruneFailures(FailureRetentionCutoff(cutoff, DateTimeOffset.UtcNow));
+            int count = 0;
+            foreach (DateTimeOffset at in failureTimes)
+            {
+                if (at >= cutoff)
+                    count++;
+            }
+
+            return count;
         }
     }
 
@@ -286,13 +346,11 @@ public class OtlpCollectorService : IOtlpCollectorService
 
         if (payload.Length > maxBodyBytes)
         {
-            return new IngestAdmissionResult(
-                false,
-                413,
-                null,
-                string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"OTLP payload of {payload.Length} bytes exceeds the {maxBodyBytes} byte limit."));
+            string message = string.Create(
+                CultureInfo.InvariantCulture,
+                $"OTLP payload of {payload.Length} bytes exceeds the {maxBodyBytes} byte limit.");
+            NoteFailure("OTLP_PAYLOAD_TOO_LARGE", message);
+            return new IngestAdmissionResult(false, 413, null, message);
         }
 
         bool isJson = IsJsonContentType(contentType);
@@ -307,18 +365,31 @@ public class OtlpCollectorService : IOtlpCollectorService
         int wireBytes = payload.Length;
         string? resolvedSignal = signal ?? SniffJsonSignal(payload.Span);
 
-        IngestAdmissionResult admission = resolvedSignal switch
+        IngestAdmissionResult admission;
+        try
         {
-            "logs" => writer.TryEnqueueLogs(
-                isJson ? OtlpCollector.DecodeLogsJson(payload.Span, max) : OtlpCollector.DecodeLogsProtobuf(payload.Span, max),
-                wireBytes),
-            "metrics" => writer.TryEnqueueMetrics(
-                isJson ? OtlpCollector.DecodeMetricsJson(payload.Span, max) : OtlpCollector.DecodeMetricsProtobuf(payload.Span, max),
-                wireBytes),
-            _ => writer.TryEnqueueSpans(
-                isJson ? OtlpCollector.DecodeTracesJson(payload.Span, max) : OtlpCollector.DecodeTracesProtobuf(payload.Span, max),
-                wireBytes),
-        };
+            admission = resolvedSignal switch
+            {
+                "logs" => writer.TryEnqueueLogs(
+                    isJson ? OtlpCollector.DecodeLogsJson(payload.Span, max) : OtlpCollector.DecodeLogsProtobuf(payload.Span, max),
+                    wireBytes),
+                "metrics" => writer.TryEnqueueMetrics(
+                    isJson ? OtlpCollector.DecodeMetricsJson(payload.Span, max) : OtlpCollector.DecodeMetricsProtobuf(payload.Span, max),
+                    wireBytes),
+                _ => writer.TryEnqueueSpans(
+                    isJson ? OtlpCollector.DecodeTracesJson(payload.Span, max) : OtlpCollector.DecodeTracesProtobuf(payload.Span, max),
+                    wireBytes),
+            };
+        }
+        catch (Exception ex) when (ex is OtlpDecodeException or OtlpPayloadTooLargeException)
+        {
+            NoteFailure(ex is OtlpDecodeException ? "OTLP_MALFORMED_PAYLOAD" : "OTLP_PAYLOAD_TOO_LARGE", ex.Message);
+            throw;
+        }
+
+        // A pause is administrative, not a failed batch. Oversize and backlog rejections are.
+        if (!admission.Accepted && admission.HttpStatusCode != 503)
+            NoteFailure(admission.HttpStatusCode == 413 ? "OTLP_PAYLOAD_TOO_LARGE" : "OTLP_REJECTED", admission.ErrorMessage ?? "rejected");
 
         // The exporter already has its 2xx, so this only shortens the wait before the rows are
         // readable; the periodic flush would catch it either way.
@@ -326,6 +397,41 @@ public class OtlpCollectorService : IOtlpCollectorService
             WakeFlushLoop();
 
         return admission;
+    }
+
+    /// <summary>
+    /// Earliest timestamp a failure count keeps. A wider requested window is kept whole.
+    /// A narrower one does not erase the five-minute history coverage reads next.
+    /// </summary>
+    /// <param name="requestedCutoff">The start of the window the caller asked to count.</param>
+    /// <param name="utcNow">The clock reading for this count.</param>
+    /// <returns>The oldest timestamp that remains queued after the count.</returns>
+    public static DateTimeOffset FailureRetentionCutoff(DateTimeOffset requestedCutoff, DateTimeOffset utcNow)
+    {
+        DateTimeOffset fiveMinutes = utcNow.AddMinutes(-5);
+        return requestedCutoff < fiveMinutes ? requestedCutoff : fiveMinutes;
+    }
+
+    private void PruneFailures(DateTimeOffset cutoff)
+    {
+        while (failureTimes.Count > 0 && failureTimes.Peek() < cutoff)
+            _ = failureTimes.Dequeue();
+    }
+
+    /// <summary>Records one rejected batch so coverage can count a real five-minute window.</summary>
+    private void NoteFailure(string code, string message)
+    {
+        lock (stateGate)
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            failureTimes.Enqueue(now);
+            while (failureTimes.Count > FailureWindowCapacity)
+                _ = failureTimes.Dequeue();
+
+            lastErrorCode = code;
+            lastError = message;
+            lastErrorAt = now.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+        }
     }
 
     /// <summary>Drains the queue into the relational store and raises <see cref="StoreUpdated"/> when anything landed.</summary>
