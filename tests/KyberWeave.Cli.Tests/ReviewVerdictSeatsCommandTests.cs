@@ -661,7 +661,8 @@ public sealed partial class ReviewVerdictSeatsCommandTests : IDisposable
         string[]? trailers = null,
         string file = "src/Foo.cs",
         string? kind = null,
-        string? basis = null)
+        string? basis = null,
+        string claim = "The loop bound excludes the final element.")
     {
         List<string> lines =
         [
@@ -673,7 +674,7 @@ public sealed partial class ReviewVerdictSeatsCommandTests : IDisposable
             $"  file: {file}",
             $"  line: {line}",
             $"  excerpt: \"{excerpt}\"",
-            "  claim: The loop bound excludes the final element.",
+            $"  claim: \"{claim}\"",
             "  evidence: src/Foo.cs",
             "  failure_scenario: The last element is never processed.",
             "  suggestion: Use <= or count + 1."

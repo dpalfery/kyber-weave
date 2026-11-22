@@ -73,6 +73,70 @@ public sealed partial class ReviewVerdictSeatsCommandTests
     }
 
     /// <summary>
+    /// A seat that states in its claim that the code predates the change needs no <c>--drop</c>: the major hardening it
+    /// reports in cycle 1 is dropped as pre-existing debt and listed as follow-up work instead of fixed.
+    /// </summary>
+    [Fact]
+    public void APreExistingDebtMajorHardeningInCycle1IsFollowUpWork()
+    {
+        WriteSeat("correctness", FindingSeat(
+            severity: "major",
+            kind: "hardening",
+            claim: "Pre-existing debt: the file is not in this change"));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains(
+            MessagesWithCode(run.Output, KindRouting),
+            line => line == "Dropped 'correctness/off-by-one': pre-existing debt: the file is not in this change.");
+        IReadOnlyList<string> lines = MessagesWithCode(run.Output, FixRound);
+        Assert.Contains("follow-up: correctness/off-by-one (major) src/Foo.cs:12 (pre-existing debt)", lines);
+        Assert.DoesNotContain(lines, line => line.StartsWith("fix:", StringComparison.Ordinal));
+        Assert.Contains("fix round: none (fix level minor); review clean: proceed to archive.", lines);
+    }
+
+    /// <summary>A hardening whose claim does not say it predates the change is still fixed in cycle 1.</summary>
+    [Fact]
+    public void ANormalMajorHardeningInCycle1IsStillFixed()
+    {
+        WriteSeat("correctness", FindingSeat(
+            severity: "major",
+            kind: "hardening",
+            claim: "The loop bound excludes the final element."));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains("fix: correctness/off-by-one (major) src/Foo.cs:12", MessagesWithCode(run.Output, FixRound));
+    }
+
+    /// <summary>
+    /// A manual <c>--drop</c> of a finding whose claim also says it predates the change wins: the finding is dropped
+    /// once, with the reviewer's reason, and never reaches the automatic routing.
+    /// </summary>
+    [Fact]
+    public void AManualDropOfAPreExistingDebtFindingProducesOneDrop()
+    {
+        WriteSeat("correctness", FindingSeat(
+            severity: "major",
+            kind: "hardening",
+            claim: "Pre-existing debt: the file is not in this change"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--drop", "correctness/off-by-one=pre-existing debt: the reviewer says so",
+                .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Single(
+            MessagesWithCode(run.Output, FixRound),
+            line => line.StartsWith("follow-up: correctness/off-by-one", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            MessagesWithCode(run.Output, KindRouting),
+            line => line.StartsWith("Dropped 'correctness/off-by-one'", StringComparison.Ordinal));
+    }
+
+    /// <summary>
     /// A finding dropped as a pull request note blocks nothing and is listed as follow-up work, exactly as pre-existing
     /// debt is; a clean review says the loop ends.
     /// </summary>
