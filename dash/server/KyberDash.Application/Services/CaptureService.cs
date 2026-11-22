@@ -299,7 +299,21 @@ public class CaptureService : ICaptureService
         }
         catch (JsonException)
         {
-            on = false;
+            object warning = new { code = "malformed", severity = "warning", text = $"{evidenceNoun} at {path} could not be parsed" };
+            return new HarnessStatusView(
+                Id: id,
+                DisplayName: displayName,
+                Mode: "managed",
+                Installed: "detected",
+                InstallEvidence: [$"{evidenceNoun} found at {path}"],
+                State: "unknown",
+                Receipt: "absent",
+                Files: [new HarnessFileView(id, path, true, true, [key], [], [key], [], null)],
+                Warnings: [warning],
+                ManualSteps: [],
+                StatusLines: ["OTLP export: unknown"],
+                Health: "attention",
+                Issues: [warning]);
         }
 
         return new HarnessStatusView(

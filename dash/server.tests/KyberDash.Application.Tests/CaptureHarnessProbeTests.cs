@@ -66,6 +66,21 @@ public class CaptureHarnessProbeTests
     }
 
     [Fact]
+    public void MalformedCopilotSettingsAreUnknownRatherThanDisabled()
+    {
+        string home = "/tmp/kw-capture-copilot-bad-json";
+        string path = Path.Combine(home, ".config", "Code", "User", "settings.json");
+        MemoryFiles files = new();
+        files.Add(path, """{ "github.copilot.chat.otel.enabled": true""");
+        CaptureService capture = Create(files, home);
+
+        JsonElement copilot = Harness(capture.GetCaptureStatus("/tmp/kw-capture-state"), "copilot");
+
+        Assert.Equal("unknown", copilot.GetProperty("state").GetString());
+        Assert.Equal("attention", copilot.GetProperty("health").GetString());
+    }
+
+    [Fact]
     public void ClaudeRequiresALoopbackEndpoint()
     {
         string home = "/tmp/kw-capture-claude";
