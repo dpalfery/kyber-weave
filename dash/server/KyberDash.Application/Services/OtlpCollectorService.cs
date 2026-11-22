@@ -153,7 +153,7 @@ public class OtlpCollectorService : IOtlpCollectorService
     {
         lock (stateGate)
         {
-            PruneFailures(DateTimeOffset.UtcNow.AddMinutes(-5));
+            PruneFailures(FailureRetentionCutoff(cutoff, DateTimeOffset.UtcNow));
             int count = 0;
             foreach (DateTimeOffset at in failureTimes)
             {
@@ -399,6 +399,19 @@ public class OtlpCollectorService : IOtlpCollectorService
         return admission;
     }
 
+    /// <summary>
+    /// Earliest timestamp a failure count keeps. A wider requested window is kept whole.
+    /// A narrower one does not erase the five-minute history coverage reads next.
+    /// </summary>
+    /// <param name="requestedCutoff">The start of the window the caller asked to count.</param>
+    /// <param name="utcNow">The clock reading for this count.</param>
+    /// <returns>The oldest timestamp that remains queued after the count.</returns>
+    public static DateTimeOffset FailureRetentionCutoff(DateTimeOffset requestedCutoff, DateTimeOffset utcNow)
+    {
+        DateTimeOffset fiveMinutes = utcNow.AddMinutes(-5);
+        return requestedCutoff < fiveMinutes ? requestedCutoff : fiveMinutes;
+    }
+
     private void PruneFailures(DateTimeOffset cutoff)
     {
         while (failureTimes.Count > 0 && failureTimes.Peek() < cutoff)
@@ -412,7 +425,6 @@ public class OtlpCollectorService : IOtlpCollectorService
         {
             DateTimeOffset now = DateTimeOffset.UtcNow;
             failureTimes.Enqueue(now);
-            PruneFailures(now.AddMinutes(-5));
             while (failureTimes.Count > FailureWindowCapacity)
                 _ = failureTimes.Dequeue();
 

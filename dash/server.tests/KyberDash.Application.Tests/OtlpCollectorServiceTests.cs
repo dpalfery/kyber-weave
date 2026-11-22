@@ -99,6 +99,15 @@ public class OtlpCollectorServiceTests
     }
 
     [Fact]
+    public void WiderFailureWindowIsNotClippedToFiveMinutes()
+    {
+        DateTimeOffset now = new(2026, 11, 22, 12, 0, 0, TimeSpan.Zero);
+
+        Assert.Equal(now.AddMinutes(-10), OtlpCollectorService.FailureRetentionCutoff(now.AddMinutes(-10), now));
+        Assert.Equal(now.AddMinutes(-5), OtlpCollectorService.FailureRetentionCutoff(now.AddMinutes(-1), now));
+    }
+
+    [Fact]
     public async Task FailureWindowStopsGrowingPastItsCap()
     {
         Harness harness = new();
