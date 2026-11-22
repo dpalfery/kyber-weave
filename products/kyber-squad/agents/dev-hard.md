@@ -88,10 +88,15 @@ Use the host's indexes before raw reads.
 
 ## Completion digest
 
+Return the digest the passing task gate prints, with your commit's sha:
+
 ```text
-STATUS: READY_FOR_REVIEW
-ARTIFACTS: <files changed or created>
-SUMMARY: <2 to 4 sentences: what was built, what was tested, any hand-off>
-TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE>, agent=dev-hard gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
-OPEN_QUESTIONS: <bullets, or "none">
+STATUS: PASS | FAIL | ESCALATION
+FILES: <comma-separated paths>
+TESTS: total=<N> failed=<N> passed=<N>
+COMMIT: <commit-sha>
+REMOTE_HEAD: UNPUSHED
+TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — agent=dev-hard gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 ```
+
+A question you could not settle goes on an `Open item:` line after the digest.

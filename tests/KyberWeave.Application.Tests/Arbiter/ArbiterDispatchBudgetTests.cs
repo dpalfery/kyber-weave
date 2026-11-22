@@ -252,6 +252,31 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     }
 
     [Fact]
+    public void EffectiveCallMinutes_GivesAHugeGateTimeoutAHugeLimit()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 150, CallMinutes: 5);
+        ReviewConfig review = ReviewWithGates(
+            new ReviewTaskGate("test", [], null, ["dotnet", "test"], [], TimeoutSeconds: int.MaxValue));
+
+        int minutes = WorkerGuardRules.EffectiveCallMinutes(budget, review);
+
+        // The arithmetic must not overflow into a negative or small limit: a huge timeout allows a huge call.
+        Assert.True(minutes > 30_000_000, $"A gate timeout of {int.MaxValue} seconds gave only {minutes} minutes.");
+    }
+
+    [Fact]
+    public void Window_ReadsTheCallLimitFromAHeaderWhoseAgentNameContainsASpace()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 150, CallMinutes: 14);
+        string header = WorkerGuardRules.HeaderLine(Start, budget, "my agent");
+
+        WorkerGuardRules.Window? window = WorkerGuardRules.Window.Read([header.TrimEnd('\n')]);
+
+        Assert.NotNull(window);
+        Assert.Equal(14, window.CallMinutes);
+    }
+
+    [Fact]
     public void StalledCall_AllowsAGapThatFitsTheLongestDeclaredTaskGate()
     {
         _host.Write(

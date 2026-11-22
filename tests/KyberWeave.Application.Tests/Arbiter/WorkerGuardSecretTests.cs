@@ -205,6 +205,39 @@ public sealed class WorkerGuardSecretTests
         Assert.Contains("would put a secret into the transcript", reason, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("echo $(cat ~/.ssh/id_rsa)")]
+    [InlineData("echo \"$(cat ~/.ssh/id_rsa)\"")]
+    [InlineData("echo `cat ~/.ssh/id_rsa`")]
+    public void ACommandSubstitutionThatReadsASecretFileIsRefused(string command)
+    {
+        string answer = Guard("copilot-cli", Copilot(_repo, command));
+
+        Assert.StartsWith(RuleId, DenialReason(answer), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("echo $password")]
+    [InlineData("echo $PASSWORD")]
+    [InlineData("echo $TOKEN")]
+    [InlineData("echo $token")]
+    [InlineData("echo $MY_TOKEN")]
+    [InlineData("echo ${env:API_KEY}")]
+    public void ASecretVariableNamedByItsKeywordAloneIsRefused(string command)
+    {
+        string answer = Guard("copilot-cli", Copilot(_repo, command));
+
+        Assert.StartsWith(RuleId, DenialReason(answer), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AHerestringOfASecretVariableIsRefused()
+    {
+        string answer = Guard("copilot-cli", Copilot(_repo, "cat <<< \"$SECRET_TOKEN\""));
+
+        Assert.StartsWith(RuleId, DenialReason(answer), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AFactoryChildsSecretCommandIsRefusedWithFactorysDenyDocument()
     {
