@@ -25,6 +25,12 @@ public class DashOptions
     /// <summary>Maximum OTLP in-flight/queued backlog size in bytes.</summary>
     public long MaxPendingBytes { get; set; } = 256L * 1024 * 1024;
 
+    /// <summary>
+    /// Collector port the process was configured with. <see langword="null"/> when this process has no
+    /// collector port to advertise. <c>0</c> means the OS has not chosen an ephemeral port yet.
+    /// </summary>
+    public int? OtlpPort { get; set; }
+
     /// <summary>Polly circuit breaker options protecting SQLite operations.</summary>
     public DashCircuitBreakerOptions CircuitBreaker { get; set; } = new();
 }
@@ -55,6 +61,23 @@ public interface IOtlpCollectorService
     /// <summary>Whether OTLP ingestion is currently paused by administrative command or wipe.</summary>
     bool IsPaused { get; }
 
+    /// <summary>UTC timestamp of the most recent batch that was written to the store, when any.</summary>
+    string? LastAcceptedAt { get; }
+
+    /// <summary>Code of the most recent rejected batch, when any.</summary>
+    string? LastErrorCode { get; }
+
+    /// <summary>Message of the most recent rejected batch, when any.</summary>
+    string? LastError { get; }
+
+    /// <summary>UTC timestamp of the most recent rejected batch, when any.</summary>
+    string? LastErrorAt { get; }
+
+    /// <summary>Counts admission failures recorded at or after <paramref name="cutoff"/>.</summary>
+    /// <param name="cutoff">Inclusive start of the window, in UTC.</param>
+    /// <returns>The number of rejected batches in the window.</returns>
+    int CountFailuresSince(DateTimeOffset cutoff);
+
     /// <summary>Raised whenever a flushed batch modifies canonical store state.</summary>
     event EventHandler? StoreUpdated;
 
@@ -84,6 +107,23 @@ public interface IOtlpCollectorService
 
     /// <summary>Resumes OTLP admission.</summary>
     void ResumeIngestion();
+}
+
+/// <summary>
+/// Whether this process has bound the OTLP listener. The host sets it after Kestrel starts;
+/// a reader treats an unset state as "not this process".
+/// </summary>
+public interface IOtlpListenerState
+{
+    /// <summary>Whether this process is bound to the collector port.</summary>
+    bool IsListening { get; }
+
+    /// <summary>The collector port this process bound, when <see cref="IsListening"/> is true.</summary>
+    int? BoundPort { get; }
+
+    /// <summary>Records that this process is listening on <paramref name="port"/>.</summary>
+    /// <param name="port">The bound collector port.</param>
+    void NoteListening(int port);
 }
 
 /// <summary>Canonical span normalization and local transcript ingestion application service contract.</summary>
@@ -244,8 +284,10 @@ public interface ISettingsService
 /// <summary>Capture plugin installation, consent, and statusline event service contract.</summary>
 public interface ICaptureService
 {
-    /// <summary>Returns capture receiver & plugin status payload.</summary>
-    JsonElement GetCaptureStatus(string stateDir);
+    /// <summary>Returns capture receiver and plugin status. <paramref name="otlpPort"/> is the collector port to advertise, when the host knows it.</summary>
+    /// <param name="stateDir">State directory holding consent.</param>
+    /// <param name="otlpPort">Configured collector port, or <see langword="null"/> when this caller has none.</param>
+    JsonElement GetCaptureStatus(string stateDir, int? otlpPort = null);
 
     /// <summary>Applies capture consent or configuration update from REST payload.</summary>
     JsonElement ConfigureCapture(JsonElement body, string stateDir);
