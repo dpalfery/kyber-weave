@@ -209,6 +209,59 @@ public sealed class WorkerGuardCanonicalCheckoutCommandTests
     }
 
     [Fact]
+    public void AGitWorkTreeOptionIntoTheCanonicalCheckoutIsRefused()
+    {
+        StartRun();
+
+        Assert.NotEmpty(Guard(
+            "copilot-cli",
+            Copilot(_worktree, $"git --git-dir={Path.Combine(_repo, ".git")} --work-tree={_repo} status")));
+    }
+
+    [Fact]
+    public void AGitWorkTreeOptionWithASeparateValueIntoTheCanonicalCheckoutIsRefused()
+    {
+        StartRun();
+
+        Assert.NotEmpty(Guard(
+            "copilot-cli",
+            Copilot(_worktree, $"git --git-dir {Path.Combine(_repo, ".git")} --work-tree {_repo} log -1")));
+    }
+
+    [Fact]
+    public void AChangeDirectoryToAPathTheGuardCannotPlaceIsRefused()
+    {
+        StartRun();
+
+        string reason = DenialReason(Guard("copilot-cli", Copilot(_worktree, "cd $HOME/repo && git cherry-pick abc123")));
+
+        Assert.StartsWith(RuleId, reason, StringComparison.Ordinal);
+        Assert.Contains("absolute path", reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AChangeDirectoryWrittenWithTheHomeShorthandIsJudgedInTheDirectoryItNames()
+    {
+        StartRun();
+        string worktreeFromHome = "~/" + Path.GetRelativePath(_home, _worktree).Replace('\\', '/');
+
+        Assert.Empty(Guard("copilot-cli", Copilot(_repo, $"cd {worktreeFromHome} && dotnet test")));
+    }
+
+    [Fact]
+    public void AShellCommandWhoseEventNamesNoWorkingDirectoryIsRefused()
+    {
+        StartRun();
+
+        string answer = Guard("copilot-cli", CopilotWithoutCwd("dotnet test"));
+
+        Assert.NotEmpty(answer);
+        string reason = DenialReason(answer);
+        Assert.StartsWith(RuleId, reason, StringComparison.Ordinal);
+        Assert.Contains("working directory", reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void WithNoLiveRunNothingChanges()
     {
         Assert.Empty(Guard("copilot-cli", Copilot(_repo, $"cd {_repo} && git cherry-pick abc123")));
@@ -387,4 +440,13 @@ public sealed class WorkerGuardCanonicalCheckoutCommandTests
         toolArgs = JsonSerializer.Serialize(new { path = Path.Combine(cwd, "src", "Job.cs") }),
     });
 
+    /// <summary>A Copilot CLI shell call whose event names no working directory at all.</summary>
+    private static string CopilotWithoutCwd(string command) => JsonSerializer.Serialize(new
+    {
+        agentId = "agent-7",
+        parentAgentId = "root",
+        agentType = "architect",
+        toolName = "bash",
+        toolArgs = JsonSerializer.Serialize(new { command }),
+    });
 }

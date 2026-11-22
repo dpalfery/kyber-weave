@@ -197,14 +197,16 @@ public sealed class WorkerGuard(
     /// <summary>
     /// The canonical-checkout refusal for a shell command, or null. A command is refused when it would run in a
     /// repository's canonical checkout: its working directory is inside one, or it steps into one with a
-    /// <c>cd</c>, <c>pushd</c> or <c>git -C</c>. The working directory is judged only when some step of the command
-    /// actually runs in it (<see cref="WorkerGuardRules.RunsInWorkingDirectory" />): a <c>cd</c> or <c>pushd</c> that
-    /// names a placeable directory moves the shell, a <c>git</c> step with <c>-C</c> names its own, a subshell's
-    /// change ends at its closing <c>)</c>, a pipeline stage starts where the pipeline did, and a step after
-    /// <c>||</c> may start where the previous step did. Every directory the command enters is judged either way.
-    /// Only a live run of that repository that works in a worktree of its own makes it stray, and a read through a
-    /// view or grep tool carries no command, so it is never judged here. The configuration is read only when there
-    /// is something to refuse.
+    /// <c>cd</c>, <c>pushd</c>, <c>git -C</c>, <c>--work-tree</c> or <c>--git-dir</c>. A <c>cd</c> whose target the
+    /// guard cannot place, and a step in a working directory the event does not name, are refused as well: what the
+    /// guard cannot judge it refuses rather than guesses at. The working directory is judged only when some step of
+    /// the command actually runs in it (<see cref="WorkerGuardRules.Walk" />): a <c>cd</c> or <c>pushd</c> that
+    /// names a placeable directory moves the shell, a <c>git</c> step with a directory option names its own, a
+    /// subshell's change ends at its closing <c>)</c>, a pipeline stage starts where the pipeline did, and a step
+    /// after <c>||</c> may start where the previous step did. Every directory the command enters is judged either
+    /// way. Only a live run of that repository that works in a worktree of its own makes it stray, and a read
+    /// through a view or grep tool carries no command, so it is never judged here. The configuration is read only
+    /// when there is something to refuse.
     /// </summary>
     private string? ShellCheckoutRefusal(WorkerGuardRules.ToolCall call, string home)
     {
@@ -213,12 +215,15 @@ public sealed class WorkerGuard(
             return null;
         }
 
-        string? refusal = WorkerGuardRules.RunsInWorkingDirectory(call.Command)
-            ? CheckoutRefusalAt(call.Cwd, workingDirectory: null, home)
-            : null;
+        WorkerGuardRules.CommandWalk walk = WorkerGuardRules.Walk(call.Command, home);
+        string? refusal = walk.HasUnplaceableDirectory
+            ? WorkerGuardRules.UnplaceableDirectoryRefusal()
+            : walk.RunsInWorkingDirectory
+                ? WorkingDirectoryRefusal(call.Cwd, home)
+                : null;
         if (refusal is null)
         {
-            foreach (string directory in WorkerGuardRules.EnteredDirectories(call.Command))
+            foreach (string directory in walk.EnteredDirectories)
             {
                 refusal = CheckoutRefusalAt(directory, call.Cwd, home);
                 if (refusal is not null)
@@ -231,11 +236,30 @@ public sealed class WorkerGuard(
         return refusal is not null && ArbiterTurnedOff(call.Cwd) ? null : refusal;
     }
 
-    /// <summary>The canonical-checkout refusal for one path, or null when it is outside every canonical checkout or no run is live there.</summary>
+    /// <summary>
+    /// The canonical-checkout refusal for a command step that runs in the shell's working directory. The event has
+    /// to name that directory: a step whose directory the guard cannot resolve is refused, as the allow-list rule
+    /// already does for the same missing fact.
+    /// </summary>
+    private string? WorkingDirectoryRefusal(string? cwd, string home) =>
+        string.IsNullOrWhiteSpace(cwd)
+            ? WorkerGuardRules.UnknownWorkingDirectoryRefusal()
+            : CheckoutRefusalAt(cwd, workingDirectory: null, home);
+
+    /// <summary>
+    /// The canonical-checkout refusal for one path, or null when it is outside every canonical checkout or no run is
+    /// live there. A named path the guard cannot resolve is refused rather than guessed at: a wrong guess would let
+    /// the command run in the canonical checkout.
+    /// </summary>
     private string? CheckoutRefusalAt(string? path, string? workingDirectory, string home)
     {
         string? absolute = AbsolutePath(path, workingDirectory);
-        if (absolute is null || checkouts.CanonicalCheckoutContaining(absolute) is not { } checkout)
+        if (absolute is null)
+        {
+            return string.IsNullOrWhiteSpace(path) ? null : WorkerGuardRules.UnknownWorkingDirectoryRefusal();
+        }
+
+        if (checkouts.CanonicalCheckoutContaining(absolute) is not { } checkout)
         {
             return null;
         }
