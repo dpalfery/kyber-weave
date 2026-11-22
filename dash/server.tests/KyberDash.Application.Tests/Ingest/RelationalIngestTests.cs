@@ -334,6 +334,7 @@ public class RelationalIngestTests
     /// A turn that stored no token class and no reported total is not priced. A stored
     /// zero is priced at zero. A reported input total is not billed at the fresh rate,
     /// a missing side is not billed as zero, and a class remainder stays partial.
+    /// A turn that stored only input, or only output, stays partial.
     /// </summary>
     [Fact]
     public void GetSessionAggregate_AbsentTokens_IsNotPricedAsZero()
@@ -372,6 +373,12 @@ public class RelationalIngestTests
                 new CollectedTokenCount(TokenClass.Output, 10),
             ],
             reportedInput: 300));
+        store.WriteBatch(PricedTurn(
+            "sess-input-only",
+            tokens: [new CollectedTokenCount(TokenClass.Input, 100)]));
+        store.WriteBatch(PricedTurn(
+            "sess-output-only",
+            tokens: [new CollectedTokenCount(TokenClass.Output, 10)]));
 
         IModelPricingLookup tables = pricing.LoadPricingTables();
         AssertAggregateCost(store, tables, "sess-absent", CostStatus.NoRate, null);
@@ -380,6 +387,8 @@ public class RelationalIngestTests
         AssertAggregateCost(store, tables, "sess-reported-input", CostStatus.NoRate, null);
         AssertAggregateCost(store, tables, "sess-reported-output", CostStatus.Partial, 100 * outputRate);
         AssertAggregateCost(store, tables, "sess-remainder", CostStatus.Partial, (100 * inputRate) + (10 * outputRate));
+        AssertAggregateCost(store, tables, "sess-input-only", CostStatus.Partial, 100 * inputRate);
+        AssertAggregateCost(store, tables, "sess-output-only", CostStatus.Partial, 10 * outputRate);
     }
 
     private static void AssertAggregateCost(
