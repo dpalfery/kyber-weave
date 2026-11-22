@@ -91,11 +91,13 @@ best available guidance and names the draft standard it relied on in one line of
 
 - Prefer an async command for I/O or non-trivial work, so the UI never freezes; an async
   command runs on the Tauri async runtime, not the main thread.
-- An async command cannot take a borrowed argument (`&str`, `State<'_, T>`). Use an owned
-  type, or return a `Result`.
+- An async command cannot take a borrowed argument (`&str`, `State<'_, T>`) and return a
+  plain value. Either take an owned type (`String` for `&str`), or return a `Result`, which
+  works for every borrowed type, `State<'_, T>` included.
 - Offload blocking or CPU-bound work with `tauri::async_runtime::spawn_blocking` or `spawn`.
 - A `RwLock` guard follows the same rule as a `std::sync::Mutex` guard across an `.await`.
-  An async command using `tokio::sync::Mutex` returns a `Result`.
+  Use `tokio::sync::Mutex` only when a guard must be held across an `.await`; otherwise drop
+  the guard before the `.await`.
 - Register shared state with `.manage()` and read it through `tauri::State<T>`. Outside a
   command, reach state through the `Manager` trait (`app.state()`, `AppHandle`).
 

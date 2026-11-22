@@ -26,6 +26,16 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 {
     private const string ArbiterServer = McpServerNames.Arbiter;
 
+    /// <summary>
+    /// Path identity for the skills roots a retired-skill copy can sit under: the same rules
+    /// <see cref="KyberWeave.Domain.Hooks.PathContainment"/> applies, because Windows and macOS
+    /// volumes usually ignore case and other hosts do not.
+    /// </summary>
+    private static readonly StringComparer SkillRootComparer =
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+
     private readonly ISquadStateStore _stateStore;
     private readonly ISquadStateMigration _migration;
     private readonly ISquadGlobalRootResolver _globalRoots;
@@ -645,11 +655,17 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 
         List<(SquadDeploymentScope Scope, SquadRetiredSkillClaim Claim)> retained = [];
         List<(SquadDeploymentScope Scope, string Message)> receiptErrors = [];
+        // A global receipt is one home-level record, so it is read where the resolver anchors
+        // user-level deployments rather than at the project whose copies are being diagnosed.
+        string globalReceiptRoot = string.IsNullOrWhiteSpace(_globalRoots.HomeDirectory)
+            ? workingDirectory
+            : _globalRoots.HomeDirectory;
         foreach (SquadDeploymentScope scope in new[] { SquadDeploymentScope.Project, SquadDeploymentScope.Global })
         {
             try
             {
-                SquadReceipt? receipt = stateStore.ReadReceipt(workingDirectory, scope);
+                string receiptRoot = scope == SquadDeploymentScope.Global ? globalReceiptRoot : workingDirectory;
+                SquadReceipt? receipt = stateStore.ReadReceipt(receiptRoot, scope);
                 if (receipt is not null)
                 {
                     retained.AddRange(
@@ -742,12 +758,11 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     /// </remarks>
     private List<string> RetiredSkillSearchRoots(string workingDirectory)
     {
-        List<string> roots =
-        [
-            Path.Combine(workingDirectory, ".claude", "skills"),
-            Path.Combine(workingDirectory, ".agents", "skills")
-        ];
-        HashSet<string> seen = new(roots, StringComparer.Ordinal);
+        List<string> roots = [];
+        HashSet<string> seen = new(SkillRootComparer);
+
+        AddSkillRoot(Path.Combine(workingDirectory, ".claude", "skills"), roots, seen);
+        AddSkillRoot(Path.Combine(workingDirectory, ".agents", "skills"), roots, seen);
 
         foreach (SquadTarget target in _renderer.SupportedTargets)
         {
@@ -756,19 +771,38 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             {
                 globalRoot = _globalRoots.ResolveGlobalRoot(target);
             }
-            catch (ArgumentException)
+            catch (Exception ex) when (FileFailure.Is(ex))
             {
                 continue;
             }
 
-            string skillsRoot = Path.Combine(globalRoot, "skills");
-            if (seen.Add(skillsRoot))
-            {
-                roots.Add(skillsRoot);
-            }
+            AddSkillRoot(Path.Combine(globalRoot, "skills"), roots, seen);
         }
 
         return roots;
+    }
+
+    /// <summary>
+    /// Adds the canonical spelling of one skills root, once. A root the file system cannot take is
+    /// skipped with a warning, so the check never reports healthy over a folder it could not read.
+    /// </summary>
+    private void AddSkillRoot(string root, List<string> roots, HashSet<string> seen)
+    {
+        try
+        {
+            string normalized = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+            if (seen.Add(normalized))
+            {
+                roots.Add(normalized);
+            }
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            // One unusable spelling is not a reason to fail the check for every other target,
+            // but the skipped folder is named so its state is not taken as healthy.
+            _console.WriteUnfolded(() => _console.Ansi.MarkupLine(
+                $"  [yellow]warn[/] Skills folder {Markup.Escape(root)} could not be checked for retired skills: {Markup.Escape(ex.Message)}"));
+        }
     }
 
     /// <summary>

@@ -91,7 +91,9 @@ disabled test without a linked issue and a date.
 - **Every MSBuild-based step in CI captures a binary log.** Add `/bl:{}` to `dotnet build`,
   `test` and `publish` (.NET 8 SDK or MSBuild 17.8+); the `{}` makes the file name unique so
   parallel jobs never overwrite each other. On a `pwsh` runner write `-bl:{{}}`. On an older
-  SDK use an explicit name, `/bl:build.binlog`.
+  SDK there is no `{}`: use an explicit name that differs per step and matrix leg, such as
+  `/bl:${{ github.job }}-${{ strategy.job-index }}-build.binlog` for the build step and
+  `/bl:${{ github.job }}-${{ strategy.job-index }}-test.binlog` for the test step.
 - **Upload binlogs on failure** with `if: failure()` and `actions/upload-artifact`, a
   `**/*.binlog` path, a name that includes `github.run_id`, and an explicit `retention-days`.
   A failed CI build with no binlog can only be diagnosed by guessing.

@@ -32,7 +32,7 @@ public static class SquadRetiredSkills
     [
         new SquadRetiredSkill(SecondBrain, SecondBrainNewHome),
         TechnologySkill("csharp-dev", "csharp"),
-        TechnologySkill("dal-dev", "data-access-layer"),
+        TechnologySkill("dal-dev", "data-access-layer", "sql-server"),
         TechnologySkill("maui-dev", "maui"),
         TechnologySkill("typescript-dev", "typescript"),
         TechnologySkill("rust-dev", "rust"),
@@ -94,6 +94,18 @@ public static class SquadRetiredSkills
     /// </summary>
     private static SquadRetiredSkill TechnologySkill(string name, params string[] technologies)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(technologies);
+        if (technologies.Length == 0)
+        {
+            throw new ArgumentException("A technology skill must name at least one standards template.", nameof(technologies));
+        }
+
+        foreach (string technology in technologies)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(technology);
+        }
+
         string templates = technologies.Length == 1
             ? $"the `{technologies[0]}` standards template"
             : $"the {JoinWithAnd(technologies.Select(technology => $"`{technology}`"))} standards templates";

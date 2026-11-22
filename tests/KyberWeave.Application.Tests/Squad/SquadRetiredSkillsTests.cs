@@ -47,29 +47,43 @@ public sealed class SquadRetiredSkillsTests
     }
 
     /// <summary>
-    /// A retired technology skill resolves to the standards template its rules moved
-    /// into, and the sentence names the command that adopts the template.
+    /// A retired technology skill resolves to exactly the standards templates its rules moved
+    /// into, and the sentence names the command that adopts them. Asserting the whole ordered
+    /// list, not a substring, means a swapped, dropped or extra template fails.
     /// </summary>
     /// <param name="name">The retired skill directory name.</param>
-    /// <param name="technology">The standards template that now holds its rules.</param>
+    /// <param name="technologies">The standards templates that now hold its rules, in order, space-separated.</param>
     [Theory]
     [InlineData("csharp-dev", "csharp")]
-    [InlineData("dal-dev", "data-access-layer")]
+    [InlineData("dal-dev", "data-access-layer sql-server")]
     [InlineData("maui-dev", "maui")]
     [InlineData("typescript-dev", "typescript")]
     [InlineData("rust-dev", "rust")]
     [InlineData("python-dev", "python")]
     [InlineData("go-dev", "go")]
     [InlineData("csp-security", "csharp")]
-    public void TechnologySkillNamesItsStandardsTemplate(string name, string technology)
+    public void TechnologySkillNamesItsStandardsTemplate(string name, string technologies)
     {
         SquadRetiredSkill skill = Assert.IsType<SquadRetiredSkill>(SquadRetiredSkills.Find(name));
+        string[] expected = technologies.Split(' ');
 
-        Assert.Contains($"`{technology}` standards template", skill.NewHome, StringComparison.Ordinal);
+        Assert.Equal(expected, StandardsTemplatesNamedBy(skill.NewHome));
+        string standards = expected.Length == 1 ? expected[0] : $"\"{technologies}\"";
         Assert.Contains(
-            $"kyber-weave docs init . --standards {technology}",
+            $"kyber-weave docs init . --standards {standards}",
             skill.NewHome,
             StringComparison.Ordinal);
+    }
+
+    /// <summary>The ordered technology names in the sentence's "rules moved to ... standards templates" clause.</summary>
+    private static string[] StandardsTemplatesNamedBy(string newHome)
+    {
+        const string lead = "The rules moved to ";
+        Assert.StartsWith(lead, newHome, StringComparison.Ordinal);
+        int end = newHome.IndexOf(" standards template", StringComparison.Ordinal);
+        Assert.True(end > lead.Length, $"'{newHome}' names no standards template.");
+        // Each name sits between a pair of backticks in "`a`" or "`a` and `b`", so the odd pieces are the names.
+        return [.. newHome[lead.Length..end].Split('`').Where((_, index) => index % 2 == 1)];
     }
 
     /// <summary>
@@ -86,13 +100,24 @@ public sealed class SquadRetiredSkillsTests
     }
 
     /// <summary>
-    /// A lookalike technology skill name (<c>csharp-dev-extra</c>) is a different skill,
-    /// so doctor does not treat it as retired state.
+    /// A lookalike technology skill name (<c>csharp-dev-extra</c>) is a different skill, so doctor
+    /// does not treat it as retired state. The malformed spellings below are the paths the parser
+    /// must still read correctly: it drops empty segments, splits either separator, and requires
+    /// the skill segment to match exactly, including case, while a trailing carriage return on the
+    /// file name leaves the skill's own segment untouched.
     /// </summary>
-    [Fact]
-    public void LookalikeTechnologySegmentIsNotARetiredSkillPath()
+    /// <param name="path">The receipt-relative path being judged.</param>
+    /// <param name="retired">Whether the path names the <c>csharp-dev</c> directory.</param>
+    [Theory]
+    [InlineData("skills/csharp-dev-extra/SKILL.md", false)]
+    [InlineData("", false)]
+    [InlineData("skills//csharp-dev/SKILL.md", true)]
+    [InlineData("skills/CSharp-Dev/SKILL.md", false)]
+    [InlineData("skills\\csharp-dev\\SKILL.md", true)]
+    [InlineData("skills/csharp-dev/SKILL.md\r", true)]
+    public void MalformedTechnologyPathMatchesOnlyWhenItStillNamesTheSkill(string path, bool retired)
     {
-        Assert.False(SquadRetiredSkills.IsRetiredSkillPath("skills/csharp-dev-extra/SKILL.md"));
+        Assert.Equal(retired, SquadRetiredSkills.IsRetiredSkillPath(path));
     }
 
     /// <summary>A retained receipt path reports the skill whose directory it names.</summary>
@@ -100,7 +125,7 @@ public sealed class SquadRetiredSkillsTests
     public void RetainedTechnologyPathNamesItsRetiredSkill()
     {
         SquadReceipt receipt = new(
-            Schema: "kyber-squad.receipt/v3",
+            Schema: SquadStateSchemas.ReceiptSchemaV3,
             Scope: SquadDeploymentScope.Global,
             TargetRoot: "/home",
             InstalledAtUtc: new DateTimeOffset(2026, 11, 18, 9, 0, 0, TimeSpan.Zero),
@@ -111,6 +136,9 @@ public sealed class SquadRetiredSkillsTests
 
         Assert.Equal("dal-dev", claim.Skill.Name);
         Assert.Equal("skills/dal-dev/SKILL.md", claim.RelativePath);
-        Assert.Contains("`data-access-layer` standards template", claim.Skill.NewHome, StringComparison.Ordinal);
+        Assert.Contains(
+            "`data-access-layer` and `sql-server` standards templates",
+            claim.Skill.NewHome,
+            StringComparison.Ordinal);
     }
 }

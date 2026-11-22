@@ -159,8 +159,11 @@ which selects on the same paths as `build`.
   file has the procedure). A workflow step that starts capturing one follows the rest of this
   list.
 - A captured binlog is named uniquely so parallel jobs never overwrite each other: `/bl:{}` on
-  .NET 8 SDK or MSBuild 17.8+, `-bl:{{}}` on a `pwsh` runner, an explicit `/bl:build.binlog` on
-  an older SDK. This repository's SDK is 10, so `/bl:{}` applies.
+  .NET 8 SDK or MSBuild 17.8+, `-bl:{{}}` on a `pwsh` runner, an explicit name that differs per
+  step and matrix leg on an older SDK, such as
+  `/bl:${{ github.job }}-${{ strategy.job-index }}-build.binlog` for the build step and
+  `/bl:${{ github.job }}-${{ strategy.job-index }}-test.binlog` for the test step.
+  This repository's SDK is 10, so `/bl:{}` applies.
 - A binlog is uploaded on failure only: `if: failure()`, `actions/upload-artifact` with a
   `**/*.binlog` path, a name that includes `github.run_id`, and an explicit `retention-days`. A
   clean step keeps binlogs: `git clean -fdx -e "*.binlog"`.

@@ -128,8 +128,10 @@ the way to the surface that displays it.
   columns are read only by the query that needs them.
 - **No N+1.** A query inside a loop over rows from another query is a defect; join, use
   `IN (...)` with bound parameters, or load the set once and index it in a `Map`. Build the
-  placeholder list from `?` marks only and bind the values; return early on an empty id set
-  (`IN ()` is a syntax error); chunk id sets past the driver's bound-parameter cap (32,766 by
+  placeholder list from `?` marks only and bind the values; an empty id set given to an `IN (...)`
+  lookup matches nothing, so return the empty result early without querying (`IN ()` is a
+  syntax error); an optional filter where empty means "no filter" is a separate parameter and
+  says so; chunk id sets past the driver's bound-parameter cap (32,766 by
   default in SQLite), or use a join or temporary table.
 - **Bound every read.** A query whose result can grow with history takes a `LIMIT`, a time
   window, or a cursor. Reading a whole table or file into memory needs a stated upper bound.
@@ -158,7 +160,8 @@ the way to the surface that displays it.
   parsed yields "not parsed", not "zero rows". Fall back only with a recorded reason.
 - Read a Node error code through a guard (`err instanceof Error && 'code' in err`), never
   `catch (e: any)`. `ENOENT` returns absent only when absence is the answer; rethrow the rest.
-- `void promise` needs a comment saying why the result is ignored.
+- `void promise` is allowed only when the promise already ends in a `.catch` that reports its
+  failure; a comment says why the result itself is ignored.
   `@typescript-eslint/no-floating-promises` and `no-misused-promises` stay on.
 - Independent awaits run concurrently (`Promise.all`, `Promise.allSettled`); concurrency over
   an unbounded set is capped, for example workers sharing one iterator over `items.entries()`.

@@ -28,4 +28,6 @@ last-reviewed: 2026-11-22
   allow-list, never from input.
 
 - Validate a value from outside the trust boundary once, at its entry point, before it is
-  parsed, stored or passed to a file or collection API.
+  stored or passed to a file or collection API. For structured input, that check parses it
+  against a schema that types every field the code reads, nested ones included; unknown fields
+  are stripped or kept as the contract says, never read untyped.

@@ -31,9 +31,9 @@ the `csharp` folder.
 
    ```bash
    dotnet msbuild build.binlog -noconlog \
-     -fl  -flp:v=diag;logfile=full.log;performancesummary \
-     -fl1 -flp1:errorsonly;logfile=errors.log \
-     -fl2 -flp2:warningsonly;logfile=warnings.log
+     -fl  -flp:"v=diag;logfile=full.log;performancesummary" \
+     -fl1 -flp1:"errorsonly;logfile=errors.log" \
+     -fl2 -flp2:"warningsonly;logfile=warnings.log"
    grep -n "error " errors.log | head -30        # root error, ignore cascades
    grep -n "Target.*FAILED" full.log             # failing target
    grep "Time Elapsed" full.log | sort -t= -k2 -rn | head -20   # slowest targets
@@ -42,7 +42,7 @@ the `csharp` folder.
 4. When a solution build fails deep in one project, build that project alone with
    `/bl:app.binlog` for a smaller log.
 5. For a quick ad-hoc run with no binlog, write a diagnostic text log directly:
-   `dotnet build -v:diagnostic -fl -flp:logfile=build-diag.log;verbosity=diagnostic`. It runs
+   `dotnet build -v:diagnostic -fl -flp:"logfile=build-diag.log;verbosity=diagnostic"`. It runs
    10–50 MB per project, so use it sparingly; a binlog and replay is cheaper when iterating.
 
 | Symptom | Check |

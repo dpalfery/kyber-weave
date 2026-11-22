@@ -44,7 +44,8 @@ public sealed class RemovedAgentNameRepoGuardTests
     /// The shipped files that must carry a removed name: the removal map every reader resolves through, the pick
     /// that maps a removed name to its replacement, the shipped technology map a host's agent-keyed task gates keep
     /// resolving through for two minor releases, and the retired-skill map <c>squad doctor</c> reads to warn about
-    /// leftover installed copies of a retired skill.
+    /// leftover installed copies of a retired skill. That last file names retired skills, not agents, and its
+    /// exemption goes when the retired-skill warning is removed.
     /// </summary>
     private static readonly string[] ExemptPaths =
     [
