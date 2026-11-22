@@ -64,7 +64,9 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plans are open.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-11-22-dash-api-stalls-on-large-store.md](2026-11-22-dash-api-stalls-on-large-store.md) | Ready | 2026-11-22 | Full purpose-named restructure of the KyberDash read contract (one read model per dashboard endpoint, broad reads retired), dirty-key projection with read-path deferral and single-flight passes, and the standards rules plus ADR 0091 that make the defect class catchable — bounding dashboard read latency on large canon stores. |
 
 ## Archived Plans
 

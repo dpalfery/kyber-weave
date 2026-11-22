@@ -1,0 +1,656 @@
+schema-version: 2
+plan: docs/plans/2026-11-22-dash-api-stalls-on-large-store.md
+execution-digest: a91d4ec8063360049e666d34d8896a6c3270c2bc60fbc33805acef737d2c77bc
+tasks:
+  - id: T1
+    capabilities: C# application-layer engine work (projection, concurrency) and data-layer query work over the KyberDash SQLite store, with in-memory unit tests over the shared fake.
+    depends-on: []
+    files:
+      - dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs
+      - dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs
+      - dash/server/KyberDash.Application/CanonSessionProjectorEngine.cs
+      - dash/server/KyberDash.Domain/StoreAndServiceDtos.cs
+      - dash/server/KyberDash.Application/KyberBridgeEngine.cs
+      - dash/server.tests/KyberDash.Application.Tests/Fakes/InMemoryRelationalStore.cs
+      - dash/server.tests/KyberDash.Application.Tests/Analytics/AnalyticsReadPathTests.cs:663
+      - dash/server.tests/KyberDash.Application.Tests/Projection/**
+      - dash/server.tests/KyberDash.Domain.Tests/CanonAnalysisTests.cs
+      - dash/server.tests/KyberDash.Domain.Tests/SqliteRelationalStoreReadTests.cs
+    session: canon-projection
+    prompt: >
+      Task T1: Projection pass — purpose-named reads, deferral, single-flight
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Remove the whole-store read from the projection pass: identities and skips from attributions, full records only per rebuilt key, a maintenance-named whole-store read for the wildcard/full path, read-path deferral of oversized dirty sessions, and a single-flight guard.
+
+      - **Capabilities:** C# application-layer engine work (projection, concurrency) and data-layer query work over the KyberDash SQLite store, with in-memory unit tests over the shared fake.
+
+      - **Difficulty:** hard
+
+      - **Technology:** csharp
+
+      - **Session:** `canon-projection`
+
+      - **Depends on:** none
+
+      - **Files:**
+        - `dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs`: add `SessionAttributions()` (with the `StoredSessionAttribution(SessionKey, HarnessId, RecordCount)` record, ordered by session key then harness), `SessionRecordsForRebuild(string sessionKey)`, and the maintenance-named whole-store record read (for example `AllSessionRecordsForMaintenance()`), whose XML doc states it is reserved for `kyber build`, wildcard projection rebuild, and doctor, and must not be called from a request path. Additions only — nothing is removed yet (D12).
+        - `dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs`: implement the three members — attributions as one grouped query over `record` joined to `record_session_link` (bind with `TextExpr` where caller text appears; keep the `hex(CAST(... AS BLOB))` read convention; no new index, no schema change); the per-key and maintenance reads through the existing `QueryRecords` filtering, renamed/wrapped to the new shapes.
+        - `dash/server/KyberDash.Application/CanonSessionProjectorEngine.cs`: `ProjectIncrementalRelational` — replace the unfiltered `reader.Records()` grouping with attribution-driven identities and skip decisions; read full records only per rebuilt key via `SessionRecordsForRebuild`; the wildcard/full path reads `AllSessionRecordsForMaintenance()`. Add the read-path entry (for example `ProjectIncrementalForReads()`) applying the per-session record-count budget (default 2,000, injectable through the constructor for tests), returning deferred keys, and writing back a dirty state that still lists them; add the single-flight guard (in-flight flag checked by every pass entry, cleared in `finally`).
+        - `dash/server/KyberDash.Domain/StoreAndServiceDtos.cs`: `ProjectionPassReport` — add `IReadOnlyList<string>? DeferredKeys = null` as an optional trailing parameter.
+        - `dash/server/KyberDash.Application/KyberBridgeEngine.cs`: `EnsureProjected` — call the read-path entry; `BuildProjectionHealth` — surface deferred keys so `GetCoverage` reports projection lag.
+        - `dash/server.tests/KyberDash.Application.Tests/Fakes/InMemoryRelationalStore.cs`: implement the three new members, and add the instrumented read log (which read methods ran, and content bytes materialized) that this and every later slice's tests assert on — extend the fake's existing style, no new fixture project.
+        - `dash/server.tests/KyberDash.Application.Tests/Analytics/AnalyticsReadPathTests.cs:663` and `AnalyticsOperationsDetailTests.cs:329`: update both `FaultingSessionReader` copies for the new members.
+        - Tests per the Test contract (new focused class under `dash/server.tests/KyberDash.Application.Tests/Projection/`, extends to `ApplicationParityTests` and `dash/server.tests/KyberDash.Domain.Tests/CanonAnalysisTests.cs`, adapter parity in `SqliteRelationalStoreReadTests.cs`).
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T1 --red`
+        - `kyber-weave review gates . --agent <worker> --task T1`
+      - **Acceptance:**
+        - All Test-contract rows pass deterministically (gate-based concurrency test; no elapsed-time assertions).
+        - A full pass still rebuilds every dirty session; the maintenance pass and CLI `kyber build` behaviour is unchanged apart from the shared single-flight guard.
+        - The deferred write-back keeps the deferred key dirty and preserves today's marker semantics for spans ingested during a pass.
+
+      Failure modes this task must not allow (advanced-task design, decided here):
+
+
+      - **Lost dirty sessions** — a deferred key never re-projected. Mitigations: the write-back test pins that the deferred key survives the pass in the dirty state; the full pass never defers; the maintenance pass runs on the operator cadence.
+
+      - **Session-id churn** — attribution-driven claiming assigning different ids than record iteration, pruning and rebuilding every stored projection. Mitigation: the ordering decision (D10) plus `AttributionDrivenClaimingAssignsTheSameSessionIdsAsRecordIteration`.
+
+      - **Stuck single-flight** — a faulted pass leaving the in-flight flag set. Mitigation: the flag clears in `finally`; the concurrency test releases its gate in `finally` and asserts a later pass proceeds.
+
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T1
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T1 | `dash/server.tests/KyberDash.Application.Tests/Projection/` (new focused class), extending `ApplicationParityTests` and `dash/server.tests/KyberDash.Domain.Tests/CanonAnalysisTests.cs`; adapter parity in `dash/server.tests/KyberDash.Data.Tests/Repositories/SqliteRelationalStoreReadTests.cs` | `dotnet test dash/server/KyberDash.sln -c Release --filter "FullyQualifiedName~ApplicationParityTests"` (plus the new class's own filter in the same form) | `AnIncrementalPassReadsOnlyTheDirtySessionsRecords`: one dirty session of two — the pass materializes only that session's records (instrumented fake read log), never issues a whole-store read, skips the clean session, and its projection is identical to a full pass's. `AttributionDrivenClaimingAssignsTheSameSessionIdsAsRecordIteration`. `AReadPathPassDefersOversizedDirtySessionsAndKeepsThemDirty` (budget 2): the small dirty session rebuilds, the oversized one is listed in `DeferredKeys`, its stored projection is unchanged, its key stays dirty, and a full pass rebuilds it. `ASecondEnsureProjectedReturnsWhileTheFirstPassHoldsTheReader` (gate-based, deterministic). `DeferredSessionsSurfaceInProjectionHealth`. `SessionAttributionsMatchTheInMemoryStore` over the SQLite adapter (keys, harnesses, counts, ordering; empty store returns empty). | The instrumentation assertions fail on current code: the pass calls unfiltered `Records()` (both sessions' content counted); the concurrent caller blocks on the gate; `DeferredKeys` is absent from `ProjectionPassReport`; the new members do not compile (the task's own symbols are missing). | All named tests pass deterministically (gates released in `finally`; no elapsed-time assertions); `ApplicationParityTests` and `CanonAnalysisTests` stay green; the attributions parity passes over adapter and fake. |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D12 | How is a ~30-call-site interface migration kept bounded and reviewable? | Vertical slices: each task lands contract + SQLite adapter + fake + `FaultingSessionReader` copies + the endpoints for one page group, ordered by latency impact (projection pass, sessions list, session detail/summary/turn, content, remaining endpoints, analytics/report, retirement). Broad members are added-to (never removed) until the retirement task, so every slice compiles and its tests are meaningful on their own. | Removing members mid-sequence would leave the tree broken between tasks and force one giant review; additive-then-retire keeps each slice independently reviewable and lets the earlier tasks ship the latency wins first. | autonomous: low-confidence, no authoritative source — follows the repository's one-plan-one-PR slicing rule |
+
+      | D10 | Data-model / contract impact | No schema or migration. `IRelationalStoreReader` is restructured per the read-model table: purpose-named members replace the broad ones; `ProjectionPassReport` gains an optional `DeferredKeys` parameter (default `null`). No new tables, columns, or indexes; `SchemaVersion` stays 25 — a bump deletes the human's 579 MB store unread, which they have explicitly declined to lose. | Ordering of `SessionAttributions()` is load-bearing: attribution-driven `SessionIdentities.Claim` must assign the same session ids as today's sorted-key record iteration, or every stored projection's id churns — pinned by test. | autonomous: low-confidence, no authoritative source |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-hard
+    agent-confidence: 0.98
+    difficulty: hard
+    difficulty-source: architect
+    technology: csharp
+  - id: T2
+    capabilities: C# contract, data-layer, and application read-path work with parity and instrumentation tests.
+    depends-on:
+      - T1
+    files:
+      - dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs
+      - dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs
+      - dash/server.tests/KyberDash.Application.Tests/Fakes/InMemoryRelationalStore.cs
+      - dash/server/KyberDash.Application/KyberBridgeEngine.cs
+      - AnalyticsReadPathTests.cs
+      - SqliteRelationalStoreReadTests.cs
+      - SqliteRelationalStoreListAggregatesTests.cs
+    session: dash-read-models
+    prompt: >
+      Task T2: Sessions list — the SessionListFigures read model
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Give the sessions list its own purpose-named, content-free read model and migrate `GetSessions` off the per-session aggregate/turn reads.
+
+      - **Capabilities:** C# contract, data-layer, and application read-path work with parity and instrumentation tests.
+
+      - **Difficulty:** hard
+
+      - **Technology:** csharp
+
+      - **Session:** `dash-read-models`
+
+      - **Depends on:** T1 (the instrumented fake and attribution read land there; same adapter and fake files)
+
+      - **Files:**
+        - `dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs`: add the `SessionListFigures` read model — its result type carries, per session key, the list's fields (harness id, workspace repo/branch, turn count, request count, token-total availability with absent distinct from zero, published and reported cost with basis mismatch, model names, problems count). No content.
+        - `dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs`: implement it as one batched, content-free pass (no `content_part_text`, no tool-call text columns), following the existing `hex` read conventions and `TextExpr` binding.
+        - `dash/server.tests/KyberDash.Application.Tests/Fakes/InMemoryRelationalStore.cs`: implement the model from state, content-free, so the parity and instrumentation tests run over the fake.
+        - `dash/server/KyberDash.Application/KyberBridgeEngine.cs`: `GetSessions` — answer from `SessionListFigures(normalizedHarness)` joined with the existing `ListSessionProjections` rows and per-row `GetSession` (session metadata only); stop calling `ReadSessionFigures` in the list path. `ReadSessionFigures` stays for T3's pages until that slice migrates it.
+        - Both `FaultingSessionReader` copies; tests per the Test contract (`AnalyticsReadPathTests.cs` extends, parity in `SqliteRelationalStoreReadTests.cs` / `SqliteRelationalStoreListAggregatesTests.cs` seeded with the token-less, multi-harness, empty, and content-bearing sessions).
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T2 --red`
+        - `kyber-weave review gates . --agent <worker> --task T2`
+      - **Acceptance:**
+        - `SessionListFiguresAnswerTheSameFiguresAsTheBroadAggregateRead` and `TheSessionsListNeverIssuesAContentRead` pass; the existing figures test keeps its assertions; the run reports a non-zero test count.
+        - No `RelationalSchemaCatalog` edit and no `SchemaVersion` bump.
+
+      Failure mode this task must not allow: a figure silently diverging from the broad read (the token-availability absent-versus-zero trap the SQLite standard names). Mitigation: the parity row seeds exactly that case and must not be weakened; the read model derives from the same columns the broad path read.
+
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T2
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T2 | `dash/server.tests/KyberDash.Application.Tests/Analytics/AnalyticsReadPathTests.cs` (extend); adapter/fake parity in `SqliteRelationalStoreReadTests.cs` / `SqliteRelationalStoreListAggregatesTests.cs` | `dotnet test dash/server/KyberDash.sln -c Release --filter "FullyQualifiedName~AnalyticsReadPathTests"` | `SessionListFiguresAnswerTheSameFiguresAsTheBroadAggregateRead`: the list read model equals the old `GetSessionAggregate`/`ListSessionAggregates` output on seeded stores with a token-less session, a multi-harness session, an empty session, and a content-bearing session (absent stays distinct from zero for token totals). `TheSessionsListNeverIssuesAContentRead`: during `GetSessions` the fake's read log records zero content-bearing reads and the harness filter set/unset, empty store, and limit cases return the same JSON as before. | The content-read assertion fails on current code: `GetSessions` calls `GetSessionAggregate` and `SessionTurnSummaries` per row, both of which materialize content. The read-model members do not compile. | Both tests pass; `GetSessionsAnswersTypedFiguresAndNeverBlendsReportedAndPublishedCosts` keeps its assertions intact; the run reports a non-zero test count. |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-hard
+    agent-confidence: 1
+    difficulty: hard
+    difficulty-source: architect
+    technology: csharp
+  - id: T3
+    capabilities: C# contract, data-layer, and application read-path work with parity and instrumentation tests.
+    depends-on:
+      - T2
+    files:
+      - dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs
+      - dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs
+      - dash/server.tests/KyberDash.Application.Tests/Fakes/InMemoryRelationalStore.cs
+      - dash/server/KyberDash.Application/KyberBridgeEngine.cs
+    session: dash-read-models
+    prompt: >
+      Task T3: Session detail, summary, and turn figures — page-shaped, content-free
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Give the session view's three figure pages their own scoped read models so selecting the 10,624-turn session never reads its 485 MB of text.
+
+      - **Capabilities:** C# contract, data-layer, and application read-path work with parity and instrumentation tests.
+
+      - **Difficulty:** medium
+
+      - **Technology:** csharp
+
+      - **Session:** `dash-read-models`
+
+      - **Depends on:** T2 (the pattern, the instrumented fake, and the same files)
+
+      - **Files:**
+        - `dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs`: add `SessionDetailFigures(sessionKey)` (the detail header's figure set including per-turn `ReadTimeTurnSummary` figures), `SessionSummaryFigures(sessionKey)` (the bounded summary block), and `TurnFigures(sessionKey, turnIndex)`. All content-free; scoping keys as the read-model table states.
+        - `dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs`: implement the three from the existing aggregate/turn builder logic, reading content-free record metadata (the builders already compute figures from token counts, reported costs, models, and timestamps — `BuildReaderTurnSummary` touches no part text).
+        - `dash/server.tests/KyberDash.Application.Tests/Fakes/InMemoryRelationalStore.cs` and both `FaultingSessionReader` copies: implement the members.
+        - `dash/server/KyberDash.Application/KyberBridgeEngine.cs`: migrate `GetSessionDetail`, `GetSessionSummary`, `GetTurnFigures`, and `GetTurnContent`'s figures half off `ReadSessionFigures`/`SessionTurnSummaries` onto the new models; retire `ReadSessionFigures` when its last caller is gone (compiler-verified).
+        - Tests per the Test contract, including the many-turn seeded session whose detail and summary paths never touch content.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T3 --red`
+        - `kyber-weave review gates . --agent <worker> --task T3`
+      - **Acceptance:**
+        - All Test-contract rows pass; detail and summary payloads are byte-for-byte the pre-change shapes; projection-failure isolation still answers `PROJECTION_FAILED` for a broken session only.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T3
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T3 | `AnalyticsReadPathTests.cs`, `RelationalIngestTests.cs`, `ApplicationParityTests.cs` (extend); parity rows in `SqliteRelationalStoreReadTests.cs` | `dotnet test dash/server/KyberDash.sln -c Release --filter "FullyQualifiedName~AnalyticsReadPathTests"` | `SessionDetailAnswersTurnFiguresWithoutContentReads` and `SessionSummaryAnswersWithoutTurnOrContentReads`: detail/summary read models equal the old `ReadSessionFigures` output (including `ReadTimeTurnSummary` fields), and the read log records zero content reads — the acceptance case is a 10,624-turn-shaped seeded session (many turns, large parts) whose detail and summary paths never touch content. `TurnFiguresAnswerOneTurnScopedToItsIndex`. | The content-read assertions fail on current code (detail/summary call the content-materializing aggregate and turn summaries); the read-model members do not compile. | All named tests pass; detail and summary payloads are byte-for-byte the pre-change shapes (existing endpoint tests stay green, locators narrowed only where the new work made them ambiguous, each edit named). |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-medium
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+    technology: csharp
+  - id: T4
+    capabilities: C# contract, data-layer, and application read-path work with parity and instrumentation tests.
+    depends-on:
+      - T3
+    files:
+      - dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs
+      - dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs
+      - dash/server.tests/KyberDash.Application.Tests/Fakes/InMemoryRelationalStore.cs
+      - dash/server/KyberDash.Application/KyberBridgeEngine.cs
+    session: dash-read-models
+    prompt: >
+      Task T4: Content view — the single scoped content read
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Make the content view the only request path that reads content text, scoped to one turn's or one request's parts.
+
+      - **Capabilities:** C# contract, data-layer, and application read-path work with parity and instrumentation tests.
+
+      - **Difficulty:** medium
+
+      - **Technology:** csharp
+
+      - **Session:** `dash-read-models`
+
+      - **Depends on:** T3 (the turn figures it joins against)
+
+      - **Files:**
+        - `dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs`: add `TurnContentParts(sessionKey, turnIndex/spanId, part, budget)` — the read-model table's only content-text member on a request path.
+        - `dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs`: implement it scoped by `(session_key, turn/span, position)`, budget and `full` semantics exactly as the current endpoints apply them; no other new read may touch `content_part_text`.
+        - `dash/server.tests/KyberDash.Application.Tests/Fakes/InMemoryRelationalStore.cs` and both `FaultingSessionReader` copies: implement the member (the fake's read log counts its content bytes).
+        - `dash/server/KyberDash.Application/KyberBridgeEngine.cs`: migrate `GetTurnContent` and `GetSessionContent` onto it; the endpoint sweep test lands here.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T4 --red`
+        - `kyber-weave review gates . --agent <worker> --task T4`
+      - **Acceptance:**
+        - `TurnContentReadsOnlyTheRequestedTurnsParts` and the endpoint sweep `EveryOtherPathLeavesContentUnread` pass; content payloads are unchanged where they exist today.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T4
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T4 | `AnalyticsReadPathTests.cs`, `ApplicationParityTests.cs` (extend) | `dotnet test dash/server/KyberDash.sln -c Release --filter "FullyQualifiedName~AnalyticsReadPathTests"` | `TurnContentReadsOnlyTheRequestedTurnsParts`: the scoped content read returns exactly the turn/span/part requested, honouring the budget and `full` flag as today; `EveryOtherPathLeavesContentUnread` — the full endpoint sweep (list, detail, summary, turn figures, span attributes, timeline, coverage, findings, problems, quarantine, harnesses, runs, report, analytics) records zero content reads on the instrumented fake. | The sweep fails on current code: `ContentParts`/broad reads run on paths the steer names as non-content. The scoped member does not compile. | Both tests pass; content payloads are unchanged where they exist today; the sweep's zero-content assertion holds for every non-content endpoint. |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-medium
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+    technology: csharp
+  - id: T5
+    capabilities: C# contract, data-layer, and application read-path work with parity and instrumentation tests.
+    depends-on:
+      - T4
+    files:
+      - dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs
+      - dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs
+      - dash/server.tests/KyberDash.Application.Tests/Fakes/InMemoryRelationalStore.cs
+      - dash/server/KyberDash.Application/KyberBridgeEngine.cs
+    session: dash-read-models
+    prompt: >
+      Task T5: Remaining session-adjacent endpoints — span attributes, timeline, stored-fields, harnesses
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Finish the session-adjacent pages with purpose-named reads; verify the projection-store and operational-store pages need no reader.
+
+      - **Capabilities:** C# contract, data-layer, and application read-path work with parity and instrumentation tests.
+
+      - **Difficulty:** medium
+
+      - **Technology:** csharp
+
+      - **Session:** `dash-read-models`
+
+      - **Depends on:** T4 (same files; the sweep grows here)
+
+      - **Files:**
+        - `dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs`: add `SpanAttributes(spanId)` (single-span metadata; if the SPA renders prompt text on that panel, at most that span's designated prompt part — the test pins whichever way this resolves) and `SessionTimeline(sessionKey?)` (content-free timeline nodes). `StoredFields` and `Harnesses` stay as they are (already purpose-named and scoped).
+        - `dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs`, `dash/server.tests/KyberDash.Application.Tests/Fakes/InMemoryRelationalStore.cs`, both `FaultingSessionReader` copies: implement the two members.
+        - `dash/server/KyberDash.Application/KyberBridgeEngine.cs`: migrate `GetSpanAttributes` (off `GetRecord` + whole hydration) and `GetTimeline` (off broad record reads) onto the new models; verify runs/compare/findings/problems/quarantine read only the projection and operational stores and add no reader calls.
+        - Tests per the Test contract.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T5 --red`
+        - `kyber-weave review gates . --agent <worker> --task T5`
+      - **Acceptance:**
+        - All named tests pass; endpoint payloads are unchanged; the read log shows only purpose-named, scoped reads for this page group.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T5
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T5 | `AnalyticsReadPathTests.cs`, `AnalyticsOperationsDetailTests.cs`, `AnalyticsErrorEnvelopeTests.cs` (extend); `StoreInterfaceShapeTests` | `dotnet test dash/server/KyberDash.sln -c Release --filter "FullyQualifiedName~AnalyticsReadPathTests"` | `SpanAttributesAnswerOneSpansMetadataWithoutSessionReads` (single-span read model; at most that span's designated prompt part if the SPA renders its text, and the test pins whichever way that resolved); `TimelineAnswersFromContentFreeRecords`; `StoredFieldsStaysScopedToTheNamedSession` (kept, not regressed). Harnesses/runs/compare/findings/problems/quarantine verified against the operational and projection stores with no relational-reader calls added. | The span-attributes and timeline assertions fail on current code (they hydrate through broad record reads); the members do not compile. | All named tests pass; the endpoint payloads are unchanged; the read log shows only purpose-named, scoped reads. |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-medium
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+    technology: csharp
+  - id: T6
+    capabilities: C# application and analytics read-path work with parity tests.
+    depends-on:
+      - T5
+    files:
+      - dash/server/KyberDash.Application/Services/ReportService.cs
+      - dash/server/KyberDash.Application
+      - dash/server/KyberDash.Application/KyberBridgeEngine.cs
+      - AnalyticsServiceOperationsTests.cs
+      - AnalyticsErrorEnvelopeTests.cs
+      - AnalyticsOperationsDetailTests.cs
+      - ApplicationParityTests.cs
+    session: dash-read-models
+    prompt: >
+      Task T6: Analytics and report — the last figure consumers migrate
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Migrate the analytics operations and `kyberdash report` onto the purpose-named figure read models, ending request-path use of `ListSessionAggregates` and the broad child queries.
+
+      - **Capabilities:** C# application and analytics read-path work with parity tests.
+
+      - **Difficulty:** medium
+
+      - **Technology:** csharp
+
+      - **Session:** `dash-read-models`
+
+      - **Depends on:** T5 (the read models it consumes exist; same adapter and fake files)
+
+      - **Files:**
+        - `dash/server/KyberDash.Application/Services/ReportService.cs` and the analytics service in `dash/server/KyberDash.Application` (compiler-located; its operations suite is `AnalyticsServiceOperationsTests`): replace `ListSessionAggregates`/broad reads with `SessionListFigures`-shaped and scoped read models; output identical.
+        - `dash/server/KyberDash.Application/KyberBridgeEngine.cs`: `GetReport` and the analytics funnel migrate off any remaining broad member.
+        - Tests per the Test contract (`AnalyticsServiceOperationsTests.cs`, `AnalyticsErrorEnvelopeTests.cs`, `AnalyticsOperationsDetailTests.cs`, `ApplicationParityTests.cs`).
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T6 --red`
+        - `kyber-weave review gates . --agent <worker> --task T6`
+      - **Acceptance:**
+        - The operations and parity suites pass unchanged in their assertions; `AnalyticsNeverIssuesAContentRead` holds; the run reports a non-zero test count.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T6
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T6 | `AnalyticsServiceOperationsTests.cs`, `AnalyticsErrorEnvelopeTests.cs`, `AnalyticsOperationsDetailTests.cs`, `ApplicationParityTests.cs` (extend) | `dotnet test dash/server/KyberDash.sln -c Release --filter "FullyQualifiedName~AnalyticsServiceOperationsTests"` | Every analytics operation and the report answer from the purpose-named read models with output identical to today (the operations suite already pins the shapes); `AnalyticsNeverIssuesAContentRead` on the sweep. | The migration's instrumentation assertion fails while analytics still reads through `ListSessionAggregates`/broad reads. | The operations and parity suites pass unchanged in their assertions; the sweep holds; the run reports a non-zero test count. |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-medium
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+    technology: csharp
+  - id: T7
+    capabilities: C# contract cleanup and architecture-boundary tests.
+    depends-on:
+      - T6
+    files:
+      - dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs
+      - dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs
+      - dash/server.tests/KyberDash.Application.Tests/Fakes/InMemoryRelationalStore.cs
+      - dash/server.tests/KyberDash.Domain.Tests/Contracts/StoreInterfaceShapeTests.cs
+      - dash/server.tests
+    session: dash-read-models
+    prompt: >
+      Task T7: Retire the broad reads and fence the maintenance read
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Remove every broad member with no remaining purpose from the interface and all implementers, and pin the maintenance-read boundary with a shape/boundary test.
+
+      - **Capabilities:** C# contract cleanup and architecture-boundary tests.
+
+      - **Difficulty:** medium
+
+      - **Technology:** csharp
+
+      - **Session:** `dash-read-models`
+
+      - **Depends on:** T6 (the last request-path consumers have migrated)
+
+      - **Files:**
+        - `dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs`: remove `Records`, `GetSessionAggregate`, `ListSessionAggregates`, `SessionTurnSummaries`, `ContentParts`, `GetRecord`, and every other member the compiler proves caller-less (the child-table queries with no named maintenance consumer go too; `Sessions`, `Sources`, `CountRecords`, `Harnesses`, `StoredFields`, `SessionModelUsages`, and the purpose-named additions stay).
+        - `dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs`: delete the retired implementations and the now-unreachable `QueryRecords` shapes they fed (the human's `EXISTS`→`IN` tweak targets this code — see D6).
+        - `dash/server.tests/KyberDash.Application.Tests/Fakes/InMemoryRelationalStore.cs`, both `FaultingSessionReader` copies, `dash/server.tests/KyberDash.Domain.Tests/Contracts/StoreInterfaceShapeTests.cs`, and the architecture-boundary tests in `dash/server.tests`: remove retired members; add `TheReaderInterfaceCarriesNoBroadReads` and `RequestPathsCannotReachMaintenanceReads` per the Test contract.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T7 --red`
+        - `kyber-weave review gates . --agent <worker> --task T7`
+      - **Acceptance:**
+        - The solution builds with no implementer carrying a retired member; both boundary/shape tests pass; the pre-existing suites for the touched projects stay green.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T7
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T7 | `StoreInterfaceShapeTests.cs` (`KyberDash.Domain.Tests`), the architecture-boundary tests in `dash/server.tests`, `InMemoryRelationalStoreTests.cs` | `dotnet test dash/server/KyberDash.sln -c Release --filter "FullyQualifiedName~StoreInterfaceShapeTests"` | `TheReaderInterfaceCarriesNoBroadReads`: `Records`, `GetSessionAggregate`, `ListSessionAggregates`, `SessionTurnSummaries`, `ContentParts`, `GetRecord`, and every other member with no remaining purpose are gone from the interface and all four implementers. `RequestPathsCannotReachMaintenanceReads`: the boundary test asserts the maintenance-named whole-store read is referenced only by the projector's full pass, the CLI build path, and doctor — not by `KyberBridgeEngine`, `DashboardQueryService`, `AnalyticsService`, or `ReportService`. | The members still exist and compile on current code; the boundary test has nothing to assert. | Both tests pass; the solution builds with no implementer left carrying a retired member; the full pre-existing unit suites for the touched projects stay green. |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D6 | The human's uncommitted `EXISTS`→`IN` predicate tweak in the main checkout's `SqliteRelationalStore.Reader.cs` — reassessed under the full restructure. | **Likely moot.** The tweak edits the session-key predicate inside `Records(...)` (the `EXISTS` clause at `SqliteRelationalStore.Reader.cs:101`); this change retires `Records(...)` and replaces it with purpose-named queries that carry their own span→session filtering (joins over `record_session_link`), so the line the tweak optimizes is rewritten regardless. Whether the new per-session queries choose `EXISTS` or `IN` is the implementing worker's call. Recommendation to the human: drop the uncommitted tweak — this branch supersedes the code it optimizes; keeping it only buys interim relief on an unshipped path. | The tweak does not conflict semantically (it is a query-plan change, not a behaviour change), and if the human prefers to keep it until this ships, the eventual merge is a textual overlap in `SqliteRelationalStore.Reader.cs` that resolves by taking this branch's version. Stated plainly per the steer so the human can decide. | autonomous: low-confidence, no authoritative source — reassessed 2026-11-22 from the restructure's effect on `Records` |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-medium
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+    technology: csharp
+  - id: T8
+    capabilities: documentation
+    depends-on:
+      - T7
+    files:
+      - docs/dash/runbook.md
+      - docs/dash/architecture.md
+    session: dash-docs-closeout
+    prompt: >
+      Task T8: docs-dev closeout — runbook troubleshooting and the read-model register
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Land the runbook and architecture harvest rows: the troubleshooting entry and the read-model register with the read-path invariants.
+
+      - **Capabilities:** documentation
+
+      - **Difficulty:** easy
+
+      - **Session:** `dash-docs-closeout`
+
+      - **Depends on:** T7 (harvest describes the shipped behaviour)
+
+      - **Files:**
+        - `docs/dash/runbook.md`: new "Common troubleshooting" entry for slow API responses on a large store, written against an oversized store (no cleanup assumed): symptom, cause, the purpose-named read contract, the deferred-session behaviour and projection health, and the honest note that stored-fields on an oversized session stays heavy by design.
+        - `docs/dash/architecture.md`: the read-model register and read-path invariants per the Design harvest row — this register is also the worked example T9's standards rules cite, so it must name each read model, its scoping key, its content policy, and the maintenance-read boundary.
+      - **Commands:**
+        - `kyber-weave docs validate .`
+        - `kyber-weave docs drift .`
+      - **Acceptance:**
+        - Both docs checks pass in the run worktree with no finding for the edited documents; the closeout mapping names each harvest destination.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T8
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T8 | Documentation; verified by the docs gates, no test class | `kyber-weave docs validate .` and `kyber-weave docs drift .` in the run worktree | The runbook troubleshooting entry and the architecture read-model register exist and match the shipped behaviour, written against an oversized store (no cleanup assumed). | Not applicable (documentation task; read-only verification named here explicitly). | Both docs checks report no finding for the plan or the edited documents. |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: docs-dev
+    agent-confidence: 1
+    difficulty: easy
+    difficulty-source: architect
+  - id: T9
+    capabilities: standards and review-guidance authoring (documentation)
+    depends-on:
+      - T7
+      - T8
+    files:
+      - docs/standards/sqlite/sqlite.standards.md
+      - SqliteRelationalStore.Reader.cs
+      - docs/standards/test/test.standards.md
+      - REVIEW.md
+    session: store-read-standards
+    prompt: >
+      Task T9: Standards — five store-read rules the next author and reviewer can apply
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Close the standards gap the human named ("update our standards so slop like this does not happen again"): write five checkable rules, with new permanent ids, into the homes and form the standards already use, so the next author writes shaped reads, the next test asserts them, and the next reviewer catches the class in a diff.
+
+      - **Capabilities:** standards and review-guidance authoring (documentation)
+
+      - **Difficulty:** medium
+
+      - **Session:** `store-read-standards`
+
+      - **Depends on:** T7 and T8 (the rules cite the shipped code and the read-model register as the worked example, so every citation resolves when the docs gates run)
+
+      - **Files:**
+        - `docs/standards/sqlite/sqlite.standards.md`: new section under Coding standards — "Store reads are shaped to their consumer" — with three rules in the standard's prose form (id in parentheses after the lead sentence, as `KW-STD-INPUT-001` does):
+          - `KW-STD-SQL-001`: a store read is shaped to its consumer — it returns the columns, rows, and scope its one calling page or pass consumes; a read whose result the caller filters, subsets, or half-discards in C# is a defect, and the query carries the shape. Whole-corpus scans are maintenance work and live behind a maintenance-named method (`AllSessionRecordsForMaintenance` in `SqliteRelationalStore.Reader.cs` is the worked example); no request path may call them. The per-session `StoredFields` inventory is the sanctioned exception — the raw rows are the view.
+          - `KW-STD-SQL-002`: content text columns (`content_part_text`, tool-call input/result text) are selected only by the path that consumes them — the content view (scoped to the requested turn/span), the stored-fields inventory (scoped to the named session), and the projection rebuild (scoped to the session being rebuilt, which derives persisted figures from text). Any other path selecting them is a defect.
+          - `KW-STD-SQL-003`: a read's cost is proportional to its input, not the corpus — an incremental pass reads only what changed (per-dirty-key reads and attribution pairs for skip decisions, never the store to decide skips); a list endpoint's store-query count is bounded regardless of row count (one batched figures read, not per-row reads); an expensive shared refresh on the request path is single-flight or moved off the path.
+        - `docs/standards/test/test.standards.md`: new section under Coding standards — "Read-path tests assert the shape of the reads" — with two rules:
+          - `KW-STD-TEST-001`: a read path's test asserts which store reads the path issues, over the fake's instrumented read log, not only the values returned. This is the mechanical lever for the store-read rules: it fails without a reviewer remembering anything, and it proposes no guard script and no new architecture test (ADR 0089 keeps prose enforcement in written guidance plus review; this rule is that guidance's testable half). It reconciles with "Test the decision, not the implementation" by naming the read log the seam's observable contract — the reads a path issues are its cost behaviour. The worked examples are this change's endpoint sweep and the `RequestPathsCannotReachMaintenanceReads` boundary test.
+          - `KW-STD-TEST-002`: narrowing or replacing a read requires scalar/aggregate parity against the read it replaces, on seeded shapes that include the absent-versus-zero cases (a token-less session), because a smaller read returning different figures is a silent defect. A fixture orders of magnitude smaller than production cannot prove a read path's latency, so the proof is the shape assertion of `KW-STD-TEST-001` — extending the existing no-sleeps/no-fixed-waits rule, not restating it — and the suite's 120-second budget is untouched because these are ordinary in-memory assertions with no waits.
+        - `REVIEW.md`: extend class 4 (Unbounded work and unbounded growth) with `R17`, covering only the angles the class does not already carry: before flagging, the reviewer answers two questions by reading the diff — does each endpoint's store read return only what its page renders (no C# filtering of a superset, no content columns outside the content view, the stored-fields inventory, or the projection rebuild)? and is any expensive shared refresh on the request path single-flight or deferred to maintenance? The class's existing bullets (unbounded materialised queries, per-row query loops, per-request rebuilds of growing structures) already catch the other variants and are cited, not repeated.
+      - **Commands:**
+        - `kyber-weave docs validate .`
+        - `kyber-weave docs drift .`
+      - **Acceptance:**
+        - Every rule is one checkable judgment with its permanent id; a reviewer could not check it and no test could express it → it is cut.
+        - Every rule is checked against the shipped read models (the register in `docs/dash/architecture.md` from T8): none outlaws the maintenance whole-store read, the heavy-by-design `StoredFields`, or the projection rebuild's content read — the carve-outs are written into the rules, and a rule the approved design violates is a defect in the rule, fixed there.
+        - No guard script and no new architecture test is proposed anywhere in the rules.
+        - Both docs gates pass with the new sections and no duplicate of an existing rule.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T9
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T9 | Standards and review guidance; verified by the docs gates, no test class — the rules' own enforcement is the test-shape rule (`KW-STD-TEST-001`), which this change's slices already apply, so no new test infrastructure is proposed (ADR 0089) | `kyber-weave docs validate .` and `kyber-weave docs drift .` in the run worktree | Five rules a reviewer can apply to a diff, each one checkable judgment with its permanent id, in the homes and form the standards already use; every rule cites the shipped worked example (read-model register, purpose-named reads, boundary test) and carves out the maintenance read, `StoredFields`, and the projection rebuild, so none outlaws the design. | Not applicable (standards task; the rules land before the end-of-run council, which is the reviewer the human's instruction targets). | Both docs checks pass with the new sections carrying `KW-STD-SQL-001..003`, `KW-STD-TEST-001..002`, and `R17`, and no rule restating an existing one (the deduplicated behaviours are cited, not repeated). |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: docs-dev
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+  - id: T10
+    capabilities: architecture decision record authoring (documentation)
+    depends-on:
+      - T9
+    files:
+      - docs/adr/0091-store-reads-are-shaped-by-their-consumer.md
+      - docs/adr/README.md
+    session: store-read-standards
+    prompt: >
+      Task T10: ADR 0091 — reads are shaped by their consumer
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Record the durable decision as a numbered ADR and register it: reads are shaped by their consumer, content text is read only by the view or rebuild that consumes it, maintenance may scan the corpus while request paths may not, and read-path projection is deferred and single-flight.
+
+      - **Capabilities:** architecture decision record authoring (documentation)
+
+      - **Difficulty:** easy
+
+      - **Session:** `store-read-standards`
+
+      - **Depends on:** T9 (the ADR cites the rule ids)
+
+      - **Files:**
+        - `docs/adr/0091-store-reads-are-shaped-by-their-consumer.md`: new ADR in the repository's ADR form — context (the dashboard stall on a 579 MB store with the measured funnel), the decision, the rejected alternatives with reasons (DB-side aggregation — large surface, parity-hostile; precomputed-table-only reads — contradicts the runbook's read-time dual-spend design; the `includeContent` switch — treats over-fetching as a caller's responsibility), the consequences (the read-model register, the maintenance-read boundary, the sanctioned carve-outs, deferred and single-flight passes), and pointers to the rules (`KW-STD-SQL-001..003`, `KW-STD-TEST-001..002`, `R17`) and the worked example.
+        - `docs/adr/README.md`: index row for ADR 0091.
+      - **Commands:**
+        - `kyber-weave docs validate .`
+        - `kyber-weave docs drift .`
+      - **Acceptance:**
+        - ADR 0091 is registered and every symbol and document it cites resolves; both docs gates pass.
+        - The ADR states the carve-outs explicitly, so a future change that widens a request-path read contradicts a numbered decision, not a convention.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T10
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T10 | ADR; verified by the docs gates, no test class | `kyber-weave docs validate .` and `kyber-weave docs drift .` in the run worktree | ADR 0091 records the read-shape contract: consumer-shaped reads, scoped content columns, maintenance-may-scan/request-paths-may-not, deferred and single-flight read-path projection, the rejected alternatives, and the carve-outs; registered in `docs/adr/README.md`. | Not applicable (ADR task; the decision is already made in D1/D3/D4/D5/D11 and the ADR is its durable record). | Both docs checks pass with ADR 0091 registered and every symbol and doc it cites resolving. |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D1 | Fix strategy: page-shaped reads for the session paths, the bounded-read fix as originally planned, or a full interface restructure? | **Full interface restructure now** (the human's explicit choice): every `IRelationalStoreReader` read becomes purpose-named, one read model per dashboard endpoint, all ~30 call sites migrate in this change. **Revision (2026-11-22):** the original D1 (keep `Records(...)` broad, add `includeContent`) and the conservative read shape are superseded by this choice. | The rejected options — page-shaping only the four session paths, or shipping the bounded-read fix — left a broad, over-fetching read behind every unmigrated page, which is the defect's class. The restructure removes the class: over-fetching becomes unrepresentable on a request path, not a switch a caller must remember to flip. | **Human decision 2026-11-22** (offered three options, chose "Full interface restructure now"); recorded by architect |
+
+      | D3 | A single huge, permanently dirty session still costs seconds per GET even after dirty-key filtering. Rate-limit, queue, or defer? | Defer by size on the read path only: the read-path pass skips dirty sessions whose record count exceeds a budget (default 2,000, injectable for tests), leaves them dirty, and lists them in the pass report; the background maintenance pass and CLI `kyber build` never defer. | Rate-limiting the sync pass leaves the worst-case GET equal to one full big-session rebuild (still seconds). Queueing reintroduces the stall. Deferral bounds GET latency by construction; deferred sessions refresh at the maintenance cadence (`JobSchedulerService.TimerLoopAsync`, operator-controlled `refreshCadenceMinutes`), and the Context Doctor sees them via projection health. Survives the scope change unchanged. | autonomous: low-confidence, no authoritative source |
+
+      | D4 | Concurrent passes? | Single-flight guard inside the projector pass entry (shared by the bridge's `EnsureProjected`, the scheduler's maintenance pass, and the CLI): a second concurrent caller returns a skipped report immediately and serves current projections. | Two unlocked passes over the same store were measured compounding the cost. Waiting (queueing) would make the second GET as slow as the first; skipping serves slightly stale projections, which the dashboard already tolerates by design (polling UI). Survives the scope change unchanged. | autonomous: low-confidence, no authoritative source |
+
+      | D5 | Keep `Records(...)` broad with an `includeContent` switch, or restructure? | **Retire the broad read; the interface change is the objective.** `Records(...)` is removed from `IRelationalStoreReader` once its last caller migrates; purpose-named read models replace it per page, and the only whole-store record read survives under a maintenance name unreachable from a request path. **Revision (2026-11-22):** the original D5 (optional `includeContent` parameter, default `true`) treated over-fetching as a switch and is superseded — the human rejected it when offered the choice. | A switch still lets a future caller forget to flip it and silently materialize a store; a purpose-named interface makes the wrong read unrepresentable. All ~30 call sites migrate in this change, sliced so the tree stays compilable (D12). | **Human decision 2026-11-22** (explicitly rejected the bounded-read option); recorded by architect |
+
+      | D11 | One read model per page, at the page's level | Every dashboard endpoint answers from one purpose-named store method whose shape is the view's shape (the read-model table). Selecting a session never materializes its content; selecting a turn never materializes the session; the content view reads one turn's or one request's parts by `(session_key, turn/span, position)`; only the content view and stored-fields may touch content text, both scoped. | The page-shaped contract is what makes the fix durable: a new page gets a new named read instead of reusing a broad one. Instrumented-fake tests enforce it (a non-content path that issues a content read fails), and T7's boundary check keeps request-path types off the maintenance read. | **Human decision 2026-11-22** (the restructure steer); granularity rules are the human's stated requirements, recorded verbatim in intent |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: docs-dev
+    agent-confidence: 1
+    difficulty: easy
+    difficulty-source: architect
+worker-roster: tiered
