@@ -110,6 +110,9 @@ public class CollectorBindTests
         Assert.False(LoopbackBinding.RequestAllowed("/v1/logs", 4747, runtime));
         Assert.True(LoopbackBinding.RequestAllowed("/api/kyber/capture", 4747, runtime));
         Assert.True(LoopbackBinding.RequestAllowed("/", 4747, runtime));
+        Assert.False(LoopbackBinding.RequestAllowed("/api/kyber/coverage", 9999, runtime));
+        Assert.False(LoopbackBinding.RequestAllowed("/v1/traces", 9999, runtime));
+        Assert.True(LoopbackBinding.RequestAllowed("/api/kyber/coverage", 0, runtime));
     }
 
     [Fact]

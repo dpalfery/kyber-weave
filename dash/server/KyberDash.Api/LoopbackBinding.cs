@@ -134,8 +134,9 @@ public static class LoopbackBinding
 
     /// <summary>
     /// Whether <paramref name="path"/> may be served on <paramref name="localPort"/>. Dashboard routes
-    /// stay on the web port and collector routes stay on the OTLP port when the two differ. An
-    /// unresolved ephemeral port, or a port that is neither, is left open so a test host is not locked out.
+    /// stay on the web port and collector routes stay on the OTLP port when the two differ. A
+    /// local port of <c>0</c> is the unresolved test host and stays open. Any other port that is
+    /// neither listener is refused.
     /// </summary>
     /// <param name="path">Request path.</param>
     /// <param name="localPort">The socket port that accepted the request.</param>
@@ -152,8 +153,11 @@ public static class LoopbackBinding
         if (!runtime.OtlpEnabled || runtime.WebPort <= 0 || runtime.OtlpPort <= 0 || runtime.WebPort == runtime.OtlpPort)
             return true;
 
-        if (localPort != runtime.WebPort && localPort != runtime.OtlpPort)
+        if (localPort <= 0)
             return true;
+
+        if (localPort != runtime.WebPort && localPort != runtime.OtlpPort)
+            return false;
 
         return localPort == runtime.OtlpPort ? otlpPath : !otlpPath;
     }
