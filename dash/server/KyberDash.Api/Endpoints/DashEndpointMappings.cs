@@ -567,7 +567,7 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(capture);
         ArgumentNullException.ThrowIfNull(runtime);
 
-        int? otlpPort = runtime.OtlpPort > 0 ? runtime.OtlpPort : null;
+        int? otlpPort = runtime.CaptureStatusOtlpPort();
         return DashHttp.NoStoreJson(StatusCodes.Status200OK, capture.GetCaptureStatus(runtime.StateDirectory, otlpPort));
     }
 

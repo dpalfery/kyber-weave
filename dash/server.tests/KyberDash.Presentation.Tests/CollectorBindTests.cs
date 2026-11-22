@@ -89,6 +89,18 @@ public class CollectorBindTests
     }
 
     [Fact]
+    public void CaptureStatusOmitsTheCollectorPortWhenTheReceiverIsOff()
+    {
+        DashRuntimeSettings disabled = new() { OtlpEnabled = false, OtlpPort = 4318 };
+        DashRuntimeSettings unbound = new() { OtlpEnabled = true, OtlpPort = 0 };
+        DashRuntimeSettings listening = new() { OtlpEnabled = true, OtlpPort = 4319 };
+
+        Assert.Null(disabled.CaptureStatusOtlpPort());
+        Assert.Null(unbound.CaptureStatusOtlpPort());
+        Assert.Equal(4319, listening.CaptureStatusOtlpPort());
+    }
+
+    [Fact]
     public void BindFailureWithoutAUrlDoesNotNamePortZero()
     {
         IOException failure = new("address already in use.", new SocketException((int)SocketError.AddressAlreadyInUse));

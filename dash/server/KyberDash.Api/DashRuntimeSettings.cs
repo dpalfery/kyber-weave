@@ -55,6 +55,13 @@ public class DashRuntimeSettings
     /// <summary>Maximum accepted OTLP request body in bytes.</summary>
     public long MaxOtlpBodyBytes { get; set; } = 64L * 1024 * 1024;
 
+    /// <summary>
+    /// Collector port capture status may name. A disabled collector, or a port the process has not
+    /// bound, is omitted so the status does not advertise a listener that is not there.
+    /// </summary>
+    /// <returns>The bound collector port, or <see langword="null"/> when there is nothing to name.</returns>
+    public int? CaptureStatusOtlpPort() => OtlpEnabled && OtlpPort > 0 ? OtlpPort : null;
+
     /// <summary>Builds the application-layer options passed to <c>AddDashApplication</c>.</summary>
     public DashOptions ToDashOptions()
     {
