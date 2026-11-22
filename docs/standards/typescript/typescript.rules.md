@@ -5,7 +5,7 @@ doc-type: rule
 status: current
 technology: typescript
 owner: dpalfery
-last-reviewed: 2026-11-16
+last-reviewed: 2026-11-22
 ---
 
 # typescript rules
@@ -22,3 +22,8 @@ last-reviewed: 2026-11-16
 
 - `strict` is on. An unmeasured value stays `null` or `undefined`; never turn it into `0`,
   `''` or a default that looks like data.
+
+## Errors and async
+
+- No empty `catch`, and none that logs and returns a default. No floating promise: await it,
+  return it, or attach a handler that reports its failure.

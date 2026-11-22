@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: typescript
 owner: dpalfery
-last-reviewed: 2026-11-15
+last-reviewed: 2026-11-22
 ---
 
 # TypeScript coding standard
@@ -29,9 +29,27 @@ KyberDash web, tray UI, and script tooling target Node.js `>=22.13.0` and use ES
 imports for Node built-ins in scripts and test helpers). Use type-only imports when a dependency
 is needed only for types.
 
+Relative import specifiers follow `moduleResolution`, which is `bundler` in every project here:
+omit the extension, as the files around you do. ESM has no `__dirname`; derive it with
+`dirname(fileURLToPath(import.meta.url))`. JSON is imported through `resolveJsonModule`; do not
+add a second form. `engines.node` is the runtime contract, so an API newer than it is a
+breaking change. A dependency goes in `dependencies` only if shipped code imports it; build and
+test tools go in `devDependencies`, and the lockfile changes in the same change through
+`npm install <pkg>`, never by hand. A change that compiles under one `tsconfig` (`dash`, `web`,
+tests) and not another is not done.
+
 Use existing dependencies for existing capabilities. A new dependency or drive-by version
 upgrade needs a concrete reason tied to the change; do not add a package merely to avoid a
 small, clear implementation.
+
+### Cross-platform
+
+The dashboard, tray UI and scripts run on macOS, Linux and Windows. Build file-system paths
+with `node:path` (`join`, `resolve`), never string concatenation with `/`, and compare paths
+only after `path.resolve`. Home and config directories come from `os.homedir()`, not a
+hard-coded `~` or `/Users`. Compared or hashed content normalizes line endings on read, or
+`.gitattributes` keeps the checkout LF. `package.json` scripts avoid POSIX-only syntax
+(`VAR=x cmd`, `rm -rf`) that fails under `cmd.exe`; use a small `.mjs` script.
 
 ## Coding standards
 
@@ -51,12 +69,20 @@ of quietly falling through to a default. Keep type assertions local and explain 
 is safe when the type system cannot express the invariant. Do not spread assertions or
 weaken compiler settings to make an unrelated change compile.
 
+`JSON.parse(text) as Row` is not narrowing: use the runtime schema or a hand-written guard
+(`value is Row`) that checks every field. Replace a `!` with a named decision: when the lookup
+is `undefined`, throw an error saying what was missing and for which id.
+
 ### Preserve meaning in data
 
 Represent absence as absence. Do not turn missing, unknown, unavailable, or not-yet-measured
 data into zero, an empty string, or an empty collection unless that is the actual domain
 meaning. Preserve distinctions between observed and derived values, and include the source or
-cost basis where downstream code could otherwise mistake one for the other. Keep API DTOs
+cost basis where downstream code could otherwise mistake one for the other. Check
+`Number(raw)` and `parseInt` results with `Number.isFinite` and keep `null` on failure; `|| 0`
+erases both `NaN` and a real `0`. A sum over a set with missing members is
+`{ value: number | null; missing: number }`, `null` when none reported; an average divides by
+the present members and is absent when there are none. Keep API DTOs
 compatible with their consumers and make availability explicit when a capability may not be
 present.
 
@@ -88,7 +114,17 @@ resources before reporting completion.
 Catch errors only where the code can recover, add useful context, or translate them into a
 stable boundary result. Preserve the cause when wrapping an error. Do not use empty catches
 for unexpected failures. If an optional feature has a fallback, state when it is unavailable
-so callers do not confuse fallback output with a complete result.
+so callers do not confuse fallback output with a complete result: an unparseable file yields
+"not parsed", not "zero rows". Read a Node error code through a guard
+(`err instanceof Error && 'code' in err`), never `catch (e: any)`; `ENOENT` returns absent
+only when absence is the answer, and every other code is rethrown. `void promise` needs a
+comment saying why the result is ignored. Run independent awaits concurrently (`Promise.all`,
+`Promise.allSettled`, which reports each rejected entry) and cap concurrency over an unbounded
+set. Pass the `AbortSignal` to `fetch`, streams and `node:timers/promises`; in a wait loop only
+an abort ends the wait quietly. A module that starts an interval or listener returns a way to
+stop it. Shutdown runs from `SIGINT` and `SIGTERM` handlers: abort, drain with a bounded
+`Promise.race` against an `unref`'d timer, then close the server. `process.exit` appears only
+in a CLI entry point.
 
 Inject clocks, filesystem roots, fetch functions, and stores at seams where tests need
 deterministic control. Tests must use temporary or injected paths and must not read or write
@@ -139,6 +175,9 @@ tsconfig, and emits nothing. `lint` is also the format check, because ESLint own
 `dash/`. `test:related` runs the tests covering the files you touched, and `<files>` are relative
 to `dash/`. The whole `npm --prefix dash run test` suite is the review council's and CI's gate; a
 dev agent does not run it.
+
+Fix the cause of a finding rather than suppressing it; a new lint suppression needs a stated
+reason. When a gate could not run on an OS, name the OS in the completion digest.
 
 Run each command directly, with no process wrapper; see
 [Running tests safely](../../dash/runbook.md#running-tests-safely).

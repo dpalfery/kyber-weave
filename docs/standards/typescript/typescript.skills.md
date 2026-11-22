@@ -5,7 +5,7 @@ doc-type: skill
 status: current
 technology: typescript
 owner: dpalfery
-last-reviewed: 2026-11-16
+last-reviewed: 2026-11-22
 ---
 
 # typescript skills
@@ -21,6 +21,13 @@ npx --prefix dash playwright test --config dash/playwright.isolated.config.ts
 
 Every command runs directly through `npm`/`npx`. Never start the dashboard to run a test, and
 Playwright only with the isolated config.
+
+## Procedure
+
+- Run `npm --prefix dash ci`, then typecheck, lint, the covering tests and `check:reachable`,
+  in that order; the Node version is the one in `dash/package.json` `engines.node`.
+- Native dependencies need the Xcode command-line tools on macOS or `build-essential` on
+  Linux. On Windows run the same `npm` scripts from PowerShell.
 
 ## Boundaries
 

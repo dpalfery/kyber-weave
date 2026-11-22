@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: rust
 owner: dpalfery
-last-reviewed: 2026-11-15
+last-reviewed: 2026-11-22
 ---
 
 # Rust coding standard
@@ -33,7 +33,8 @@ This is a local decision record, not a summary of the language. Rules that the c
 
 - The tray is a standalone crate, not a member of a Cargo workspace. Its manifest declares
   `edition = "2021"` and `rust-version = "1.77"`. Raise either deliberately, in its own change.
-- `Cargo.lock` is committed. Keep it committed for this binary crate.
+- `Cargo.lock` is committed. Keep it committed for this binary crate. Builds and tests run
+  with `--locked`, which fails if the lockfile would change.
 - There is no `rust-toolchain.toml`. The toolchain is whatever `rustup` resolves for the
   developer, and the gates below run against it.
 - The crate's `Cargo.toml` pins a vendored path patch for `glib` under `[patch.crates-io]`,
@@ -43,13 +44,18 @@ This is a local decision record, not a summary of the language. Rules that the c
 ### Dependencies
 
 - Prefer crates.io releases. A git dependency is pinned by full commit SHA, never by branch
-  or tag, and carries a comment saying why it is not from crates.io.
+  or tag, and carries a comment saying why it is not from crates.io and when it can move
+  back.
+- Prefer a pure-Rust crate to one with a C dependency, which is what makes cross-compilation
+  hard. Enable only the tokio features the crate uses (it lists `macros`, `time` and
+  `rt-multi-thread`); `full` is for prototypes.
 - Use the dependency already in the lockfile for an existing capability. The tray's HTTP client
   is `reqwest` with the blocking feature; a second HTTP client is a finding.
 - A new dependency needs a reason in the change description. `cargo deny` is not configured:
   there is no `deny.toml` in the crate, so no licence or advisory gate runs today.
 - Platform-only dependencies sit under `[target.'cfg(...)'.dependencies]`, as `libc`,
-  `objc2`, and `windows-sys` already do.
+  `objc2`, and `windows-sys` already do. Features are additive: a feature that removes
+  behaviour breaks the first crate that enables it alongside another dependent.
 
 ### Cross-platform
 
@@ -61,7 +67,14 @@ states, and the bundle targets in `tauri.conf.json` are macOS and Windows instal
   with a counterpart for each other platform the crate builds on. `pid_is_alive` in
   `supervisor.rs` is the model.
 - A change that touches a `cfg`-gated item is checked on the platform it names, because clippy
-  on one OS does not compile the other OS's branch.
+  on one OS does not compile the other OS's branch. Run the gates on each OS you can, and name
+  any OS you could not run on, and any `#[cfg(...)]` branch you could not compile, in the
+  completion digest.
+- macOS needs the Xcode command-line tools for the linker; Windows needs the MSVC toolchain
+  (Visual Studio Build Tools, "Desktop development with C++") and runs the gates from
+  PowerShell or a Developer prompt; Linux needs a C toolchain for crates whose `build.rs`
+  compiles C, plus the Tauri packages named under Completion.
+- Release automation belongs to `devops`; hand it the list of triples and the build command.
 
 ## Coding standards
 
@@ -79,6 +92,14 @@ Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value fro
   restructure so the type proves the value exists. An `expect` on a stated invariant (a value
   compiled into the binary, a window declared in `tauri.conf.json`) is allowed when its message
   states the invariant. The existing exceptions are listed in [Existing exceptions](#existing-exceptions).
+- **Wrap, do not flatten.** Keep `#[source]` (or `#[from]`) on a wrapped error; never turn an
+  error into a `String`. An error message is lowercase, has no trailing period, and names the
+  thing that failed. Where a value is provably present, restructure so the type says so
+  (`let Some(x) = … else { return Err(…) };`) rather than asserting it.
+- **Public API.** Items are `pub` only when another crate needs them, `pub(crate)` otherwise.
+  Functions take borrowed inputs (`&str`, `&Path`, `impl AsRef<Path>`) and return owned
+  outputs. An enum other crates match on is `#[non_exhaustive]` when variants are expected to
+  grow.
 - **No silent failure.** `let _ = fallible();` discards an error. When that is intended, the
   comment on the line says so. Status-item and tray updates that cannot fail the caller are the
   usual case.
@@ -89,11 +110,18 @@ Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value fro
 
 - The tray runs blocking work off the async runtime. Filesystem, process, and blocking HTTP
   work reached from a Tauri command goes through `tauri::async_runtime::spawn_blocking`, as
-  `lib.rs` does. `std::thread::sleep` does not appear in async code.
+  `lib.rs` does. `std::thread::sleep` does not appear in async code; `tokio::time::sleep`
+  replaces it, and `tokio::fs` replaces blocking file I/O where the code is async.
 - A process the tray starts is owned by a `Supervisor` and killed by it. Quitting stops every
   process the tray launched. A server the tray merely attached to is never stopped by the tray
   (see `supervisor.rs`).
-- A `std::sync::Mutex` guard is not held across an `.await`.
+- A `std::sync::Mutex` guard is not held across an `.await`: scope it so it drops first. State
+  that must live across an await point uses `tokio::sync::Mutex` with a comment, as a design
+  smell. Prefer message passing (`mpsc`, `watch`) to shared mutable state for long-lived
+  tasks.
+- A detached task's panic and error are lost, so a spawned task reports its outcome through a
+  join handle or a channel. `select!` drops the losing branches, so race only cancel-safe
+  futures; the tokio docs mark which methods are.
 
 ### Existing exceptions
 
