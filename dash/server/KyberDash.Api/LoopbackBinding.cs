@@ -127,7 +127,7 @@ public static class LoopbackBinding
         ArgumentNullException.ThrowIfNull(exception);
         ArgumentNullException.ThrowIfNull(runtime);
 
-        string target = ExtractUrl(exception) ?? FallbackUrl(runtime);
+        string target = ExtractUrl(exception) ?? UnspecifiedTargets(runtime);
         string detail = Innermost(exception).Message;
         return string.Create(CultureInfo.InvariantCulture, $"kyberdash-api: could not listen on {target}: {detail}");
     }
@@ -232,10 +232,14 @@ public static class LoopbackBinding
         return null;
     }
 
-    private static string FallbackUrl(DashRuntimeSettings runtime)
+    private static string UnspecifiedTargets(DashRuntimeSettings runtime)
     {
-        int port = runtime.OtlpEnabled && runtime.OtlpPort != runtime.WebPort ? runtime.OtlpPort : runtime.WebPort;
-        return DashRuntimeSettings.LoopbackUrl(port).GetLeftPart(UriPartial.Authority);
+        string web = DashRuntimeSettings.LoopbackUrl(runtime.WebPort).GetLeftPart(UriPartial.Authority);
+        if (!runtime.OtlpEnabled || runtime.OtlpPort == runtime.WebPort)
+            return web;
+
+        string otlp = DashRuntimeSettings.LoopbackUrl(runtime.OtlpPort).GetLeftPart(UriPartial.Authority);
+        return string.Create(CultureInfo.InvariantCulture, $"{web} or {otlp}");
     }
 
     private static Exception Innermost(Exception exception)
