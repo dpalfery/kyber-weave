@@ -185,7 +185,7 @@ public class CaptureService : ICaptureService
 
         // 4. Codex
         string codexConfig = Path.Combine(home, ".codex", "config.toml");
-        bool codexExists = File.Exists(codexConfig);
+        bool codexExists = files.FileExists(codexConfig);
         list.Add(new HarnessStatusView(
             Id: "codex",
             DisplayName: "Codex",
@@ -204,7 +204,7 @@ public class CaptureService : ICaptureService
 
         // 5. Pi
         string piConfig = Path.Combine(home, ".pi", "agent", "settings.json");
-        bool piExists = File.Exists(piConfig);
+        bool piExists = files.FileExists(piConfig);
         list.Add(new HarnessStatusView(
             Id: "pi",
             DisplayName: "Pi",
@@ -225,7 +225,7 @@ public class CaptureService : ICaptureService
         string factoryDir = Environment.GetEnvironmentVariable("FACTORY_DIR") is { Length: > 0 } fDir
             ? fDir
             : Path.Combine(home, ".factory");
-        bool factoryExists = Directory.Exists(factoryDir);
+        bool factoryExists = files.DirectoryExists(factoryDir);
         list.Add(new HarnessStatusView(
             Id: "factory",
             DisplayName: "Factory",

@@ -137,6 +137,22 @@ public class CaptureHarnessProbeTests
     }
 
     [Fact]
+    public void CodexPiAndFactoryUseTheHarnessFileSeam()
+    {
+        string home = "/tmp/kw-capture-seam";
+        MemoryFiles files = new();
+        files.Add(Path.Combine(home, ".codex", "config.toml"), "model = \"gpt\"");
+        files.Add(Path.Combine(home, ".pi", "agent", "settings.json"), "{}");
+        files.AddDirectory(Path.Combine(home, ".factory"));
+        CaptureService capture = Create(files, home);
+        JsonElement status = capture.GetCaptureStatus("/tmp/kw-capture-state");
+
+        Assert.Equal("detected", Harness(status, "codex").GetProperty("installed").GetString());
+        Assert.Equal("detected", Harness(status, "pi").GetProperty("installed").GetString());
+        Assert.Equal("detected", Harness(status, "factory").GetProperty("installed").GetString());
+    }
+
+    [Fact]
     public void ReceiverLivenessStaysUnknownAndTheDetailUsesTheGivenPort()
     {
         CaptureService capture = Create(new MemoryFiles(), "/tmp/kw-capture-none");
@@ -184,14 +200,17 @@ public class CaptureHarnessProbeTests
     private sealed class MemoryFiles : IHarnessFileSystem
     {
         private readonly Dictionary<string, string?> files = new(StringComparer.Ordinal);
+        private readonly HashSet<string> directories = new(StringComparer.Ordinal);
 
         public void Add(string path, string text) => files[path] = text;
+
+        public void AddDirectory(string path) => directories.Add(path);
 
         public void Unreadable(string path) => files[path] = null;
 
         public bool FileExists(string path) => files.ContainsKey(path);
 
-        public bool DirectoryExists(string path) => false;
+        public bool DirectoryExists(string path) => directories.Contains(path);
 
         public IEnumerable<string> EnumerateFiles(string directoryPath, string searchPattern, bool recursive) => [];
 
