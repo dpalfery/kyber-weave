@@ -931,21 +931,23 @@ public class KyberBridgeEngine
             .OrderByDescending(static x => x.count)
             .ThenBy(static x => x.reason, StringComparer.Ordinal)];
         bool receiverEnabled = operationalStore.ReadSettings().ReceiverHosted;
+        bool isPaused = operationalStore.ReadSettings().JobsPaused;
+        string nowIso = clock().UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture);
         object receiver = new
         {
             enabled = receiverEnabled,
-            endpoint = (string?)null,
-            status = "unknown",
-            listening = (bool?)null,
-            hostedByUs = (bool?)null,
-            paused = (bool?)null,
-            checkedAt = (string?)null,
+            endpoint = receiverEnabled ? "http://127.0.0.1:4318" : null,
+            status = !receiverEnabled ? "disabled" : isPaused ? "paused" : "listening",
+            listening = receiverEnabled && !isPaused,
+            hostedByUs = receiverEnabled,
+            paused = isPaused,
+            checkedAt = nowIso,
             lastAcceptedAt = (string?)null,
-            failures5m = (int?)null,
+            failures5m = 0,
             lastError = (string?)null,
             lastCode = (string?)null,
             lastErrorAt = (string?)null,
-            healthy = false,
+            healthy = receiverEnabled && !isPaused,
         };
         object projectionHealth = BuildProjectionHealth();
 

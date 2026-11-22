@@ -237,9 +237,17 @@ public static partial class Program
     private static void BindEndpoints(WebApplication app, DashRuntimeSettings runtime)
     {
         app.Urls.Clear();
-        app.Urls.Add(
-            (runtime.OtlpOnly ? DashRuntimeSettings.LoopbackUrl(runtime.OtlpPort) : DashRuntimeSettings.LoopbackUrl(runtime.WebPort))
-                .GetLeftPart(UriPartial.Authority));
+        if (runtime.OtlpOnly)
+        {
+            app.Urls.Add(DashRuntimeSettings.LoopbackUrl(runtime.OtlpPort).GetLeftPart(UriPartial.Authority));
+            return;
+        }
+
+        app.Urls.Add(DashRuntimeSettings.LoopbackUrl(runtime.WebPort).GetLeftPart(UriPartial.Authority));
+        if (runtime.OtlpEnabled && runtime.OtlpPort != runtime.WebPort)
+        {
+            app.Urls.Add(DashRuntimeSettings.LoopbackUrl(runtime.OtlpPort).GetLeftPart(UriPartial.Authority));
+        }
     }
 
     private static int ResolveWebPort(IServiceProvider services, DashRuntimeSettings runtime)
