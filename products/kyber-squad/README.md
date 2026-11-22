@@ -59,26 +59,17 @@ products/kyber-squad/
     ├── code-review/
     ├── code-review-loop/
     ├── create-pull-request/
-    ├── csharp-dev/
-    ├── csp-security/
-    ├── dal-dev/
     ├── delivery-execution/
     ├── dp-code-reviewer/
     ├── github-cli/
-    ├── github-devops/
-    ├── go-dev/
     ├── kilo-review-loop/
     ├── lm-studio-cli/
-    ├── maui-dev/
     ├── pr-review-fix-comments/
     ├── product-owner/
-    ├── python-dev/
     ├── review-council/
-    ├── rust-dev/
     ├── security-review/
     ├── setup-dev-environment/
-    ├── task-gate/
-    └── typescript-dev/
+    └── task-gate/
 ```
 
 ---
@@ -121,6 +112,12 @@ explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
 canonical copy; the retired `create-pull-request-github` is folded into `create-pull-request`. The canonical
 tree also retains its supplemental resources; recursive APM and
 Agent Plugins packages preserve those resources and their local references.
+
+Squad ships no per-technology skill. How a technology is written — its rules, its procedure and
+its commands — lives in that technology's folder under [`standards/`](standards/README.md),
+which a worker receives through `docs_get_coding_standard_for_technology` once the host adopts
+it; [the dispositions reference](../../docs/kyber-squad/skill-resource-dispositions.md) records
+where each former technology skill's content went.
 
 `code-review-loop` completes an authorized code review feedback cycle: validated fixes,
 pushed commit links in replies, resolved threads, and a requested re-review. Its linked
