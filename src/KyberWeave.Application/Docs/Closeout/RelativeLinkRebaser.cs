@@ -10,13 +10,19 @@ namespace KyberWeave.Core.Docs.Closeout;
 /// <remarks>
 /// <para>
 /// A link is written for the folder the document is in, so a move one folder deeper breaks every relative link in it
-/// unless the targets are re-expressed. Inline links and images, and reference definitions, are rewritten; absolute
-/// URLs, root-absolute paths, fragment-only links and anything inside a code fence or an inline code span are left
-/// exactly as written.
+/// unless the targets are re-expressed. Inline links and images, reference definitions (including ones written inside
+/// a blockquote or a list item), <c>href</c> and <c>src</c> values in inline HTML tags, and targets written with
+/// backslashes are rewritten; absolute URLs, root-absolute paths, fragment-only links, the YAML frontmatter and
+/// anything inside a code fence or an inline code span are left exactly as written.
 /// </para>
 /// <para>
 /// Folders are repository-relative and forward-slashed. A target that climbs above the repository root cannot be
 /// re-expressed and is left as written.
+/// </para>
+/// <para>
+/// Known limit: this is a text scan rather than a full Markdown parser, so a link inside a four-space indented code
+/// block, an HTML comment, or a <c>&lt;code&gt;</c> element is still rewritten even though a renderer shows it
+/// literally.
 /// </para>
 /// </remarks>
 public static partial class RelativeLinkRebaser
@@ -43,7 +49,7 @@ public static partial class RelativeLinkRebaser
         string to = NormalizeFolder(toFolder);
         StringBuilder output = new(markdown.Length);
         int count = 0;
-        int index = 0;
+        int index = SkipFrontmatter(markdown, output);
         while (index < markdown.Length)
         {
             if (AtLineStart(markdown, index) && TryFence(markdown, index, out char fence, out int fenceLength))
@@ -66,8 +72,16 @@ public static partial class RelativeLinkRebaser
                 continue;
             }
 
+            if (markdown[index] == '<' && TryHtmlTag(markdown, index, from, to, ref count, out string tag, out int tagEnd))
+            {
+                output.Append(tag);
+                index = tagEnd;
+                continue;
+            }
+
             if (markdown[index] == ']' && !IsEscaped(markdown, index)
-                && index + 1 < markdown.Length && markdown[index + 1] == '(')
+                && index + 1 < markdown.Length && markdown[index + 1] == '('
+                && HasOpeningBracket(markdown, index))
             {
                 int close = MatchingParenthesis(markdown, index + 1);
                 if (close > index + 1
@@ -85,6 +99,31 @@ public static partial class RelativeLinkRebaser
 
         rewritten = count;
         return output.ToString();
+    }
+
+    /// <summary>Copies a leading YAML frontmatter block verbatim, returning the index after it, or 0 when there is none.</summary>
+    private static int SkipFrontmatter(string text, StringBuilder output)
+    {
+        if (!text.StartsWith("---", StringComparison.Ordinal))
+            return 0;
+
+        int firstLineEnd = LineEnd(text, 0);
+        if (text[3..firstLineEnd].TrimEnd('\r').Trim().Length != 0)
+            return 0;
+
+        for (int index = IndexAfterLine(text, 0); index < text.Length; index = IndexAfterLine(text, index))
+        {
+            int end = LineEnd(text, index);
+            if (text[index..end].TrimEnd('\r').Trim().Equals("---", StringComparison.Ordinal))
+            {
+                int after = IndexAfterLine(text, index);
+                output.Append(text, 0, after);
+                return after;
+            }
+        }
+
+        // An opening fence with no closing one is not frontmatter, so the document is scanned as ordinary Markdown.
+        return 0;
     }
 
     private static int CopyFence(string text, int start, char fence, int fenceLength, StringBuilder output)
@@ -117,15 +156,8 @@ public static partial class RelativeLinkRebaser
     {
         fence = '\0';
         length = 0;
-        int index = start;
-        int spaces = 0;
-        while (index < text.Length && text[index] == ' ' && spaces < 4)
-        {
-            index++;
-            spaces++;
-        }
-
-        if (spaces > 3 || index >= text.Length || (text[index] != '`' && text[index] != '~'))
+        int index = SkipBlockPrefix(text, start, allowListMarker: true);
+        if (index < 0 || index >= text.Length || (text[index] != '`' && text[index] != '~'))
             return false;
 
         char marker = text[index];
@@ -144,15 +176,8 @@ public static partial class RelativeLinkRebaser
 
     private static bool IsClosingFence(string text, int start, char fence, int length)
     {
-        int index = start;
-        int spaces = 0;
-        while (index < text.Length && text[index] == ' ' && spaces < 4)
-        {
-            index++;
-            spaces++;
-        }
-
-        if (spaces > 3 || index >= text.Length || text[index] != fence || RunLength(text, index, fence) < length)
+        int index = SkipBlockPrefix(text, start, allowListMarker: false);
+        if (index < 0 || index >= text.Length || text[index] != fence || RunLength(text, index, fence) < length)
             return false;
 
         for (int trailing = index + RunLength(text, index, fence); trailing < text.Length && text[trailing] != '\n'; trailing++)
@@ -167,18 +192,11 @@ public static partial class RelativeLinkRebaser
     {
         rewritten = string.Empty;
         end = start;
-        int index = start;
-        int spaces = 0;
-        while (index < text.Length && text[index] == ' ' && spaces < 4)
-        {
-            index++;
-            spaces++;
-        }
-
-        if (spaces > 3 || index >= text.Length || text[index] != '[' || IsEscaped(text, index))
+        int labelStart = SkipBlockPrefix(text, start, allowListMarker: true);
+        if (labelStart < 0 || labelStart >= text.Length || text[labelStart] != '[' || IsEscaped(text, labelStart))
             return false;
 
-        int labelEnd = index + 1;
+        int labelEnd = labelStart + 1;
         while (labelEnd < text.Length && text[labelEnd] is not (']' or '\n'))
             labelEnd++;
         if (labelEnd >= text.Length || text[labelEnd] != ']' || IsEscaped(text, labelEnd))
@@ -186,15 +204,226 @@ public static partial class RelativeLinkRebaser
         if (labelEnd + 1 >= text.Length || text[labelEnd + 1] != ':')
             return false;
 
-        int destination = labelEnd + 2;
-        while (destination < text.Length && text[destination] is ' ' or '\t')
-            destination++;
+        // A footnote reference and a definition's label share the '[^...]' shape, and only the definition names a file.
+        string label = text[(labelStart + 1)..labelEnd];
+        if (label.Length == 0 || label[0] == '^')
+            return false;
+
+        int destination = DestinationStart(text, labelEnd + 2);
+        if (destination < 0)
+            return false;
+
         int lineEnd = LineEnd(text, destination);
-        if (!TryRebaseDestination(text[destination..lineEnd], from, to, ref count, out string line))
+        if (!TryRebaseDefinitionRest(text[destination..lineEnd], from, to, ref count, out string line))
             return false;
 
         rewritten = string.Concat(text[start..destination], line);
         end = lineEnd;
+        return true;
+    }
+
+    /// <summary>
+    /// Where a definition's destination starts: after the colon's whitespace, and after a single line break when the
+    /// destination is written on the next line. Returns -1 when the definition has no destination.
+    /// </summary>
+    private static int DestinationStart(string text, int afterColon)
+    {
+        int index = afterColon;
+        while (index < text.Length && text[index] is ' ' or '\t')
+            index++;
+        if (index < text.Length && text[index] == '\r')
+            index++;
+        if (index >= text.Length)
+            return -1;
+        if (text[index] != '\n')
+            return index;
+
+        int next = SkipBlockPrefix(text, index + 1, allowListMarker: true);
+        if (next < 0 || next >= text.Length || text[next] == '\n' || text[next] == '\r')
+            return -1;
+        return next;
+    }
+
+    /// <summary>
+    /// Re-expresses the destination of a definition and accepts the line only when what follows the destination is
+    /// nothing or a quoted or parenthesised title: a line shaped <c>[label]: prose</c> is prose, not a definition.
+    /// </summary>
+    private static bool TryRebaseDefinitionRest(string rest, string from, string to, ref int count, out string rebuilt)
+    {
+        rebuilt = rest;
+        int start = 0;
+        while (start < rest.Length && rest[start] is ' ' or '\t')
+            start++;
+        if (start >= rest.Length)
+            return false;
+
+        bool angled = rest[start] == '<';
+        int destinationEnd;
+        string destination;
+        if (angled)
+        {
+            int close = rest.IndexOf('>', start + 1);
+            if (close < 0)
+                return false;
+            destination = rest[(start + 1)..close];
+            destinationEnd = close + 1;
+        }
+        else
+        {
+            destinationEnd = start;
+            while (destinationEnd < rest.Length && !char.IsWhiteSpace(rest[destinationEnd]))
+                destinationEnd++;
+            destination = rest[start..destinationEnd];
+        }
+
+        if (!IsDefinitionTail(rest[destinationEnd..]))
+            return false;
+
+        string rebased = RebaseTarget(destination, from, to);
+        if (string.Equals(destination, rebased, StringComparison.Ordinal))
+            return true;
+
+        count++;
+        rebuilt = string.Concat(rest[..start], angled ? $"<{rebased}>" : rebased, rest[destinationEnd..]);
+        return true;
+    }
+
+    /// <summary>True when the text after a definition's destination is empty or is one quoted or parenthesised title.</summary>
+    private static bool IsDefinitionTail(string tail)
+    {
+        string trimmed = tail.TrimEnd('\r');
+        if (trimmed.Length == 0)
+            return true;
+        if (trimmed[0] is not (' ' or '\t'))
+            return false;
+
+        trimmed = trimmed.Trim();
+        if (trimmed.Length == 0)
+            return true;
+        if (trimmed.Length < 2)
+            return false;
+
+        char close = trimmed[0] switch { '"' => '"', '\'' => '\'', '(' => ')', _ => '\0' };
+        return close != '\0'
+            && trimmed[^1] == close
+            && !trimmed[1..^1].Contains(close, StringComparison.Ordinal);
+    }
+
+    /// <summary>Rewrites <c>href</c> and <c>src</c> values in one inline HTML tag, or returns false when it is not a tag.</summary>
+    private static bool TryHtmlTag(string text, int start, string from, string to, ref int count, out string rewritten, out int end)
+    {
+        rewritten = string.Empty;
+        end = start;
+        if (!IsTagStart(text, start))
+            return false;
+
+        int close = -1;
+        for (int cursor = start + 1; cursor < LineEnd(text, start); cursor++)
+        {
+            if (text[cursor] == '>')
+            {
+                close = cursor;
+                break;
+            }
+        }
+
+        if (close < 0)
+            return false;
+
+        rewritten = string.Concat("<", RewriteAttributes(text[(start + 1)..close], from, to, ref count), ">");
+        end = close + 1;
+        return true;
+    }
+
+    private static bool IsTagStart(string text, int start)
+    {
+        int index = start + 1;
+        if (index < text.Length && text[index] == '/')
+            index++;
+        return index < text.Length && char.IsAsciiLetter(text[index]);
+    }
+
+    private static string RewriteAttributes(string inner, string from, string to, ref int count)
+    {
+        StringBuilder result = new(inner.Length);
+        int index = 0;
+        while (index < inner.Length)
+        {
+            char character = inner[index];
+            if (character is '"' or '\'')
+            {
+                int close = inner.IndexOf(character, index + 1);
+                if (close < 0)
+                {
+                    result.Append(inner, index, inner.Length - index);
+                    break;
+                }
+
+                result.Append(inner, index, close - index + 1);
+                index = close + 1;
+                continue;
+            }
+
+            if (!char.IsAsciiLetter(character))
+            {
+                result.Append(character);
+                index++;
+                continue;
+            }
+
+            int nameEnd = index;
+            while (nameEnd < inner.Length && (char.IsAsciiLetterOrDigit(inner[nameEnd]) || inner[nameEnd] is '-' or '_'))
+                nameEnd++;
+
+            if (!TryAttributeValue(inner, index, nameEnd, out int valueStart, out int valueEnd))
+            {
+                result.Append(inner, index, nameEnd - index);
+                index = nameEnd;
+                continue;
+            }
+
+            string value = inner[(valueStart + 1)..valueEnd];
+            string rebased = RebaseTarget(value, from, to);
+            if (!string.Equals(value, rebased, StringComparison.Ordinal))
+                count++;
+
+            result.Append(inner, index, valueStart - index + 1).Append(rebased).Append(inner[valueEnd]);
+            index = valueEnd + 1;
+        }
+
+        return result.ToString();
+    }
+
+    /// <summary>The quoted value of a <c>href</c> or <c>src</c> attribute whose name ends at <paramref name="nameEnd"/>, when it is one.</summary>
+    private static bool TryAttributeValue(string inner, int start, int nameEnd, out int valueStart, out int valueEnd)
+    {
+        valueStart = 0;
+        valueEnd = 0;
+        string name = inner[start..nameEnd];
+        if (!name.Equals("href", StringComparison.OrdinalIgnoreCase)
+            && !name.Equals("src", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        int cursor = nameEnd;
+        while (cursor < inner.Length && inner[cursor] == ' ')
+            cursor++;
+        if (cursor >= inner.Length || inner[cursor] != '=')
+            return false;
+
+        cursor++;
+        while (cursor < inner.Length && inner[cursor] == ' ')
+            cursor++;
+        if (cursor >= inner.Length || inner[cursor] is not ('"' or '\''))
+            return false;
+
+        int close = inner.IndexOf(inner[cursor], cursor + 1);
+        if (close < 0)
+            return false;
+
+        valueStart = cursor;
+        valueEnd = close;
         return true;
     }
 
@@ -242,6 +471,8 @@ public static partial class RelativeLinkRebaser
             return target;
         if (Scheme().IsMatch(target))
             return target;
+
+        target = target.Replace('\\', '/');
 
         int suffixAt = target.IndexOfAny(['#', '?']);
         string path = suffixAt < 0 ? target : target[..suffixAt];
@@ -302,12 +533,23 @@ public static partial class RelativeLinkRebaser
         int depth = 0;
         char quote = '\0';
         bool angled = false;
+        int lineEndings = 0;
         for (int index = open; index < text.Length; index++)
         {
             char character = text[index];
             if (character == '\\')
             {
                 index++;
+                continue;
+            }
+
+            if (character == '\n' && quote == '\0' && !angled)
+            {
+                // A link destination cannot span paragraphs, and only the whitespace around a destination and its
+                // title may hold a line ending: this is what stops an unbalanced '](' scanning to the end of a file.
+                if (lineEndings >= 2 || IsBlankLineAfter(text, index))
+                    return -1;
+                lineEndings++;
                 continue;
             }
 
@@ -352,11 +594,36 @@ public static partial class RelativeLinkRebaser
         return -1;
     }
 
+    /// <summary>True when the bracketed text before <paramref name="closeBracket"/> opens with a real link bracket.</summary>
+    private static bool HasOpeningBracket(string text, int closeBracket)
+    {
+        for (int index = closeBracket - 1; index >= 0; index--)
+        {
+            char character = text[index];
+            if (character == '\n')
+                return false;
+            if (character != '[')
+                continue;
+            if (IsEscaped(text, index))
+                return false;
+
+            // '[0](1)' after a name is an index into an array, not a link.
+            return index == 0 || !IsIdentifierCharacter(text[index - 1]);
+        }
+
+        return false;
+    }
+
+    private static bool IsIdentifierCharacter(char character) =>
+        char.IsLetterOrDigit(character) || character == '_';
+
     private static int FindBacktickRun(string text, int start, int length)
     {
         int index = start;
         while (index < text.Length)
         {
+            if (text[index] == '\n' && IsBlankLineAfter(text, index))
+                return -1;
             if (text[index] != '`')
             {
                 index++;
@@ -372,6 +639,68 @@ public static partial class RelativeLinkRebaser
         return -1;
     }
 
+    /// <summary>
+    /// Where a line's content starts once its blockquote markers and one list marker are skipped, or -1 when the line
+    /// is indented far enough to be an indented code block.
+    /// </summary>
+    private static int SkipBlockPrefix(string text, int start, bool allowListMarker)
+    {
+        int index = start;
+        for (int guard = 0; guard < 8; guard++)
+        {
+            int lineEnd = LineEnd(text, index);
+            int cursor = index;
+            int spaces = 0;
+            while (cursor < lineEnd && text[cursor] == ' ' && spaces < 4)
+            {
+                cursor++;
+                spaces++;
+            }
+
+            if (spaces > 3)
+                return -1;
+
+            if (cursor < lineEnd && text[cursor] == '>')
+            {
+                index = cursor + 1;
+                continue;
+            }
+
+            if (allowListMarker && TryListMarkerEnd(text, cursor, lineEnd, out int markerEnd))
+            {
+                index = markerEnd;
+                continue;
+            }
+
+            return cursor;
+        }
+
+        return -1;
+    }
+
+    /// <summary>The index just past a list marker at <paramref name="start"/>, when there is one.</summary>
+    private static bool TryListMarkerEnd(string text, int start, int lineEnd, out int end)
+    {
+        end = start;
+        if (text[start] is '-' or '*' or '+')
+        {
+            if (start + 1 < lineEnd && text[start + 1] is not (' ' or '\t'))
+                return false;
+            end = start + 1;
+            return true;
+        }
+
+        int digits = start;
+        while (digits < lineEnd && char.IsAsciiDigit(text[digits]))
+            digits++;
+        if (digits == start || digits >= lineEnd || text[digits] is not ('.' or ')'))
+            return false;
+        if (digits + 1 >= lineEnd || text[digits + 1] is not (' ' or '\t'))
+            return false;
+        end = digits + 1;
+        return true;
+    }
+
     private static int RunLength(string text, int start, char character)
     {
         int end = start;
@@ -381,6 +710,19 @@ public static partial class RelativeLinkRebaser
     }
 
     private static bool AtLineStart(string text, int index) => index == 0 || text[index - 1] == '\n';
+
+    /// <summary>True when the line beginning after <paramref name="newline"/> holds no content.</summary>
+    private static bool IsBlankLineAfter(string text, int newline)
+    {
+        for (int index = newline + 1; index < text.Length; index++)
+        {
+            if (text[index] is '\r' or ' ' or '\t')
+                continue;
+            return text[index] == '\n';
+        }
+
+        return true;
+    }
 
     private static bool IsEscaped(string text, int index)
     {

@@ -54,5 +54,8 @@ public sealed class PlanCloseoutLinkRebaseTests
             "[Architecture](../../admin-dashboard/architecture.md#install) (D1, H1)",
             row,
             StringComparison.Ordinal);
+        Assert.Contains(
+            outcome.Report.Items,
+            item => item.Message.Contains("Rewrote 1 relative link so they still resolve from 6-Docs/archive/plans.", StringComparison.Ordinal));
     }
 }

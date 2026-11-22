@@ -285,6 +285,8 @@ public sealed partial class PlanCloseout
 
         _store.DeleteFile(_files.Absolute(plan));
         Say(report, plan, $"Moved {plan} to {target} with status archived.");
+        if (rewrittenLinks > 0)
+            Say(report, plan, $"Rewrote {rewrittenLinks} relative link{(rewrittenLinks == 1 ? string.Empty : "s")} so they still resolve from {archiveFolder}.");
         if (hasTaskFile)
         {
             _store.DeleteFile(_files.Absolute(taskFile));

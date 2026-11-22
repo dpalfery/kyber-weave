@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
 using Xunit;
 
@@ -127,5 +128,119 @@ public sealed class RelativeLinkRebaserTests
 
         Assert.Equal("[a](../../reference/a.md) [site](https://example.com) [top](#contents)", rebased);
         Assert.Equal(1, rewritten);
+    }
+
+    [Theory]
+    [InlineData("[^1]: See the design note.")]
+    [InlineData("[note]: See the design note.")]
+    [InlineData("[note]: ../reference/a.md and some prose")]
+    public void ALineThatOnlyLooksLikeAReferenceDefinitionIsLeftAlone(string markdown)
+    {
+        Assert.Equal(markdown, Rebase(markdown));
+    }
+
+    [Theory]
+    [InlineData("[a]: ../reference/a.md \"the a document\"", "[a]: ../../reference/a.md \"the a document\"")]
+    [InlineData("[a]: ../reference/a.md 'the a document'", "[a]: ../../reference/a.md 'the a document'")]
+    [InlineData("[a]: ../reference/a.md (the a document)", "[a]: ../../reference/a.md (the a document)")]
+    public void AReferenceDefinitionWithATitleIsRewritten(string markdown, string expected)
+    {
+        Assert.Equal(expected, Rebase(markdown));
+    }
+
+    [Fact]
+    public void AFenceAfterABulletMarkerIsRecognised()
+    {
+        const string Markdown = "- ~~~\n  [a](x.md)\n  ~~~\n- [b](y.md)";
+
+        Assert.Equal("- ~~~\n  [a](x.md)\n  ~~~\n- [b](../../plans/y.md)", Rebase(Markdown));
+    }
+
+    [Fact]
+    public void AFenceAfterAnOrderedListMarkerIsRecognised()
+    {
+        const string Markdown = "1. ```\n   [a](x.md)\n   ```\n[a](y.md)";
+
+        Assert.Equal("1. ```\n   [a](x.md)\n   ```\n[a](../../plans/y.md)", Rebase(Markdown));
+    }
+
+    [Fact]
+    public void AFenceAfterABlockquoteMarkerIsRecognised()
+    {
+        const string Markdown = "> ~~~\n> [a](x.md)\n> ~~~\n[a](y.md)";
+
+        Assert.Equal("> ~~~\n> [a](x.md)\n> ~~~\n[a](../../plans/y.md)", Rebase(Markdown));
+    }
+
+    [Fact]
+    public void ACodeSpanDoesNotCrossABlankLine()
+    {
+        const string Markdown = "Use the ` char.\n\n[a](x.md)\n\nAnd another ` here.";
+
+        Assert.Equal("Use the ` char.\n\n[a](../../plans/x.md)\n\nAnd another ` here.", Rebase(Markdown));
+    }
+
+    [Fact]
+    public void TheYamlFrontmatterIsNeverRewritten()
+    {
+        const string Markdown = "---\nid: plans/x\nsource: ../reference/a.md\n---\n\n[a](x.md)";
+
+        Assert.Equal("---\nid: plans/x\nsource: ../reference/a.md\n---\n\n[a](../../plans/x.md)", Rebase(Markdown));
+    }
+
+    [Fact]
+    public void AnIndexIntoAnArrayIsNotALink()
+    {
+        const string Markdown = "arr[0](1)";
+
+        Assert.Equal(Markdown, Rebase(Markdown));
+    }
+
+    [Fact]
+    public void ABackslashSeparatedTargetIsNormalisedBeforeRebasing()
+    {
+        Assert.Equal("[a](../../x.md)", Rebase("[a](..\\x.md)"));
+    }
+
+    [Fact]
+    public void AWindowsDrivePathIsLeftAlone()
+    {
+        const string Markdown = "[a](C:\\docs\\x.md)";
+
+        Assert.Equal(Markdown, Rebase(Markdown));
+    }
+
+    [Theory]
+    [InlineData("<a href=\"../reference/a.md\">a</a>", "<a href=\"../../reference/a.md\">a</a>")]
+    [InlineData("<img src='../images/d.png' alt=\"d\">", "<img src='../../images/d.png' alt=\"d\">")]
+    public void AnHtmlAttributeIsRebasedLikeALink(string markdown, string expected)
+    {
+        Assert.Equal(expected, Rebase(markdown));
+    }
+
+    [Theory]
+    [InlineData("> [a]: x.md", "> [a]: ../../plans/x.md")]
+    [InlineData("- [a]: x.md", "- [a]: ../../plans/x.md")]
+    public void AReferenceDefinitionInsideABlockMarkerIsRebased(string markdown, string expected)
+    {
+        Assert.Equal(expected, Rebase(markdown));
+    }
+
+    [Fact]
+    public void AReferenceDefinitionWhoseDestinationIsOnTheNextLineIsRebased()
+    {
+        Assert.Equal("[a]:\n  ../../plans/x.md", Rebase("[a]:\n  x.md"));
+    }
+
+    [Fact]
+    public void AnUnbalancedLinkOpenerDoesNotScanToTheEndOfTheFile()
+    {
+        string markdown = string.Concat(Enumerable.Repeat("[a](\n", 8000));
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        _ = Rebase(markdown);
+        stopwatch.Stop();
+
+        Assert.True(stopwatch.ElapsedMilliseconds < 200, $"Rebasing 8000 unbalanced link openers took {stopwatch.ElapsedMilliseconds} ms.");
     }
 }
