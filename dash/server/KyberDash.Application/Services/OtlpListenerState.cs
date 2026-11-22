@@ -6,7 +6,7 @@ namespace KyberDash.Application;
 /// In-process record of the collector socket this host bound. It starts unset and becomes
 /// listening only when the host calls <see cref="NoteListening"/> after Kestrel accepts the port.
 /// </summary>
-public sealed class OtlpListenerState : IOtlpListenerState
+public class OtlpListenerState : IOtlpListenerState
 {
     /// <inheritdoc />
     public bool IsListening { get; private set; }
