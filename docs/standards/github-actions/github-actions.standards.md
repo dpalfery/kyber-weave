@@ -162,7 +162,8 @@ which selects on the same paths as `build`.
   .NET 8 SDK or MSBuild 17.8+, `-bl:{{}}` on a `pwsh` runner, an explicit name that differs per
   step and matrix leg on an older SDK, such as
   `/bl:${{ github.job }}-${{ strategy.job-index }}-build.binlog` for the build step and
-  `-test.binlog` for the test step. This repository's SDK is 10, so `/bl:{}` applies.
+  `/bl:${{ github.job }}-${{ strategy.job-index }}-test.binlog` for the test step.
+  This repository's SDK is 10, so `/bl:{}` applies.
 - A binlog is uploaded on failure only: `if: failure()`, `actions/upload-artifact` with a
   `**/*.binlog` path, a name that includes `github.run_id`, and an explicit `retention-days`. A
   clean step keeps binlogs: `git clean -fdx -e "*.binlog"`.

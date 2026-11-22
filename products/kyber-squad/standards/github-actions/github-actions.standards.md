@@ -93,7 +93,7 @@ disabled test without a linked issue and a date.
   parallel jobs never overwrite each other. On a `pwsh` runner write `-bl:{{}}`. On an older
   SDK there is no `{}`: use an explicit name that differs per step and matrix leg, such as
   `/bl:${{ github.job }}-${{ strategy.job-index }}-build.binlog` for the build step and
-  `-test.binlog` for the test step.
+  `/bl:${{ github.job }}-${{ strategy.job-index }}-test.binlog` for the test step.
 - **Upload binlogs on failure** with `if: failure()` and `actions/upload-artifact`, a
   `**/*.binlog` path, a name that includes `github.run_id`, and an explicit `retention-days`.
   A failed CI build with no binlog can only be diagnosed by guessing.
