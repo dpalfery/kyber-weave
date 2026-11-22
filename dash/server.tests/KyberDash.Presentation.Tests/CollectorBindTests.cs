@@ -122,6 +122,7 @@ public class CollectorBindTests
 
         Assert.True(LoopbackBinding.RequestAllowed("/v1/traces", 4318, runtime));
         Assert.True(LoopbackBinding.RequestAllowed("/healthz", 4318, runtime));
+        Assert.True(LoopbackBinding.RequestAllowed("/healthz/", 4318, runtime));
         Assert.False(LoopbackBinding.RequestAllowed("/api/kyber/meta", 4318, runtime));
     }
 }

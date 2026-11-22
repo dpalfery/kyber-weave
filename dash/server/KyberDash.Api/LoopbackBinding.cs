@@ -162,7 +162,7 @@ public static class LoopbackBinding
         return localPort == runtime.OtlpPort ? otlpPath : !otlpPath;
     }
 
-    /// <summary>Whether <paramref name="path"/> is the collector surface (<c>/healthz</c> or <c>/v1/...</c>).</summary>
+    /// <summary>Whether <paramref name="path"/> is the collector surface (<c>/healthz</c> or <c>/v1/...</c>). A trailing slash is ignored.</summary>
     /// <param name="path">Request path.</param>
     /// <returns><see langword="true"/> for collector routes.</returns>
     public static bool IsOtlpPath(string? path)
@@ -170,11 +170,12 @@ public static class LoopbackBinding
         if (string.IsNullOrEmpty(path))
             return false;
 
-        if (string.Equals(path, "/healthz", StringComparison.OrdinalIgnoreCase))
+        string normalized = path.Length > 1 ? path.TrimEnd('/') : path;
+        if (string.Equals(normalized, "/healthz", StringComparison.OrdinalIgnoreCase))
             return true;
 
-        return path.Equals("/v1", StringComparison.OrdinalIgnoreCase)
-            || path.StartsWith("/v1/", StringComparison.OrdinalIgnoreCase);
+        return normalized.Equals("/v1", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("/v1/", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
