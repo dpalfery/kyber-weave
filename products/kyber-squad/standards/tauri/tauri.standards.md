@@ -6,7 +6,7 @@ status: draft
 technology: tauri
 builds-on: rust
 owner: unassigned
-last-reviewed: 2026-09-27
+last-reviewed: 2026-11-22
 ---
 
 # Tauri coding standard
@@ -45,8 +45,8 @@ best available guidance and names the draft standard it relied on in one line of
 
 ### Errors
 
-- Fallible code returns `Result` and propagates with `?`. No `.unwrap()`, `.expect()`, or
-  panic in a command path; a panic is reserved for an unrecoverable startup condition.
+- Fallible code returns `Result` and propagates with `?`. No panic in a command path; a panic
+  is reserved for an unrecoverable startup condition.
 - One error enum per crate, derived with `thiserror`, serialized with the tagged-enum pattern
   so the frontend receives a typed `{ kind, message }`:
 
@@ -91,13 +91,13 @@ best available guidance and names the draft standard it relied on in one line of
 
 - Prefer an async command for I/O or non-trivial work, so the UI never freezes; an async
   command runs on the Tauri async runtime, not the main thread.
-- An async command cannot take a borrowed argument (`&str`, `State<'_, T>`). Use an owned
-  type, or return a `Result`.
-- Never block the async runtime. Offload blocking or CPU-bound work with
-  `tauri::async_runtime::spawn_blocking` or `spawn`.
-- Do not hold a `std::sync::Mutex` or `RwLock` guard across an `.await`. Drop it first, or
-  use `tokio::sync::Mutex` for state that must live across await points; an async command
-  using that mutex returns a `Result`.
+- An async command cannot take a borrowed argument (`&str`, `State<'_, T>`) and return a
+  plain value. Either take an owned type (`String` for `&str`), or return a `Result`, which
+  works for every borrowed type, `State<'_, T>` included.
+- Offload blocking or CPU-bound work with `tauri::async_runtime::spawn_blocking` or `spawn`.
+- A `RwLock` guard follows the same rule as a `std::sync::Mutex` guard across an `.await`.
+  Use `tokio::sync::Mutex` only when a guard must be held across an `.await`; otherwise drop
+  the guard before the `.await`.
 - Register shared state with `.manage()` and read it through `tauri::State<T>`. Outside a
   command, reach state through the `Manager` trait (`app.state()`, `AppHandle`).
 
@@ -129,7 +129,7 @@ _Nothing specific yet._
 ### IPC trust boundary
 
 - Treat the WebView as untrusted. The Rust core has full system access; the frontend reaches
-  it only through IPC. Validate every argument crossing the boundary.
+  it only through IPC.
 - Default-deny exposure. Expose only the commands the frontend needs, and gate them with
   capabilities in `src-tauri/capabilities/`, granting the least permission and the
   narrowest scope.
@@ -141,8 +141,6 @@ _Nothing specific yet._
   through the command's error type.
 - Keep secrets, tokens and credentials in the Rust core, never in the WebView or in
   frontend-reachable code.
-- Keep `tauri` and plugin crates on the pinned versions, and never widen the CSP to make
-  something load.
 
 ## Done checklist
 

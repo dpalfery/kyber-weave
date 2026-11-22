@@ -71,26 +71,17 @@ public sealed class SquadPackAndReleaseTests
         "code-review",
         "code-review-loop",
         "create-pull-request",
-        "csharp-dev",
-        "csp-security",
-        "dal-dev",
         "delivery-execution",
         "dp-code-reviewer",
         "github-cli",
-        "github-devops",
-        "go-dev",
         "kilo-review-loop",
         "lm-studio-cli",
-        "maui-dev",
         "pr-review-fix-comments",
         "product-owner",
-        "python-dev",
         "review-council",
-        "rust-dev",
         "security-review",
         "setup-dev-environment",
-        "task-gate",
-        "typescript-dev"
+        "task-gate"
     ];
 
     [Fact]
@@ -166,8 +157,8 @@ public sealed class SquadPackAndReleaseTests
             Assert.Contains(entryNames, name => name == $"agents/{agent}.md");
         }
 
-        // Presence of all 28 canonical skills
-        Assert.Equal(28, CanonicalSkills.Length);
+        // Presence of all 19 canonical skills
+        Assert.Equal(19, CanonicalSkills.Length);
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));

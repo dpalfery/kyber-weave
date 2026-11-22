@@ -5,7 +5,7 @@ doc-type: rule
 status: draft
 technology: data-access-layer
 owner: unassigned
-last-reviewed: 2026-11-16
+last-reviewed: 2026-11-22
 ---
 
 # data-access-layer rules
@@ -25,3 +25,8 @@ last-reviewed: 2026-11-16
 
 - Deliver `IRepository<T>` implementations that satisfy the interfaces in the Contracts
   project this standard names.
+
+## Transactions
+
+- Every command inside a transaction scope takes that scope's `SqlTransaction`. Never run
+  a command in the scope without it.
