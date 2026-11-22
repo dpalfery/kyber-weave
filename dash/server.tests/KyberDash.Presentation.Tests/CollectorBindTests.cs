@@ -109,6 +109,9 @@ public class CollectorBindTests
         Assert.True(LoopbackBinding.ShouldRetryOtlpBindOnEphemeral(
             new IOException("address already in use.", socket),
             runtime));
+        Assert.False(LoopbackBinding.ShouldRetryOtlpBindOnEphemeral(
+            new IOException("Failed to bind to address http://127.0.0.1:9999: address already in use.", socket),
+            runtime));
 
         runtime.OtlpPortExplicit = true;
         Assert.False(LoopbackBinding.ShouldRetryOtlpBindOnEphemeral(collectorFailure, runtime));

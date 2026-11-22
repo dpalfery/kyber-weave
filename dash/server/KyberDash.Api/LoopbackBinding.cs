@@ -98,7 +98,7 @@ public static class LoopbackBinding
 
     /// <summary>
     /// Whether a failed start should be tried again with an ephemeral collector port. An explicit
-    /// port never moves, and a failure that names only the web port is not a collector collision.
+    /// port never moves. A retry happens only when the failure names the collector port, or names no URL.
     /// </summary>
     /// <param name="exception">The exception <c>StartAsync</c> threw.</param>
     /// <param name="runtime">Transport settings at the moment of the failure.</param>
@@ -118,12 +118,7 @@ public static class LoopbackBinding
         if (url is null)
             return true;
 
-        bool namesWeb = UrlNamesPort(url, runtime.WebPort);
-        bool namesOtlp = UrlNamesPort(url, runtime.OtlpPort);
-        if (namesWeb && !namesOtlp)
-            return false;
-
-        return namesOtlp || !namesWeb;
+        return UrlNamesPort(url, runtime.OtlpPort);
     }
 
     /// <summary>
