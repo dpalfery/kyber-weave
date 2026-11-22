@@ -32,7 +32,8 @@ public class OtlpCollectorService : IOtlpCollectorService
 
     private readonly BoundedIngestWriter writer;
     private readonly ITranscriptIngestionService ingestion;
-    private readonly ICanonStoreRepository store;
+    private readonly IRelationalStoreWriter relationalWriter;
+    private readonly IOperationalStore operationalStore;
     private readonly long maxBodyBytes;
     private readonly Lock stateGate = new();
     private readonly CancellationTokenSource flushShutdown = new();
@@ -44,19 +45,23 @@ public class OtlpCollectorService : IOtlpCollectorService
     /// <summary>
     /// Initializes a new <see cref="OtlpCollectorService"/>.
     /// </summary>
-    /// <param name="store">Canonical store receiving logs, metrics, and the ingest audit row.</param>
+    /// <param name="relationalWriter">Relational store writer receiving mapped log batches and diagnostic problems.</param>
+    /// <param name="operationalStore">Operational store receiving quarantined spans, metric points, and ingest audit rows.</param>
     /// <param name="ingestion">Ingestion service receiving admitted spans.</param>
     /// <param name="options">Composition options carrying the payload and backlog ceilings.</param>
     public OtlpCollectorService(
-        ICanonStoreRepository store,
+        IRelationalStoreWriter relationalWriter,
+        IOperationalStore operationalStore,
         ITranscriptIngestionService ingestion,
         DashOptions options)
     {
-        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(relationalWriter);
+        ArgumentNullException.ThrowIfNull(operationalStore);
         ArgumentNullException.ThrowIfNull(ingestion);
         ArgumentNullException.ThrowIfNull(options);
 
-        this.store = store;
+        this.relationalWriter = relationalWriter;
+        this.operationalStore = operationalStore;
         this.ingestion = ingestion;
         maxBodyBytes = options.MaxOtlpBodyBytes > 0 ? options.MaxOtlpBodyBytes : OtlpCollector.DefaultMaxBodyBytes;
 
@@ -323,8 +328,8 @@ public class OtlpCollectorService : IOtlpCollectorService
         return admission;
     }
 
-    /// <summary>Drains the queue into the canonical store and raises <see cref="StoreUpdated"/> when anything landed.</summary>
-    /// <returns>Number of telemetry items the flush accepted.</returns>
+    /// <summary>Drains the queue into the relational store and raises <see cref="StoreUpdated"/> when anything landed.</summary>
+    /// <returns>Number of telemetry items the flush processed.</returns>
     private int FlushPending()
     {
         int pendingBefore = writer.PendingItems;
@@ -333,8 +338,8 @@ public class OtlpCollectorService : IOtlpCollectorService
             return 0;
         }
 
-        IngestOutcome outcome = writer.Flush(store);
-        int flushed = outcome.Accepted + outcome.Quarantined + outcome.Rejected;
+        (IngestOutcome outcome, int metricPointsWritten) = writer.FlushRelational(relationalWriter, operationalStore);
+        int flushed = outcome.Accepted + outcome.Quarantined + outcome.Rejected + metricPointsWritten;
         if (flushed == 0)
         {
             return 0;

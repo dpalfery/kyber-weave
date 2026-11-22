@@ -1,26 +1,48 @@
-using Xunit;
+using System.Reflection;
 using System.Text.Json;
+using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
+using KyberDash.Core.Exceptions;
+using KyberDash.Data.Collector;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain;
+using Xunit;
 
 namespace KyberDash.Data.Tests;
 
 /// <summary>Rate-table loading, pricing-provider registration, and model-catalog status for <see cref="PricingRepository"/>.</summary>
+/// <remarks>
+/// This class reconfigures <see cref="CanonPricing"/>'s process-wide provider (the constructor
+/// registers a store-backed one, and the tests exercise registration), so it joins
+/// <see cref="CanonPricingStatics"/> and restores the provider it found: leaving empty tables
+/// behind once starved a parallel reader of rates for <c>claude-sonnet-4-5</c>.
+/// </remarks>
+[Collection(Repositories.CanonPricingStatics.Name)]
 public class PricingRepositoryTests : IDisposable
 {
-    private readonly TempDirectory directory = new();
+    private readonly (Func<PricingTables>? Provider, PricingTables? Cache) savedPricingProvider;
+
+    /// <summary>Captures the process-wide pricing provider so <see cref="Dispose"/> can put it back.</summary>
+    public PricingRepositoryTests()
+    {
+        savedPricingProvider = (
+            PricingField("_pricingProvider").GetValue(null) as Func<PricingTables>,
+            PricingField("_cachedTables").GetValue(null) as PricingTables);
+    }
 
     /// <inheritdoc />
     public void Dispose()
     {
-        // Restore the process-wide provider so other tests are not left with a repository-backed one.
-        CanonPricing.ConfigurePricingProvider(() => CanonPricing.BuildPricingTables(
-            new Dictionary<string, ModelCosts>(StringComparer.Ordinal),
-            new Dictionary<string, ModelCosts>(StringComparer.Ordinal)));
-        directory.Dispose();
+        // Restore the process-wide provider so other tests are not left with a repository-backed
+        // one (or with empty tables that would price ambient reads as having no rate).
+        PricingField("_pricingProvider").SetValue(null, savedPricingProvider.Provider);
+        PricingField("_cachedTables").SetValue(null, savedPricingProvider.Cache);
         GC.SuppressFinalize(this);
     }
+
+    private static FieldInfo PricingField(string name) =>
+        typeof(CanonPricing).GetField(name, BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException($"CanonPricing.{name} is no longer a private static field.");
 
     [Fact]
     public void LoadPricingTables_ReadsEmbeddedSnapshotAndFallback()
@@ -67,7 +89,7 @@ public class PricingRepositoryTests : IDisposable
     [Fact]
     public void Constructor_RegistersItselfAsTheProcessPricingProvider()
     {
-        CanonStoreRepository store = new(Path.Combine(directory.Path, "canon.db"), new KyberDash.Core.Resilience.SqliteCircuitBreaker());
+        InMemoryRelationalStore store = new();
         _ = new PricingRepository(store);
         TokenUsage tokens = new(FreshInput: 1_000_000, CacheRead: 0, CacheCreation: 0, Output: 1_000_000, ReportedInput: 1_000_000, ReportedOutput: 1_000_000);
 
@@ -89,226 +111,257 @@ public class PricingRepositoryTests : IDisposable
 
         Assert.Equal(PricingRepository.EmbeddedSnapshotSource, snapshot.GetProperty("source").GetString());
         Assert.Equal("embedded", snapshot.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, snapshot.GetProperty("lastRefreshAt").ValueKind);
         Assert.Equal(JsonValueKind.Array, snapshot.GetProperty("models").ValueKind);
     }
 
     [Fact]
-    public void GetModelCatalogSnapshot_ReadsStatusFromTheStore()
+    public void GetModelCatalogSnapshot_MapsEmptyAndBlankStatusToEmbedded()
     {
-        CanonStoreRepository store = new(Path.Combine(directory.Path, "canon.db"), new KyberDash.Core.Resilience.SqliteCircuitBreaker());
-        store.SetMetadata(PricingRepository.CatalogStatusMetadataKey, "refreshed");
+        InMemoryRelationalStore emptyStore = new();
+        PricingRepository emptyRepository = new(emptyStore);
+
+        JsonElement emptySnapshot = emptyRepository.GetModelCatalogSnapshot();
+        Assert.Equal("embedded", emptySnapshot.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, emptySnapshot.GetProperty("lastRefreshAt").ValueKind);
+
+        PricingRepository blankRepository = new(new StubCatalogOperationalStore(
+            new StoredModelCatalogSnapshot("   ", [new StoredModelCatalogVendorStatus("anthropic", "ok", "   ")], [])));
+        JsonElement blankSnapshot = blankRepository.GetModelCatalogSnapshot();
+        Assert.Equal("embedded", blankSnapshot.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, blankSnapshot.GetProperty("lastRefreshAt").ValueKind);
+    }
+
+    [Fact]
+    public void GetModelCatalogSnapshot_ReadsStatusAndLatestVendorRefreshFromTheStore()
+    {
+        InMemoryRelationalStore store = new();
+        store.ReplaceModelContextWindowCatalog(new StoredModelCatalogSnapshot(
+            Status: "refreshed",
+            Vendors:
+            [
+                new StoredModelCatalogVendorStatus("openai", "ok", "2026-11-19T10:00:00Z"),
+                new StoredModelCatalogVendorStatus("anthropic", "ok", "2026-11-19T13:30:00+02:00"),
+                new StoredModelCatalogVendorStatus("google", "error", null, "timeout"),
+            ],
+            Entries: []));
         PricingRepository repository = new(store);
 
         JsonElement snapshot = repository.GetModelCatalogSnapshot();
 
         Assert.Equal("refreshed", snapshot.GetProperty("status").GetString());
+        Assert.Equal("2026-11-19T13:30:00+02:00", snapshot.GetProperty("lastRefreshAt").GetString());
     }
 
-    [Fact]
-    public void GetModelCatalogSnapshot_StaysAdvisoryWhenTheStoreFails()
+    [Theory]
+    [InlineData("invalid_operation")]
+    [InlineData("io")]
+    [InlineData("sqlite")]
+    [InlineData("breaker")]
+    public void GetModelCatalogSnapshot_StaysAdvisoryWhenTheStoreFails(string faultKind)
     {
-        PricingRepository repository = new(new ThrowingStoreRepository());
+        Exception exception = faultKind switch
+        {
+            "invalid_operation" => new InvalidOperationException("store offline"),
+            "io" => new IOException("disk unavailable"),
+            "sqlite" => new SqliteExecutionException("sqlite3 failed"),
+            "breaker" => new CircuitBreakerOpenException("breaker open"),
+            _ => throw new ArgumentOutOfRangeException(nameof(faultKind)),
+        };
+        PricingRepository repository = new(new ThrowingOperationalStore(exception));
 
         JsonElement snapshot = repository.GetModelCatalogSnapshot();
 
         Assert.Equal("unknown", snapshot.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, snapshot.GetProperty("lastRefreshAt").ValueKind);
     }
 
-    /// <summary>Store whose metadata reads fail, to prove catalog status never breaks a read.</summary>
-    private class ThrowingStoreRepository : ICanonStoreRepository
+    private class StubCatalogOperationalStore : IOperationalStore
     {
-        public string DatabasePath => ":memory:";
+        private readonly StoredModelCatalogSnapshot catalog;
 
-        public string? GetMetadata(string key) => throw new InvalidOperationException("store offline");
+        public StubCatalogOperationalStore(StoredModelCatalogSnapshot catalog)
+        {
+            this.catalog = catalog;
+        }
 
-        public void EnsureInitialized() => throw new InvalidOperationException("store offline");
+        public StoredModelCatalogSnapshot GetModelContextWindowCatalog() => catalog;
 
-        public void SetMetadata(string key, string value) => throw new InvalidOperationException("store offline");
+        public SettingsView ReadSettings() => throw new NotSupportedException();
 
-        public bool CompareAndSwapMetadata(string key, string? expected, string? newValue) => throw new InvalidOperationException("store offline");
+        public void SaveSettings(SettingsView settings) => throw new NotSupportedException();
 
-        public long RecordsWriteMarker() => throw new InvalidOperationException("store offline");
+        public StoreStateView? GetStoreState() => throw new NotSupportedException();
 
-        public int CountRecords() => throw new InvalidOperationException("store offline");
+        public void SetStoreState(StoreStateView state) => throw new NotSupportedException();
 
-        public IReadOnlyList<string> ListObservedHarnesses() => throw new InvalidOperationException("store offline");
+        public long GetWriteMarker() => throw new NotSupportedException();
 
-        public void PutRecord(CanonicalRecord record) => throw new InvalidOperationException("store offline");
+        public void SetWriteMarker(long recordsWriteSeq) => throw new NotSupportedException();
 
-        public void PutRecords(IEnumerable<CanonicalRecord> records) => throw new InvalidOperationException("store offline");
+        public string? GetLastCleanAtUtc() => throw new NotSupportedException();
 
-        public CanonicalRecord? GetRecord(string spanId) => throw new InvalidOperationException("store offline");
+        public void SetLastCleanAtUtc(string lastCleanAtUtc) => throw new NotSupportedException();
 
-        public bool HasRecord(string spanId) => throw new InvalidOperationException("store offline");
+        public int? GetContentRetentionDays() => throw new NotSupportedException();
 
-        public IReadOnlyList<CanonicalRecord> QueryAllRecords() => throw new InvalidOperationException("store offline");
+        public void SetContentRetentionDays(int retentionDays) => throw new NotSupportedException();
 
-        public IReadOnlyList<CanonicalRecord> ListRecordsBySessionKey(string sessionKey) => throw new InvalidOperationException("store offline");
+        public string? GetContentPurgeMarkUtc() => throw new NotSupportedException();
 
-        public void SetCosts(IReadOnlyDictionary<string, CostBlock> updates) => throw new InvalidOperationException("store offline");
+        public void SetContentPurgeMarkUtc(string purgedThroughUtc) => throw new NotSupportedException();
 
-        public void QuarantineAndDelete(QuarantineRow row) => throw new InvalidOperationException("store offline");
+        public ProjectionStateView? GetProjectionState() => throw new NotSupportedException();
 
-        public IReadOnlyList<QuarantineRow> GetQuarantined(string? harness = null) => throw new InvalidOperationException("store offline");
+        public void SetProjectionState(ProjectionStateView state) => throw new NotSupportedException();
 
-        public void RecordProblem(SpanProblemRow problem) => throw new InvalidOperationException("store offline");
+        public DirtyProjectionState? GetProjectionDirtyState() => throw new NotSupportedException();
 
-        public void RecordProblems(IEnumerable<SpanProblemRow> problems) => throw new InvalidOperationException("store offline");
+        public void SetProjectionDirtyState(DirtyProjectionState state) => throw new NotSupportedException();
 
-        public IReadOnlyList<SpanProblemRow> GetProblems(string? spanId = null) => throw new InvalidOperationException("store offline");
+        public void ClearProjectionDirtyState() => throw new NotSupportedException();
 
-        public void RecordIngest(string source, int count, string timestamp) => throw new InvalidOperationException("store offline");
+        public IReadOnlyList<SessionKeyAlias> ListSessionKeyAliases(string? sessionId = null) => throw new NotSupportedException();
 
-        public IReadOnlyList<IngestLogEntry> GetIngestLog(string? source = null) => throw new InvalidOperationException("store offline");
+        public void ReplaceSessionKeyAliases(IEnumerable<SessionKeyAlias> aliases) => throw new NotSupportedException();
 
-        public long? GetCachedTokenCount(string hash) => throw new InvalidOperationException("store offline");
+        public void UpsertRefreshRun(RefreshRunRow row) => throw new NotSupportedException();
 
-        public void PutCachedTokenCounts(IReadOnlyDictionary<string, long> counts, string model) => throw new InvalidOperationException("store offline");
+        public RefreshRunRow? GetRefreshRun(string refreshRunId) => throw new NotSupportedException();
 
-        public void PutSession(SessionSummaryRow row) => throw new InvalidOperationException("store offline");
+        public IReadOnlyList<RefreshRunRow> ListRefreshRuns(int limit = 20) => throw new NotSupportedException();
 
-        public void PutSessions(IEnumerable<SessionSummaryRow> rows) => throw new InvalidOperationException("store offline");
+        public SourceCheckpoint? GetSourceCheckpoint(string harnessId, string sourceKey) => throw new NotSupportedException();
 
-        public SessionSummaryRow? GetSession(string sessionId) => throw new InvalidOperationException("store offline");
+        public void UpsertSourceCheckpoint(SourceCheckpoint checkpoint) => throw new NotSupportedException();
 
-        public IReadOnlyList<SessionSummaryRow> ListSessions(string? harness = null) => throw new InvalidOperationException("store offline");
+        public IReadOnlyList<SourceCheckpoint> ListSourceCheckpoints(string? harnessId = null) => throw new NotSupportedException();
 
-        public void DeleteSession(string sessionId) => throw new InvalidOperationException("store offline");
+        public StoredIngestProblem? GetIngestProblem(long problemId) => throw new NotSupportedException();
 
-        public void DeleteSessions(IEnumerable<string> sessionIds) => throw new InvalidOperationException("store offline");
+        public IReadOnlyList<StoredIngestProblem> ListIngestProblems(string? harnessId = null, string? spanId = null, int? limit = null, int? offset = null) => throw new NotSupportedException();
 
-        public IReadOnlyList<(int TurnIndex, string TurnJson)> GetSessionTurns(string sessionId) => throw new InvalidOperationException("store offline");
+        public int CountIngestProblems(string? harnessId = null) => throw new NotSupportedException();
 
-        public DirtyProjectionState GetDirtyProjectionState() => throw new InvalidOperationException("store offline");
+        public void PutQuarantinedSpan(StoredQuarantinedSpan span) => throw new NotSupportedException();
 
-        public void MarkProjectionClean(long writeSeq, string schemaVersion) => throw new InvalidOperationException("store offline");
+        public StoredQuarantinedSpan? GetQuarantinedSpan(string spanId) => throw new NotSupportedException();
 
-        public IReadOnlyDictionary<string, string> GetProjectionSessionKeyMap() => throw new InvalidOperationException("store offline");
+        public IReadOnlyList<StoredQuarantinedSpan> ListQuarantinedSpans(string? harnessId = null, int? limit = null, int? offset = null) => throw new NotSupportedException();
 
-        public void SaveProjectionSessionKeyMap(IReadOnlyDictionary<string, string> map) => throw new InvalidOperationException("store offline");
+        public int CountQuarantinedSpans(string? harnessId = null) => throw new NotSupportedException();
 
-        public void PutFinding(Finding finding) => throw new InvalidOperationException("store offline");
+        public long? GetCachedTokenCount(string hash) => throw new NotSupportedException();
 
-        public void PutFindings(IEnumerable<Finding> findings) => throw new InvalidOperationException("store offline");
+        public void PutCachedTokenCounts(IEnumerable<StoredTokenCacheEntry> entries) => throw new NotSupportedException();
 
-        public Finding? GetFinding(string id) => throw new InvalidOperationException("store offline");
+        public void ReplaceModelContextWindowCatalog(StoredModelCatalogSnapshot snapshot) => throw new NotSupportedException();
 
-        public IReadOnlyList<Finding> ListFindings(string? runId = null, string? sessionId = null) => throw new InvalidOperationException("store offline");
+        public void PutMetricPoints(IEnumerable<StoredMetricPoint> points) => throw new NotSupportedException();
 
-        public void DeleteFindingsForSession(string sessionId) => throw new InvalidOperationException("store offline");
+        public IReadOnlyList<StoredMetricPoint> ListMetricPoints(string? name = null, int? limit = null) => throw new NotSupportedException();
 
-        public void UpsertRuns(IEnumerable<RunRow> runs) => throw new InvalidOperationException("store offline");
+        public void RecordIngest(string source, int count, string timestampUtc) => throw new NotSupportedException();
 
-        public RunRow? GetRun(string runId) => throw new InvalidOperationException("store offline");
+        public IReadOnlyList<IngestLogEntry> ListIngestLog(string? source = null) => throw new NotSupportedException();
 
-        public IReadOnlyList<RunRow> ListRuns(string? harness = null) => throw new InvalidOperationException("store offline");
+        public void PutRecordProvenance(IEnumerable<RecordProvenanceRow> rows) => throw new NotSupportedException();
 
-        public void UpsertExecutions(IEnumerable<ExecutionRow> executions) => throw new InvalidOperationException("store offline");
+        public IReadOnlyList<RecordProvenanceRow> ListRecordProvenance(string harnessId, string sourceKey) => throw new NotSupportedException();
+    }
 
-        public IReadOnlyList<ExecutionRow> ListExecutionsForRun(string runId) => throw new InvalidOperationException("store offline");
+    /// <summary>Operational store whose catalog reads fail, to prove catalog status never breaks a read.</summary>
+    private class ThrowingOperationalStore : IOperationalStore
+    {
+        private readonly Exception failure;
 
-        public IReadOnlyList<ExecutionRow> ListExecutionsByHarness(string harness) => throw new InvalidOperationException("store offline");
+        public ThrowingOperationalStore(Exception failure)
+        {
+            this.failure = failure;
+        }
 
-        public void UpsertHarnessRollups(IEnumerable<HarnessRollupRow> rollups) => throw new InvalidOperationException("store offline");
+        public SettingsView ReadSettings() => throw failure;
 
-        public HarnessRollupRow? GetHarnessRollup(string harness) => throw new InvalidOperationException("store offline");
+        public void SaveSettings(SettingsView settings) => throw failure;
 
-        public IReadOnlyList<HarnessRollupRow> ListHarnessRollups() => throw new InvalidOperationException("store offline");
+        public StoreStateView? GetStoreState() => throw failure;
 
-        public void PutPrediction(PredictionRow prediction) => throw new InvalidOperationException("store offline");
+        public void SetStoreState(StoreStateView state) => throw failure;
 
-        public IReadOnlyList<PredictionRow> ListPredictions(string? runId = null) => throw new InvalidOperationException("store offline");
+        public long GetWriteMarker() => throw failure;
 
-        public IReadOnlyList<StoredProblemRow> ListStoredProblems(string? harness = null, string? spanId = null) => throw new InvalidOperationException("store offline");
+        public void SetWriteMarker(long recordsWriteSeq) => throw failure;
 
-        public StoredProblemRow? GetStoredProblem(int id) => throw new InvalidOperationException("store offline");
+        public string? GetLastCleanAtUtc() => throw failure;
 
-        public IReadOnlyList<QuarantineRow> ListQuarantine(string? harness = null) => throw new InvalidOperationException("store offline");
+        public void SetLastCleanAtUtc(string lastCleanAtUtc) => throw failure;
 
-        public QuarantineRow? GetQuarantineItem(string spanId) => throw new InvalidOperationException("store offline");
+        public int? GetContentRetentionDays() => throw failure;
 
-        public SourceCheckpoint? GetSourceCheckpoint(string harnessId, string sourceKey) => throw new InvalidOperationException("store offline");
+        public void SetContentRetentionDays(int retentionDays) => throw failure;
 
-        public void UpsertSourceCheckpoint(SourceCheckpoint checkpoint) => throw new InvalidOperationException("store offline");
+        public string? GetContentPurgeMarkUtc() => throw failure;
 
-        public IReadOnlyList<SourceCheckpoint> ListSourceCheckpoints(string? harnessId = null) => throw new InvalidOperationException("store offline");
+        public void SetContentPurgeMarkUtc(string purgedThroughUtc) => throw failure;
 
-        public void PutRecordProvenance(IEnumerable<RecordProvenanceRow> rows) => throw new InvalidOperationException("store offline");
+        public ProjectionStateView? GetProjectionState() => throw failure;
 
-        public void RecordRefreshRun(RefreshRunRow row) => throw new InvalidOperationException("store offline");
+        public void SetProjectionState(ProjectionStateView state) => throw failure;
 
-        public IReadOnlyList<RefreshRunRow> ListRefreshRuns(int limit = 20) => throw new InvalidOperationException("store offline");
+        public DirtyProjectionState? GetProjectionDirtyState() => throw failure;
 
-        public void StorePendingLogs(IEnumerable<OtlpLog> logs, string? harness = null) => throw new InvalidOperationException("store offline");
+        public void SetProjectionDirtyState(DirtyProjectionState state) => throw failure;
 
-        public IReadOnlyList<OtlpLog> TakePendingLogs(int limit = 500) => throw new InvalidOperationException("store offline");
+        public void ClearProjectionDirtyState() => throw failure;
 
-        public void StoreQuarantinedLogs(IEnumerable<(OtlpLog Log, string Reason)> logs, string? harness = null) => throw new InvalidOperationException("store offline");
+        public IReadOnlyList<SessionKeyAlias> ListSessionKeyAliases(string? sessionId = null) => throw failure;
 
-        public bool IsLogEnriched(string logId) => throw new InvalidOperationException("store offline");
+        public void ReplaceSessionKeyAliases(IEnumerable<SessionKeyAlias> aliases) => throw failure;
 
-        public void MarkLogsEnriched(IEnumerable<string> logIds) => throw new InvalidOperationException("store offline");
+        public void UpsertRefreshRun(RefreshRunRow row) => throw failure;
 
-        public void StoreMetrics(IEnumerable<OtlpMetric> metrics, string? source = null) => throw new InvalidOperationException("store offline");
+        public RefreshRunRow? GetRefreshRun(string refreshRunId) => throw failure;
 
-        public int PurgeContentBefore(string cutoffUtc) => throw new InvalidOperationException("store offline");
+        public IReadOnlyList<RefreshRunRow> ListRefreshRuns(int limit = 20) => throw failure;
 
-        public StoreWipeReport WipeAll() => throw new InvalidOperationException("store offline");
+        public SourceCheckpoint? GetSourceCheckpoint(string harnessId, string sourceKey) => throw failure;
 
-        public StoreWipeReport WipeHarnesses(IEnumerable<string> harnesses) => throw new InvalidOperationException("store offline");
+        public void UpsertSourceCheckpoint(SourceCheckpoint checkpoint) => throw failure;
 
-        public void Vacuum() => throw new InvalidOperationException("store offline");
+        public IReadOnlyList<SourceCheckpoint> ListSourceCheckpoints(string? harnessId = null) => throw failure;
 
-        public IReadOnlyList<string> GetBuiltSessionIds() => throw new InvalidOperationException("store offline");
+        public StoredIngestProblem? GetIngestProblem(long problemId) => throw failure;
 
-        public IReadOnlyList<string> GetDistinctSessionKeys() => throw new InvalidOperationException("store offline");
+        public IReadOnlyList<StoredIngestProblem> ListIngestProblems(string? harnessId = null, string? spanId = null, int? limit = null, int? offset = null) => throw failure;
 
-        public IReadOnlyList<(string Key, string Harness)> GetSessionKeyHarnesses() => throw new InvalidOperationException("store offline");
+        public int CountIngestProblems(string? harnessId = null) => throw failure;
 
-        public bool HasCurrentDetectorVersion() => throw new InvalidOperationException("store offline");
+        public void PutQuarantinedSpan(StoredQuarantinedSpan span) => throw failure;
 
-        public void SetDetectorVersion(int version = CanonSchema.DetectorVersion) => throw new InvalidOperationException("store offline");
+        public StoredQuarantinedSpan? GetQuarantinedSpan(string spanId) => throw failure;
 
-        public IReadOnlyDictionary<string, IReadOnlyList<string>>? GetProjectedSessionKeyMap() => throw new InvalidOperationException("store offline");
+        public IReadOnlyList<StoredQuarantinedSpan> ListQuarantinedSpans(string? harnessId = null, int? limit = null, int? offset = null) => throw failure;
 
-        public void RecordProjectedSessionKeys(long seq, IReadOnlyDictionary<string, IReadOnlyList<string>> sessionIdsByKey) => throw new InvalidOperationException("store offline");
+        public int CountQuarantinedSpans(string? harnessId = null) => throw failure;
 
-        public IReadOnlyDictionary<string, int> CountRecordsBySource() => throw new InvalidOperationException("store offline");
+        public long? GetCachedTokenCount(string hash) => throw failure;
 
-        public long? GetMaxRecordRowId() => throw new InvalidOperationException("store offline");
+        public void PutCachedTokenCounts(IEnumerable<StoredTokenCacheEntry> entries) => throw failure;
 
-        public uint ComputeStoreGeneration() => throw new InvalidOperationException("store offline");
+        public StoredModelCatalogSnapshot GetModelContextWindowCatalog() => throw failure;
 
-        public IReadOnlyList<JsonElement> ListSessionTurnPayloads(string sessionId) => throw new InvalidOperationException("store offline");
+        public void ReplaceModelContextWindowCatalog(StoredModelCatalogSnapshot snapshot) => throw failure;
 
-        public JsonElement? GetSessionTurnPayload(string sessionId, int turnIndex) => throw new InvalidOperationException("store offline");
+        public void PutMetricPoints(IEnumerable<StoredMetricPoint> points) => throw failure;
 
-        public void DeleteHarnessRollup(string harness) => throw new InvalidOperationException("store offline");
+        public IReadOnlyList<StoredMetricPoint> ListMetricPoints(string? name = null, int? limit = null) => throw failure;
 
-        public int CountQuarantine(string? harness = null) => throw new InvalidOperationException("store offline");
+        public void RecordIngest(string source, int count, string timestampUtc) => throw failure;
 
-        public IReadOnlyList<QuarantineRow> ListQuarantinePage(string? harness = null, int? limit = null, int? offset = null) => throw new InvalidOperationException("store offline");
+        public IReadOnlyList<IngestLogEntry> ListIngestLog(string? source = null) => throw failure;
 
-        public int CountProblems(string? harness = null) => throw new InvalidOperationException("store offline");
+        public void PutRecordProvenance(IEnumerable<RecordProvenanceRow> rows) => throw failure;
 
-        public StoredProblemRow? GetProblemById(int id) => throw new InvalidOperationException("store offline");
-
-        public IReadOnlyList<StoredProblemRow> ListProblems(string? harness = null, int? limit = null, int? offset = null) => throw new InvalidOperationException("store offline");
-
-        public IReadOnlyList<RecordProvenanceRow> ListRecordProvenance(string harnessId, string sourceKey) => throw new InvalidOperationException("store offline");
-
-        public IReadOnlyList<CanonicalRecord> ListOtlpRecords(string? coveredFromUtc = null, string? coveredThroughUtc = null) => throw new InvalidOperationException("store offline");
-
-        public void CommitSourceUnit(
-            SourceCheckpoint checkpoint,
-            IReadOnlyList<CanonicalRecord> records,
-            IReadOnlyList<RecordProvenanceRow> provenances,
-            IReadOnlyList<SpanProblemRow>? problems = null) => throw new InvalidOperationException("store offline");
-
-        public string StartRefreshRun(string id, string trigger, string startedAtUtc, int pid, int? historyWeeks = null) => throw new InvalidOperationException("store offline");
-
-        public void CompleteRefreshRun(string id, string status, string completedAtUtc, string? summary) => throw new InvalidOperationException("store offline");
-
-        public int ReconcileDeadRefreshRuns(string completedAtUtc, long maxAgeMs = 3_600_000) => throw new InvalidOperationException("store offline");
+        public IReadOnlyList<RecordProvenanceRow> ListRecordProvenance(string harnessId, string sourceKey) => throw failure;
     }
 }

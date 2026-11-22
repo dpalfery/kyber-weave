@@ -54,41 +54,52 @@ public class SettingsRepository : ISettingsRepository
     /// <summary>JSON property carrying the content-capture consent flag in the Factory plugin file.</summary>
     public const string FactoryContentConsentProperty = "contentCapture";
 
-    private readonly ICanonStoreRepository store;
+    private readonly IOperationalStore store;
 
     /// <summary>Initializes a repository backed by <paramref name="store"/>.</summary>
-    /// <param name="store">Canonical store holding the shared operator switches.</param>
-    public SettingsRepository(ICanonStoreRepository store)
+    /// <param name="store">Operational store holding the shared operator switches.</param>
+    public SettingsRepository(IOperationalStore store)
     {
         ArgumentNullException.ThrowIfNull(store);
         this.store = store;
     }
 
     /// <inheritdoc />
-    public SettingsView ReadSettings() =>
-        new(
-            FolderImportScheduled: DecodeOnOff(store.GetMetadata(FolderImportScheduledKey)),
-            JobsPaused: DecodeOnOff(store.GetMetadata(JobsPausedKey)),
-            RefreshCadenceMinutes: DecodeBoundedInt(
-                store.GetMetadata(RefreshCadenceMinutesKey),
-                CadenceMinMinutes,
-                CadenceMaxMinutes,
-                DefaultRefreshCadenceMinutes),
-            ReceiverHosted: DecodeOnOff(store.GetMetadata(ReceiverHostedKey)),
-            DashboardPort: DecodeBoundedInt(
-                store.GetMetadata(DashboardPortKey),
-                PortMin,
-                PortMax,
-                DefaultDashboardPort));
+    public SettingsView ReadSettings()
+    {
+        SettingsView stored = store.ReadSettings();
+        int refreshCadenceMinutes = stored.RefreshCadenceMinutes is >= CadenceMinMinutes and <= CadenceMaxMinutes
+            ? stored.RefreshCadenceMinutes
+            : DefaultRefreshCadenceMinutes;
+        int dashboardPort = stored.DashboardPort is >= PortMin and <= PortMax
+            ? stored.DashboardPort
+            : DefaultDashboardPort;
+
+        return stored with
+        {
+            RefreshCadenceMinutes = refreshCadenceMinutes,
+            DashboardPort = dashboardPort,
+        };
+    }
 
     /// <inheritdoc />
     public void WriteBooleanSetting(string key, bool value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         if (key is not (FolderImportScheduledKey or JobsPausedKey or ReceiverHostedKey))
+        {
             throw new ArgumentException($"setting '{key}' rejected: not a recognized boolean setting key", nameof(key));
+        }
 
-        store.SetMetadata(key, value ? "on" : "off");
+        SettingsView current = ReadSettings();
+        SettingsView updated = key switch
+        {
+            FolderImportScheduledKey => current with { FolderImportScheduled = value },
+            JobsPausedKey => current with { JobsPaused = value },
+            ReceiverHostedKey => current with { ReceiverHosted = value },
+            _ => throw new ArgumentException($"setting '{key}' rejected: not a recognized boolean setting key", nameof(key)),
+        };
+        store.SaveSettings(updated);
     }
 
     /// <inheritdoc />
@@ -97,20 +108,28 @@ public class SettingsRepository : ISettingsRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         if (string.Equals(key, RefreshCadenceMinutesKey, StringComparison.Ordinal))
         {
-            if (value < CadenceMinMinutes || value > CadenceMaxMinutes)
+            if (value is < CadenceMinMinutes or > CadenceMaxMinutes)
+            {
                 throw new ArgumentOutOfRangeException(nameof(value), value, "refresh cadence must be between 1 and 1440 minutes");
+            }
         }
         else if (string.Equals(key, DashboardPortKey, StringComparison.Ordinal))
         {
-            if (value < PortMin || value > PortMax)
+            if (value is < PortMin or > PortMax)
+            {
                 throw new ArgumentOutOfRangeException(nameof(value), value, "dashboard port must be between 1 and 65535");
+            }
         }
         else
         {
             throw new ArgumentException($"setting '{key}' rejected: not a recognized integer setting key", nameof(key));
         }
 
-        store.SetMetadata(key, value.ToString(CultureInfo.InvariantCulture));
+        SettingsView current = ReadSettings();
+        SettingsView updated = string.Equals(key, RefreshCadenceMinutesKey, StringComparison.Ordinal)
+            ? current with { RefreshCadenceMinutes = value }
+            : current with { DashboardPort = value };
+        store.SaveSettings(updated);
     }
 
     /// <inheritdoc />
@@ -119,7 +138,9 @@ public class SettingsRepository : ISettingsRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(stateDir);
         string path = Path.Combine(Path.GetFullPath(stateDir), FactoryPluginFile);
         if (!File.Exists(path))
+        {
             return false;
+        }
 
         try
         {
@@ -165,28 +186,5 @@ public class SettingsRepository : ISettingsRepository
         using FileStream stream = new(path, FileMode.Append, FileAccess.Write, FileShare.Read);
         byte[] bytes = Encoding.UTF8.GetBytes(line + "\n");
         stream.Write(bytes, 0, bytes.Length);
-    }
-
-    private static bool DecodeOnOff(string? raw) => string.Equals(raw, "on", StringComparison.Ordinal);
-
-    private static int DecodeBoundedInt(string? raw, int min, int max, int fallback)
-    {
-        if (string.IsNullOrEmpty(raw))
-            return fallback;
-
-        foreach (char ch in raw)
-        {
-            if (ch is < '0' or > '9')
-                return fallback;
-        }
-
-        if (int.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out int parsed)
-            && parsed >= min
-            && parsed <= max)
-        {
-            return parsed;
-        }
-
-        return fallback;
     }
 }

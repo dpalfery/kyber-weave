@@ -163,8 +163,14 @@ fn parse_server_record(text: &str) -> Option<Listening> {
     if api_version < crate::cli::MIN_API_VERSION {
         return None;
     }
+    let url_str = if let Some(url) = value.get("url").and_then(|v| v.as_str()) {
+        url.to_string()
+    } else {
+        let port = value.get("port").and_then(|v| v.as_u64())?;
+        format!("http://127.0.0.1:{port}")
+    };
     Some(Listening {
-        url: api::loopback_origin(value.get("url")?.as_str()?).ok()?,
+        url: api::loopback_origin(&url_str).ok()?,
         pid: u32::try_from(value.get("pid")?.as_u64()?).ok()?,
         // The record does not carry a release number; nothing reads it.
         version: String::new(),
@@ -848,6 +854,12 @@ mod tests {
 
         assert_eq!(parse_listening_line("  KyberDash dashboard at ..."), None);
         assert_eq!(parse_listening_line(r#"{"event":"something.else"}"#), None);
+        assert_eq!(
+            parse_listening_line(
+                r#"{"event":"kyberdash.web.attached","url":"http://127.0.0.1:4747","pid":4242,"version":"0.21.0","apiVersion":1}"#
+            ),
+            None
+        );
         assert_eq!(parse_listening_line(""), None);
     }
 
@@ -883,6 +895,12 @@ mod tests {
             .expect("a compatible record parses");
         assert_eq!(good.url, "http://127.0.0.1:4747");
         assert_eq!(good.pid, own_pid);
+
+        let with_port_only = format!(r#"{{"pid":{own_pid},"port":4747,"apiVersion":1}}"#);
+        let port_parsed = parse_server_record(&with_port_only).expect("port-only record parses");
+        assert_eq!(port_parsed.url, "http://127.0.0.1:4747");
+        assert_eq!(port_parsed.pid, own_pid);
+        assert_eq!(port_parsed.api_version, 1);
 
         let too_old = record(own_pid, "http://127.0.0.1:4747", 0);
         assert_eq!(parse_server_record(&too_old), None);

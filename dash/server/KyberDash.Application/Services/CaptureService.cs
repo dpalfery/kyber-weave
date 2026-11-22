@@ -32,18 +32,18 @@ public class CaptureService : ICaptureService
     public const string FactoryPluginRelativePath = "plugins/kyberdash";
 
     private readonly ISettingsRepository settings;
-    private readonly ICanonStoreRepository store;
+    private readonly IOperationalStore store;
     private readonly IServerStateRepository serverState;
 
     /// <summary>
     /// Initializes a new <see cref="CaptureService"/>.
     /// </summary>
     /// <param name="settings">Settings repository holding consent and status-line cache files.</param>
-    /// <param name="store">Canonical store holding the shared receiver switch.</param>
+    /// <param name="store">Operational store owning the receiver switch and capture state.</param>
     /// <param name="serverState">Server-state repository supplying the default state directory.</param>
     public CaptureService(
         ISettingsRepository settings,
-        ICanonStoreRepository store,
+        IOperationalStore store,
         IServerStateRepository serverState)
     {
         ArgumentNullException.ThrowIfNull(settings);

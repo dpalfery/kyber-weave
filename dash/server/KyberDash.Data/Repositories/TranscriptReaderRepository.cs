@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using KyberDash.Contracts.Repositories;
+using KyberDash.Data.Collector.Sources;
+using KyberDash.Data.Harnesses;
 using KyberDash.Domain;
 
 namespace KyberDash.Data.Repositories;
@@ -42,20 +44,43 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
     private const long MergeWindowMs = 60_000;
 
     private readonly string homeDirectory;
+    private readonly string stateDirectory;
+    private readonly IHarnessFileSystem fileSystem;
+    private readonly HarnessSourceRegistry sourceRegistry;
 
     /// <summary>Initializes a reader that discovers sources under the current user's home directory.</summary>
     public TranscriptReaderRepository()
-        : this(null)
+        : this(null, null, null)
     {
     }
 
     /// <summary>Initializes a reader whose source discovery starts from <paramref name="homeDirectory"/>.</summary>
     /// <param name="homeDirectory">Home directory holding <c>.claude</c> and <c>.codex</c>; defaults to the current user's.</param>
     public TranscriptReaderRepository(string? homeDirectory)
+        : this(homeDirectory, null, null)
     {
-        this.homeDirectory = string.IsNullOrWhiteSpace(homeDirectory)
-            ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
-            : Path.GetFullPath(homeDirectory);
+    }
+
+    /// <summary>Initializes a reader whose source discovery uses explicit home, filesystem seam, and optional state directory.</summary>
+    /// <param name="homeDirectory">Home directory holding local harness roots; defaults to the current user's.</param>
+    /// <param name="fileSystem">Filesystem seam used for discovery; defaults to <see cref="PhysicalHarnessFileSystem.Instance"/>.</param>
+    /// <param name="stateDirectory">KyberDash state directory holding caches; defaults to <c>.kyberdash</c> under <paramref name="homeDirectory"/> when provided, otherwise <see cref="ServerStateRepository.ResolveStateDirectory"/>.</param>
+    public TranscriptReaderRepository(
+        string? homeDirectory,
+        IHarnessFileSystem? fileSystem,
+        string? stateDirectory = null)
+    {
+        bool explicitHome = !string.IsNullOrWhiteSpace(homeDirectory);
+        this.homeDirectory = explicitHome
+            ? Path.GetFullPath(homeDirectory!)
+            : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        this.stateDirectory = !string.IsNullOrWhiteSpace(stateDirectory)
+            ? Path.GetFullPath(stateDirectory)
+            : explicitHome
+                ? Path.Combine(this.homeDirectory, CanonDbPath.DefaultDirectoryName)
+                : ServerStateRepository.ResolveStateDirectory();
+        this.fileSystem = fileSystem ?? PhysicalHarnessFileSystem.Instance;
+        sourceRegistry = new HarnessSourceRegistry();
     }
 
     /// <inheritdoc />
@@ -244,17 +269,35 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
     /// <inheritdoc />
     public IReadOnlyList<RefreshSourceInput> DiscoverLocalSources(DateTimeOffset? sinceUtc = null)
     {
-        List<RefreshSourceInput> sources = [];
-        sources.AddRange(DiscoverRoot(ClaudeRoot, ClaudeHarnessId, ClaudeProviderId, ClaudeParserId, ClaudeFormat, ReadClaudeEnvelopes, sinceUtc));
-        sources.AddRange(DiscoverRoot(CodexRoot, CodexHarnessId, CodexProviderId, CodexParserId, CodexFormat, ReadCodexEnvelopes, sinceUtc));
+        SourceDiscoveryContext context = new(homeDirectory, stateDirectory, fileSystem, sinceUtc);
+        SourceDiscoveryResult discovery = sourceRegistry.DiscoverAll(context);
+        List<RefreshSourceInput> sources = new(discovery.Sources.Count);
+
+        foreach (SourceUnit unit in discovery.Sources)
+        {
+            Func<IReadOnlyList<SourceRecordEnvelope>> loader = unit.HarnessId switch
+            {
+                ClaudeHarnessId => () => ReadClaudeEnvelopes(unit.SourceKey, unit.SourceKey, unit.RevisionToken, null, null, null),
+                CodexHarnessId => () => ReadCodexEnvelopes(unit.SourceKey, unit.SourceKey, unit.RevisionToken, null, null, null),
+                _ => static () => [],
+            };
+
+            sources.Add(new RefreshSourceInput
+            {
+                HarnessId = unit.HarnessId,
+                SourceKey = unit.SourceKey,
+                ProviderId = unit.ProviderId,
+                ParserId = unit.ParserId,
+                ParserContractVersion = unit.ParserContractVersion,
+                Format = unit.Format,
+                SourceRootLabel = unit.SourceRootLabel,
+                RevisionToken = unit.RevisionToken,
+                LoadEnvelopes = loader,
+            });
+        }
+
         return sources;
     }
-
-    /// <summary>Root directory holding Claude Code project transcripts.</summary>
-    private string ClaudeRoot => Path.Combine(homeDirectory, ".claude", "projects");
-
-    /// <summary>Root directory holding Codex CLI session transcripts.</summary>
-    private string CodexRoot => Path.Combine(homeDirectory, ".codex", "sessions");
 
     private static string NowIso() =>
         DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
@@ -294,101 +337,6 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
             return first;
 
         return [.. first.Concat(second).Distinct(StringComparer.Ordinal)];
-    }
-
-    private static IEnumerable<RefreshSourceInput> DiscoverRoot(
-        string root,
-        string harnessId,
-        string providerId,
-        string parserId,
-        string format,
-        Func<string, string?, string?, string?, DateTimeOffset?, DateTimeOffset?, IReadOnlyList<SourceRecordEnvelope>> loader,
-        DateTimeOffset? sinceUtc)
-    {
-        List<string> files = [];
-        try
-        {
-            if (!Directory.Exists(root))
-                return [];
-
-            EnumerationOptions options = new()
-            {
-                RecurseSubdirectories = true,
-                IgnoreInaccessible = true,
-                MatchCasing = MatchCasing.CaseInsensitive,
-                AttributesToSkip = FileAttributes.ReparsePoint,
-            };
-
-            files.AddRange(Directory.EnumerateFiles(root, "*.jsonl", options));
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
-        {
-            return [];
-        }
-
-        List<RefreshSourceInput> sources = [];
-        foreach (string file in files.Order(StringComparer.Ordinal))
-        {
-            string revision = RevisionTokenOf(file);
-            DateTimeOffset? written = ReadLastWriteUtc(file, revision);
-            if (sinceUtc.HasValue && written.HasValue && written.Value < sinceUtc.Value)
-                continue;
-
-            if (!sinceUtc.HasValue && !written.HasValue)
-                continue;
-
-            string fullPath = Path.GetFullPath(file);
-            string sourceKey = fullPath;
-            sources.Add(new RefreshSourceInput
-            {
-                HarnessId = harnessId,
-                SourceKey = sourceKey,
-                ProviderId = providerId,
-                ParserId = parserId,
-                ParserContractVersion = ParserContractVersion,
-                Format = format,
-                SourceRootLabel = Path.GetFileName(Path.GetDirectoryName(fullPath) ?? string.Empty),
-                RevisionToken = revision,
-                LoadEnvelopes = () => loader(fullPath, sourceKey, revision, null, null, null),
-            });
-        }
-
-        return sources;
-    }
-
-    /// <summary>
-    /// Revision fingerprint of one transcript file (<c>&lt;length&gt;-&lt;ticks&gt;</c>). A file that cannot be
-    /// inspected gets a token that never matches a previous run, so it is re-read rather than skipped.
-    /// </summary>
-    private static string RevisionTokenOf(string file)
-    {
-        try
-        {
-            FileInfo info = new(file);
-            if (!info.Exists)
-                return "missing";
-
-            return string.Create(CultureInfo.InvariantCulture, $"{info.Length}-{info.LastWriteTimeUtc.Ticks}");
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
-        {
-            return "unknown";
-        }
-    }
-
-    private static DateTimeOffset? ReadLastWriteUtc(string file, string revision)
-    {
-        if (string.Equals(revision, "missing", StringComparison.Ordinal) || string.Equals(revision, "unknown", StringComparison.Ordinal))
-            return null;
-
-        int dash = revision.IndexOf('-', StringComparison.Ordinal);
-        if (dash < 0 || !long.TryParse(revision[(dash + 1)..], NumberStyles.Integer, CultureInfo.InvariantCulture, out long ticks))
-            return null;
-
-        if (ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks)
-            return null;
-
-        return new DateTimeOffset(new DateTime(ticks, DateTimeKind.Utc));
     }
 
     private record ClaudeUsageLine(
@@ -1043,28 +991,11 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
         return ReadString(block, "text") ?? block.GetRawText();
     }
 
-    private static string? ReadCodexSystemPrompt(JsonElement payload)
-    {
-        string? direct = ReadString(payload, "system_prompt");
-        if (!string.IsNullOrEmpty(direct))
-            return direct;
+    private static string? ReadCodexSystemPrompt(JsonElement payload) =>
+        HarnessJson.ReadCodexSystemPrompt(payload);
 
-        if (payload.TryGetProperty("base_instructions", out JsonElement baseEl) && baseEl.ValueKind == JsonValueKind.Object)
-            return ReadString(baseEl, "text");
-
-        return null;
-    }
-
-    private static string? ReadCodexAgentsMd(JsonElement payload)
-    {
-        if (!payload.TryGetProperty("state", out JsonElement stateEl) || stateEl.ValueKind != JsonValueKind.Object)
-            return null;
-
-        if (!stateEl.TryGetProperty("agents_md", out JsonElement agentsEl) || agentsEl.ValueKind != JsonValueKind.Object)
-            return null;
-
-        return ReadString(agentsEl, "text");
-    }
+    private static string? ReadCodexAgentsMd(JsonElement payload) =>
+        HarnessJson.ReadCodexAgentsMd(payload);
 
     private static long? ReadCodexContextWindow(JsonElement payload)
     {
@@ -1185,45 +1116,15 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
         return true;
     }
 
-    private static string? ReadString(JsonElement obj, string key)
-    {
-        if (!obj.TryGetProperty(key, out JsonElement el) || el.ValueKind != JsonValueKind.String)
-            return null;
-
-        string? val = el.GetString();
-        return string.IsNullOrEmpty(val) ? null : val;
-    }
+    private static string? ReadString(JsonElement obj, string key) =>
+        HarnessJson.ReadString(obj, key);
 
     private static long ReadLong(JsonElement obj, string key) =>
         TryReadLong(obj, key, out long val) ? val : 0L;
 
-    private static bool TryReadLong(JsonElement obj, string key, out long value)
-    {
-        value = 0L;
-        if (!obj.TryGetProperty(key, out JsonElement el) || el.ValueKind != JsonValueKind.Number)
-            return false;
+    private static bool TryReadLong(JsonElement obj, string key, out long value) =>
+        HarnessJson.TryReadLong(obj, key, out value);
 
-        if (el.TryGetInt64(out long i))
-        {
-            value = i;
-            return true;
-        }
-
-        if (el.TryGetDouble(out double d) && double.IsFinite(d))
-        {
-            value = (long)d;
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool TryReadInt(JsonElement obj, string key, out int value)
-    {
-        value = 0;
-        if (!obj.TryGetProperty(key, out JsonElement el) || el.ValueKind != JsonValueKind.Number)
-            return false;
-
-        return el.TryGetInt32(out value);
-    }
+    private static bool TryReadInt(JsonElement obj, string key, out int value) =>
+        HarnessJson.TryReadInt(obj, key, out value);
 }

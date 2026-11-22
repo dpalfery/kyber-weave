@@ -401,6 +401,7 @@ The sections named here are sections of this file. Only the technologies with a 
 | python | `*.py` and embedded Python | 2, 3, 4, 5, 12 |
 | react | `*.tsx`, `*.jsx`, React UI `.ts` | 1, 2, 8 |
 | sql | `*.sql`, migrations | 4, 6 |
+| sqlite | `**/Sqlite*.cs`, `**/BaseSqliteRepository.cs`, `dash/server/KyberDash.Domain/Schema/**` | 4, 6 |
 | typescript | Node `*.ts`, `*.mts`, `*.cts`, `*.mjs` outside a React UI | 1, 2, 3, 4, 5, 6, 10, 12, 13, 14 |
 | rust | `*.rs`, `Cargo.toml`, `build.rs` outside Tauri | 3, 6 (no Kilo evidence) |
 | tauri | `src-tauri/**`, IPC, capabilities | 6, 12 (no Kilo evidence; also load the rust and react rows) |

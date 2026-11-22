@@ -13,7 +13,7 @@ public static class CanonValidation
     /// <summary>Maximum UTF-8 byte length stored for a single collapsed content part (64 KiB).</summary>
     public const int MaxContentPartBytes = 64 * 1024;
 
-    /// <summary>Maximum UTF-16 character length stored for a quarantine <c>raw_payload</c> column (256 Ki chars).</summary>
+    /// <summary>Maximum UTF-16 character length stored for a quarantine bounded quarantine evidence (256 Ki chars).</summary>
     public const int MaxQuarantineRawPayloadChars = 256 * 1024;
 
     /// <summary>Problem code emitted when <c>freshInput &lt; 0</c> after convention conversion.</summary>
@@ -108,7 +108,7 @@ public static class CanonValidation
     }
 
     /// <summary>
-    /// Bounds a serialized decoded-span JSON payload for <c>quarantine.raw_payload</c>, appending a
+    /// Bounds a serialized decoded-span JSON payload for <c>quarantine</c> evidence, appending a
     /// truncation marker when <paramref name="json"/> exceeds <see cref="MaxQuarantineRawPayloadChars"/>.
     /// </summary>
     public static string BoundRawPayload(string json)
