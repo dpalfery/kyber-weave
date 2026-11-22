@@ -110,6 +110,15 @@ public sealed class ReviewGatesFixRunTests : IDisposable
         Assert.False(_services.Files.FileExists(Path.Combine(_repo, TaskGateNextStep.PassingReportPath("t1"))));
     }
 
+    [Fact]
+    public void APunctuationOnlyTaskIsRefusedWithTheBadTaskMessageInsteadOfThrowing()
+    {
+        CapturedConsoleExecution<int> run = Gates("--agent", "csharp-dev", "--task", "!!!", "--paths", TaskFile);
+
+        Assert.Equal(1, run.Result);
+        Assert.Contains("--task '!!!' is not a valid lookup name", run.Output, StringComparison.Ordinal);
+    }
+
     /// <summary>Runs <c>review gates</c> on the repository with the default human output, so the next-step lines print.</summary>
     private CapturedConsoleExecution<int> Gates(params string[] options) =>
         _services.Run(_services.ReviewGatesApp(), ["review", "gates", _repo, .. options]);

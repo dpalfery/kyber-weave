@@ -635,12 +635,15 @@ public sealed class ReviewGatesService(
 
         // The report goes where the Arbiter reads the evidence. A --fix run that changes a task file never counts,
         // so it writes none by default; one that changes nothing counts, and writes the passing report below.
-        string? outPath = request.Out;
-        if (outPath is null && taskSlug is not null && !request.Fix)
-            outPath = Path.Combine(root, request.Red ? TaskGateNextStep.FailingReportPath(taskSlug) : TaskGateNextStep.PassingReportPath(taskSlug));
-
-        if (taskGates.ValidateTask(taskSlug) is { } taskProblem)
+        // The task is validated before its report path is built: a punctuation-only id normalises to nothing,
+        // so building the path first would throw instead of refusing the run with the bad --task message.
+        string? taskProblem = taskGates.ValidateTask(taskSlug);
+        if (taskProblem is not null)
             refusals.Add(taskProblem);
+
+        string? outPath = request.Out;
+        if (outPath is null && taskSlug is not null && !request.Fix && taskProblem is null)
+            outPath = Path.Combine(root, request.Red ? TaskGateNextStep.FailingReportPath(taskSlug) : TaskGateNextStep.PassingReportPath(taskSlug));
 
         foreach (string path in paths)
             if (taskGates.ValidatePath(root, path) is { } pathProblem)

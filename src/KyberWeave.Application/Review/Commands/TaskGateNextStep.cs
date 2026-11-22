@@ -40,7 +40,7 @@ public static class TaskGateNextStep
                 NextPrefix + "the failing run is recorded; do not paste its lines into the digest. Implement the task, " +
                 "then run the passing run:",
                 "  " + (fromPlan && task is not null
-                    ? $"kyber-weave review gates . --agent {agent} --task {Slug(task)}"
+                    ? $"kyber-weave review gates . --agent {Quoted(agent)} --task {Slug(task)}"
                     : Command(agent, paths, task, PassingReportPath(task ?? "<task-id>"))),
             ]
             : [
@@ -119,7 +119,7 @@ public static class TaskGateNextStep
     {
         string files = paths.Count > 0 ? string.Join(' ', paths.Select(path => "--paths " + Quoted(path))) : "--paths <file>";
         string taskWord = task is null ? "<task-id>" : Slug(task);
-        return $"kyber-weave review gates . --agent {agent} {files} --task {taskWord} --out {outPath}";
+        return $"kyber-weave review gates . --agent {Quoted(agent)} {files} --task {taskWord} --out {outPath}";
     }
 
     /// <summary>The task's slug, which names its scratch folder. A value that leaves none is refused, never written to a guessed folder.</summary>
