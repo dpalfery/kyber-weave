@@ -99,6 +99,24 @@ public class OtlpCollectorServiceTests
     }
 
     [Fact]
+    public async Task FailureWindowStopsGrowingPastItsCap()
+    {
+        Harness harness = new();
+        byte[] payload = Encoding.UTF8.GetBytes("{\"resourceSpans\": 5}");
+
+        for (int i = 0; i < 1100; i++)
+        {
+            await Assert.ThrowsAsync<OtlpDecodeException>(() => harness.Collector.AdmitTracesAsync(
+                payload,
+                "application/json",
+                TestContext.Current.CancellationToken));
+        }
+
+        int counted = harness.Collector.CountFailuresSince(DateTimeOffset.UtcNow.AddMinutes(-5));
+        Assert.Equal(1024, counted);
+    }
+
+    [Fact]
     public async Task UnsupportedContentTypeIsRefusedWithoutDecoding()
     {
         Harness harness = new();

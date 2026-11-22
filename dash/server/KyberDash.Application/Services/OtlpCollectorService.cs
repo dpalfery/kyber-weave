@@ -39,6 +39,8 @@ public class OtlpCollectorService : IOtlpCollectorService
     private readonly Lock stateGate = new();
     private readonly CancellationTokenSource flushShutdown = new();
     private readonly SemaphoreSlim flushWake = new(0, 1);
+    private const int FailureWindowCapacity = 1024;
+
     private readonly Queue<DateTimeOffset> failureTimes = new();
     private Task? flushLoop;
     private bool paused;
@@ -151,6 +153,7 @@ public class OtlpCollectorService : IOtlpCollectorService
     {
         lock (stateGate)
         {
+            PruneFailures(DateTimeOffset.UtcNow.AddMinutes(-5));
             int count = 0;
             foreach (DateTimeOffset at in failureTimes)
             {
@@ -396,6 +399,12 @@ public class OtlpCollectorService : IOtlpCollectorService
         return admission;
     }
 
+    private void PruneFailures(DateTimeOffset cutoff)
+    {
+        while (failureTimes.Count > 0 && failureTimes.Peek() < cutoff)
+            _ = failureTimes.Dequeue();
+    }
+
     /// <summary>Records one rejected batch so coverage can count a real five-minute window.</summary>
     private void NoteFailure(string code, string message)
     {
@@ -403,8 +412,8 @@ public class OtlpCollectorService : IOtlpCollectorService
         {
             DateTimeOffset now = DateTimeOffset.UtcNow;
             failureTimes.Enqueue(now);
-            DateTimeOffset cutoff = now.AddMinutes(-5);
-            while (failureTimes.Count > 0 && failureTimes.Peek() < cutoff)
+            PruneFailures(now.AddMinutes(-5));
+            while (failureTimes.Count > FailureWindowCapacity)
                 _ = failureTimes.Dequeue();
 
             lastErrorCode = code;
