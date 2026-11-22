@@ -284,8 +284,10 @@ public interface ISettingsService
 /// <summary>Capture plugin installation, consent, and statusline event service contract.</summary>
 public interface ICaptureService
 {
-    /// <summary>Returns capture receiver and plugin status payload.</summary>
-    JsonElement GetCaptureStatus(string stateDir);
+    /// <summary>Returns capture receiver and plugin status. <paramref name="otlpPort"/> is the collector port to advertise, when the host knows it.</summary>
+    /// <param name="stateDir">State directory holding consent.</param>
+    /// <param name="otlpPort">Configured collector port, or <see langword="null"/> when this caller has none.</param>
+    JsonElement GetCaptureStatus(string stateDir, int? otlpPort = null);
 
     /// <summary>Applies capture consent or configuration update from REST payload.</summary>
     JsonElement ConfigureCapture(JsonElement body, string stateDir);

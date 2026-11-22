@@ -1,8 +1,10 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
 using KyberDash.Core.Exceptions;
+using KyberDash.Data.Collector.Sources;
 using KyberDash.Domain;
 
 namespace KyberDash.Application;
@@ -36,6 +38,8 @@ public class CaptureService : ICaptureService
     private readonly ISettingsRepository settings;
     private readonly IOperationalStore store;
     private readonly IServerStateRepository serverState;
+    private readonly IHarnessFileSystem files;
+    private readonly Func<string> homeDirectory;
 
     /// <summary>
     /// Initializes a new <see cref="CaptureService"/>.
@@ -43,10 +47,14 @@ public class CaptureService : ICaptureService
     /// <param name="settings">Settings repository holding consent and status-line cache files.</param>
     /// <param name="store">Operational store owning the receiver switch and capture state.</param>
     /// <param name="serverState">Server-state repository supplying the default state directory.</param>
+    /// <param name="files">Filesystem seam for harness config probes. The process filesystem is used when omitted.</param>
+    /// <param name="homeDirectory">Home directory the probes are rooted at. The operator profile is used when omitted.</param>
     public CaptureService(
         ISettingsRepository settings,
         IOperationalStore store,
-        IServerStateRepository serverState)
+        IServerStateRepository serverState,
+        IHarnessFileSystem? files = null,
+        Func<string>? homeDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(store);
@@ -55,36 +63,53 @@ public class CaptureService : ICaptureService
         this.settings = settings;
         this.store = store;
         this.serverState = serverState;
+        this.files = files ?? PhysicalHarnessFileSystem.Instance;
+        this.homeDirectory = homeDirectory ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
     }
 
     /// <inheritdoc />
-    public JsonElement GetCaptureStatus(string stateDir)
+    public JsonElement GetCaptureStatus(string stateDir, int? otlpPort = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(stateDir);
 
         SettingsView current = settings.ReadSettings();
         bool factoryConsent = settings.ReadFactoryContentConsent(stateDir);
         string platform = OperatingSystem.IsMacOS() ? "darwin" : OperatingSystem.IsWindows() ? "win32" : "linux";
+        string endpoint = otlpPort is > 0
+            ? string.Create(CultureInfo.InvariantCulture, $"http://127.0.0.1:{otlpPort.Value}")
+            : "the configured collector port";
 
         var receiver = new
         {
             hosted = current.ReceiverHosted,
-            liveness = current.ReceiverHosted ? "kyberdash" : "none",
+            liveness = "unknown",
             detail = current.ReceiverHosted
-                ? $"KyberDash receiver is listening at http://127.0.0.1:{OtlpCollector.DefaultOtlpPort}"
+                ? $"KyberDash receiver hosting is requested at {endpoint}; liveness was not probed"
                 : "this KyberDash server does not host the OTLP receiver; liveness was not probed",
         };
 
         List<HarnessStatusView> harnessesList = BuildHarnessStatuses(factoryConsent);
         int enabledCount = harnessesList.Count(static h => h.State == "on");
+        int attention = harnessesList.Count(static h => h.State == "unknown" || h.Health == "attention");
+        int issueCount = harnessesList.Sum(static h => h.Issues.Count);
+        bool statusOnlyDetected = harnessesList.Exists(static h => h.Mode == "status-only" && h.Installed == "detected");
+        string health = attention > 0 || issueCount > 0
+            ? "attention"
+            : !current.ReceiverHosted && enabledCount > 0
+                ? "attention"
+                : current.ReceiverHosted && enabledCount > 0
+                    ? "ok"
+                    : statusOnlyDetected
+                        ? "attention"
+                        : "off";
 
         var check = new
         {
             checkedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
-            health = enabledCount > 0 ? "ok" : "off",
+            health,
             enabled = enabledCount,
-            attention = 0,
-            issueCount = 0,
+            attention,
+            issueCount,
         };
 
         return JsonSerializer.SerializeToElement(new
@@ -102,93 +127,59 @@ public class CaptureService : ICaptureService
         }, CamelCaseOptions);
     }
 
-    private static List<HarnessStatusView> BuildHarnessStatuses(bool factoryConsent)
+    private List<HarnessStatusView> BuildHarnessStatuses(bool factoryConsent)
     {
-        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string home = homeDirectory();
         List<HarnessStatusView> list = [];
 
-        // 1. Copilot
         string copilotPath = OperatingSystem.IsMacOS()
             ? Path.Combine(home, "Library", "Application Support", "Code", "User", "settings.json")
             : OperatingSystem.IsWindows()
                 ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Code", "User", "settings.json")
                 : Path.Combine(home, ".config", "Code", "User", "settings.json");
-        bool copilotExists = File.Exists(copilotPath);
-        bool copilotOn = false;
-        if (copilotExists)
-        {
-            try
-            {
-                string text = File.ReadAllText(copilotPath);
-                copilotOn = text.Contains("\"github.copilot.chat.otel.enabled\": true", StringComparison.OrdinalIgnoreCase)
-                    || text.Contains("\"github.copilot.chat.otel.enabled\":true", StringComparison.OrdinalIgnoreCase);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-        }
-        list.Add(new HarnessStatusView(
-            Id: "copilot",
-            DisplayName: "Copilot",
-            Mode: "managed",
-            Installed: copilotExists ? "detected" : "not-detected",
-            InstallEvidence: copilotExists ? [$"VS Code settings found at {copilotPath}"] : [$"VS Code settings not found at {copilotPath}"],
-            State: copilotOn ? "on" : "off",
-            Receipt: "absent",
-            Files: copilotExists ? [new HarnessFileView("vscode-settings", copilotPath, true, true, ["github.copilot.chat.otel.enabled"], copilotOn ? ["github.copilot.chat.otel.enabled"] : [], copilotOn ? [] : ["github.copilot.chat.otel.enabled"], [], null)] : [],
-            Warnings: [],
-            ManualSteps: [],
-            StatusLines: copilotOn ? ["OTLP export: enabled"] : ["OTLP export: disabled"],
-            Health: copilotOn ? "ok" : "off",
-            Issues: []
-        ));
+        list.Add(DescribeManagedFile(
+            "copilot",
+            "Copilot",
+            copilotPath,
+            "VS Code settings",
+            "github.copilot.chat.otel.enabled",
+            static root => JsonBoolean(root, "github.copilot.chat.otel.enabled") == true));
 
-        // 2. Claude Code
         string claudePath = Path.Combine(home, ".claude", "settings.json");
-        bool claudeExists = File.Exists(claudePath);
-        bool claudeOn = false;
-        if (claudeExists)
-        {
-            try
-            {
-                string text = File.ReadAllText(claudePath);
-                claudeOn = text.Contains("OTEL_EXPORTER_OTLP_ENDPOINT", StringComparison.OrdinalIgnoreCase)
-                    || text.Contains("OTEL_LOGS_EXPORTER", StringComparison.OrdinalIgnoreCase);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-        }
-        list.Add(new HarnessStatusView(
-            Id: "claude-code",
-            DisplayName: "Claude Code",
-            Mode: "managed",
-            Installed: claudeExists ? "detected" : "not-detected",
-            InstallEvidence: claudeExists ? [$"config found at {claudePath}"] : [$"no config found at {claudePath}"],
-            State: claudeOn ? "on" : "off",
-            Receipt: "absent",
-            Files: claudeExists ? [new HarnessFileView("claude-settings", claudePath, true, true, ["env.OTEL_EXPORTER_OTLP_ENDPOINT"], claudeOn ? ["env.OTEL_EXPORTER_OTLP_ENDPOINT"] : [], claudeOn ? [] : ["env.OTEL_EXPORTER_OTLP_ENDPOINT"], [], null)] : [],
-            Warnings: [],
-            ManualSteps: [],
-            StatusLines: claudeOn ? ["OTLP export: enabled"] : ["OTLP export: disabled"],
-            Health: claudeOn ? "ok" : "off",
-            Issues: []
-        ));
+        list.Add(DescribeManagedFile(
+            "claude-code",
+            "Claude Code",
+            claudePath,
+            "config",
+            "env.OTEL_EXPORTER_OTLP_ENDPOINT",
+            static root => ClaudePointsAtLoopback(root)));
 
-        // 3. OpenCode
         string opencodeConfig = Path.Combine(home, ".config", "opencode", "opencode.jsonc");
         string opencodePlugin = Path.Combine(home, ".config", "opencode", "plugins", "kyberdash.ts");
-        bool opencodeInstalled = File.Exists(opencodeConfig) || File.Exists(opencodePlugin);
-        bool opencodeOn = File.Exists(opencodePlugin);
+        bool opencodeConfigExists = files.FileExists(opencodeConfig);
+        bool opencodePluginExists = files.FileExists(opencodePlugin);
+        List<string> opencodeEvidence = [];
+        if (opencodeConfigExists)
+            opencodeEvidence.Add($"config found at {opencodeConfig}");
+        if (opencodePluginExists)
+            opencodeEvidence.Add($"plugin found at {opencodePlugin}");
+        if (opencodeEvidence.Count == 0)
+            opencodeEvidence.Add($"no config found at {opencodeConfig}");
+
+        // OpenCode enable is the plugin file. The product does not write an OTLP key into opencode.jsonc.
         list.Add(new HarnessStatusView(
             Id: "opencode",
             DisplayName: "OpenCode",
             Mode: "managed",
-            Installed: opencodeInstalled ? "detected" : "not-detected",
-            InstallEvidence: opencodeInstalled ? [$"config found at {opencodeConfig}"] : [$"no config found at {opencodeConfig}"],
-            State: opencodeOn ? "on" : "off",
+            Installed: opencodeConfigExists || opencodePluginExists ? "detected" : "not-detected",
+            InstallEvidence: opencodeEvidence,
+            State: opencodePluginExists ? "on" : "off",
             Receipt: "absent",
             Files: [],
             Warnings: [],
             ManualSteps: [],
-            StatusLines: opencodeOn ? ["plugin: installed"] : ["plugin: not installed"],
-            Health: opencodeOn ? "ok" : "off",
+            StatusLines: opencodePluginExists ? ["plugin: installed"] : ["plugin: not installed"],
+            Health: opencodePluginExists ? "ok" : "off",
             Issues: []
         ));
 
@@ -252,6 +243,188 @@ public class CaptureService : ICaptureService
         ));
 
         return list;
+    }
+
+    private HarnessStatusView DescribeManagedFile(
+        string id,
+        string displayName,
+        string path,
+        string evidenceNoun,
+        string key,
+        Func<JsonElement, bool> enabled)
+    {
+        (FileProbe probe, string text) = ProbeFile(path);
+        if (probe == FileProbe.Missing)
+        {
+            return new HarnessStatusView(
+                Id: id,
+                DisplayName: displayName,
+                Mode: "managed",
+                Installed: "not-detected",
+                InstallEvidence: [$"{evidenceNoun} not found at {path}"],
+                State: "off",
+                Receipt: "absent",
+                Files: [],
+                Warnings: [],
+                ManualSteps: [],
+                StatusLines: ["OTLP export: disabled"],
+                Health: "off",
+                Issues: []);
+        }
+
+        if (probe == FileProbe.Unreadable)
+        {
+            object warning = new { code = "unreadable", severity = "warning", text = $"{evidenceNoun} at {path} could not be read" };
+            return new HarnessStatusView(
+                Id: id,
+                DisplayName: displayName,
+                Mode: "managed",
+                Installed: "detected",
+                InstallEvidence: [$"{evidenceNoun} found at {path}"],
+                State: "unknown",
+                Receipt: "absent",
+                Files: [new HarnessFileView(id, path, true, true, [key], [], [key], [], null)],
+                Warnings: [warning],
+                ManualSteps: [],
+                StatusLines: ["OTLP export: unknown"],
+                Health: "attention",
+                Issues: [warning]);
+        }
+
+        bool on = false;
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(StripJsonComments(text));
+            on = document.RootElement.ValueKind == JsonValueKind.Object && enabled(document.RootElement);
+        }
+        catch (JsonException)
+        {
+            on = false;
+        }
+
+        return new HarnessStatusView(
+            Id: id,
+            DisplayName: displayName,
+            Mode: "managed",
+            Installed: "detected",
+            InstallEvidence: [$"{evidenceNoun} found at {path}"],
+            State: on ? "on" : "off",
+            Receipt: "absent",
+            Files: [new HarnessFileView(id, path, true, true, [key], on ? [key] : [], on ? [] : [key], [], null)],
+            Warnings: [],
+            ManualSteps: [],
+            StatusLines: on ? ["OTLP export: enabled"] : ["OTLP export: disabled"],
+            Health: on ? "ok" : "off",
+            Issues: []);
+    }
+
+    private (FileProbe Probe, string Text) ProbeFile(string path)
+    {
+        if (!files.FileExists(path))
+            return (FileProbe.Missing, string.Empty);
+
+        try
+        {
+            return (FileProbe.Text, files.ReadAllText(path));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return (FileProbe.Unreadable, string.Empty);
+        }
+    }
+
+    /// <summary>Removes <c>//</c> and <c>/* */</c> comments that sit outside JSON strings.</summary>
+    /// <param name="text">JSON or JSONC text.</param>
+    /// <returns>Text a JSON parser can read.</returns>
+    internal static string StripJsonComments(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        StringBuilder output = new(text.Length);
+        bool inString = false;
+        bool escape = false;
+        for (int i = 0; i < text.Length; i++)
+        {
+            char current = text[i];
+            if (inString)
+            {
+                output.Append(current);
+                if (escape)
+                    escape = false;
+                else if (current == '\\')
+                    escape = true;
+                else if (current == '"')
+                    inString = false;
+                continue;
+            }
+
+            if (current == '"')
+            {
+                inString = true;
+                output.Append(current);
+                continue;
+            }
+
+            if (current == '/' && i + 1 < text.Length && text[i + 1] == '/')
+            {
+                while (i < text.Length && text[i] != '\n')
+                    i++;
+
+                output.Append('\n');
+                continue;
+            }
+
+            if (current == '/' && i + 1 < text.Length && text[i + 1] == '*')
+            {
+                i += 2;
+                while (i + 1 < text.Length && !(text[i] == '*' && text[i + 1] == '/'))
+                    i++;
+
+                if (i + 1 < text.Length)
+                    i++;
+                continue;
+            }
+
+            output.Append(current);
+        }
+
+        return output.ToString();
+    }
+
+    private static bool? JsonBoolean(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out JsonElement value))
+            return null;
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => null,
+        };
+    }
+
+    private static bool ClaudePointsAtLoopback(JsonElement root)
+    {
+        if (!root.TryGetProperty("env", out JsonElement env) || env.ValueKind != JsonValueKind.Object)
+            return false;
+
+        if (!env.TryGetProperty("OTEL_EXPORTER_OTLP_ENDPOINT", out JsonElement endpoint)
+            || endpoint.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        string value = endpoint.GetString() ?? string.Empty;
+        return Uri.TryCreate(value, UriKind.Absolute, out Uri? uri)
+            && uri.IsLoopback
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+    }
+
+    private enum FileProbe
+    {
+        Missing,
+        Unreadable,
+        Text,
     }
 
     /// <summary>File-level status entry for harness configuration.</summary>
