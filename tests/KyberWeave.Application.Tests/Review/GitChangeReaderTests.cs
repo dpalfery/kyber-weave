@@ -210,6 +210,26 @@ public sealed class GitChangeReaderTests
         Assert.Equal("feature/x", Reader().CurrentBranch(Root));
     }
 
+    /// <summary>A fix packet's commits section names the paths after <c>--</c>, so a path is never read as an option.</summary>
+    [Fact]
+    public void LogOnelineAsksForTheCommitsOnTheGivenPathsAfterTheGivenCommit()
+    {
+        _ = _git.Script(
+            "git",
+            new ProcessRunResult(0, "abc1234 one fix\ndef5678 another\n", false),
+            "log",
+            "--oneline",
+            "--no-color",
+            "abc1234..HEAD",
+            "--",
+            "src/a.cs",
+            "src/b.cs");
+
+        IReadOnlyList<string> commits = Reader().LogOneline(Root, "abc1234", ["src/a.cs", "src/b.cs"]);
+
+        Assert.Equal(["abc1234 one fix", "def5678 another"], commits);
+    }
+
     [Fact]
     public void ADetachedHeadHasNoCurrentBranch()
     {

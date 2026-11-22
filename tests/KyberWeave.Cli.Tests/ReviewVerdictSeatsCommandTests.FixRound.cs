@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
 using Xunit;
@@ -422,6 +423,77 @@ public sealed partial class ReviewVerdictSeatsCommandTests
         // The next cycle's recheck is this document filtered by the fix level (ReviewCycleSelector.ReadRecheck).
         Assert.Empty(stored.Findings);
         Assert.DoesNotContain(stored.Findings, new ReviewPolicy().FixRoundTakes);
+    }
+
+    /// <summary>
+    /// A round that continues writes one ready packet beside the cycle's findings and prints its dispatch block, so the
+    /// conductor sends it unchanged instead of paraphrasing the <c>fix:</c> line.
+    /// </summary>
+    [Fact]
+    public void AContinuingRoundWritesOneFixPacketAndPrintsItsDispatchBlock()
+    {
+        string cycle = CycleFolder(3);
+        _services.Cycles.WriteIdentity(cycle, Identity);
+        WriteFile("repo/docs/plans/demo.md", "---\nid: demo\ntitle: Demo\ndoc-type: plan\nstatus: Ready\n---\n\n# Demo\n");
+        WriteFile(
+            "repo/docs/plans/demo.tasks.yml",
+            "schema-version: 1\nplan: docs/plans/demo.md\ntasks:\n  - id: T1\n    files:\n      - src/Foo.cs\n");
+        ScriptChange("docs/plans/demo.md", "src/Foo.cs");
+        WriteSeat("correctness", FindingSeat(severity: "major"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--out", Path.Combine(cycle, "findings.json"), .. NotSeatedExcept("correctness")]);
+
+        Assert.Contains(MessagesWithCode(run.Output, FixRound), block =>
+            block.StartsWith("--- fix T1 ---", StringComparison.Ordinal)
+            && block.Contains("KYBER-ARBITER: true", StringComparison.Ordinal)
+            && block.Contains("PLAN_FILE: docs/plans/demo.md", StringComparison.Ordinal)
+            && block.Contains("TASK: T1", StringComparison.Ordinal)
+            && block.Contains($"Fix packet: {Path.Combine(cycle, "fix-packets", "T1.md")}", StringComparison.Ordinal)
+            && block.EndsWith("--- end ---", StringComparison.Ordinal));
+        Assert.True(_services.Files.FileExists(Path.Combine(cycle, "fix-packets", "T1.md")));
+    }
+
+    /// <summary>A clean review sends nothing to a fix round, so it writes no packet.</summary>
+    [Fact]
+    public void ACleanRoundWritesNoFixPackets()
+    {
+        string cycle = CycleFolder(3);
+        _services.Cycles.WriteIdentity(cycle, Identity);
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--out", Path.Combine(cycle, "findings.json"), .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.False(_services.Files.DirectoryExists(Path.Combine(cycle, "fix-packets")));
+    }
+
+    /// <summary>A capped loop sends its findings to human review, so it writes no packet either.</summary>
+    [Fact]
+    public void ACappedRoundWritesNoFixPackets()
+    {
+        WriteCycles(Minors(4), Minors(3), Minors(2), Minors(1));
+        string cycle = CycleFolder(5);
+        _services.Cycles.WriteIdentity(cycle, Identity);
+        WriteSeat("security", FindingSeat(lens: "security", id: "security/m1", severity: "minor"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", CycleFolder(4), "--out", Path.Combine(cycle, "findings.json"),
+                .. NotSeatedExcept("security")]);
+
+        Assert.Contains(MessagesWithCode(run.Output, FixRound), line => line.StartsWith("open:", StringComparison.Ordinal));
+        Assert.False(_services.Files.DirectoryExists(Path.Combine(cycle, "fix-packets")));
+    }
+
+    /// <summary>Scripts the change the packet writer reads: a merge base, the changed paths and no untracked file.</summary>
+    private void ScriptChange(params string[] paths)
+    {
+        string status = string.Concat(paths.Select(path => $"M\0{path}\0"));
+        _ = _services.Processes
+            .Script("git", new ProcessRunResult(0, "base123\n", false), "merge-base", "origin/HEAD", "HEAD")
+            .Script("git", new ProcessRunResult(0, status, false), "diff", "-z", "--name-status", "-M", "--relative", "base123", "--")
+            .Script("git", new ProcessRunResult(0, string.Empty, false), "ls-files", "-z", "--others", "--exclude-standard", "--");
     }
 
     private string CycleFolder(int number) => Path.Combine(_services.Root, "cycles", $"cycle-{number}");

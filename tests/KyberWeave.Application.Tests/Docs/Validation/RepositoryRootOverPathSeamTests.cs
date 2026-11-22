@@ -196,5 +196,7 @@ public sealed class RepositoryRootOverPathSeamTests
             (string.Empty, string.Empty);
 
         public string DiffSince(string workingDirectory, string commit) => string.Empty;
+
+        public IReadOnlyList<string> LogOneline(string workingDirectory, string fromCommit, IReadOnlyList<string> paths) => [];
     }
 }

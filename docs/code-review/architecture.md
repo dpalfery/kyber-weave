@@ -32,6 +32,7 @@ code-refs:
   - SeatOutputParser
   - CitedLineCheck
   - ReviewEvidence
+  - FixPacketWriter
 sections:
   "#":
     keywords:
@@ -1129,6 +1130,18 @@ when the fix refuses its whole class: the verifier states the class in one sente
 least three other inputs of that class that the original failure scenario did not name, and
 traces each through the fix. A fix that refuses only the input the finding named leaves the
 finding open.
+
+**Fix packets.** When a round continues, `review verdict` writes one packet per owning group into the
+cycle's `fix-packets/` folder through the file-system seam and prints one dispatch block for each, after
+the `fix:` lines. The groups are the plan's tasks: a finding goes to the task whose `files` scope names
+its file, by exact path or by a listed directory prefix; a finding on a `*.md` file goes to `docs`; a
+file no task lists, and every failed blocking gate, go to `unassigned`. Each packet carries, in one
+place, the rules a fix worker follows, the full record of its findings, every earlier cycle's finding on
+the same files (`## History on these files`) and the commits already made there since cycle 1
+(`git log --oneline <cycle 1 head>..HEAD -- <files>`). The block names the plan, the task, the
+`docs-dev` agent for `docs`, or who must assign `unassigned`, and the packet's absolute path. The
+conductor sends that block unchanged, so a fix worker reads the findings themselves rather than a
+paraphrase of the `fix:` lines; `FixPacketWriter` is the one writer.
 
 The loop has a hard stop: 5 review cycles, or 3 cycles in a row in which the count of
 findings to fix (the `fix:` lines, whatever the fix level makes fixable) does not fall; `review verdict` applies it and prints
