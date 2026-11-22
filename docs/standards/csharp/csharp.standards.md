@@ -172,6 +172,20 @@ Consequences worth stating:
   report and then never exit ([ADR 0075](../../adr/0075-inspectcode-is-removed-from-the-squad.md)).
   Static analysis is the compiler and analyzer warnings from the build gate.
 
+### Build files
+
+- Never write generated files into the source tree during a build, or leave a property
+  condition unquoted (`'$(Prop)' == 'true'`).
+
+### Build diagnostics
+
+- Rebuilds with nothing changed: `dotnet build -v:diagnostic -fl -flp:logfile=diag.log`, then
+  search for `Building target '<T>' completely` and `Input file ... is newer than output file`.
+- Slow build: `dotnet build -fl -flp:logfile=perf.log;performancesummary` for target and task
+  timings, or `dotnet build /bl:build.binlog` and open it in the MSBuild Structured Log Viewer.
+- Several CLI commands in one job: set `DOTNET_CLI_USE_MSBUILD_SERVER=1` so MSBuild Server stays
+  warm between them. It is opt-in before the .NET 11 SDK and gains little in a one-command job.
+
 ## Security and data handling
 
 ### Safe filesystem enumeration
@@ -206,12 +220,6 @@ Shelling out to an external CLI binary for application database queries introduc
 - Large payloads must be streamed across standard I/O pipes and re-parsed, creating artificial memory bottlenecks.
 
 The `sqlite3` CLI is permitted only for isolated, out-of-process developer maintenance tools or decoupled indexers (such as reading an external CodeGraph repository index). All runtime application-level database interaction must use managed in-process database providers.
-
-### Logging
-
-Strip newlines and tabs from a user-supplied value before it is logged, and log with
-message-template placeholders, never string concatenation. A user identifier in a log is
-pseudonymous or policy-approved, never raw PII.
 
 ## Done checklist
 

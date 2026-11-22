@@ -39,12 +39,3 @@ Editing anything under `docs/` means re-running both gates:
 dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready
 dotnet run --project src/KyberWeave.Cli -- docs drift .
 ```
-
-## Build diagnostics
-
-- Rebuilds with nothing changed: `dotnet build -v:diagnostic -fl -flp:logfile=diag.log`, then
-  search for `Building target '<T>' completely` and `Input file ... is newer than output file`.
-- Slow build: `dotnet build -fl -flp:logfile=perf.log;performancesummary` for target and task
-  timings, or `dotnet build /bl:build.binlog` and open it in the MSBuild Structured Log Viewer.
-- Several CLI commands in one job: set `DOTNET_CLI_USE_MSBUILD_SERVER=1` so MSBuild Server stays
-  warm between them. It is opt-in before the .NET 11 SDK and gains little in a one-command job.
