@@ -117,7 +117,7 @@ public class CaptureService : ICaptureService
             ok = true,
             receiverHosted = current.ReceiverHosted,
             jobsPaused = current.JobsPaused,
-            otlpEndpoint = OtlpEndpointLabel,
+            otlpEndpoint = otlpPort is > 0 ? endpoint : OtlpEndpointLabel,
             contentCapture = factoryConsent,
             platform,
             receiver,
