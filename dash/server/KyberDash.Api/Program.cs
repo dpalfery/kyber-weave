@@ -114,6 +114,17 @@ public static partial class Program
         builder.Logging.AddConsole();
         ConfigureServices(builder.Services, runtime);
         WebApplication app = builder.Build();
+        app.Use(async (context, next) =>
+        {
+            DashRuntimeSettings bound = context.RequestServices.GetRequiredService<DashRuntimeSettings>();
+            if (!LoopbackBinding.RequestAllowed(context.Request.Path.Value ?? "/", context.Connection.LocalPort, bound))
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+
+            await next(context).ConfigureAwait(false);
+        });
         app.MapDashApiEndpoints();
         app.MapOtlpEndpoints();
         return app;
@@ -164,6 +175,14 @@ public static partial class Program
         if (lease.Lease is null)
             return lease.ExitCode;
 
+        if (LoopbackBinding.ShouldUseEphemeralOtlpPort(
+                runtime.OtlpEnabled,
+                runtime.OtlpPortExplicit,
+                LoopbackBinding.LoopbackPortIsFree(runtime.OtlpPort)))
+        {
+            runtime.OtlpPort = 0;
+        }
+
         BindEndpoints(app, runtime);
 
         IJobSchedulerService jobs = app.Services.GetRequiredService<IJobSchedulerService>();
@@ -173,10 +192,9 @@ public static partial class Program
         {
             await app.StartAsync(shutdown.Token).ConfigureAwait(false);
         }
-        catch (IOException ex) when (ex.InnerException is SocketException)
+        catch (IOException ex) when (LoopbackBinding.IsBindFailure(ex))
         {
-            await Console.Error.WriteLineAsync(
-                $"kyberdash-api: could not listen on {DashRuntimeSettings.LoopbackUrl(runtime.WebPort)}: {ex.InnerException.Message}").ConfigureAwait(false);
+            await Console.Error.WriteLineAsync(LoopbackBinding.DescribeBindFailure(ex, runtime)).ConfigureAwait(false);
             return 1;
         }
 
@@ -187,22 +205,39 @@ public static partial class Program
         if (collector is OtlpCollectorService otlpLifecycle)
             otlpLifecycle.Start();
 
-        Uri webUri = ResolveBoundUrl(app, runtime.WebPort);
-        string webUrl = webUri.GetLeftPart(UriPartial.Authority);
-        lease.Lease.UpdateUrl(webUri);
-        lifecycle.PublishServerInfo(
-            runtime.StateDirectory,
-            new ServerInfo(
-                webUri.Port,
-                Environment.ProcessId,
-                DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
-                webUri,
-                ApiContractVersion));
+        IReadOnlyList<string> boundAddresses = ReadBoundAddresses(app);
+        if (!runtime.OtlpOnly)
+        {
+            Uri webUri = LoopbackBinding.SelectWebUrl(boundAddresses, runtime.WebPort, runtime.OtlpPort);
+            if (webUri.Port > 0)
+                runtime.WebPort = webUri.Port;
 
-        await AnnounceListeningAsync(runtime, webUrl).ConfigureAwait(false);
+            string webUrl = webUri.GetLeftPart(UriPartial.Authority);
+            lease.Lease.UpdateUrl(webUri);
+            lifecycle.PublishServerInfo(
+                runtime.StateDirectory,
+                new ServerInfo(
+                    webUri.Port,
+                    Environment.ProcessId,
+                    DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
+                    webUri,
+                    ApiContractVersion));
 
-        if (runtime.OpenBrowser && !runtime.OtlpOnly)
-            BrowserLauncher.TryOpen(JoinViewUrl(webUrl, runtime.View));
+            await AnnounceListeningAsync(runtime, webUrl).ConfigureAwait(false);
+
+            if (runtime.OpenBrowser)
+                BrowserLauncher.TryOpen(JoinViewUrl(webUrl, runtime.View));
+        }
+
+        if (runtime.OtlpEnabled)
+        {
+            int otlpPort = LoopbackBinding.SelectOtlpPort(boundAddresses, runtime.OtlpPort, runtime.WebPort);
+            if (otlpPort > 0)
+            {
+                runtime.OtlpPort = otlpPort;
+                app.Services.GetRequiredService<IOtlpListenerState>().NoteListening(otlpPort);
+            }
+        }
 
         try
         {
@@ -317,23 +352,14 @@ public static partial class Program
         return new OwnedEngineLease(null, exitCode: 1);
     }
 
-    private static Uri ResolveBoundUrl(WebApplication app, int configuredPort)
+    private static IReadOnlyList<string> ReadBoundAddresses(WebApplication app)
     {
         Microsoft.AspNetCore.Hosting.Server.Features.IServerAddressesFeature? addresses = app.Services
             .GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>()
             .Features
             .Get<Microsoft.AspNetCore.Hosting.Server.Features.IServerAddressesFeature>();
 
-        if (addresses is not null)
-        {
-            foreach (string address in addresses.Addresses)
-            {
-                if (Uri.TryCreate(address, UriKind.Absolute, out Uri? uri) && uri.Port > 0)
-                    return DashRuntimeSettings.LoopbackUrl(uri.Port);
-            }
-        }
-
-        return DashRuntimeSettings.LoopbackUrl(configuredPort);
+        return addresses is null ? [] : [.. addresses.Addresses];
     }
 
     private static async Task AnnounceListeningAsync(DashRuntimeSettings runtime, string webUrl)
