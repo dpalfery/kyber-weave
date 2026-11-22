@@ -217,6 +217,7 @@ public sealed class GitChangeReaderTests
         _ = _git.Script(
             "git",
             new ProcessRunResult(0, "abc1234 one fix\ndef5678 another\n", false),
+            "--literal-pathspecs",
             "log",
             "--oneline",
             "--no-color",
@@ -228,6 +229,39 @@ public sealed class GitChangeReaderTests
         IReadOnlyList<string> commits = Reader().LogOneline(Root, "abc1234", ["src/a.cs", "src/b.cs"]);
 
         Assert.Equal(["abc1234 one fix", "def5678 another"], commits);
+    }
+
+    /// <summary>
+    /// Every path is a literal name, not a pattern, and a path that is not repository-relative is dropped: git would
+    /// otherwise read it as a path on the machine rather than in the change.
+    /// </summary>
+    [Fact]
+    public void LogOnelineRunsWithLiteralPathspecsAndDropsPathsOutsideTheRepository()
+    {
+        _ = _git.Script(
+            "git",
+            new ProcessRunResult(0, "abc1234 one fix\n", false),
+            "--literal-pathspecs",
+            "log",
+            "--oneline",
+            "--no-color",
+            "abc1234..HEAD",
+            "--",
+            "src/a.cs");
+
+        IReadOnlyList<string> commits = Reader().LogOneline(
+            Root, "abc1234", ["/abs/src/a.cs", "../outside.cs", "src/a.cs"]);
+
+        Assert.Equal(["abc1234 one fix"], commits);
+        Assert.Single(_git.Calls);
+    }
+
+    /// <summary>With no repository-relative path left, the read is empty and git is not asked for every commit.</summary>
+    [Fact]
+    public void LogOnelineWithNoRepositoryRelativePathListsNothingWithoutRunningGit()
+    {
+        Assert.Empty(Reader().LogOneline(Root, "abc1234", ["/abs/src/a.cs", "../outside.cs"]));
+        Assert.Empty(_git.Calls);
     }
 
     [Fact]
