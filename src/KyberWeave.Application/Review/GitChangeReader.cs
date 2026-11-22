@@ -172,7 +172,9 @@ public sealed class GitChangeReader(IProgramRunner programs) : IGitChangeReader
     /// <paramref name="paths"/>, newest first.
     /// </summary>
     /// <remarks>
-    /// The path list is given after <c>--</c>, so a path that begins with a dash is a path and never an option.
+    /// The path list is given after <c>--</c>, so a path that begins with a dash is a path and never an option, and
+    /// <c>--literal-pathspecs</c> makes every path a literal name rather than a pattern. A path that is not
+    /// repository-relative is ignored: git would read it as a path on the machine, not in the change.
     /// </remarks>
     /// <exception cref="InvalidOperationException">git could not list the commits.</exception>
     public IReadOnlyList<string> LogOneline(string workingDirectory, string fromCommit, IReadOnlyList<string> paths)
@@ -181,8 +183,12 @@ public sealed class GitChangeReader(IProgramRunner programs) : IGitChangeReader
         ArgumentException.ThrowIfNullOrWhiteSpace(fromCommit);
         ArgumentNullException.ThrowIfNull(paths);
 
-        List<string> arguments = ["log", "--oneline", "--no-color", $"{fromCommit}..HEAD", "--"];
-        arguments.AddRange(paths);
+        string[] relative = [.. paths.Where(CitedLineCheck.IsRepositoryRelative)];
+        if (relative.Length == 0)
+            return [];
+
+        List<string> arguments = ["--literal-pathspecs", "log", "--oneline", "--no-color", $"{fromCommit}..HEAD", "--"];
+        arguments.AddRange(relative);
         string output = RunGit(workingDirectory, [.. arguments]);
         return
         [

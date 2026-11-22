@@ -277,7 +277,8 @@ public sealed partial class ReviewVerdictService(
 
     /// <summary>
     /// Writes one ready fix packet per owning group into the cycle folder and prints its dispatch block, so the
-    /// conductor sends the findings themselves instead of paraphrasing the <c>fix:</c> lines.
+    /// conductor sends the findings themselves instead of paraphrasing the <c>fix:</c> lines. Everything the writer
+    /// could not read or write is a warning line, including a cycle folder it could not name at all.
     /// </summary>
     private void ReportFixPackets(
         string root,
@@ -288,7 +289,15 @@ public sealed partial class ReviewVerdictService(
         DiagnosticReport report)
     {
         if (CurrentCycleFolder(request) is not { } folder)
+        {
+            report.Add(new Diagnostic(
+                FixRoundCode,
+                Severity.Warning,
+                "fix packets: not written — the cycle folder could not be named (pass --out inside the cycle " +
+                "folder); dispatch from the fix: lines and findings.json",
+                Subject));
             return;
+        }
 
         FixPacketOutcome outcome = FixPacketWriter.Write(
             new FixPacketInput(
@@ -302,11 +311,8 @@ public sealed partial class ReviewVerdictService(
             cycles,
             git,
             files);
-        if (outcome.Problem is { } problem)
-        {
-            report.Add(new Diagnostic(FixRoundCode, Severity.Warning, problem, Subject));
-            return;
-        }
+        foreach (string note in outcome.Notes)
+            report.Add(new Diagnostic(FixRoundCode, Severity.Warning, note, Subject));
 
         foreach (string block in outcome.DispatchBlocks)
             report.Add(new Diagnostic(FixRoundCode, Severity.Info, block, Subject));
@@ -441,13 +447,24 @@ public sealed partial class ReviewVerdictService(
         return false;
     }
 
-    /// <summary>The folder of the cycle this verdict belongs to: the one <c>--out</c> or <c>--gates</c> sits in, when it records its change.</summary>
+    /// <summary>
+    /// The folder of the cycle this verdict belongs to: the one <c>--out</c> or <c>--gates</c> sits in, when it records
+    /// its change. A cycle's first verdict runs before <see cref="RecordCycleIdentity"/> records the change, so
+    /// <c>--out</c> in a <c>cycle-&lt;n&gt;</c> folder names the folder without that record.
+    /// </summary>
     private string? CurrentCycleFolder(ReviewVerdictRequest request)
     {
         foreach (string? path in new[] { request.Out, request.Gates })
         {
             if (path is not null && Path.GetDirectoryName(FullPath(path)) is { } folder && cycles.HasIdentity(folder))
                 return folder;
+        }
+
+        if (request.Out is not null
+            && ReviewCycleView.TryFromOutPath(paths, environment, request.Out, out _, out _)
+            && Path.GetDirectoryName(FullPath(request.Out)) is { } fromOut)
+        {
+            return fromOut;
         }
 
         return null;

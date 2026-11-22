@@ -58,10 +58,10 @@ public sealed class FixPacketWriterTests : IDisposable
             [new GateResult("test", true, 1, "3 failed")]);
 
         Assert.Equal(["T1", "T2", "docs", "unassigned"], outcome.DispatchBlocks.Select(GroupOf));
-        string t1 = Read("T1");
+        string t1 = Read("task-T1");
         Assert.Contains("### correctness/a", t1, StringComparison.Ordinal);
         Assert.DoesNotContain("correctness/b", t1, StringComparison.Ordinal);
-        Assert.Contains("### correctness/b", Read("T2"), StringComparison.Ordinal);
+        Assert.Contains("### correctness/b", Read("task-T2"), StringComparison.Ordinal);
         Assert.Contains("### documentation-accuracy/guide", Read("docs"), StringComparison.Ordinal);
         string unassigned = Read("unassigned");
         Assert.Contains("### correctness/other", unassigned, StringComparison.Ordinal);
@@ -80,7 +80,7 @@ public sealed class FixPacketWriterTests : IDisposable
         string packet = Read("unassigned");
         Assert.StartsWith("# Fix packet: unassigned\n\nRead every finding here before you change anything.\n", packet, StringComparison.Ordinal);
         Assert.Contains("1. Make one design that satisfies all of these findings together, and the earlier ones in the history, not one patch per finding.", packet, StringComparison.Ordinal);
-        Assert.Contains("3. Never change an approved plan decision. If a finding can only be fixed by changing one, leave it and report `Plan conflict: <id> — <the decision>`.", packet, StringComparison.Ordinal);
+        Assert.Contains("3. Do not change an approved plan decision unless a finding here is a regression that decision caused: then fix the regression and name the decision you overrode in your digest. A finding that only disagrees with a plan decision never reaches this packet.", packet, StringComparison.Ordinal);
         Assert.Contains("6. The fix edits the current tree; never restore a file to base and re-apply.", packet, StringComparison.Ordinal);
     }
 
@@ -96,7 +96,7 @@ public sealed class FixPacketWriterTests : IDisposable
         FixPacketOutcome outcome = Write([Finding("correctness/third", "src/Core/A.cs")], [], prior: Path.Combine(_review, "cycle-2"));
 
         string packet = Read(GroupOf(outcome.DispatchBlocks[0]));
-        Assert.Contains("## History on these files", packet, StringComparison.Ordinal);
+        Assert.Contains("## Earlier cycles' findings on these files (line numbers are from that cycle's commit; not necessarily still open)", packet, StringComparison.Ordinal);
         Assert.Contains("cycle 1 · correctness/first (major) src/Core/A.cs:4 — The first defect.", packet, StringComparison.Ordinal);
         Assert.Contains("cycle 2 · correctness/second (major) src/Core/A.cs:9 — The second defect.", packet, StringComparison.Ordinal);
     }
@@ -110,7 +110,7 @@ public sealed class FixPacketWriterTests : IDisposable
 
         _ = Write([Finding("correctness/other", "src/Other/C.cs")], [], prior: Path.Combine(_review, "cycle-1"));
 
-        Assert.Contains("## History on these files\n\nnone\n", Read("unassigned"), StringComparison.Ordinal);
+        Assert.Contains("## Earlier cycles' findings on these files (line numbers are from that cycle's commit; not necessarily still open)\n\nnone\n", Read("unassigned"), StringComparison.Ordinal);
     }
 
     /// <summary>The commits on the packet's files since cycle 1 are its last section.</summary>
@@ -125,7 +125,7 @@ public sealed class FixPacketWriterTests : IDisposable
 
         string packet = Read("unassigned");
         Assert.Contains("## Commits on these files since cycle 1\n\nccccccc first fix\nddddddd second fix\n", packet, StringComparison.Ordinal);
-        Assert.Contains(_services.Processes.Calls, call => call.Arguments.SequenceEqual(["log", "--oneline", "--no-color", "aaaaaaa..HEAD", "--", "src/Core/A.cs"]));
+        Assert.Contains(_services.Processes.Calls, call => call.Arguments.SequenceEqual(["--literal-pathspecs", "log", "--oneline", "--no-color", "aaaaaaa..HEAD", "--", "src/Core/A.cs"]));
     }
 
     /// <summary>Cycle 1 with no head omits the commits section and says why in one line.</summary>
@@ -150,7 +150,8 @@ public sealed class FixPacketWriterTests : IDisposable
         ScriptChange();
         _services.Processes.Script(
             "git",
-            new ProcessRunResult(128, string.Empty, false) { StandardError = "fatal: bad revision\n" },
+            new ProcessRunResult(128, string.Empty, false) { StandardError = "fatal: bad revision in /abs/path/src/Core/A.cs\n" },
+            "--literal-pathspecs",
             "log",
             "--oneline",
             "--no-color",
@@ -162,9 +163,10 @@ public sealed class FixPacketWriterTests : IDisposable
 
         string packet = Read("unassigned");
         Assert.DoesNotContain("## Commits on these files since cycle 1", packet, StringComparison.Ordinal);
-        Assert.Contains("Commits on these files since cycle 1: not listed — git could not list them", packet, StringComparison.Ordinal);
-        Assert.Contains("exited with code 128: fatal: bad revision", packet, StringComparison.Ordinal);
-        Assert.EndsWith(").\n", packet[(packet.IndexOf("not listed — git could not list them", StringComparison.Ordinal))..], StringComparison.Ordinal);
+        Assert.Contains("Commits on these files since cycle 1: not listed — git could not list them.\n", packet, StringComparison.Ordinal);
+
+        // A git message can carry an absolute path, which must never reach the packet.
+        Assert.DoesNotContain("/abs/path", packet, StringComparison.Ordinal);
     }
 
     /// <summary>A task packet's block names the plan, the task and the packet's absolute path, and nothing else.</summary>
@@ -185,7 +187,7 @@ public sealed class FixPacketWriterTests : IDisposable
 
         Assert.Equal(
             $"--- fix T1 ---\nKYBER-ARBITER: true\nPLAN_FILE: {Plan}\nTASK: T1\n" +
-            $"Fix packet: {Path.Combine(_cycle, "fix-packets", "T1.md")}\n--- end ---",
+            $"Fix packet: {Path.Combine(_cycle, "fix-packets", "task-T1.md")}\n--- end ---",
             Assert.Single(outcome.DispatchBlocks));
     }
 
@@ -210,7 +212,216 @@ public sealed class FixPacketWriterTests : IDisposable
         Assert.DoesNotContain("TASK:", unassigned, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A task's group is sanitized and prefixed with <c>task-</c>, so a task called <c>docs</c> cannot take the
+    /// documentation packet's name and two groups that sanitize to the same name are still distinct files.
+    /// </summary>
+    [Fact]
+    public void PacketFileNamesAreSafeUniqueAndNeverTakeABuiltInGroupsName()
+    {
+        WritePlan("""
+            schema-version: 1
+            plan: docs/plans/demo.md
+            tasks:
+              - id: docs
+                files:
+                  - src/Core/A.cs
+              - id: a/b
+                files:
+                  - src/Core/B.cs
+              - id: a-b
+                files:
+                  - src/Core/C.cs
+            """);
+        ScriptChange(Plan, "src/Core/A.cs", "src/Core/B.cs", "src/Core/C.cs", "docs/guide.md");
+
+        FixPacketOutcome outcome = Write(
+            [
+                Finding("correctness/a", "src/Core/A.cs"),
+                Finding("correctness/b", "src/Core/B.cs"),
+                Finding("correctness/c", "src/Core/C.cs"),
+                Finding("documentation-accuracy/guide", "docs/guide.md")
+            ],
+            []);
+
+        Assert.True(PacketExists("task-docs"));
+        Assert.True(PacketExists("docs"));
+        Assert.True(PacketExists("task-a-b"));
+        Assert.True(PacketExists("task-a-b-2"));
+        Assert.Contains("task-docs.md", outcome.DispatchBlocks[0], StringComparison.Ordinal);
+        Assert.Contains("task-a-b.md", outcome.DispatchBlocks[1], StringComparison.Ordinal);
+        Assert.Contains("task-a-b-2.md", outcome.DispatchBlocks[2], StringComparison.Ordinal);
+    }
+
+    /// <summary>Packet files an earlier round wrote and this round does not are deleted before the new packets land.</summary>
+    [Fact]
+    public void APacketFileFromAnEarlierRoundThatThisRoundDoesNotWriteIsDeleted()
+    {
+        _services.Files.CreateDirectory(Path.Combine(_cycle, "fix-packets"));
+        _services.Files.WriteAllText(Path.Combine(_cycle, "fix-packets", "old-group.md"), "an earlier round's packet");
+        _services.Files.WriteAllText(Path.Combine(_cycle, "fix-packets", "notes.txt"), "not a packet");
+        ScriptChange();
+
+        _ = Write([Finding("correctness/a", "src/Core/A.cs")], []);
+
+        Assert.False(PacketExists("old-group"));
+        Assert.True(PacketExists("unassigned"));
+        Assert.True(_services.Files.FileExists(Path.Combine(_cycle, "fix-packets", "notes.txt")));
+    }
+
+    /// <summary>A file two tasks list stays with the first in plan order, and that packet names the other task.</summary>
+    [Fact]
+    public void AFileTwoTasksListStaysWithTheFirstAndItsPacketNamesTheOther()
+    {
+        WritePlan("""
+            schema-version: 1
+            plan: docs/plans/demo.md
+            tasks:
+              - id: T1
+                files:
+                  - src/Core/A.cs
+              - id: T2
+                files:
+                  - src/Core/A.cs
+            """);
+        ScriptChange(Plan, "src/Core/A.cs");
+
+        FixPacketOutcome outcome = Write([Finding("correctness/a", "src/Core/A.cs")], []);
+
+        Assert.Equal(["T1"], outcome.DispatchBlocks.Select(GroupOf));
+        Assert.Contains(
+            "src/Core/A.cs is also listed by task T2 in the plan's task file.",
+            Read("task-T1"),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>A packet that cannot be written is reported, and the blocks of the packets already written are kept.</summary>
+    [Fact]
+    public void APacketThatCannotBeWrittenKeepsTheBlocksOfThePacketsBeforeIt()
+    {
+        WritePlan("""
+            schema-version: 1
+            plan: docs/plans/demo.md
+            tasks:
+              - id: T1
+                files:
+                  - src/Core/A.cs
+              - id: T2
+                files:
+                  - src/Core/B.cs
+            """);
+        ScriptChange(Plan, "src/Core/A.cs", "src/Core/B.cs");
+        _services.Files.FailWhen(
+            operation => operation.Name == "WriteAllText"
+                         && operation.Path is { } path
+                         && path.EndsWith("task-T2.md", StringComparison.Ordinal),
+            new IOException("disk full"));
+
+        FixPacketOutcome outcome = Write(
+            [Finding("correctness/a", "src/Core/A.cs"), Finding("correctness/b", "src/Core/B.cs")],
+            []);
+
+        Assert.Equal(["T1"], outcome.DispatchBlocks.Select(GroupOf));
+        Assert.True(PacketExists("task-T1"));
+        Assert.False(PacketExists("task-T2"));
+        Assert.Contains(outcome.Notes, note => note.Contains("task-T2.md", StringComparison.Ordinal)
+                                              && note.Contains("could not be written", StringComparison.Ordinal));
+    }
+
+    /// <summary>Git failing to name the change is reported, and the finding still reaches the unassigned packet.</summary>
+    [Fact]
+    public void AChangeGitCannotListIsReportedAsANote()
+    {
+        _services.Processes.Script(
+            "git",
+            new ProcessRunResult(128, string.Empty, false) { StandardError = "fatal: not a git repository\n" },
+            "merge-base",
+            "origin/HEAD",
+            "HEAD");
+
+        FixPacketOutcome outcome = Write([Finding("correctness/a", "src/Core/A.cs")], []);
+
+        Assert.Contains(outcome.Notes, note => note.Contains("git could not list the change", StringComparison.Ordinal));
+        Assert.Contains("### correctness/a", Read("unassigned"), StringComparison.Ordinal);
+    }
+
+    /// <summary>No plan, or several, is reported: no task can own a finding, so all but the Markdown ones go to unassigned.</summary>
+    [Theory]
+    [InlineData(false, "no plan was found for this change")]
+    [InlineData(true, "the change touches 2 plans")]
+    public void AChangeWithoutExactlyOnePlanIsReportedAsANote(bool several, string reason)
+    {
+        WritePlan("""
+            schema-version: 1
+            plan: docs/plans/demo.md
+            tasks:
+              - id: T1
+                files:
+                  - src/Core/A.cs
+            """);
+        if (several)
+        {
+            Write("repo/docs/plans/other.md", "---\nid: other\ntitle: Other\ndoc-type: plan\nstatus: Ready\n---\n\n# Other\n");
+            ScriptChange(Plan, "docs/plans/other.md", "src/Core/A.cs");
+        }
+        else
+        {
+            ScriptChange("src/Core/A.cs");
+        }
+
+        FixPacketOutcome outcome = Write([Finding("correctness/a", "src/Core/A.cs")], []);
+
+        Assert.Contains(outcome.Notes, note => note.Contains(reason, StringComparison.Ordinal));
+        Assert.Contains("### correctness/a", Read("unassigned"), StringComparison.Ordinal);
+    }
+
+    /// <summary>A task file the plan names but the tree does not hold is reported, and its findings go to unassigned.</summary>
+    [Fact]
+    public void AMissingTaskFileIsReportedAsANote()
+    {
+        Write("repo/" + Plan, "---\nid: demo\ntitle: Demo\ndoc-type: plan\nstatus: Ready\n---\n\n# Demo\n");
+        ScriptChange(Plan, "src/Core/A.cs");
+
+        FixPacketOutcome outcome = Write([Finding("correctness/a", "src/Core/A.cs")], []);
+
+        Assert.Contains(outcome.Notes, note => note.Contains("docs/plans/demo.tasks.yml", StringComparison.Ordinal)
+                                              && note.Contains("missing or could not be read", StringComparison.Ordinal));
+        Assert.Contains("### correctness/a", Read("unassigned"), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A cycle whose record cannot be read is named in the history, never hiding the cycles that can be read, and the
+    /// commits section names the first cycle it could actually read.
+    /// </summary>
+    [Fact]
+    public void AnUnreadableEarlierCycleIsNamedAndDoesNotHideTheReadableOnes()
+    {
+        WriteEarlierCycle(1, head: "aaaaaaa", Finding("correctness/first", "src/Core/A.cs", line: 4));
+        WriteEarlierCycle(2, head: "bbbbbbb", Finding("correctness/second", "src/Core/A.cs", line: 9));
+        string head = Path.Combine(_review, "cycle-1", "head");
+        _services.Files.WriteAllText(head, "aaaaaaa\n");
+        _services.Files.FailWhen(
+            operation => operation.Name == "ReadAllText"
+                         && string.Equals(operation.Path, head, StringComparison.Ordinal),
+            new IOException("the cycle record cannot be read"));
+        ScriptChange("src/Core/A.cs");
+        ScriptLog("bbbbbbb..HEAD", "ccccccc fix");
+
+        FixPacketOutcome outcome = Write(
+            [Finding("correctness/third", "src/Core/A.cs")], [], prior: Path.Combine(_review, "cycle-2"));
+
+        string packet = Read("unassigned");
+        Assert.Contains("(cycle 1 unreadable)", packet, StringComparison.Ordinal);
+        Assert.Contains("cycle 2 · correctness/second (major) src/Core/A.cs:9", packet, StringComparison.Ordinal);
+        Assert.Contains("## Commits on these files since cycle 2\n\nccccccc fix\n", packet, StringComparison.Ordinal);
+        Assert.Contains(outcome.Notes, note => note.Contains("cycle 1 could not be read", StringComparison.Ordinal));
+    }
+
     private static string GroupOf(string block) => block["--- fix ".Length..block.IndexOf(" ---", StringComparison.Ordinal)];
+
+    private string PacketFile(string name) => Path.Combine(_cycle, "fix-packets", name + ".md");
+
+    private bool PacketExists(string name) => _services.Files.FileExists(PacketFile(name));
 
     private static ReviewFinding Finding(
         string id, string file, int line = 12, string claim = "The loop bound excludes the final element.") =>
@@ -267,6 +478,7 @@ public sealed class FixPacketWriterTests : IDisposable
         _services.Processes.Script(
             "git",
             new ProcessRunResult(0, string.Join('\n', lines) + (lines.Length == 0 ? string.Empty : "\n"), false),
+            "--literal-pathspecs",
             "log",
             "--oneline",
             "--no-color",

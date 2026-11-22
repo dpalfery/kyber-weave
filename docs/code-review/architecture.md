@@ -1134,14 +1134,23 @@ finding open.
 **Fix packets.** When a round continues, `review verdict` writes one packet per owning group into the
 cycle's `fix-packets/` folder through the file-system seam and prints one dispatch block for each, after
 the `fix:` lines. The groups are the plan's tasks: a finding goes to the task whose `files` scope names
-its file, by exact path or by a listed directory prefix; a finding on a `*.md` file goes to `docs`; a
-file no task lists, and every failed blocking gate, go to `unassigned`. Each packet carries, in one
-place, the rules a fix worker follows, the full record of its findings, every earlier cycle's finding on
-the same files (`## History on these files`) and the commits already made there since cycle 1
-(`git log --oneline <cycle 1 head>..HEAD -- <files>`). The block names the plan, the task, the
-`docs-dev` agent for `docs`, or who must assign `unassigned`, and the packet's absolute path. The
-conductor sends that block unchanged, so a fix worker reads the findings themselves rather than a
-paraphrase of the `fix:` lines; `FixPacketWriter` is the one writer.
+its file, by exact path or by a listed directory prefix, and when two tasks list it the first in plan
+order keeps it while that packet names the other; a finding on a `*.md` file goes to `docs`; a file no
+task lists, and every failed blocking gate, go to `unassigned`. Each packet is named for its group,
+sanitized to letters, digits, dot, underscore and dash, with `task-` before a plan task's group so a task
+called `docs` cannot take the documentation packet's name and a `-2`, `-3` suffix when two names still
+collide; packet files this round does not write are deleted first. Each packet carries, in one place,
+the rules a fix worker follows, the full record of its findings, every earlier cycle's finding on the
+same files (`## Earlier cycles' findings on these files (line numbers are from that cycle's commit; not
+necessarily still open)`) and the commits already made there since the first cycle it could read
+(`git --literal-pathspecs log --oneline <that cycle's head>..HEAD -- <files>`). The block
+names the plan, the task, the `docs-dev` agent for `docs`, or who must assign `unassigned`, and the
+packet's absolute path. The conductor sends that block unchanged, so a fix worker reads the findings
+themselves rather than a paraphrase of the `fix:` lines; `FixPacketWriter` is the one writer. When the
+round continues but no cycle folder can be named, it writes no packet and warns instead, so the
+conductor dispatches from the `fix:` lines and `findings.json`; every degraded path — a change git could
+not list, no plan or several, a missing or unreadable task file, an unreadable earlier cycle, a packet
+that could not be written — is a warning beside the packets that were written.
 
 The loop has a hard stop: 5 review cycles, or 3 cycles in a row in which the count of
 findings to fix (the `fix:` lines, whatever the fix level makes fixable) does not fall; `review verdict` applies it and prints

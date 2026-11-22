@@ -352,6 +352,7 @@ public sealed partial class ReviewVerdictSeatsCommandTests
         string cycle = OutCycleFolder(3);
         _services.Files.CreateDirectory(cycle);
         WriteSeat("security", FindingSeat(lens: "security", id: "security/key-in-argv", severity: "critical", kind: "hardening"));
+        ScriptChange();
 
         CapturedConsoleExecution<int> run = Verdict(
             ["--seats", _seats, "--out", Path.Combine(cycle, "findings.json"), .. NotSeatedExcept("security")]);
@@ -449,9 +450,9 @@ public sealed partial class ReviewVerdictSeatsCommandTests
             && block.Contains("KYBER-ARBITER: true", StringComparison.Ordinal)
             && block.Contains("PLAN_FILE: docs/plans/demo.md", StringComparison.Ordinal)
             && block.Contains("TASK: T1", StringComparison.Ordinal)
-            && block.Contains($"Fix packet: {Path.Combine(cycle, "fix-packets", "T1.md")}", StringComparison.Ordinal)
+            && block.Contains($"Fix packet: {Path.Combine(cycle, "fix-packets", "task-T1.md")}", StringComparison.Ordinal)
             && block.EndsWith("--- end ---", StringComparison.Ordinal));
-        Assert.True(_services.Files.FileExists(Path.Combine(cycle, "fix-packets", "T1.md")));
+        Assert.True(_services.Files.FileExists(Path.Combine(cycle, "fix-packets", "task-T1.md")));
     }
 
     /// <summary>A clean review sends nothing to a fix round, so it writes no packet.</summary>
@@ -484,6 +485,51 @@ public sealed partial class ReviewVerdictSeatsCommandTests
 
         Assert.Contains(MessagesWithCode(run.Output, FixRound), line => line.StartsWith("open:", StringComparison.Ordinal));
         Assert.False(_services.Files.DirectoryExists(Path.Combine(cycle, "fix-packets")));
+    }
+
+    /// <summary>
+    /// The first verdict of a cycle runs before the cycle records its change, so the packet writer must still name
+    /// the cycle folder from <c>--out</c> and write the packets the normal flow dispatches from.
+    /// </summary>
+    [Fact]
+    public void AContinuingRoundWritesPacketsBeforeTheCycleRecordsItsIdentity()
+    {
+        string cycle = OutCycleFolder(3);
+        _services.Files.CreateDirectory(cycle);
+        WriteSeat("correctness", FindingSeat(severity: "major"));
+        ScriptChange();
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--out", Path.Combine(cycle, "findings.json"), .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.True(_services.Files.FileExists(Path.Combine(cycle, "fix-packets", "unassigned.md")));
+        Assert.DoesNotContain(
+            MessagesWithCode(run.Output, FixRound),
+            line => line.Contains("the cycle folder could not be named", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A continuing round that cannot name a cycle folder writes no packet, so it says so instead of leaving the
+    /// conductor to guess why no dispatch block followed the <c>fix:</c> lines.
+    /// </summary>
+    [Fact]
+    public void AContinuingRoundWithNoCycleFolderWarnsThatThePacketsWereNotWritten()
+    {
+        WriteSeat("correctness", FindingSeat(severity: "major"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--out", Path.Combine(_services.Root, "report.json"), .. NotSeatedExcept("correctness")]);
+
+        AssertDiagnostic(
+            run.Output,
+            FixRound,
+            "warning",
+            "fix packets: not written — the cycle folder could not be named (pass --out inside the cycle folder); " +
+            "dispatch from the fix: lines and findings.json");
+        Assert.DoesNotContain(
+            MessagesWithCode(run.Output, FixRound),
+            line => line.StartsWith("--- fix ", StringComparison.Ordinal));
     }
 
     /// <summary>Scripts the change the packet writer reads: a merge base, the changed paths and no untracked file.</summary>

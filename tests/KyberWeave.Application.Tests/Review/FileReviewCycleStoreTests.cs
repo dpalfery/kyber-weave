@@ -128,6 +128,45 @@ public sealed class FileReviewCycleStoreTests
     }
 
     [Fact]
+    public void ReadCycleReadsOneFolderWithoutReadingTheOthers()
+    {
+        SeedFile(Path.Combine(Review, "cycle-1"), ReviewCyclePlanning.FindingsFile, "[]");
+        SeedFile(Path.Combine(Review, "cycle-2"), ReviewCyclePlanning.FindingsFile, "[]");
+
+        ReviewCycleRecord cycle = Store().ReadCycle(Path.Combine(Review, "cycle-2"))!;
+
+        Assert.Equal(2, cycle.Number);
+        Assert.Equal(Path.Combine(Review, "cycle-2"), cycle.Folder);
+    }
+
+    [Fact]
+    public void ReadCycleReturnsNullForAFolderThatIsNotANumberedCycle()
+    {
+        SeedFile(Path.Combine(Review, "not-a-cycle"), ReviewCyclePlanning.FindingsFile, "[]");
+
+        Assert.Null(Store().ReadCycle(Path.Combine(Review, "not-a-cycle")));
+    }
+
+    /// <summary>
+    /// A cycle whose head cannot be read still fails only its own read, so a caller that reads the cycles one at a
+    /// time keeps the others instead of losing the whole history.
+    /// </summary>
+    [Fact]
+    public void ReadCycleThrowsOnlyForTheCycleWhoseHeadCannotBeRead()
+    {
+        string head = Path.Combine(Review, "cycle-1", ReviewCyclePlanning.HeadFile);
+        SeedFile(Path.Combine(Review, "cycle-1"), ReviewCyclePlanning.FindingsFile, "[]");
+        SeedFile(Path.Combine(Review, "cycle-1"), ReviewCyclePlanning.HeadFile, "abc");
+        SeedFile(Path.Combine(Review, "cycle-2"), ReviewCyclePlanning.FindingsFile, "[]");
+        _files.FailWhen(operation => operation.Name == "ReadAllText" && operation.Path == head, new IOException("unreadable"));
+
+        FileReviewCycleStore store = Store();
+
+        _ = Assert.Throws<IOException>(() => store.ReadCycle(Path.Combine(Review, "cycle-1")));
+        Assert.Equal(2, store.ReadCycle(Path.Combine(Review, "cycle-2"))!.Number);
+    }
+
+    [Fact]
     public void ReadFinishedFailsWhenTheHeadOfACycleCannotBeRead()
     {
         string head = Path.Combine(Review, "cycle-1", ReviewCyclePlanning.HeadFile);

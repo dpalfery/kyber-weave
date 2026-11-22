@@ -42,6 +42,6 @@ public interface IGitChangeReader
     /// </summary>
     /// <param name="workingDirectory">The repository root.</param>
     /// <param name="fromCommit">The commit the history starts after, the change's first review cycle.</param>
-    /// <param name="paths">The repository-relative paths the commits must have touched.</param>
+    /// <param name="paths">The repository-relative paths the commits must have touched; any other path is ignored.</param>
     IReadOnlyList<string> LogOneline(string workingDirectory, string fromCommit, IReadOnlyList<string> paths);
 }

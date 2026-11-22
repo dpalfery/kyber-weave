@@ -50,6 +50,17 @@ public sealed class FileReviewCycleStore(
     }
 
     /// <inheritdoc />
+    public ReviewCycleRecord? ReadCycle(string cycleFolder)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(cycleFolder);
+
+        string resolved = Resolve(cycleFolder);
+        return ReviewCyclePlanning.TryNumber(Path.GetFileName(resolved)) is { } number
+            ? Read(number, resolved)
+            : null;
+    }
+
+    /// <inheritdoc />
     public void WriteIdentity(string cycleFolder, ReviewCycleIdentity identity)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(cycleFolder);
