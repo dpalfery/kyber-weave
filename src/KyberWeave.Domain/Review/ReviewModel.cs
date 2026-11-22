@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace KyberWeave.Core.Review;
 
 /// <summary>How much damage a finding does if the change ships with it.</summary>
@@ -19,6 +21,32 @@ public enum ReviewSeverity
 
     /// <summary>Data loss, a security hole, corruption, or behaviour that breaks silently.</summary>
     Critical
+}
+
+/// <summary>What kind of finding this is, so the verdict can route it later.</summary>
+/// <remarks>
+/// Severity says how much damage the finding does; kind says what it disagrees with. A finding that meets every
+/// request, plan decision and base behaviour yet still makes the code sturdier is <see cref="Hardening"/>, and one
+/// that disagrees with an approved plan decision is a <see cref="PlanObjection"/> rather than a defect.
+/// </remarks>
+public enum FindingKind
+{
+    /// <summary>
+    /// Breaks a stated acceptance criterion, a plan contract, or behaviour that works on the base branch; any
+    /// security, data-loss or corruption risk is always a defect.
+    /// </summary>
+    [JsonStringEnumMemberName("defect")]
+    Defect,
+
+    /// <summary>
+    /// True, but the request, the plan and base behaviour are all met; it makes the code sturdier beyond them.
+    /// </summary>
+    [JsonStringEnumMemberName("hardening")]
+    Hardening,
+
+    /// <summary>Disagrees with an approved plan decision.</summary>
+    [JsonStringEnumMemberName("plan-objection")]
+    PlanObjection
 }
 
 /// <summary>What the review concluded about the change.</summary>
@@ -70,6 +98,13 @@ public enum RiskGrade
 /// the override is only cited, or when none applied.
 /// </param>
 /// <param name="SeatSeverity">The severity the seat gave, when an applied override changed it; null otherwise.</param>
+/// <param name="Kind">
+/// What kind of finding this is — a defect, a hardening or a plan objection; null when the seat wrote no kind.
+/// </param>
+/// <param name="Basis">
+/// What the finding breaks, quoted: the acceptance criterion, the plan line, or the base behaviour; null when the
+/// seat quoted none.
+/// </param>
 public sealed record ReviewFinding(
     string Id,
     string Lens,
@@ -84,7 +119,9 @@ public sealed record ReviewFinding(
     string? Suggestion = null,
     string? Override = null,
     string? OverrideSource = null,
-    ReviewSeverity? SeatSeverity = null);
+    ReviewSeverity? SeatSeverity = null,
+    FindingKind? Kind = null,
+    string? Basis = null);
 
 /// <summary>What one deterministic gate reported.</summary>
 /// <param name="Id">The gate's declared identifier.</param>
