@@ -793,9 +793,17 @@ public sealed class ReviewGatesService(
         report.AddMetric("gates", finalReport.Gates.Count);
         report.AddMetric("failed", finalReport.Gates.Count(g => !g.Passed && !g.NotApplicable));
 
+        // A --fix run whose fixes changed a task file is not the verification run, so its report must not land where a
+        // plain run's report is read as the task's evidence, even when --out names that path.
+        string? evidenceReport = taskSlug is not null && !request.Red
+            ? Path.Combine(root, TaskGateNextStep.PassingReportPath(taskSlug))
+            : null;
+        bool withheldEvidence = fixChangedFiles && evidenceReport is not null && SamePath(outPath, evidenceReport);
+
         string content = ReviewJson.Write(finalReport);
-        ReviewReportWriter.TryWrite(
-            files, pathResolver, environment, outPath, content, ReviewGateReporting.ReportWriteFailed, report);
+        if (!withheldEvidence)
+            ReviewReportWriter.TryWrite(
+                files, pathResolver, environment, outPath, content, ReviewGateReporting.ReportWriteFailed, report);
         if (countingReport is not null && !SamePath(outPath, countingReport))
             ReviewReportWriter.TryWrite(
                 files, pathResolver, environment, countingReport, content, ReviewGateReporting.ReportWriteFailed, report);
@@ -811,6 +819,8 @@ public sealed class ReviewGatesService(
                 : targetMissing is not null
                     ? $"task: not found in a plan ({targetMissing}), so the files git reports changed were gated; pass --paths to name them"
                     : $"files: {string.Join(", ", changed)}");
+            if (withheldEvidence)
+                epilogue.Add($"the fix run's report was not written to {evidenceReport} because a plain run must verify");
             epilogue.AddRange(digest);
             if (redOutcome is not null)
             {

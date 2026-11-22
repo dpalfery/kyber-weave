@@ -76,6 +76,24 @@ public sealed class ReviewGatesFixRunTests : IDisposable
     }
 
     [Fact]
+    public void AFixRunThatChangedATaskFileNeverWritesItsReportToThePassingReportPath()
+    {
+        _services.Processes.Script("format", _ =>
+        {
+            _services.Files.WriteAllText(Path.Combine(_repo, TaskFile), "class Widget { int Id; }\n");
+            return new ProcessRunResult(0, string.Empty, TimedOut: false);
+        });
+        string evidencePath = Path.Combine(_repo, TaskGateNextStep.PassingReportPath("t1"));
+
+        CapturedConsoleExecution<int> run = Gates(
+            "--agent", "csharp-dev", "--task", "t1", "--paths", TaskFile, "--fix", "--out", evidencePath);
+
+        Assert.Equal(0, run.Result);
+        Assert.False(_services.Files.FileExists(evidencePath));
+        Assert.Contains("a plain run must verify", run.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AFixRunThatChangedATaskFileStillSaysToVerifyWithoutFix()
     {
         _services.Processes.Script("format", _ =>
