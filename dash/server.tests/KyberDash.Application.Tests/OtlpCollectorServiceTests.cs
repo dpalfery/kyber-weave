@@ -93,6 +93,9 @@ public class OtlpCollectorServiceTests
             Encoding.UTF8.GetBytes("{\"resourceSpans\": 5}"),
             "application/json",
             TestContext.Current.CancellationToken));
+
+        Assert.Equal(1, harness.Collector.CountFailuresSince(DateTimeOffset.UtcNow.AddMinutes(-5)));
+        Assert.Equal("OTLP_MALFORMED_PAYLOAD", harness.Collector.LastErrorCode);
     }
 
     [Fact]

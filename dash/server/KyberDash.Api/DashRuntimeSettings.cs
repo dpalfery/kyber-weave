@@ -65,6 +65,7 @@ public class DashRuntimeSettings
             DashboardDir = DashboardDirectory,
             Version = Version,
             MaxOtlpBodyBytes = MaxOtlpBodyBytes,
+            OtlpPort = OtlpPort,
         };
     }
 
