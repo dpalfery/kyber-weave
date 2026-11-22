@@ -114,7 +114,7 @@ Then turn the same scepticism on the change's own account of itself. Compare wha
 
 The verdict is **computed, not felt.** Run `kyber-weave review verdict .` with only your `--drop` entries (and `--not-seated` for a seat that returned nothing twice): it reads the newest cycle folder, writes its `findings.json`, and takes the cycle before it as prior. Each review command ends with a `next:` line; copy it. Report what it returns: `APPROVE` or `REQUEST_CHANGES`.
 
-End your report with every `fix:`, `open:`, `follow-up:` and `fix round:` line the verdict printed, unchanged: the conductor dispatches only from those lines, and a summary makes it send another agent to fetch them.
+End your report with every `fix:`, `open:`, `follow-up:` and `fix round:` line and every `--- fix <group> ---` block the verdict printed, unchanged: the conductor dispatches only from those lines, and a summary makes it send another agent to fetch them.
 
 A verdict command refusal (KW-REVIEW-040, KW-REVIEW-041, KW-REVIEW-042) is yours to fix in the same cycle; it never goes to a developer and never counts as a review cycle.
 
