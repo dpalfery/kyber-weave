@@ -1,7 +1,7 @@
 // Shared harness-collection world backed by `kyberdash e2e-seed` (never ~/.kyberdash/canon.db).
 
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -170,4 +170,313 @@ export async function bootIsolatedWorld(
       resolveExit()
     })
   })
+}
+
+export type IsolatedServerHandle = {
+  readonly url: string
+  readonly dbPath: string
+  readonly stateDir: string
+  readonly rootDir: string
+  stop: () => Promise<void>
+}
+
+function isProcessGroupAlive(pid: number): boolean {
+  try {
+    process.kill(-pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
+  }
+}
+
+function signalProcessGroup(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-pid, signal)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
+      throw error
+    }
+  }
+}
+
+async function stopProcessGroup(pid: number): Promise<void> {
+  signalProcessGroup(pid, 'SIGTERM')
+  const deadline = Date.now() + 5_000
+  while (isProcessGroupAlive(pid) && Date.now() < deadline) {
+    await new Promise<void>((resolveWait) => setTimeout(resolveWait, 100))
+  }
+  if (isProcessGroupAlive(pid)) {
+    signalProcessGroup(pid, 'SIGKILL')
+  }
+}
+
+function cleanupIsolatedTempRoot(rootDir: string): void {
+  if (rootDir.startsWith(tmpdir()) && !rootDir.includes('.kyberdash')) {
+    rmSync(rootDir, { recursive: true, force: true })
+  }
+}
+
+export async function startIsolatedServer(options?: {
+  readonly startupTimeoutMs?: number
+}): Promise<IsolatedServerHandle> {
+  const startupTimeoutMs = options?.startupTimeoutMs ?? 90_000
+  const rootDir = mkdtempSync(join(tmpdir(), 'kyber-otel-e2e-'))
+  if (!rootDir.startsWith(tmpdir()) || rootDir.includes('.kyberdash')) {
+    cleanupIsolatedTempRoot(rootDir)
+    throw new Error(`isolated server temp root invalid: ${rootDir}`)
+  }
+
+  const dbPath = join(rootDir, 'canon.db')
+  if (dbPath === USER_CANON) {
+    cleanupIsolatedTempRoot(rootDir)
+    throw new Error('refusing to serve the user canon.db')
+  }
+
+  const stateDir = join(rootDir, 'state')
+  const homeDir = join(rootDir, 'home')
+  mkdirSync(stateDir, { recursive: true })
+  mkdirSync(homeDir, { recursive: true })
+
+  const { command, prefixArgs, repoRoot, dashRoot } = resolveKyberdashCommand()
+  const dashDist = join(dashRoot, 'dist', 'dash')
+  if (!existsSync(join(dashDist, 'index.html'))) {
+    const built = spawnSync('npm', ['run', 'build:web'], {
+      cwd: dashRoot,
+      encoding: 'utf8',
+      timeout: 300_000,
+      killSignal: 'SIGKILL',
+    })
+    if (built.status !== 0) {
+      cleanupIsolatedTempRoot(rootDir)
+      throw new Error(`build:web failed: ${built.stdout ?? ''}\n${built.stderr ?? ''}`)
+    }
+  }
+
+  const child = spawn(
+    command,
+    [...prefixArgs, 'web', '--no-open', '--port', '0', '--db', dbPath, '--state-dir', stateDir],
+    {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        HOME: homeDir,
+        USERPROFILE: homeDir,
+        KYBER_CANON_DB: dbPath,
+        KYBERDASH_STATE_DIR: stateDir,
+        KYBERDASH_DASH_DIR: process.env['KYBERDASH_DASH_DIR'] ?? dashDist,
+      },
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  )
+
+  const pid = child.pid
+  const killOnExit = (): void => {
+    if (pid === undefined || !isProcessGroupAlive(pid)) return
+    try {
+      signalProcessGroup(pid, 'SIGKILL')
+    } catch {
+      // Process is exiting; nothing left can act on the error.
+    }
+  }
+  process.once('exit', killOnExit)
+
+  let url: string
+  try {
+    url = await new Promise<string>((resolveUrl, rejectUrl) => {
+      let stdoutBuffer = ''
+      let stderrBuffer = ''
+      let settled = false
+
+      const timer = setTimeout(() => {
+        if (settled) return
+        settled = true
+        rejectUrl(
+          new Error(
+            `kyberdash web did not become ready within ${startupTimeoutMs}ms: ${stdoutBuffer}\n${stderrBuffer}`,
+          ),
+        )
+      }, startupTimeoutMs)
+
+      const finishError = (error: Error): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        rejectUrl(error)
+      }
+
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderrBuffer += chunk.toString('utf8')
+      })
+
+      child.stdout.on('data', (chunk: Buffer) => {
+        if (settled) return
+        stdoutBuffer += chunk.toString('utf8')
+        let newlineAt = stdoutBuffer.indexOf('\n')
+        while (newlineAt !== -1) {
+          const line = stdoutBuffer.slice(0, newlineAt)
+          stdoutBuffer = stdoutBuffer.slice(newlineAt + 1)
+          try {
+            const parsed = JSON.parse(line) as { event?: unknown; url?: unknown }
+            if (
+              parsed.event === 'kyberdash.web.listening' &&
+              typeof parsed.url === 'string' &&
+              parsed.url.startsWith('http://127.0.0.1:')
+            ) {
+              settled = true
+              clearTimeout(timer)
+              resolveUrl(parsed.url)
+              return
+            }
+          } catch {
+            // Ignore non-JSON log lines.
+          }
+          newlineAt = stdoutBuffer.indexOf('\n')
+        }
+      })
+
+      child.once('error', (error) => {
+        finishError(new Error(`kyberdash web spawn failed: ${String(error)}`))
+      })
+
+      child.once('exit', (code) => {
+        finishError(new Error(`kyberdash web exited ${code} before ready: ${stdoutBuffer}\n${stderrBuffer}`))
+      })
+    })
+  } catch (error) {
+    process.off('exit', killOnExit)
+    if (pid !== undefined) {
+      await stopProcessGroup(pid)
+    } else if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL')
+    }
+    cleanupIsolatedTempRoot(rootDir)
+    throw error
+  }
+
+  let stopped = false
+  return {
+    url,
+    dbPath,
+    stateDir,
+    rootDir,
+    stop: async () => {
+      if (stopped) return
+      stopped = true
+      process.off('exit', killOnExit)
+      if (pid !== undefined) {
+        await stopProcessGroup(pid)
+      } else if (child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL')
+      }
+      cleanupIsolatedTempRoot(rootDir)
+    },
+  }
+}
+
+async function postOtlpSignal(baseUrl: string, path: '/v1/traces' | '/v1/logs', payload: unknown): Promise<void> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(15_000),
+  })
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    throw new Error(`POST ${path} failed (${response.status}): ${body.slice(0, 400)}`)
+  }
+}
+
+export async function postOtlpTraces(baseUrl: string, payload: unknown): Promise<void> {
+  await postOtlpSignal(baseUrl, '/v1/traces', payload)
+}
+
+export async function postOtlpLogs(baseUrl: string, payload: unknown): Promise<void> {
+  await postOtlpSignal(baseUrl, '/v1/logs', payload)
+}
+
+export async function waitForOtlpIngest(
+  baseUrl: string,
+  expectedSessionIds: readonly string[],
+  options?: {
+    readonly timeoutMs?: number
+    readonly pollIntervalMs?: number
+    readonly expectedHarnesses?: readonly string[]
+  },
+): Promise<void> {
+  const timeoutMs = options?.timeoutMs ?? 30_000
+  const pollIntervalMs = options?.pollIntervalMs ?? 250
+  const expectedHarnesses = options?.expectedHarnesses ?? []
+  const deadline = Date.now() + timeoutMs
+
+  let missingSessions: string[] = [...expectedSessionIds]
+  let missingHarnesses: string[] = [...expectedHarnesses]
+  let lastError: string | undefined
+
+  while (Date.now() <= deadline) {
+    try {
+      // Wait for OtlpCollectorService to drain its queue before querying /api/kyber/* so
+      // EnsureProjected() runs once over the complete flushed corpus without racing itself.
+      const healthRes = await fetch(`${baseUrl}/healthz`, { signal: AbortSignal.timeout(5_000) })
+      if (!healthRes.ok) {
+        lastError = `/healthz HTTP ${healthRes.status}`
+        await new Promise<void>((resolveWait) => setTimeout(resolveWait, pollIntervalMs))
+        continue
+      }
+
+      const healthJson = (await healthRes.json()) as { pendingCount?: unknown }
+      if (typeof healthJson.pendingCount === 'number' && healthJson.pendingCount > 0) {
+        lastError = `collector still draining (${healthJson.pendingCount} pending)`
+        await new Promise<void>((resolveWait) => setTimeout(resolveWait, pollIntervalMs))
+        continue
+      }
+
+      const sessionsRes = await fetch(`${baseUrl}/api/kyber/sessions`, { signal: AbortSignal.timeout(10_000) })
+      const harnessesRes = await fetch(`${baseUrl}/api/kyber/harnesses`, { signal: AbortSignal.timeout(10_000) })
+      const coverageRes = await fetch(`${baseUrl}/api/kyber/coverage`, { signal: AbortSignal.timeout(10_000) })
+
+      if (sessionsRes.ok && coverageRes.ok && harnessesRes.ok) {
+        const sessionsJson = (await sessionsRes.json()) as {
+          sessions?: Array<{ session_id?: unknown; sessionId?: unknown }>
+        }
+        const coverageJson = (await coverageRes.json()) as {
+          ingest?: unknown
+          harnesses?: Array<{ harness?: unknown }>
+        }
+        const harnessesJson = (await harnessesRes.json()) as {
+          harnesses?: Array<{ harness?: unknown; sampleCount?: unknown }>
+        }
+
+        const seenSessions = new Set<string>()
+        for (const row of sessionsJson.sessions ?? []) {
+          if (typeof row.session_id === 'string') seenSessions.add(row.session_id)
+          if (typeof row.sessionId === 'string') seenSessions.add(row.sessionId)
+        }
+
+        const seenHarnesses = new Set<string>()
+        for (const row of harnessesJson.harnesses ?? []) {
+          if (typeof row.harness === 'string' && typeof row.sampleCount === 'number' && row.sampleCount > 0) {
+            seenHarnesses.add(row.harness)
+          }
+        }
+
+        missingSessions = expectedSessionIds.filter((id) => !seenSessions.has(id))
+        missingHarnesses = expectedHarnesses.filter((h) => !seenHarnesses.has(h))
+
+        if (missingSessions.length === 0 && missingHarnesses.length === 0 && coverageJson.ingest !== undefined) {
+          return
+        }
+      } else {
+        lastError = `HTTP ${sessionsRes.status}/${coverageRes.status}/${harnessesRes.status}`
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error)
+    }
+
+    await new Promise<void>((resolveWait) => setTimeout(resolveWait, pollIntervalMs))
+  }
+
+  throw new Error(
+    `waitForOtlpIngest timed out after ${timeoutMs}ms. Missing sessions: [${missingSessions.join(', ')}]; missing harnesses: [${missingHarnesses.join(', ')}]${lastError ? `; last error: ${lastError}` : ''}`,
+  )
 }
