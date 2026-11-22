@@ -45,15 +45,9 @@ register wins.
 - The rule ids in this repository (`KW-*`) are permanent. Add a new id; never reuse or
   renumber one.
 
-## Security floors
+## Logging and untrusted input
 
-- Never use a wildcard CORS origin (or `AllowAnyOrigin()` with `AllowCredentials()`), or
-  `unsafe-inline` / `unsafe-eval` in a CSP, on any policy the dashboard host sets.
-- Never trust client-side validation as the only validation; the server validates what it accepts.
-- Never persist or build a path from a client-supplied filename.
-- Never log tokens, secrets, connection strings, PII, prompts or raw user queries.
-
-## Build files
-
-- Never write generated files into the source tree during a build, or leave a property
-  condition unquoted (`'$(Prop)' == 'true'`).
+- Never log tokens, secrets, connection strings, raw PII or prompts; log with message templates
+  and strip newlines from a user-supplied value.
+- Never build a path from a client-supplied filename, and never add a wildcard CORS origin or an
+  `unsafe-inline` / `unsafe-eval` CSP.
