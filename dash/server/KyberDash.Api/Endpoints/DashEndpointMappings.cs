@@ -383,15 +383,21 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
 
-        string? harness = DashHttp.OptionalQueryString(request.Query, "harness");
-        string? sessionId = DashHttp.OptionalQueryString(request.Query, "session");
-        string? runId = DashHttp.OptionalQueryString(request.Query, "run");
-        int limit = DashHttp.OptionalPositiveInt(request.Query, "limit", out bool invalidLimit) ?? 50;
+        string? harness = DashHttp.NormalizeFilter(DashHttp.OptionalQueryString(request.Query, "harness"));
+        string? sessionId = DashHttp.OptionalQueryString(request.Query, "session")?.Trim();
+        string? runId = DashHttp.OptionalQueryString(request.Query, "run")?.Trim();
+        int? parsedLimit = DashHttp.OptionalPositiveInt(request.Query, "limit", out bool invalidLimit);
         if (invalidLimit)
             return DashHttp.Error(StatusCodes.Status400BadRequest, "limit must be a positive whole number");
 
+        int limit = Math.Clamp(parsedLimit ?? 50, 1, 200);
+        string? rawDays = DashHttp.OptionalQueryString(request.Query, "days")?.Trim();
+        int days = 7;
+        if (rawDays is not null && (!int.TryParse(rawDays, NumberStyles.None, CultureInfo.InvariantCulture, out days) || days <= 0))
+            return DashHttp.Error(StatusCodes.Status400BadRequest, "days must be a positive whole number");
+
         return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetReport(harness, sessionId, runId, limit)),
+            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetReport(harness, sessionId, runId, limit, days)),
             cancellationToken).ConfigureAwait(false);
     }
 

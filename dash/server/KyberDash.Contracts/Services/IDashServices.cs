@@ -194,6 +194,14 @@ public interface IDashboardQueryService
     /// <summary>Returns summary report payload.</summary>
     JsonElement GetReport(string? harness = null, string? sessionId = null, string? runId = null, int limit = 50);
 
+    /// <summary>Returns summary report payload scoped to <paramref name="days"/>.</summary>
+    /// <param name="harness">Optional harness filter.</param>
+    /// <param name="sessionId">Optional session filter.</param>
+    /// <param name="runId">Optional run filter.</param>
+    /// <param name="limit">Maximum findings included.</param>
+    /// <param name="days">Positive lookback window in whole days.</param>
+    JsonElement GetReport(string? harness, string? sessionId, string? runId, int limit, int days);
+
     /// <summary>Returns session execution timeline tree payload.</summary>
     JsonElement GetTimeline(string? sessionId = null);
 

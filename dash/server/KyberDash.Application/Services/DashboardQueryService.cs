@@ -117,6 +117,10 @@ public class DashboardQueryService : IDashboardQueryService
         bridge.GetReport(harness, sessionId, runId, limit);
 
     /// <inheritdoc />
+    public JsonElement GetReport(string? harness, string? sessionId, string? runId, int limit, int days) =>
+        bridge.GetReport(harness, sessionId, runId, limit, days);
+
+    /// <inheritdoc />
     public JsonElement GetTimeline(string? sessionId = null) => bridge.GetTimeline(sessionId);
 
     /// <inheritdoc />

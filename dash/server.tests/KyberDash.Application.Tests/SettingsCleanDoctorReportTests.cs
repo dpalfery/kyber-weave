@@ -1159,4 +1159,522 @@ public static class SettingsCleanDoctorReportTests
             public AnalyticsService Analytics { get; }
         }
     }
+
+    /// <summary>
+    /// Report projection alignment: injected store paths, 4-arg vs 5-arg windowing, bounded
+    /// scorecard derivation without N+1 scans, unmeasurable figure reasons, and non-blended cost.
+    /// </summary>
+    public class BridgeReportTests
+    {
+        private static readonly DateTimeOffset FixedNow = new(2026, 11, 20, 12, 0, 0, TimeSpan.Zero);
+
+        [Fact]
+        public void CoverageStorePathUsesDefaultResolutionOrInjectedDatabasePath()
+        {
+            InMemoryRelationalStore store = new();
+            FakePricingRepository pricing = new();
+            KyberBridgeEngine defaultBridge = new(
+                store,
+                store,
+                store,
+                pricing,
+                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonRollupsEngine(store, store, pricing),
+                clock: () => FixedNow);
+
+            JsonElement defaultReport = defaultBridge.GetReport();
+            Assert.Equal(
+                CanonDbPath.Resolve(),
+                defaultReport.GetProperty("coverage").GetProperty("storePath").GetString());
+
+            KyberBridgeEngine customBridge = new(
+                store,
+                store,
+                store,
+                pricing,
+                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonRollupsEngine(store, store, pricing),
+                version: "1.9.0",
+                clock: () => FixedNow,
+                storePath: "/tmp/custom-report.db");
+
+            JsonElement customReport = customBridge.GetReport();
+            Assert.Equal(
+                "/tmp/custom-report.db",
+                customReport.GetProperty("coverage").GetProperty("storePath").GetString());
+            Assert.Equal("1.9.0", customReport.GetProperty("kyberdashVersion").GetString());
+
+            ServiceCollection services = new();
+            services.AddSingleton<IRelationalStoreWriter>(store);
+            services.AddSingleton<IRelationalStoreReader>(store);
+            services.AddSingleton<IProjectionStore>(store);
+            services.AddSingleton<IOperationalStore>(store);
+            services.AddSingleton<IPricingRepository>(pricing);
+            services.AddDashApplication(new DashOptions
+            {
+                DatabasePath = "/tmp/di-canon.db",
+                StateDirectory = Path.GetTempPath(),
+                Version = "2.4.0",
+            });
+
+            using ServiceProvider provider = services.BuildServiceProvider();
+            IDashboardQueryService queryService = provider.GetRequiredService<IDashboardQueryService>();
+            JsonElement diReport = queryService.GetReport();
+            Assert.Equal("/tmp/di-canon.db", diReport.GetProperty("coverage").GetProperty("storePath").GetString());
+            Assert.Equal("2.4.0", diReport.GetProperty("kyberdashVersion").GetString());
+        }
+
+        [Fact]
+        public void EmptyStoreEmitsFullContextReportShapeWithCompatibilityScalars()
+        {
+            InMemoryRelationalStore store = new();
+            KyberBridgeEngine bridge = CreateBridge(store, version: "1.2.3", storePath: "canon.db");
+
+            JsonElement report = bridge.GetReport();
+
+            Assert.Equal(1, report.GetProperty("schemaVersion").GetInt32());
+            Assert.Equal("2026-11-20T12:00:00.000Z", report.GetProperty("generatedAt").GetString());
+            Assert.Equal("1.2.3", report.GetProperty("kyberdashVersion").GetString());
+            Assert.True(report.GetProperty("storeGeneration").GetInt64() >= 0);
+            Assert.Equal(0, report.GetProperty("sessionCount").GetInt32());
+            Assert.Equal(0, report.GetProperty("findingCount").GetInt32());
+            Assert.Equal(0, report.GetProperty("harnessCount").GetInt32());
+
+            JsonElement scope = report.GetProperty("scope");
+            Assert.Equal(7, scope.GetProperty("days").GetInt32());
+            Assert.False(scope.TryGetProperty("harness", out _));
+            Assert.False(scope.TryGetProperty("sessionId", out _));
+            Assert.False(scope.TryGetProperty("runId", out _));
+
+            JsonElement coverage = report.GetProperty("coverage");
+            Assert.Equal("canon.db", coverage.GetProperty("storePath").GetString());
+            Assert.Empty(coverage.GetProperty("harnesses").EnumerateArray());
+            Assert.Equal(0, coverage.GetProperty("quarantineCount").GetInt32());
+            Assert.Equal(0, coverage.GetProperty("problemCount").GetInt32());
+            Assert.NotEmpty(coverage.GetProperty("hints").EnumerateArray());
+
+            Assert.Empty(report.GetProperty("findings").EnumerateArray());
+            Assert.Empty(report.GetProperty("harnesses").EnumerateArray());
+            Assert.Equal(JsonValueKind.Null, report.GetProperty("latestSession").ValueKind);
+
+            JsonElement unknownCost = Assert.Single(report.GetProperty("cost").EnumerateArray());
+            Assert.Equal("unknown", unknownCost.GetProperty("basis").GetString());
+            Assert.Equal(JsonValueKind.Null, unknownCost.GetProperty("amountUsd").GetProperty("value").ValueKind);
+            Assert.False(string.IsNullOrWhiteSpace(unknownCost.GetProperty("amountUsd").GetProperty("reason").GetString()));
+        }
+
+        [Fact]
+        public void FourArgOverloadDefaultsToSevenDaysWhileFiveArgFiltersWindow()
+        {
+            InMemoryRelationalStore store = new();
+            FakePricingRepository pricing = new();
+
+            WriteRichSession(
+                store,
+                sessionId: "sess-recent",
+                harnessId: "claude-code",
+                startedAt: FixedNow.AddDays(-2),
+                inputTokens: 1_000,
+                cacheReadTokens: 800,
+                reportedCostUsd: 0.25,
+                toolResultText: new string('a', 14_000));
+            WriteRichSession(
+                store,
+                sessionId: "sess-old",
+                harnessId: "codex",
+                startedAt: FixedNow.AddDays(-20),
+                inputTokens: 1_000,
+                cacheReadTokens: 0,
+                reportedCostUsd: 0.75,
+                toolResultText: new string('b', 14_000));
+
+            _ = new CanonProjectionService(
+                store,
+                store,
+                store,
+                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonRollupsEngine(store, store, pricing)).ProjectAll();
+
+            KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
+            DashboardQueryService queryService = new(bridge);
+
+            JsonElement defaultReport = queryService.GetReport();
+            Assert.Equal(7, defaultReport.GetProperty("scope").GetProperty("days").GetInt32());
+            Assert.Equal(1, defaultReport.GetProperty("sessionCount").GetInt32());
+            Assert.Equal(1, defaultReport.GetProperty("harnessCount").GetInt32());
+            JsonElement recentHarness = Assert.Single(defaultReport.GetProperty("harnesses").EnumerateArray());
+            Assert.Equal("claude-code", recentHarness.GetProperty("harness").GetString());
+            Assert.NotEmpty(defaultReport.GetProperty("findings").EnumerateArray());
+            foreach (JsonElement finding in defaultReport.GetProperty("findings").EnumerateArray())
+            {
+                Assert.Equal("sess-recent", finding.GetProperty("sessionId").GetString());
+                Assert.StartsWith("finding/", finding.GetProperty("view").GetString(), StringComparison.Ordinal);
+                Assert.True(finding.TryGetProperty("recoverableTokens", out _));
+            }
+
+            List<JsonElement> coverageHarnesses = [.. defaultReport.GetProperty("coverage").GetProperty("harnesses").EnumerateArray()];
+            Assert.Equal(2, coverageHarnesses.Count);
+            Assert.Equal(1, coverageHarnesses.Single(static h => h.GetProperty("harness").GetString() == "claude-code").GetProperty("sessionsInWindow").GetInt32());
+            Assert.Equal(0, coverageHarnesses.Single(static h => h.GetProperty("harness").GetString() == "codex").GetProperty("sessionsInWindow").GetInt32());
+
+            JsonElement thirtyDayReport = queryService.GetReport(null, null, null, 50, 30);
+            Assert.Equal(30, thirtyDayReport.GetProperty("scope").GetProperty("days").GetInt32());
+            Assert.Equal(2, thirtyDayReport.GetProperty("sessionCount").GetInt32());
+            Assert.Equal(2, thirtyDayReport.GetProperty("harnessCount").GetInt32());
+
+            JsonElement codexScoped = queryService.GetReport("codex", null, null, 1, 30);
+            Assert.Equal("codex", codexScoped.GetProperty("scope").GetProperty("harness").GetString());
+            Assert.Equal(1, codexScoped.GetProperty("sessionCount").GetInt32());
+            Assert.Equal("sess-old", codexScoped.GetProperty("latestSession").GetProperty("sessionId").GetString());
+            Assert.True(codexScoped.GetProperty("findings").GetArrayLength() <= 1);
+            Assert.Single(codexScoped.GetProperty("harnesses").EnumerateArray());
+
+            JsonElement sessionScoped = queryService.GetReport(null, "sess-recent", null, 0, 7);
+            Assert.Equal("sess-recent", sessionScoped.GetProperty("scope").GetProperty("sessionId").GetString());
+            Assert.Equal(1, sessionScoped.GetProperty("sessionCount").GetInt32());
+            Assert.True(sessionScoped.GetProperty("findings").GetArrayLength() <= 1);
+
+            StoredRun runForOld = Assert.Single(((IProjectionStore)store).ListRuns("codex"));
+            JsonElement runScoped = queryService.GetReport(null, null, runForOld.RunId, 500, 30);
+            Assert.Equal(runForOld.RunId, runScoped.GetProperty("scope").GetProperty("runId").GetString());
+            Assert.Equal(1, runScoped.GetProperty("sessionCount").GetInt32());
+            Assert.Equal("sess-old", runScoped.GetProperty("latestSession").GetProperty("sessionId").GetString());
+        }
+
+        [Fact]
+        public void UnexportedDimensionsAndUnmeasurableContextEmitReasons()
+        {
+            InMemoryRelationalStore store = new();
+            FakePricingRepository pricing = new();
+
+            store.WriteBatch(new CollectedBatch(
+                Source: new CollectedSource("cursor", SourceKind.Otlp, "otlp:cursor"),
+                Sessions:
+                [
+                    new CollectedSession("sess-cursor", "cursor", "sess-cursor", new CollectedWorkspace("/work/proj", "proj", "main"), null, []),
+                ],
+                Records:
+                [
+                    new CollectedRecord(
+                        RecordId: "span-cur-1",
+                        HarnessId: "cursor",
+                        Op: RecordOp.LlmInvoke,
+                        Kind: RecordKind.Client,
+                        Name: "chat.turn",
+                        StartedAt: FixedNow.AddHours(-2),
+                        Status: RecordStatus.Ok,
+                        SessionKey: "sess-cursor",
+                        ParentRecordId: null,
+                        TraceId: null,
+                        Model: "unlisted-model",
+                        EndedAt: FixedNow.AddHours(-1),
+                        ReportedDurationMs: 500,
+                        Tokens:
+                        [
+                            new CollectedTokenCount(TokenClass.Input, 120),
+                            new CollectedTokenCount(TokenClass.Output, 30),
+                        ],
+                        ReportedCost: null,
+                        Parts: [],
+                        Tool: null,
+                        Agent: null,
+                        SkillsInvoked: [],
+                        AgentInstanceId: null,
+                        ToolDefinitions: [],
+                        Signals: new CollectedRecordSignals(null, null, null, null),
+                        ReportedInputTokens: 120,
+                        ReportedOutputTokens: 30),
+                ],
+                Problems: []));
+
+            _ = new CanonProjectionService(
+                store,
+                store,
+                store,
+                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonRollupsEngine(store, store, pricing)).ProjectAll();
+
+            KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
+            JsonElement report = bridge.GetReport(null, null, null, 50, 7);
+
+            JsonElement cursorHarness = Assert.Single(report.GetProperty("harnesses").EnumerateArray());
+            JsonElement dimensions = cursorHarness.GetProperty("dimensions");
+            foreach (string key in new[]
+            {
+                "contextHygiene",
+                "cacheEfficiency",
+                "toolYield",
+                "skillUtilisation",
+                "delegationOverhead",
+                "continuity",
+            })
+            {
+                JsonElement dim = dimensions.GetProperty(key);
+                Assert.Equal(JsonValueKind.Null, dim.GetProperty("value").ValueKind);
+                Assert.False(string.IsNullOrWhiteSpace(dim.GetProperty("reason").GetString()));
+            }
+
+            JsonElement latestTurn = report.GetProperty("latestSession").GetProperty("latestTurn");
+            Assert.Equal(JsonValueKind.Null, latestTurn.GetProperty("pressure").GetProperty("value").ValueKind);
+            Assert.False(string.IsNullOrWhiteSpace(latestTurn.GetProperty("pressure").GetProperty("reason").GetString()));
+            Assert.Equal(JsonValueKind.Null, latestTurn.GetProperty("contextWindow").GetProperty("value").ValueKind);
+            Assert.Equal(JsonValueKind.Null, latestTurn.GetProperty("residual").GetProperty("value").ValueKind);
+            foreach (string bucket in new[]
+            {
+                "system_prompt",
+                "tool_definitions",
+                "instruction_context",
+                "conversation_history",
+                "tool_result_content",
+            })
+            {
+                JsonElement bucketVal = latestTurn.GetProperty("buckets").GetProperty(bucket);
+                Assert.Equal(JsonValueKind.Null, bucketVal.GetProperty("value").ValueKind);
+                Assert.False(string.IsNullOrWhiteSpace(bucketVal.GetProperty("reason").GetString()));
+            }
+        }
+
+        [Fact]
+        public void HydratesSingleLatestSessionOnceWithoutPerSessionLoopsAndKeepsCostBasesSeparate()
+        {
+            InMemoryRelationalStore store = new();
+            FakePricingRepository pricing = new(new Dictionary<string, ModelCosts>(StringComparer.Ordinal)
+            {
+                ["claude-sonnet-4-6"] = new ModelCosts(3e-6, 15e-6, 3.75e-6, 0.3e-6, 0, 1.0, false),
+            });
+
+            for (int index = 0; index < 5; index++)
+            {
+                WriteRichSession(
+                    store,
+                    sessionId: $"sess-multi-{index}",
+                    harnessId: index % 2 == 0 ? "claude-code" : "codex",
+                    startedAt: FixedNow.AddHours(-10 + index),
+                    inputTokens: 800,
+                    cacheReadTokens: index % 2 == 0 ? 400 : 0,
+                    reportedCostUsd: 0.10,
+                    toolResultText: index == 4 ? "ok" : null,
+                    includeMcpTool: true);
+            }
+
+            _ = new CanonProjectionService(
+                store,
+                store,
+                store,
+                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonRollupsEngine(store, store, pricing)).ProjectAll();
+
+            CountingReader countingReader = new(store);
+            KyberBridgeEngine bridge = new(
+                countingReader,
+                store,
+                store,
+                pricing,
+                new CanonSessionProjectorEngine(countingReader, store, store, pricing),
+                new CanonRollupsEngine(countingReader, store, pricing),
+                clock: () => FixedNow,
+                storePath: "/tmp/multi.db");
+
+            JsonElement report = bridge.GetReport(null, null, null, 50, 7);
+
+            Assert.True(countingReader.GetSessionAggregateCalls <= 1);
+            Assert.Equal(1, countingReader.SessionTurnSummariesCalls);
+            Assert.Equal(5, report.GetProperty("sessionCount").GetInt32());
+
+            JsonElement latestSession = report.GetProperty("latestSession");
+            Assert.Equal("sess-multi-4", latestSession.GetProperty("sessionId").GetString());
+            Assert.Equal("session/sess-multi-4", latestSession.GetProperty("view").GetString());
+            JsonElement latestTurn = latestSession.GetProperty("latestTurn");
+            Assert.Equal(1, latestTurn.GetProperty("index").GetInt32());
+            Assert.True(latestTurn.GetProperty("pressure").GetProperty("value").GetDouble() > 0);
+            Assert.Equal(200_000, latestTurn.GetProperty("contextWindow").GetProperty("value").GetInt64());
+            JsonElement buckets = latestTurn.GetProperty("buckets");
+            Assert.Equal("tokens", buckets.GetProperty("conversation_history").GetProperty("unit").GetString());
+            Assert.Equal("tokens", buckets.GetProperty("system_prompt").GetProperty("unit").GetString());
+            Assert.Equal("tokens", latestTurn.GetProperty("residual").GetProperty("unit").GetString());
+            Assert.NotEmpty(latestSession.GetProperty("toolDefinitionSources").EnumerateArray());
+
+            List<JsonElement> costRows = [.. report.GetProperty("cost").EnumerateArray()];
+            Assert.Contains(costRows, static row => row.GetProperty("basis").GetString() == "harness" && Math.Abs(row.GetProperty("amountUsd").GetProperty("value").GetDouble() - 0.50) < 0.001);
+            Assert.Contains(costRows, static row => row.GetProperty("basis").GetString() == "published" && row.GetProperty("amountUsd").GetProperty("value").GetDouble() > 0);
+            Assert.Equal(2, costRows.Count);
+        }
+
+        private static KyberBridgeEngine CreateBridge(
+            InMemoryRelationalStore store,
+            FakePricingRepository? pricing = null,
+            string version = KyberBridgeEngine.DefaultVersion,
+            string? storePath = null)
+        {
+            FakePricingRepository resolvedPricing = pricing ?? new FakePricingRepository();
+            return new KyberBridgeEngine(
+                store,
+                store,
+                store,
+                resolvedPricing,
+                new CanonSessionProjectorEngine(store, store, store, resolvedPricing),
+                new CanonRollupsEngine(store, store, resolvedPricing),
+                version: version,
+                clock: () => FixedNow,
+                storePath: storePath);
+        }
+
+        private static void WriteRichSession(
+            InMemoryRelationalStore store,
+            string sessionId,
+            string harnessId,
+            DateTimeOffset startedAt,
+            long inputTokens,
+            long cacheReadTokens,
+            double reportedCostUsd,
+            string? toolResultText = null,
+            bool includeMcpTool = false)
+        {
+            List<CollectedRecord> records =
+            [
+                new CollectedRecord(
+                    RecordId: $"span-{sessionId}-0",
+                    HarnessId: harnessId,
+                    Op: RecordOp.LlmInvoke,
+                    Kind: RecordKind.Client,
+                    Name: "chat.turn",
+                    StartedAt: startedAt,
+                    Status: RecordStatus.Ok,
+                    SessionKey: sessionId,
+                    ParentRecordId: null,
+                    TraceId: null,
+                    Model: "claude-sonnet-4-6",
+                    EndedAt: startedAt.AddMinutes(1),
+                    ReportedDurationMs: 1_000,
+                    Tokens:
+                    [
+                        new CollectedTokenCount(TokenClass.Input, inputTokens),
+                        new CollectedTokenCount(TokenClass.CacheRead, cacheReadTokens),
+                        new CollectedTokenCount(TokenClass.CacheWrite, 0),
+                        new CollectedTokenCount(TokenClass.Output, 80),
+                    ],
+                    ReportedCost: new CollectedCost(reportedCostUsd, "USD"),
+                    Parts:
+                    [
+                        new CollectedContentPart(0, ContentBucket.UserPrompt, "Inspect the context report.", null, 120, null, "user", null, null),
+                    ],
+                    Tool: null,
+                    Agent: null,
+                    SkillsInvoked: [],
+                    AgentInstanceId: null,
+                    ToolDefinitions: includeMcpTool
+                        ? [new CollectedToolDefinition(0, "mcp__github__search", "github", 900)]
+                        : [],
+                    Signals: new CollectedRecordSignals(null, null, null, 200_000),
+                    ReportedInputTokens: inputTokens + cacheReadTokens,
+                    ReportedOutputTokens: 80),
+            ];
+
+            if (!string.IsNullOrEmpty(toolResultText))
+            {
+                records.Add(new CollectedRecord(
+                    RecordId: $"span-{sessionId}-tool",
+                    HarnessId: harnessId,
+                    Op: RecordOp.ToolInvoke,
+                    Kind: RecordKind.Client,
+                    Name: "search_docs",
+                    StartedAt: startedAt.AddSeconds(15),
+                    Status: RecordStatus.Ok,
+                    SessionKey: sessionId,
+                    ParentRecordId: $"span-{sessionId}-0",
+                    TraceId: null,
+                    Model: "claude-sonnet-4-6",
+                    EndedAt: startedAt.AddSeconds(16),
+                    ReportedDurationMs: 250,
+                    Tokens: [],
+                    ReportedCost: null,
+                    Parts:
+                    [
+                        new CollectedContentPart(0, ContentBucket.ToolResultContent, toolResultText, null, Math.Max(10, toolResultText.Length / 4), null, null, null, null),
+                    ],
+                    Tool: null,
+                    Agent: null,
+                    SkillsInvoked: [],
+                    AgentInstanceId: null,
+                    ToolDefinitions: [],
+                    Signals: new CollectedRecordSignals(null, null, null, 200_000),
+                    ReportedInputTokens: null,
+                    ReportedOutputTokens: null));
+            }
+
+            store.WriteBatch(new CollectedBatch(
+                Source: new CollectedSource(harnessId, SourceKind.Otlp, "otlp:" + harnessId),
+                Sessions:
+                [
+                    new CollectedSession(
+                        SessionKey: sessionId,
+                        HarnessId: harnessId,
+                        NativeSessionId: sessionId,
+                        Workspace: new CollectedWorkspace("/tmp/kyber-weave", "kyber-weave", "main"),
+                        Title: sessionId,
+                        ReportedUsage: []),
+                ],
+                Records: records,
+                Problems: []));
+        }
+
+        private sealed class CountingReader(InMemoryRelationalStore inner) : IRelationalStoreReader
+        {
+            public int GetSessionAggregateCalls { get; private set; }
+
+            public int SessionTurnSummariesCalls { get; private set; }
+
+            public IReadOnlyList<string> Harnesses() => inner.Harnesses();
+
+            public IReadOnlyList<StoredSource> Sources(string? harnessId = null) => inner.Sources(harnessId);
+
+            public int CountRecords(string? harnessId = null) => inner.CountRecords(harnessId);
+
+            public CollectedRecord? GetRecord(string spanId) => inner.GetRecord(spanId);
+
+            public IReadOnlyList<CollectedRecord> Records(string? sessionKey = null, string? harnessId = null, string? sourceId = null) =>
+                inner.Records(sessionKey, harnessId, sourceId);
+
+            public IReadOnlyList<StoredTokenCount> TokenCounts(string? spanId = null, string? sessionKey = null) => inner.TokenCounts(spanId, sessionKey);
+
+            public IReadOnlyList<StoredReportedTotal> ReportedTotals(string? spanId = null, string? sessionKey = null) => inner.ReportedTotals(spanId, sessionKey);
+
+            public IReadOnlyList<StoredReportedCost> ReportedCosts(string? spanId = null, string? sessionKey = null) => inner.ReportedCosts(spanId, sessionKey);
+
+            public IReadOnlyList<StoredSkillInvocation> SkillsInvoked(string? spanId = null, string? sessionKey = null) => inner.SkillsInvoked(spanId, sessionKey);
+
+            public IReadOnlyList<StoredToolCall> ToolCalls(string? spanId = null, string? sessionKey = null) => inner.ToolCalls(spanId, sessionKey);
+
+            public IReadOnlyList<StoredContentPart> ContentParts(string? spanId = null, string? sessionKey = null) => inner.ContentParts(spanId, sessionKey);
+
+            public IReadOnlyList<StoredToolDefinition> ToolDefinitions(string? spanId = null, string? sessionKey = null) => inner.ToolDefinitions(spanId, sessionKey);
+
+            public IReadOnlyList<StoredAgentInvocation> AgentInvocations(string? spanId = null, string? sessionKey = null) => inner.AgentInvocations(spanId, sessionKey);
+
+            public IReadOnlyList<StoredRecordSignals> RecordSignals(string? spanId = null, string? sessionKey = null) => inner.RecordSignals(spanId, sessionKey);
+
+            public CollectedSession? GetSession(string sessionKey) => inner.GetSession(sessionKey);
+
+            public IReadOnlyList<CollectedSession> Sessions(string? harnessId = null) => inner.Sessions(harnessId);
+
+            public IReadOnlyList<StoredSessionModelUsage> SessionModelUsages(string? sessionKey = null) => inner.SessionModelUsages(sessionKey);
+
+            public StoredFieldsView StoredFields(string sessionKey) => inner.StoredFields(sessionKey);
+
+            public SessionAggregateView? GetSessionAggregate(string sessionKey, IModelPricingLookup? pricing = null)
+            {
+                GetSessionAggregateCalls++;
+                return inner.GetSessionAggregate(sessionKey, pricing);
+            }
+
+            public IReadOnlyList<SessionAggregateView> ListSessionAggregates(string? harnessId = null, IModelPricingLookup? pricing = null) =>
+                inner.ListSessionAggregates(harnessId, pricing);
+
+            public IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null)
+            {
+                SessionTurnSummariesCalls++;
+                return inner.SessionTurnSummaries(sessionKey, pricing);
+            }
+        }
+    }
 }

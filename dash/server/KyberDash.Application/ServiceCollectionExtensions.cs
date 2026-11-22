@@ -84,7 +84,8 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<IPricingRepository>(),
             provider.GetRequiredService<CanonSessionProjectorEngine>(),
             provider.GetRequiredService<CanonRollupsEngine>(),
-            string.IsNullOrWhiteSpace(options.Version) ? KyberBridgeEngine.DefaultVersion : options.Version));
+            string.IsNullOrWhiteSpace(options.Version) ? KyberBridgeEngine.DefaultVersion : options.Version,
+            storePath: options.DatabasePath));
     }
 
     /// <summary>
