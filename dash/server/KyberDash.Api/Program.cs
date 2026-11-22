@@ -195,7 +195,9 @@ public static partial class Program
             new ServerInfo(
                 webUri.Port,
                 Environment.ProcessId,
-                DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture)));
+                DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
+                webUri,
+                ApiContractVersion));
 
         await AnnounceListeningAsync(runtime, webUrl).ConfigureAwait(false);
 

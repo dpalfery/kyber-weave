@@ -13,8 +13,9 @@ namespace KyberWeave.Tests;
 /// <see cref="KiloRenderer"/> emits the owned file <c>.kilo/plugin/kyber-arbiter.ts</c>
 /// from <see cref="ArbiterPluginShim"/> for harness <c>kilo</c>, spawning the binary by
 /// argv with Bun, writing the <c>kyber-arbiter.plugin-event/v1</c> envelope, throwing on
-/// block, assigning <c>output.args</c> and appending to <c>output.output</c>; nothing
-/// renders when disabled or under Global scope (Req 6.3, 22.2, 25.1).
+/// block, assigning <c>output.args</c> and appending to <c>output.output</c>. Kilo's fork
+/// keeps the 1.x <c>{ id, server }</c> default export and the 1.x hook object byte for
+/// byte; nothing renders when disabled (Req 6.3, 22.2, 25.1).
 /// </summary>
 public sealed class ArbiterKiloRenderingTests : IDisposable
 {
@@ -129,6 +130,30 @@ public sealed class ArbiterKiloRenderingTests : IDisposable
     public void Render_UnknownHarnessToken_ThrowsInsteadOfGuessingALoaderShape()
     {
         Assert.Throws<ArgumentException>(() => ArbiterPluginShim.Render("warp"));
+    }
+
+    [Fact]
+    public void Render_Kilo_ProjectScope_KeepsTheOneXServerBody()
+    {
+        // Kilo is an OpenCode fork on the 1.x plugin API: the server function returns the
+        // hook object, which carries the writable output.args/output.output. The 2.x
+        // ctx.tool.hook registration must never leak into this render.
+        string content = ArbiterPluginShim.Render("kilo", SquadDeploymentScope.Project);
+
+        Assert.Contains(
+            "export const KyberArbiter: Plugin = async ({ directory }) => ({",
+            content,
+            StringComparison.Ordinal);
+        Assert.Contains("\"tool.execute.before\": async (input, output) => {", content, StringComparison.Ordinal);
+        Assert.Contains("\"tool.execute.after\": async (input, output) => {", content, StringComparison.Ordinal);
+        Assert.Contains("output.args = decision.args;", content, StringComparison.Ordinal);
+        Assert.Contains("output.output = (output.output ?? \"\") + \"\\n\" + reason;", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("ctx.tool.hook", content, StringComparison.Ordinal);
+        Assert.True(
+            content.EndsWith(
+                "});\nexport default {\n  id: \"kyber-arbiter\",\n  server: KyberArbiter,\n};",
+                StringComparison.Ordinal),
+            "Kilo's project-scope default export must stay the 1.x { id, server } object");
     }
 
     [Fact]

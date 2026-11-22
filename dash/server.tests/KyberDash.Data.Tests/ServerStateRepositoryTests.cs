@@ -32,14 +32,17 @@ public class ServerStateRepositoryTests : IDisposable
     [Fact]
     public void ServerInfo_RoundTripsThroughServerJson()
     {
-        ServerInfo info = new(Port: 4747, Pid: Environment.ProcessId, StartedAt: "2026-01-01T00:00:00.000Z");
+        ServerInfo info = new(Port: 4747, Pid: Environment.ProcessId, StartedAt: "2026-01-01T00:00:00.000Z", Url: new Uri("http://127.0.0.1:4747/"), ApiVersion: 1);
 
         repository.WriteServerInfo(directory.Path, info);
 
         string path = directory.Combine(ServerStateRepository.ServerInfoFile);
         Assert.True(File.Exists(path));
         Assert.Equal(info, repository.ReadServerInfo(directory.Path));
-        Assert.Contains("\"port\":4747", File.ReadAllText(path), StringComparison.Ordinal);
+        string text = File.ReadAllText(path);
+        Assert.Contains("\"port\":4747", text, StringComparison.Ordinal);
+        Assert.Contains("\"url\":\"http://127.0.0.1:4747/\"", text, StringComparison.Ordinal);
+        Assert.Contains("\"apiVersion\":1", text, StringComparison.Ordinal);
 
         repository.DeleteServerInfo(directory.Path);
         Assert.Null(repository.ReadServerInfo(directory.Path));

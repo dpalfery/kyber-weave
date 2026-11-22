@@ -26,4 +26,8 @@
     <ProjectReference Include="..\..\server\KyberDash.Domain\KyberDash.Domain.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\KyberDash.Application.Tests\Fakes\InMemoryRelationalStore.cs" Link="Fakes\InMemoryRelationalStore.cs" />
+  </ItemGroup>
+
 </Project>

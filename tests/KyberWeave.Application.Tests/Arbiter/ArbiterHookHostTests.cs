@@ -260,6 +260,23 @@ public sealed class ArbiterHookHostTests
         Assert.Equal(string.Empty, stderr.ToString());
     }
 
+    [Fact]
+    public async Task EqualsFormScopeGlobal_IsAcceptedAndABadValueIsRejected()
+    {
+        using StringWriter acceptedErr = new();
+        int accepted = await Composition.DispatchAsync(
+            ["hook", "--scope=global"], TextReader.Null, TextWriter.Null, acceptedErr);
+
+        using StringWriter rejectedErr = new();
+        int rejected = await Composition.DispatchAsync(
+            ["hook", "--scope=sideways"], TextReader.Null, TextWriter.Null, rejectedErr);
+
+        Assert.Equal(1, accepted);
+        Assert.DoesNotContain("project|global", acceptedErr.ToString(), StringComparison.Ordinal);
+        Assert.Equal(1, rejected);
+        Assert.Contains("project|global", rejectedErr.ToString(), StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// The arbiter answers <c>--version</c> with exit 0 and <c>--help</c> with a usage
     /// error, which is why the CI smoke may drop <c>|| true</c> for it.

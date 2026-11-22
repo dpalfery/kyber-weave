@@ -307,7 +307,9 @@ public record IngestAdmissionResult(
 public record ServerInfo(
     [property: JsonPropertyName("port")] int Port,
     [property: JsonPropertyName("pid")] int Pid,
-    [property: JsonPropertyName("startedAt")] string StartedAt);
+    [property: JsonPropertyName("startedAt")] string StartedAt,
+    [property: JsonPropertyName("url")] Uri? Url = null,
+    [property: JsonPropertyName("apiVersion")] int ApiVersion = 1);
 
 /// <summary>Snapshot of the in-process background job host state.</summary>
 public record JobHostStatus(
@@ -374,13 +376,33 @@ public record AnalyticsExecutionResult(
     int StatusCode,
     JsonElement Envelope);
 
+/// <summary>
+/// Rebuild summary of the most recent automatic destructive older-schema store rebuild, mirroring
+/// the data layer's <c>StoreRebuildInfo</c> without taking a data-layer reference.
+/// </summary>
+/// <param name="DatabasePath">Full path to the rebuilt SQLite database file.</param>
+/// <param name="OldSchemaVersion">Schema version discovered in the pre-existing store.</param>
+/// <param name="NewSchemaVersion">Schema version stamped after the rebuild.</param>
+/// <param name="SettingsResetToDefaults">Whether operator settings were reset to defaults.</param>
+/// <param name="UnrecoverableHistoryClasses">History classes that could not be preserved across the rebuild.</param>
+/// <param name="ReingestTriggered">Whether the post-rebuild source re-ingest has already been triggered.</param>
+public record StoreRebuildSummary(
+    string DatabasePath,
+    int OldSchemaVersion,
+    int NewSchemaVersion,
+    bool SettingsResetToDefaults,
+    IReadOnlyList<string> UnrecoverableHistoryClasses,
+    bool ReingestTriggered);
+
 /// <summary>Diagnostics summary returned by the doctor service.</summary>
+/// <param name="LastRebuild">Summary of the most recent destructive older-schema rebuild, or <see langword="null"/> when none occurred.</param>
 public record DoctorDiagnosticsReport(
     string DatabasePath,
     int Records,
     int Sessions,
     IReadOnlyList<string> ObservedHarnesses,
-    string CircuitBreakerState);
+    string CircuitBreakerState,
+    StoreRebuildSummary? LastRebuild = null);
 
 /// <summary>Engine liveness status returned by engine probe/ensure.</summary>
 public enum EngineProbeState

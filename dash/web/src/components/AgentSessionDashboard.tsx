@@ -10,6 +10,7 @@ import { SchemaCostRanking, type SchemaCostAnalysis, type SchemaCostToolRow } fr
 import { SkillsPanel } from './SkillsPanel.js'
 import { TimelineView, type TimelineNode, type CostBlock } from './analysis/TimelineView.js'
 import { SessionCostPanel } from './SessionCostPanel.js'
+import { StoredFieldsPanel } from './StoredFieldsPanel.js'
 import { findContextTurn, findTurnByTransport } from '../lib/kyberApi.js'
 import type {
   KyberContextBucket,
@@ -26,6 +27,10 @@ import type {
 // ---------------------------------------------------------------------------
 // Types & Contracts
 // ---------------------------------------------------------------------------
+
+function finiteCost(value: number | null | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
 
 export interface SessionSummaryCost {
   value?: number | null
@@ -85,6 +90,8 @@ export interface SessionSummaryPayload {
   defs_turns?: number | null
   schema_waste_cost?: SessionWasteCost | null
   cost?: SessionSummaryCost | null
+  /** Harness-reported cost. A priced value, including zero, is the figure the harness sent. */
+  cost_reported?: SessionSummaryCost | null
   span_count?: number | null
 }
 
@@ -710,6 +717,13 @@ export function AgentSessionContent({
   }
 
   const u = session.summary || {}
+  const reportedFigure = finiteCost(u.cost_reported?.value) ?? finiteCost(u.cost_reported?.usd)
+  // A harness-reported figure, including a reported zero, is the cost the harness sent.
+  // The published block stays beside it and is what the tile shows only when the harness sent none.
+  const cost = reportedFigure != null
+    ? { ...u.cost_reported, value: reportedFigure, basis: u.cost_reported?.basis || 'harness' }
+    : (u.cost || {})
+  const costFigure = finiteCost(cost.value) ?? finiteCost(cost.usd)
   const offeredList = Array.isArray(u.tools_offered) ? u.tools_offered : undefined
   const invokedList = Array.isArray(u.tools_invoked) ? u.tools_invoked : undefined
   const toolsOfferedCount = offeredList !== undefined
@@ -728,7 +742,6 @@ export function AgentSessionContent({
   const toolCallsReason = `Tool invocation count was not reported by ${session.harness || 'this adapter'}.`
   const rows = session.reconciliation || []
   const badReconciliation = rows.filter((r) => !(r.input_match && r.output_match))
-  const cost = u.cost || {}
   const basis = cost.basis || 'none'
   // The engine stamps a harness-reported cost with basis `harness`; `harness_reported` is the
   // legacy spelling, still accepted (SessionCostPanel reads both).
@@ -1073,14 +1086,14 @@ export function AgentSessionContent({
               )}
             </div>
             <div className="mt-1 text-xl font-semibold tabular-nums tracking-tight text-foreground">
-              {cost.value != null
-                ? usd(cost.value)
+              {costFigure != null
+                ? usd(costFigure)
                 : cost.credits != null
                   ? `${formatCredits(cost.credits)} cr`
                   : '—'}
             </div>
             <div className="mt-0.5 text-[11px] text-tertiary-foreground truncate">
-              {cost.value != null && cost.credits != null
+              {costFigure != null && cost.credits != null
                 ? `${formatCredits(cost.credits)} credits`
                 : isReported
                   ? 'reported by harness'
@@ -1437,6 +1450,13 @@ export function AgentSessionContent({
           Section 5: Session Cost & Token Accounting
       --------------------------------------------------------------------- */}
       <SessionCostPanel session={session} />
+
+      {/* ---------------------------------------------------------------------
+          Stored Fields: what the relational store persisted for this session
+      --------------------------------------------------------------------- */}
+      <div className="space-y-2" data-testid="stored-fields-section">
+        <StoredFieldsPanel sessionKey={session.session_id ?? session.id} />
+      </div>
 
       {/* ---------------------------------------------------------------------
           Section 6: Slide-out Inspector Drawer

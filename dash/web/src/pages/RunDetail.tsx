@@ -21,6 +21,7 @@ import {
   BaselineSelect,
   DIMENSION_METADATA,
 } from '../components/analysis/index.js'
+import { StoredFieldsPanel } from '../components/StoredFieldsPanel.js'
 
 export interface RunDetailProps {
   runId: string
@@ -539,6 +540,11 @@ export function RunDetail({
             onSelectFinding={onSelectFinding}
             onSelectTurn={(turnIdx) => handleOpenTurn(turnIdx)}
           />
+
+          {/* Stored Fields for the inspected session execution */}
+          <div className="space-y-2" data-testid="stored-fields-section">
+            <StoredFieldsPanel sessionKey={activeExecution?.sessionId} />
+          </div>
         </>
       )}
     </div>

@@ -573,6 +573,7 @@ public sealed class DispatchPromptInsertionTests
             hostConfig ?? new FixedConfig(config),
             ArbiterTestServices.Get<IDispatchClaimStore>(),
             ArbiterTestServices.Get<IClaudeHookCoverage>(),
+            ArbiterTestServices.Get<IProjectDispatchHookProbe>(),
             ArbiterTestServices.Get<IProcessEnvironment>(),
             new FakeIdGenerator(),
             () => "decision-test-1",

@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: csharp
 owner: dpalfery
-last-reviewed: 2026-11-15
+last-reviewed: 2026-11-20
 ---
 
 # C# coding standard
@@ -95,7 +95,31 @@ CLI output goes through `AnsiConsole`, never `Console.WriteLine`. Any value that
 file, a configuration, or an operator is passed through `Markup.Escape` before it reaches
 markup — a path containing brackets otherwise corrupts the render or throws.
 
+### SQLite
+
+SQL in this repository is SQLite. How a database is opened, how the KyberDash canon
+schema changes, and how values are bound is the
+[SQLite coding standard](../sqlite/sqlite.standards.md), resolved as
+`<sqlite-coding-standard>`.
+
 ## Testing
+
+### Design for unit tests: interface first
+
+Every class that does work is written so a unit test can exercise its behaviour in memory. That is
+a design rule, not a testing one: such a class takes its collaborators as interfaces through its
+constructor, and every outside resource is reached through a seam. The seam register
+([`docs/reference/seams.md`](../../reference/seams.md)) names each seam, its adapters and its fake,
+and the exceptions (sealed framework types that may be used directly);
+[ADR 0089](../../adr/0089-every-behaviour-is-testable-through-a-seam.md) is the decision behind it.
+Adapters are proved against the real resource by their contract suite, composition roots by a
+smoke test, and data-only Domain types need no seam.
+
+So the default test for new behaviour is an in-memory unit test against the interface. The other
+two kinds are the exceptions with their own homes, which `AGENTS.md` names: an integration test
+proves an adapter or a whole flow against the real resource and runs in CI only, and a content test
+reads shipped content through the corpus seam. When the only way to test a behaviour is through a
+real disk, process or network, the seam is missing: add it, then write the unit test.
 
 ### Tests
 
@@ -153,6 +177,17 @@ first, then the file's `LinkTarget` before `File.Exists`, which follows a link o
 
 This per-entry guarantee applies only below the root the walk starts from. Whether that root may
 itself be a symlink is the caller's decision, outside this pattern.
+
+### Database interaction: in-process ADO.NET over CLI subprocesses
+
+For application-level database interactions (application stores, telemetry persistence, caches, sessions), always use in-process ADO.NET / managed data access providers (`Microsoft.Data.Sqlite`, `System.Data.Common`), **never** the `sqlite3` CLI via subprocess spawning (`Process.Start`).
+
+Shelling out to an external CLI binary for application database queries introduces severe performance and operational hazards:
+- Process-spawning overhead (`fork`/`exec`) under high concurrency exhausts process IDs and causes OS allocator lock contention.
+- It prevents connection pooling, prepared statements, and transactional batching in memory.
+- Large payloads must be streamed across standard I/O pipes and re-parsed, creating artificial memory bottlenecks.
+
+The `sqlite3` CLI is permitted only for isolated, out-of-process developer maintenance tools or decoupled indexers (such as reading an external CodeGraph repository index). All runtime application-level database interaction must use managed in-process database providers.
 
 ## Done checklist
 

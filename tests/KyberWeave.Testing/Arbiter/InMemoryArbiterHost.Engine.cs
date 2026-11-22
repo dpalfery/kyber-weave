@@ -161,19 +161,23 @@ internal sealed partial class InMemoryArbiterHost
     /// <param name="configLoader">Loads the project configuration; a test passes one that counts its calls.</param>
     /// <param name="newDecisionId">Builds a decision id; null uses <paramref name="ids"/>.</param>
     /// <param name="ids">The identifier seam; the host's when null.</param>
+    /// <param name="prompts">The prompt service factory; null installs none, so no dispatch is expanded.</param>
     internal HookCommand HookCommand(
         HarnessAdapterRegistry registry,
         Func<string, KyberWeaveConfig>? configLoader = null,
         Func<string>? newDecisionId = null,
-        IIdGenerator? ids = null) =>
+        IIdGenerator? ids = null,
+        ITaskPromptServiceFactory? prompts = null) =>
         new(
             registry,
             configLoader is null ? Get<IArbiterHostConfig>() : new DelegateHostConfig(configLoader, Get<IArbiterHostConfig>()),
             Get<IDispatchClaimStore>(),
             Get<IClaudeHookCoverage>(),
+            Get<IProjectDispatchHookProbe>(),
             Get<IProcessEnvironment>(),
             ids ?? Get<IIdGenerator>(),
-            newDecisionId);
+            newDecisionId,
+            prompts);
 
     /// <summary>The project-scope configuration comes from a test's loader; every other answer is the host's.</summary>
     private sealed class DelegateHostConfig(Func<string, KyberWeaveConfig> loader, IArbiterHostConfig inner) : IArbiterHostConfig

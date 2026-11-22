@@ -1,18 +1,29 @@
 using System.Globalization;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
+using KyberDash.Data.Collector;
 using KyberDash.Domain;
 
 namespace KyberDash.Application;
 
 /// <summary>
-/// Validated database clean: pause ingestion, wipe the chosen scope, re-project, optionally re-ingest,
-/// and always resume.
+/// Validated relational-store clean: pause ingestion, wipe the chosen scope, re-project, optionally
+/// re-ingest, and always resume.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The whole scope is validated before anything is deleted, so a caller that passes a mistyped harness
 /// name wipes nothing. Resume happens in a <c>finally</c>: a wipe that throws still returns the
 /// receiver to service rather than leaving capture switched off until the next restart.
+/// </para>
+/// <para>
+/// The wipe deletes the scope's collected sources (each source's records cascade away), the projected
+/// session, run, execution, rollup, and finding rows, and the write-marker invalidation that makes the
+/// projection pass rebuild from what is left. The relational store keeps collected session identity
+/// rows — they are harness-owned, not source-owned — so a clean reports zero sessions deleted while
+/// every record, projection, and derived row of the scope is gone. Ingest problems and quarantined
+/// spans are operator diagnostics, not telemetry, so they are reported as zero deleted as well.
+/// </para>
 /// </remarks>
 public class CleanService : ICleanService
 {
@@ -44,36 +55,49 @@ public class CleanService : ICleanService
             "cline",
             "cline-cli",
             "pi",
-            "aider",
             "opencode",
             "kilo-code",
             "kilo-shared-runtime",
             "kilo-vscode-legacy",
             "droid",
-            "windsurf",
         ],
         StringComparer.OrdinalIgnoreCase);
 
-    private readonly ICanonStoreRepository store;
+    private readonly IRelationalStoreReader reader;
+    private readonly IRelationalStoreWriter writer;
+    private readonly IProjectionStore projections;
+    private readonly IOperationalStore operationalStore;
     private readonly ICanonProjectionService projection;
     private readonly ITranscriptIngestionService ingestion;
 
     /// <summary>
     /// Initializes a new <see cref="CleanService"/>.
     /// </summary>
-    /// <param name="store">Canonical store repository performing the wipe.</param>
+    /// <param name="reader">Relational reader counting the scope before it is wiped.</param>
+    /// <param name="writer">Relational writer deleting the scope's collected sources.</param>
+    /// <param name="projections">Projection store holding the derived rows the report counts.</param>
+    /// <param name="operationalStore">Operational store owning the clean stamp and projection invalidation.</param>
     /// <param name="projection">Projection service rebuilding derived state after the wipe.</param>
     /// <param name="ingestion">Ingestion service used for an optional history backfill.</param>
     public CleanService(
-        ICanonStoreRepository store,
+        IRelationalStoreReader reader,
+        IRelationalStoreWriter writer,
+        IProjectionStore projections,
+        IOperationalStore operationalStore,
         ICanonProjectionService projection,
         ITranscriptIngestionService ingestion)
     {
-        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(reader);
+        ArgumentNullException.ThrowIfNull(writer);
+        ArgumentNullException.ThrowIfNull(projections);
+        ArgumentNullException.ThrowIfNull(operationalStore);
         ArgumentNullException.ThrowIfNull(projection);
         ArgumentNullException.ThrowIfNull(ingestion);
 
-        this.store = store;
+        this.reader = reader;
+        this.writer = writer;
+        this.projections = projections;
+        this.operationalStore = operationalStore;
         this.projection = projection;
         this.ingestion = ingestion;
     }
@@ -100,9 +124,7 @@ public class CleanService : ICleanService
         pauseIngestion?.Invoke();
         try
         {
-            StoreWipeReport wipe = canonicalScope is null
-                ? store.WipeAll()
-                : store.WipeHarnesses(canonicalScope);
+            StoreWipeReport wipe = Wipe(canonicalScope);
 
             _ = projection.ProjectIncremental();
             _ = projection.ProjectRunsAndHarnesses();
@@ -181,5 +203,155 @@ public class CleanService : ICleanService
         }
 
         return [.. known.Order(StringComparer.Ordinal)];
+    }
+
+    private StoreWipeReport Wipe(IReadOnlyList<string>? harnesses)
+    {
+        string nowIso = DateTimeOffset.UtcNow.UtcDateTime.ToString(
+            "yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+
+        List<CollectedSession> sessions = [];
+        if (harnesses is null)
+        {
+            sessions.AddRange(reader.Sessions());
+        }
+        else
+        {
+            foreach (string harness in harnesses)
+            {
+                sessions.AddRange(reader.Sessions(harness));
+            }
+        }
+
+        int records = 0;
+        if (harnesses is null)
+        {
+            records = reader.CountRecords();
+        }
+        else
+        {
+            foreach (string harness in harnesses)
+            {
+                records += reader.CountRecords(harness);
+            }
+        }
+
+        List<StoredSessionProjection> sessionProjections = [];
+        if (harnesses is null)
+        {
+            sessionProjections.AddRange(projections.ListSessionProjections());
+        }
+        else
+        {
+            foreach (string harness in harnesses)
+            {
+                sessionProjections.AddRange(projections.ListSessionProjections(harness));
+            }
+        }
+
+        int turns = 0;
+        foreach (StoredSessionProjection sessionProjection in sessionProjections)
+        {
+            turns += projections.GetSessionTurns(sessionProjection.SessionId).Count;
+        }
+
+        List<StoredRun> runs = [];
+        if (harnesses is null)
+        {
+            runs.AddRange(projections.ListRuns());
+        }
+        else
+        {
+            foreach (string harness in harnesses)
+            {
+                runs.AddRange(projections.ListRuns(harness));
+            }
+        }
+
+        int executions = 0;
+        foreach (StoredRun run in runs)
+        {
+            executions += projections.ListExecutionsForRun(run.RunId).Count;
+        }
+
+        HashSet<string> scopeSessionIds = new(sessions.Select(static session => session.SessionKey), StringComparer.Ordinal);
+        HashSet<string> scopeRunIds = new(runs.Select(static run => run.RunId), StringComparer.Ordinal);
+
+        int findings = 0;
+        HashSet<string> findingSessionIds = new(StringComparer.Ordinal);
+        foreach (StoredFinding finding in projections.ListFindings())
+        {
+            bool inScope = harnesses is null
+                || (finding.SessionId is not null && scopeSessionIds.Contains(finding.SessionId))
+                || (finding.RunId is not null && scopeRunIds.Contains(finding.RunId));
+            if (inScope && finding.SessionId is not null)
+            {
+                findings++;
+                findingSessionIds.Add(finding.SessionId);
+            }
+        }
+
+        List<StoredHarnessRollup> rollups = projections.ListHarnessRollups()
+            .Where(rollup => harnesses is null || harnesses.Contains(rollup.HarnessId, StringComparer.Ordinal))
+            .ToList();
+
+        // Findings reference sessions without a foreign key, so the clean removes them itself before
+        // the rows they point at disappear.
+        foreach (string sessionId in findingSessionIds)
+        {
+            projections.DeleteFindingsForSession(sessionId);
+        }
+
+        foreach (StoredSessionProjection sessionProjection in sessionProjections)
+        {
+            projections.DeleteSessionProjection(sessionProjection.SessionId);
+        }
+
+        foreach (StoredRun run in runs)
+        {
+            projections.DeleteRun(run.RunId);
+        }
+
+        foreach (StoredHarnessRollup rollup in rollups)
+        {
+            projections.DeleteHarnessRollup(rollup.HarnessId);
+        }
+
+        List<StoredSource> sources = [];
+        if (harnesses is null)
+        {
+            sources.AddRange(reader.Sources());
+        }
+        else
+        {
+            foreach (string harness in harnesses)
+            {
+                sources.AddRange(reader.Sources(harness));
+            }
+        }
+
+        foreach (StoredSource source in sources)
+        {
+            writer.DeleteSource(source.SourceId);
+        }
+
+        // Deleting sources does not move the records write marker, so the projection pass that
+        // follows would short-circuit and never rebuild: invalidate the watermarks the same way a
+        // write does, and clear the incremental dirty range in favour of a full pass.
+        operationalStore.SetWriteMarker(operationalStore.GetWriteMarker() + 1);
+        operationalStore.ClearProjectionDirtyState();
+        operationalStore.SetLastCleanAtUtc(nowIso);
+
+        return new StoreWipeReport(
+            RecordsDeleted: records,
+            SessionsDeleted: 0,
+            TurnsDeleted: turns,
+            RunsDeleted: runs.Count,
+            ExecutionsDeleted: executions,
+            FindingsDeleted: findings,
+            RollupsDeleted: rollups.Count,
+            ProblemsDeleted: 0,
+            QuarantineDeleted: 0,
+            LastCleanAt: nowIso);
     }
 }

@@ -259,6 +259,17 @@ public static partial class Program
                     sessions = report.Sessions,
                     observedHarnesses = report.ObservedHarnesses,
                     circuitBreakerState = report.CircuitBreakerState,
+                    lastRebuild = report.LastRebuild is { } rebuild
+                        ? new
+                        {
+                            databasePath = rebuild.DatabasePath,
+                            oldSchemaVersion = rebuild.OldSchemaVersion,
+                            newSchemaVersion = rebuild.NewSchemaVersion,
+                            settingsResetToDefaults = rebuild.SettingsResetToDefaults,
+                            unrecoverableHistoryClasses = rebuild.UnrecoverableHistoryClasses,
+                            reingestTriggered = rebuild.ReingestTriggered,
+                        }
+                        : null,
                 },
                 IndentedJsonOptions)).ConfigureAwait(false);
             return 0;
@@ -269,6 +280,15 @@ public static partial class Program
         await output.WriteLineAsync(string.Create(
             CultureInfo.InvariantCulture,
             $"Records: {report.Records}  Sessions: {report.Sessions}  Harnesses: {harnesses}  Circuit breaker: {report.CircuitBreakerState}")).ConfigureAwait(false);
+        if (report.LastRebuild is { } lastRebuild)
+        {
+            string unrecoverable = string.Join(", ", lastRebuild.UnrecoverableHistoryClasses);
+            string reingest = lastRebuild.ReingestTriggered ? "triggered" : "pending the next job-host start";
+            await output.WriteLineAsync(string.Create(
+                CultureInfo.InvariantCulture,
+                $"Last rebuild: schema {lastRebuild.OldSchemaVersion} -> {lastRebuild.NewSchemaVersion} at '{lastRebuild.DatabasePath}'; settings reset to defaults; unrecoverable history: {unrecoverable}; re-ingest {reingest}")).ConfigureAwait(false);
+        }
+
         return 0;
     }
 

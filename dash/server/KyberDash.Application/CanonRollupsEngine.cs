@@ -2,15 +2,25 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using KyberDash.Contracts.Repositories;
+using KyberDash.Data.Collector;
 using KyberDash.Domain;
 
 namespace KyberDash.Application;
 
 /// <summary>
-/// Derives run and execution boundaries, projects per-harness efficiency rollups with honest
-/// unobservability (<c>not_measurable</c> instead of zero), and computes run scorecards and
-/// comparisons over <see cref="ICanonStoreRepository"/>.
+/// Projects per-harness efficiency rollups with honest unobservability (<c>not_measurable</c>
+/// instead of zero) over the relational store contracts, and computes run scorecards and
+/// comparisons.
 /// </summary>
+/// <remarks>
+/// <para>
+/// The primary constructor projects rollups typed: it reads sessions and read-time aggregates
+/// through <see cref="IRelationalStoreReader"/> and writes <c>harness_rollup</c> rows with one
+/// <c>harness_rollup_metric</c> row per measurable dimension through <see cref="IProjectionStore"/>.
+/// Harnesses without sessions leave no rollup or metric rows behind (never zero-valued filler),
+/// and the BL-3 pruned identities (<c>aider</c>, <c>windsurf</c>) are excluded even when observed.
+/// </para>
+/// </remarks>
 public class CanonRollupsEngine
 {
     private const string NoRollupReason =
@@ -59,36 +69,35 @@ public class CanonRollupsEngine
         "repo",
     ];
 
-    private static readonly string[] CanonicalRegisteredHarnesses =
+    /// <summary>Harness identities pruned from rollup projection (BL-3).</summary>
+    private static readonly string[] PrunedHarnessIdentities =
     [
         "aider",
-        "antigravity",
-        "claude-code",
-        "cline",
-        "codex",
-        "copilot",
-        "cursor",
-        "droid",
-        "kilo-code",
-        "opencode",
-        "pi",
         "windsurf",
     ];
 
-    private readonly ICanonStoreRepository store;
+    private readonly IRelationalStoreReader? reader;
+    private readonly IProjectionStore? projections;
     private readonly IPricingRepository pricing;
 
     /// <summary>
-    /// Initializes a new <see cref="CanonRollupsEngine"/>.
+    /// Initializes a relational <see cref="CanonRollupsEngine"/> projecting typed harness rollups
+    /// from the normalized relational store.
     /// </summary>
-    /// <param name="store">Canonical store repository.</param>
+    /// <param name="reader">Relational reader supplying sessions and read-time aggregates.</param>
+    /// <param name="projections">Typed projection store receiving harness rollup rows.</param>
     /// <param name="pricing">Model rate-table repository.</param>
-    public CanonRollupsEngine(ICanonStoreRepository store, IPricingRepository pricing)
+    public CanonRollupsEngine(
+        IRelationalStoreReader reader,
+        IProjectionStore projections,
+        IPricingRepository pricing)
     {
-        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(reader);
+        ArgumentNullException.ThrowIfNull(projections);
         ArgumentNullException.ThrowIfNull(pricing);
 
-        this.store = store;
+        this.reader = reader;
+        this.projections = projections;
         this.pricing = pricing;
     }
 
@@ -157,7 +166,7 @@ public class CanonRollupsEngine
         }
 
         string fallback = fallbackRunId ?? first.SessionId ?? first.TraceId ?? first.SpanId;
-        string seed = StripLeadingHarnessPrefix(first.Harness, fallback);
+        string seed = CanonPipelineShared.StripHarnessPrefix(first.Harness, fallback);
         return new DerivedRunIdentity(
             RunId: $"derived:{first.Harness}:{seed}",
             GroupingBasis: "derived",
@@ -199,119 +208,331 @@ public class CanonRollupsEngine
     }
 
     /// <summary>
-    /// Rebuilds <c>run</c>, <c>execution</c>, and <c>harness_rollup</c> rows from all sessions
-    /// currently materialized in the backing store.
+    /// Projects harness rollups from all sessions currently materialized in the backing store.
     /// </summary>
     /// <returns>Projected harness rollup rows ordered by harness identifier.</returns>
-    public IReadOnlyList<HarnessRollupRow> ProjectRunsAndHarnesses()
+    public IReadOnlyList<HarnessRollupRow> ProjectRunsAndHarnesses() =>
+        ProjectRunsAndHarnessesRelational();
+
+    /// <summary>
+    /// Projects typed <c>harness_rollup</c> rows with one <c>harness_rollup_metric</c> row per
+    /// measurable dimension for every harness observed in the relational store. Harnesses without
+    /// sessions leave no rows behind, and stale rows (including the BL-3 pruned identities) are
+    /// deleted.
+    /// </summary>
+    /// <returns>Projected harness rollup rows ordered by harness identifier.</returns>
+    private IReadOnlyList<HarnessRollupRow> ProjectRunsAndHarnessesRelational()
     {
         _ = pricing.LoadPricingTables();
-        IReadOnlyList<SessionSummaryRow> sessions = store.ListSessions();
 
-        Dictionary<string, RunAccumulator> runsById = new(StringComparer.Ordinal);
-        List<ExecutionRow> executions = [];
-        Dictionary<string, List<SessionSummaryRow>> sessionsByHarness = new(StringComparer.Ordinal);
-
-        foreach (SessionSummaryRow session in sessions)
+        Dictionary<string, List<CollectedSession>> sessionsByHarness = new(StringComparer.Ordinal);
+        foreach (CollectedSession session in reader!.Sessions())
         {
-            string normalizedHarness = CanonPricing.NormalizeHarnessName(session.Harness);
-            if (CanonPricing.IsExcludedHarnessIdentity(normalizedHarness))
+            string normalized = CanonPricing.NormalizeHarnessName(session.HarnessId);
+            if (CanonPricing.IsExcludedHarnessIdentity(normalized) || IsPrunedHarnessIdentity(normalized))
             {
                 continue;
             }
 
-            if (!sessionsByHarness.TryGetValue(normalizedHarness, out List<SessionSummaryRow>? harnessList))
+            if (!sessionsByHarness.TryGetValue(normalized, out List<CollectedSession>? harnessSessions))
             {
-                harnessList = [];
-                sessionsByHarness[normalizedHarness] = harnessList;
+                harnessSessions = [];
+                sessionsByHarness[normalized] = harnessSessions;
             }
 
-            harnessList.Add(session);
+            harnessSessions.Add(session);
+        }
 
-            IReadOnlyList<CanonicalRecord> sessionRecords = store.ListRecordsBySessionKey(session.SessionId);
-            string? explicitRunId = FindFirstRawAttribute(sessionRecords, RunIdAttributeKeys);
-            string? cwd = session.Repo ?? FindFirstRawAttribute(sessionRecords, WorkingDirectoryAttributeKeys);
-            string runId = !string.IsNullOrEmpty(explicitRunId)
-                ? explicitRunId
-                : $"derived:{normalizedHarness}:{StripLeadingHarnessPrefix(normalizedHarness, session.SessionId)}";
-            string groupingBasis = !string.IsNullOrEmpty(explicitRunId) ? "explicit" : "derived";
-            string groupingRule = !string.IsNullOrEmpty(explicitRunId) ? "explicit_run_id" : "session_fallback";
-
-            if (!runsById.TryGetValue(runId, out RunAccumulator? runAcc))
+        Dictionary<string, List<StoredRun>> runsByHarness = new(StringComparer.Ordinal);
+        foreach (StoredRun run in projections!.ListRuns())
+        {
+            string normalized = CanonPricing.NormalizeHarnessName(run.HarnessId);
+            if (!runsByHarness.TryGetValue(normalized, out List<StoredRun>? harnessRuns))
             {
-                runAcc = new RunAccumulator(runId, normalizedHarness, session.Label ?? runId, groupingBasis, groupingRule, cwd);
-                runsById[runId] = runAcc;
+                harnessRuns = [];
+                runsByHarness[normalized] = harnessRuns;
             }
 
-            runAcc.AddSession(session);
-
-            string? parentExecId = !string.IsNullOrEmpty(session.ParentSession)
-                ? $"exec:{session.ParentSession}"
-                : null;
-            bool isRoot = !session.IsSubagent && parentExecId is null;
-            JsonElement linkage = JsonSerializer.SerializeToElement<object>(
-                parentExecId is not null
-                    ? new { status = "measured", parentSession = session.ParentSession }
-                    : new { status = isRoot ? "measured" : "not_measurable", reason = isRoot ? "root_execution" : "no_parent_trace_or_session" });
-
-            executions.Add(new ExecutionRow(
-                ExecutionId: $"exec:{session.SessionId}",
-                RunId: runId,
-                SessionId: session.SessionId,
-                ParentExecutionId: parentExecId,
-                Harness: normalizedHarness,
-                AgentName: session.AgentName,
-                IsRoot: isRoot,
-                Started: session.Started,
-                Ended: session.Ended,
-                ParentLinkage: linkage,
-                Payload: null));
+            harnessRuns.Add(run);
         }
 
-        List<RunRow> runRows = [];
-        foreach (RunAccumulator acc in runsById.Values)
+        List<StoredHarnessRollup> rollups = [];
+        foreach (string harness in sessionsByHarness.Keys.Order(StringComparer.Ordinal))
         {
-            runRows.Add(acc.ToRunRow());
-        }
-
-        store.UpsertRuns(runRows);
-        store.UpsertExecutions(executions);
-
-        HashSet<string> allHarnesses = new(CanonicalRegisteredHarnesses, StringComparer.Ordinal);
-        foreach (string observed in store.ListObservedHarnesses())
-        {
-            string norm = CanonPricing.NormalizeHarnessName(observed);
-            if (!CanonPricing.IsExcludedHarnessIdentity(norm))
+            runsByHarness.TryGetValue(harness, out List<StoredRun>? harnessRuns);
+            harnessRuns ??= [];
+            List<StoredExecution> harnessExecutions = [];
+            foreach (StoredRun run in harnessRuns)
             {
-                allHarnesses.Add(norm);
+                harnessExecutions.AddRange(projections.ListExecutionsForRun(run.RunId));
+            }
+
+            List<SessionDatum> data = new(sessionsByHarness[harness].Count);
+            foreach (CollectedSession session in sessionsByHarness[harness])
+            {
+                data.Add(ReadSessionDatum(session.SessionKey));
+            }
+
+            rollups.Add(BuildStoredRollup(harness, data, harnessRuns.Count, harnessExecutions));
+        }
+
+        projections.ReplaceHarnessRollups(rollups);
+
+        HashSet<string> live = new(sessionsByHarness.Keys, StringComparer.Ordinal);
+        foreach (StoredHarnessRollup existing in projections.ListHarnessRollups())
+        {
+            if (!live.Contains(existing.HarnessId))
+            {
+                projections.DeleteHarnessRollup(existing.HarnessId);
             }
         }
 
-        List<HarnessRollupRow> rollups = [];
-        foreach (string harness in allHarnesses.Order(StringComparer.Ordinal))
-        {
-            sessionsByHarness.TryGetValue(harness, out List<SessionSummaryRow>? harnessSessions);
-            int runCount = runRows.Count(r => string.Equals(r.Harness, harness, StringComparison.Ordinal));
-            List<ExecutionRow> harnessExecs = [.. executions.Where(e => string.Equals(e.Harness, harness, StringComparison.Ordinal))];
+        return [.. rollups.Select(ToHarnessRollupRow).OrderBy(static row => row.Harness, StringComparer.Ordinal)];
+    }
 
-            HarnessRollupRow rollup = BuildRollupRow(
-                harness,
-                harnessSessions ?? [],
-                runCount,
-                harnessExecs);
-            store.UpsertHarnessRollups([rollup]);
-            rollups.Add(rollup);
-        }
-
-        foreach (HarnessRollupRow existing in store.ListHarnessRollups())
+    private static bool IsPrunedHarnessIdentity(string harness)
+    {
+        foreach (string pruned in PrunedHarnessIdentities)
         {
-            if (!allHarnesses.Contains(existing.Harness))
+            if (string.Equals(pruned, harness, StringComparison.Ordinal))
             {
-                store.DeleteHarnessRollup(existing.Harness);
+                return true;
             }
         }
 
-        return rollups;
+        return false;
+    }
+
+    /// <summary>Typed per-session inputs for harness metric aggregation.</summary>
+    /// <param name="Projection">Projected session summary, when the session projector ran.</param>
+    /// <param name="Aggregate">Read-time session aggregate, when the session has turns.</param>
+    private sealed record SessionDatum(StoredSessionProjection? Projection, SessionAggregateView? Aggregate);
+
+    private SessionDatum ReadSessionDatum(string sessionKey) =>
+        new(projections!.GetSessionProjection(sessionKey), reader!.GetSessionAggregate(sessionKey));
+
+    /// <summary>
+    /// Aggregates measurable harness metrics from typed session projections and read-time
+    /// aggregates. Unmeasurable dimensions are omitted from <c>Metrics</c> rather than zeroed.
+    /// </summary>
+    private static StoredHarnessRollup BuildStoredRollup(
+        string harness,
+        IReadOnlyList<SessionDatum> data,
+        int runCount,
+        IReadOnlyList<StoredExecution> executions)
+    {
+        List<double> peakPressures = [];
+        bool anyDerivedPressure = false;
+        int unknownWindowSessions = 0;
+        long totalCacheRead = 0;
+        long totalInput = 0;
+        bool hasCacheRead = false;
+        int totalDefinedTools = 0;
+        int totalInvokedTools = 0;
+        int subagentSessions = 0;
+
+        foreach (SessionDatum datum in data)
+        {
+            if (datum.Projection is not null && datum.Projection.IsSubagent)
+            {
+                subagentSessions++;
+            }
+
+            if (datum.Projection?.Context is StoredSessionContext context
+                && !IsUnnamedWindowSource(context.ContextLimitSource))
+            {
+                double peak = 0;
+                bool found = false;
+                foreach (StoredSessionContextTurn turn in context.Turns)
+                {
+                    if (turn.Pressure is double pressure && double.IsFinite(pressure)
+                        && (!found || pressure > peak))
+                    {
+                        peak = pressure;
+                        found = true;
+                    }
+                }
+
+                if (found)
+                {
+                    peakPressures.Add(peak);
+                    if (string.Equals(context.ContextLimitSource, "declared", StringComparison.Ordinal)
+                        || context.DerivedCounts.Count > 0)
+                    {
+                        anyDerivedPressure = true;
+                    }
+                }
+                else
+                {
+                    unknownWindowSessions++;
+                }
+            }
+            else
+            {
+                unknownWindowSessions++;
+            }
+
+            if (datum.Aggregate is not SessionAggregateView aggregate)
+            {
+                continue;
+            }
+
+            long input = aggregate.TotalInput ?? 0;
+            long cacheRead = aggregate.TotalCacheRead ?? 0;
+            totalInput += input;
+            totalCacheRead += cacheRead;
+
+            if (cacheRead > 0)
+            {
+                hasCacheRead = true;
+            }
+
+            HashSet<string> offered = new(aggregate.ToolsOffered, StringComparer.Ordinal);
+            totalDefinedTools += offered.Count;
+            foreach (string tool in aggregate.ToolsInvoked)
+            {
+                if (offered.Contains(tool))
+                {
+                    totalInvokedTools++;
+                }
+            }
+        }
+
+        List<StoredHarnessRollupMetric> metrics = [];
+        if (peakPressures.Count > 0)
+        {
+            peakPressures.Sort();
+            double medianPressure = Math.Round(ComputeMedian(peakPressures), 4);
+            double p95Pressure = Math.Round(ComputeP95(peakPressures), 4);
+            string basis = anyDerivedPressure ? "derived" : "measured";
+            metrics.Add(new StoredHarnessRollupMetric("context_pressure_median", medianPressure, basis));
+            metrics.Add(new StoredHarnessRollupMetric("context_pressure_p95", p95Pressure, basis));
+        }
+
+        double? cacheHitRate = null;
+        if (hasCacheRead && totalInput > 0)
+        {
+            cacheHitRate = Math.Round((double)totalCacheRead / totalInput, 4);
+            metrics.Add(new StoredHarnessRollupMetric("cache_hit_rate", cacheHitRate.Value, "measured"));
+        }
+
+        double? toolYield = null;
+        if (totalDefinedTools > 0)
+        {
+            toolYield = Math.Round((double)totalInvokedTools / totalDefinedTools, 4);
+            metrics.Add(new StoredHarnessRollupMetric("tool_yield", toolYield.Value, "measured"));
+        }
+
+        double? delegationOverhead = null;
+        if (data.Count > 0 && subagentSessions > 0)
+        {
+            delegationOverhead = Math.Round((double)subagentSessions / data.Count, 4);
+            metrics.Add(new StoredHarnessRollupMetric("delegation_overhead", delegationOverhead.Value, "measured"));
+        }
+        else if (executions.Count > 1 && executions.Any(static execution => !execution.IsRoot))
+        {
+            int children = executions.Count(static execution => !execution.IsRoot);
+            delegationOverhead = Math.Round((double)children / executions.Count, 4);
+            metrics.Add(new StoredHarnessRollupMetric("delegation_overhead", delegationOverhead.Value, "measured"));
+        }
+
+        int sampleCount = Math.Max(data.Count, Math.Max(runCount, executions.Count));
+        return new StoredHarnessRollup(
+            harness,
+            data.Count,
+            runCount,
+            executions.Count,
+            unknownWindowSessions,
+            data.Count,
+            metrics);
+    }
+
+    /// <summary>Maps a stored harness rollup to the scorecard row shape.</summary>
+    private static HarnessRollupRow ToHarnessRollupRow(StoredHarnessRollup rollup)
+    {
+        ArgumentNullException.ThrowIfNull(rollup);
+
+        string pressureReason = $"No measurable turns found in recorded sessions for harness \"{rollup.HarnessId}\".";
+        Dictionary<string, JsonElement> measurability = new(StringComparer.Ordinal)
+        {
+            ["context_pressure"] = MetricTag(rollup, "context_pressure_median", pressureReason),
+            ["context_pressure_median"] = MetricTag(rollup, "context_pressure_median", pressureReason),
+            ["context_pressure_p95"] = MetricTag(rollup, "context_pressure_p95", pressureReason),
+            ["cache_hit_rate"] = MetricTag(rollup, "cache_hit_rate", $"Cache-read telemetry not observed for harness \"{rollup.HarnessId}\"."),
+            ["tool_yield"] = MetricTag(rollup, "tool_yield", $"No tool definitions recorded for harness \"{rollup.HarnessId}\"."),
+            ["delegation_overhead"] = MetricTag(rollup, "delegation_overhead", $"No subagent executions observed for harness \"{rollup.HarnessId}\"."),
+            ["field_coverage"] = JsonSerializer.SerializeToElement("measured"),
+        };
+
+        double fieldCoverage = ComputeFieldCoverage(rollup);
+
+        JsonElement payload = JsonSerializer.SerializeToElement(new
+        {
+            sessionCount = rollup.SessionCount,
+            runCount = rollup.RunCount,
+            executionCount = rollup.ExecutionCount,
+            unknownWindowSessions = rollup.UnknownWindowSessions,
+            windowSessionsTotal = rollup.WindowSessionsTotal,
+        });
+
+        return new HarnessRollupRow(
+            Harness: rollup.HarnessId,
+            SampleCount: Math.Max(rollup.SessionCount, Math.Max(rollup.RunCount, rollup.ExecutionCount)),
+            ContextPressureMedian: CanonPipelineShared.RollupMetricValue(rollup, "context_pressure_median"),
+            ContextPressureP95: CanonPipelineShared.RollupMetricValue(rollup, "context_pressure_p95"),
+            CacheHitRate: CanonPipelineShared.RollupMetricValue(rollup, "cache_hit_rate"),
+            ToolYield: CanonPipelineShared.RollupMetricValue(rollup, "tool_yield"),
+            DelegationOverhead: CanonPipelineShared.RollupMetricValue(rollup, "delegation_overhead"),
+            FieldCoverage: fieldCoverage,
+            Measurability: measurability,
+            Payload: payload);
+    }
+
+    /// <summary>
+    /// Computes field coverage at read time from the metric dimensions evidenced on a stored
+    /// rollup: context pressure (median or p95), cache hit rate, tool yield, and delegation
+    /// overhead each contribute one covered dimension.
+    /// </summary>
+    private static double ComputeFieldCoverage(StoredHarnessRollup rollup)
+    {
+        ArgumentNullException.ThrowIfNull(rollup);
+
+        int covered = 0;
+        if (CanonPipelineShared.RollupMetricValue(rollup, "context_pressure_median").HasValue
+            || CanonPipelineShared.RollupMetricValue(rollup, "context_pressure_p95").HasValue)
+        {
+            covered++;
+        }
+
+        if (CanonPipelineShared.RollupMetricValue(rollup, "cache_hit_rate").HasValue)
+        {
+            covered++;
+        }
+
+        if (CanonPipelineShared.RollupMetricValue(rollup, "tool_yield").HasValue)
+        {
+            covered++;
+        }
+
+        if (CanonPipelineShared.RollupMetricValue(rollup, "delegation_overhead").HasValue)
+        {
+            covered++;
+        }
+
+        return Math.Round((double)covered / CoverageDimensions.Count, 4);
+    }
+
+    private static JsonElement MetricTag(StoredHarnessRollup rollup, string metric, string missingReason)
+    {
+        foreach (StoredHarnessRollupMetric entry in rollup.Metrics)
+        {
+            if (string.Equals(entry.Metric, metric, StringComparison.Ordinal))
+            {
+                return JsonSerializer.SerializeToElement(entry.Basis);
+            }
+        }
+
+        return NotMeasurableJson(missingReason);
     }
 
     /// <summary>Derives the six scorecard dimensions for one <see cref="HarnessRollupRow"/>.</summary>
@@ -347,29 +568,44 @@ public class CanonRollupsEngine
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
 
-        RunRow? run = store.GetRun(runId);
-        if (run is null)
+        StoredRun? storedRun = projections!.GetRun(runId);
+        if (storedRun is null)
         {
             return JsonSerializer.SerializeToElement<object?>(null);
         }
 
-        IReadOnlyList<ExecutionRow> execs = store.ListExecutionsForRun(runId);
-        List<SessionSummaryRow> runSessions = [];
-        foreach (ExecutionRow exec in execs)
+        IReadOnlyList<StoredExecution> executions = projections.ListExecutionsForRun(runId);
+        List<SessionDatum> data = [];
+        foreach (StoredExecution execution in executions)
         {
-            if (string.IsNullOrEmpty(exec.SessionId))
+            if (!string.IsNullOrEmpty(execution.SessionId))
             {
-                continue;
-            }
-
-            SessionSummaryRow? session = store.GetSession(exec.SessionId);
-            if (session is not null)
-            {
-                runSessions.Add(session);
+                data.Add(ReadSessionDatum(execution.SessionId));
             }
         }
 
-        HarnessRollupRow metrics = BuildRollupRow(run.Harness, runSessions, 1, execs);
+        HarnessRollupRow metrics = ToHarnessRollupRow(BuildStoredRollup(storedRun.HarnessId, data, 1, executions));
+        return BuildScorecardPayload(
+            storedRun.RunId,
+            storedRun.HarnessId,
+            storedRun.Label,
+            storedRun.GroupingBasis,
+            storedRun.GroupingRule,
+            data.Count,
+            executions.Count,
+            metrics);
+    }
+
+    private static JsonElement BuildScorecardPayload(
+        string runId,
+        string harness,
+        string? label,
+        string? groupingBasis,
+        string? groupingRule,
+        int sessionCount,
+        int executionCount,
+        HarnessRollupRow metrics)
+    {
         (
             object contextHygiene,
             object cacheEfficiency,
@@ -381,13 +617,13 @@ public class CanonRollupsEngine
 
         return JsonSerializer.SerializeToElement(new
         {
-            runId = run.RunId,
-            harness = run.Harness,
-            label = run.Label,
-            groupingBasis = run.GroupingBasis,
-            groupingRule = run.GroupingRule,
-            sessionCount = runSessions.Count,
-            executionCount = execs.Count,
+            runId,
+            harness,
+            label,
+            groupingBasis,
+            groupingRule,
+            sessionCount,
+            executionCount,
             contextPressureMedian = metrics.ContextPressureMedian,
             contextPressureP95 = metrics.ContextPressureP95,
             cacheHitRate = metrics.CacheHitRate,
@@ -408,11 +644,16 @@ public class CanonRollupsEngine
     /// <returns>Serialized harness comparison payload.</returns>
     public JsonElement CompareHarnesses()
     {
-        IReadOnlyList<HarnessRollupRow> rollups = store.ListHarnessRollups();
-        if (rollups.Count == 0)
-        {
-            rollups = ProjectRunsAndHarnesses();
-        }
+        IReadOnlyList<StoredHarnessRollup> stored = projections!.ListHarnessRollups();
+        IReadOnlyList<HarnessRollupRow> rollups = stored.Count == 0
+            ? ProjectRunsAndHarnessesRelational()
+            : [.. stored.Select(ToHarnessRollupRow)];
+        return SerializeComparison(rollups);
+    }
+
+    private static JsonElement SerializeComparison(IReadOnlyList<HarnessRollupRow> rollups)
+    {
+        ArgumentNullException.ThrowIfNull(rollups);
 
         return JsonSerializer.SerializeToElement(new
         {
@@ -440,8 +681,8 @@ public class CanonRollupsEngine
         ArgumentException.ThrowIfNullOrWhiteSpace(runAId);
         ArgumentException.ThrowIfNullOrWhiteSpace(runBId);
 
-        RunRow? runA = store.GetRun(runAId);
-        RunRow? runB = store.GetRun(runBId);
+        StoredRun? runA = projections!.GetRun(runAId);
+        StoredRun? runB = projections.GetRun(runBId);
         if (runA is null || runB is null)
         {
             return null;
@@ -450,24 +691,7 @@ public class CanonRollupsEngine
         RunMetrics a = SummarizeRunMetrics(runA);
         RunMetrics b = SummarizeRunMetrics(runB);
 
-        long? deltaInput = a.TotalInput.HasValue && b.TotalInput.HasValue ? b.TotalInput.Value - a.TotalInput.Value : null;
-        long? deltaOutput = a.TotalOutput.HasValue && b.TotalOutput.HasValue ? b.TotalOutput.Value - a.TotalOutput.Value : null;
-        double? deltaPressure = a.PeakPressure.HasValue && b.PeakPressure.HasValue
-            ? Math.Round(b.PeakPressure.Value - a.PeakPressure.Value, 4)
-            : null;
-
-        return JsonSerializer.SerializeToElement(new
-        {
-            runA = a,
-            runB = b,
-            delta = new
-            {
-                inputTokens = deltaInput,
-                outputTokens = deltaOutput,
-                peakPressure = deltaPressure,
-                turns = b.TurnCount - a.TurnCount,
-            },
-        }, CamelCaseJsonOptions);
+        return CompareRunMetrics(a, b);
     }
 
     private static (
@@ -546,6 +770,31 @@ public class CanonRollupsEngine
         return fallbackReason;
     }
 
+    private static JsonElement CompareRunMetrics(RunMetrics a, RunMetrics b)
+    {
+        ArgumentNullException.ThrowIfNull(a);
+        ArgumentNullException.ThrowIfNull(b);
+
+        long? deltaInput = a.TotalInput.HasValue && b.TotalInput.HasValue ? b.TotalInput.Value - a.TotalInput.Value : null;
+        long? deltaOutput = a.TotalOutput.HasValue && b.TotalOutput.HasValue ? b.TotalOutput.Value - a.TotalOutput.Value : null;
+        double? deltaPressure = a.PeakPressure.HasValue && b.PeakPressure.HasValue
+            ? Math.Round(b.PeakPressure.Value - a.PeakPressure.Value, 4)
+            : null;
+
+        return JsonSerializer.SerializeToElement(new
+        {
+            runA = a,
+            runB = b,
+            delta = new
+            {
+                inputTokens = deltaInput,
+                outputTokens = deltaOutput,
+                peakPressure = deltaPressure,
+                turns = b.TurnCount - a.TurnCount,
+            },
+        }, CamelCaseJsonOptions);
+    }
+
     private record RunMetrics(
         string RunId,
         string Harness,
@@ -557,9 +806,11 @@ public class CanonRollupsEngine
         long? TotalOutput,
         double? PeakPressure);
 
-    private RunMetrics SummarizeRunMetrics(RunRow run)
+    private RunMetrics SummarizeRunMetrics(StoredRun run)
     {
-        IReadOnlyList<ExecutionRow> execs = store.ListExecutionsForRun(run.RunId);
+        ArgumentNullException.ThrowIfNull(run);
+
+        IReadOnlyList<StoredExecution> execs = projections!.ListExecutionsForRun(run.RunId);
         long totalInput = 0;
         long totalOutput = 0;
         bool hasInput = false;
@@ -568,55 +819,50 @@ public class CanonRollupsEngine
         double maxPressure = 0;
         bool hasPressure = false;
 
-        foreach (ExecutionRow exec in execs)
+        foreach (StoredExecution execution in execs)
         {
-            if (string.IsNullOrEmpty(exec.SessionId))
+            if (string.IsNullOrEmpty(execution.SessionId))
             {
                 continue;
             }
 
-            SessionSummaryRow? session = store.GetSession(exec.SessionId);
-            if (session is null)
+            SessionDatum datum = ReadSessionDatum(execution.SessionId);
+            if (datum.Aggregate is SessionAggregateView aggregate)
             {
-                continue;
-            }
-
-            if (TryGetSummaryElement(session, out JsonElement summary))
-            {
-                if (TryGetLong(summary, "total_input", out long inp))
+                if (aggregate.TotalInput is long input)
                 {
-                    totalInput += inp;
+                    totalInput += input;
                     hasInput = true;
                 }
 
-                if (TryGetLong(summary, "total_output", out long outp))
+                if (aggregate.TotalOutput is long output)
                 {
-                    totalOutput += outp;
+                    totalOutput += output;
                     hasOutput = true;
                 }
 
-                if (TryGetInt(summary, "turn_count", out int tc))
-                {
-                    turns += tc;
-                }
+                turns += aggregate.TurnCount;
             }
 
-            if (TryExtractPeakPressure(session, out double peak, out _))
+            if (datum.Projection?.Context is StoredSessionContext context)
             {
-                if (!hasPressure || peak > maxPressure)
+                foreach (StoredSessionContextTurn turn in context.Turns)
                 {
-                    maxPressure = peak;
+                    if (turn.Pressure is double pressure && double.IsFinite(pressure)
+                        && (!hasPressure || pressure > maxPressure))
+                    {
+                        maxPressure = pressure;
+                        hasPressure = true;
+                    }
                 }
-
-                hasPressure = true;
             }
         }
 
         return new RunMetrics(
             run.RunId,
-            run.Harness,
-            run.Started,
-            run.Ended,
+            run.HarnessId,
+            run.StartedAtUtc,
+            run.EndedAtUtc,
             execs.Count,
             turns,
             hasInput ? totalInput : null,
@@ -624,340 +870,11 @@ public class CanonRollupsEngine
             hasPressure ? Math.Round(maxPressure, 4) : null);
     }
 
-    private static HarnessRollupRow BuildRollupRow(
-        string harness,
-        IReadOnlyList<SessionSummaryRow> sessions,
-        int runCount,
-        IReadOnlyList<ExecutionRow> executions)
-    {
-        Dictionary<string, JsonElement> measurability = new(StringComparer.Ordinal);
-        if (sessions.Count == 0 && executions.Count == 0 && runCount == 0)
-        {
-            string reason = $"No collectable runs or sessions recorded for harness \"{harness}\".";
-            foreach (string dim in new[] { "context_pressure", "context_pressure_median", "context_pressure_p95", "cache_hit_rate", "tool_yield", "delegation_overhead" })
-            {
-                measurability[dim] = NotMeasurableJson(reason);
-            }
-
-            measurability["field_coverage"] = JsonSerializer.SerializeToElement("measured");
-
-            JsonElement emptyPayload = JsonSerializer.SerializeToElement(new
-            {
-                sessionCount = 0,
-                runCount = 0,
-                executionCount = 0,
-                reason,
-            });
-
-            return new HarnessRollupRow(
-                Harness: harness,
-                SampleCount: 0,
-                ContextPressureMedian: null,
-                ContextPressureP95: null,
-                CacheHitRate: null,
-                ToolYield: null,
-                DelegationOverhead: null,
-                FieldCoverage: 0.0,
-                Measurability: measurability,
-                Payload: emptyPayload);
-        }
-
-        List<double> peakPressures = [];
-        bool anyDerivedPressure = false;
-        int unknownWindowSessions = 0;
-        long totalCacheRead = 0;
-        long totalInput = 0;
-        bool hasCacheRead = false;
-        bool hasInput = false;
-        int totalDefinedTools = 0;
-        int totalInvokedTools = 0;
-        int subagentSessions = 0;
-
-        foreach (SessionSummaryRow session in sessions)
-        {
-            if (session.IsSubagent)
-            {
-                subagentSessions++;
-            }
-
-            if (IsUnnamedWindowSource(session.ContextLimitSource))
-            {
-                unknownWindowSessions++;
-            }
-
-            if (TryExtractPeakPressure(session, out double peak, out bool derived))
-            {
-                peakPressures.Add(peak);
-                if (derived)
-                {
-                    anyDerivedPressure = true;
-                }
-            }
-
-            if (TryGetSummaryElement(session, out JsonElement summary))
-            {
-                if (TryGetLong(summary, "total_input", out long inp))
-                {
-                    totalInput += inp;
-                    if (inp > 0)
-                    {
-                        hasInput = true;
-                    }
-                }
-
-                if (TryGetLong(summary, "total_cache_read", out long cr))
-                {
-                    totalCacheRead += cr;
-                    if (cr > 0)
-                    {
-                        hasCacheRead = true;
-                    }
-                }
-
-                if (summary.TryGetProperty("tools_offered", out JsonElement offered) && offered.ValueKind == JsonValueKind.Array
-                    && summary.TryGetProperty("tools_invoked", out JsonElement invoked) && invoked.ValueKind == JsonValueKind.Array)
-                {
-                    HashSet<string> offeredSet = new(StringComparer.Ordinal);
-                    foreach (JsonElement item in offered.EnumerateArray())
-                    {
-                        if (item.ValueKind == JsonValueKind.String && item.GetString() is string name)
-                        {
-                            offeredSet.Add(name);
-                        }
-                    }
-
-                    totalDefinedTools += offeredSet.Count;
-                    foreach (JsonElement item in invoked.EnumerateArray())
-                    {
-                        if (item.ValueKind == JsonValueKind.String && item.GetString() is string name && offeredSet.Contains(name))
-                        {
-                            totalInvokedTools++;
-                        }
-                    }
-                }
-            }
-        }
-
-        double? medianPressure = null;
-        double? p95Pressure = null;
-        if (peakPressures.Count > 0)
-        {
-            peakPressures.Sort();
-            medianPressure = Math.Round(ComputeMedian(peakPressures), 4);
-            p95Pressure = Math.Round(ComputeP95(peakPressures), 4);
-            JsonElement tag = JsonSerializer.SerializeToElement(anyDerivedPressure ? "derived" : "measured");
-            measurability["context_pressure"] = tag;
-            measurability["context_pressure_median"] = tag;
-            measurability["context_pressure_p95"] = tag;
-        }
-        else
-        {
-            string reason = unknownWindowSessions > 0
-                ? string.Create(CultureInfo.InvariantCulture, $"No source reported a context window for {unknownWindowSessions} recorded session(s) for harness \"{harness}\"; pressure is unmeasurable, not zero.")
-                : $"No measurable turns found in recorded sessions for harness \"{harness}\".";
-            JsonElement notMeas = NotMeasurableJson(reason);
-            measurability["context_pressure"] = notMeas;
-            measurability["context_pressure_median"] = notMeas;
-            measurability["context_pressure_p95"] = notMeas;
-        }
-
-        double? cacheHitRate = null;
-        if (hasCacheRead && totalInput > 0)
-        {
-            cacheHitRate = Math.Round((double)totalCacheRead / totalInput, 4);
-            measurability["cache_hit_rate"] = JsonSerializer.SerializeToElement("measured");
-        }
-        else
-        {
-            measurability["cache_hit_rate"] = NotMeasurableJson(
-                $"Cache-read telemetry not observed for harness \"{harness}\".");
-        }
-
-        double? toolYield = null;
-        if (totalDefinedTools > 0)
-        {
-            toolYield = Math.Round((double)totalInvokedTools / totalDefinedTools, 4);
-            measurability["tool_yield"] = JsonSerializer.SerializeToElement("measured");
-        }
-        else
-        {
-            measurability["tool_yield"] = NotMeasurableJson(
-                $"No tool definitions recorded for harness \"{harness}\".");
-        }
-
-        double? delegationOverhead = null;
-        if (sessions.Count > 0 && subagentSessions > 0)
-        {
-            delegationOverhead = Math.Round((double)subagentSessions / sessions.Count, 4);
-            measurability["delegation_overhead"] = JsonSerializer.SerializeToElement("measured");
-        }
-        else if (executions.Count > 1 && executions.Any(e => !e.IsRoot))
-        {
-            int children = executions.Count(e => !e.IsRoot);
-            delegationOverhead = Math.Round((double)children / executions.Count, 4);
-            measurability["delegation_overhead"] = JsonSerializer.SerializeToElement("measured");
-        }
-        else
-        {
-            measurability["delegation_overhead"] = NotMeasurableJson(
-                $"No subagent executions observed for harness \"{harness}\".");
-        }
-
-        int coveredDimensions = 0;
-        if (hasInput)
-        {
-            coveredDimensions++;
-        }
-
-        if (cacheHitRate.HasValue)
-        {
-            coveredDimensions++;
-        }
-
-        if (toolYield.HasValue)
-        {
-            coveredDimensions++;
-        }
-
-        if (delegationOverhead.HasValue)
-        {
-            coveredDimensions++;
-        }
-
-        if (medianPressure.HasValue)
-        {
-            coveredDimensions++;
-        }
-
-        double fieldCoverage = Math.Round((double)coveredDimensions / CoverageDimensions.Count, 4);
-        measurability["field_coverage"] = JsonSerializer.SerializeToElement("measured");
-
-        int sampleCount = Math.Max(sessions.Count, Math.Max(runCount, executions.Count));
-        JsonElement payload = JsonSerializer.SerializeToElement(new
-        {
-            sessionCount = sessions.Count,
-            runCount,
-            executionCount = executions.Count,
-            unknownWindowSessions,
-            windowSessionsTotal = sessions.Count,
-        });
-
-        return new HarnessRollupRow(
-            Harness: harness,
-            SampleCount: sampleCount,
-            ContextPressureMedian: medianPressure,
-            ContextPressureP95: p95Pressure,
-            CacheHitRate: cacheHitRate,
-            ToolYield: toolYield,
-            DelegationOverhead: delegationOverhead,
-            FieldCoverage: fieldCoverage,
-            Measurability: measurability,
-            Payload: payload);
-    }
-
     private static JsonElement NotMeasurableJson(string reason) =>
         JsonSerializer.SerializeToElement(new { status = "not_measurable", reason });
 
     private static bool IsUnnamedWindowSource(string? source) =>
         string.IsNullOrEmpty(source) || string.Equals(source, "default", StringComparison.Ordinal);
-
-    private static bool TryExtractPeakPressure(SessionSummaryRow session, out double peak, out bool derived)
-    {
-        peak = 0;
-        derived = false;
-        if (IsUnnamedWindowSource(session.ContextLimitSource))
-        {
-            return false;
-        }
-
-        if (session.Payload.ValueKind != JsonValueKind.Object
-            || !session.Payload.TryGetProperty("context", out JsonElement context)
-            || context.ValueKind != JsonValueKind.Object)
-        {
-            return false;
-        }
-
-        if (string.Equals(session.ContextLimitSource, "declared", StringComparison.Ordinal))
-        {
-            derived = true;
-        }
-
-        if (context.TryGetProperty("derivedCounts", out JsonElement dc) && dc.ValueKind == JsonValueKind.True)
-        {
-            derived = true;
-        }
-
-        if (!context.TryGetProperty("turns", out JsonElement turns) || turns.ValueKind != JsonValueKind.Array)
-        {
-            return false;
-        }
-
-        bool found = false;
-        foreach (JsonElement turn in turns.EnumerateArray())
-        {
-            if (turn.ValueKind == JsonValueKind.Object
-                && turn.TryGetProperty("pressure", out JsonElement pEl)
-                && pEl.ValueKind == JsonValueKind.Number
-                && pEl.TryGetDouble(out double val)
-                && double.IsFinite(val))
-            {
-                if (!found || val > peak)
-                {
-                    peak = val;
-                }
-
-                found = true;
-            }
-        }
-
-        return found;
-    }
-
-    private static bool TryGetSummaryElement(SessionSummaryRow session, out JsonElement summary)
-    {
-        summary = default;
-        if (!string.IsNullOrEmpty(session.SummaryJson))
-        {
-            try
-            {
-                using JsonDocument doc = JsonDocument.Parse(session.SummaryJson);
-                if (doc.RootElement.ValueKind == JsonValueKind.Object)
-                {
-                    summary = doc.RootElement.Clone();
-                    return true;
-                }
-            }
-            catch (JsonException)
-            {
-            }
-        }
-
-        if (session.Payload.ValueKind == JsonValueKind.Object
-            && session.Payload.TryGetProperty("summary", out JsonElement embedded)
-            && embedded.ValueKind == JsonValueKind.Object)
-        {
-            summary = embedded;
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool TryGetLong(JsonElement obj, string propName, out long value)
-    {
-        value = 0;
-        return obj.TryGetProperty(propName, out JsonElement el)
-            && el.ValueKind == JsonValueKind.Number
-            && el.TryGetInt64(out value);
-    }
-
-    private static bool TryGetInt(JsonElement obj, string propName, out int value)
-    {
-        value = 0;
-        return obj.TryGetProperty(propName, out JsonElement el)
-            && el.ValueKind == JsonValueKind.Number
-            && el.TryGetInt32(out value);
-    }
 
     private static string? FindFirstRawAttribute(IReadOnlyList<CanonicalRecord> records, string[] keys)
     {
@@ -993,14 +910,6 @@ public class CanonRollupsEngine
         return null;
     }
 
-    private static string StripLeadingHarnessPrefix(string harness, string seed)
-    {
-        string prefix = $"{harness}:";
-        return seed.StartsWith(prefix, StringComparison.Ordinal)
-            ? seed[prefix.Length..]
-            : seed;
-    }
-
     private static string SanitizePathSegment(string value)
     {
         StringBuilder sb = new(value.Length);
@@ -1013,44 +922,4 @@ public class CanonRollupsEngine
         return sb.ToString();
     }
 
-    private class RunAccumulator(
-        string runId,
-        string harness,
-        string label,
-        string groupingBasis,
-        string groupingRule,
-        string? workingDirectory)
-    {
-        private string? started;
-        private string? ended;
-        private int count;
-
-        public void AddSession(SessionSummaryRow session)
-        {
-            count++;
-            if (!string.IsNullOrEmpty(session.Started)
-                && (started is null || string.Compare(session.Started, started, StringComparison.Ordinal) < 0))
-            {
-                started = session.Started;
-            }
-
-            if (!string.IsNullOrEmpty(session.Ended)
-                && (ended is null || string.Compare(session.Ended, ended, StringComparison.Ordinal) > 0))
-            {
-                ended = session.Ended;
-            }
-        }
-
-        public RunRow ToRunRow() => new(
-            RunId: runId,
-            Harness: harness,
-            Label: label,
-            GroupingBasis: groupingBasis,
-            GroupingRule: groupingRule,
-            WorkingDirectory: workingDirectory,
-            Started: started,
-            Ended: ended,
-            ExecutionCount: count,
-            Payload: null);
-    }
 }

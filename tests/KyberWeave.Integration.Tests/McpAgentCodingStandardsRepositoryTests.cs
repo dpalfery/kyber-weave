@@ -114,7 +114,7 @@ public sealed class McpAgentCodingStandardsRepositoryTests
     [Fact]
     public void TheRepositoryBundleCarriesItsRulesAndSkillsForEveryInstalledTechnology()
     {
-        string[] installed = ["csharp", "test", "typescript", "rust", "tauri", "go", "github-actions"];
+        string[] installed = ["csharp", "test", "typescript", "react", "rust", "tauri", "github-actions"];
 
         foreach (string technology in installed)
         {
