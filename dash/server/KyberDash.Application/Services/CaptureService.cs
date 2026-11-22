@@ -31,6 +31,8 @@ public class CaptureService : ICaptureService
     /// <summary>Relative path of the Factory plugin directory inside its config root.</summary>
     public const string FactoryPluginRelativePath = "plugins/kyberdash";
 
+    private static readonly JsonSerializerOptions CamelCaseOptions = new(JsonSerializerDefaults.Web);
+
     private readonly ISettingsRepository settings;
     private readonly IOperationalStore store;
     private readonly IServerStateRepository serverState;
@@ -97,7 +99,7 @@ public class CaptureService : ICaptureService
             harnesses = harnessesList,
             check,
             stateDirectory = Path.GetFullPath(stateDir),
-        });
+        }, CamelCaseOptions);
     }
 
     private static List<HarnessStatusView> BuildHarnessStatuses(bool factoryConsent)
