@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: draft
 technology: python
 owner: unassigned
-last-reviewed: 2026-08-16
+last-reviewed: 2026-11-22
 ---
 
 # Python coding standard
@@ -90,6 +90,14 @@ do.
 - Concurrent I/O uses `asyncio.gather` (or `TaskGroup`) rather than a sequential loop of
   awaits. Do not mix blocking I/O into an async function.
 
+### Bug fixes
+
+- Start from a repro: a failing test, command or snippet.
+- Run the focused check that would have caught the original mistake. If a verification tool
+  is unavailable, keep the change narrow and say what remains uncertain.
+- Report the facts that changed the decision (diagnostic code, Pylance setting or feature,
+  type, call site, failing input, test result), not speculation.
+
 ### Errors
 
 - **No bare `except:`.** Catch the exception you can name and handle.
@@ -135,11 +143,9 @@ constants.
   never `yaml.load`.
 - `subprocess` takes an argument list; `shell=True` with interpolated input is a shell
   injection.
-- Secrets come from the environment or a secret store, never a literal and never a
-  committed config file. Do not log them.
+- Secrets come from the environment or a secret store.
 - Database queries are parameterized. String concatenation into SQL is an injection.
-- Validate and sanitize untrusted input at the boundary; do not trust a return value you
-  have not typed.
+- Do not trust a return value you have not typed.
 
 ## Done checklist
 

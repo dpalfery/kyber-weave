@@ -32,7 +32,7 @@ products/kyber-squad/
 │   ├── models.yml                      # Model tiers, aliases, and temperature parameters
 │   ├── capabilities.yml                # Capability taxonomy and permission assignments
 │   └── fallbacks.yml                   # Lowering rules and collision resolution for fallback harnesses
-├── agents/                             # 15 canonical agent definition files plus owned references
+├── agents/                             # canonical agent definition files plus owned references
 │   ├── architect.md
 │   ├── architect/                      # Progressive-disclosure references (Markdown)
 │   ├── bug-crusher-investigator.md
@@ -59,33 +59,24 @@ products/kyber-squad/
     ├── code-review/
     ├── code-review-loop/
     ├── create-pull-request/
-    ├── csharp-dev/
-    ├── csp-security/
-    ├── dal-dev/
     ├── delivery-execution/
     ├── dp-code-reviewer/
     ├── github-cli/
-    ├── github-devops/
-    ├── go-dev/
     ├── kilo-review-loop/
     ├── lm-studio-cli/
-    ├── maui-dev/
     ├── pr-review-fix-comments/
     ├── product-owner/
-    ├── python-dev/
     ├── review-council/
-    ├── rust-dev/
     ├── security-review/
     ├── setup-dev-environment/
-    ├── task-gate/
-    └── typescript-dev/
+    └── task-gate/
 ```
 
 ---
 
 ## Canonical Components
 
-### 1. Agents (15 Canonical Roles)
+### 1. Agents (Canonical Roles)
 
 Each agent in `agents/<name>.md` contains LF-normalized UTF-8 Markdown with strict YAML frontmatter conforming to `schemas/agent.schema.json`:
 
@@ -122,6 +113,12 @@ canonical copy; the retired `create-pull-request-github` is folded into `create-
 tree also retains its supplemental resources; recursive APM and
 Agent Plugins packages preserve those resources and their local references.
 
+Squad ships no per-technology skill. How a technology is written — its rules, its procedure and
+its commands — lives in that technology's folder under [`standards/`](standards/README.md),
+which a worker receives through `docs_get_coding_standard_for_technology` once the host adopts
+it; [the dispositions reference](../../docs/kyber-squad/skill-resource-dispositions.md) records
+where each former technology skill's content went.
+
 `code-review-loop` completes an authorized code review feedback cycle: validated fixes,
 pushed commit links in replies, resolved threads, and a requested re-review. Its linked
 `code-review-loop.md` workflow ships beside `SKILL.md`. `pr-review-fix-comments` remains the
@@ -155,8 +152,9 @@ The tracked root `.github/` self-deployment predates resource delivery and remai
 snapshot until a human refreshes it after a release candidate; packages and fresh renders carry
 resources today. Every retained resource now has a reviewed disposition in the
 [skill-resource dispositions audit](../../docs/kyber-squad/skill-resource-dispositions.md):
-non-policy content stays in its skill directory as its durable home, portable policy lives in the
-`products/kyber-squad/standards/` templates, and nothing was deleted.
+non-policy content stays in its skill directory as its durable home, and portable policy lives in
+the `products/kyber-squad/standards/` templates. The retired technology skills' directories were
+deleted after their content moved to those templates; the audit records each moved resource.
 
 The Kyber-Weave skills under `.apm/skills/` (`codegraph`, `kw-onboarding`, `kyber-docs-authoring`,
 `kyber-docs-integrity-review`, `kyber-docs-onboarding-and-assessment`, `kyber-weave-cli`,

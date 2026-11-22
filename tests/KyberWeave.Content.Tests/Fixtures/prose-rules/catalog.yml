@@ -259,9 +259,6 @@ rules:
     statement: A developer agent, or worker, never runs the full test suite.
     stated-in:
       - products/kyber-squad/shared/worker-baseline.md
-      - products/kyber-squad/skills/go-dev/references/gates-and-platforms.md
-      - products/kyber-squad/skills/rust-dev/references/gates-and-platforms.md
-      - products/kyber-squad/skills/typescript-dev/references/esm-and-gates.md
       - products/kyber-squad/standards/go/go.standards.md
       - products/kyber-squad/standards/rust/rust.standards.md
       - products/kyber-squad/standards/typescript/typescript.standards.md
@@ -278,9 +275,6 @@ rules:
       absent-from:
         - docs/standards/test/test.standards.md
         - products/kyber-squad/skills/kilo-review-loop/SKILL.md
-        - products/kyber-squad/skills/go-dev/references/gates-and-platforms.md
-        - products/kyber-squad/skills/rust-dev/references/gates-and-platforms.md
-        - products/kyber-squad/skills/typescript-dev/references/esm-and-gates.md
   - id: C1-primary-sessions
     statement: The reader must never run the full test suite.
     stated-in:
@@ -575,20 +569,19 @@ rules:
   - id: standards-via-tool
     statement: The reader gets its coding standard through the docs_get_coding_standard_for_technology tool, and reads the standard's file only when that tool is unavailable.
     stated-in:
-      - products/kyber-squad/skills/go-dev/SKILL.md
-      - products/kyber-squad/skills/maui-dev/SKILL.md
-      - products/kyber-squad/skills/python-dev/SKILL.md
-      - products/kyber-squad/skills/rust-dev/SKILL.md
-      - products/kyber-squad/skills/typescript-dev/SKILL.md
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/agents/dev-easy.md
+      - products/kyber-squad/agents/dev-medium.md
+      - products/kyber-squad/agents/dev-hard.md
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
     retired:
       statement: The reader opens the coding standard file by its path directly, without first using the coding-standard tool.
       example: Before you start, open docs/standards/<technology>/README.md directly and read the coding standard; do not use a tool for it.
-      seed-into: products/kyber-squad/shared/worker-baseline.md
+      seed-into: products/kyber-squad/skills/task-gate/references/rework.md
       absent-from:
-        - products/kyber-squad/skills/go-dev/SKILL.md
+        - products/kyber-squad/agents/conductor/references/autonomy.md
   # ---------------------------------------------------------------- the review loop and the council
   - id: council-loop-until-approve
     statement: The review council re-reviews after every fix round until the verdict says nothing is left to fix (fix round none, review clean), or the loop reaches its hard stop.

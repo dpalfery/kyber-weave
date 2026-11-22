@@ -1,11 +1,10 @@
-using System.Text.RegularExpressions;
 using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// T19 RED — every developer agent and every developer skill reaches a coding standard through
+/// T19 RED — every developer agent reaches a coding standard through
 /// <c>docs_get_coding_standard_for_technology</c> instead of being told to read a path.
 /// </summary>
 /// <remarks>
@@ -17,37 +16,13 @@ namespace KyberWeave.Tests;
 /// what it left out.
 /// </para>
 /// <para>
-/// The registry property names stay in the text. <c>&lt;csharp-coding-standard&gt;</c> and the
-/// rest are still what a host's Config Reg publishes, and a standard that is missing or still a
-/// draft has to be able to report that as the question it cannot answer — so this file asserts
-/// that each file names the tool and keeps a registry property name. That a file read is not
-/// presented as the way to get the standard is graded from the prose rule catalog.
+/// That a file read is not presented as the way to get the standard is graded from the prose
+/// rule catalog.
 /// </para>
 /// </remarks>
 public sealed class SquadStandardsToolContractTests
 {
     private const string ToolName = "docs_get_coding_standard_for_technology";
-
-    /// <summary>
-    /// The canonical developer skills that state the coding-standard policy line for their own
-    /// role. Chosen by reading the tree rather than by assuming symmetry with the agents:
-    /// <c>react-dev</c> and <c>tauri-dev</c> ship no skill at all, and <c>csharp-dev</c> and
-    /// <c>dal-dev</c> ship one that names no standard of its own, so neither carries the line
-    /// that is being rerouted here.
-    /// </summary>
-    private static readonly string[] DeveloperSkills =
-    [
-        "go-dev",
-        "maui-dev",
-        "python-dev",
-        "rust-dev",
-        "typescript-dev"
-    ];
-
-    /// <summary>A registry property name as the repository instructions publish it.</summary>
-    private static readonly Regex RegistryProperty = new(
-        @"<[a-z][a-z-]*-coding-standard>",
-        RegexOptions.CultureInvariant);
 
     private const string ProductRoot = "products/kyber-squad";
 
@@ -78,52 +53,6 @@ public sealed class SquadStandardsToolContractTests
 
         Assert.Contains(ToolName, text, StringComparison.Ordinal);
     }
-
-    /// <summary>
-    /// The same contract for the developer skills, which carry the policy line the agent bodies
-    /// defer to: a skill that tells a worker to read the path undoes the agent that does not.
-    /// </summary>
-    /// <param name="skillName">The canonical skill identity.</param>
-    [Theory]
-    [InlineData("go-dev")]
-    [InlineData("maui-dev")]
-    [InlineData("python-dev")]
-    [InlineData("rust-dev")]
-    [InlineData("typescript-dev")]
-    public void EveryDeveloperSkillReachesItsCodingStandardThroughTheTool(string skillName)
-    {
-        AssertRoutesThroughTheTool($"skills/{skillName}/SKILL.md");
-    }
-
-    /// <summary>
-    /// The registry property names survive the reroute, in every file that carries one. They are
-    /// how a host repository's Config Reg publishes a standard, how a worker names the standard it
-    /// could not find, and what makes "not declared here" and "still a draft" answerable at all —
-    /// a route that replaced them with a bare technology word would lose all three.
-    /// </summary>
-    [Fact]
-    public void EveryTechnologyRoutingFileKeepsTheRegistryPropertyNamesItCarried()
-    {
-        List<string> missing = new();
-        foreach (string relativePath in AgentAndSkillPaths())
-        {
-            string text = Corpus.ReadText($"{ProductRoot}/{relativePath}");
-            if (!RegistryProperty.IsMatch(text)) missing.Add(relativePath);
-        }
-
-        Assert.True(
-            missing.Count == 0,
-            "These files no longer name a coding-standard registry property, so a worker cannot "
-            + "name the standard it found missing: " + string.Join(", ", missing));
-    }
-
-    /// <summary>
-    /// The files that route to a standard by a registry property name. A developer agent names no technology,
-    /// so its body carries no `<technology>-coding-standard` token; the technology skills are where a host's
-    /// property name is still published on the routing path.
-    /// </summary>
-    private static IEnumerable<string> AgentAndSkillPaths() =>
-        DeveloperSkills.Select(name => $"skills/{name}/SKILL.md");
 
     /// <summary>
     /// A routing instruction names the tool. What it says about reading the file instead is graded

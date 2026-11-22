@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: csharp
 owner: dpalfery
-last-reviewed: 2026-11-20
+last-reviewed: 2026-11-22
 ---
 
 # C# coding standard
@@ -24,6 +24,8 @@ repository has made and would otherwise have to re-argue in review.
 `KyberWeave.Application` takes few packages, and adding one needs a justification you
 can state. The reasoning is in [`AGENTS.md`](../../../AGENTS.md): every dependency this
 library takes is one every host repository takes with it.
+
+Project references form a DAG; shared contracts live in a contracts library, never in a cycle.
 
 ## Coding standards
 
@@ -144,6 +146,22 @@ Consequences worth stating:
   runs all Roslyn analyzers with `TreatWarningsAsErrors=true` under `AnalysisMode=all`,
   developer task-gates (`review.task-gates`) omit `dotnet format analyzers`, saving ~24s
   per task with zero loss of analyzer coverage.
+- **Build files stay SDK-style, with the baseline in one place.** Root `Directory.Build.props`
+  holds the repository baseline (analysis level and mode, `Nullable`, `ImplicitUsings`,
+  `LangVersion`, warnings as errors), and a project file does not repeat it. A nested
+  `Directory.Build.props` chains the parent with `GetPathOfFileAbove`; otherwise MSBuild loads
+  only the nearest file. Properties a project may override go in `.props`; anything that reads
+  final project properties goes in `.targets`.
+- **A custom target is guarded and incremental.** Use built-in tasks (`Copy`, `Delete`,
+  `MakeDir`, `WriteLinesToFile`) rather than `<Exec>`, and build paths with `NormalizePath` or
+  `Path.Combine`, never with a drive letter. A target that runs a tool or generator is guarded
+  with `'$(DesignTimeBuild)' != 'true' and '$(BuildingProject)' == 'true'`, declares `Inputs`
+  and `Outputs` (or writes a stamp file with `Touch`), writes under `$(IntermediateOutputPath)`
+  and adds the files to `Compile` and `FileWrites`. Generation is deterministic: no
+  `DateTime.UtcNow` in generated code.
+- **Build once, restore once.** Multi-step CI restores once, then uses `--no-restore` for build
+  and `--no-build` for test, with NuGet cached on the lock files or projects; end a CI job with
+  `-p:NodeReuse=false` so workers hold no file locks.
 - **A format gate's exit 0 does not prove a project file was checked.** `dotnet format
   --include` accepts a `.csproj`, `.props` or `.targets` path and exits 0 without formatting
   anything, because it rewrites C# documents; a path that does not exist behaves the same way.
@@ -153,6 +171,20 @@ Consequences worth stating:
 - **No ReSharper command-line tools.** InspectCode is not a gate here: it can write its
   report and then never exit ([ADR 0075](../../adr/0075-inspectcode-is-removed-from-the-squad.md)).
   Static analysis is the compiler and analyzer warnings from the build gate.
+
+### Build files
+
+- Never write generated files into the source tree during a build, or leave a property
+  condition unquoted (`'$(Prop)' == 'true'`).
+
+### Build diagnostics
+
+- Rebuilds with nothing changed: `dotnet build -v:diagnostic -fl -flp:logfile=diag.log`, then
+  search for `Building target '<T>' completely` and `Input file ... is newer than output file`.
+- Slow build: `dotnet build -fl -flp:"logfile=perf.log;performancesummary"` for target and task
+  timings, or `dotnet build /bl:build.binlog` and open it in the MSBuild Structured Log Viewer.
+- Several CLI commands in one job: set `DOTNET_CLI_USE_MSBUILD_SERVER=1` so MSBuild Server stays
+  warm between them. It is opt-in before the .NET 11 SDK and gains little in a one-command job.
 
 ## Security and data handling
 

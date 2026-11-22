@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: draft
 technology: github-actions
 owner: unassigned
-last-reviewed: 2026-08-16
+last-reviewed: 2026-11-22
 ---
 
 # github-actions coding standard
@@ -86,6 +86,21 @@ disabled test without a linked issue and a date.
 - **Test results and build artifacts are uploaded** with an explicit `retention-days`; .NET test
   steps log with `--logger trx` so the results can be published.
 
+### Build diagnostics
+
+- **Every MSBuild-based step in CI captures a binary log.** Add `/bl:{}` to `dotnet build`,
+  `test` and `publish` (.NET 8 SDK or MSBuild 17.8+); the `{}` makes the file name unique so
+  parallel jobs never overwrite each other. On a `pwsh` runner write `-bl:{{}}`. On an older
+  SDK there is no `{}`: use an explicit name that differs per step and matrix leg, such as
+  `/bl:${{ github.job }}-${{ strategy.job-index }}-build.binlog` for the build step and
+  `/bl:${{ github.job }}-${{ strategy.job-index }}-test.binlog` for the test step.
+- **Upload binlogs on failure** with `if: failure()` and `actions/upload-artifact`, a
+  `**/*.binlog` path, a name that includes `github.run_id`, and an explicit `retention-days`.
+  A failed CI build with no binlog can only be diagnosed by guessing.
+- **A clean step keeps binlogs**: `git clean -fdx -e "*.binlog"`.
+- Do not turn on `-v:diagnostic` as the default. It writes 10-50 MB per project; the binlog
+  plus a replay is cheaper.
+
 ## Security and data handling
 
 ### Supply chain
@@ -103,8 +118,8 @@ disabled test without a linked issue and a date.
 
 ### Secrets
 
-Secrets come from the secrets store, are passed by `env:`, and are never echoed, written to an
-artifact, or included in a step summary. A workflow that needs to print a secret to debug it
+Secrets come from the secrets store and are passed by `env:`, and none is written to an
+artifact or included in a step summary. A workflow that needs to print a secret to debug it
 needs a different debugging approach.
 
 Prefer OIDC federation to a long-lived cloud credential stored as a secret.
