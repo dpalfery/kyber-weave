@@ -77,7 +77,7 @@ public static class LoopbackBinding
         {
             foreach (int port in ports)
             {
-                if (webPort <= 0 || port != webPort || ports.Count == 1)
+                if (webPort <= 0 || port != webPort)
                     return port;
             }
         }

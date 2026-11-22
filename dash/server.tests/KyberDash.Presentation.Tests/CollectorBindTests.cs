@@ -35,6 +35,21 @@ public class CollectorBindTests
     }
 
     [Fact]
+    public void EphemeralCollectorPortIsNotTheSoleWebAddress()
+    {
+        int selected = LoopbackBinding.SelectOtlpPort(
+            ["http://127.0.0.1:4747"],
+            configuredOtlpPort: 0,
+            webPort: 4747);
+
+        Assert.Equal(0, selected);
+        Assert.Equal(34567, LoopbackBinding.SelectOtlpPort(
+            ["http://127.0.0.1:4747", "http://127.0.0.1:34567"],
+            configuredOtlpPort: 0,
+            webPort: 4747));
+    }
+
+    [Fact]
     public void ConfiguredCollectorPortIsNotReplacedByTheWebPort()
     {
         int selected = LoopbackBinding.SelectOtlpPort(

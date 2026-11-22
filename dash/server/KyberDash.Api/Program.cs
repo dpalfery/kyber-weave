@@ -224,6 +224,9 @@ public static partial class Program
             otlpLifecycle.Start();
 
         IReadOnlyList<string> boundAddresses = ReadBoundAddresses(app);
+        // Equal ports share one socket. Remember that before the web port is replaced
+        // with the address Kestrel actually bound.
+        bool sharedCollectorSocket = runtime.OtlpEnabled && runtime.OtlpPort == runtime.WebPort;
         if (!runtime.OtlpOnly)
         {
             Uri webUri = LoopbackBinding.SelectWebUrl(boundAddresses, runtime.WebPort, runtime.OtlpPort);
@@ -250,6 +253,9 @@ public static partial class Program
         if (runtime.OtlpEnabled)
         {
             int otlpPort = LoopbackBinding.SelectOtlpPort(boundAddresses, runtime.OtlpPort, runtime.WebPort);
+            if (otlpPort <= 0 && sharedCollectorSocket && runtime.WebPort > 0)
+                otlpPort = runtime.WebPort;
+
             if (otlpPort > 0)
             {
                 runtime.OtlpPort = otlpPort;
