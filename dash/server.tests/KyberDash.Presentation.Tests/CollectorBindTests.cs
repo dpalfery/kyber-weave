@@ -89,6 +89,18 @@ public class CollectorBindTests
     }
 
     [Fact]
+    public void BindFailureWithoutAUrlDoesNotNamePortZero()
+    {
+        IOException failure = new("address already in use.", new SocketException((int)SocketError.AddressAlreadyInUse));
+        DashRuntimeSettings runtime = new() { WebPort = 4747, OtlpPort = 0, OtlpEnabled = true };
+
+        string message = LoopbackBinding.DescribeBindFailure(failure, runtime);
+
+        Assert.Contains("http://127.0.0.1:4747", message, StringComparison.Ordinal);
+        Assert.DoesNotContain(":0", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BusyDefaultCollectorPortFallsBackOnlyWhenItWasNotExplicit()
     {
         Assert.True(LoopbackBinding.ShouldUseEphemeralOtlpPort(otlpEnabled: true, otlpPortExplicit: false, preferredPortFree: false));

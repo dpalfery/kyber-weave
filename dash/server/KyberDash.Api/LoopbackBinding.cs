@@ -275,7 +275,7 @@ public static class LoopbackBinding
     private static string UnspecifiedTargets(DashRuntimeSettings runtime)
     {
         string web = DashRuntimeSettings.LoopbackUrl(runtime.WebPort).GetLeftPart(UriPartial.Authority);
-        if (!runtime.OtlpEnabled || runtime.OtlpPort == runtime.WebPort)
+        if (!runtime.OtlpEnabled || runtime.OtlpPort <= 0 || runtime.OtlpPort == runtime.WebPort)
             return web;
 
         string otlp = DashRuntimeSettings.LoopbackUrl(runtime.OtlpPort).GetLeftPart(UriPartial.Authority);
