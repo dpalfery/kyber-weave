@@ -35,9 +35,15 @@ public sealed class ArbiterGlobalPluginDirRenderingTests
             root => Path.Combine(root, ".config", "opencode"),
             "plugins/kyber-arbiter.ts");
 
-        Assert.Contains("tool.execute.before", content, StringComparison.Ordinal);
+        Assert.Contains("ctx.tool.hook(\"execute.before\"", content, StringComparison.Ordinal);
+        Assert.Contains("ctx.location?.directory", content, StringComparison.Ordinal);
         Assert.Contains("kyber-weave-arbiter", content, StringComparison.Ordinal);
         Assert.Contains("--scope global", content, StringComparison.Ordinal);
+
+        // The plugin file lives under the harness's user-level directory, so walking up
+        // from it would pick ~/.kyber-weave/kyber-weave.yml over the repository.
+        Assert.DoesNotContain("currentFileDirectory", content, StringComparison.Ordinal);
+        Assert.Contains("findNearestRepositoryRoot", content, StringComparison.Ordinal);
         Assert.Equal("dispatch-unconfirmed", Assert.Single(
             ArbiterHookWiring.TargetDegradations([SquadTarget.OpenCode], SquadDeploymentScope.Global)).Details);
     }
@@ -52,8 +58,13 @@ public sealed class ArbiterGlobalPluginDirRenderingTests
             "plugin/kyber-arbiter.ts");
 
         Assert.Contains("tool.execute.before", content, StringComparison.Ordinal);
+        Assert.Contains("server: KyberArbiter", content, StringComparison.Ordinal);
         Assert.Contains("kyber-weave-arbiter", content, StringComparison.Ordinal);
         Assert.Contains("--scope global", content, StringComparison.Ordinal);
+
+        // The global root rule applies to Kilo too, even though its body stays 1.x.
+        Assert.DoesNotContain("currentFileDirectory", content, StringComparison.Ordinal);
+        Assert.Contains("findNearestRepositoryRoot", content, StringComparison.Ordinal);
     }
 
     [Fact]

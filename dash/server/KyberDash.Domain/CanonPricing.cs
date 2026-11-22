@@ -814,16 +814,19 @@ public static partial class CanonPricing
         harness is not null && PublishedApplicabilityHarnesses.Contains(ToAsciiLower(harness.Trim()));
 
     /// <summary>Resolves aliases, router prefixes, and leaf namespaces to a canonical model ID.</summary>
-    public static string ResolveCanonicalModelId(string model)
+    public static string ResolveCanonicalModelId(string model) =>
+        ResolveCanonicalModelIdCore(model, tables: null);
+
+    private static string ResolveCanonicalModelIdCore(string model, PricingTables? tables)
     {
         ArgumentNullException.ThrowIfNull(model);
-        string aliased = ResolveAlias(GetCanonicalName(model));
+        string aliased = ResolveAlias(GetCanonicalName(model, tables));
         int slash = aliased.LastIndexOf('/');
         if (slash < 0)
             return aliased;
 
         string leaf = aliased[(slash + 1)..];
-        return leaf.Length == 0 ? aliased : ResolveAlias(GetCanonicalName(leaf));
+        return leaf.Length == 0 ? aliased : ResolveAlias(GetCanonicalName(leaf, tables));
     }
 
     /// <summary>True when <paramref name="model"/> is a built-in flat-rate subscription SKU rather than per-token billed.</summary>
@@ -849,15 +852,19 @@ public static partial class CanonPricing
         !string.IsNullOrEmpty(model) && IsBuiltInFlatRateModel(model);
 
     /// <summary>Looks up published per-token pricing for <paramref name="model"/> using TS lookup precedence.</summary>
-    public static ModelCosts? GetModelCosts(string model)
+    public static ModelCosts? GetModelCosts(string model) =>
+        GetModelCosts(model, GetTables());
+
+    /// <summary>Looks up per-token pricing for <paramref name="model"/> using explicit <paramref name="tables"/>.</summary>
+    public static ModelCosts? GetModelCosts(string model, PricingTables tables)
     {
         ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(tables);
         if (string.IsNullOrWhiteSpace(model))
             return null;
 
-        PricingTables tables = GetTables();
         string withPrefix = DateSuffixRegex().Replace(AtSuffixRegex().Replace(model, string.Empty), string.Empty);
-        string canonicalName = GetCanonicalName(model);
+        string canonicalName = GetCanonicalName(model, tables);
         string canonical = ResolveAlias(canonicalName);
 
         if (!string.Equals(canonical, canonicalName, StringComparison.Ordinal) &&
@@ -873,7 +880,7 @@ public static partial class CanonPricing
         if (tables.PricingCache.TryGetValue(canonical, out ModelCosts? byCanonical))
             return byCanonical;
 
-        foreach (string candidate in RoutedModelCandidates(model))
+        foreach (string candidate in RoutedModelCandidates(model, tables))
         {
             string aliased = ResolveAlias(candidate);
             if (tables.PricingCache.TryGetValue(aliased, out ModelCosts? byCandidateAlias))
@@ -902,7 +909,7 @@ public static partial class CanonPricing
         string? withPrefixVariant = StripKnownPricingVariantSuffix(withPrefix);
         if (withPrefixVariant is not null && !string.Equals(withPrefixVariant, withPrefix, StringComparison.Ordinal))
         {
-            ModelCosts? variantCosts = GetModelCosts(withPrefixVariant);
+            ModelCosts? variantCosts = GetModelCosts(withPrefixVariant, tables);
             if (variantCosts is not null)
                 return variantCosts;
         }
@@ -912,12 +919,25 @@ public static partial class CanonPricing
             !string.Equals(canonicalVariant, canonical, StringComparison.Ordinal) &&
             !string.Equals(canonicalVariant, withPrefixVariant, StringComparison.Ordinal))
         {
-            ModelCosts? variantCosts = GetModelCosts(canonicalVariant);
+            ModelCosts? variantCosts = GetModelCosts(canonicalVariant, tables);
             if (variantCosts is not null)
                 return variantCosts;
         }
 
         return null;
+    }
+
+    /// <summary>Looks up per-token pricing for <paramref name="model"/> via an injected <see cref="IModelPricingLookup"/> or bundled tables.</summary>
+    public static ModelCosts? GetModelCosts(string model, IModelPricingLookup? pricing)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        if (pricing is null)
+            return GetModelCosts(model, GetTables());
+
+        if (pricing is PricingTables tables)
+            return GetModelCosts(model, tables);
+
+        return string.IsNullOrWhiteSpace(model) ? null : pricing.GetModelCosts(model);
     }
 
     /// <summary>Computes turn USD cost from published rates, including tiered prompt escalation for GPT-6 Luna and Grok 4.6.</summary>
@@ -929,10 +949,32 @@ public static partial class CanonPricing
         double cacheReadTokens,
         double webSearchRequests,
         bool fast = false,
-        double oneHourCacheCreationTokens = 0)
+        double oneHourCacheCreationTokens = 0) =>
+        CalculateCost(
+            model,
+            inputTokens,
+            outputTokens,
+            cacheCreationTokens,
+            cacheReadTokens,
+            webSearchRequests,
+            fast,
+            oneHourCacheCreationTokens,
+            pricing: null);
+
+    /// <summary>Computes turn USD cost from injected or published rates, including tiered prompt escalation for GPT-6 Luna and Grok 4.6.</summary>
+    public static double CalculateCost(
+        string model,
+        double inputTokens,
+        double outputTokens,
+        double cacheCreationTokens,
+        double cacheReadTokens,
+        double webSearchRequests,
+        bool fast,
+        double oneHourCacheCreationTokens,
+        IModelPricingLookup? pricing)
     {
         ArgumentNullException.ThrowIfNull(model);
-        ModelCosts? costs = GetModelCosts(model);
+        ModelCosts? costs = GetModelCosts(model, pricing);
         if (costs is null)
             return 0;
 
@@ -947,7 +989,7 @@ public static partial class CanonPricing
         double safeWebSearch = ClampPositive(webSearchRequests);
         double promptTokens = safeInput + safeCacheRead;
 
-        ModelCosts tieredCosts = TieredCostsFor(model, costs, promptTokens, safeCacheCreation);
+        ModelCosts tieredCosts = TieredCostsFor(model, costs, promptTokens, safeCacheCreation, pricing as PricingTables);
         double multiplier = fast ? tieredCosts.FastMultiplier : 1.0;
 
         return multiplier * (
@@ -964,6 +1006,15 @@ public static partial class CanonPricing
         TokenUsage tokens,
         string? model,
         string? harness,
+        CostBlock? existing = null) =>
+        PricePublishedTurn(tokens, model, harness, pricing: null, existing);
+
+    /// <summary>Prices a turn from injected or bundled published-rate tables under TS applicability scoping rules.</summary>
+    public static CostBlock PricePublishedTurn(
+        TokenUsage tokens,
+        string? model,
+        string? harness,
+        IModelPricingLookup? pricing,
         CostBlock? existing = null)
     {
         ArgumentNullException.ThrowIfNull(tokens);
@@ -979,7 +1030,7 @@ public static partial class CanonPricing
         if (IsFlatRateModel(model))
             return new CostBlock(CostBasis.Published, CostStatus.NotBilled);
 
-        ModelCosts? costs = GetModelCosts(model);
+        ModelCosts? costs = GetModelCosts(model, pricing);
         if (costs is null ||
             !(costs.InputCostPerToken > 0 ||
               costs.OutputCostPerToken > 0 ||
@@ -1000,7 +1051,10 @@ public static partial class CanonPricing
             tokens.Output,
             billedCacheWrite,
             tokens.CacheRead,
-            webSearchRequests: 0);
+            webSearchRequests: 0,
+            fast: false,
+            oneHourCacheCreationTokens: 0,
+            pricing: pricing);
 
         return new CostBlock(
             CostBasis.Published,
@@ -1015,6 +1069,15 @@ public static partial class CanonPricing
         TokenUsage tokens,
         string? model,
         string? harness,
+        CostBlock? existing = null) =>
+        PriceTurn(tokens, model, harness, pricing: null, existing);
+
+    /// <summary>Prices a turn across Copilot credits or injected/published tables while preserving harness-reported costs.</summary>
+    public static CostBlock PriceTurn(
+        TokenUsage tokens,
+        string? model,
+        string? harness,
+        IModelPricingLookup? pricing,
         CostBlock? existing = null)
     {
         ArgumentNullException.ThrowIfNull(tokens);
@@ -1023,7 +1086,96 @@ public static partial class CanonPricing
 
         return IsCopilotHarness(harness)
             ? PriceCopilotTurn(tokens, model, harness, existing)
-            : PricePublishedTurn(tokens, model, harness, existing);
+            : PricePublishedTurn(tokens, model, harness, pricing, existing);
+    }
+
+    /// <summary>
+    /// Prices a turn from the token classes that were stored.
+    /// A reported input total is the checksum <c>fresh + cache read + cache write</c>.
+    /// It is not billed at the fresh rate, and a missing side is not billed as a measured zero.
+    /// A reported output total is one rate and is billed when the output class was not stored.
+    /// Stored classes that sum to the reported input are priced, with the absent input classes
+    /// reconciled to zero. A remainder is priced only for the stored classes and reported as
+    /// <see cref="CostStatus.Partial"/>. When no reported input was stored, the input side is
+    /// complete only if an input class was stored. An absent output class is not a measured
+    /// zero. Reasoning tokens are a subset of output, so a reasoning-only turn is not priced.
+    /// A turn with no billable class and no reported total is not priced.
+    /// </summary>
+    public static CostBlock PriceStoredTokens(
+        long? freshInput,
+        long? cacheRead,
+        long? cacheCreation,
+        long? output,
+        long? reasoning,
+        long? reportedInput,
+        long? reportedOutput,
+        string? model,
+        string? harness,
+        IModelPricingLookup? pricing)
+    {
+        bool canPriceInput = freshInput is not null || cacheRead is not null || cacheCreation is not null;
+        bool canPriceOutput = output is not null || reportedOutput is not null;
+        bool storedClass = canPriceInput || output is not null;
+        bool reportedInputOnly = !canPriceInput && !canPriceOutput && reportedInput is not null;
+        if ((!storedClass && reportedInput is null && reportedOutput is null) || reportedInputOnly)
+        {
+            return new CostBlock(
+                CostBasis.Published,
+                IsPublishedTableHarness(harness) ? CostStatus.NoRate : CostStatus.OutOfScope);
+        }
+
+        long billedFresh = freshInput ?? 0L;
+        long billedCacheRead = cacheRead ?? 0L;
+        long billedCacheCreation = cacheCreation ?? 0L;
+        decimal knownInput = (decimal)billedFresh + billedCacheRead + billedCacheCreation;
+        bool inputComplete = reportedInput is not null
+            ? canPriceInput && knownInput == reportedInput.Value
+            : canPriceInput;
+
+        long billedOutput;
+        bool outputComplete;
+        if (output is not null)
+        {
+            billedOutput = output.Value;
+            outputComplete = reportedOutput is null || reportedOutput.Value == output.Value;
+        }
+        else if (reportedOutput is not null)
+        {
+            billedOutput = reportedOutput.Value;
+            outputComplete = true;
+        }
+        else
+        {
+            billedOutput = 0L;
+            outputComplete = false;
+        }
+
+        TokenUsage usage = new(
+            FreshInput: billedFresh,
+            CacheRead: billedCacheRead,
+            CacheCreation: billedCacheCreation,
+            Output: billedOutput,
+            ReportedInput: reportedInput ?? SaturateToInt64(knownInput),
+            ReportedOutput: reportedOutput ?? billedOutput,
+            Reasoning: reasoning);
+
+        CostBlock priced = PriceTurn(usage, model, harness, pricing, existing: null);
+        if (inputComplete && outputComplete)
+            return priced;
+
+        return priced.Status == CostStatus.Priced
+            ? priced with { Status = CostStatus.Partial }
+            : priced;
+
+        static long SaturateToInt64(decimal total)
+        {
+            if (total > long.MaxValue)
+                return long.MaxValue;
+            if (total < long.MinValue)
+                return long.MinValue;
+
+            return (long)total;
+        }
     }
 
     /// <summary>Extracts a validated non-negative finite integer/double measurement from JSON or numeric values.</summary>
@@ -1314,7 +1466,7 @@ public static partial class CanonPricing
         return model;
     }
 
-    private static string GetCanonicalName(string model)
+    private static string GetCanonicalName(string model, PricingTables? tables = null)
     {
         string cleaned = BracketSuffixRegex().Replace(
             DateSuffixRegex().Replace(AtSuffixRegex().Replace(model, string.Empty), string.Empty),
@@ -1330,20 +1482,20 @@ public static partial class CanonPricing
             return cleaned;
         }
 
-        return StripKnownFirstNamespace(cleaned);
+        return StripKnownFirstNamespace(cleaned, tables);
     }
 
-    private static string StripKnownFirstNamespace(string model)
+    private static string StripKnownFirstNamespace(string model, PricingTables? tables = null)
     {
         int idx = model.IndexOf('/', StringComparison.Ordinal);
         if (idx <= 0)
             return model;
 
         string head = ToAsciiLower(model[..idx]);
-        return GetTables().KnownNamespaces.Contains(head) ? model[(idx + 1)..] : model;
+        return (tables ?? GetTables()).KnownNamespaces.Contains(head) ? model[(idx + 1)..] : model;
     }
 
-    private static IReadOnlyList<string> RoutedModelCandidates(string model)
+    private static IReadOnlyList<string> RoutedModelCandidates(string model, PricingTables? tables = null)
     {
         List<string> ids = [];
         HashSet<string> seen = new(StringComparer.Ordinal);
@@ -1368,7 +1520,7 @@ public static partial class CanonPricing
             }
         }
 
-        Push(GetCanonicalName(current));
+        Push(GetCanonicalName(current, tables));
         return ids;
     }
 
@@ -1385,9 +1537,9 @@ public static partial class CanonPricing
         return null;
     }
 
-    private static ModelCosts TieredCostsFor(string model, ModelCosts baseCosts, double promptTokens, double cacheCreationTokens)
+    private static ModelCosts TieredCostsFor(string model, ModelCosts baseCosts, double promptTokens, double cacheCreationTokens, PricingTables? tables = null)
     {
-        string canonical = ResolveCanonicalModelId(model);
+        string canonical = ResolveCanonicalModelIdCore(model, tables);
         if (string.Equals(canonical, "gpt-6-luna", StringComparison.Ordinal) &&
             promptTokens + cacheCreationTokens > Gpt6LunaPromptTokenThreshold)
         {
@@ -1637,9 +1789,25 @@ public static partial class CanonPricing
 
 }
 
+/// <summary>Looks up per-token model pricing rates without exposing underlying cache tables.</summary>
+public interface IModelPricingLookup
+{
+    /// <summary>Looks up per-token pricing rates for <paramref name="model"/>.</summary>
+    /// <param name="model">Model identifier to look up.</param>
+    ModelCosts? GetModelCosts(string model);
+}
+
 /// <summary>Indexed pricing lookup tables constructed from snapshot and fallback cost dictionaries.</summary>
 public record PricingTables(
     IReadOnlyDictionary<string, ModelCosts> PricingCache,
     IReadOnlyList<string> SortedKeys,
     IReadOnlyDictionary<string, ModelCosts> LowercaseIndex,
-    IReadOnlySet<string> KnownNamespaces);
+    IReadOnlySet<string> KnownNamespaces) : IModelPricingLookup
+{
+    /// <summary>Looks up per-token pricing for <paramref name="model"/> using these tables.</summary>
+    /// <param name="model">Model identifier to look up.</param>
+    protected virtual ModelCosts? GetModelCosts(string model) => CanonPricing.GetModelCosts(model, this);
+
+    /// <inheritdoc />
+    ModelCosts? IModelPricingLookup.GetModelCosts(string model) => GetModelCosts(model);
+}

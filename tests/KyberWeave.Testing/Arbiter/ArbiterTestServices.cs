@@ -124,6 +124,7 @@ internal static class ArbiterTestServices
             new DelegateHostConfig(configLoader, Get<IArbiterHostConfig>()),
             Get<IDispatchClaimStore>(),
             Get<IClaudeHookCoverage>(),
+            Get<IProjectDispatchHookProbe>(),
             Get<IProcessEnvironment>(),
             ids ?? Get<IIdGenerator>(),
             newDecisionId,

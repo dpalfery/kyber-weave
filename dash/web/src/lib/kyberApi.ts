@@ -2189,3 +2189,64 @@ export type KyberTurnSkillsEntry =
       invoked: string[] | KyberSkillAvailability
     }
   | KyberSkillAvailability
+
+/**
+ * One typed cell of the catalog-driven stored-fields inspection
+ * (`GET /api/kyber/session/:sessionKey/stored-fields`). The server serializes
+ * the C# record with camelCase keys, so `textValue` / `integerValue` /
+ * `realValue` carry the cell's figure under the affinity named by
+ * `columnType` — and every one of them is null when the store held no value.
+ * A null cell was never measured; the panel renders it as not reported,
+ * never as `0` or `""`. `columnType` stays `unknown` on the wire because the
+ * server may serialize the affinity as a number or a name; the panel reads
+ * the value keys, never the affinity.
+ */
+export interface StoredFieldCell {
+  columnName: string
+  columnType?: unknown
+  textValue?: string | null
+  integerValue?: number | null
+  realValue?: number | null
+}
+
+/** One persisted row: the cells in the owning table's `columnNames` order. */
+export interface StoredFieldRow {
+  cells: StoredFieldCell[]
+}
+
+/**
+ * One catalog table's inspection entry: the reachable `table.column` labels
+ * live in `columnNames` plus every row cell's `columnName`; `rows` holds the
+ * session's persisted rows; `missingParentKeys` names the parent keys with
+ * no row in this optional child table.
+ */
+export interface StoredTableFields {
+  tableName: string
+  columnNames: string[]
+  rows: StoredFieldRow[]
+  missingParentKeys: string[]
+}
+
+/**
+ * The catalog-driven relational view of one session: every applicable table
+ * in catalog order. `tables` is empty only when nothing was ever projected,
+ * never when the session is merely quiet.
+ */
+export interface StoredFieldsResponse {
+  sessionKey: string
+  tables: StoredTableFields[]
+}
+
+/**
+ * Reads the catalog-driven stored-fields view for a session.
+ *
+ * WHY this route and not the session payload: the payload serves the
+ * session's measured counters, while this route serves what the relational
+ * store actually persisted — every reachable catalog column labeled
+ * `table.column` — for the session execution inspection.
+ */
+export async function fetchStoredFields(sessionKey: string): Promise<StoredFieldsResponse> {
+  return fetchJson<StoredFieldsResponse>(
+    `/api/kyber/session/${encodeURIComponent(sessionKey)}/stored-fields`,
+  )
+}

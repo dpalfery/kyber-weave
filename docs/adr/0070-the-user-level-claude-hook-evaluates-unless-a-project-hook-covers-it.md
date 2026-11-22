@@ -4,7 +4,7 @@ title: The user-level Claude Arbiter hook evaluates a dispatch under the project
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-19
 component: KyberArbiter
 decided-by: []
 supersedes: []
@@ -72,6 +72,10 @@ is harmful: the decision log counts earlier escalations, and a repeat count of t
    other harness still defers when the project enables Arbiter, and the log names what it deferred to.
    Extending the probe to other harnesses is a follow-up, because their covering-hook semantics are not
    measured.
+   *Amended 2026-11-19:* Antigravity, OpenCode, Factory, Cursor and Pi load their project hook files statically,
+   so a file check answers coverage for them. When the project has no hook of its own for one of them, the user-level hook inserts
+   the task prompt without evaluating, as for a project that opts out ([ADR 0085](0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md)
+   §6: insertion is not an Arbiter action). Judging those dispatches at user level is not decided here.
 6. **Claude's user-level block is written only under `PreToolUse` and `PostToolUse`.** Claude Code documents
    only those spellings, so a lower-case legacy entry is migrated when the block is next rendered. The
    casing rule is recorded in [the Squad architecture](../kyber-squad/architecture.md).

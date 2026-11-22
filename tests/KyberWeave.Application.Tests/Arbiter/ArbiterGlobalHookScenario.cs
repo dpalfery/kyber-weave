@@ -42,6 +42,9 @@ internal sealed class ArbiterGlobalHookScenario : IDisposable
     /// <summary>Gets the home directory the user-level hook is told.</summary>
     public string Home => Project.HomeDirectory;
 
+    /// <summary>Gets the project-hook probe the user-level hook asks whether the project covers a harness.</summary>
+    public FakeProjectDispatchHookProbe ProjectHooks => Project.ProjectHooks;
+
     /// <summary>Gets the project root of the twin host.</summary>
     public string TwinRoot => Twin.RepoRoot;
 
@@ -132,6 +135,10 @@ internal sealed class ArbiterGlobalHookScenario : IDisposable
 
     public static string CursorTaskDispatch(string root) =>
         Fixture(root, "cursor/pre-task-dispatch.json", _ => { });
+
+    /// <summary>The Codex PreToolUse dispatch fixture, run in the given project.</summary>
+    public static string CodexTaskDispatch(string root) =>
+        Fixture(root, "codex/pre-spawn-dispatch.json", _ => { });
 
     /// <summary>The Claude PreToolUse hand-back fixture, run in the given project.</summary>
     public static string Handback(string root) =>

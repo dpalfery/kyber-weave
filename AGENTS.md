@@ -278,10 +278,11 @@ references that belong to this repository.
 - **<csharp-coding-standard>**: `docs/standards/csharp/csharp.standards.md`
 - **<test-coding-standard>**: `docs/standards/test/test.standards.md`
 - **<typescript-coding-standard>**: `docs/standards/typescript/typescript.standards.md`
+- **<react-coding-standard>**: `docs/standards/react/react.standards.md`
 - **<rust-coding-standard>**: `docs/standards/rust/rust.standards.md`
 - **<tauri-coding-standard>**: `docs/standards/tauri/tauri.standards.md`
-- **<go-coding-standard>**: `docs/standards/go/go.standards.md`
 - **<github-actions-coding-standard>**: `docs/standards/github-actions/github-actions.standards.md`
+- **<sqlite-coding-standard>**: `docs/standards/sqlite/sqlite.standards.md`
 - **<plan-index>**: `docs/plans/README.md`
 - **<specification-index>**: `docs/specs/README.md`
 - **<todo-index>**: `docs/todo/README.md`

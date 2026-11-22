@@ -1,5 +1,10 @@
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
+using KyberDash.Data.Collector;
+using KyberDash.Data.Collector.Sources;
+using KyberDash.Data.Harnesses.Antigravity;
+using KyberDash.Data.Harnesses.Cline;
+using KyberDash.Data.Harnesses.Kilo;
 using KyberDash.Domain;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -32,6 +37,7 @@ public static class ServiceCollectionExtensions
 
         _ = Data.ServiceCollectionExtensions.AddDashDataServices(services, resolvedOptions);
 
+        RegisterHarnessMapperAliases(services);
         RegisterEngines(services, resolvedOptions);
         RegisterServices(services);
 
@@ -49,34 +55,63 @@ public static class ServiceCollectionExtensions
             _ = pricing.LoadPricingTables();
             return pricing;
         });
-        services.TryAddSingleton(provider =>
-        {
-            ICanonStoreRepository store = provider.GetRequiredService<ICanonStoreRepository>();
-            IPricingRepository pricing = provider.GetRequiredService<IPricingRepository>();
-            return new CanonSessionProjectorEngine(store, pricing);
-        });
+        services.TryAddSingleton(provider => new CanonSessionProjectorEngine(
+            provider.GetRequiredService<IRelationalStoreReader>(),
+            provider.GetRequiredService<IProjectionStore>(),
+            provider.GetRequiredService<IOperationalStore>(),
+            provider.GetRequiredService<IPricingRepository>()));
 
-        services.TryAddSingleton(provider =>
-        {
-            ICanonStoreRepository store = provider.GetRequiredService<ICanonStoreRepository>();
-            IPricingRepository pricing = provider.GetRequiredService<IPricingRepository>();
-            return new CanonRollupsEngine(store, pricing);
-        });
+        services.TryAddSingleton(provider => new CanonRollupsEngine(
+            provider.GetRequiredService<IRelationalStoreReader>(),
+            provider.GetRequiredService<IProjectionStore>(),
+            provider.GetRequiredService<IPricingRepository>()));
 
         services.TryAddSingleton(provider => new CanonRefreshEngine(
-            provider.GetRequiredService<ICanonStoreRepository>(),
-            provider.GetRequiredService<ITranscriptReaderRepository>(),
-            provider.GetRequiredService<IPricingRepository>(),
+            provider.GetRequiredService<IRelationalStoreWriter>(),
+            provider.GetRequiredService<IRelationalStoreReader>(),
+            provider.GetRequiredService<IOperationalStore>(),
+            provider.GetRequiredService<HarnessSourceRegistry>(),
+            [.. provider.GetServices<IHarnessMapper>()],
+            provider.GetService<IHarnessFileSystem>(),
             provider.GetRequiredService<CanonSessionProjectorEngine>(),
-            provider.GetRequiredService<CanonRollupsEngine>()));
+            provider.GetRequiredService<CanonRollupsEngine>(),
+            provider.GetService<DashOptions>()));
+
+        services.TryAddSingleton<IOtlpListenerState, OtlpListenerState>();
 
         services.TryAddSingleton(provider => new KyberBridgeEngine(
-            provider.GetRequiredService<ICanonStoreRepository>(),
-            provider.GetRequiredService<ISettingsRepository>(),
+            provider.GetRequiredService<IRelationalStoreReader>(),
+            provider.GetRequiredService<IProjectionStore>(),
+            provider.GetRequiredService<IOperationalStore>(),
             provider.GetRequiredService<IPricingRepository>(),
             provider.GetRequiredService<CanonSessionProjectorEngine>(),
             provider.GetRequiredService<CanonRollupsEngine>(),
-            string.IsNullOrWhiteSpace(options.Version) ? KyberBridgeEngine.DefaultVersion : options.Version));
+            string.IsNullOrWhiteSpace(options.Version) ? KyberBridgeEngine.DefaultVersion : options.Version,
+            options: provider.GetRequiredService<DashOptions>(),
+            collector: provider.GetService<IOtlpCollectorService>(),
+            listener: provider.GetService<IOtlpListenerState>()));
+    }
+
+    /// <summary>
+    /// Registers the harness-family alias mappers the engines' <see cref="IHarnessMapper.HarnessId"/>-keyed
+    /// lookup needs on top of the base mapper registrations the data-layer composition already made.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="AddDashApplication"/> always calls <see cref="Data.ServiceCollectionExtensions.AddDashDataServices"/>
+    /// first, and that registers every mapper implementation (span mappers before transcript
+    /// mappers, so the transcript mappers own the shared local-file harness ids under the
+    /// engines' last-wins lookup). The family mappers it registers also map their family
+    /// members' units inside <c>Map</c>, but the lookup keys on HarnessId alone, so the
+    /// evidenced member ids (antigravity-cli, cline-cli, kilo-vscode-legacy) resolve through
+    /// alias registrations pointing at the family mapper. Plain <c>AddSingleton</c>:
+    /// <c>TryAddEnumerable</c> would dedupe the three alias instances by their shared wrapper type.
+    /// </remarks>
+    /// <param name="services">Service collection to populate.</param>
+    private static void RegisterHarnessMapperAliases(IServiceCollection services)
+    {
+        _ = services.AddSingleton<IHarnessMapper>(new HarnessMapperAlias(new AntigravityTranscriptMapper(), AntigravityTranscriptMapper.AntigravityCliHarnessId));
+        _ = services.AddSingleton<IHarnessMapper>(new HarnessMapperAlias(new ClineMapper(), ClineMapper.ClineCliHarnessId));
+        _ = services.AddSingleton<IHarnessMapper>(new HarnessMapperAlias(new KiloMapper(), KiloMapper.KiloVscodeLegacyHarnessId));
     }
 
     /// <summary>Registers every <c>KyberDash.Contracts.Services</c> implementation.</summary>
@@ -84,19 +119,28 @@ public static class ServiceCollectionExtensions
     private static void RegisterServices(IServiceCollection services)
     {
         services.TryAddSingleton<CanonProjectionService>(provider => new CanonProjectionService(
-            provider.GetRequiredService<ICanonStoreRepository>(),
+            provider.GetRequiredService<IRelationalStoreReader>(),
+            provider.GetRequiredService<IProjectionStore>(),
+            provider.GetRequiredService<IOperationalStore>(),
             provider.GetRequiredService<CanonSessionProjectorEngine>(),
             provider.GetRequiredService<CanonRollupsEngine>()));
         services.TryAddSingleton<ICanonProjectionService>(provider => provider.GetRequiredService<CanonProjectionService>());
 
+        services.TryAddSingleton<IHarnessFileSystem>(_ => PhysicalHarnessFileSystem.Instance);
+        services.TryAddSingleton<HarnessSourceRegistry>(_ => new HarnessSourceRegistry());
+
         services.TryAddSingleton<TranscriptIngestionService>(provider => new TranscriptIngestionService(
-            provider.GetRequiredService<ICanonStoreRepository>(),
-            provider.GetRequiredService<ITranscriptReaderRepository>(),
-            provider.GetRequiredService<CanonRefreshEngine>()));
+            provider.GetRequiredService<IRelationalStoreWriter>(),
+            provider.GetRequiredService<IOperationalStore>(),
+            provider.GetRequiredService<HarnessSourceRegistry>(),
+            [.. provider.GetServices<IHarnessMapper>()],
+            provider.GetService<IHarnessFileSystem>(),
+            provider.GetService<DashOptions>()));
         services.TryAddSingleton<ITranscriptIngestionService>(provider => provider.GetRequiredService<TranscriptIngestionService>());
 
         services.TryAddSingleton<IOtlpCollectorService>(provider => new OtlpCollectorService(
-            provider.GetRequiredService<ICanonStoreRepository>(),
+            provider.GetRequiredService<IRelationalStoreWriter>(),
+            provider.GetRequiredService<IOperationalStore>(),
             provider.GetRequiredService<ITranscriptIngestionService>(),
             provider.GetRequiredService<DashOptions>()));
 
@@ -107,7 +151,10 @@ public static class ServiceCollectionExtensions
             new AnalyticsService(provider.GetRequiredService<KyberBridgeEngine>()));
 
         services.TryAddSingleton<ICleanService>(provider => new CleanService(
-            provider.GetRequiredService<ICanonStoreRepository>(),
+            provider.GetRequiredService<IRelationalStoreReader>(),
+            provider.GetRequiredService<IRelationalStoreWriter>(),
+            provider.GetRequiredService<IProjectionStore>(),
+            provider.GetRequiredService<IOperationalStore>(),
             provider.GetRequiredService<ICanonProjectionService>(),
             provider.GetRequiredService<ITranscriptIngestionService>()));
 
@@ -116,11 +163,12 @@ public static class ServiceCollectionExtensions
 
         services.TryAddSingleton<ICaptureService>(provider => new CaptureService(
             provider.GetRequiredService<ISettingsRepository>(),
-            provider.GetRequiredService<ICanonStoreRepository>(),
+            provider.GetRequiredService<IOperationalStore>(),
             provider.GetRequiredService<IServerStateRepository>()));
 
         services.TryAddSingleton<IJobSchedulerService>(provider => new JobSchedulerService(
-            provider.GetRequiredService<ICanonStoreRepository>(),
+            provider.GetRequiredService<IRelationalStoreReader>(),
+            provider.GetRequiredService<IOperationalStore>(),
             provider.GetRequiredService<ICanonProjectionService>(),
             provider.GetRequiredService<ITranscriptIngestionService>(),
             provider.GetRequiredService<ISettingsRepository>(),
@@ -128,12 +176,14 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<DashOptions>()));
 
         services.TryAddSingleton<IDoctorService>(provider => new DoctorService(
-            provider.GetRequiredService<ICanonStoreRepository>(),
+            provider.GetRequiredService<IRelationalStoreReader>(),
+            provider.GetRequiredService<IOperationalStore>(),
             provider.GetRequiredService<KyberDash.Core.Resilience.ICircuitBreaker>()));
 
         services.TryAddSingleton<IReportService>(provider => new ReportService(
             provider.GetRequiredService<IDashboardQueryService>(),
-            provider.GetRequiredService<ICanonStoreRepository>()));
+            provider.GetRequiredService<IProjectionStore>(),
+            provider.GetRequiredService<IRelationalStoreReader>()));
 
         services.TryAddSingleton<IMenubarService>(provider =>
             new MenubarService(provider.GetRequiredService<IServerStateRepository>()));
@@ -143,9 +193,11 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<DashOptions>()));
 
         services.TryAddSingleton<IE2eSeederService>(provider => new E2eSeederService(
+            provider.GetRequiredService<IRelationalStoreWriter>(),
+            provider.GetRequiredService<IProjectionStore>(),
+            provider.GetRequiredService<IOperationalStore>(),
             provider.GetRequiredService<ITranscriptIngestionService>(),
-            provider.GetRequiredService<ICanonProjectionService>(),
-            provider.GetRequiredService<ICanonStoreRepository>()));
+            provider.GetRequiredService<ICanonProjectionService>()));
 
         services.TryAddSingleton<IWebAssetService>(provider => new WebAssetService(
             provider.GetRequiredService<IWebAssetRepository>(),

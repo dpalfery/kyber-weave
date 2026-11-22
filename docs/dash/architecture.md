@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-15
+last-reviewed: 2026-11-20
 decided-by:
   - adr/0084-kyberdash-csharp-engine
   - adr/0020-kyberdash-one-time-fork
@@ -29,6 +29,7 @@ decided-by:
   - adr/0038-post-run-transcript-sync-subagent-hierarchy
   - adr/0041-kyberdash-retire-legacy-context-schema-routes
   - adr/0043-kyberdash-analysis-mcp-read-only-boundary
+  - adr/0090-kyberdash-relational-store
 keywords:
   - dashboard
   - codeburn
@@ -74,10 +75,7 @@ code-refs:
   - CanonRefreshEngine
   - CleanService
   - SettingsService
-  - CanonStoreRepository
-  - CanonSchema
   - CanonDbPath
-  - CanonCompressedColumn
   - CachedTokenCounter
   - FactoryHookMapper
   - FactoryKeys
@@ -90,15 +88,28 @@ code-refs:
   - IsSupportedDroidEnvelope
   - MapHookEvent
   - DecodeMetricsJson
-  - CommitSourceUnit
   - PurgeExpiredContent
   - ProjectIncremental
   - DedupeTwinTurns
-  - PutSession
   - GetSessionSummary
   - AnalyzeContext
   - DetectFindings
   - RefreshHarnessSources
+  - RelationalSchemaCatalog
+  - SchemaDdlGenerator
+  - LegacyTableReplacementMap
+  - SqliteRelationalStore
+  - OtlpLogMapper
+  - TranscriptIngestionService
+  - IRelationalStoreReader
+  - IRelationalStoreWriter
+  - IProjectionStore
+  - IOperationalStore
+  - CollectedBatch
+  - HarnessSourceRegistry
+  - IHarnessSourceReader
+  - IHarnessMapper
+  - StoredFieldsView
 ---
 
 # KyberDash architecture
@@ -140,7 +151,7 @@ flowchart TB
         AD["Harness adapters<br/>fingerprint + vote"]
     end
 
-    ST["CanonStoreRepository — SQLite<br/>disjoint tokens, cost basis, quarantine, problems"]
+    ST["SqliteRelationalStore — SQLite<br/>disjoint tokens, cost basis, quarantine, problems"]
 
     subgraph projection["Shared canonical projection"]
         PR["CanonSessionProjectorEngine<br/>incremental dirty-key projection"]
@@ -203,7 +214,7 @@ tree; git history holds it, so the table above is the whole current layout.
 |---|---|---|
 | Provider parsers & readers | `dash/server/KyberDash.Domain/CanonSynth.cs` (`ParsedProviderCall`, `ReaderTurn`) and `dash/server/KyberDash.Data/Repositories/TranscriptReaderRepository.cs` | Produces parsed `ParsedProviderCall` and `ReaderTurn` models with native record and deduplication keys. |
 | `CanonSynth` | `dash/server/KyberDash.Domain/CanonSynth.cs` | Consumes parsed calls; emits canonical records with a declared measurability map. Preserves cross-provider deduplication keys rather than adding a parallel mechanism (R3). Implements child `tool.invoke` span extraction, 64 KiB result truncation, and structured error status (contracts below). |
-| `OtlpCollector` & `OtlpCollectorService` | `dash/server/KyberDash.Domain/OtlpCollector.cs`, `OtlpCollectorService.cs` | HTTP listener on the OTLP-standard port 4318 at `POST /v1/traces`, `POST /v1/logs`, and `POST /v1/metrics`. Decodes OTLP JSON and protobuf to span, log, and metric shapes. Each decoded log gets a unique `OtlpCollector.DeriveLogId` (correlation identity, timestamp, and payload digest) so duplicate deliveries of the same class do not collide. A log is stored to `pending_logs` through `CanonStoreRepository.StorePendingLogs` and is never a parallel canonical record; the retired TypeScript engine enriched a correlated span-shaped record with it, and the C# engine does not yet. The session key reads `session_id`, falling back to `session.id`, in both JSON and protobuf decoders. |
+| `OtlpCollector` & `OtlpCollectorService` | `dash/server/KyberDash.Domain/OtlpCollector.cs`, `OtlpCollectorService.cs` | HTTP listener on the OTLP-standard port 4318 at `POST /v1/traces`, `POST /v1/logs`, and `POST /v1/metrics`. Decodes OTLP JSON and protobuf to span, log, and metric shapes. Each decoded log gets a unique `OtlpCollector.DeriveLogId` (correlation identity, timestamp, and payload digest) so duplicate deliveries of the same class do not collide. A log is mapped by `OtlpLogMapper.Map` (`dash/server/KyberDash.Data/Harnesses/Otlp/OtlpLogMapper.cs`) into `CollectedBatch` rows via `IRelationalStoreWriter.WriteBatch` or a standalone `CollectedProblem` via `IRelationalStoreWriter.WriteProblem`, and is never a parallel canonical record; the retired TypeScript engine enriched a correlated span-shaped record with it, and the C# engine does not. The session key reads `session_id`, falling back to `session.id`, in both JSON and protobuf decoders. |
 | `BoundedIngestWriter` | `dash/server/KyberDash.Application/BoundedIngestWriter.cs` | Batches writes behind bounded admission (R2.5): the accepted backlog enforces configurable span/log and memory bounds; an oversize batch is permanently rejected (`413`) and a full backlog is shed transiently (`503` + `Retry-After`). Request bodies are capped at 64 MiB (`OtlpCollector.DefaultMaxBodyBytes`). |
 
 ### Collection-mechanism hierarchy and completeness contract
@@ -244,8 +255,8 @@ observable from the web server.
 ### Claude request-body log correlation
 
 **This contract describes the retired TypeScript engine, and the C# engine does not implement it.**
-In `dash/server/`, `BoundedIngestWriter` writes every accepted OTLP log to `pending_logs` through
-`CanonStoreRepository.StorePendingLogs`; nothing reads those rows back, `IngestSpanNormalizer`
+In `dash/server/`, `BoundedIngestWriter` drains every accepted OTLP log through
+`OtlpLogMapper.Map` into `IRelationalStoreWriter.WriteBatch` / `WriteProblem`; there is no `pending_logs` staging table, `IngestSpanNormalizer`
 normalises spans only, and there is no raw-entry write path. A Claude Code `api_request_body` log
 therefore neither enriches a record nor is correlated with one, and `telemetry-inventory.md`'s
 "a log enriches one existing span-shaped record" holds only for the retired engine. The rest of this
@@ -324,7 +335,7 @@ flowchart LR
     Host["OpenCode 2.x<br/>hooks and bus events"] --> Plugin["kyberdash-opencode<br/>capture engine"]
     Plugin -->|"OTLP/HTTP JSON, contract 3"| Receiver["Loopback receiver<br/>127.0.0.1:4318"]
     Receiver --> Adapter["OpenCode adapter<br/>CanonAdapters"]
-    Adapter --> Store["canon.db records"]
+    Adapter --> Store["canon.db records<br/>SqliteRelationalStore"]
     Store --> Projection["Shared projection<br/>CanonSessionProjectorEngine"]
     Projection --> API["/api/kyber/*"]
     API --> Dashboard["Web dashboard"]
@@ -345,13 +356,13 @@ OpenCode plugin bundler under `dash/src/capture/` was retired in the C# cutover
 
 **Engine and projection.** `kyberdash engine ensure --if-running` (`dash/server/KyberDash.Cli/Program.cs`) attaches
 only when a live engine holds the endpoint (ADR 0039) and starts nothing when none runs. `kyber-weave update`
-runs it after the binaries commit, then the tray step. The detector generation is `CanonSchema.DetectorVersion`
-`5` (`dash/server/KyberDash.Domain/CanonSchema.cs`). `CanonSessionProjectorEngine.IsProjectionCurrent`
+runs it after the binaries commit, then the tray step. The detector generation is `SqliteRelationalStore.DetectorVersion`
+`5` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`). `CanonSessionProjectorEngine.IsProjectionCurrent`
 (`dash/server/KyberDash.Application/CanonSessionProjectorEngine.cs`) treats a store stamped with any other value as stale,
 so derived findings are rebuilt with the current rules rather than kept. Under `kyberdash web`, `JobSchedulerService`
-runs maintenance ticks that invoke `CanonRefreshEngine.PurgeExpiredContent` and call
+runs maintenance ticks that invoke `TranscriptIngestionService.PurgeExpiredContent` and call
 `CanonSessionProjectorEngine.ProjectIncremental` when `IsProjectionCurrent` is false. A store stamped with an older
-detector version is therefore re-projected to `CanonSchema.DetectorVersion` on startup/tick, and a current
+detector version is therefore re-projected to `SqliteRelationalStore.DetectorVersion` on startup/tick, and a current
 stamp skips redundant projection with no separate `kyber build`.
 
 The contract-3 envelope. The claim and the mapping live in `CanonAdapters` (`IsOpencodeEnvelopeSpan`,
@@ -489,7 +500,7 @@ flowchart LR
     Host["Factory (Droid)<br/>hook events"] --> Plugin["kyberdash-factory<br/>the harness's cached plugin"]
     Plugin -->|"OTLP/HTTP JSON, contract 1"| Receiver["Loopback receiver<br/>127.0.0.1:4318"]
     Receiver --> Adapter["droid adapter<br/>CanonAdapters (C#)"]
-    Adapter --> Store["canon.db records<br/>CanonStoreRepository (C#)"]
+    Adapter --> Store["canon.db records<br/>SqliteRelationalStore (C#)"]
     Store --> Projection["Shared projection<br/>CanonSessionProjectorEngine (C#)"]
     Projection --> API["/api/kyber/* (DashEndpointMappings)"]
     API --> Dashboard["Web dashboard (dash/web/)"]
@@ -760,7 +771,7 @@ The file source is read over, and both reads write the **same** rows.
 - The **refresh** reads every Factory session under the history window — and only when a run is
   allowed to read folder sources at all (`settings.folder_import.scheduled` is off by default, so
   an unattended run reads none).
-- **Live counter and file refresh (`CanonRefreshEngine`, `JobSchedulerService`):** Explicitly enabled folder imports and scheduled maintenance run `CanonRefreshEngine.RefreshHarnessSources` and `CanonSessionProjectorEngine.ProjectIncremental` under `JobsLease` so file-sourced counter rows pair cleanly against `kyberdash-factory-plugin` turn rows without double-counting.
+- **Live counter and file refresh (`CanonRefreshEngine`, `JobSchedulerService`):** Explicitly enabled folder imports and scheduled maintenance run `TranscriptIngestionService.RefreshHarnessSources` and `CanonSessionProjectorEngine.ProjectIncremental` under `JobsLease` so file-sourced counter rows pair cleanly against `kyberdash-factory-plugin` turn rows without double-counting.
 
 Both reads go through the same provider and the same synthesizer, so the rows carry the same
 identity: a later folder import **replaces** the live rows rather than adding a second copy of
@@ -799,7 +810,7 @@ Nothing moves `$FACTORY_DIR` over the organisation-settings boundary (`FACTORY_D
 path. Only OTLP/HTTP is documented for Factory — port 4318, no gRPC, no 4317 — so no other
 protocol is added. Logs are never exported by Droid, so `/v1/logs` receives nothing from Factory.
 
-**Where the metric points go.** Decoded metric points target the canon store's own `metric_point` table (`CanonSchema` in `dash/server/KyberDash.Domain/CanonSchema.cs`). A point's identity digests everything the row carries — **including the interval the point's measurement covers** — so a re-delivered point lands on the row it already occupies instead of beside it.
+**Where the metric points go.** Decoded metric points target the relational store's own `metric_point` table (`RelationalSchemaCatalog` in `dash/server/KyberDash.Domain/Schema/RelationalSchemaCatalog.cs`, written via `IOperationalStore.PutMetricPoints`). A point's identity digests everything the row carries — **including the interval the point's measurement covers** — so a re-delivered point lands on the row it already occupies instead of beside it.
 row carries the metric's name, kind and unit, its aggregation temporality, the point's timestamp,
 **the start of the interval the point's measurement covers**, and its value or its count and sum,
 the point's attributes, the resource attributes, the scope,
@@ -820,12 +831,9 @@ never reach the stored row. The keys that survive are the correlation and usage 
 `session.id`, `conversation.id`, the whole `gen_ai.*` namespace, and the point's own measurement
 attributes such as `model.id` or `skill.name`. Those are not identity, so they are kept.
 
-The table is created by the store's own schema with `CREATE ... IF NOT EXISTS`, the
-`model_context_window_catalog` precedent, so **the table's own creation needs no version bump and
-no migration step**: a store that predates the table opens unchanged and grows it on the next
-open. A **column** added to the table afterwards is a different matter — the same
-`IF NOT EXISTS` leaves an existing table without it — so the interval start landed with the
-**schema 23** migration, and it is presence-guarded like the other `ADD COLUMN` steps.
+The `metric_point` table and its `metric_point_start_time` child are declared in `RelationalSchemaCatalog`
+and created by `SchemaDdlGenerator`; the interval start (`start_time_unix_nano`) is a first-class
+child row (`metric_point_start_time`), absent when the point declared no interval, never a fabricated zero.
 
 A metric point has **no span**, so its row carries **no harness attribution** — there is no span
 to fingerprint — and the exporter's `service.name` is a source, not an attribution. That is also
@@ -892,7 +900,7 @@ path is available when none arrives.
 ## Local harness-source refresh
 
 Session files also enter the store through `kyberdash kyber refresh` (`dash/server/KyberDash.Cli/Program.cs`,
-calling `CanonRefreshEngine.RefreshHarnessSources` in `dash/server/KyberDash.Application/CanonRefreshEngine.cs`).
+calling `TranscriptIngestionService.RefreshHarnessSources` (`dash/server/KyberDash.Application/Services/TranscriptIngestionService.cs`).
 That path is the production local-history ingest; OTLP remains a separate receiver.
 
 The command opens `~/.kyberdash/canon.db` (or `--db`) and processes each harness `RefreshSourceInput` unit
@@ -902,8 +910,7 @@ and defaults to **2**. There is no public `--provider` flag. Invalid `--history-
 exits **2** before the store opens. Failed harness jobs or derivation failure exit **1**.
 Success, including absent (`unavailable`) sources, exits **0**.
 
-Each accepted unit is persisted with `CanonStoreRepository.CommitSourceUnit`: canonical rows,
-`record_provenance`, and `source_checkpoint` in one transaction (schema **15**). Every
+Each accepted unit is persisted with `IRelationalStoreWriter.WriteBatch`: source, session, record, and `ingest_problem` rows with `record_provenance` and `source_checkpoint` children in one transaction, plus `IOperationalStore.UpsertSourceCheckpoint` and `UpsertRefreshRun`. Every
 refresh run additionally records its coverage window in `refresh_run.history_weeks` — the
 `--history-weeks` value of that run. Rows predating window tracking read as `null`, which
 every surface renders as unknown with the reason "recorded before window tracking", never
@@ -918,7 +925,7 @@ is not retried as another user and does not fabricate rows: discovery reports `e
 names the path as not readable — permission denied — with a platform-specific remedy (Full
 Disk Access on macOS, owner/permissions otherwise). A zero-record checkpoint remains a truthful count of *parsed* records
 ([honest unobservability](../rules/honest-unobservability.md)). After jobs
-drain, `CanonRefreshEngine.PurgeExpiredContent` empties content older than 14 days without touching
+drain, `TranscriptIngestionService.PurgeExpiredContent` marks content older than 14 days without touching
 `records.raw` ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)), then the store
 is projected through `CanonSessionProjectorEngine.ProjectIncremental` — the same shared entry the live receiver uses
 (see [The shared canonical projection](#the-shared-canonical-projection)). Gemini is never a
@@ -933,12 +940,12 @@ The contract is [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md).
 
 **A present-but-unreadable store is a problem, not an empty history.** Discovery does not silently skip
 a SQLite store that exists but will not open, or that fails its required-table check: the recorded
-unreadable error surfaces during parsing, and `CanonRefreshEngine.RefreshHarnessSources` records a
-`PROVIDER_PARSE_ERROR` problem row via `CanonStoreRepository.RecordProblems` attributed to the harness and
+unreadable error surfaces during parsing, and `TranscriptIngestionService.RefreshHarnessSources` records a
+`PROVIDER_PARSE_ERROR` problem row via `IRelationalStoreWriter.WriteProblem` attributed to the harness and
 naming the database while continuing other harnesses. An **absent** store stays silent, because
 absence is a negative existence check. The Kilo databases read through the same rule.
 
-**Job rows persist until cleaned.** `CanonStoreRepository.RecordProblems` upserts problem rows without pruning
+**Job rows persist until cleaned.** `IRelationalStoreWriter.WriteProblem` persists problem rows without pruning
 previously healed job-level entries, so a per-harness Clean is used to clear resolved job-level
 problem rows alongside records, provenance and checkpoints.
 
@@ -960,7 +967,7 @@ Cursor is never paired positionally. The reader honors the refresh
 `dateRange` so window-sliced calls stay aligned, and advancing the Claude family `ParserContractVersion`
 invalidates stale checkpoints so a subsequent `kyberdash kyber refresh` re-synthesizes historical
 empty desktop rows that still fall inside the 14-day content-retention window. Older rows stay
-counters-only: `CanonRefreshEngine.PurgeExpiredContent` empties their parts in the same run
+counters-only: `TranscriptIngestionService.PurgeExpiredContent` marks their parts in the same run
 ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)). The
 bucket table and repair boundary are in the
 [telemetry inventory](telemetry-inventory.md#claude-desktop-and-cli-file-synth-parts-issue-216).
@@ -1001,7 +1008,7 @@ Kilo child-session (subagent) messages used to reach step 5. Their key starts wi
 
 The hash's ordinal is the call's occurrence index among the batch's kept calls with the same harness, the same native session id and the same timestamp, in source order (`CanonSynth.SynthesizeEnvelopes` and `CanonSynth.Synthesize`). It used to be the call's index in the whole windowed batch. The refresh window is cut by timestamp, so every call that shares a timestamp is either wholly in or wholly out. The ordinal therefore no longer moves when the window's start moves or when another session leaves the batch. Two distinct calls at the same instant still get distinct ids (occurrence 0, 1, …).
 
-Before this change a re-read could mint a new id for the same hash-backed call on each run, and the old row stayed beside it. One Kilo session held 15,136 rows for its calls, up to four copies of each. Commits now supersede stale hash-backed copies, and schema 24 removes the ones already stored: see [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md) (amended 2026-11-10) and the [runbook's schema 24 section](runbook.md#2e1-upgrading-the-store-to-schema-24-duplicate-record-repair).
+Before this change a re-read could mint a new id for the same hash-backed call on each run, and the old row stayed beside it. One Kilo session held 15,136 rows for its calls, up to four copies of each. Commits now supersede stale hash-backed copies; the retired v24 duplicate-record repair is recorded in [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md) (amended 2026-11-10) and the [runbook's schema 24 section](runbook.md#2e1-upgrading-the-store-to-schema-24-duplicate-record-repair).
 
 ## The shared canonical projection
 
@@ -1020,26 +1027,26 @@ UTF-8-safe content truncation via `CanonValidation`), notifies `JobSchedulerServ
 updates, and relies on `JobSchedulerService` (coordinated via `JobsLease` on `jobs.lock`) and incremental
 dirty-key projection (`projection_dirty_sessions` / `projection_session_key_map`) rather than
 recomputing the whole corpus on every incoming OTLP request. Unchanged runs skip projection via the
-monotonic `records_write_seq` marker, schema version, and `CanonSchema.DetectorVersion`, while
+monotonic `records_write_seq` marker, schema version, and `SqliteRelationalStore.DetectorVersion`, while
 unchanged session/run/execution rows avoid redundant writes.
 
-The C# canonical engine under `dash/server/` owns the schema-24 SQLite layout:
-- **Storage & transport (`CanonDbPath`, `CanonSchema`, `CanonCompressedColumn`, `CanonStoreRepository`)**:
+The C# canonical engine under `dash/server/` owns the schema-25 relational SQLite layout:
+- **Storage & transport (`CanonDbPath`, `RelationalSchemaCatalog`, `SchemaDdlGenerator`, `SqliteRelationalStore`)**:
   reads and writes `canon.db` through bounded `ProcessRunner` batches to `sqlite3` (avoiding the
-  native `SQLitePCLRaw.lib.e_sqlite3` package), compressing payloads and turns with zlib deflate.
+  native `SQLitePCLRaw.lib.e_sqlite3` package) under `CanonDbPath.Resolve`.
 - **Ingestion & normalization (`CanonicalRecord`, `CanonValidation`, `CanonAdapters`, `CanonIngestPipeline`, `OtlpCollector`, `BoundedIngestWriter`)**:
   decodes OTLP JSON and Protobuf wires, validates token invariants, runs eight harness adapters,
   and routes unmatched traffic to quarantine.
 - **Pricing, analysis, and projection (`CanonPricing`, `CachedTokenCounter`, `CanonContextAnalysis`, `CanonFindings`, `CanonRollupsEngine`, `CanonSessionProjectorEngine`)**:
   applies embedded pricing snapshots and overrides, token memoization, context composition,
-  D5/D6/D8 findings, run/execution rollups, twin-turn deduplication, and compressed `session_turn`
-  storage.
+  D5/D6/D8 findings, run/execution rollups, twin-turn deduplication, and `session_turn` rows
+  (`IProjectionStore.ReplaceSessionTurns`).
 - **Server & job hosting (`MapDashApiEndpoints`, `OtlpCollectorService`, `SettingsService`, `CleanService`, `JobSchedulerService`, `KyberBridgeEngine`, `DashEndpointMappings`)**:
   serves `/api/kyber/*`, `/api/events` SSE, and embedded web UI assets (`KyberDash.Api.web.json`)
   while keeping `JobSchedulerService` and `OtlpCollectorService` in-process under `JobsLease` and `EngineOwner`.
 - **Fallback synthesis & checkpointed refresh (`CanonSynth`, `CanonSynthDedup`, `TranscriptReaderRepository`, `CanonRefreshEngine`)**:
   synthesizes provider transcripts, enforces OTLP precedence with `DEDUP_DISAGREEMENT` audit
-  problems, and tracks `CommitSourceUnit` checkpoints plus 14-day rolling `PurgeExpiredContent` sweeps.
+  problems, and tracks `UpsertSourceCheckpoint` checkpoints plus 14-day rolling `PurgeExpiredContent` sweeps (`TranscriptIngestionService`).
 Raw `records` are never synthesized into sessions for reporting: until the
 projection has turned accepted spans into derived rows, a record-only group is not a session
 and appears on no report surface or selector inventory.
@@ -1081,7 +1088,125 @@ it is in
 
 Session projection (`CanonSessionProjectorEngine.ProjectIncremental`) collapses duplicate twin turns per session and writes normalized `session` and compressed `session_turn` rows.
 
+## Relational store and schema catalog (schema 25)
+
+The live store is the normalized relational schema at schema 25.
+`RelationalSchemaCatalog` (`dash/server/KyberDash.Domain/Schema/RelationalSchemaCatalog.cs`) is the
+single static source of every table, column, key, foreign key, check, and index;
+`SchemaDdlGenerator` emits the deterministic `CREATE TABLE` DDL from it, and the stored-fields
+view and catalog tests read it directly. `SqliteRelationalStore`
+(`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore*.cs`) implements all four store
+seams — `IRelationalStoreWriter`, `IRelationalStoreReader`, `IProjectionStore`,
+`IOperationalStore` — against `canon.db` (`CanonDbPath.Resolve`) through bounded `ProcessRunner`
+calls to the system `sqlite3` CLI, stamped at `SchemaVersion = 25`.
+
+```mermaid
+flowchart LR
+    CAT["RelationalSchemaCatalog<br/>single static source"]
+    DDL["SchemaDdlGenerator<br/>deterministic DDL"]
+    COL["Collector DTOs<br/>CollectedBatch"]
+    W["IRelationalStoreWriter<br/>WriteBatch"]
+    DB[("canon.db<br/>schema 25")]
+    R["IRelationalStoreReader<br/>read-time aggregates"]
+    P["IProjectionStore<br/>sessions / runs / findings"]
+    O["IOperationalStore<br/>settings / quarantine / problems"]
+    CAT --> DDL --> DB
+    COL --> W --> DB
+    DB --> R
+    DB --> P
+    DB --> O
+```
+
+Catalog rules, enforced by `RelationalSchemaCatalogTests`:
+
+- Every column is `NOT NULL` and typed only `INTEGER`, `REAL`, or `TEXT` (booleans are
+  `INTEGER CHECK (x IN (0, 1))`, timestamps are ISO-8601 UTC `TEXT`, enums are `TEXT CHECK`).
+  There are no `BLOB`, `*_json`, `payload`, `raw`, or EAV columns.
+- Optional values live in 0..1 child tables keyed to the parent: a missing row means
+  "not reported", never `""`, `0`, `NULL`, or a status flag.
+- Every foreign key is `ON DELETE CASCADE`. Ordered multi-item children carry a non-null
+  `position` (`IsRepeatedItem`); non-repeated composite keys are allow-listed instead.
+- Projection tables store only non-derivable outputs. Turn counts, token totals, durations,
+  models, costs, cache ratios, tool counts, coverage, problems, and reconciliation are computed
+  at read time (DD-13) via `IRelationalStoreReader.GetSessionAggregate`,
+  `ListSessionAggregates`, and `SessionTurnSummaries`, never stored.
+- Mutually exclusive verdicts use exclusive pairs: `session_context` vs
+  `session_context_unmeasurable`, `session_schema` vs `session_schema_unmeasurable`, and
+  `content_part_text` vs `content_part_withheld`.
+- `LegacyTableReplacementMap`
+  (`dash/server/KyberDash.Domain/Schema/LegacyTableReplacementMap.cs`) maps all 22 v24
+  retired v24 tables to typed replacement tables or documented removals (OTLP raw log tables
+  removed, priced cost read at read time, measurability maps dropped).
+
+`AddDashDataServices` registers only `SqliteRelationalStore`; the live read path
+(`KyberBridgeEngine`, projection, rollups, refresh) runs on the relational seams above.
+`LegacyTableReplacementMap` records how the retired v24 tables map to the relational tables.
+
+## Collector boundary and mapping pipeline
+
+Harness formats never reach SQLite directly. They are normalized into static collector DTOs
+(`CollectedTypes.cs` in `dash/server/KyberDash.Domain/Collector/`, kept under
+`namespace KyberDash.Data.Collector` so `KyberDash.Contracts` can reference them without
+depending on `KyberDash.Data`):
+
+- Enums `RecordOp` (`llm.invoke` / `tool.invoke` / `agent.invoke` / `unspecified`),
+  `RecordKind`, `RecordStatus`, `TokenClass`, `SourceKind` (`file` / `otlp`), and
+  `ContentBucket` map 1:1 to `record` / `record_token_count` / `source` / `content_part` columns.
+- `CollectedSource(HarnessId, Kind, Locator)` feeds `source`;
+  `CollectedSession(SessionKey, HarnessId, NativeSessionId, Workspace, Title, ReportedUsage)`
+  feeds `session` plus `session_title` / `session_workspace` / `session_repository` /
+  `session_branch` / `session_model_usage`; `CollectedRecord` fans out to `record` and its
+  `record_*`, `content_part*`, `tool_definition*`, `tool_call*`, and `agent_invocation*`
+  children; `CollectedProblem` feeds `ingest_problem` and its optional child tables.
+
+The pipeline seam lives in `dash/server/KyberDash.Data/Collector/Sources/`:
+`IHarnessSourceReader` discovers native units over the `IHarnessFileSystem` seam (symlink-safe,
+test-scriptable), `IHarnessMapper` maps one `NativeSourceUnit` to one `CollectedBatch` without
+touching the filesystem or clock, and `HarnessSourceRegistry` owns registration — BL-2 harness
+coverage, `CanonPricing.NormalizeHarnessName` alias folding (`claude-desktop -> claude-code`,
+`cursor-agent -> cursor`), the `antigravity-cli` statusline cache, BL-3 exclusions (`windsurf`,
+`aider`), and the `SOURCE_FORMAT_UNEVIDENCED` verdict for `zcode` and other unevidenced formats.
+`IRelationalStoreWriter.WriteBatch` persists one batch (`source`, `session`, `record`,
+`ingest_problem` rows and children) atomically; `DeleteSource` cascades by `ON DELETE CASCADE`;
+`WriteProblem` persists a single diagnostic.
+
+## Analytics read path, error envelope, and stored-fields surface
+
+`KyberBridgeEngine` (`dash/server/KyberDash.Application/KyberBridgeEngine.cs`) reads only the
+relational seams: session aggregates and records from `IRelationalStoreReader`, runs,
+executions, harness rollups, findings, and predictions from `IProjectionStore`, and settings,
+quarantine, problems, and audit rows from `IOperationalStore`, with published pricing supplied
+as the read-time `IModelPricingLookup`. A session whose read fails is isolated: the answer
+carries `projection_status = "PROJECTION_FAILED"` while the remaining sessions answer normally,
+and the fault is surfaced through `GetCoverage`. Harness-reported and read-time published costs
+stay separate (`cost_reported` vs `cost`, plus a `cost_basis_mismatch` verdict) and are never
+blended.
+
+Analytics computation stays in the shared engine service (`ExecuteAnalytics`); the HTTP routes
+under `/api/kyber/analytics/*` and the MCP stdio adapter (`McpStdioHost`, eight additive
+loopback routes) share the same schemas, results, and errors. The MCP adapter never opens
+SQLite and never derives a domain figure. The versioned envelope (`contractVersion: 1`) carries
+`scope`, `data` (a measured empty result is distinct from unavailable data), `measurement`,
+`coverage`, `freshness` (engine instance and store/projection generation — request time is
+never substituted), `evidence`, `pagination`, and `error` (stable code, safe message, hint —
+never raw DB payloads). Status follows the envelope error: 200 when `error` is null; 400 for
+`invalid_request` / `unsupported_query`; 404 for `not_found`; 409 for `stale_cursor`; 413 for
+`budget_exceeded`; 503 for `ANALYTICS_STORE_UNAVAILABLE` / `incompatible_engine` / `cancelled`;
+500 for `internal_error`. Operations are `status`, `catalog`, `query`, `search-sessions`,
+`inspect`, `findings`, `compare`, and `outcomes`.
+
+The stored-fields inspection surface is `GET /api/kyber/session/{sessionKey}/stored-fields`
+(never `/api/sessions/...`), mapped in `DashEndpointMappings.StoredFieldsAsync` and served via
+`IDashboardQueryService.GetStoredFields` from `KyberBridgeEngine.GetStoredFields`. The reader
+implementation (`SqliteRelationalStore.Reader.StoredFields`) walks `RelationalSchemaCatalog`
+in catalog order and returns a `StoredFieldsView(SessionKey, Tables)` of `StoredTableFields`
+entries (`tableName`, `columnNames`, `rows`, `missingParentKeys`). Every reachable catalog
+column is labeled `table.column`; a parent key with no row in an optional child table is listed
+in `missingParentKeys` and rendered as "not reported" (never `0` or `""`). An unknown session
+answers HTTP 404.
+
 ## Normalization layer
+
 
 ```mermaid
 flowchart LR
@@ -1093,7 +1218,7 @@ flowchart LR
     INHERIT -->|"unresolved"| QUAR["quarantine — observed namespaces only"]
     CLAIM --> NORM["normalize — convert token convention"]
     NORM --> VAL["CanonValidation.ValidateTokens — disjoint classes"]
-    VAL -->|"pass"| STORE["CanonStoreRepository"]
+    VAL -->|"pass"| STORE["SqliteRelationalStore"]
     VAL -->|"fail"| PROB["problem record"]
 ```
 
@@ -1184,7 +1309,7 @@ architecture required no schema bump (leaving the store schema version unchanged
 existing stores and later `priceOverrides` / `modelAliases` changes take effect on the next projection.
 
 The write-back is the one exception to "every derived table is a cache over `records`". Each
-session's changed blocks go through `CanonStoreRepository.setCosts` in **one transaction** (`BEGIN`/`COMMIT`,
+session's changed blocks go through `IProjectionStore` replacements in **one transaction** (`BEGIN`/`COMMIT`,
 rolled back whole on failure; an empty list is a no-op), so a failing session cannot leave a
 half-repriced one. `records.cost_json` is the derived, re-derivable cost cache: the report path
 reads it, the next projection reprices it, and a re-ingest overwrite self-heals on that next
@@ -1347,7 +1472,7 @@ since an uncovered turn carries no key. The finding does not state that coverage
 Finding detail follows ADR 0013 D15/D16: the wording is "listed with N recorded turns and 0
 invocations", with no deletion or waste claim.
 
-**Detector version.** `CanonSchema.DetectorVersion` is `5` (`dash/server/KyberDash.Domain/CanonSchema.cs`). Stores stamped with
+**Detector version.** `SqliteRelationalStore.DetectorVersion` is `5` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.cs`). Stores stamped with
 an older generation (for example `3` or `4`) report their findings as outdated; `CanonSessionProjectorEngine`
 re-projects them to the current generation on maintenance/build.
 
@@ -1407,225 +1532,28 @@ measured independently from whether individual composition buckets are available
 
 ### Store
 
-`CanonStoreRepository` (`dash/server/KyberDash.Data/Repositories/CanonStoreRepository.cs` and `CanonStoreRepository.Queries.cs`) persists `canon.db`
+
+`SqliteRelationalStore` (`dash/server/KyberDash.Data/Repositories/SqliteRelationalStore*.cs`) persists `canon.db`
 via bounded `ProcessRunner` calls to the system `sqlite3` CLI, avoiding the native `SQLitePCLRaw.lib.e_sqlite3`
-dependency (`GHSA-2m69-gcr7-jv3q`). `CanonSchema.SchemaVersion` (`24`) and all DDL/migration statements
-live in `dash/server/KyberDash.Domain/CanonSchema.cs`; metadata carries the schema version, and older stores
-migrate in place on open rather than rebuilding. Idempotent upsert is keyed on the record identifier (`span_id`).
-The tables are `records`, `session`, `run`, `execution`, `token_cache`, `quarantine`, `pending_logs`,
-`quarantined_logs`, `enriched_logs`, `problems`, `ingest_log`, `metadata`,
-`harness_rollup`, `finding`, `prediction`, `source_checkpoint`, `record_provenance`, `refresh_run`,
-and `session_turn`.
-Schema 11 added checkpointing and provenance ([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md)),
-schema 12 added `refresh_run`, schema 13 introduced `problem_key` with unique indexing, schema 14 rekeyed that identity by span, code, and location,
-schema 15 made finding estimated waste nullable (`estimated_waste_tokens INTEGER` NULL for coverage-gap findings with unmeasured estimates),
-schema 16 added `history_weeks INTEGER` to `refresh_run`,
-schema 17 added trace metadata columns (`source`, `name`, `timestamp` to `quarantine`; `session_id`, `harness`, `timestamp` to `problems`),
-schema 18 added `quarantine.raw_payload` — the decoded packet a quarantined span is filed with, kept after the record is deleted so the turn inspector can still show what the sender sent ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)),
-schema 19 added a nullable `harness` to `quarantine`, `pending_logs`, and `quarantined_logs`, so a per-harness wipe can scope those rows rather than missing them, and
-schema 20 added sync progress and settling columns (`synced_at TEXT`, `sync_status TEXT DEFAULT 'pending'`, `settled_at TEXT`, `transcript_path TEXT`, `transcript_offset INTEGER DEFAULT 0`) to `session` for post-run transcript synchronization ([ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)), and
-schema 21 added the materialized session summary columns (`summary_json TEXT`, `problems_count INTEGER`, both nullable with no `DEFAULT`) to `session`, plus the `session_denorm_idx` covering index and planner statistics — see [Materialized session summary columns and the sessions-list covering index](#materialized-session-summary-columns-and-the-sessions-list-covering-index-schema-21) — and
-schema 22 split turns into `session_turn` and added the `context_limit_source` column — see [Session turn split and the narrow-read columns](#session-turn-split-and-the-narrow-read-columns-schema-22), and
-schema 23 added the metric point's interval start (`metric_point.start_time_unix_nano`) — a column costs a version bump and a migration step where the table's own `CREATE ... IF NOT EXISTS` does not, because a store that already carries the table never gains the column from the `CREATE TABLE`.
+dependency (`GHSA-2m69-gcr7-jv3q`). The schema is the relational catalog at `SqliteRelationalStore.SchemaVersion`
+(`25`): `RelationalSchemaCatalog` (`dash/server/KyberDash.Domain/Schema/RelationalSchemaCatalog.cs`) is the
+single static source of every table, column, key, and index, and `SchemaDdlGenerator` emits the deterministic
+DDL. The store implements `IRelationalStoreWriter` (`WriteBatch`, `DeleteSource`, `WriteProblem`),
+`IRelationalStoreReader` (`GetSessionAggregate`, `ListSessionAggregates`, `SessionTurnSummaries`, `StoredFields`),
+`IProjectionStore` (sessions, runs, executions, findings, predictions), and `IOperationalStore` (settings,
+checkpoints, quarantine, problems, ingest log). `LegacyTableReplacementMap`
+(`dash/server/KyberDash.Domain/Schema/LegacyTableReplacementMap.cs`) records how the retired v24 document
+tables map to the relational tables. History before the relational cutover (schemas 11-24, including the
+retired schema-21 materialized columns and the schema-22 turn split) is retired with that layout; the upgrade
+path for pre-relational stores is a rebuild, and behavioral detail lives in
+[ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md) and the runbook.
 
-Schema 24 removes the duplicate hash-backed call records that earlier refresh windows left behind, once, when a build of this version opens the store. Commits also supersede stale hash-backed copies from then on. See the [runbook's schema 24 section](runbook.md#2e1-upgrading-the-store-to-schema-24-duplicate-record-repair) and [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md).
-Every `ADD COLUMN` in those steps is presence-guarded, so a store that already carries the column — such as one stamped by an off-main build — reaches the identical final shape instead of failing on a duplicate column ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)).
-`CommitSourceUnit` writes records, provenance, and the unit checkpoint together. The raw
-column is compressed (`CanonCompressedColumn`, R12.4); the measured cost of not doing
-so is in the [rationale](../reference/kyberdash-rationale.md).
+Writes are atomic batches: `IRelationalStoreWriter.WriteBatch` persists one `CollectedBatch` (source, session,
+record, and content-part children) with its provenance, and `IOperationalStore.UpsertSourceCheckpoint` /
+`UpsertRefreshRun` record the unit checkpoint and coverage window. Reads are read-time aggregates over the
+relational tables; priced cost is read at read time and measurability is stamped at ingest, never stored as
+a parallel document.
 
-In C#, the store is cleanly factored across `dash/server/KyberDash.Domain/CanonSchema.cs` (constants, DDL, migrations),
-`dash/server/KyberDash.Domain/CanonCompressedColumn.cs` (zlib deflate/inflate helpers),
-`dash/server/KyberDash.Domain/CanonDbPath.cs` (path resolution),
-`dash/server/KyberDash.Data/Repositories/CanonStoreRepository.cs` (core record/session/finding/checkpoint persistence), and
-`dash/server/KyberDash.Data/Repositories/CanonStoreRepository.Queries.cs` (server query helpers, wipes, runs, quarantine, and refresh-run state).
-
-Two `records` columns carry the grouping and content model. `session_id` holds the harness's
-own conversation id, promoted out of the raw payload so sessions group with a `GROUP BY`;
-where the source names no session it falls back to the trace id. `parts_json` holds
-deflate-compressed structured content parts, each with its canonical bucket, its text, an
-optional harness-reported token count, and an optional ground-truth MCP server name. Where
-parts are present they are the authority: the flat content map is derived from them on read,
-so the same text is never stored twice. Turn rows and record parts share one codec
-contract: content is stored compressed (deflate, level 6) and read back through a
-tolerant codec, and a value whose deflated form is not smaller is stored as plain
-text instead — the measured "does not pay" boundary is ~74 bytes. Measured on
-40,621 realistic turns, level 6 stores 7.82 MB against 15.31 MB plain (0.51×), at
-~364 ms of deflate and ~146 ms of inflate for a full-corpus read.
-
-The `session` table holds derived sessions, one row per conversation. Each payload is built by
-running the analysis layer (`analyzeContext`, `rankSchemas`, `buildTimeline`) over the
-records, and the table is a cache: dropping every row and rebuilding loses nothing.
-
-#### Materialized session summary columns and the sessions-list covering index (schema 21)
-
-The sessions list once read the entire `payload` blob of every session row to compute two
-values — `json_extract(payload, '$.summary')` and
-`json_array_length(json_extract(payload, '$.problems'))` — with no SQL `LIMIT`. On a corpus
-whose payloads total tens of megabytes, every list request demand-paged the whole payload
-store (measured 15.6–26.1 s cold, intermittently, as the machine's own background I/O
-evicted the page cache). Schema 21 materializes both values at write time so the list never
-reads `payload`.
-
-**Columns.** `session` gains `summary_json TEXT` and `problems_count INTEGER`, both nullable
-with no `DEFAULT`. `NULL` is the per-column sentinel meaning "this column was not
-materialized", never "this row is whole": a row that predates the columns keeps `NULL`
-until the projection rewrites it, and the reader derives such rows from `payload` instead
-of misreading them as an empty summary or a zero count. A `DEFAULT` would erase exactly
-that distinction. The migration is presence-guarded and idempotent with no backfill; legacy
-rows self-heal on the next projection rebuild, and the legacy state is never worse than the
-pre-change baseline.
-
-**The writer owns those columns.** `CanonStoreRepository.PutSession` derives both values from the same
-serialized payload it writes, in the same statement, so they cannot drift from `payload`.
-The column-ownership split with the transcript-sync job is preserved: the upsert names none
-of `synced_at`, `sync_status`, `settled_at`, `transcript_path`, or `transcript_offset`, so
-a re-upsert leaves the sync job's columns intact.
-
-**The reader reads those columns only.** `KyberBridgeEngine.GetSessions` selects the twelve
-index-covered columns and orders by `started DESC`, with a legacy fallback
-(`WHERE summary_json IS NULL OR problems_count IS NULL`) that serves unmaterialized rows
-from `payload`; the pre-existing full-payload read stays as the last resort when JSON
-functions are unavailable. The `?limit` slice still applies after subagent nesting and
-rollup — deliberately not pushed into SQL, because a SQL-level limit would cut the children
-of returned parents and change the rollup output. `KyberBridgeEngine.GetReport` inherits the fix
-through this method, and `sessionTokenTotals` reads `summary_json` first with a per-row
-payload fallback, keeping its `not_measurable`-stays-`undefined` contract.
-
-**The covering index is the mechanism, not the columns alone.** `ALTER TABLE … ADD COLUMN`
-appends the new columns after `payload`, so a table-row read for `summary_json` still
-traverses the payload's overflow chain — the denormalization alone relocates the cost without
-an index (cold unchanged, ~18 ms warm). `session_denorm_idx` over the reader's exact column
-list turns the list into an index-only scan
-(`SCAN session USING COVERING INDEX session_denorm_idx`, 211 pages / ~864 KB). The lesson
-carries forward: every future payload-derived field needs the column *plus* an index that
-covers its reader, and the reader's SELECT must stay inside the index's columns — adding a
-column to one without the other silently brings the payload walk back. The index DDL lives
-in one module-scope constant (`SESSION_DENORM_INDEX_SQL`), applied by the presence-guarded
-`createSessionDenormIndex` helper from both the migration step and the constructor's
-fresh-create path — never inline in `SCHEMA_SQL`, whose unconditional DDL would fail to open
-a store whose `session` table predates the reader's columns. Planner statistics
-(`ANALYZE session` in the migration and on fresh creation, maintained thereafter by the
-existing close-time `PRAGMA optimize`) are hygiene and determinism for the planner's cost
-model, not the index's unlock: the index alone flips the plan on the supported build. A
-read-only connection cannot write `sqlite_stat1`, which is why the writer is the only place
-the statistics are written.
-
-**Rejected alternatives (all measured, do not revisit).** Extracting only `$.summary`
-still materializes the whole blob (0.077 s vs 0.072 s warm); `PRAGMA cache_size`,
-`mmap_size`, and `temp_store` tuning moved nothing on either end; an expression index
-over `json_extract(payload, …)` matched the read but cost 3.5× per-refresh upserts and
-hard-fails the INSERT on malformed JSON; a separate summary table and a payload-last
-rebuild matched the read at higher migration or write-site cost; `VACUUM` halves the
-file with list latency unchanged, because freelist pages are never read.
-
-**One adjudicated exception to byte-identity.** A row carrying `problems` but no
-`summary` — a shape the payload builder never writes — reports its true materialized
-count, where the pre-change JSON-capable path reported `0` (that path's own bug; its
-no-JSON fallback already reported the true count). The two columns are consumed
-independently downstream and the legacy merge fills only what a row is missing, so a
-materialized value is never overwritten by the payload.
-
-**The bounded summary route.** `GET /api/kyber/session/:id/summary` serves the ten-key
-bounded shape (`session_id`, `harness`, `label`, `is_subagent`, `parent_session`,
-`agent_name`, `started`, `ended`, `summary`, `problems_count`) from the columns, with a
-per-row legacy fallback and no `_clip` — the content is bounded by construction. The
-fallback is per column, not whole-row: a row is incomplete when either materialized
-column is NULL, and only the missing column is filled from the payload — through the
-same `isMissingSessionColumn` / `fillMissingSessionColumns` mechanism the sessions list
-uses, so the two surfaces cannot disagree on `problems_count`. It serves
-no run or execution linkage, deliberately: those fields exist in neither the payload nor
-the table, and serving them would push a `{level:'run'}` spine entry that does not exist
-today. The web client's `fetchKyberSession` targets this route, so deep-link ancestry
-lookup stops pulling the whole payload; the resolved spine stays
-`[doctor, harness, execution]` with no run level. Deployment coupling: the web client
-requires the engine's new route — against an older engine the request 404s and the client
-degrades to a not-found spine rather than crashing, so server and client ship together.
-
-**Measured result.** Cold list 37.5–47.2 ms against the < 1 s target; warm median 2.174 ms
-against ≤ 10 ms. List output is byte-identical across the materialized, forced-legacy,
-index-dropped, and pre-change-reader states (279,991 bytes), and all 7 harness-filtered
-responses match the pre-change reader. The index is not a write tax (full projection within
-0.5% with or without it), and the legacy state self-heals on the next projection rebuild.
-
-#### Session turn split and the narrow-read columns (schema 22)
-
-The sessions list no longer reads `payload` at all; the detail path still did — one
-whole-blob read per session to reach a single turn. Schema 22 removes that read by
-moving the turns out of the blob:
-
-```sql
-CREATE TABLE IF NOT EXISTS session_turn (
-  session_id TEXT NOT NULL,
-  turn_index INTEGER NOT NULL,
-  turn_json TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS session_turn_by_session ON session_turn (session_id, turn_index);
-ALTER TABLE session ADD COLUMN context_limit_source TEXT; -- presence-guarded; NULL = not materialized
-```
-
-`session_turn` holds one row per turn; `turn_json` is the deflated turn JSON (zlib,
-level 6), compressed from birth. The column's declared type stays `TEXT` while SQLite's
-dynamic typing keeps the deflated bytes a `BLOB` value in that column all the same, and
-readers tell the two stored forms apart by the storage class the value comes back with;
-the `(session_id, turn_index)` index is deliberately not unique because a legacy payload
-may repeat an index. `session.payload` is rewritten without the `turns`
-key — every other top-level key byte-identical, in its original order — so metadata
-readers see the same document minus turns. The migration also populates
-`context_limit_source` from `payload.context.contextLimitSource` on every row it
-rewrites, and the writer materializes it on every write thereafter, so a fresh corpus
-is never under-counted.
-
-The table shape is the read shape: the detail path reassembles `{...metadata,
-turns}` with one ordered range scan per session — no per-turn N+1 — and `_clip`
-applies to the assembled document exactly as before. A per-turn read served from the
-payload would still pay the whole-blob server cost (`json_extract` materializes the
-row), so the bounded per-turn read below is born reading one `session_turn` row.
-Readers discriminate the two stored turn forms by SQLite's storage class, so a row
-written before the change still reads.
-
-The migration is presence-guarded and idempotent — a row whose payload carries no
-`turns` key is skipped, so re-running on a split store writes nothing — in one
-transaction per step, like every migration before it. Older binaries refuse a v22
-store by design (fail-closed).
-
-The per-column `NULL` sentinel carries over from schema 21: a `NULL`
-`context_limit_source` means "this column was not materialized", never "this row is
-whole". A row with a NULL source is not counted by `countUnknownWindowSessions`,
-matching the old `NULL IN ('default','absent')` behavior of the payload expression
-the column replaced.
-
-`session_denorm_idx` stays load-bearing: the split shrinks the largest payloads but
-leaves their non-turn keys (`problems`, `reconciliation`, `timeline`, `requests`) at
-MB scale, so the payload overflow chain persists and the list remains an index-only
-scan. Steady-state passes skip unchanged turn rows, and the full-rebuild write budget
-is ≤ baseline + 750 ms (deflate level 1 is the escape hatch if the gate misses).
-
-**Measured corpus.** 336 sessions, 79.6 MB of payload holding 40,621 turns; after the
-split the payload total is 48.3 MB and `session_turn` holds 40,719 rows over 9,031
-pages (36,990,976 bytes).
-
-**Deployment fact.** A store must be migrated to v22 by the new build before the list
-is fast: the v21 migration added the materialized columns without backfilling them,
-so until the new build's projection — or the v22 migration — rewrites a row, its
-columns stay NULL and the reader serves it from payload. Deploy the new build first;
-the migration lands on open.
-
-**Operator reclamation.** `kyberdash dash vacuum` reclaims the freelist the split
-leaves behind. `--dry-run` reports the reclaimable space from SQLite's own
-`page_count`/`freelist_count`/`page_size` counters, opening the store read-only —
-the file's size and mtime are unchanged afterwards. A real run reports the before
-size, the after size, the reclaimed bytes, and the freelist count it reclaimed; it
-holds the same writer lock a refresh holds, and it refuses a store it cannot open
-with the store's own upgrade message. Measured: the live store is 3.33 GB with a
-286,441-page freelist of 813,331 pages (~35% dead). There is no recurring vacuum
-cadence — freelist pages are never read (`VACUUM` halves the file with list latency
-unchanged), and the quarantine family is evidence retention by design under the
-existing purge policy ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)),
-so retention is unchanged. The one-time live vacuum is an owner-operated step: stop
-the engine, run `kyberdash dash vacuum`, start the engine. In WAL mode the main file
-is rewritten only at the final checkpoint, so the engine must be stopped, not merely
-idle.
 
 #### Subagent session hierarchy and read-time spend rollups (ADR 0038)
 
@@ -1657,7 +1585,7 @@ Where run identity is absent, `CanonRollupsEngine.DeriveRunIdentity` computes a 
 working-directory affinity and bounded inter-session time gaps (`grouping_basis = 'derived'`).
 Rebuilding via `kyberdash kyber build` re-projects both tables deterministically from retained records.
 
-`KyberBridgeEngine` (`dash/server/KyberDash.Application/KyberBridgeEngine.cs`) reads `canon.db` through `CanonStoreRepository`
+`KyberBridgeEngine` (`dash/server/KyberDash.Application/KyberBridgeEngine.cs`) reads `canon.db` through `IRelationalStoreReader` / `IProjectionStore` / `IOperationalStore`
 and serves derived sessions, runs, harness rollups, findings, and unclipped content without opening
 any legacy `sessions.db` ([ADR 0008](../adr/0008-kyberdash-single-canonical-store.md)). Derived
 session queries serve only projected sessions — record-only groups are excluded until projected.
@@ -1679,7 +1607,7 @@ degrade per session cleanly with a `derivation_failed` problem row rather than c
 
 `CanonSessionProjectorEngine.ProjectIncremental` isolates derivation per session so a corrupted session
 records a `SpanProblemRow` (`derivation_failed`) and continues with the remaining sessions. A
-batch/source failure is recorded on the `RefreshReport` by `CanonRefreshEngine.RefreshHarnessSources`.
+batch/source failure is recorded on the `RefreshReport` by `TranscriptIngestionService.RefreshHarnessSources`.
 
 ## Diagnostic Spine and Progressive Disclosure (ADR 0012)
 
@@ -1786,7 +1714,7 @@ The analysis layer contains pure C# analysis modules under `dash/server/KyberDas
 | Context bucketing, residual, pressure, cache-invalidation flag | `CanonContextAnalysis.AnalyzeContext` | R7 |
 | Schema-cost ranking, never-invoked cost, bounded unused range | `CanonContextAnalysis.RankSchemas` | R8 |
 | Hierarchical timeline, subagent and auxiliary separation | `CanonContextAnalysis.BuildTimeline` | R9 |
-| Cross-harness metric table, run comparison & calibration | `CanonAnalytics` / `KyberBridgeEngine` | R10, ADR 0012 |
+| Cross-harness metric table, run comparison & calibration | `KyberBridgeEngine` | R10, ADR 0012 |
 | Telemetry-grounded finding engine & waste ranking | `CanonFindings.DetectFindings` | ADR 0013 (D5, D6, D8) |
 | Context & token estimation helpers | `CachedTokenCounter`, `CanonPricing` | ADR 0012, R4.6 |
 
@@ -1902,7 +1830,7 @@ verdict omits `completedPairCount`, sets `historyAvailability: 'unavailable'`, a
 `canPromote: false` so the pair stays manual-only. Absent comparable turns or token coverage
 returns a first-class unavailable state with a reason — never a fabricated zero turn count,
 token delta, or `0 / 5` history display ([honest unobservability](../rules/honest-unobservability.md)).
-Diagnostic predictions are logged and scored via `CanonStoreRepository` (`prediction` table) and `KyberBridgeEngine.GetCalibration` (`dash/server/KyberDash.Application/KyberBridgeEngine.cs`).
+Diagnostic predictions are logged and scored via `IProjectionStore.ReplacePrediction` (`prediction` table family) and `KyberBridgeEngine.GetCalibration` (`dash/server/KyberDash.Application/KyberBridgeEngine.cs`).
 
 ### Opt-In LLM Context Review Seam (ADR 0015)
 
@@ -1953,8 +1881,8 @@ by `dash/scripts/pack-sea-web.mjs`); in a source checkout it serves `dash/dist/d
 `KYBERDASH_DASH_DIR` overrides either source.
 
 `KyberBridgeEngine` (`dash/server/KyberDash.Application/KyberBridgeEngine.cs`) serves `/api/kyber/*` queries over
-`CanonStoreRepository` (`~/.kyberdash/canon.db`, resolved by `CanonDbPath.Resolve`), checking projection currency
-(`CanonSessionProjectorEngine.IsProjectionCurrent`) before reading derived summaries. A fixed `CanonStoreRepository`
+`SqliteRelationalStore` (`~/.kyberdash/canon.db`, resolved by `CanonDbPath.Resolve`), checking projection currency
+(`CanonSessionProjectorEngine.IsProjectionCurrent`) before reading derived summaries. A fixed `SqliteRelationalStore`
 instance (such as from `kyberdash report` or an in-memory store in tests) shares that instance directly.
 
 ### Jobs and shared settings (ADR 0033)
@@ -2007,7 +1935,7 @@ receiver child spawns ([ADR 0047](../adr/0047-kyberdash-self-spawns-through-one-
 
 - **Allow-listed C# spawns (`ProcessSpawnSitesTests`):** The remaining OS spawns — the browser
   opener (`Program.RunDetached`, 5 s timeout via `ProcessRunner.Run`), tray codesign/app helpers
-  (`TrayMenubarInstaller`, bounded timeouts via `ProcessRunner.Run`), `CanonStoreRepository` `sqlite3` CLI
+  (`TrayMenubarInstaller`, bounded timeouts via `ProcessRunner.Run`), `SqliteRelationalStore` `sqlite3` CLI
   batches (`ProcessRunner.Run`), and detached engine handoff (`Program.TrySpawnDetachedEngine`,
   bounded to one instance by `EngineOwner` on `engine.sock`) — must all be declared with explicit
   bounds in `tests/KyberWeave.RepoPolicy.Tests/Fixtures/spawn-sites-allowlist.json`.
@@ -2186,11 +2114,12 @@ The web dashboard server wires HTTP requests directly to `KyberBridgeEngine`:
 | `/api/kyber/runs` | `GET` | `{ runs: RunRow[] }` | List runs newest-first; supports `?harness=`. Each row carries `started`, `harness`, measured `turnCount` when derivable, and optional `label` for Compare inventory labels. |
 | `/api/kyber/run/:id` | `GET` | `{ run, executionTree, executions, findings, turns, scorecard }` | Complete run detail with parent/child execution tree, executions enriched with `turnCount` and `costUsd`, `turns` list (`RunTurnRow[]` with model, tokens, pressure, `cacheHitRatio`, timestamp, and per-turn `costUsd`), and run-scoped `scorecard` (`RunScorecard`). |
 | `/api/kyber/sessions` | `GET` | `{ sessions: SessionSummary[] }` | List sessions; supports `?limit=` and `?harness=`. |
-| `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload with turns, context, tools, and timeline. Summary emits `cache_hit_ratio` and `cache_creation_coverage` from single engine writer. Additively carries `summary.skills_listed`, `summary.skills_invoked`, `skills`, and per-turn `turns[i].skills_listed` / `turns[i].skills_invoked` ([skills view contract](#skills-view-contract)). Since schema 22 the served document is assembled — the metadata payload plus one ordered `session_turn` scan — with identical content and unchanged `_clip` bounds. |
-| `/api/kyber/session/:id/summary` | `GET` | Bounded session summary (`session_id`, `harness`, `label`, `is_subagent`, `parent_session`, `agent_name`, `started`, `ended`, `summary`, `problems_count`) | Bounded ancestry lookup served from the materialized columns without touching `payload`; 404 for an unknown id. No run or execution linkage is served, deliberately ([below](#materialized-session-summary-columns-and-the-sessions-list-covering-index-schema-21)). |
+| `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload with turns, context, tools, and timeline. Summary emits `cache_hit_ratio` and `cache_creation_coverage` from single engine writer. Additively carries `summary.skills_listed`, `summary.skills_invoked`, `skills`, and per-turn `turns[i].skills_listed` / `turns[i].skills_invoked` ([skills view contract](#skills-view-contract)). The served document is assembled — the session aggregate plus one ordered `session_turn` scan via `IRelationalStoreReader.SessionTurnSummaries` — with identical content and unchanged `_clip` bounds. |
+| `/api/kyber/session/:id/summary` | `GET` | Bounded session summary (`session_id`, `harness`, `label`, `is_subagent`, `parent_session`, `agent_name`, `started`, `ended`, `summary`, `problems_count`) | Bounded ancestry lookup served from the read-time session aggregate without touching stored turns; 404 for an unknown id. No run or execution linkage is served, deliberately. |
 | `/api/kyber/session/:id/turn/:index` | `GET` | Bounded per-turn figures | One turn's figures served from a single `session_turn` row — 404 for an unknown turn under the strict 0-based identity lookup. The turn page's counters query reads kilobytes here instead of the whole payload (up to 10,933 turns) it once fetched for one row's counters. |
 | `/api/kyber/timeline` | `GET` | Session timeline | The stored session `timeline` served from the payload directly, without reassembling the whole session payload; the shape the client already parses is unchanged. |
 | `/api/kyber/session/:id/content` | `GET` | `SessionContent` | Full canonical content for an inspected session part. |
+| `/api/kyber/session/{sessionKey}/stored-fields` | `GET` | `StoredFieldsView` (`sessionKey`, `tables[]` of `{ tableName, columnNames, rows, missingParentKeys }`) | Catalog-driven inspection of every applicable `RelationalSchemaCatalog` table for one session: every reachable column labeled `table.column`, absent optional rows listed in `missingParentKeys` as not reported (never `0` or `""`); 404 when the session is unknown; never `/api/sessions/...`. Served by `DashEndpointMappings.StoredFieldsAsync` via `IDashboardQueryService.GetStoredFields` from `KyberBridgeEngine.GetStoredFields` over `IRelationalStoreReader.StoredFields` ([analytics read path, error envelope, and stored-fields surface](#analytics-read-path-error-envelope-and-stored-fields-surface)). |
 | `/api/kyber/session/:id/turn/:index/content` | `GET` | `TurnContentResult` | Full unclipped assembled context for a specific turn ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)). Uses 0-based `:index`; strict resolution returns 404 for out-of-bounds turn indices, and 200 with empty parts when the turn exists but recorded no content. `?full=true` is the explicit lossless path — no default-budget truncation, no large-number sentinel — backing the whole-turn inspector; each part annotates recurrence against earlier captured turns by whole-text sha256 with no normalization, and `sharedContext` unions turn-span system prompts with non-turn session prompts, each tagged with its contributing `turnIndex` ([ordered, API-seen turn context](#ordered-api-seen-turn-context)). Additively carries `parentSpanId` and `rawPacket: { spanAttributesPath, interactionPath? }` — the packet pointers the turn view discloses; `interactionPath` is present only when the parent's quarantine row kept a payload ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). Additively carries a `skills` entry, `{listed: [{name, text?}], invoked: [names]}`, where either side or the whole entry may be `{availability: 'not_measurable', reason}` ([skills view contract](#skills-view-contract)). |
 | `/api/kyber/findings` | `GET` | `{ findings: Finding[], total, limit, offset, detectorCounts, unknownWindowSessions }` | Ranked findings; supports `?runId=`, `?sessionId=`, `?harness=`, `?detector=`, `?limit=`, `?offset=`. `total` describes the narrowed set; `detectorCounts` cover the run/session/harness scope ignoring paging and the detector filter so filter chips never evaporate; `unknownWindowSessions` counts sessions with an unreported context window in scope. |
 | `/api/kyber/finding/:id` | `GET` | `Finding` | Single finding detail with evidence rows and risk caveats. |
@@ -2404,7 +2333,7 @@ parity is pinned by `dash/server.tests/KyberDash.Presentation.Tests/MinimalApiEn
 ## Parity suite and C# engine verification (R15)
 
 The C# parity suite in `dash/server.tests/` (`CanonIngestTests.cs`,
-`CanonStoreRepositoryParityTests.cs`, `CanonSynthTests.cs`, `CanonAnalysisTests.cs`,
+`CanonSynthTests.cs`, `CanonAnalysisTests.cs`,
 `MinimalApiEndpointTests.cs`, `ApplicationParityTests.cs`, and `CliDispatchTests.cs`)
 pins the ported C# pipeline across ingest, storage, synthesis, analysis, findings, pricing, and
 REST/MCP endpoints. The measured rationale behind the architecture is preserved in

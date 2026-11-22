@@ -23,20 +23,24 @@ public class ReportService : IReportService
     public const string AbsentCell = "absent";
 
     private readonly IDashboardQueryService query;
-    private readonly ICanonStoreRepository store;
+    private readonly IProjectionStore projections;
+    private readonly IRelationalStoreReader reader;
 
     /// <summary>
     /// Initializes a new <see cref="ReportService"/>.
     /// </summary>
     /// <param name="query">Query service producing the report projection.</param>
-    /// <param name="store">Canonical store repository supplying harness rollups and findings.</param>
-    public ReportService(IDashboardQueryService query, ICanonStoreRepository store)
+    /// <param name="projections">Projection store supplying harness rollups and findings.</param>
+    /// <param name="reader">Relational reader backing report-scope reads.</param>
+    public ReportService(IDashboardQueryService query, IProjectionStore projections, IRelationalStoreReader reader)
     {
         ArgumentNullException.ThrowIfNull(query);
-        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(projections);
+        ArgumentNullException.ThrowIfNull(reader);
 
         this.query = query;
-        this.store = store;
+        this.projections = projections;
+        this.reader = reader;
     }
 
     /// <inheritdoc />
@@ -51,8 +55,8 @@ public class ReportService : IReportService
 
         int boundedLimit = Math.Clamp(limit, 1, 200);
         JsonElement report = query.GetReport(harness, sessionId, runId, boundedLimit);
-        IReadOnlyList<HarnessRollupRow> rollups = store.ListHarnessRollups();
-        IReadOnlyList<Finding> findings = store.ListFindings(runId, sessionId);
+        IReadOnlyList<StoredHarnessRollup> rollups = projections.ListHarnessRollups();
+        IReadOnlyList<StoredFinding> findings = projections.ListFindings(runId, sessionId);
 
         return format.Trim().ToUpperInvariant() switch
         {
@@ -75,14 +79,14 @@ public class ReportService : IReportService
 
     /// <summary>Renders the report payload as GitHub-flavoured Markdown.</summary>
     /// <param name="report">Dashboard report projection.</param>
-    /// <param name="rollups">Harness rollup rows.</param>
+    /// <param name="rollups">Persisted harness rollups.</param>
     /// <param name="findings">Findings included in the report scope.</param>
     /// <param name="limit">Maximum findings listed.</param>
     /// <returns>Markdown text ending in a newline.</returns>
     public static string RenderMarkdown(
         JsonElement report,
-        IReadOnlyList<HarnessRollupRow> rollups,
-        IReadOnlyList<Finding> findings,
+        IReadOnlyList<StoredHarnessRollup> rollups,
+        IReadOnlyList<StoredFinding> findings,
         int limit)
     {
         ArgumentNullException.ThrowIfNull(rollups);
@@ -108,13 +112,13 @@ public class ReportService : IReportService
         {
             text.AppendLine("| Harness | Sessions | Context p50 | Context p95 | Cache hit |");
             text.AppendLine("|---|---|---|---|---|");
-            foreach (HarnessRollupRow rollup in rollups.OrderBy(static row => row.Harness, StringComparer.Ordinal))
+            foreach (StoredHarnessRollup rollup in rollups.OrderBy(static row => row.HarnessId, StringComparer.Ordinal))
             {
-                text.Append("| ").Append(rollup.Harness)
-                    .Append(" | ").Append(rollup.SampleCount.ToString(CultureInfo.InvariantCulture))
-                    .Append(" | ").Append(FormatPercent(rollup.ContextPressureMedian))
-                    .Append(" | ").Append(FormatPercent(rollup.ContextPressureP95))
-                    .Append(" | ").Append(FormatPercent(rollup.CacheHitRate))
+                text.Append("| ").Append(rollup.HarnessId)
+                    .Append(" | ").Append(rollup.SessionCount.ToString(CultureInfo.InvariantCulture))
+                    .Append(" | ").Append(FormatPercent(MetricValue(rollup, "context_pressure_median")))
+                    .Append(" | ").Append(FormatPercent(MetricValue(rollup, "context_pressure_p95")))
+                    .Append(" | ").Append(FormatPercent(MetricValue(rollup, "cache_hit_rate")))
                     .AppendLine(" |");
             }
         }
@@ -128,7 +132,7 @@ public class ReportService : IReportService
         }
         else
         {
-            foreach (Finding finding in findings.Take(limit))
+            foreach (StoredFinding finding in findings.Take(limit))
             {
                 text.Append("- **").Append(finding.DetectorId).Append("** (").Append(finding.Confidence).Append("): ")
                     .Append(finding.Title).AppendLine();
@@ -140,14 +144,14 @@ public class ReportService : IReportService
 
     /// <summary>Renders the report payload as fixed-width plain text.</summary>
     /// <param name="report">Dashboard report projection.</param>
-    /// <param name="rollups">Harness rollup rows.</param>
+    /// <param name="rollups">Persisted harness rollups.</param>
     /// <param name="findings">Findings included in the report scope.</param>
     /// <param name="limit">Maximum findings listed.</param>
     /// <returns>Plain text ending in a newline.</returns>
     public static string RenderText(
         JsonElement report,
-        IReadOnlyList<HarnessRollupRow> rollups,
-        IReadOnlyList<Finding> findings,
+        IReadOnlyList<StoredHarnessRollup> rollups,
+        IReadOnlyList<StoredFinding> findings,
         int limit)
     {
         ArgumentNullException.ThrowIfNull(rollups);
@@ -168,13 +172,13 @@ public class ReportService : IReportService
         }
         else
         {
-            foreach (HarnessRollupRow rollup in rollups.OrderBy(static row => row.Harness, StringComparer.Ordinal))
+            foreach (StoredHarnessRollup rollup in rollups.OrderBy(static row => row.HarnessId, StringComparer.Ordinal))
             {
-                text.Append("  ").Append(rollup.Harness)
-                    .Append("  sessions=").Append(rollup.SampleCount.ToString(CultureInfo.InvariantCulture))
-                    .Append("  context_p50=").Append(FormatPercent(rollup.ContextPressureMedian))
-                    .Append("  context_p95=").Append(FormatPercent(rollup.ContextPressureP95))
-                    .Append("  cache_hit=").Append(FormatPercent(rollup.CacheHitRate))
+                text.Append("  ").Append(rollup.HarnessId)
+                    .Append("  sessions=").Append(rollup.SessionCount.ToString(CultureInfo.InvariantCulture))
+                    .Append("  context_p50=").Append(FormatPercent(MetricValue(rollup, "context_pressure_median")))
+                    .Append("  context_p95=").Append(FormatPercent(MetricValue(rollup, "context_pressure_p95")))
+                    .Append("  cache_hit=").Append(FormatPercent(MetricValue(rollup, "cache_hit_rate")))
                     .AppendLine();
             }
         }
@@ -187,7 +191,7 @@ public class ReportService : IReportService
         }
         else
         {
-            foreach (Finding finding in findings.Take(limit))
+            foreach (StoredFinding finding in findings.Take(limit))
             {
                 text.Append("  ").Append(finding.DetectorId).Append(' ')
                     .Append(finding.Confidence).Append("  ").Append(finding.Title).AppendLine();
@@ -221,6 +225,17 @@ public class ReportService : IReportService
         report.TryGetProperty(property, out JsonElement value) && value.ValueKind == JsonValueKind.String
             ? value.GetString() ?? AbsentCell
             : AbsentCell;
+
+    /// <summary>Reads one metric off a persisted harness rollup, or <see langword="null"/> when absent.</summary>
+    /// <param name="rollup">Persisted harness rollup.</param>
+    /// <param name="metric">Metric identifier, for example <c>context_pressure_median</c>.</param>
+    /// <returns>The metric value, or <see langword="null"/> when the rollup did not record it.</returns>
+    public static double? MetricValue(StoredHarnessRollup rollup, string metric)
+    {
+        ArgumentNullException.ThrowIfNull(rollup);
+        ArgumentException.ThrowIfNullOrWhiteSpace(metric);
+        return CanonPipelineShared.RollupMetricValue(rollup, metric);
+    }
 
     /// <summary>Formats a ratio as a whole percentage, or <c>absent</c> when the source did not measure it.</summary>
     /// <param name="value">Ratio in <c>0..1</c>, or <see langword="null"/>.</param>

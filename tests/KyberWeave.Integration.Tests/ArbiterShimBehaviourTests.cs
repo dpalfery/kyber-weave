@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using KyberWeave.Tests.Fakes;
 using System.Text;
+using System.Text.Json;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fixtures;
@@ -9,12 +10,13 @@ using Xunit;
 namespace KyberWeave.Integration.Tests;
 
 /// <summary>
-/// Runs the generated OpenCode shim and Pi extension under Bun against a fake
-/// <c>kyber-weave-arbiter</c> binary, because asserting on the generated TypeScript text
-/// cannot tell a hook that allows on purpose from one that allows because it crashed.
-/// The host's only allow is exit 0 with empty stdout (or a <c>decision: allow</c>
-/// document); every other outcome has to block. Skipped when Bun or a POSIX shell is
-/// missing.
+/// Runs the generated OpenCode and Kilo plugin shims and the Pi extension under Bun against a
+/// fake <c>kyber-weave-arbiter</c> binary, because asserting on the generated TypeScript text
+/// cannot tell a hook that allows on purpose from one that allows because it crashed. OpenCode
+/// 2.x is driven through the default export's <c>setup</c> and its <c>ctx.tool.hook</c>
+/// registrations; Kilo stays on the 1.x <c>{ id, server }</c> hook object. The host's only allow
+/// is exit 0 with empty stdout (or a <c>decision: allow</c> document); every other outcome has
+/// to block. Skipped when Bun or a POSIX shell is missing.
 /// </summary>
 public sealed class ArbiterShimBehaviourTests : IDisposable
 {
@@ -60,12 +62,24 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
         PlantRepositoryMarker();
         await File.WriteAllTextAsync(Path.Combine(_temp.Path, "shim.ts"), ArbiterPluginShim.Render("opencode"));
         await File.WriteAllTextAsync(Path.Combine(_temp.Path, "drive.ts"), """
-            import { KyberArbiter } from "./shim.ts";
-            const hooks: any = await KyberArbiter({ directory: process.cwd() } as any);
+            import plugin from "./shim.ts";
+            const hooks: any = {};
+            const ctx = {
+              location: { directory: process.cwd() },
+              tool: {
+                hook: async (name: string, callback: any) => {
+                  hooks[name] = callback;
+                  return { dispose: async () => {} };
+                },
+              },
+            };
+            await plugin.setup(ctx);
             try {
-              await hooks["tool.execute.before"](
-                { tool: "task", callID: "c1", sessionID: "s1", args: { subagent_type: "x", prompt: "p" } },
-                { args: {} });
+              const event: any = {
+                tool: "task", id: "c1", sessionID: "s1", agent: "build", messageID: "m1",
+                input: { subagent_type: "x", prompt: "p" },
+              };
+              await hooks["execute.before"](event);
               console.log("ALLOWED");
             } catch (e) {
               console.log("BLOCKED:" + String(e));
@@ -105,37 +119,140 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
         Assert.StartsWith(expected, output, StringComparison.Ordinal);
     }
 
-    [Theory]
-    [InlineData("{\"decision\":\"allow\"}", Allowed)]
-    [InlineData("{\"decision\":\"block\",\"reason\":\"nope\"}", Blocked)]
-    public async Task OpenCodeShim_DefaultExportLoadsThroughSetupAndPinsBothDecisions(string stdout, string expected)
+    [Fact]
+    public async Task OpenCodeShim_SetupRegistersBothHooksAndMapsTheEvent()
     {
-        // The OpenCode v2 loader reads only the default export { id, setup }.
-        // Loading through the named export (as the fail-closed table above does)
-        // cannot see the SchemaError the real loader raises for that shape, so
-        // this test imports the default export exactly as the loader does.
-        // Both decisions are pinned through that path: a setup that always
-        // blocks would otherwise still satisfy a block-only test.
+        // OpenCode 2.x reads only the default export { id, setup } and registers hooks
+        // through ctx.tool.hook. Loading through the named export cannot see that
+        // contract, so this drives setup exactly as the loader does: both hooks are
+        // registered, the arbiter's replacement args land on the event's writable
+        // `input`, call id and session reach the envelope, both after statuses map onto
+        // `result`, and the cleanup disposes both registrations.
         string bun = RequireBun();
-        WriteFakeBinary(stdout, "0");
+        WriteCapturingBinary("{\"decision\":\"allow\",\"args\":{\"prompt\":\"replaced\"}}");
         PlantRepositoryMarker();
         await File.WriteAllTextAsync(Path.Combine(_temp.Path, "shim.ts"), ArbiterPluginShim.Render("opencode"));
         await File.WriteAllTextAsync(Path.Combine(_temp.Path, "drive.ts"), """
             import plugin from "./shim.ts";
-            const hooks: any = await plugin.setup({ directory: process.cwd() } as any);
-            try {
-              await hooks["tool.execute.before"](
-                { tool: "task", callID: "c1", sessionID: "s1", args: { subagent_type: "x", prompt: "p" } },
-                { args: {} });
-              console.log("ALLOWED");
-            } catch (e) {
-              console.log("BLOCKED:" + String(e));
-            }
+            const hooks: any = {};
+            const disposed: string[] = [];
+            const ctx = {
+              location: { directory: process.cwd() },
+              tool: {
+                hook: async (name: string, callback: any) => {
+                  hooks[name] = callback;
+                  return { dispose: async () => { disposed.push(name); } };
+                },
+              },
+            };
+            const cleanup = await plugin.setup(ctx);
+            const before: any = {
+              tool: "subagent", id: "call-7", sessionID: "session-9", agent: "build",
+              messageID: "m1", input: { prompt: "original" },
+            };
+            await hooks["execute.before"](before);
+            console.log("inputPrompt=" + before.input.prompt);
+            await hooks["execute.after"]({
+              tool: "subagent", id: "call-7", sessionID: "session-9", agent: "build", messageID: "m1",
+              input: before.input, status: "completed", result: { output: "done", metadata: { m: 1 } },
+            });
+            await hooks["execute.after"]({
+              tool: "subagent", id: "call-7", sessionID: "session-9", agent: "build", messageID: "m1",
+              input: before.input, status: "error", error: "boom",
+            });
+            await cleanup();
+            console.log("disposed=" + disposed.join(","));
             """);
 
         string output = await RunBunAsync(bun, "drive.ts");
 
-        Assert.StartsWith(expected, output, StringComparison.Ordinal);
+        Assert.Contains("inputPrompt=replaced", output, StringComparison.Ordinal);
+        Assert.Contains("disposed=execute.before,execute.after", output, StringComparison.Ordinal);
+
+        string[] envelopes = (await File.ReadAllLinesAsync(Path.Combine(_temp.Path, "envelopes.log")))
+            .Where(line => line.Trim().Length > 0)
+            .ToArray();
+        Assert.Equal(3, envelopes.Length);
+
+        JsonElement beforeEvent = JsonDocument.Parse(envelopes[0]).RootElement;
+        Assert.Equal("kyber-arbiter.plugin-event/v1", beforeEvent.GetProperty("schema").GetString());
+        Assert.Equal("opencode", beforeEvent.GetProperty("harness").GetString());
+        Assert.Equal("before", beforeEvent.GetProperty("phase").GetString());
+        Assert.Equal("subagent", beforeEvent.GetProperty("tool").GetString());
+        Assert.Equal("call-7", beforeEvent.GetProperty("call-id").GetString());
+        Assert.Equal("session-9", beforeEvent.GetProperty("session").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(beforeEvent.GetProperty("cwd").GetString()));
+        Assert.Equal("original", beforeEvent.GetProperty("args").GetProperty("prompt").GetString());
+
+        JsonElement completed = JsonDocument.Parse(envelopes[1]).RootElement.GetProperty("result");
+        Assert.Equal("completed", completed.GetProperty("status").GetString());
+        Assert.Equal("done", completed.GetProperty("output").GetString());
+        Assert.Equal(1, completed.GetProperty("metadata").GetProperty("m").GetInt32());
+
+        JsonElement errored = JsonDocument.Parse(envelopes[2]).RootElement.GetProperty("result");
+        Assert.Equal("error", errored.GetProperty("status").GetString());
+        Assert.Equal("boom", errored.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task OpenCodeShim_GlobalScope_ResolvesTheRepositoryRootFromTheHarnessDirectory()
+    {
+        // A globally installed plugin file sits under the harness's user-level directory,
+        // and a user machine also carries ~/.kyber-weave/kyber-weave.yml. Walking up from
+        // the plugin file would bind the hook to home; at global scope the walk starts
+        // from the harness directory instead, so the repository below home wins.
+        string bun = RequireBun();
+        WriteCapturingBinary("{\"decision\":\"allow\"}");
+
+        string home = Path.Combine(_temp.Path, "home");
+        string repository = Path.Combine(home, "repo");
+        string plugins = Path.Combine(home, ".config", "opencode", "plugins");
+        Directory.CreateDirectory(Path.Combine(home, ".kyber-weave"));
+        await File.WriteAllTextAsync(Path.Combine(home, ".kyber-weave", "kyber-weave.yml"), "ontology:\n");
+        Directory.CreateDirectory(Path.Combine(repository, ".git"));
+        Directory.CreateDirectory(plugins);
+
+        await File.WriteAllTextAsync(
+            Path.Combine(plugins, "shim.ts"),
+            ArbiterPluginShim.Render("opencode", SquadDeploymentScope.Global));
+        await File.WriteAllTextAsync(Path.Combine(repository, "drive.ts"), """
+            import plugin from "../.config/opencode/plugins/shim.ts";
+            const hooks: any = {};
+            const ctx = {
+              location: { directory: process.cwd() },
+              tool: {
+                hook: async (name: string, callback: any) => {
+                  hooks[name] = callback;
+                  return { dispose: async () => {} };
+                },
+              },
+            };
+            await plugin.setup(ctx);
+            await hooks["execute.before"]({
+              tool: "task", id: "c1", sessionID: "s1", agent: "build", messageID: "m1", input: {},
+            });
+            console.log("cwd=" + process.cwd());
+            """);
+
+        string output = await RunBunAsync(bun, "drive.ts", workingDirectory: repository);
+
+        // The capture binary writes its stdin relative to its own cwd, so the file lands
+        // in the repository only when the spawn cwd is the repository, not home.
+        string envelopePath = Path.Combine(repository, "envelopes.log");
+        Assert.True(
+            File.Exists(envelopePath),
+            "the arbiter hook must spawn with the repository as its cwd, not the home directory");
+        Assert.False(File.Exists(Path.Combine(home, "envelopes.log")));
+
+        string driverCwd = output.Split('\n')
+            .First(line => line.StartsWith("cwd=", StringComparison.Ordinal))["cwd=".Length..]
+            .Trim();
+        string envelopeCwd = JsonDocument.Parse(await File.ReadAllTextAsync(envelopePath))
+            .RootElement.GetProperty("cwd").GetString()!;
+        Assert.Equal(driverCwd, envelopeCwd);
+        Assert.True(
+            envelopeCwd.EndsWith(Path.Combine("home", "repo"), StringComparison.Ordinal),
+            $"the envelope cwd must be the repository below home, but was '{envelopeCwd}'");
     }
 
     [Theory]
@@ -382,11 +499,26 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
         MakeExecutable(script);
     }
 
-    private async Task<string> RunBunAsync(string bun, string script, bool inheritPath = true)
+    /// <summary>
+    /// A fake binary that appends the envelope it received on stdin to <c>envelopes.log</c> in its
+    /// own cwd, then answers with <paramref name="stdout"/>. The log's location proves which
+    /// directory the shim spawned the hook in.
+    /// </summary>
+    private void WriteCapturingBinary(string stdout)
+    {
+        string script = Path.Combine(_temp.Path, "kyber-weave-arbiter");
+        string body = "#!/bin/sh\ncat >> envelopes.log\nprintf '\\n' >> envelopes.log\n"
+            + $"printf '%s' '{stdout}'\n"
+            + "exit 0\n";
+        File.WriteAllText(script, body);
+        MakeExecutable(script);
+    }
+
+    private async Task<string> RunBunAsync(string bun, string script, bool inheritPath = true, string? workingDirectory = null)
     {
         ProcessStartInfo startInfo = new(bun)
         {
-            WorkingDirectory = _temp.Path,
+            WorkingDirectory = workingDirectory ?? _temp.Path,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,

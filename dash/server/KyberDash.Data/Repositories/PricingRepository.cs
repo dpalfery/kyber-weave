@@ -1,6 +1,8 @@
+using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
 using KyberDash.Contracts.Repositories;
+using KyberDash.Core.Exceptions;
 using KyberDash.Domain;
 
 namespace KyberDash.Data.Repositories;
@@ -24,7 +26,7 @@ public class PricingRepository : IPricingRepository
     /// <summary>Value of the catalog <c>source</c> field: rates come from the embedded snapshot.</summary>
     public const string EmbeddedSnapshotSource = "embedded_snapshot";
 
-    private readonly ICanonStoreRepository? store;
+    private readonly IOperationalStore? store;
     private readonly Lock gate = new();
     private PricingTables? tables;
 
@@ -32,12 +34,14 @@ public class PricingRepository : IPricingRepository
     /// Initializes a repository that reports catalog status from <paramref name="store"/> and registers
     /// itself as the process-wide pricing provider.
     /// </summary>
-    /// <param name="store">Canonical store read for catalog refresh status, or <see langword="null"/> to report the embedded snapshot only.</param>
-    public PricingRepository(ICanonStoreRepository? store = null)
+    /// <param name="store">Operational store read for catalog refresh status, or <see langword="null"/> to report the embedded snapshot only.</param>
+    public PricingRepository(IOperationalStore? store = null)
     {
         this.store = store;
         if (store is not null)
+        {
             CanonPricing.ConfigurePricingProvider(LoadPricingTables);
+        }
     }
 
     /// <inheritdoc />
@@ -54,17 +58,21 @@ public class PricingRepository : IPricingRepository
     {
         string status = "embedded";
         string? lastRefreshAt = null;
-        if (store is { } canonical)
+        if (store is { } operational)
         {
             try
             {
-                status = canonical.GetMetadata(CatalogStatusMetadataKey) ?? status;
-                lastRefreshAt = canonical.GetMetadata(CatalogStatusMetadataKey + ".last_refresh_at");
+                StoredModelCatalogSnapshot catalog = operational.GetModelContextWindowCatalog();
+                status = string.IsNullOrWhiteSpace(catalog.Status) || string.Equals(catalog.Status, "empty", StringComparison.Ordinal)
+                    ? "embedded"
+                    : catalog.Status;
+                lastRefreshAt = LatestVendorRefreshAtUtc(catalog.Vendors);
             }
-            catch (Exception exception) when (exception is InvalidOperationException or IOException)
+            catch (Exception exception) when (exception is InvalidOperationException or IOException or SqliteExecutionException or CircuitBreakerOpenException)
             {
                 // Catalog status is advisory; a store that cannot answer must not fail a read.
                 status = "unknown";
+                lastRefreshAt = null;
             }
         }
 
@@ -76,6 +84,64 @@ public class PricingRepository : IPricingRepository
             updatedAt = (string?)null,
             models = Array.Empty<object>(),
         });
+    }
+
+    private static string? LatestVendorRefreshAtUtc(IReadOnlyList<StoredModelCatalogVendorStatus>? vendors)
+    {
+        if (vendors is null || vendors.Count == 0)
+        {
+            return null;
+        }
+
+        string? best = null;
+        bool bestParsed = false;
+        DateTimeOffset bestUtc = default;
+
+        foreach (StoredModelCatalogVendorStatus vendor in vendors)
+        {
+            if (vendor is null || string.IsNullOrWhiteSpace(vendor.LastRefreshAtUtc))
+            {
+                continue;
+            }
+
+            string candidate = vendor.LastRefreshAtUtc;
+            bool candidateParsed = DateTimeOffset.TryParse(
+                candidate,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out DateTimeOffset candidateUtc);
+
+            if (best is null || IsLaterRefreshTimestamp(candidate, candidateParsed, candidateUtc, best, bestParsed, bestUtc))
+            {
+                best = candidate;
+                bestParsed = candidateParsed;
+                bestUtc = candidateUtc;
+            }
+        }
+
+        return best;
+    }
+
+    private static bool IsLaterRefreshTimestamp(
+        string candidate,
+        bool candidateParsed,
+        DateTimeOffset candidateUtc,
+        string best,
+        bool bestParsed,
+        DateTimeOffset bestUtc)
+    {
+        if (candidateParsed && bestParsed)
+        {
+            int comparison = candidateUtc.CompareTo(bestUtc);
+            return comparison > 0 || (comparison == 0 && StringComparer.Ordinal.Compare(candidate, best) > 0);
+        }
+
+        if (candidateParsed != bestParsed)
+        {
+            return candidateParsed;
+        }
+
+        return StringComparer.Ordinal.Compare(candidate, best) > 0;
     }
 
     /// <summary>Reads both embedded resource streams and builds the indexed tables exactly once.</summary>
@@ -97,7 +163,9 @@ public class PricingRepository : IPricingRepository
         foreach (JsonProperty prop in doc.RootElement.EnumerateObject())
         {
             if (prop.Value.ValueKind != JsonValueKind.Array || prop.Value.GetArrayLength() < 2)
+            {
                 continue;
+            }
 
             double input = prop.Value[0].GetDouble();
             double output = prop.Value[1].GetDouble();

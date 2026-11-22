@@ -9,13 +9,14 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the Arbiter OpenCode plugin shim: when enabled at project scope the
-/// <see cref="OpenCodeRenderer"/> emits the owned file
-/// <c>.opencode/plugins/kyber-arbiter.ts</c> from <see cref="ArbiterPluginShim"/>,
-/// spawning the binary by argv with Bun, writing the
-/// <c>kyber-arbiter.plugin-event/v1</c> envelope, throwing on block, assigning
-/// <c>output.args</c> and appending to <c>output.output</c>; nothing renders when
-/// disabled or under Global scope (Req 6.1, 22.2, 25.1).
+/// Pins the Arbiter OpenCode plugin shim: when enabled the <see cref="OpenCodeRenderer"/>
+/// emits the owned file <c>.opencode/plugins/kyber-arbiter.ts</c> from
+/// <see cref="ArbiterPluginShim"/>, spawning the binary by argv with Bun and writing the
+/// <c>kyber-arbiter.plugin-event/v1</c> envelope. OpenCode 2.x loads <c>{ id, setup }</c>,
+/// so the setup function registers both hooks through <c>ctx.tool.hook</c>, a block
+/// throws, and a returned <c>args</c> object is assigned to the event's writable
+/// <c>input</c>; the 1.x <c>"tool.execute.before"</c> object never appears. Nothing
+/// renders when disabled (Req 6.1, 22.2, 25.1).
 /// </summary>
 public sealed class ArbiterOpenCodeRenderingTests : IDisposable
 {
@@ -106,14 +107,19 @@ public sealed class ArbiterOpenCodeRenderingTests : IDisposable
     }
 
     [Fact]
-    public async Task RenderAsync_Shim_ExportsPluginWithBothHooksBlockingOnBlock()
+    public async Task RenderAsync_Shim_RegistersBothHooksThroughThePluginContext()
     {
+        // OpenCode 2.x reads no hook object from setup: a 1.x body such as
+        // {"tool.execute.before": ...} registers nothing and the hook never runs.
+        // Each hook is registered through ctx.tool.hook, and the cleanup disposes both.
         string content = await ShimContentAsync();
 
-        Assert.Contains("@opencode-ai/plugin", content, StringComparison.Ordinal);
-        Assert.Contains("Plugin", content, StringComparison.Ordinal);
-        Assert.Contains("tool.execute.before", content, StringComparison.Ordinal);
-        Assert.Contains("tool.execute.after", content, StringComparison.Ordinal);
+        Assert.Contains("ctx.tool.hook(\"execute.before\"", content, StringComparison.Ordinal);
+        Assert.Contains("ctx.tool.hook(\"execute.after\"", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"tool.execute.before\":", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"tool.execute.after\":", content, StringComparison.Ordinal);
+        Assert.Contains("before.dispose()", content, StringComparison.Ordinal);
+        Assert.Contains("after.dispose()", content, StringComparison.Ordinal);
         Assert.Contains("\"block\"", content, StringComparison.Ordinal);
         Assert.Contains("decision", content, StringComparison.Ordinal);
         Assert.Contains("throw", content, StringComparison.Ordinal);
@@ -121,9 +127,25 @@ public sealed class ArbiterOpenCodeRenderingTests : IDisposable
     }
 
     [Fact]
+    public async Task RenderAsync_Shim_MapsTheTwoXEventOntoTheEnvelope()
+    {
+        // The 2.x event carries the call id as `id`, the arguments as `input`, and the
+        // result as a completed/errored union; the envelope keeps its v1 field names.
+        string content = await ShimContentAsync();
+
+        Assert.Contains("tool: event.tool", content, StringComparison.Ordinal);
+        Assert.Contains("\"call-id\": event.id", content, StringComparison.Ordinal);
+        Assert.Contains("session: event.sessionID", content, StringComparison.Ordinal);
+        Assert.Contains("args: event.input", content, StringComparison.Ordinal);
+        Assert.Contains("{ status: \"error\", error: event.error }", content, StringComparison.Ordinal);
+        Assert.Contains("output: event.result?.output", content, StringComparison.Ordinal);
+        Assert.Contains("metadata: event.result?.metadata", content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Render_Opencode_EmitsDefaultExportObjectWithSetup()
     {
-        // OpenCode v2.2.5's loader reads only the default export and accepts
+        // OpenCode 2.x's loader reads only the default export and accepts
         // { id, setup }; a named-only export fails with SchemaError and the
         // plugin silently never loads (fail-open).
         string content = ArbiterPluginShim.Render("opencode");
@@ -133,6 +155,12 @@ public sealed class ArbiterOpenCodeRenderingTests : IDisposable
         Assert.Contains("setup: KyberArbiter", content, StringComparison.Ordinal);
         Assert.DoesNotContain("server: KyberArbiter", content, StringComparison.Ordinal);
         Assert.Contains("export const KyberArbiter", content, StringComparison.Ordinal);
+        Assert.Contains("ctx.tool.hook", content, StringComparison.Ordinal);
+
+        // 2.x types live in another package; the shim declares what it needs locally so
+        // the installed file imports no plugin package at all.
+        Assert.DoesNotContain("@opencode-ai/plugin", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("@opencode/plugin", content, StringComparison.Ordinal);
 
         // Contains alone passes with two defaults (SyntaxError in the host) or
         // a default ahead of the named export it references (TDZ
@@ -147,12 +175,15 @@ public sealed class ArbiterOpenCodeRenderingTests : IDisposable
     }
 
     [Fact]
-    public async Task RenderAsync_Shim_AssignsArgsAndAppendsOutputOnBlock()
+    public async Task RenderAsync_Shim_AssignsDecisionArgsToTheWritableEventInput()
     {
+        // 2.x hands the hook a writable `event.input`; replacing it changes the
+        // arguments the tool runs with. There is no 1.x `output` object.
         string content = await ShimContentAsync();
 
-        Assert.Contains("output.args", content, StringComparison.Ordinal);
-        Assert.Contains("output.output", content, StringComparison.Ordinal);
+        Assert.Contains("event.input = decision.args;", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("output.args", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("output.output", content, StringComparison.Ordinal);
     }
 
     [Fact]
