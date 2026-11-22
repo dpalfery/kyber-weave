@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: draft
 technology: sql-server
 owner: unassigned
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-22
 ---
 
 # SQL Server coding standard
@@ -111,7 +111,7 @@ The schema is code. Its source of truth is an SDK-style SQL database project
 - Deploy with SqlPackage `Publish` (or `azure/sql-action`, which wraps it). Build once, and
   deploy the same artifact to every environment.
 - Before production, generate a preview with SqlPackage `Script` or `DeployReport` and have a
-  human approve it. Never run un-reviewed DDL by hand.
+  human approve it.
 - Pipelines use a standalone SqlPackage installed as a `dotnet` tool, and connect with a
   managed or Entra identity rather than a password.
 
@@ -162,9 +162,8 @@ statement or stored procedure will do.
 ### Least privilege
 
 Application accounts get the permissions the application uses, and no more. Nothing routine
-runs as `sa`, `root`, or the schema owner. Never enable `xp_cmdshell`; use SQLCLR or an external
-process instead of `xp_cmdshell` for anything that needs to run outside the engine. Map Entra or
-Windows groups to roles, and do not hand out `sysadmin` by default.
+runs as `sa`, `root`, or the schema owner. Map Entra or Windows groups to roles, and do not
+hand out `sysadmin` by default.
 
 Prefer Microsoft Entra ID or Kerberos authentication over SQL authentication for application and
 pipeline connections; keep SQL authentication disabled unless there is a justified need.

@@ -5,18 +5,19 @@ doc-type: skill
 status: draft
 technology: rust
 owner: unassigned
-last-reviewed: 2026-11-16
+last-reviewed: 2026-11-22
 ---
 
 # rust skills
 
 ## What this folder covers
 
-- Error types and crate boundaries.
-- Async and the tokio runtime.
-- `unsafe` review and documentation.
-- Cross-compilation and target triples.
-- The format, lint, build and test commands.
+- Standards, in `rust.standards.md`: errors and crate boundaries, and async and tokio (Coding
+  standards); dependencies, TLS, targets and cross-platform (Naming and layout); `unsafe`
+  (Security and data handling); the gates and per-platform notes (Commands).
+- Cross-build procedure: `rustup target add <triple>`, then
+  `cargo build --release --target <triple> --locked`; confirm no OpenSSL with
+  `cargo tree -i openssl-sys --target all`.
 
 ## Hand-off
 

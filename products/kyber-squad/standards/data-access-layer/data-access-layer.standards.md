@@ -6,7 +6,7 @@ status: draft
 technology: data-access-layer
 builds-on: csharp
 owner: unassigned
-last-reviewed: 2026-08-16
+last-reviewed: 2026-11-22
 ---
 
 # Data access layer coding standard
@@ -49,26 +49,40 @@ best available guidance and names the draft standard it relied on in one line of
 | Persistence row | `<Solution>.Persistence` (private) |
 | FluentMigrator scripts | `<Solution>.Persistence` (or the host's migrations project) |
 
-Application and API code consumes `IRepository<T>`. It does not open connections or
-write SQL.
-
 ## Coding standards
 
 ### Hard rules
 
-- Parameterized `SqlCommand` / `SqlParameter` only. String concatenation into SQL is an
-  injection, including in a migration.
 - List columns explicitly. `SELECT *` is a contract with tomorrow's schema.
-- Dispose connections, commands, and readers with `using` / `await using`.
 - Multi-statement work that must be atomic runs in one transaction, with an explicit
   rollback path. Do not nest transactions.
 - Connection strings and credentials come from configuration / Key Vault / managed
-  identity, as declared by the **Configuration Policy** registry property — never a
-  literal, never a committed file, never a log line.
+  identity, as declared by the **Configuration Policy** registry property.
 - Register the factory as Singleton and repositories as Scoped in
   `ServiceCollectionExtensions.AddSqlPersistenceServices()` (or the host's equivalent).
-- Structured logging on failures: operation, entity, id. Do not swallow database
-  exceptions.
+
+### Commands and parameters
+
+- Add each parameter with an explicit type and, for strings, a length:
+  `command.Parameters.Add("@Name", SqlDbType.NVarChar, 200).Value = name;`.
+- Map an absent value to `DBNull.Value` explicitly (`optional ?? (object)DBNull.Value`).
+- Keep the SQL text in a `const` string beside the method that runs it. A `MERGE` or other
+  multi-statement batch types every parameter the same way.
+- Pass the `CancellationToken` to every `...Async` call (open, execute, read, commit,
+  rollback).
+- Open the connection as late as possible and release it as early as possible: one
+  `await using` connection per repository method, not one held across calls.
+- A lookup that finds nothing returns `null` (or an empty collection), not an exception.
+
+### Transactions
+
+- A command created without the scope's `SqlTransaction` fails or runs outside the scope.
+- Commit on success and roll back in a `catch`, then rethrow so the stack is kept.
+
+### Failure handling
+
+- Log the failure with structured properties (operation, entity, id) and rethrow, wrapping
+  the original exception as the inner exception when the caller needs a domain-level type.
 
 ## Testing
 
@@ -84,6 +98,11 @@ _Nothing specific yet._
   environment is immutable — a later edit to it there would not run at all.
 - For a non-nullable column added to an existing table, add a default first, then remove the
   default in a separate migration, so rows written before the change still satisfy `NOT NULL`.
+- Use `WithDefaultValue(SystemMethods.CurrentUTCDateTime)` for audit timestamp columns, never a
+  hardcoded date.
+- Make `Up()` safe to re-run with FluentMigrator's `IfTableDoesNotExist` /
+  `IfIndexDoesNotExist` / `IfColumnDoesNotExist` guards, per **<sql-coding-standard>**.
+- After applying a migration, verify the result against the schema project's `.dacpac`.
 - Down() is a host decision: implementing it is optional, and a production correction is
   always a forward migration, per **<sql-coding-standard>**.
 

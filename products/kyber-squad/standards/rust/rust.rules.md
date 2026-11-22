@@ -5,7 +5,7 @@ doc-type: rule
 status: draft
 technology: rust
 owner: unassigned
-last-reviewed: 2026-11-16
+last-reviewed: 2026-11-22
 ---
 
 # rust rules
@@ -16,6 +16,12 @@ last-reviewed: 2026-11-16
   well as this one. Fetch it once and follow both.
 - When a shared crate is consumed by a Tauri app, agree the crate's public API before editing
   `src-tauri`; edit it only where the task names it.
+
+## Errors and async
+
+- No `unwrap()` or `expect()` in non-test code outside a stated invariant.
+- Never hold a `std::sync::Mutex` guard across an `.await`, and never block the async
+  runtime.
 
 ## Security and data handling
 
