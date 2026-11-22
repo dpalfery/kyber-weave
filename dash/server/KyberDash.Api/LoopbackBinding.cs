@@ -48,7 +48,7 @@ public static class LoopbackBinding
     /// <param name="addresses">Bound listener URLs.</param>
     /// <param name="configuredOtlpPort">The collector port before bind, or <c>0</c> when the OS chose one.</param>
     /// <param name="webPort">The dashboard port, skipped when the collector port was ephemeral and the two differ.</param>
-    /// <returns>The bound collector port, or <paramref name="configuredOtlpPort"/> when none of the addresses match.</returns>
+    /// <returns>The bound collector port, or <c>0</c> when a configured port is not among the addresses.</returns>
     public static int SelectOtlpPort(IEnumerable<string> addresses, int configuredOtlpPort, int webPort)
     {
         ArgumentNullException.ThrowIfNull(addresses);
@@ -67,6 +67,10 @@ public static class LoopbackBinding
                 if (port == configuredOtlpPort)
                     return port;
             }
+
+            // A miss must not fall through to the web listener. The caller treats a positive
+            // result as the port this process bound.
+            return 0;
         }
 
         if (configuredOtlpPort == 0)
@@ -78,7 +82,7 @@ public static class LoopbackBinding
             }
         }
 
-        return ports.Count > 0 ? ports[^1] : configuredOtlpPort;
+        return 0;
     }
 
     /// <summary>
