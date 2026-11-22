@@ -1098,7 +1098,8 @@ public static partial class CanonPricing
     /// reconciled to zero. A remainder is priced only for the stored classes and reported as
     /// <see cref="CostStatus.Partial"/>. When no reported input was stored, the input side is
     /// complete only if an input class was stored. An absent output class is not a measured
-    /// zero. A turn with no class and no reported total is not priced.
+    /// zero. Reasoning tokens are a subset of output, so a reasoning-only turn is not priced.
+    /// A turn with no billable class and no reported total is not priced.
     /// </summary>
     public static CostBlock PriceStoredTokens(
         long? freshInput,
@@ -1114,7 +1115,7 @@ public static partial class CanonPricing
     {
         bool canPriceInput = freshInput is not null || cacheRead is not null || cacheCreation is not null;
         bool canPriceOutput = output is not null || reportedOutput is not null;
-        bool storedClass = canPriceInput || output is not null || reasoning is not null;
+        bool storedClass = canPriceInput || output is not null;
         bool reportedInputOnly = !canPriceInput && !canPriceOutput && reportedInput is not null;
         if ((!storedClass && reportedInput is null && reportedOutput is null) || reportedInputOnly)
         {
