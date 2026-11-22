@@ -568,13 +568,7 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(capture);
         ArgumentNullException.ThrowIfNull(runtime);
 
-        SettingsView current = settings.GetSettings();
-        return DashHttp.NoStoreJson(StatusCodes.Status200OK, new
-        {
-            ok = true,
-            receiverHosted = current.ReceiverHosted,
-            jobsPaused = current.JobsPaused,
-        });
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, capture.GetCaptureStatus(runtime.StateDirectory));
     }
 
     private static async Task<IResult> CaptureConfigureAsync(

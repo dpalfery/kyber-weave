@@ -62,6 +62,29 @@ public class CaptureService : ICaptureService
 
         SettingsView current = settings.ReadSettings();
         bool factoryConsent = settings.ReadFactoryContentConsent(stateDir);
+        string platform = OperatingSystem.IsMacOS() ? "darwin" : OperatingSystem.IsWindows() ? "win32" : "linux";
+
+        var receiver = new
+        {
+            hosted = current.ReceiverHosted,
+            liveness = current.ReceiverHosted ? "kyberdash" : "none",
+            detail = current.ReceiverHosted
+                ? $"KyberDash receiver is listening at http://127.0.0.1:{OtlpCollector.DefaultOtlpPort}"
+                : "this KyberDash server does not host the OTLP receiver; liveness was not probed",
+        };
+
+        List<HarnessStatusView> harnessesList = BuildHarnessStatuses(factoryConsent);
+        int enabledCount = harnessesList.Count(static h => h.State == "on");
+
+        var check = new
+        {
+            checkedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
+            health = enabledCount > 0 ? "ok" : "off",
+            enabled = enabledCount,
+            attention = 0,
+            issueCount = 0,
+        };
+
         return JsonSerializer.SerializeToElement(new
         {
             ok = true,
@@ -69,14 +92,193 @@ public class CaptureService : ICaptureService
             jobsPaused = current.JobsPaused,
             otlpEndpoint = OtlpEndpointLabel,
             contentCapture = factoryConsent,
-            harnesses = new
-            {
-                opencode = new { harness = OpencodeHarness, installed = File.Exists(ResolvePluginFile(OpencodeHarness, null)) },
-                factory = new { harness = FactoryHarness, installed = Directory.Exists(ResolvePluginFile(FactoryHarness, null)), contentCapture = factoryConsent },
-            },
+            platform,
+            receiver,
+            harnesses = harnessesList,
+            check,
             stateDirectory = Path.GetFullPath(stateDir),
         });
     }
+
+    private static List<HarnessStatusView> BuildHarnessStatuses(bool factoryConsent)
+    {
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        List<HarnessStatusView> list = [];
+
+        // 1. Copilot
+        string copilotPath = OperatingSystem.IsMacOS()
+            ? Path.Combine(home, "Library", "Application Support", "Code", "User", "settings.json")
+            : OperatingSystem.IsWindows()
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Code", "User", "settings.json")
+                : Path.Combine(home, ".config", "Code", "User", "settings.json");
+        bool copilotExists = File.Exists(copilotPath);
+        bool copilotOn = false;
+        if (copilotExists)
+        {
+            try
+            {
+                string text = File.ReadAllText(copilotPath);
+                copilotOn = text.Contains("\"github.copilot.chat.otel.enabled\": true", StringComparison.OrdinalIgnoreCase)
+                    || text.Contains("\"github.copilot.chat.otel.enabled\":true", StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+        list.Add(new HarnessStatusView(
+            Id: "copilot",
+            DisplayName: "Copilot",
+            Mode: "managed",
+            Installed: copilotExists ? "detected" : "not-detected",
+            InstallEvidence: copilotExists ? [$"VS Code settings found at {copilotPath}"] : [$"VS Code settings not found at {copilotPath}"],
+            State: copilotOn ? "on" : "off",
+            Receipt: "absent",
+            Files: copilotExists ? [new HarnessFileView("vscode-settings", copilotPath, true, true, ["github.copilot.chat.otel.enabled"], copilotOn ? ["github.copilot.chat.otel.enabled"] : [], copilotOn ? [] : ["github.copilot.chat.otel.enabled"], [], null)] : [],
+            Warnings: [],
+            ManualSteps: [],
+            StatusLines: copilotOn ? ["OTLP export: enabled"] : ["OTLP export: disabled"],
+            Health: copilotOn ? "ok" : "off",
+            Issues: []
+        ));
+
+        // 2. Claude Code
+        string claudePath = Path.Combine(home, ".claude", "settings.json");
+        bool claudeExists = File.Exists(claudePath);
+        bool claudeOn = false;
+        if (claudeExists)
+        {
+            try
+            {
+                string text = File.ReadAllText(claudePath);
+                claudeOn = text.Contains("OTEL_EXPORTER_OTLP_ENDPOINT", StringComparison.OrdinalIgnoreCase)
+                    || text.Contains("OTEL_LOGS_EXPORTER", StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+        list.Add(new HarnessStatusView(
+            Id: "claude-code",
+            DisplayName: "Claude Code",
+            Mode: "managed",
+            Installed: claudeExists ? "detected" : "not-detected",
+            InstallEvidence: claudeExists ? [$"config found at {claudePath}"] : [$"no config found at {claudePath}"],
+            State: claudeOn ? "on" : "off",
+            Receipt: "absent",
+            Files: claudeExists ? [new HarnessFileView("claude-settings", claudePath, true, true, ["env.OTEL_EXPORTER_OTLP_ENDPOINT"], claudeOn ? ["env.OTEL_EXPORTER_OTLP_ENDPOINT"] : [], claudeOn ? [] : ["env.OTEL_EXPORTER_OTLP_ENDPOINT"], [], null)] : [],
+            Warnings: [],
+            ManualSteps: [],
+            StatusLines: claudeOn ? ["OTLP export: enabled"] : ["OTLP export: disabled"],
+            Health: claudeOn ? "ok" : "off",
+            Issues: []
+        ));
+
+        // 3. OpenCode
+        string opencodeConfig = Path.Combine(home, ".config", "opencode", "opencode.jsonc");
+        string opencodePlugin = Path.Combine(home, ".config", "opencode", "plugins", "kyberdash.ts");
+        bool opencodeInstalled = File.Exists(opencodeConfig) || File.Exists(opencodePlugin);
+        bool opencodeOn = File.Exists(opencodePlugin);
+        list.Add(new HarnessStatusView(
+            Id: "opencode",
+            DisplayName: "OpenCode",
+            Mode: "managed",
+            Installed: opencodeInstalled ? "detected" : "not-detected",
+            InstallEvidence: opencodeInstalled ? [$"config found at {opencodeConfig}"] : [$"no config found at {opencodeConfig}"],
+            State: opencodeOn ? "on" : "off",
+            Receipt: "absent",
+            Files: [],
+            Warnings: [],
+            ManualSteps: [],
+            StatusLines: opencodeOn ? ["plugin: installed"] : ["plugin: not installed"],
+            Health: opencodeOn ? "ok" : "off",
+            Issues: []
+        ));
+
+        // 4. Codex
+        string codexConfig = Path.Combine(home, ".codex", "config.toml");
+        bool codexExists = File.Exists(codexConfig);
+        list.Add(new HarnessStatusView(
+            Id: "codex",
+            DisplayName: "Codex",
+            Mode: "status-only",
+            Installed: codexExists ? "detected" : "not-detected",
+            InstallEvidence: codexExists ? [$"config found at {codexConfig}"] : [$"no config found at {codexConfig}"],
+            State: "not-applicable",
+            Receipt: "absent",
+            Files: [],
+            Warnings: [],
+            ManualSteps: [],
+            StatusLines: ["coverage comes from session files"],
+            Health: "read-only",
+            Issues: []
+        ));
+
+        // 5. Pi
+        string piConfig = Path.Combine(home, ".pi", "agent", "settings.json");
+        bool piExists = File.Exists(piConfig);
+        list.Add(new HarnessStatusView(
+            Id: "pi",
+            DisplayName: "Pi",
+            Mode: "status-only",
+            Installed: piExists ? "detected" : "not-detected",
+            InstallEvidence: piExists ? [$"agent settings found at {piConfig}"] : [$"no settings found at {piConfig}"],
+            State: "not-applicable",
+            Receipt: "absent",
+            Files: [],
+            Warnings: [],
+            ManualSteps: [],
+            StatusLines: ["coverage comes from session files"],
+            Health: "read-only",
+            Issues: []
+        ));
+
+        // 6. Factory
+        string factoryDir = Environment.GetEnvironmentVariable("FACTORY_DIR") is { Length: > 0 } fDir
+            ? fDir
+            : Path.Combine(home, ".factory");
+        bool factoryExists = Directory.Exists(factoryDir);
+        list.Add(new HarnessStatusView(
+            Id: "factory",
+            DisplayName: "Factory",
+            Mode: "managed",
+            Installed: factoryExists ? "detected" : "not-detected",
+            InstallEvidence: factoryExists ? [$"directory found at {factoryDir}"] : [$"directory not found at {factoryDir}"],
+            State: factoryConsent ? "on" : "off",
+            Receipt: "absent",
+            Files: [],
+            Warnings: [],
+            ManualSteps: [],
+            StatusLines: factoryConsent ? ["content consent: on"] : ["content consent: off"],
+            Health: factoryConsent ? "ok" : "off",
+            Issues: []
+        ));
+
+        return list;
+    }
+
+    /// <summary>File-level status entry for harness configuration.</summary>
+    internal record HarnessFileView(
+        string Id,
+        string Path,
+        bool Applicable,
+        bool? Exists,
+        IReadOnlyList<string> ExpectedKeys,
+        IReadOnlyList<string> PresentKeys,
+        IReadOnlyList<string> MissingKeys,
+        IReadOnlyList<string> MismatchedKeys,
+        object? Drift);
+
+    /// <summary>Status entry for one AI coding harness.</summary>
+    internal record HarnessStatusView(
+        string Id,
+        string DisplayName,
+        string Mode,
+        string Installed,
+        IReadOnlyList<string> InstallEvidence,
+        string State,
+        string Receipt,
+        IReadOnlyList<HarnessFileView> Files,
+        IReadOnlyList<object> Warnings,
+        IReadOnlyList<object> ManualSteps,
+        IReadOnlyList<string> StatusLines,
+        string? Health,
+        IReadOnlyList<object> Issues);
 
     /// <inheritdoc />
     public JsonElement ConfigureCapture(JsonElement body, string stateDir)
