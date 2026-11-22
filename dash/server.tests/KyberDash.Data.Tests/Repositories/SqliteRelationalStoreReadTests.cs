@@ -137,6 +137,13 @@ public class SqliteRelationalStoreReadTests : IDisposable
             tokens: [new CollectedTokenCount(TokenClass.Output, 10)],
             reportedInput: null,
             reportedOutput: null);
+        WritePricedTurn(
+            sqlite,
+            memory,
+            "sess-input-only",
+            tokens: [new CollectedTokenCount(TokenClass.Input, 100)],
+            reportedInput: null,
+            reportedOutput: null);
 
         AssertPricedAlike(sqlite, memory, pricing, "sess-absent", CostStatus.NoRate, null);
         AssertPricedAlike(sqlite, memory, pricing, "sess-zero", CostStatus.Priced, 0d);
@@ -147,6 +154,7 @@ public class SqliteRelationalStoreReadTests : IDisposable
         AssertPricedAlike(sqlite, memory, pricing, "sess-remainder", CostStatus.Partial, (100 * inputRate) + (10 * outputRate));
         AssertPricedAlike(sqlite, memory, pricing, "sess-reported-output-fills", CostStatus.Priced, (100 * inputRate) + (40 * outputRate));
         AssertPricedAlike(sqlite, memory, pricing, "sess-output-only", CostStatus.Partial, 10 * outputRate);
+        AssertPricedAlike(sqlite, memory, pricing, "sess-input-only", CostStatus.Partial, 100 * inputRate);
     }
 
     private static void WritePricedTurn(
