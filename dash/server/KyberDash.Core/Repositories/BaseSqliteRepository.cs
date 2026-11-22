@@ -104,6 +104,7 @@ public abstract partial class BaseSqliteRepository
         {
             DataSource = DatabasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
+            Pooling = false,
             DefaultTimeout = Math.Max(1, (int)Math.Ceiling(busyTimeoutMilliseconds / 1000.0)),
         }.ToString();
 
