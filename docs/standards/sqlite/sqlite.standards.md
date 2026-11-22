@@ -44,10 +44,11 @@ that catalog, in parent-before-child order. A hand-written `CREATE TABLE` or
 `ALTER TABLE` for `canon.db` is a finding: the catalog and the generator are the only
 writers.
 
-The store is opened through the system `sqlite3` CLI (`BaseSqliteRepository`,
-`ExecuteSqliteCore`). `Microsoft.Data.Sqlite` and `SQLitePCLRaw` are not dependencies.
-The native library `SQLitePCLRaw.lib.e_sqlite3` carries advisory GHSA-2m69-gcr7-jv3q,
-which is why the CLI is the boundary ([ADR 0084](../../adr/0084-kyberdash-csharp-engine.md)).
+The store is opened through in-process ADO.NET (`Microsoft.Data.Sqlite.Core`,
+`BaseSqliteRepository`). `SQLitePCLRaw.provider.sqlite3` links against the system-provided
+dynamic library (`/usr/lib/libsqlite3.dylib` on macOS / system SQLite on Linux and Windows),
+keeping the vulnerable bundled binary `SQLitePCLRaw.lib.e_sqlite3` (advisory GHSA-2m69-gcr7-jv3q)
+out of the dependency graph while avoiding the multi-process spawning overhead of the CLI.
 
 ## Coding standards
 

@@ -6,16 +6,21 @@ using System.Text.RegularExpressions;
 using KyberDash.Core.Exceptions;
 using KyberDash.Core.Processes;
 using KyberDash.Core.Resilience;
+using Microsoft.Data.Sqlite;
+using SQLitePCL;
 
 namespace KyberDash.Core.Repositories;
 
 /// <summary>
-/// Base SQLite repository wrapping <c>sqlite3</c> CLI execution with busy retries and a Polly
+/// Base SQLite repository wrapping in-process SQLite execution with busy retries and a Polly
 /// <see cref="ICircuitBreaker"/> guard so persistent store failures fail fast instead of
 /// hanging the daemon.
 /// </summary>
 public abstract partial class BaseSqliteRepository
 {
+    private static readonly Lock ProviderGate = new();
+    private static bool ProviderInitialized;
+
     private const int SqliteBusyResultCode = 5;
     private const int SqliteLockedResultCode = 6;
 
@@ -26,8 +31,20 @@ public abstract partial class BaseSqliteRepository
     /// <summary>Filesystem path to the SQLite database managed by this repository.</summary>
     public string DatabasePath { get; }
 
-    /// <summary>Circuit breaker guarding <c>sqlite3</c> invocations.</summary>
+    /// <summary>Circuit breaker guarding database invocations.</summary>
     protected ICircuitBreaker CircuitBreaker { get; }
+
+    /// <summary>Ensures the system sqlite3 dynamic library provider is registered once.</summary>
+    protected static void EnsureSqliteProviderInitialized()
+    {
+        if (ProviderInitialized) return;
+        lock (ProviderGate)
+        {
+            if (ProviderInitialized) return;
+            raw.SetProvider(new SQLite3Provider_sqlite3());
+            ProviderInitialized = true;
+        }
+    }
 
     /// <summary>Initializes a new <see cref="BaseSqliteRepository"/>.</summary>
     protected BaseSqliteRepository(
@@ -66,48 +83,95 @@ public abstract partial class BaseSqliteRepository
     }
 
     /// <summary>Executes a single SQLite batch run without modifying circuit-breaker state directly.</summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA2100:Review SQL queries for security vulnerabilities", Justification = "Internal engine executes parameterized and literal-escaped SQL scripts.")]
     protected virtual string ExecuteSqliteCore(string sql)
     {
         ArgumentNullException.ThrowIfNull(sql);
-        string boundedInput = $".timeout {busyTimeoutMilliseconds.ToString(CultureInfo.InvariantCulture)}\n{sql}";
+        EnsureSqliteProviderInitialized();
+
+        string cleanedSql = StripCliDotCommands(sql);
+        if (string.IsNullOrWhiteSpace(cleanedSql))
+            return string.Empty;
+
+        string connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = DatabasePath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            DefaultTimeout = Math.Max(1, busyTimeoutMilliseconds / 1000),
+        }.ToString();
 
         for (int attempt = 1; attempt <= busyAttempts; attempt++)
         {
-            ProcessStartInfo startInfo = CreateStartInfo();
-            startInfo.ArgumentList.Add("-batch");
-            startInfo.ArgumentList.Add("-bail");
-            startInfo.ArgumentList.Add(DatabasePath);
-
-            ProcessResult result;
             try
             {
-                result = ProcessRunner.Run(startInfo, boundedInput, batchTimeout);
+                using SqliteConnection connection = new(connectionString);
+                connection.Open();
+
+                using SqliteCommand command = connection.CreateCommand();
+                command.CommandTimeout = Math.Max(1, (int)batchTimeout.TotalSeconds);
+                command.CommandText = cleanedSql;
+
+                using SqliteDataReader reader = command.ExecuteReader();
+                StringBuilder sb = new();
+                bool hasMore = true;
+                while (hasMore)
+                {
+                    while (reader.Read())
+                    {
+                        for (int i = 0; i < reader.FieldCount; i++)
+                        {
+                            if (i > 0)
+                                sb.Append('\t');
+                            if (!reader.IsDBNull(i))
+                            {
+                                object value = reader.GetValue(i);
+                                if (value is byte[] bytes)
+                                    sb.Append(Convert.ToHexString(bytes));
+                                else
+                                    sb.Append(Convert.ToString(value, CultureInfo.InvariantCulture));
+                            }
+                        }
+                        sb.Append('\n');
+                    }
+                    hasMore = reader.NextResult();
+                }
+
+                return sb.ToString();
             }
-            catch (Win32Exception exception)
+            catch (SqliteException ex) when (ex.SqliteErrorCode is SqliteBusyResultCode or SqliteLockedResultCode)
             {
-                throw new SqliteExecutionException("The 'sqlite3' executable is unavailable.", exception);
+                if (attempt < busyAttempts)
+                {
+                    Thread.Sleep(50 * attempt);
+                    continue;
+                }
+                throw new SqliteExecutionException($"sqlite3 error {ex.SqliteErrorCode}: {ex.Message}", ex.SqliteErrorCode, ex.Message);
             }
-            catch (TimeoutException exception)
+            catch (SqliteException ex)
             {
-                throw new SqliteExecutionException(
-                    "The canonical store did not answer within the time limit, so the sqlite3 batch was stopped.",
-                    exception);
+                throw new SqliteExecutionException($"sqlite3 error {ex.SqliteErrorCode}: {ex.Message}", ex.SqliteErrorCode, ex.Message);
             }
-
-            if (result.ExitCode == 0)
-                return result.StandardOutput;
-
-            if (IsBusy(result) && attempt < busyAttempts)
-                continue;
-
-            string combinedError = (result.StandardOutput + "\n" + result.StandardError).Trim();
-            throw new SqliteExecutionException(
-                $"sqlite3 exited with code {result.ExitCode.ToString(CultureInfo.InvariantCulture)}: {combinedError}",
-                result.ExitCode,
-                combinedError);
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new SqliteExecutionException($"Database access error: {ex.Message}", ex);
+            }
         }
 
         throw new SqliteExecutionException("The canonical store operation did not complete.");
+    }
+
+    private static string StripCliDotCommands(string sql)
+    {
+        string[] lines = sql.Split('\n');
+        StringBuilder sb = new();
+        foreach (string line in lines)
+        {
+            string trimmed = line.TrimStart();
+            if (trimmed.StartsWith('.'))
+                continue;
+            sb.AppendLine(line);
+        }
+        return sb.ToString().Trim();
     }
 
     /// <summary>Encodes a UTF-8 string as an injection-proof SQLite <c>CAST(X'...' AS TEXT)</c> literal.</summary>

@@ -307,7 +307,9 @@ public record IngestAdmissionResult(
 public record ServerInfo(
     [property: JsonPropertyName("port")] int Port,
     [property: JsonPropertyName("pid")] int Pid,
-    [property: JsonPropertyName("startedAt")] string StartedAt);
+    [property: JsonPropertyName("startedAt")] string StartedAt,
+    [property: JsonPropertyName("url")] Uri? Url = null,
+    [property: JsonPropertyName("apiVersion")] int ApiVersion = 1);
 
 /// <summary>Snapshot of the in-process background job host state.</summary>
 public record JobHostStatus(
