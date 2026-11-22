@@ -413,8 +413,8 @@ stated acceptance criterion, a plan contract or base behaviour (any security, da
 corruption risk is always a defect), hardening meets the request, the plan and base behaviour and
 only makes the code sturdier, and a plan objection disagrees with an approved plan decision. The
 basis is what the finding breaks, quoted: the acceptance criterion, the plan line or the base
-behaviour. Both are optional, are recorded in `findings.json` under the same names, and a
-findings.json written before them still reads.
+behaviour. Both are optional, are recorded in `findings.json` under the same names for a finding
+the verdict keeps, and a findings.json written before them still reads.
 
 A findings or `NO FINDINGS` seat that wrote no `Discovery:` line, read files directly with no index lookup and no
 `Index fallback:` line, wrote an `Index fallback:` value outside the three modes, or wrote two
@@ -1141,6 +1141,19 @@ request: ready stays decided by required CI alone.
 Each cycle keeps its record in `.agent_scratchpad/<task-id>/review/cycle-<n>/` — the `seats`
 folder, `gates.json`, the `findings.json` the verdict command writes, and `cycle.json` — until the run
 ends.
+
+**Kind routing.** The verdict routes each finding by its `kind:` as well as its severity. A
+`defect`, and a finding whose seat wrote no kind (read as a defect, with a `KW-REVIEW-063` warning
+per finding), follows the severity and fix-level rules above; a finding from the `security` lens is
+always a defect whatever kind it carries. A `plan-objection` never takes a fix round: it is dropped
+with the reason `pr note: plan objection: <basis or "no basis quoted">`. A `hardening` survives only
+inside the cycle schedule: cycle 1 keeps a major or critical one the fix level would take, cycle 2
+keeps only a critical one, and cycle 3 and later keep none; every other hardening is dropped with
+`pr note: hardening outside the cycle <n> schedule`. Such a dropped finding is follow-up work, never
+a `fix:` line or a fix count, and it is not written to `findings.json`, so the next cycle's recheck
+never re-checks it. The cycle number is the `cycle-<n>` folder the `--out` or `--gates` path sits in,
+else the cycle after the `--prior` folder; when none names one, the verdict routes as cycle 1 and
+reports that (`KW-REVIEW-063`).
 
 **A recorded cycle is prior only when it belongs to this change.** The scratchpad is git-ignored, so
 a reset or clean leaves the folders of an earlier run behind, and a brand-new change could otherwise read
