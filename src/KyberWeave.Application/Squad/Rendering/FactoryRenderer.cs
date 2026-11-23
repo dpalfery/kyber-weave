@@ -57,7 +57,9 @@ namespace KyberWeave.Core.Squad.Rendering;
 ///         squad's own declaration, and a squad that declares none grants none. Only an empty whitelist
 ///         records <c>permission-not-expressible</c> saying parent MCP was not inherited; a deliberately
 ///         whitelisted droid is a non-degraded outcome and makes no such claim, so the two outcomes stay
-///         distinguishable in the degradation stream.
+///         distinguishable in the degradation stream — except that a whitelisted server the toolchain
+///         roster drops is named there too, since the whitelist would otherwise claim a grant that
+///         reaches nothing.
 ///     </para>
 ///     <para>
 ///         Profile-declared shared identities suppress their skill projections per the native
@@ -183,6 +185,14 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
             mcpServers,
             context.Source.Toolchain.RequiredMcpTools);
 
+        // A granted server with no roster entry is a grant that reaches nothing: name it in
+        // the degradation stream rather than leaving a whitelist that claims it.
+        IReadOnlyList<string> droppedMcpServers =
+        [
+            .. mcpServers.Where(server =>
+                !context.Source.Toolchain.RequiredMcpTools.ContainsKey(server))
+        ];
+
         context.AddPrincipal(RenderDroid(context, agent, mcpServers, mcpToolIds), agent.Resources);
 
         context.AddEntryPointSkillProjection(
@@ -194,9 +204,10 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
                 fallbackProfile,
                 context.CapabilityProfiles,
                 mcpServers,
+                droppedMcpServers,
                 path,
                 reused),
-            () => BuildDegradationRecords(agent, context.CapabilityProfiles, mcpServers));
+            () => BuildDegradationRecords(agent, context.CapabilityProfiles, mcpServers, droppedMcpServers));
     }
 
     private protected override void RenderCanonicalSkills(SquadHarnessRenderContext context) =>
@@ -406,6 +417,7 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
         SquadFallbackProfile fallbackProfile,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
         IReadOnlyList<string> mcpServers,
+        IReadOnlyList<string> droppedMcpServers,
         string entryPointSkillPath,
         bool reusedCanonicalSkill = false)
     {
@@ -433,6 +445,7 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
                      agent,
                      capabilityProfiles,
                      mcpServers,
+                     droppedMcpServers,
                      $"The same-name entry point at {entryPointSkillPath} runs under the " +
                      "session's permissions; the droid's explicit tools allow-list and " +
                      $"{DescribeMcpServers(mcpServers)} do not apply to it."))
@@ -443,6 +456,7 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
         IReadOnlyList<string> mcpServers,
+        IReadOnlyList<string> droppedMcpServers,
         string? entryPointSkillNote = null)
     {
         if (!capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
@@ -499,7 +513,13 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
         // The withholding sentence describes an empty whitelist only. A whitelisted droid is a
         // non-degraded outcome, so it carries no MCP claim at all — the entry-point caveat is
         // the one place a whitelisted primary's value is named, and it is passed in separately.
+        // The exception is a whitelisted server the roster drops: the whitelist claims it while
+        // tools carries nothing for it, so each dropped server is named here.
         if (mcpServers.Count == 0) notExpressibleDetails.Add(McpWithheldSentence);
+        foreach (string dropped in droppedMcpServers)
+            notExpressibleDetails.Add(
+                $"MCP server '{dropped}' is whitelisted under mcpServers but the toolchain roster "
+                + $"names no tools for it, so no {dropped}___ entries were emitted under tools.");
 
         if (entryPointSkillNote is not null) notExpressibleDetails.Add(entryPointSkillNote);
 
