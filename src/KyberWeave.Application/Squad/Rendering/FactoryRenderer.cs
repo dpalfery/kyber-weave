@@ -342,13 +342,37 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
             servers.ValueKind != JsonValueKind.Object)
             return [];
 
-        return
-        [
-            .. servers.EnumerateObject()
-                .Select(server => server.Name)
-                .Where(name => !string.Equals(name, ArbiterServer, StringComparison.Ordinal))
-                .OrderBy(name => name, StringComparer.Ordinal)
-        ];
+        List<string> names = [];
+        foreach (JsonProperty server in servers.EnumerateObject())
+        {
+            if (string.Equals(server.Name, ArbiterServer, StringComparison.Ordinal))
+                continue;
+
+            // A name outside the portable set would split the plain-style YAML flow
+            // sequence and the {server}___{tool} id alike, so a malformed declaration
+            // fails the render instead of emitting a whitelist that parses as two servers.
+            if (!IsPortableServerName(server.Name))
+                throw new SquadRenderValidationException(
+                    $"MCP server name '{server.Name}' in 'mcpServers' is not usable in a "
+                    + "qualified Factory tool name. Use only letters, digits, underscore, and hyphen.");
+
+            names.Add(server.Name);
+        }
+
+        names.Sort(StringComparer.Ordinal);
+        return names;
+    }
+
+    /// <summary>
+    ///     The character set a declared MCP server name survives: the same portable set the
+    ///     toolchain roster enforces, since the name lands in a plain YAML scalar and a
+    ///     <c>{server}___{tool}</c> id alike.
+    /// </summary>
+    private static bool IsPortableServerName(string value)
+    {
+        return !string.IsNullOrEmpty(value) &&
+               value.All(character =>
+                   char.IsAsciiLetterOrDigit(character) || character is '_' or '-');
     }
 
     /// <summary>
