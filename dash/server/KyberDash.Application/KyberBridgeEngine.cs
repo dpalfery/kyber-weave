@@ -60,6 +60,9 @@ public class KyberBridgeEngine
     /// <summary>Default number of subagents on a session's subagent page.</summary>
     public const int DefaultSubagentPageLimit = 25;
 
+    /// <summary>Rows per page the section list routes serve when the request names no limit.</summary>
+    public const int DefaultSectionPageLimit = 25;
+
     /// <summary>Session marker answered when a single session's projection read fails.</summary>
     private const string ProjectionFailedStatus = "PROJECTION_FAILED";
 
@@ -596,7 +599,141 @@ public class KyberBridgeEngine
         return JsonSerializer.SerializeToElement(payload, CamelCaseJsonOptions);
     }
 
-    /// <summary>Returns turn-level figures for <paramref name="turnIndex"/> in <paramref name="sessionId"/>, or <see langword="null"/>.</summary>
+    /// <summary>
+    /// Returns the requests section payload — one page of the session's request rows, each with
+    /// the prompt preview its page read carries — or <see langword="null"/> when the session has
+    /// no projection.
+    /// </summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page.</param>
+    /// <returns>Paging envelope JSON element, or <see langword="null"/>.</returns>
+    /// <remarks>
+    /// The rows answer from the content-free request figures plus one prompt-preview read scoped
+    /// to exactly the page's request spans — the section's sanctioned content read — so the
+    /// previews never cost the session's whole conversation.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
+    public JsonElement? GetSessionRequests(string sessionId, int page = 1, int limit = DefaultSectionPageLimit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        EnsureProjected();
+        // The section 404 check reads the projection header row, not the whole projection the
+        // detail route loads.
+        if (projections.SessionHeadersByKeys([sessionId]).Count == 0)
+        {
+            return null;
+        }
+
+        (SessionRequestFigurePageResult? pageResult, string? projectionStatus) = TrySessionRequestFigures(sessionId, page, limit);
+        IReadOnlyList<ReadTimeSessionRequestSummary> items = pageResult?.Items ?? [];
+        Dictionary<string, string?> previews = items.Count == 0
+            ? new Dictionary<string, string?>(StringComparer.Ordinal)
+            : new Dictionary<string, string?>(
+                reader.RequestPromptPreviews(sessionId, [.. items.Select(static request => request.RequestSpanId)]),
+                StringComparer.Ordinal);
+        List<Dictionary<string, object?>> rows = RequestRows(
+        [
+            .. items.Select(request => previews.TryGetValue(request.RequestSpanId, out string? preview) ? request with { PromptPreview = preview } : request),
+        ]);
+
+        Dictionary<string, object?> payload = PagingEnvelope(
+            "requests",
+            rows,
+            pageResult?.Total ?? 0,
+            limit,
+            PageOffset(page, limit),
+            page);
+        if (projectionStatus is not null)
+        {
+            payload["projection_status"] = projectionStatus;
+        }
+
+        return JsonSerializer.SerializeToElement(payload, CamelCaseJsonOptions);
+    }
+
+    /// <summary>
+    /// Returns the reconciliation section payload — one page of the session's measurable
+    /// reconciliation rows — or <see langword="null"/> when the session has no projection.
+    /// </summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page.</param>
+    /// <returns>Paging envelope JSON element, or <see langword="null"/>.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
+    public JsonElement? GetSessionReconciliation(string sessionId, int page = 1, int limit = DefaultSectionPageLimit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        EnsureProjected();
+        // The section 404 check reads the projection header row, not the whole projection the
+        // detail route loads.
+        if (projections.SessionHeadersByKeys([sessionId]).Count == 0)
+        {
+            return null;
+        }
+
+        (SessionReconciliationFigurePageResult? pageResult, string? projectionStatus) = TrySessionReconciliationFigures(sessionId, page, limit);
+        List<Dictionary<string, object?>> rows = ReconciliationRows(pageResult?.Items ?? []);
+
+        Dictionary<string, object?> payload = PagingEnvelope(
+            "reconciliation",
+            rows,
+            pageResult?.Total ?? 0,
+            limit,
+            PageOffset(page, limit),
+            page);
+        if (projectionStatus is not null)
+        {
+            payload["projection_status"] = projectionStatus;
+        }
+
+        return JsonSerializer.SerializeToElement(payload, CamelCaseJsonOptions);
+    }
+
+    /// <summary>
+    /// Returns the problems section payload — one page of the session's stored ingest problems —
+    /// or <see langword="null"/> when the session has no projection.
+    /// </summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page.</param>
+    /// <returns>Paging envelope JSON element, or <see langword="null"/>.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
+    public JsonElement? GetSessionProblems(string sessionId, int page = 1, int limit = DefaultSectionPageLimit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        EnsureProjected();
+        // The section 404 check reads the projection header row, not the whole projection the
+        // detail route loads.
+        if (projections.SessionHeadersByKeys([sessionId]).Count == 0)
+        {
+            return null;
+        }
+
+        (SessionProblemPageResult? pageResult, string? projectionStatus) = TrySessionProblems(sessionId, page, limit);
+        Dictionary<string, object?> payload = PagingEnvelope(
+            "problems",
+            [.. (pageResult?.Items ?? []).Select(static problem => (object)problem)],
+            pageResult?.Total ?? 0,
+            limit,
+            PageOffset(page, limit),
+            page);
+        if (projectionStatus is not null)
+        {
+            payload["projection_status"] = projectionStatus;
+        }
+
+        return JsonSerializer.SerializeToElement(payload, CamelCaseJsonOptions);
+    }
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="turnIndex">Zero-based turn index.</param>
     /// <returns>Turn figures JSON element, or <see langword="null"/>.</returns>
@@ -2105,6 +2242,69 @@ public class KyberBridgeEngine
         try
         {
             return (reader.SessionTurnFigures(sessionKey, lookup), null);
+        }
+        catch (Exception ex)
+        {
+            RecordProjectionFailure(sessionKey, ex.Message);
+            return (null, ProjectionFailedStatus);
+        }
+    }
+
+    /// <summary>Reads a page of a session's request rows, isolating any fault to that session.</summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page.</param>
+    /// <returns>The request page when readable, and the isolation marker when the read failed.</returns>
+    private (SessionRequestFigurePageResult? Page, string? ProjectionStatus) TrySessionRequestFigures(
+        string sessionKey,
+        int page,
+        int limit)
+    {
+        try
+        {
+            return (reader.SessionRequestFigures(sessionKey, page, limit), null);
+        }
+        catch (Exception ex)
+        {
+            RecordProjectionFailure(sessionKey, ex.Message);
+            return (null, ProjectionFailedStatus);
+        }
+    }
+
+    /// <summary>Reads a page of a session's reconciliation rows, isolating any fault to that session.</summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page.</param>
+    /// <returns>The reconciliation page when readable, and the isolation marker when the read failed.</returns>
+    private (SessionReconciliationFigurePageResult? Page, string? ProjectionStatus) TrySessionReconciliationFigures(
+        string sessionKey,
+        int page,
+        int limit)
+    {
+        try
+        {
+            return (reader.SessionReconciliationFigures(sessionKey, page, limit), null);
+        }
+        catch (Exception ex)
+        {
+            RecordProjectionFailure(sessionKey, ex.Message);
+            return (null, ProjectionFailedStatus);
+        }
+    }
+
+    /// <summary>Reads a page of a session's stored ingest problems, isolating any fault to that session.</summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page.</param>
+    /// <returns>The problem page when readable, and the isolation marker when the read failed.</returns>
+    private (SessionProblemPageResult? Page, string? ProjectionStatus) TrySessionProblems(
+        string sessionKey,
+        int page,
+        int limit)
+    {
+        try
+        {
+            return (reader.SessionProblems(sessionKey, page, limit), null);
         }
         catch (Exception ex)
         {

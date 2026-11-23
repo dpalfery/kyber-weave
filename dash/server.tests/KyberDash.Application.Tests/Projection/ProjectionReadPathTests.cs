@@ -595,6 +595,18 @@ public class ProjectionReadPathTests
         public virtual SessionTurnFigureSet? SessionTurnFigures(string sessionKey, IModelPricingLookup? pricing = null) => inner.SessionTurnFigures(sessionKey, pricing);
 
         /// <inheritdoc />
+        public virtual SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit) => inner.SessionRequestFigures(sessionKey, page, limit);
+
+        /// <inheritdoc />
+        public virtual SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit) => inner.SessionReconciliationFigures(sessionKey, page, limit);
+
+        /// <inheritdoc />
+        public virtual SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit) => inner.SessionProblems(sessionKey, page, limit);
+
+        /// <inheritdoc />
+        public IReadOnlyDictionary<string, string?> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds) => inner.RequestPromptPreviews(sessionKey, requestSpanIds);
+
+        /// <inheritdoc />
         public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey) => inner.SessionRecordsContentFree(sessionKey);
     }
 

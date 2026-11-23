@@ -13,7 +13,8 @@ namespace KyberDash.Application.Tests.Sessions;
 /// reads: <see cref="KyberBridgeEngine.GetSessionSummary"/> carries every field the summary
 /// section renders with parity to the detail payload it widens, the charts section equals the
 /// detail payload's turn list and context object without paying for any other section's reads,
-/// the turn section carries that turn's stored context buckets, and the run page's turn list
+/// the turn section carries that turn's stored context buckets, the requests, reconciliation and
+/// problems sections page today's rows at 25 with the true total, and the run page's turn list
 /// comes from the same per-session turn figures.
 /// </summary>
 public sealed class SessionSectionEndpointsTests
@@ -173,6 +174,191 @@ public sealed class SessionSectionEndpointsTests
     }
 
     /// <summary>
+    /// The requests section pages today's request rows at 25 with the true total, and carries the
+    /// prompt previews the page's requests own — read in one scoped pass over exactly the page's
+    /// request spans, never the session's whole conversation.
+    /// </summary>
+    [Fact]
+    public void TheRequestsSectionPagesAt25AndCarriesTodaysRows()
+    {
+        PreviewCapturingStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-sections";
+        WriteSectionSession(store, sessionKey);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        JsonElement detail = bridge.GetSessionDetail(sessionKey)!.Value;
+        JsonElement[] detailRows = [.. detail.GetProperty("requests").EnumerateArray()];
+
+        store.ClearReadLog();
+        JsonElement page = bridge.GetSessionRequests(sessionKey)!.Value;
+
+        Assert.Equal(detailRows.Length, page.GetProperty("total").GetInt32());
+        JsonElement[] rows = [.. page.GetProperty("requests").EnumerateArray()];
+        Assert.Equal(25, rows.Length);
+        for (int index = 0; index < rows.Length; index++)
+        {
+            Assert.Equal(detailRows[index].GetProperty("request").GetRawText(), rows[index].GetProperty("request").GetRawText());
+            Assert.Equal(detailRows[index].GetProperty("timestamp").GetRawText(), rows[index].GetProperty("timestamp").GetRawText());
+            Assert.Equal(detailRows[index].GetProperty("turns").GetRawText(), rows[index].GetProperty("turns").GetRawText());
+            Assert.Equal(detailRows[index].GetProperty("model").GetRawText(), rows[index].GetProperty("model").GetRawText());
+        }
+
+        // Every preview is the scoped part read's first 200 characters of the page's requests'
+        // own prompt parts, which the detail payload cannot carry on its content-free pass.
+        Assert.All(rows, static row => Assert.Equal(new string('x', 200), row.GetProperty("prompt").GetString()));
+
+        // One prompt-preview read answered exactly the page's request spans.
+        IReadOnlyList<string> previewRead = Assert.Single(store.PromptPreviewReads);
+        Assert.True(previewRead.Count <= 25, $"the prompt read took {previewRead.Count} ids");
+        Assert.Equal(
+            rows.Select(static row => row.GetProperty("request").GetString() ?? string.Empty).ToList(),
+            previewRead.ToList());
+
+        // The requests read is the section's own content-free pass plus the one scoped prompt
+        // read; the projection reads are the 404 header check and EnsureProjected's guards.
+        Assert.Equal(
+            (IReadOnlyList<string>)[nameof(InMemoryRelationalStore.SessionRequestFigures), nameof(InMemoryRelationalStore.RequestPromptPreviews)],
+            store.ReadLog.Where(static read => read != "CountRecords").ToList());
+        Assert.Equal(
+            (IReadOnlyList<string>)[nameof(InMemoryRelationalStore.SessionHeadersByKeys)],
+            store.SessionProjectionReadLog
+                .Where(static read => read is not ("ListSessionProjections" or "ListHarnessRollups"))
+                .ToList());
+        Assert.DoesNotContain(store.ReadLog, static read => ContentBearingReads.Contains(read));
+
+        // Page 2 continues the rows and pays its own prompt read; a page past the end answers
+        // empty with the true total.
+        store.ClearReadLog();
+        store.PromptPreviewReads.Clear();
+        JsonElement second = bridge.GetSessionRequests(sessionKey, page: 2)!.Value;
+        Assert.Equal(detailRows[25].GetProperty("request").GetRawText(), second.GetProperty("requests").EnumerateArray().First().GetProperty("request").GetRawText());
+        Assert.Equal(detailRows.Length, second.GetProperty("total").GetInt32());
+        _ = Assert.Single(store.PromptPreviewReads);
+
+        store.ClearReadLog();
+        store.PromptPreviewReads.Clear();
+        JsonElement lastPage = bridge.GetSessionRequests(sessionKey, page: 6)!.Value;
+        Assert.Equal(3, lastPage.GetProperty("requests").EnumerateArray().Count());
+        Assert.Equal(detailRows[127].GetProperty("request").GetRawText(), lastPage.GetProperty("requests").EnumerateArray().Last().GetProperty("request").GetRawText());
+        Assert.Equal(detailRows.Length, lastPage.GetProperty("total").GetInt32());
+
+        store.ClearReadLog();
+        store.PromptPreviewReads.Clear();
+        JsonElement past = bridge.GetSessionRequests(sessionKey, page: 7)!.Value;
+        Assert.Empty(past.GetProperty("requests").EnumerateArray().ToList());
+        Assert.Equal(detailRows.Length, past.GetProperty("total").GetInt32());
+    }
+
+    /// <summary>
+    /// The reconciliation section pages today's measurable reconciliation rows at 25 with the true
+    /// total, in turn order, from the content-free reconciliation figures alone.
+    /// </summary>
+    [Fact]
+    public void TheReconciliationSectionPagesAt25AndCarriesTodaysRows()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-sections";
+        WriteSectionSession(store, sessionKey);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        JsonElement detail = bridge.GetSessionDetail(sessionKey)!.Value;
+        JsonElement[] detailRows = [.. detail.GetProperty("reconciliation").EnumerateArray()];
+        Assert.Equal(128, detailRows.Length);
+
+        store.ClearReadLog();
+        JsonElement page = bridge.GetSessionReconciliation(sessionKey)!.Value;
+
+        Assert.Equal(detailRows.Length, page.GetProperty("total").GetInt32());
+        JsonElement[] rows = [.. page.GetProperty("reconciliation").EnumerateArray()];
+        Assert.Equal(25, rows.Length);
+        for (int index = 0; index < rows.Length; index++)
+        {
+            Assert.Equal(detailRows[index].GetRawText(), rows[index].GetRawText());
+        }
+
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.Equal(
+            (IReadOnlyList<string>)[nameof(InMemoryRelationalStore.SessionReconciliationFigures)],
+            store.ReadLog.Where(static read => read != "CountRecords").ToList());
+        Assert.Equal(
+            (IReadOnlyList<string>)[nameof(InMemoryRelationalStore.SessionHeadersByKeys)],
+            store.SessionProjectionReadLog
+                .Where(static read => read is not ("ListSessionProjections" or "ListHarnessRollups"))
+                .ToList());
+        Assert.DoesNotContain(store.ReadLog, static read => ContentBearingReads.Contains(read));
+
+        JsonElement second = bridge.GetSessionReconciliation(sessionKey, page: 2)!.Value;
+        Assert.Equal(detailRows[25].GetRawText(), second.GetProperty("reconciliation").EnumerateArray().First().GetRawText());
+
+        JsonElement lastPage = bridge.GetSessionReconciliation(sessionKey, page: 6)!.Value;
+        Assert.Equal(3, lastPage.GetProperty("reconciliation").EnumerateArray().Count());
+        Assert.Equal(detailRows[127].GetRawText(), lastPage.GetProperty("reconciliation").EnumerateArray().Last().GetRawText());
+
+        JsonElement past = bridge.GetSessionReconciliation(sessionKey, page: 7)!.Value;
+        Assert.Empty(past.GetProperty("reconciliation").EnumerateArray().ToList());
+        Assert.Equal(detailRows.Length, past.GetProperty("total").GetInt32());
+    }
+
+    /// <summary>
+    /// The problems section pages the session's stored ingest problems at 25 with the true total,
+    /// carrying the same rows the detail payload's problems array lists.
+    /// </summary>
+    [Fact]
+    public void TheProblemsSectionPagesStoredIngestProblems()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-problems";
+        WriteSession(
+            store,
+            sessionKey,
+            [
+                Turn("span-problems-1", sessionKey, 0, inputTokens: 100),
+                Turn("span-problems-2", sessionKey, 1, inputTokens: 200),
+            ]);
+        WriteProblems(store, sessionKey, count: 30);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        JsonElement detail = bridge.GetSessionDetail(sessionKey)!.Value;
+        JsonElement[] detailRows = [.. detail.GetProperty("problems").EnumerateArray()];
+        Assert.Equal(30, detailRows.Length);
+
+        store.ClearReadLog();
+        JsonElement page = bridge.GetSessionProblems(sessionKey)!.Value;
+
+        Assert.Equal(detailRows.Length, page.GetProperty("total").GetInt32());
+        JsonElement[] rows = [.. page.GetProperty("problems").EnumerateArray()];
+        Assert.Equal(25, rows.Length);
+        for (int index = 0; index < rows.Length; index++)
+        {
+            Assert.Equal(detailRows[index].GetRawText(), rows[index].GetRawText());
+        }
+
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.Equal(
+            (IReadOnlyList<string>)[nameof(InMemoryRelationalStore.SessionProblems)],
+            store.ReadLog.Where(static read => read != "CountRecords").ToList());
+        Assert.Equal(
+            (IReadOnlyList<string>)[nameof(InMemoryRelationalStore.SessionHeadersByKeys)],
+            store.SessionProjectionReadLog
+                .Where(static read => read is not ("ListSessionProjections" or "ListHarnessRollups"))
+                .ToList());
+        Assert.DoesNotContain(store.ReadLog, static read => ContentBearingReads.Contains(read));
+
+        JsonElement second = bridge.GetSessionProblems(sessionKey, page: 2)!.Value;
+        Assert.Equal(5, second.GetProperty("problems").EnumerateArray().Count());
+        Assert.Equal(detailRows[25].GetRawText(), second.GetProperty("problems").EnumerateArray().First().GetRawText());
+    }
+
+    /// <summary>
     /// The run page's turn list answers the same turns the per-session turn figures read carries,
     /// with the execution and session attribution the run view adds.
     /// </summary>
@@ -229,10 +415,36 @@ public sealed class SessionSectionEndpointsTests
         Assert.Null(bridge.GetSessionSummary("sess-absent"));
         Assert.Null(bridge.GetSessionCharts("sess-absent"));
         Assert.Null(bridge.GetTurnFigures("sess-absent", 0));
+        Assert.Null(bridge.GetSessionRequests("sess-absent"));
+        Assert.Null(bridge.GetSessionReconciliation("sess-absent"));
+        Assert.Null(bridge.GetSessionProblems("sess-absent"));
 
         Assert.Contains(nameof(InMemoryRelationalStore.SessionHeadersByKeys), store.SessionProjectionReadLog);
         Assert.DoesNotContain(nameof(InMemoryRelationalStore.GetSessionProjection), store.SessionProjectionReadLog);
         Assert.DoesNotContain(store.ReadLog, static read => ContentBearingReads.Contains(read));
+    }
+
+    /// <summary>Seeds one batch of ingest problems attached to <paramref name="sessionKey"/>.</summary>
+    private static void WriteProblems(InMemoryRelationalStore store, string sessionKey, int count)
+    {
+        store.WriteBatch(new CollectedBatch(
+            Source: new CollectedSource("claude-code", SourceKind.Otlp, "otlp:claude-code"),
+            Sessions: [],
+            Records: [],
+            Problems:
+            [
+                .. Enumerable.Range(0, count).Select(i => new CollectedProblem(
+                    $"problem-{sessionKey}-{i:D2}",
+                    "error",
+                    "INGEST_TEST",
+                    $"problem {i}",
+                    null,
+                    null,
+                    sessionKey,
+                    "claude-code",
+                    null,
+                    null)),
+            ]));
     }
 
     /// <summary>Seeds the 128-turn section session: measurable context, tool figures, and one skill invocation.</summary>
@@ -399,4 +611,20 @@ public sealed class SessionSectionEndpointsTests
             "tool_result_content" => ContentBucket.ToolResultContent,
             _ => throw new ArgumentException($"Unexpected bucket '{bucket}'.", nameof(bucket)),
         };
+
+    /// <summary>
+    /// In-memory store recording every scoped prompt-preview read's span ids, so a test can pin
+    /// that <see cref="KyberBridgeEngine.GetSessionRequests"/> previews only the page's requests.
+    /// </summary>
+    private sealed class PreviewCapturingStore : InMemoryRelationalStore
+    {
+        /// <summary>The span ids each <c>RequestPromptPreviews</c> call received, in call order.</summary>
+        public List<IReadOnlyList<string>> PromptPreviewReads { get; } = [];
+
+        public override IReadOnlyDictionary<string, string?> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds)
+        {
+            PromptPreviewReads.Add([.. requestSpanIds]);
+            return base.RequestPromptPreviews(sessionKey, requestSpanIds);
+        }
+    }
 }

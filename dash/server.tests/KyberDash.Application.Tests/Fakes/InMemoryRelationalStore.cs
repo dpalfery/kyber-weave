@@ -1163,6 +1163,161 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
+    public virtual SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionRequestFigures));
+            List<ReadTimeSessionRequestSummary> rows =
+            [
+                .. BuildSessionFigures(state, sessionKey, CollectSessionRecordsContentFree(state, sessionKey), null)?.Requests ?? [],
+            ];
+            return new SessionRequestFigurePageResult(PageOf(rows, page, limit), rows.Count);
+        }
+    }
+
+    /// <inheritdoc />
+    public virtual SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionReconciliationFigures));
+            // The section renders the measurable rows only, as the detail payload's
+            // reconciliation rows do: a row whose either match is absent is not rendered.
+            List<ReadTimeTurnReconciliation> rows =
+            [
+                .. (BuildSessionFigures(state, sessionKey, CollectSessionRecordsContentFree(state, sessionKey), null)?.Reconciliation ?? [])
+                    .Where(static row => row.InputMatch.HasValue && row.OutputMatch.HasValue),
+            ];
+            return new SessionReconciliationFigurePageResult(PageOf(rows, page, limit), rows.Count);
+        }
+    }
+
+    /// <inheritdoc />
+    public virtual SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionProblems));
+            List<Problem> rows = CollectSessionProblems(state, sessionKey, ResolveSessionSpanIds(state, sessionKey));
+            return new SessionProblemPageResult(PageOf(rows, page, limit), rows.Count);
+        }
+    }
+
+    /// <inheritdoc />
+    public virtual IReadOnlyDictionary<string, string?> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds)
+    {
+        ArgumentNullException.ThrowIfNull(requestSpanIds);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(RequestPromptPreviews));
+            Dictionary<string, string?> previews = new(StringComparer.Ordinal);
+            if (requestSpanIds.Count == 0)
+            {
+                return previews;
+            }
+
+            List<CollectedRecord> records = CollectSessionRecordsContentFree(state, sessionKey);
+            List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntries(state, sessionKey, records);
+            foreach (string requestSpanId in requestSpanIds.Distinct(StringComparer.Ordinal))
+            {
+                previews[requestSpanId] = MaterializeRequestPromptPreview(state, sessionKey, requestSpanId, records, turnEntries);
+            }
+
+            return previews;
+        }
+    }
+
+    /// <summary>
+    /// Reads one request span's prompt preview: its own prompt-bucket parts first, then the parts
+    /// of the turns it owns, in turn order — the same rule the detail figures' request rows use —
+    /// counting the part text the candidate records' parts materialize.
+    /// </summary>
+    /// <param name="currentState">Store state to read parts from.</param>
+    /// <param name="sessionKey">Owning session key.</param>
+    /// <param name="requestSpanId">Request span whose preview is read.</param>
+    /// <param name="records">The session's content-free records, for turn ownership.</param>
+    /// <param name="turnEntries">The session's turn entries, in turn order.</param>
+    /// <returns>The truncated preview, or <see langword="null"/> when the span carries none.</returns>
+    private string? MaterializeRequestPromptPreview(
+        StoreState currentState,
+        string sessionKey,
+        string requestSpanId,
+        IReadOnlyList<CollectedRecord> records,
+        IReadOnlyList<(int Position, CollectedRecord Record)> turnEntries)
+    {
+        HashSet<string> subtree = CollectDescendantSpanIds(requestSpanId, records);
+        List<CollectedRecord> candidates = [];
+        CollectedRecord? requestRecord = MaterializeRecordWithParts(currentState, requestSpanId);
+        if (requestRecord is not null)
+        {
+            candidates.Add(requestRecord);
+        }
+
+        foreach ((int _, CollectedRecord turnEntry) in turnEntries)
+        {
+            if (subtree.Contains(turnEntry.RecordId) && turnEntry.RecordId != requestSpanId)
+            {
+                CollectedRecord? ownedTurn = MaterializeRecordWithParts(currentState, turnEntry.RecordId);
+                if (ownedTurn is not null)
+                {
+                    candidates.Add(ownedTurn);
+                }
+            }
+        }
+
+        foreach (CollectedRecord candidate in candidates)
+        {
+            foreach (CollectedContentPart part in candidate.Parts)
+            {
+                materializedContentBytes += ContentBytesOf(part);
+            }
+        }
+
+        return ExtractPromptPreview(requestRecord, [.. candidates.Skip(requestRecord is null ? 0 : 1)]);
+    }
+
+    /// <summary>Materializes one record's scalar columns, tokens, and content parts, when its row exists.</summary>
+    /// <param name="currentState">Store state to read from.</param>
+    /// <param name="spanId">Record span id.</param>
+    /// <returns>The record, or <see langword="null"/> when no row carries the span.</returns>
+    private static CollectedRecord? MaterializeRecordWithParts(StoreState currentState, string spanId)
+    {
+        object?[]? row = FindRowByKey(currentState, "record", [("span_id", spanId)]);
+        return row is null ? null : MaterializeRecord(currentState, row);
+    }
+
+    /// <summary>Cuts one page of <paramref name="rows"/>, tolerating a page past the end.</summary>
+    /// <param name="rows">The rows the read computed, in their own order.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page.</param>
+    /// <returns>The page's rows; empty when the page starts past the end.</returns>
+    private static List<T> PageOf<T>(IReadOnlyList<T> rows, int page, int limit)
+    {
+        if (rows.Count == 0)
+        {
+            return [];
+        }
+
+        long offset = Math.Min((long)(page - 1) * limit, rows.Count);
+        return [.. rows.Skip((int)offset).Take(limit)];
+    }
+
+    /// <inheritdoc />
     public StoredSessionProjection? GetSessionProjection(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
