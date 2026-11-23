@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.ProseRules;
 using Xunit;
 using KyberWeave.Tests.Corpus;
 
@@ -131,6 +132,24 @@ public sealed class SquadDeliveryExecutionSkillTests
             $"'{DeliveryExecutionSkillPath}' must carry the moved execution contract; it is missing " +
             $"{Joined(missing)}. The contract moves out of '{RetiredExecutionReferencePath}' rather than being " +
             "rewritten, so both entry points load the same rules.");
+    }
+
+    /// <summary>
+    ///     The worktree-isolation rules have one home: the skill's <c>## Ready queue</c> section. A
+    ///     worker must create its worktree from the run worktree, so the section names both the
+    ///     per-task worktree rule and the exact command that creates one.
+    /// </summary>
+    [Fact]
+    public void TheReadyQueueSectionHoldsThePerTaskWorktreeRule()
+    {
+        string skill = ReadProductFile(DeliveryExecutionSkillPath);
+        string readyQueue = ProseRuleCatalog.Section(skill, "Ready queue")
+            ?? throw new InvalidOperationException(
+                $"'{DeliveryExecutionSkillPath}' must carry a '## Ready queue' section; the worktree-isolation " +
+                "rules have no other home.");
+
+        Assert.Contains("Every task gets its own fresh git worktree", readyQueue, StringComparison.Ordinal);
+        Assert.Contains("git -C <run worktree> worktree add", readyQueue, StringComparison.Ordinal);
     }
 
     [Fact]

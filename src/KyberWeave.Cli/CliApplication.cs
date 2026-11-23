@@ -424,6 +424,11 @@ internal static class CliApplication
                 run.AddCommand<RunDeliverCommand>("deliver")
                     .WithDescription(RunDeliverCommand.Description)
                     .WithExample("run", "deliver", ".", "--summary", "Plans now finalize through a tool, so a run saves a minute per plan.");
+
+                run.AddCommand<RunIntegrateCommand>("integrate")
+                    .WithDescription(RunIntegrateCommand.Description)
+                    .WithExample("run", "integrate", "--task", "T3")
+                    .WithExample("run", "integrate", "--task", "T3", "--run-worktree", "../run", "--path", "../task");
             });
 
             // Kyber-Arbiter Human Surfaces — validate, list, inspect, dry-run, audit,

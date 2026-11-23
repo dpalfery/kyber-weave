@@ -748,6 +748,8 @@ public sealed class SeatOutputParserTests
     [InlineData("NO FINDINGS: nothing wrong.", "    evidence: src/Foo.cs:12")]
     [InlineData("NO FINDINGS: nothing wrong.", "- {note: x, severity: minor}")]
     [InlineData("NO FINDINGS: nothing wrong.", "- failureScenario: x")]
+    [InlineData("NO FINDINGS: nothing wrong.", "- kind: defect")]
+    [InlineData("NO FINDINGS: nothing wrong.", "- basis: Acceptance criterion 3")]
     [InlineData("NO FINDINGS: nothing wrong.", "- guidance: [§3]")]
     [InlineData("NO FINDINGS: nothing wrong.", "\"claim\": x")]
     [InlineData("SKIPPED: the lens did not run.", "- {id: correctness/a, lens: correctness, severity: minor, confidence: 7, file: src/Foo.cs, line: 3, claim: x}")]
@@ -1073,6 +1075,60 @@ public sealed class SeatOutputParserTests
         seat.InputSites is { } sites ? (sites.Traced, sites.FilesWithNone) : null;
 
     // -----------------------------------------------------------------------------------------
+    // Finding kind and basis: what a finding disagrees with, and the text it quotes for that.
+    // -----------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("defect", FindingKind.Defect)]
+    [InlineData("hardening", FindingKind.Hardening)]
+    [InlineData("plan-objection", FindingKind.PlanObjection)]
+    [InlineData("HARDENING", FindingKind.Hardening)]
+    public void EachKindNameASeatWritesParsesToItsKind(string written, FindingKind expected)
+    {
+        SeatOutput seat = SeatOutputParser.Parse("correctness", Fenced(FindingLines(kind: written)));
+
+        Assert.Equal(expected, Assert.Single(seat.Findings).Kind);
+    }
+
+    /// <summary>A seat that wrote no kind gave none: the parser does not guess one.</summary>
+    [Fact]
+    public void AFindingWithNoKindReadsAsNoKind()
+    {
+        SeatOutput seat = SeatOutputParser.Parse("correctness", Fenced(FindingLines()));
+
+        Assert.Null(Assert.Single(seat.Findings).Kind);
+    }
+
+    [Theory]
+    [InlineData("bug")]
+    [InlineData("defect, hardening")]
+    [InlineData("plan_objection")]
+    public void AnUnknownKindIsRefusedNamingTheThreeValues(string written)
+    {
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", Fenced(FindingLines(kind: written))));
+
+        Assert.Contains("kind", error.Message, StringComparison.Ordinal);
+        Assert.Contains("defect", error.Message, StringComparison.Ordinal);
+        Assert.Contains("hardening", error.Message, StringComparison.Ordinal);
+        Assert.Contains("plan-objection", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The basis is the text the seat quoted for what the finding breaks. It holds a <c>": "</c>, so the flat reader
+    /// reads it, and it must survive that path as written.
+    /// </summary>
+    [Fact]
+    public void TheBasisASeatWroteIsKept()
+    {
+        const string basis = "Acceptance criterion 3: a missing kind is refused.";
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", Fenced(FindingLines(basis: basis)));
+
+        Assert.Equal(basis, Assert.Single(seat.Findings).Basis);
+    }
+
+    // -----------------------------------------------------------------------------------------
     // Helpers: seat text built from the parts a seat writes.
     // -----------------------------------------------------------------------------------------
 
@@ -1082,7 +1138,9 @@ public sealed class SeatOutputParserTests
         string? severity = "minor",
         string? confidence = "7",
         string claim = "The loop bound excludes the final element.",
-        string line = "12")
+        string line = "12",
+        string? kind = null,
+        string? basis = null)
     {
         List<string> lines = [];
         lines.Add(id is null ? "- lens: correctness" : $"- id: {id}");
@@ -1099,6 +1157,10 @@ public sealed class SeatOutputParserTests
         lines.Add("  evidence: src/Foo.cs:12");
         lines.Add("  failure_scenario: The last element is never processed.");
         lines.Add("  suggestion: Use <= or count + 1.");
+        if (kind is not null)
+            lines.Add($"  kind: {kind}");
+        if (basis is not null)
+            lines.Add($"  basis: {basis}");
         return lines;
     }
 

@@ -41,8 +41,8 @@ reviewer and the verdict command read them there. What reaches you is statuses a
 5. **Refute.** The reviewer may return one more `STATUS: COUNCIL_SEATS_NEEDED` holding one
    refutation block per finding, each with a `Seat file:` line. Send them in one batch and repeat
    step 4.
-6. **Verdict.** The reviewer returns the verdict (`APPROVE` or `REQUEST_CHANGES`), the cycle folder and
-   the path of its `findings.json`. Report that; the review loop in the `delivery-execution` skill
+6. **Verdict.** The reviewer returns the verdict (`APPROVE` or `REQUEST_CHANGES`), the cycle folder,
+   the path of its `findings.json`, and the verdict's `fix:` lines and `--- fix <group> ---` blocks unchanged. Report that; the review loop in the `delivery-execution` skill
    decides what follows.
 
 ## What stays elsewhere

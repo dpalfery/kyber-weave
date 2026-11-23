@@ -4,7 +4,7 @@ title: Kyber Arbiter runbook
 doc-type: runbook
 component: KyberArbiter
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-20
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -255,10 +255,27 @@ with it and never retries the blocked dispatch unchanged. The exception is a ref
 work instead of sending it to architect.
 
 Timeouts are bounded by `provider.timeout-ms` plus the harness budget. The hook timeout is rendered
-as `ceil(timeout-ms / 1000) + 2` seconds from the repository's configuration; a user override that
+as `ceil(timeout-ms / 1000) + 2` seconds from the repository's configuration, and never below 30
+seconds. The floor is what a burst needs: a hook also starts a process, reads a plan and the git facts,
+and appends to the project ledger, and a fan-out of review lenses runs twelve to twenty at once on a
+machine that is already building. The shipped 3-second budget used to render 5 seconds, and a live run
+logged 55 hook timeouts, almost all in same-second bursts. A user override that
 raises `timeout-ms` without re-rendering the hooks makes the hook log, and `arbiter doctor` report,
 `KW-ARB-CONFIG-016`. A hook the harness kills mid-evaluation still leaves its ledger event, which
 `audit` reports as a decision-less entry, and the dispatch proceeds as the harness treats a killed hook.
+
+The project ledger's lock is held for the append alone, so a burst of hooks queues for milliseconds per
+row. A killed return hook used to leave its dispatch in flight with no way to close it, and
+`KW-ARB-READY-001` then answered `overlaps-in-flight` for every later attempt at that task. The
+harness's stop event now closes that one dispatch with a post row marked `recovered`, and a report that
+arrives after the stop still pairs with the same dispatch, so the row never steals a real return; see
+[Recovered returns](architecture.md#recovered-returns). If the same agent has several dispatches still
+open, the hook logs how many matched and closes none, because it cannot tell which one ended.
+
+If a hook still times out, check the machine first: the hook log says which phase was killed and the
+decision log says whether that dispatch's return was recorded. Do not raise the harness timeout by hand
+in the hook file; re-render it with `kyber-weave squad update` or `kyber-weave arbiter install` so the
+recorded block and the config agree.
 
 Pre-dispatch denies block on every target. Post-dispatch limits differ by harness: some
 targets deliver outcomes only as context, and Antigravity and Devin deliver none. The
@@ -339,18 +356,31 @@ check on the conductor's own `task` calls, and logs instead of denying when it c
 ## Reading a canonical-checkout refusal
 
 A subagent starts in the repository's canonical checkout (its main worktree) and is told the run's worktree
-in prose, so it can write to the wrong one. `KW-ARB-CHECKOUT-001` catches that on machine facts, in two
-places:
+in prose, so it can write to, or run a command in, the wrong one. `KW-ARB-CHECKOUT-001` catches that on machine
+facts, in two places:
 
-- **Before the write, where the harness hooks it.** `kyber-weave-arbiter worker-guard` runs on every Copilot
-  CLI tool call (the user-level `~/.copilot/hooks/kyber-arbiter.json` only, because the CLI runs the project
-  file too and a call would count twice) and every Claude tool call (the user-level settings block), and
-  checks Copilot CLI's `edit` and `create` and Claude's `Edit`, `Write`, `MultiEdit` and `NotebookEdit`. It denies a Squad subagent's write into the canonical
-  checkout while a live run of that repository works in a worktree of its own, and the reason names the same
-  path in the run worktree. A root agent (a person's own session) is never checked, and a project that sets
-  `arbiter.enabled: false` is never refused. The guard reads only the run records and the checkout's git
-  files, starts no process, and allows anything it cannot read. A shell command that writes a file is not
-  seen by it; the return check below catches that.
+- **Before the write or command, where the harness hooks it.** `kyber-weave-arbiter worker-guard` runs on every
+  Copilot CLI tool call (the user-level `~/.copilot/hooks/kyber-arbiter.json` only, because the CLI runs the project
+  file too and a call would count twice) and every Claude tool call (the user-level settings block). It checks
+  Copilot CLI's `edit`, `create`, `bash` and `powershell` and Claude's `Edit`, `Write`, `MultiEdit`,
+  `NotebookEdit` and `Bash`. It denies a Squad subagent's write into the canonical checkout while a live run of
+  that repository works in a worktree of its own, and the reason names the same path in the run worktree. It also
+  denies a shell command that would run there: the call's working directory is inside the canonical checkout, or
+  one of its `cd`, `pushd` or `git -C` steps moves into it, wherever in the command that step sits, and the reason
+  names the canonical checkout and the run worktree and tells the agent to start the command with
+  `cd <run worktree> && `, so every step runs in the worktree. A working directory inside the canonical
+  checkout does not count when no step of the command runs there: a `cd` or `pushd` into a directory moves the
+  shell before every later step, and a `git` step that names its own directory with `-C` runs there, so the guard
+  judges those directories instead. The walk follows the shell: a `cd` inside `( … )` ends at the closing `)`, so
+  a later step still runs in the outer directory; a pipeline stage starts in the directory the pipeline did, so a
+  `cd` in an earlier stage does not carry; and a step after `||` may run in the directory the previous step
+  started in, because the left side may have failed. A `cd` or `pushd` it cannot place (a bare `pushd`, `cd -`, or
+  a variable such as `$WT`) and any other step do run in the working directory, so it is judged on that. A root
+  agent (a person's own session) is never checked, and a project that sets `arbiter.enabled: false` is never
+  refused. The guard reads only the run records and the checkout's git files, starts no process, and allows
+  anything it cannot read. A read through a grep tool carries no command, so this check never refuses one; a read
+  through a view or read tool is judged only by [the secret rule](#reading-a-secret-refusal). A write a
+  command makes to a path it does not name is left to the return check below.
 - **On the return, everywhere returns are observed.** Before a dispatch to a specialist that writes files,
   the hook snapshots the canonical checkout; on the return it diffs it. Paths that changed are listed in the
   escalation's evidence, and `NEXT` asks for the same specialist to move them into the run worktree and
@@ -360,6 +390,45 @@ places:
   so its dispatch to a developer returns as `investigate.returned`, which the rule also covers.
 
 A run that branched in place works in the canonical checkout, so neither check applies to it.
+
+## Reading a secret refusal
+
+`KW-ARB-SECRET-001` stops a subagent's call that would put a secret into the transcript, which the model provider
+receives. It runs in the same worker-guard hook as the two rules above, on every Copilot CLI, Claude and
+Factory tool call from a Squad subagent, for every capability profile; a root agent is never checked, and `arbiter.enabled: false`
+turns it off with the rest of the Arbiter. It reads no file and starts no process: the call's own text decides it,
+and a command whose text it cannot read is refused rather than allowed. It refuses three things:
+
+- **Reading a secret file.** A shell command reads one with `cat`, `head`, `tail`, `less`, `more`, `type`,
+  `Get-Content`, `gc`, `bat`, `xxd`, `strings` or `base64`, by copying it with `cp` or `scp`, with `grep`, `rg`,
+  `egrep`, `fgrep`, `awk`, `sed`, `sort`, `uniq`, `od`, `hexdump`, `nl`, `jq`, `yq`, `openssl`, `diff`, `cut` or
+  `tr`, with `dd if=`, with PowerShell's `Select-String -Path`, by opening it from a one-line script, or with a
+  single `<` redirect (not a `<<` heredoc); the harness's own read tool (`view` on Copilot CLI, `Read` on Claude)
+  counts too. A secret file is one whose name holds `password`, `passwd`, `secret`, `credential`, `token`,
+  `apikey`, `api-key` or `api_key` when it has no extension or a configuration or data extension (`.txt`, `.json`,
+  `.yaml`, `.yml`, `.xml`, `.ini`, `.conf`, `.cfg`, `.config`, `.properties`, `.toml`, `.env`, `.secret`, `.pass`),
+  so a source or documentation file such as `TokenService.cs` or `secret-handling.md` is not refused for its name;
+  a `.env` file other than `.env.example`, `.env.sample` and `.env.template`; a file under
+  `~/.microsoft/usersecrets/`, `~/.ssh/` (except a `.pub` key, `known_hosts` and `config`),
+  `~/.aws/credentials`, `~/.azure/`, `~/.docker/config.json` or `~/.kube/config`, or one named
+  `~/.netrc`, `~/.git-credentials`, `~/.npmrc` or `~/.pypirc`; and any `*.pem`, `*.key`, `*.pfx` or `*.p12`.
+  Listing a directory or testing whether a file exists is allowed.
+- **Printing a secret from a store.** `dotnet user-secrets list`; `docker inspect` unless its `--format`/`-f`
+  template names no environment value; `env` or `printenv` with nothing to print, or `printenv` of a secret-named
+  variable; `echo`, `printf`, `Write-Output` or `Write-Host` of one; `Get-ChildItem env:`, `gci env:` or
+  `dir env:`; `security find-generic-password` or `find-internet-password` with `-w` or `-g`; `gh auth token`;
+  `az account get-access-token`; `kubectl get secret … -o yaml|json|jsonpath`; `cat /proc/*/environ`; and a Python
+  or Node one-liner that prints `os.environ` or `process.env`.
+- **Putting a literal secret on the command line.** A `NAME=value` (or `-e`/`--env` `NAME=value`) whose name says
+  it holds a secret and whose value is a literal rather than a reference; a `Password=` or `Pwd=` literal in a
+  connection string; `sqlcmd -P <literal>`; `mysql -p<literal>` or `--password=<literal>`;
+  `curl -u user:<literal>`; or `Authorization: Bearer <literal>`.
+
+The rule matches the whole command text, quotes and nested shell strings included, so `bash -c "cat …"`,
+`sh -c "…"` and `pwsh -Command "…"` escape nothing. A value passed by reference, as in
+`docker exec c sh -c 'SQLCMDPASSWORD="$MSSQL_SA_PASSWORD" sqlcmd …'`, is allowed, because the value never enters the
+transcript. The denial names the rule and the case, and tells the agent to let the tool read its own configuration
+or to pass the value by reference; a task that truly needs a secret ends `BLOCKED` with an `Open item:` line.
 
 ## Reading a budget stop
 
@@ -381,9 +450,12 @@ planners and `devops` are not budgeted, because a full test run or a CI wait is 
 
 A single hung call is caught sooner. The guard sees only the start of each call, so when the gap since the
 dispatch's previous call is past `dispatch-budget.call-minutes` (default 5; the gap includes the model's own
-time after that call), it denies the next call once: the worker is told to stop the hung process, record
-`NOT VERIFIED: <command> — timed out` and move on. The denied call is counted, so the retry that follows is
-allowed. A gap longer than the budget's minutes starts a fresh window instead, as above.
+time after that call) and that previous call started a process, it denies the next call once: the worker is
+told to stop the hung process, record `NOT VERIFIED: <command> — timed out` and move on. A wait on a shell
+that is still running counts as the call that started it, because that wait is where a hung process shows up.
+A file read starts no process and cannot hang, so a gap after one is never judged this way. The denied call is
+counted, so the retry that follows is allowed. A gap longer than the budget's minutes starts a fresh window
+instead, as above.
 
 The conductor treats the return as a failed attempt, never sends the same packet back to the same worker on
 the same model, and sends the rework one model up or to `architect` (the `delivery-execution` skill). The
@@ -391,8 +463,15 @@ ladder rule reads `STATUS: BUDGET_EXCEEDED` as `fail`, so under `model-targeting
 dispatch climbs one rung, but only where the harness takes a per-dispatch model (Claude); elsewhere the
 conductor's prose carries the escalation.
 
-Only Copilot CLI and Claude run the worker guard: they are the harnesses whose user-level hooks see a
-subagent's own tool calls with its id and type. Every other harness hooks only the dispatch and its return.
+Copilot CLI, Claude and Factory run the worker guard: they are the harnesses whose user-level hooks see a
+subagent's own tool calls. Claude and Copilot name the subagent in the payload. Factory does not, so the guard
+joins three events in a small session ledger under `~/.kyber-weave/arbiter/sessions/` (swept after two days):
+the root's `Task` dispatch names the type it started, the child's `SessionStart` names the parent through
+`calling_session_id`, and the dispatch's `PostToolUse` text names the child session and its type, which also
+corrects a guess taken when two dispatches were in flight. The child's entry is removed at `SessionEnd`. A
+child whose type is still unknown after three seconds is guarded by `KW-ARB-SECRET-001` and
+`KW-ARB-CHECKOUT-001` only; the profile-specific rules are skipped and one log line says so. Every other
+harness hooks only the dispatch and its return.
 
 ## Reading a planner refusal
 

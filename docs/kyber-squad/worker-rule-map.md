@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-11-12
+last-reviewed: 2026-11-22
 keywords:
   - worker rule map
   - rule home
@@ -147,7 +147,7 @@ reads:
 | C1 | Never run the full test suite, even for a cross-cutting change — the review council and CI run it; run the tests covering the change and any test that references a changed symbol. | 11 agent bodies, one identical bullet each: `dal-dev`, `github-devops`, `go-dev`, `maui-dev`, `pulumi-dev`, `python-dev`, `react-dev`, `rust-dev`, `sql-database-architect`, `tauri-dev`, `typescript-dev` (`## Hard rules` for all but `sql-database-architect` and `tauri-dev`, whose bullet sat in `### Completion gate`) | the baseline block | catalog rule `C1`; `SquadWorkerBaselineInjectionTests.EachWorkerRenderCarriesTheBaselineExactlyOnce`, one case per shipped target |
 | C2 | Inside the "build once, test many" bullet: the same ban, with the clause "even for a cross-cutting change". | `agents/csharp-dev.md` → `## Workflow` step 7, the ban sentence only. The rest of the bullet stays: "only the test classes … task touched", "in the first full review", "integrated head", "`TESTS: total=0` with the reason", "shared test infrastructure", "targeted set" and "cross-cutting" are all still there | the baseline block | as C1, which is where the ban now lives. The rest of the bullet is graded by the catalog entries `task-end-touched-classes-only` and `shared-infra-targeted-set` |
 | C3 | The same ban inside the same bullet. | `agents/test-dev.md` → `## Workflow` step 5, the ban sentence only, on the same terms as C2 | the baseline block | as C2 |
-| C4 | A dev agent never runs the full suite; it runs the tests covering its change. | `skills/csharp-dev/references/build-commands.md` → `## Run tests`: the ban half of the sentence. The filter command and the "the review council and CI run it" sentence stay, so a host reading the reference alone still sees which run is the gate | the baseline block | as C1 for the baseline line. **Nothing checks the reference itself**; the seeded-defect trial is the only check that the injected line replaces it |
+| C4 | A dev agent never runs the full suite; it runs the tests covering its change. | `skills/csharp-dev/references/build-commands.md` → `## Run tests` held the ban half of the sentence until the technology skills were deleted (2026-11-22); the `csharp` standard's Done checklist now states the filtered command and that the unfiltered run belongs to the council and CI | the baseline block | as C1 for the baseline line
 
 Two rows that look like this rule but are **not** it, and stay where they are:
 
@@ -209,12 +209,12 @@ When T52 ran, six theories asserted the same phrases in **both** `agents/conduct
 2.7 KB the plan estimated: G6 and G7, the two rows no theory pinned there. Those phrase theories
 are deleted now, so the phrase block is lifted. What remains is smaller: catalog rules `G1` to `G5`
 still list the conductor as a home, so a removal drops that home from the catalog in the same
-change, and two token tests still read the conductor (G2 and G4 below).
+change, and one token test still reads the conductor (G4 below).
 
 | ID | Rule — what a worker must do | Current homes (before the trim) | Single home after | Enforced by |
 |---|---|---|---|---|
 | G1 | Send a self-contained packet: inlined entry-file table, acceptance criteria, dependencies, mode, pre-computed test commands, and no plan or spec in the worker's context. | `agents/conductor.md` → `## Shared lifecycle invariants`; `skills/delivery-execution/SKILL.md` → `## Ready queue`, `## Task file and dispatch` | `delivery-execution` | catalog rule `G1`, with both files as homes. **Phrase block lifted** |
-| G2 | Give each parallel worker a worktree or isolated context with per-task artifact paths, and serialize integration before push. | both files | `delivery-execution` → `## Ready queue` | catalog rule `G2`, with `G2-serialized-integration`, `worktree-cleanup` and `integration-conflict-rework`; `SquadPerformanceContractTests.ConductorSurfacesSpecifyTheArtifactsPathAndTaskGateOutput` still requires the artifact-path line in both files, and `SquadWorktreeMcpContractTests` the MCP-setup sentences in the conductor. **Still blocked on those tokens**; `ConductorExecutionContractNamesTheWorktreeCleanupAndConflictAbortCommands` reads only the skill |
+| G2 | Give each parallel worker a worktree or isolated context with per-task artifact paths, and serialize integration before push. | both files | `delivery-execution` → `## Ready queue` | catalog rule `G2`, with `G2-serialized-integration`, `worktree-cleanup` and `integration-conflict-rework`. The conductor's artifact-path and MCP-setup sentences are gone; it keeps its own per-task worktree sentence, which is what rule `G2`'s conductor home covers, and its "- Start every ready task at once" bullet names the skill's `## Ready queue` section, which `ConductorPointsAtTheReadyQueueSectionForTheIsolationRules` holds. `ConductorSurfacesSpecifyTheArtifactsPathAndTaskGateOutput`, `SurfacesConsistentlySpecifyArtifactIsolationFlags` and `SquadWorktreeMcpContractTests` now read only the skill, and `ConductorExecutionContractNamesTheWorktreeCleanupAndConflictAbortCommands` already did |
 | G3 | In test-first mode one worker writes a task's tests and its code in one dispatch, running the tests failing first ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)). Same-role bundling is removed with the split. | `agents/conductor.md` → `## Shared lifecycle invariants` | `delivery-execution` → `## Test-first mode` | catalog rule `G3`, which keeps the retired RED/GREEN separation absent; `G3-bundle-same-role` is removed |
 | G4 | Report discovery before the digest; the two review seats report it above their attestation line instead, and the verdict engine flags a findings or `NO FINDINGS` seat's gaps (`KW-REVIEW-044`; a `SKIPPED` seat is exempt). | both files | `delivery-execution` → `## Developer exit gate` | catalog rule `G4`, with `G4-review-seats`; `SquadPerformanceContractTests.ConductorSurfacesSpecifyTheDiscoveryHeader` still requires the `Discovery:` line in both files. **Still blocked on that token** |
 | G5 | Exempt a valid `STATUS: ESCALATION` from the six-field rejection, and route a tripped breaker to architect mediation. | both files, plus `docs/kyber-squad/requirements.md` | `delivery-execution` → `## Iteration circuit-breaker and loop detection` | catalog rule `G5`, with all three files as homes. **Phrase block lifted** |
@@ -234,7 +234,7 @@ alone.
 | The full-suite line in all 14 standard templates, and the ban sentence in `standards/go`, `standards/rust` and `standards/typescript` | A standard is host-owned project content: it ships into a host repository, is read on its own, and has no Squad render around it. Removing the line would leave that host with a rule it cannot see. |
 | The ban in `skills/bug-crusher/SKILL.md` | Catalog rule `C1-primary-sessions` lists the skill as a home. The skill is a primary session, which the baseline never reaches. |
 | The investigator's ban, which now arrives by injection rather than in its body | `bug-crusher-investigator` is a dispatched subagent, so the baseline reaches it. `SquadWorkerBaselineInjectionTests.EachWorkerRenderCarriesTheBaselineExactlyOnce` puts the baseline in the investigator's **render** for every shipped harness, which is where the rule now reaches that agent. T52 removed the body copy — see [the pin conflict](#the-pin-conflict-t52-resolved). |
-| The ban in `skills/kilo-review-loop/SKILL.md`, `skills/go-dev/references/gates-and-platforms.md`, `skills/rust-dev/references/gates-and-platforms.md`, `skills/typescript-dev/references/esm-and-gates.md` | Catalog rule `C1` lists the three gate references as homes and `C1-primary-sessions` the kilo skill; `KiloReviewLoopGivesNoLocalFullRunRoute` also holds the kilo skill's tokens. A gate table's reader must see the limit beside the command it limits. |
+| The ban in `skills/kilo-review-loop/SKILL.md` | Catalog rule `C1-primary-sessions` lists the kilo skill as a home; `KiloReviewLoopGivesNoLocalFullRunRoute` also holds the kilo skill's tokens. A gate command's reader must see the limit beside the command it limits; for a technology that is the standard's ban sentence, kept above. |
 | "No worker runs the full suite, and the conductor never dispatches a full run" in `agents/conductor.md` and in `skills/delivery-execution/SKILL.md` | Catalog rule `conductor-never-dispatches-full-run` lists both as homes. This is the dispatcher's rule; the baseline reaches only `invocation: subagent` bodies. |
 | The six-field block and the `TASK_GATE:` line in `skills/delivery-execution/SKILL.md` alongside its new home in `skills/task-gate/SKILL.md` | Two audiences: the conductor requires the digest, the worker emits it. Both are pinned (`ConductorSurfacesSpecifyExplicitSixFieldWorkerDigestSchema`, `SharedExecutionSkill_DeclaresDeterministicTaskGate_AndConductorOffloadsIt`, `TheTaskGateSkillSpecifiesTheExplicitSixFieldCompletionDigestSchema`). |
 | The closed `CIRCUIT_BREAKER_TRIGGER` token set in `skills/task-gate/SKILL.md` alongside its procedure in `references/rework.md` | The skill raises the escalation the reference explains; `SquadCanonicalContentTests.TaskGateSkillDefinesTheDeterministicReviewGateContract` asserts the closed set on the skill file itself. |
@@ -263,15 +263,17 @@ render (so the injected block is what is asserted) or narrow it to the fields th
 per-agent, and drop the agent bodies from catalog rule `D1`'s homes. This is the pin that blocks
 its own removal: the section it protects is the duplicate of the injected block.
 
-**Rows G1 to G5 were deferred on phrase pins; for G1, G3 and G5 that block is lifted.**
+**Rows G1 to G5 were deferred on phrase pins; for G1, G2, G3 and G5 that block is lifted.**
 Six theories in `SquadPerformanceContractTests` asserted the same phrases in `agents/conductor.md`
 and in `skills/delivery-execution/SKILL.md`, so T52 left all five rows. Those theories are deleted.
 Removing the conductor copy of G1, G3 or G5 now means dropping `agents/conductor.md` from that
-catalog rule's homes in the same change; no structural test reads the text. G2 and G4 are still
-blocked on token tests: `ConductorSurfacesSpecifyTheArtifactsPathAndTaskGateOutput` and
-`SquadWorktreeMcpContractTests` read the conductor for G2's artifact-path and MCP-setup sentences,
-and `ConductorSurfacesSpecifyTheDiscoveryHeader` reads it for G4's `Discovery:` line. The removals
-themselves are not done here. The G2 cleanup sentence is read only in the skill, by
+catalog rule's homes in the same change; no structural test reads the text. G2's artifact-path and
+MCP-setup sentences are gone too, and its token tests now read only the skill; the conductor keeps
+its own per-task worktree sentence, which is what catalog rule `G2`'s conductor home still covers,
+and its "- Start every ready task at once" bullet names the skill's `## Ready queue` section, which
+`ConductorPointsAtTheReadyQueueSectionForTheIsolationRules` holds. G4 is still blocked on a token
+test: `ConductorSurfacesSpecifyTheDiscoveryHeader` reads the conductor for the `Discovery:` line.
+The G2 cleanup sentence is read only in the skill, by
 `ConductorExecutionContractNamesTheWorktreeCleanupAndConflictAbortCommands`.
 
 ## The pin conflict T52 resolved

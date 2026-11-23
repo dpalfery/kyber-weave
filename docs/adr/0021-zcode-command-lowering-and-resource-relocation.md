@@ -95,7 +95,7 @@ on ZCode the explicit empty list widens just as far.
    always carries at least the ungoverned base — `TodoWrite` and `Skill`, matching
    `ClaudeRenderer` — and an empty resolution raises
    `SquadRenderValidationException` rather than producing the literal that would widen.
-   `Skill` is not a convenience: it is what makes the 24 skills this renderer deploys
+   `Skill` is not a convenience: it is what makes the skills this renderer deploys
    reachable, and withholding it would ship a skill tree no agent could open.
 
 5. **MCP is granted by fully qualified tool name, and the grant is a hard requirement.**

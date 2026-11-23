@@ -81,7 +81,7 @@ native droid primitive works for delegation, and only the user-facing selection 
 ## Alternatives Considered
 
 - **Author a canonical `conductor` skill (an eighth distinct-body intersection).** Rejected.
-  It would grow the canonical inventory from 24 skills and duplicate a body the harnesses
+  It would grow the canonical skill inventory and duplicate a body the harnesses
   that need it already derive from the agent, forcing every conductor body edit through two
   files. Claude's dual entry point established that an agent-derived entry-point skill is
   the product's answer to a missing selection primitive, not new canonical content.

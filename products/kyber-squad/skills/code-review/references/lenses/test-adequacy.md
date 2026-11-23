@@ -51,6 +51,13 @@ exception assertion so broad that any failure satisfies it, including the wrong 
 - Flag unguarded boolean `||` assertions where one branch matches unrelated text or masks missing invariant assertions.
 - Flag non-contiguous `foreach` field checks over multi-line schemas that loop across lines without verifying contiguous schema structure and ordering; require contiguous multi-line schema assertions.
 
+**Tests that depend on timing.** A test the change adds or edits that passes only when timing
+goes its way is a `defect`: it waits with a sleep or a fixed timeout, races a timer, a debounce
+or a network response, or reads the wall clock. A flaky gate either blocks the change for no
+reason or lets a red test ship. Raise one finding per test and name the race. It is fixed only
+when the test controls time and ordering (a fake clock, an awaited event, an intercepted
+request, an explicit wait on a condition); a longer timeout or a retry does not fix it.
+
 **Edge cases the change introduces.** New boundary, new branch, new failure mode — is each
 exercised? This is where uncovered-branch analysis and correctness analysis meet, and it is
 the most valuable thing this lens produces.

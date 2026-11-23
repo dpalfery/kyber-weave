@@ -30,6 +30,7 @@ Frontmatter `status` is `draft` while the plan is Draft and `current` from Ready
 Every plan contains:
 
 - governed frontmatter including `development-mode: test-first | standard`, `documentation-impact: new-component | extends-component | no-design-change`, and `impact-components` (catalog component names; required and non-empty for `new-component` and `extends-component`);
+- a `## Request` section quoting the user's request verbatim, as the dispatch carried it, so every later dispatch and the plan review read it from the plan;
 - problem and goal;
 - a `## Request trace` table mapping every explicit instruction in the request to the plan section, task or out-of-scope boundary that covers it;
 - a permanent Decisions section recording all material choices, alternatives, questions, and approvals;
@@ -112,17 +113,38 @@ impact-components:
 
 Where the host declares task gates, a task's **Commands** are the task-gate runs only, exactly as the worker's packet prints them (test-first: the failing run with `--red`, then the passing run; standard mode: the one passing run): the gate runs the Test contract's runner command, so listing that command as a step of its own makes the worker run every test twice.
 
+**Verification gates use what the host already runs.** The plan proves the request with the host's declared gates and tests, including database-backed tests that start the host's local container or test database through its own script: that is the host's procedure, so the plan runs it as given. Never plan a step an autonomous run cannot do alone: a person's confirmation or reservation, an "exclusive window" on a shared environment, a manual check in a browser, or a run that only happens when someone opts in. Where the request asks for proof a gate cannot give, the plan says so in a `PR note:` under out-of-scope boundaries instead of a step that will be skipped.
+
 Every task that changes files carries a `Difficulty:` line and a `Technology:` line.
 
 `Difficulty:` is the architect's rating, one of three values:
 
-- `easy`: every change is stated in the plan and an existing pattern covers it, in however many files.
-- `medium`: the worker makes design choices the plan leaves open, in code that has patterns to follow. This is the default when the line is missing.
-- `hard`: there is no pattern to copy, a wrong choice breaks other callers, or the work involves concurrency, security or a data migration.
+Every file-changing task carries a `Difficulty:` line. The values are still spelled `easy`, `medium` and `hard`; read them as **standard**, **intermediate** and **advanced**. The tier says how much can go wrong that a worker would not see from an ordinary test, not how much work the task is.
 
-Rate the decisions the worker must make, not the size: the number of files or layers does not by itself raise the rating. When unsure between two ratings, pick the lower, because a failed attempt moves the task one tier up; the exception is a task that may plausibly be `hard` for security, concurrency, a data migration or a choice that can break other callers: pick the higher, without predicting whether its task gate would catch a wrong result.
+**Standard (`easy`) is the default: about eight tasks in ten.** It is idiomatic production code in one technology, however large: endpoints, multi-table queries, UI state, validation, business rules, and any pattern the codebase already has. If it is wrong, a normal test fails or a user sees it at once. Build the simplest clean solution; add no queue, lock, cache or defensive layer the task does not need.
 
-Examples: in one technology, a repository method, its service and its endpoint, each copying the neighbouring one, with the names and types in the plan, is `easy` although it spans three layers. One new optional field on a response is `easy` although it alters a contract. A new screen whose state handling the plan leaves to the worker is `medium`. Replacing how background jobs are locked is `hard` although it touches one file.
+**Intermediate (`medium`): the happy path works, but the code fails at scale, across tenants, or when the other side misbehaves, unless a known defensive pattern is applied.** Ask: what happens when there is a lot of it, many users or tenants share it, or a dependency is slow or flaky? Contrast pairs:
+- A paged admin list over a table that rarely changes is standard. An infinite-scroll feed while new rows keep arriving is intermediate: page numbers skip and repeat items, so it needs a cursor.
+- Checking a role on an endpoint, like the endpoints beside it, is standard. Making every query return only the caller's own team's or organisation's rows is intermediate.
+- Calling an internal service the app already calls is standard. Calling a third-party API that drops requests is intermediate: retries need exponential backoff with jitter, or a recovering server is flattened.
+- Sending one email inside the request is standard. A bulk export or mass email is intermediate: it moves to a background job, and a job that keeps failing goes to a dead-letter queue instead of being lost or retried forever.
+- Logging an error is standard. Following one user's request through the frontend, API and database logs is intermediate: one correlation ID travels through all of them.
+
+**Advanced (`hard`): a mistake silently corrupts data, leaks access, or charges money, and shows up only under timing, retries, a crash part-way through, or clock and timezone edges, so no ordinary test run reveals it.** Ask: can this go wrong in a way no test will show, and would it cost money, data or trust? Contrast pairs:
+- Saving an order is standard. Handling a payment webhook that can arrive twice or out of order is advanced: it needs an idempotency key.
+- Updating a counter in one request is standard. Two buyers reserving the last item at the same moment, on different servers, is advanced: it needs locking that survives clock drift and expired locks.
+- Writing a row is standard. Writing a row and publishing the event billing depends on is advanced: a crash between the two leaves them out of step, so it needs a transactional outbox.
+- A form that saves in one step is standard. A booking across several services that must undo earlier steps when a later one fails is advanced: a saga with compensating steps.
+- Reading cached settings is standard. Keeping several cache layers consistent when data changes is advanced: cache busting.
+- Adding the authorization attribute the neighbouring endpoints use is standard. Building sign-in with SSO, OAuth or OIDC, or the token lifecycle, is advanced.
+- Adding a nullable column is standard. Renaming or reshaping a column on a live table without downtime is advanced: an expand-and-contract migration.
+- Showing a date is standard. A recurring schedule across timezones and daylight-saving changes is advanced: store UTC plus the IANA zone rule.
+
+These pairs teach the line; they are not the whole list. Rate a task by which side of the line it falls on, by the same reasoning, even when nothing above names it. When the codebase already has a proven implementation of an intermediate or advanced pattern and the task reuses it as it is, the task is standard.
+
+For an advanced task, the plan does the design before any worker starts: state the failure mode in one line and the mitigation in three to five bullets, in the task itself, so the worker builds what is already decided.
+
+Rate the decisions the worker must make, not the size: the number of files or layers does not by itself raise the rating. Split the work so each task follows one existing pattern the plan names, in one technology, and say which file to copy. When unsure between two tiers, pick the lower, because a failed attempt moves the task one tier up.
 
 `Technology:` names exactly one technology the task is written in, chosen from `ontology.technologies`. A change that spans two unrelated technologies is two tasks with a dependency between them, never one task with two technologies: an endpoint and its database migration are separate tasks, the migration first, because one prompt carries one technology's rules and one set of gates. A technology built on another (React on TypeScript) is still one task in the child; the parent's rules arrive with the child's.
 
@@ -134,7 +156,7 @@ A plan never carries the review command. The end-of-run council derives it from 
 
 Before writing a task, fetch the standard for the one technology it names with `docs_get_coding_standard_for_technology`, using the Config Reg's standards list. Never read a standards file directly unless that tool is missing or reports a failure; say which in the plan's findings. The tool returns the technology's rules, skills and standard together, and a file read can miss the rules and the skills: a repository or query file falls under the data-access and SQL standards as well as the language standard. Ask about the pattern the task will copy. When the standard forbids that pattern, the task follows the standard. When the standard names a target the code does not have yet (one a todo tracks), decide it now: record a Decisions row and write the sanctioned exception into the task text, so the worker is never the first to find the conflict.
 
-When existing code contradicts a documented rule or standard (where a kind of file goes, a layering or naming rule), new work follows the documented rule, not the surrounding code: never copy the divergent pattern forward, and name the documented location in the task. This holds for every new file's location even when all of its existing siblings sit elsewhere and following them looks cheaper: the end-of-run review reports a new file placed against the standard as a major finding, which costs a fix round, so the documented location is also the fast choice. It is never a low-confidence decision. Existing code that carries a comment marking it as a deliberate exception is respected. Record each other divergence you find, with the rule and the existing offending paths, in the investigation findings, then decide by the size of the debt: when fixing it is small and touches the same files, add it to a task in this plan; otherwise write a todo under the directory named by **<todo-index>**, add it to that index's inventory, and link it from the plan's out-of-scope boundaries (and from a `RESIDUAL` row of the Closeout mapping when closeout leaves it open). The deliver tool commits the todo with the run.
+When existing code contradicts a documented rule or standard (where a kind of file goes, a layering or naming rule), new work follows the documented rule, not the surrounding code: never copy the divergent pattern forward, and name the documented location in the task. This holds for every new file's location even when all of its existing siblings sit elsewhere and following them looks cheaper: the end-of-run review reports a new file placed against the standard as a major finding, which costs a fix round, so the documented location is also the fast choice. It is never a low-confidence decision. Existing code that carries a comment marking it as a deliberate exception is respected. Record each other divergence you find, with the rule and the existing offending paths, in the investigation findings, then decide by the size of the debt: when fixing it is small and touches the same files, add it to a task in this plan; otherwise list it under the plan's out-of-scope boundaries as `PR note: <paths> — <the rule they break>` (and name it in a `RESIDUAL` row of the Closeout mapping when closeout leaves it open); the conductor carries it to the pull request notes (the `change-scope` skill).
 
 ## The request's explicit instructions
 
@@ -204,13 +226,13 @@ Under `autonomy: autonomous`, decide per the autonomous-decisions reference and 
 
 ## Documentation gates after plan writes
 
-After every plan save, obtain the two checks. Leave `mergeReady` false while the plan is in the active plans folder. A shell is not permission to implement.
+After every plan save, obtain the two checks. Leave `mergeReady` false while the plan is in the active plans folder, and never validate with `--merge-ready`: that mode is the pull-request gate and always rejects an open Draft (`KW-DOC-LIFECYCLE-003`). A shell is not permission to implement.
 
 Fix every finding a check reports in the plan — errors and warnings alike — and re-check until the only findings left are the standards warning period below. The standards warning period (`KW-DOC-SPEC-012`, `KW-DOC-SPEC-013`, `KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`) is outside your write boundary and does not stop the plan: `docs-dev` clears it at closeout with `kyber-weave docs standards migrate`, committed with the closeout. Do not list it as a risk, an accepted warning or out of scope. Any other finding outside your write boundary is `STATUS: BLOCKED`, and then name the finding, why you cannot fix it, and who can.
 
 ### With a shell
 
-Run `kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .` in the checkout that holds your plan (the worktree when the run uses one) and report `DOCS_VALIDATE: pass (cli, <path>)`. You may use the kw-docs MCP tools `docs_validate_governed_document_schema` and `docs_detect_drift_between_documents_and_code` instead, only in the canonical checkout and only when each response has `rev=` and `branch=` equal to your `RUN_BASE` and `RUN_BRANCH` and `repo=` equal to `git rev-parse --git-common-dir` in your checkout. `repo=` is the git directory, so a different value is another repository, and a matching one proves nothing alone because every worktree shares it. On any mismatch, or when the result is missing, run the CLI commands.
+Run `kyber-weave docs validate .` and `kyber-weave docs drift .` in the checkout that holds your plan (the worktree when the run uses one) and report `DOCS_VALIDATE: pass (cli, <path>)`. You may use the kw-docs MCP tools `docs_validate_governed_document_schema` and `docs_detect_drift_between_documents_and_code` instead, only in the canonical checkout and only when each response has `rev=` and `branch=` equal to your `RUN_BASE` and `RUN_BRANCH` and `repo=` equal to `git rev-parse --git-common-dir` in your checkout. `repo=` is the git directory, so a different value is another repository, and a matching one proves nothing alone because every worktree shares it. On any mismatch, or when the result is missing, run the CLI commands.
 
 ### With no shell
 

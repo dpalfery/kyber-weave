@@ -305,6 +305,71 @@ public sealed class ArbiterLedgerTests : IDisposable
         });
     }
 
+    [Fact]
+    public async Task TwentyConcurrentHookSizedAppends_FinishWellUnderFiveSeconds_AndLoseNoRow()
+    {
+        // One project ledger, already as long as a busy run's (the read window's worth of realistic rows), and the
+        // burst a fan-out produces: twelve to twenty hooks in the same second. An append that held the lock across
+        // its pairing read made the later writers miss the 500 ms lock budget, so their rows were lost - and a lost
+        // post row leaves its dispatch in flight for the rest of the run. The critical section is the append alone
+        // now, so every row lands, quickly.
+        Directory.CreateDirectory(ArbiterDirectory);
+        InFlightLedger seeded = RealArbiterState.Ledger(ArbiterDirectory);
+        List<ArbiterLedgerEvent> seed = [];
+        for (int index = 0; index < 4000; index++)
+        {
+            string suffix = index.ToString(CultureInfo.InvariantCulture);
+            seed.Add(NewEvent(
+                At(index),
+                ArbiterLedgerPhases.Pre,
+                callId: index < 20 ? $"hook-call-{suffix}" : null,
+                pairDigest: "seed-digest-" + suffix,
+                trigger: "delegate",
+                target: "dev-easy",
+                caller: "conductor",
+                taskFiles:
+                [
+                    "3-Domain/HotshotLogistics.Contracts/Services/IJobService.cs",
+                    "2-Application/HotshotLogistics.Application/Services/JobService.cs",
+                    "1-Presentation/HotshotLogistics.Api/Models/JobStatusSummaryResponse.cs",
+                    "1-Presentation/HotshotLogistics.Api/Controllers/JobController.cs",
+                    "5-Test/tests/HotshotLogistics.IntegrationTests/JobControllerIntegrationTests.cs",
+                ],
+                headers: new ArbiterLedgerHeaders(PlanFile: "6-Docs/plans/2026-11-20-dashboard-job-status-cards.md", Task: "T" + suffix)));
+        }
+
+        await File.WriteAllLinesAsync(
+            seeded.FilePath,
+            seed.Select(record => JsonSerializer.Serialize(record)).ToArray(),
+            TestContext.Current.CancellationToken);
+
+        const int Hooks = 20;
+        long started = Stopwatch.GetTimestamp();
+        Task[] appends =
+        [
+            .. Enumerable.Range(0, Hooks).Select(index => Task.Run(() => seeded.AppendAsync(NewEvent(
+                At(5000 + index),
+                ArbiterLedgerPhases.Post,
+                callId: $"hook-call-{index.ToString(CultureInfo.InvariantCulture)}",
+                trigger: "delegate",
+                target: "dev-easy",
+                caller: "conductor",
+                headers: new ArbiterLedgerHeaders(PlanFile: "6-Docs/plans/2026-11-20-dashboard-job-status-cards.md", Task: "T" + index.ToString(CultureInfo.InvariantCulture)))))),
+        ];
+        await Task.WhenAll(appends);
+        TimeSpan elapsed = Stopwatch.GetElapsedTime(started);
+
+        Assert.True(elapsed < TimeSpan.FromSeconds(5), $"20 concurrent appends took {elapsed.TotalSeconds:F2}s");
+        IReadOnlyList<ArbiterLedgerEvent> events = RealArbiterState.Ledger(ArbiterDirectory).ReadAll();
+        Assert.Equal(4000 + Hooks, events.Count);
+        string[] claims =
+        [
+            .. events.Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null).Select(e => e.PreId!),
+        ];
+        Assert.Equal(Hooks, claims.Length);
+        Assert.Equal(Hooks, claims.Distinct(StringComparer.Ordinal).Count());
+    }
+
     // ---- Reads (acceptance 3) ----
 
     [Fact]

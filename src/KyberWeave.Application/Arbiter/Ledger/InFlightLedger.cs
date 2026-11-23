@@ -48,22 +48,67 @@ public sealed class InFlightLedger : IArbiterLedger
     /// first) and stored with the match.
     /// </summary>
     /// <remarks>
-    /// Pairing happens inside the append lock. It reads the ledger, so resolving it
-    /// before taking the lock would let two concurrent posts both match the same
-    /// unpaired pre and both claim it.
+    /// The match is resolved from a lock-free read of the ledger, and the append reconciles it under the lock with
+    /// the rows that landed meanwhile, so two concurrent posts still cannot claim one pre. Reading the whole ledger
+    /// under the lock was what made a burst of concurrent hooks miss the lock budget and lose their rows.
     /// </remarks>
-    /// <exception cref="IOException">Thrown when the lock is not acquired within 500 ms (fail closed).</exception>
+    /// <exception cref="IOException">Thrown when the lock cannot be taken within three 500 ms attempts (fail closed).</exception>
     public Task AppendAsync(ArbiterLedgerEvent record, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);
-        bool needsMatch = record.Phase == ArbiterLedgerPhases.Post && record.PreId is null;
+        if (record.Phase != ArbiterLedgerPhases.Post || record.PreId is not null)
+        {
+            return _log.AppendLineAsync(_directory, FileName, ArbiterJson.Serialize(record), cancellationToken);
+        }
+
+        long snapshot = _log.ByteLength(FilePath);
+        ArbiterLogRead<ArbiterLedgerEvent> read = ReadAllWithDiagnostics();
+        // A read that did not see every line of the log (cut off, unreadable, or with a line that was not a record)
+        // cannot pair safely: the oldest pre it would match first may be the one it missed, so a match here would
+        // claim the wrong dispatch. No match is the fail-closed answer, the way a missing pre reads, and the post is
+        // stored unpaired.
+        bool complete = !read.Truncated && read.Unreadable is null && read.MalformedLines == 0;
+        IReadOnlyList<ArbiterLedgerEvent> events = read.Records;
+        string? match = complete ? ArbiterLedgerQueries.MatchPre(events, record) : null;
         return _log.AppendLineAsync(
             _directory,
             FileName,
-            needsMatch
-                ? () => ArbiterJson.Serialize(record with { PreId = MatchPre(record) })
-                : () => ArbiterJson.Serialize(record),
+            snapshot,
+            landed =>
+            {
+                string? paired = match;
+                if (complete && landed.Count > 0)
+                {
+                    // The ledger moved between the read and the lock: another post may have claimed the pre this
+                    // one matched, or a twin dispatch may have landed. Recompute over both, so a pre is claimed
+                    // once and a twin is not mistaken for the one already paired.
+                    paired = ArbiterLedgerQueries.MatchPre(MergeWithLanded(events, landed), record);
+                }
+
+                return ArbiterJson.Serialize(record with { PreId = paired });
+            },
             cancellationToken);
+    }
+
+    /// <summary>
+    /// The events read before the lock, followed by the lines that landed since. A line the earlier read already
+    /// covered (the two reads can overlap around the snapshot) is kept once, by id, so a pre is not counted twice.
+    /// </summary>
+    private static IReadOnlyList<ArbiterLedgerEvent> MergeWithLanded(
+        IReadOnlyList<ArbiterLedgerEvent> events,
+        IReadOnlyList<string> landed)
+    {
+        HashSet<string> known = [.. events.Select(e => e.Id)];
+        List<ArbiterLedgerEvent> merged = [.. events];
+        foreach (string line in landed)
+        {
+            if (TryDeserialize(line) is { } record && known.Add(record.Id))
+            {
+                merged.Add(record);
+            }
+        }
+
+        return merged;
     }
 
     /// <summary>Reads every complete event in the newest bytes, in append order. Takes no lock.</summary>
@@ -120,7 +165,17 @@ public sealed class InFlightLedger : IArbiterLedger
     public string? MatchPre(ArbiterLedgerEvent post)
     {
         ArgumentNullException.ThrowIfNull(post);
-        return post.PreId ?? ArbiterLedgerQueries.MatchPre(ReadAll(), post);
+        if (post.PreId is not null)
+        {
+            return post.PreId;
+        }
+
+        // The append path's fail-closed rule: a read that did not see the whole log must not pair with the
+        // wrong pre, so it reads as no match, the way an empty log reads.
+        ArbiterLogRead<ArbiterLedgerEvent> read = ReadAllWithDiagnostics();
+        return read.Truncated || read.Unreadable is not null || read.MalformedLines > 0
+            ? null
+            : ArbiterLedgerQueries.MatchPre(read.Records, post);
     }
 
     /// <summary>

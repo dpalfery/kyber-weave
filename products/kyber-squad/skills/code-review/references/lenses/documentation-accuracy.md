@@ -56,7 +56,10 @@ example exists. Search for one.
 acceptance steps must match what shipped, or be marked as superseded with the reason. This
 applies to archived plans: they may be corrected to match reality ("corrected, not
 rewritten"), and a stale archived plan that a live document links to as the source of truth is
-a finding.
+a finding. Fidelity is judged on what the plan records as delivered (its closeout, decisions
+and acceptance steps), not on the wording of its task bodies: task bodies were instructions to
+workers, and a fix round that changed a mechanism does not make them a stale document. The
+generated task file (`*.tasks.yml`, `tasks.yml`) is a copy of the plan; never report it.
 
 **Doc comments and summaries.** The comment says what the code does, not what the author meant.
 "Keys or paths" when only paths are returned; "thread-safe" or "immutable" or "read-only" when

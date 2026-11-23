@@ -84,6 +84,14 @@ public sealed class GitCheckoutProbeTests
     }
 
     [Fact]
+    public void ADotGitFileWithoutAGitdirPointerFingerprintsToZero()
+    {
+        Write(Root + "/.git", "not a pointer");
+
+        Assert.Equal(0, Probe().Fingerprint(Root));
+    }
+
+    [Fact]
     public void TheRevisionIsGitsFirstLineAndACleanTreeIsNotDirty()
     {
         _ = _git
@@ -156,6 +164,48 @@ public sealed class GitCheckoutProbeTests
         long before = Probe().Fingerprint(Root);
 
         Write(metadata + "/HEAD", "ref: refs/heads/longer-branch-name\n");
+
+        Assert.NotEqual(before, Probe().Fingerprint(Root));
+    }
+
+    [Fact]
+    public void TheFingerprintOfALinkedWorktreeFollowsTheSharedBranchRef()
+    {
+        string metadata = "/work/main/.git/worktrees/wt";
+        string common = Path.GetFullPath("../..", metadata);
+        Write(Root + "/.git", "gitdir: " + metadata + "\n");
+        Write(metadata + "/HEAD", "ref: refs/heads/topic\n");
+        Write(metadata + "/commondir", "../..\n");
+        Write(common + "/refs/heads/topic", "0123456789\n");
+        long before = Probe().Fingerprint(Root);
+
+        Write(common + "/refs/heads/topic", "fedcba9876543210\n");
+
+        Assert.NotEqual(before, Probe().Fingerprint(Root));
+    }
+
+    [Fact]
+    public void TheFingerprintOfANormalCheckoutFollowsPackedRefs()
+    {
+        Write(Root + "/.git/HEAD", "ref: refs/heads/a\n");
+        Write(Root + "/.git/packed-refs", "0123456789 refs/heads/a\n");
+        long before = Probe().Fingerprint(Root);
+
+        Write(Root + "/.git/packed-refs", "fedcba9876543210 refs/heads/a\n");
+
+        Assert.NotEqual(before, Probe().Fingerprint(Root));
+    }
+
+    [Fact]
+    public void TheFingerprintOfALinkedWorktreeFollowsItsIndex()
+    {
+        string metadata = "/work/main/.git/worktrees/wt";
+        Write(Root + "/.git", "gitdir: " + metadata + "\n");
+        Write(metadata + "/HEAD", "ref: refs/heads/a\n");
+        Write(metadata + "/index", "one");
+        long before = Probe().Fingerprint(Root);
+
+        Write(metadata + "/index", "two-longer");
 
         Assert.NotEqual(before, Probe().Fingerprint(Root));
     }

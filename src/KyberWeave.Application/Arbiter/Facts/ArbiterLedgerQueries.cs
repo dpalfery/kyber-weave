@@ -26,9 +26,15 @@ public static class ArbiterLedgerQueries
 
         // A post's own stored claim must not count against itself, or a
         // re-match of the same event would return null instead of the pre it
-        // already paired with. Claims by other posts still reserve the pre.
+        // already paired with. Claims by other posts still reserve the pre,
+        // except a claim a recovery wrote from a stop event: a stop precedes a
+        // synchronous dispatch's own post on Copilot CLI, so the real return
+        // must still be able to claim the dispatch it answers.
         HashSet<string> paired = events
-            .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null && e.Id != post.Id)
+            .Where(e => e.Phase == ArbiterLedgerPhases.Post
+                && e.PreId is not null
+                && e.Recovered is null
+                && e.Id != post.Id)
             .Select(e => e.PreId!)
             .ToHashSet(StringComparer.Ordinal);
 

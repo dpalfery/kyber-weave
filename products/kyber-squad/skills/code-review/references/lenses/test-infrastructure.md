@@ -56,6 +56,8 @@ vs block list, LF vs CRLF, single-line vs multi-line) silently leaves the origin
 place, and the fixture then claims to be valid or minimal while it is neither. Require a
 match-count assertion, or parse and re-emit the structure.
 
+**The fix stays inside the existing setup.** When a test is unsafe under shared data or parallel writers, the fix the finding asks for uses the repository's existing fixtures and test database, as the `change-scope` skill sets out; a fix that needs a new database, catalog, credential or CI step is a `PR note:` finding instead.
+
 **Isolation claims versus enforcement.** A fixture or collection that documents "isolated",
 "read-only", "lock-free", or "safe to run in parallel" is making a claim. Find the mechanism
 that enforces it; if the claim depends on every future caller behaving, name that.

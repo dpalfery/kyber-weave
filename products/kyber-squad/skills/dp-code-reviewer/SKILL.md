@@ -72,7 +72,7 @@ disputed. The review loop never switches to it on its own.
 ## The re-review loop
 
 The council re-reviews after every fix round until the verdict prints `fix round: none`. Failed blocking gates and
-findings at or above `review.policy.fix-level` (default `minor`) go to a fix round, after an APPROVE too, and a verifier cycle checks each round;
+findings at or above `review.policy.fix-level` (default `minor`), after the `kind` routing the code-review skill's Fix round paragraph sets out, go to a fix round, after an APPROVE too, and a verifier cycle checks each round;
 findings below the level are follow-up work.
 
 1. **Review** — `code-review` in the current mode.

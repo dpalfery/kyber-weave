@@ -11,6 +11,7 @@ using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Mcp;
 using KyberWeave.Application.Review;
 using KyberWeave.Application.RunStart;
+using KyberWeave.Application.RunIntegrate;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Validation;
@@ -107,7 +108,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IPlanTaskAgentPickerFactory>(sp => new ConfiguredPlanTaskAgentPickerFactory(
             sp.GetRequiredService<ConfiguredArbiterProviderFactory>(),
-            sp.GetRequiredService<IProcessEnvironment>()));
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IEmbeddedResources>()));
         services.TryAddSingleton(sp => new RunDeliveryPorts(
             sp.GetRequiredService<IRepositoryFileStore>(),
             sp.GetRequiredService<IBoundedProcessExecutor>(),
@@ -118,6 +120,13 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IEmbeddedResources>()));
         services.TryAddSingleton<IRunDeliveryRunner, RunDeliveryRunner>();
+        services.TryAddSingleton<IRunIntegrateService>(sp => new RunIntegrateService(
+            sp.GetRequiredService<IGitCommandRunner>(),
+            sp.GetRequiredService<IRunCheckout>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<IStatusLineDeploymentService>(sp => new StatusLineDeploymentService(
             sp.GetRequiredService<IStatusLineFiles>(),
             sp.GetRequiredService<IFileSystemPathSemantics>()));

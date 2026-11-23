@@ -171,7 +171,12 @@ public sealed partial class PlanCloseout
             return new PlanCloseoutOutcome(report, false);
         }
 
-        string archivedText = WithArchivedStatus(planText, date);
+        // A plan's links are written for the folder it is in, and the archive is one folder deeper. Re-expressing them
+        // before the copy is written is what keeps the archived plan's links, and the inventory row copied from its
+        // Closeout mapping, pointing at the same files they pointed at before the move.
+        string planFolder = Path.GetDirectoryName(plan)?.Replace('\\', '/') ?? string.Empty;
+        string archivedText = RelativeLinkRebaser.Rebase(planText, planFolder, archiveFolder, out int rewrittenLinks);
+        archivedText = WithArchivedStatus(archivedText, date);
         string taskFile = PlanTaskFileGenerator.TaskFilePathOf(plan);
         bool hasTaskFile = _store.FileExists(_files.Absolute(taskFile));
 
@@ -251,6 +256,8 @@ public sealed partial class PlanCloseout
 
         if (!archive)
         {
+            if (rewrittenLinks > 0)
+                Say(report, plan, $"Would rewrite {rewrittenLinks} relative link{(rewrittenLinks == 1 ? string.Empty : "s")} so they still resolve from {archiveFolder}.");
             Say(report, plan, $"Closeout evidence is complete. With --archive (and without --dry-run) this would move {plan} to {target}.");
             Say(report, plan, hasTaskFile ? $"Would remove {taskFile}." : "No task file to remove.");
             Say(report, plan, planRowRemoved ? $"Would take its row out of {planIndex}." : $"{planIndex} has no row for it.");
@@ -278,6 +285,8 @@ public sealed partial class PlanCloseout
 
         _store.DeleteFile(_files.Absolute(plan));
         Say(report, plan, $"Moved {plan} to {target} with status archived.");
+        if (rewrittenLinks > 0)
+            Say(report, plan, $"Rewrote {rewrittenLinks} relative link{(rewrittenLinks == 1 ? string.Empty : "s")} so they still resolve from {archiveFolder}.");
         if (hasTaskFile)
         {
             _store.DeleteFile(_files.Absolute(taskFile));

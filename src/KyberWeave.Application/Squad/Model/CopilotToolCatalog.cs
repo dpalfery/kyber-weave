@@ -13,8 +13,8 @@ public static class CopilotToolCatalog
 {
     // Shared tools lead so every agent's tools list shares the longest possible prefix
     // (prompt-cache friendly). Order: vscode, read, todo, MCP, search, execute, edit, web, agent.
-    // The coarse tool-set names at the end remain valid for agents not yet narrowed to
-    // explicit tools; they sort after every explicit entry.
+    // The coarse tool-set names after them remain valid for agents not yet narrowed to
+    // explicit tools; they sort after every explicit entry. The skill loader sorts last.
     public static IReadOnlyList<string> OrderedTools { get; } =
     [
         "vscode/runCommand",
@@ -50,7 +50,8 @@ public static class CopilotToolCatalog
         "read",
         "context7/*",
         "execute",
-        "edit"
+        "edit",
+        "skill"
     ];
 
     public static IReadOnlyDictionary<string, string?> RequiredCapabilities { get; } =
@@ -92,7 +93,10 @@ public static class CopilotToolCatalog
             ["read/viewImage"] = "filesystem.read",
             ["read/terminalSelection"] = "filesystem.read",
             ["read/terminalLastCommand"] = "filesystem.read",
-            ["read/getTaskOutput"] = "filesystem.read"
+            ["read/getTaskOutput"] = "filesystem.read",
+            // skill is the Copilot CLI's skill loader: it reads a skill already deployed beside
+            // the agent and confers no capability of its own, so it stays ungoverned.
+            ["skill"] = null
         };
 
     public static IReadOnlyList<string> Normalize(IEnumerable<string> tools)

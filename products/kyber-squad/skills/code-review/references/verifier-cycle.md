@@ -15,6 +15,8 @@ Read this in every review cycle after the first, which the council's gate run pr
 
 **Fixed means the class is fixed.** A finding is FIXED only when the fix refuses its whole class: state the class in one sentence, name at least three other inputs of that class that the original failure scenario did not name, and trace each through the fix. Seats cannot run anything, so you do: when the code is reachable from a command, run the class inputs against the built CLI and record each input and what it did in `reviewer.md`.
 
+**What a verifier seat looks for.** Whether each prior finding the fix round took is fixed, and any defect the fix itself caused (it breaks an acceptance criterion, a plan contract or base behaviour). Any other finding in the fix delta keeps its true `kind`; the verdict's cycle schedule decides whether hardening is still fixed (cycle 2 takes critical hardening only; from cycle 3 hardening goes to the pull request notes).
+
 **The refutation pass** sends only the candidates no earlier cycle refuted.
 
 **The loop ends** when the verdict prints `fix round: none`. Anything this cycle's verdict still prints as `fix:` goes to another fix round and another verifier cycle, an APPROVE included; `review clean: proceed to archive` ends it. The verdict itself applies the hard stop (5 cycles, or 3 in a row with no drop in the findings to fix) and prints what is left as `open:` for human review.

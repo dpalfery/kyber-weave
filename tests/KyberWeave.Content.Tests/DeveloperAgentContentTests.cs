@@ -68,29 +68,21 @@ public sealed class DeveloperAgentContentTests
         "azure-cli",
         "azure-naming",
         "bug-crusher",
+        "change-scope",
         "code-review",
         "code-review-loop",
         "create-pull-request",
-        "csharp-dev",
-        "csp-security",
-        "dal-dev",
         "delivery-execution",
         "dp-code-reviewer",
         "github-cli",
-        "github-devops",
-        "go-dev",
         "kilo-review-loop",
         "lm-studio-cli",
-        "maui-dev",
         "pr-review-fix-comments",
         "product-owner",
-        "python-dev",
         "review-council",
-        "rust-dev",
         "security-review",
         "setup-dev-environment",
-        "task-gate",
-        "typescript-dev"
+        "task-gate"
     ];
 
     private static SquadAgent Agent(string name) =>

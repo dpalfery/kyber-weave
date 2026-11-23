@@ -87,11 +87,9 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
     {
         if (IsAgentLifecycle(payload))
         {
-            // Only a finished turn with text can be a return. The answer must come from the event alone: the
-            // hook process asks it through an adapter built over no engine, before it builds the real one.
-            return string.IsNullOrWhiteSpace(GetString(payload, "response"))
-                || string.IsNullOrWhiteSpace(GetString(payload, "sessionId"))
-                || string.IsNullOrWhiteSpace(GetString(payload, "stopReason"));
+            // A stop event can close a dispatch whose return hook was lost, and closing it needs the ledger and the
+            // decision log: never pass a stop through. A start event carries no stop reason and has nothing to record.
+            return string.IsNullOrWhiteSpace(GetString(payload, "stopReason"));
         }
 
         CopilotSchema schema;
@@ -220,7 +218,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         {
             return contextual.DecidePreDispatch(
                 harness, caller, target, prompt, config, context,
-                CliCallId(payload), sessionId: null, dispatchModel: null, deliveredPrompt: deliveredPrompt);
+                CliCallId(payload), sessionId: GetString(payload, "sessionId"), dispatchModel: null, deliveredPrompt: deliveredPrompt);
         }
 
         return _engine.DecidePreDispatch(caller, target, prompt, config);
@@ -240,7 +238,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         {
             return contextual.DecidePostDispatch(
                 harness, caller, target, prompt, toolOutput, config, context,
-                CliCallId(payload), sessionId: null);
+                CliCallId(payload), sessionId: GetString(payload, "sessionId"));
         }
 
         return _engine.DecidePostDispatch(caller, target, toolOutput, config);
@@ -259,22 +257,44 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 
     private string HandleSubagentStop(JsonElement payload, KyberWeaveConfig config, HookContext context)
     {
-        if (_engine is not IBackgroundDispatchEngine background
-            || GetString(payload, "response") is not { Length: > 0 } response
-            || GetString(payload, "sessionId") is not { Length: > 0 } sessionId
-            || GetString(payload, "agentId") is not { Length: > 0 } agentId)
+        string? sessionId = GetString(payload, "sessionId");
+        string? response = GetString(payload, "response");
+        HookOutcome? outcome = null;
+
+        // A remembered background turn is recorded first. Its own post claims the dispatch's pre event, so the
+        // recovery below cannot mistake that dispatch for one whose return was lost.
+        if (_engine is IBackgroundDispatchEngine background
+            && !string.IsNullOrEmpty(response)
+            && !string.IsNullOrEmpty(sessionId)
+            && GetString(payload, "agentId") is { Length: > 0 } agentId)
         {
-            return string.Empty;
+            outcome = background.DecideBackgroundReturn(CliToken, sessionId, agentId, response, config, context);
         }
 
-        HookOutcome outcome = background.DecideBackgroundReturn(CliToken, sessionId, agentId, response, config, context);
+        // The agent's turn is over, whether or not its return hook reached us. One still-open dispatch of that agent
+        // is closed, so a hook killed at its timeout cannot leave the dispatch holding its task's files all run.
+        if (_engine is ILostReturnRecovery recovery)
+        {
+            recovery.RecoverLostReturn(CliToken, sessionId, AgentNamesOf(payload), context);
+        }
 
         // The stop hook can only rewrite the response the dispatching agent reads, so a note rides at its end.
         // The engine also keeps the note for that agent's next dispatch hook, in case the rewrite is not delivered.
-        return string.IsNullOrWhiteSpace(outcome.Reason)
+        return outcome is null || string.IsNullOrWhiteSpace(outcome.Reason)
             ? string.Empty
             : new JsonObject { ["modifiedResponse"] = response + "\n\n" + outcome.Reason }.ToJsonString();
     }
+
+    /// <summary>Every name the payload may give the stopped agent, in the order the payload names them.</summary>
+    private static readonly string[] AgentNameFields = ["agentName", "agentType", "agentDisplayName"];
+
+    /// <summary>Every name the payload gives the stopped agent, in the order the payload names them.</summary>
+    private static IReadOnlyList<string> AgentNamesOf(JsonElement payload) =>
+        [.. AgentNameFields
+            .Select(name => GetString(payload, name))
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)];
 
     /// <summary>
     /// The agent id of a <c>task</c> result that is not a return: the dispatch started in the background, or a

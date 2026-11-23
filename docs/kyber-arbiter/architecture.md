@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberArbiter
 source-root: src/KyberWeave.Domain/Arbiter
 owner: dpalfery
-last-reviewed: 2026-11-18
+last-reviewed: 2026-11-20
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -48,6 +48,8 @@ code-refs:
   - ArbiterRuleAdvisory
   - TextExcerpts
   - ArbiterHookTimeout
+  - ILostReturnRecovery
+  - ArbiterLogFiles
 ---
 
 # Kyber Arbiter architecture
@@ -212,7 +214,13 @@ Limits on those facts:
 `InFlightLedger` and `DecisionLog` persist `artifacts/arbiter/ledger.jsonl`
 (`kyber-arbiter.ledger/v1`) and `artifacts/arbiter/decisions.jsonl`
 (`kyber-arbiter.decision/v1`) as append-only lines under one lock file. Only the hook
-appends; the CLI only reads. A pre event's `headers` carry the dispatch's `plan-file`, `task`,
+appends; the CLI only reads. The lock is held for the append alone: each line is one write on an
+`O_APPEND` descriptor, and a post's pairing is resolved from a lock-free read, then reconciled under
+the lock against the lines that landed meanwhile. A fan-out of concurrent hooks therefore queues for
+milliseconds per row rather than for one whole-ledger read each; while that read was under the lock,
+twenty hooks in the same second exhausted the 500 ms wait budget and lost their rows. An append now
+makes three 500 ms attempts, 100 ms apart, before it fails closed. A pre event's
+`headers` carry the dispatch's `plan-file`, `task`,
 `lens`, `refute` and `technology` values, which the worker guard reads to scope a read-only
 dispatch's command allow-list. Prompts and code are logged as digests, never in full.
 Each step-1 rule entry records what the model scored, so thresholds can be tuned from the log:
@@ -467,15 +475,47 @@ Arbiter off, and with it the guard. Each `ArchitectShellGuard` decision writes a
 [ADR 0071](../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md).
 
 `WorkerGuard` (`kyber-weave-arbiter worker-guard`) is the hook guard on a Squad subagent's own tool calls. It
-runs on every Copilot CLI and Claude tool call from the user-level hook file or settings block, the only
-places those harnesses report a subagent's calls with its id and type, and it acts only on a call from inside
-a Squad subagent. It denies a write into the canonical checkout while a live run works in its own worktree
-(`KW-ARB-CHECKOUT-001`, the same id as the return rule) and every call of a developer or `docs-dev` dispatch
-whose current turn is past `arbiter.dispatch-budget` (`KW-ARB-BUDGET-001`), and denies once the call after one that ran past
-`dispatch-budget.call-minutes`, measured as the gap between the dispatch's consecutive calls. It reads the run records, the checkout's git files and
+runs on every Copilot CLI, Claude and Factory tool call from the user-level hook file or settings block, and
+it acts only on a call from inside a Squad subagent. Claude and Copilot report the subagent's id and type in
+the call's own payload. Factory reports neither, so the guard keeps a small session ledger under
+`~/.kyber-weave/arbiter/sessions/`: the root's `Task` pre event records the type in flight, the child's
+`SessionStart` records the child-to-parent link through `calling_session_id`, and the dispatch's `PostToolUse`
+text, which names both ids, resolves an ambiguous child and corrects an earlier guess. The child's entry is
+deleted at `SessionEnd`. A child whose type is still unresolved after three seconds is judged by the rules
+that hold for every profile (`KW-ARB-SECRET-001` and `KW-ARB-CHECKOUT-001`); the profile-specific rules are
+skipped and one log line records it. It denies a write into the canonical checkout while a live run works in its own worktree
+(`KW-ARB-CHECKOUT-001`, the same id as the return rule), and a shell command that would run there for the same
+reason: the call's working directory is inside the canonical checkout, or one of its `cd`, `pushd` or `git -C`
+steps moves into it, wherever in the command that step sits. A call's working directory inside the canonical
+checkout does not count when no step of the command runs there: a `cd` or `pushd` into a directory moves the
+shell before every later step, and a `git` step that names its own directory with `-C` runs there, so the guard
+judges those directories instead. The walk follows the shell: a `cd` inside `( … )` ends at the closing `)`, so
+a later step still runs in the outer directory; a pipeline stage starts in the directory the pipeline did, so a
+`cd` in an earlier stage does not carry; and a step after `||` may run in the directory the previous step
+started in, because the left side may have failed. A `cd` or `pushd` it cannot place (a bare `pushd`, `cd -`, or
+a variable such as `$WT`) and any other step do run in the working directory, so it is judged on that. It denies
+every call of a developer or `docs-dev` dispatch whose current turn is past `arbiter.dispatch-budget`
+(`KW-ARB-BUDGET-001`), and denies once the call after a process-starting call that ran past
+`dispatch-budget.call-minutes`, measured as the gap between the dispatch's consecutive calls; a file read is
+never judged, because only a call that started a process, or waited on one, can hang. It also denies a call that
+would put a secret into the transcript, which goes to the model provider (`KW-ARB-SECRET-001`): the rule applies to
+every capability profile, reads no file and starts no process, and decides from the call's own command text or from
+the path the harness's `view` or `Read` tool names. It refuses a command that reads a secret file (a name fragment
+decides only when the file has no extension or a configuration or data extension, so a source file such as
+`TokenService.cs` is not refused for its name), one that prints a
+secret from a store (`dotnet user-secrets list`, `docker inspect` without a non-environment `--format`, `env` and
+`printenv` with nothing to print or with a secret-named argument, a secret-named variable echoed or printed, `env:`
+listings, the keychain and cloud token lookups, `kubectl get secret … -o yaml|json|jsonpath`, `/proc/*/environ`,
+and a Python or Node one-liner over `os.environ` or `process.env`), and one that carries a literal secret
+(`NAME=value` or `-e`/`--env` `NAME=value`, `Password=`/`Pwd=` in a connection string, `sqlcmd -P`, `mysql -p`,
+`curl -u`, `Authorization: Bearer`). A value passed by reference (`"$VAR"`) is allowed, because it never enters the
+transcript. The whole command text is matched, quotes and nested `bash -c`, `sh -c` and `pwsh -Command` strings
+included, so wrapping a command in a shell escapes nothing, and a command the rule cannot read is refused: this rule
+fails closed, unlike the others. It reads the run records, the checkout's git files and
 one append-only counter file per subagent under `~/.kyber-weave/arbiter/budgets/`, starts no process, calls no
-model, and allows anything it cannot read on the write and budget paths. A developer's shell command that writes
-a file is not seen by it; the return rule catches that.
+model, and allows anything it cannot read on the write, command and budget paths. A read through a grep tool carries
+no command, so the checkout rule never judges it; a read through a `view` or `Read` tool is judged only by the secret
+rule. A write a command makes to a file it does not name is left to the return rule below.
 
 A command from a `platform-reader` dispatch (the `platform-researcher` agent) is seen. The guard raises
 `worker.command` with the command's text, its *form* — the program and leading words, with a leading
@@ -499,9 +539,10 @@ falls back to every declared technology's list, so a refusal is never lost; that
 reading for a read-only agent.
 A judged command whose event
 names no working directory is refused too, because the technology's list lives under that directory and
-cannot be read; the missing directory is itself a machine fact. Where no worker guard runs, nothing is
-refused: on those eleven harnesses the same verbs are stated in the technology's `rules.md`, which reaches
-the prompt's `<technology-rules>` part, and are an instruction only. See Requirement 8.6 and the
+cannot be read; the missing directory is itself a machine fact. Factory's guard reads the same list, using
+the parent session id its ledger recorded to find the dispatch's `technology` header. Where no worker guard
+runs, nothing is refused: on those ten harnesses the same verbs are stated in the technology's `rules.md`,
+which reaches the prompt's `<technology-rules>` part, and are an instruction only. See Requirement 8.6 and the
 [runbook](runbook.md#reading-a-canonical-checkout-refusal).
 
 ## Where the rules come from
@@ -1094,7 +1135,9 @@ Every dispatch has one **pair key**:
 
 Pairing takes the first unpaired pre event of the same harness with the same call id; failing that, the
 first unpaired pre event with the same digest, oldest first. Both keys are recorded on the pre event, so a
-harness that gives an id on one side and not the other still pairs by digest.
+harness that gives an id on one side and not the other still pairs by digest. A pre event claimed only by
+a recovered row (a stop event's close, see [Recovered returns](#recovered-returns)) still counts as
+unpaired for a real return, because Copilot CLI's stop precedes a synchronous dispatch's own post.
 
 The digest tier exists for the harnesses whose hook cannot see an id (Factory, Devin, Kilo) and for a
 ledger written before the id was read. It is why the digest is computed over the *delivered* prompt and
@@ -1127,6 +1170,9 @@ The sites that pair, all through `ArbiterLedgerQueries`:
   stores it with the agent id; it reads the same two tiers.
 - `ArbiterHookDecisionEngine.DecideBackgroundReturn` — looks the stored pre event up by session and agent
   id, then records the turn's response as its return with that `pre-id`.
+- `ArbiterHookDecisionEngine.RecoverLostReturn` — a stop event's fallback when the return hook was lost:
+  it takes the one still-open pre event of that agent in the session by id and writes a post row marked
+  `recovered` (see [Recovered returns](#recovered-returns)).
 - `ArbiterLedgerQueries.ConcurrentWriters`, `InFlightPaths` and `DispatchTechnology` — read the pair to
   know what is still in flight.
 
@@ -1134,6 +1180,45 @@ When no pre event matches, the hook logs one line naming the key it tried: the a
 id, the digest, and how many pre events were already paired. An unpaired return is still recorded as its
 own post event, so `arbiter audit` shows it; it is never attributed to another dispatch, and it never
 marks a task complete.
+
+### Recovered returns
+
+A return hook can be lost: the harness kills it at its timeout, or never delivers it. The dispatch then
+stays in flight for the rest of the run, and `KW-ARB-READY-001` refuses every later attempt at the same
+task with `overlaps-in-flight`. Nothing in the run can close that pre event, so the run blocks.
+
+The harness's stop event is the evidence that the agent's work is over: `subagentStop` on Copilot CLI,
+`SubagentStop` on Claude and Factory. Each adapter's existing stop path (`HandleSubagentStop`) calls
+`ILostReturnRecovery.RecoverLostReturn` after it has recorded any background turn, so a real return
+always wins. The recovery writes one post row for the one still-open pre event of that agent in the same
+session, and marks it:
+
+- The match is on the dispatch's **target** agent, never its caller, and only a pre row carrying the
+  stop event's own session id. A pre row written before the session was recorded names none, and is
+  never recovered: the stop event cannot say which session's agent it belonged to.
+- The pre must be older than the stop event. A same-target post in the same session that claims a pre
+  and was written after the pre is a dispatch that already finished, so a stop arriving then is that
+  finished dispatch's late signal and nothing is closed — the dispatches still open may be different
+  workers still running. A post that claims no pre is not that evidence: it can be the unpaired return
+  the stop handler itself just recorded, which is the case recovery exists for.
+- `recovered` names the stop event (`subagentStop` or `SubagentStop`), so nothing reads the row as a
+  worker's report.
+- It carries the pre event's caller, target and headers, pairs by its `pre-id`, and has no
+  `returns` markers and no changed paths. The dispatch stops holding its task's files; no task is
+  marked complete, because no report was read.
+- A real return that arrives after the stop still pairs with the same dispatch, so the row does not
+  steal it. Copilot CLI fires `subagentStop` at the end of a synchronous agent's turn **before** the
+  parent's `postToolUse`, so every healthy synchronous dispatch takes this order: the recovered row
+  marks the end, and the report that follows is the row that carries the markers and the changed
+  paths. Pairing counts a post as claiming a pre unless that post is a recovered one.
+- A dispatch the rules refused wrote a pre row but never ran a worker, so it is not a candidate. The
+  same set keeps it out of `ledger.in-flight.paths`.
+- When several dispatches of the agent are still open the stop event cannot say which one ended: none
+  is closed, and one line names how many matched. Closing the wrong one would report work as finished
+  that never ran.
+- Factory's `SubagentStop` names the dispatch only by `task_name`, which is a description rather than
+  an agent. The target comes from the transcript's `Task` call, the same place the dispatch path reads
+  it, so recovery matches the agent the dispatch actually named.
 
 ### Attestation scope
 
@@ -1214,7 +1299,7 @@ The degradation records these outcomes produce are listed once, in the
 | Cursor | 2 | Owned entries in the shared `.cursor/hooks.json` (`preToolUse`/`postToolUse`, `failClosed: true`) | `Task` | Header inference from the marker | `tool_input.prompt`; `tool_input.subagent_type` is undocumented, so when absent the rules answer `undecidable`. Returns pair by `tool_use_id` | Unsupported (unverified): whether `updated_input` applies to `Task` is undocumented [CU-SUB], [CU-HOOK] |
 | Kilo | 3 | The `.kilo/plugin/kyber-arbiter.ts` shim speaking the plugin envelope | `task` | Header inference from the marker | `args.subagent_type`, `args.prompt`; returns pair by `callID` | Unsupported (unverified): the task tool documents no model [KI-SUB] |
 | Antigravity | 3 | An owned top-level group `kyber-arbiter` in `.agents/hooks.json`, matching `^invoke_subagent$` | `invoke_subagent`; each element of `Subagents` is one dispatch | Header inference from the marker | `TypeName`, `Prompt`, as one flat `args` object (the shape a real agy call sends) or as the `Subagents` list; see [the Antigravity payload](#the-antigravity-payload-and-caller-rule). Deny writes `{decision: "deny", reason}`; every other answer on a pre-tool event writes `{decision: "allow"}`, never `{}`, which agy reports as a denial with an empty reason. An inserted prompt writes `{decision: "ask", overwrite: {...}}` | Unsupported: `invoke_subagent` has no model field; tier is per custom subagent [AG-SUB], [AG-HOOK] |
-| Factory | 3 | An owned block in `.factory/hooks.json`, matcher groups at the top level with no `hooks` wrapper, plus a `SubagentStop` group with no matcher (Factory runs `Task` in the background, so the worker report arrives at stop, not at `PostToolUse`), unless shadowed (below) | `Task` | Header inference from the marker | `tool_input.subagent_type`, `tool_input.prompt`; returns pair by `pair-digest` | Unsupported: the docs say the caller cannot choose a model for a single call [FA-DROID], [FA-HOOK] |
+| Factory | 3 | An owned block in `.factory/hooks.json`, matcher groups at the top level with no `hooks` wrapper: the dispatch's `Task` groups, a `SubagentStop` group with no matcher (Factory runs `Task` in the background, so the worker report arrives at stop, not at `PostToolUse`), and the worker guard's `PreToolUse` group matching every tool, second `PostToolUse` on `Task`, and matcher-less `SessionStart` and `SessionEnd` groups; unless shadowed (below) | `Task` | Header inference from the marker | `tool_input.subagent_type`, `tool_input.prompt`; returns pair by `pair-digest` | Unsupported: the docs say the caller cannot choose a model for a single call [FA-DROID], [FA-HOOK] |
 | Devin | 3 | An owned block in `.devin/hooks.v1.json` (the Claude Code format), matching `^run_subagent$` | `run_subagent` | Header inference from the marker | `tool_input.profile`, `tool_input.prompt`; returns pair by `pair-digest` | Unsupported (unverified): the `run_subagent` schema documents no model [DV-HOOK], [DV-LOG] |
 | Warp, ZCode | 3 | No hooks: the MCP fallback | — | Asserted by the caller in `arbiter_evaluate_agent_dispatch_or_return` | — | Not applicable: no hooks |
 
@@ -1355,7 +1440,9 @@ skills outrank project skills). Two points are not documented and are the design
 invoked. The claim keeps one evaluation whichever way those points fall. The rationale and rejected
 alternatives are in [ADR 0070](../adr/0070-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md).
 
-Claude's user-level block is written only under `hooks.PreToolUse` and `hooks.PostToolUse`. See
+Claude's user-level block is written under `hooks.PreToolUse`, `hooks.PostToolUse` and the
+matcher-less `hooks.SubagentStop`. The stop entry runs the same Arbiter command with the same
+timeout, and is what lets a dispatch whose return hook timed out stop holding its task's files. See
 [Squad architecture](../kyber-squad/architecture.md) for the owned-block rule.
 
 The architect's shell guard is not in this block. It is a `PreToolUse` entry with matcher `^(Bash|PowerShell)$`

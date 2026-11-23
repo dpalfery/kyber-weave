@@ -129,7 +129,7 @@ public sealed class DocsCloseoutCommandTests
     public void ASlugMatchingTwoActivePlansIsAmbiguousAndNothingMoves()
     {
         using DocFixture fixture = Repository();
-        fixture.Write("6-Docs/plans/2026-10-25-widget.md", CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready"));
+        fixture.Write("6-Docs/plans/2026-10-25-widget.md", CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", linkPrefix: ".."));
 
         (int exit, string output) = RunTyped(fixture, "widget", ".");
 
@@ -153,7 +153,7 @@ public sealed class DocsCloseoutCommandTests
     [Fact]
     public void AnUncheckedTaskListRefusesTheArchiveAndMovesNothing()
     {
-        string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready") + """
+        string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", linkPrefix: "..") + """
 
             ## Tasks
 
@@ -176,7 +176,7 @@ public sealed class DocsCloseoutCommandTests
     [Fact]
     public void ATickedTaskListArchivesNormally()
     {
-        string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready") + """
+        string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", linkPrefix: "..") + """
 
             ## Tasks
 
@@ -194,7 +194,7 @@ public sealed class DocsCloseoutCommandTests
     [Fact]
     public void AProseChecklistOutsideTheTasksSectionDoesNotRefuseTheArchive()
     {
-        string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready") + """
+        string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", linkPrefix: "..") + """
 
             ## Tasks
 
@@ -216,7 +216,7 @@ public sealed class DocsCloseoutCommandTests
     [Fact]
     public void AFencedCheckboxExampleInsideTheTasksSectionDoesNotRefuseTheArchive()
     {
-        string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready") + """
+        string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", linkPrefix: "..") + """
 
             ## Tasks
 
@@ -243,6 +243,7 @@ public sealed class DocsCloseoutCommandTests
         string plan = CloseoutCorpus.PlanDocument(
             status: "ready",
             bodyStatus: "Ready",
+            linkPrefix: "..",
             sections: CloseoutCorpus.DecisionsSection("D1") + CloseoutCorpus.DesignHarvestSection("H1")) + """
 
             ## Tasks
@@ -273,6 +274,7 @@ public sealed class DocsCloseoutCommandTests
         Assert.True(Exists(fixture, TaskFile));
         Assert.False(Exists(fixture, Archived));
         Assert.Contains("Closeout evidence is complete", output, StringComparison.Ordinal);
+        Assert.Contains("Would rewrite 1 relative link", output, StringComparison.Ordinal);
         Assert.Contains("2026-10-20-widget.md", Read(fixture, PlanIndex), StringComparison.Ordinal);
     }
 
@@ -280,7 +282,7 @@ public sealed class DocsCloseoutCommandTests
     public void AnUnmappedDecisionRefusesTheArchiveNamingWhatIsMissingAndMovesNothing()
     {
         string sections = CloseoutCorpus.DecisionsSection("D1", "D2")
-                          + CloseoutCorpus.CloseoutMappingSection(("D1, H1", "[Widget architecture](../../reference/widget.md)"))
+                          + CloseoutCorpus.CloseoutMappingSection(("D1, H1", "[Widget architecture](../reference/widget.md)"))
                           + CloseoutCorpus.DesignHarvestSection("H1");
         using DocFixture fixture = Repository(
             CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", sections: sections));
@@ -330,7 +332,7 @@ public sealed class DocsCloseoutCommandTests
     public void AMappingRowWhoseLinkResolvesNowhereIsNamedAlongsideEveryUnmappedId()
     {
         string sections = CloseoutCorpus.DecisionsSection("D1", "D2")
-                          + CloseoutCorpus.CloseoutMappingSection(("D1, D2, H1", "[Widget](../../reference/missing.md)"))
+                          + CloseoutCorpus.CloseoutMappingSection(("D1, D2, H1", "[Widget](../reference/missing.md)"))
                           + CloseoutCorpus.DesignHarvestSection("H1");
         using DocFixture fixture = Repository(
             CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", sections: sections));
@@ -347,7 +349,7 @@ public sealed class DocsCloseoutCommandTests
     [InlineData(true, "| 2026-10-20 | 2026-11-13 |")]
     public void TheInventoryRowShowsTheCreatedDateOnlyWhenThePlanRecordedOne(bool recorded, string cells)
     {
-        string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready");
+        string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", linkPrefix: "..");
         if (recorded)
             plan = plan.Replace("status: ready", "status: ready\ncreated: 2026-10-20", StringComparison.Ordinal);
         using DocFixture fixture = Repository(plan);

@@ -1,4 +1,6 @@
 using System.Text.Json.Nodes;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
 using Xunit;
 using static KyberWeave.Tests.ReviewDiagnosticAssert;
@@ -67,6 +69,89 @@ public sealed partial class ReviewVerdictSeatsCommandTests
         Assert.Equal(0, run.Result);
         IReadOnlyList<string> lines = MessagesWithCode(run.Output, FixRound);
         Assert.Contains("follow-up: correctness/off-by-one (major) src/Foo.cs:12 (pre-existing debt)", lines);
+        Assert.Contains("fix round: none (fix level minor); review clean: proceed to archive.", lines);
+    }
+
+    /// <summary>
+    /// A seat that states in its claim that the code predates the change needs no <c>--drop</c>: the major hardening it
+    /// reports in cycle 1 is dropped as pre-existing debt and listed as follow-up work instead of fixed.
+    /// </summary>
+    [Fact]
+    public void APreExistingDebtMajorHardeningInCycle1IsFollowUpWork()
+    {
+        WriteSeat("correctness", FindingSeat(
+            severity: "major",
+            kind: "hardening",
+            claim: "Pre-existing debt: the file is not in this change"));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains(
+            MessagesWithCode(run.Output, KindRouting),
+            line => line == "Dropped 'correctness/off-by-one': pre-existing debt: the file is not in this change.");
+        IReadOnlyList<string> lines = MessagesWithCode(run.Output, FixRound);
+        Assert.Contains("follow-up: correctness/off-by-one (major) src/Foo.cs:12 (pre-existing debt)", lines);
+        Assert.DoesNotContain(lines, line => line.StartsWith("fix:", StringComparison.Ordinal));
+        Assert.Contains("fix round: none (fix level minor); review clean: proceed to archive.", lines);
+    }
+
+    /// <summary>A hardening whose claim does not say it predates the change is still fixed in cycle 1.</summary>
+    [Fact]
+    public void ANormalMajorHardeningInCycle1IsStillFixed()
+    {
+        WriteSeat("correctness", FindingSeat(
+            severity: "major",
+            kind: "hardening",
+            claim: "The loop bound excludes the final element."));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains("fix: correctness/off-by-one (major) src/Foo.cs:12", MessagesWithCode(run.Output, FixRound));
+    }
+
+    /// <summary>
+    /// A manual <c>--drop</c> of a finding whose claim also says it predates the change wins: the finding is dropped
+    /// once, with the reviewer's reason, and never reaches the automatic routing.
+    /// </summary>
+    [Fact]
+    public void AManualDropOfAPreExistingDebtFindingProducesOneDrop()
+    {
+        WriteSeat("correctness", FindingSeat(
+            severity: "major",
+            kind: "hardening",
+            claim: "Pre-existing debt: the file is not in this change"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--drop", "correctness/off-by-one=pre-existing debt: the reviewer says so",
+                .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Single(
+            MessagesWithCode(run.Output, FixRound),
+            line => line.StartsWith("follow-up: correctness/off-by-one", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            MessagesWithCode(run.Output, KindRouting),
+            line => line.StartsWith("Dropped 'correctness/off-by-one'", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A finding dropped as a pull request note blocks nothing and is listed as follow-up work, exactly as pre-existing
+    /// debt is; a clean review says the loop ends.
+    /// </summary>
+    [Fact]
+    public void AFindingDroppedAsAPullRequestNoteIsFollowUpWorkAndTheLoopEnds()
+    {
+        WriteSeat("correctness", FindingSeat(severity: "major"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--drop", "correctness/off-by-one=pr note: the pull request describes this instead",
+                .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        IReadOnlyList<string> lines = MessagesWithCode(run.Output, FixRound);
+        Assert.Contains("follow-up: correctness/off-by-one (major) src/Foo.cs:12 (pr note)", lines);
         Assert.Contains("fix round: none (fix level minor); review clean: proceed to archive.", lines);
     }
 
@@ -264,7 +349,267 @@ public sealed partial class ReviewVerdictSeatsCommandTests
         Assert.Contains($"fix round: none (fix level {level}); review clean: proceed to archive.", lines);
     }
 
+    private const string KindRouting = "KW-REVIEW-063";
+
+    /// <summary>
+    /// A plan objection never takes a fix round: it becomes follow-up work, and its quoted basis is the recorded reason.
+    /// </summary>
+    [Fact]
+    public void APlanObjectionIsFollowUpWorkAndItsBasisIsTheReason()
+    {
+        WriteSeat("documentation-accuracy", FindingSeat(
+            lens: "documentation-accuracy",
+            id: "documentation-accuracy/plan-t2",
+            severity: "critical",
+            kind: "plan-objection",
+            basis: "plan T2 says the selector stays in Application."));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("documentation-accuracy")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains(
+            MessagesWithCode(run.Output, KindRouting),
+            line => line.Contains(
+                "'documentation-accuracy/plan-t2': pr note: plan objection: plan T2 says the selector stays in Application.",
+                StringComparison.Ordinal));
+        IReadOnlyList<string> lines = MessagesWithCode(run.Output, FixRound);
+        Assert.Contains("follow-up: documentation-accuracy/plan-t2 (critical) src/Foo.cs:12 (pr note)", lines);
+        Assert.DoesNotContain(lines, line => line.StartsWith("fix:", StringComparison.Ordinal));
+        Assert.Contains("fix round: none (fix level minor); review clean: proceed to archive.", lines);
+    }
+
+    /// <summary>
+    /// A cycle 3 hardening is dropped whatever its severity, so a change whose only findings are a hardening and a plan
+    /// objection is approved, with both listed as follow-up work and neither as a fix.
+    /// </summary>
+    [Fact]
+    public void OnlyDroppedFindingsLeaveTheVerdictApprove()
+    {
+        string cycle = OutCycleFolder(3);
+        _services.Files.CreateDirectory(cycle);
+        WriteSeat("correctness", FindingSeat(severity: "critical", kind: "hardening"));
+        WriteSeat("documentation-accuracy", FindingSeat(
+            lens: "documentation-accuracy",
+            id: "documentation-accuracy/plan-d4",
+            severity: "major",
+            kind: "plan-objection",
+            basis: "plan D4 names the decision model as optional."));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--out", Path.Combine(cycle, "findings.json"), .. NotSeatedExcept("correctness", "documentation-accuracy")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains(MessagesWithCode(run.Output, "KW-REVIEW-024"), line => line.StartsWith("APPROVE", StringComparison.Ordinal));
+        IReadOnlyList<string> lines = MessagesWithCode(run.Output, FixRound);
+        Assert.Contains("follow-up: correctness/off-by-one (critical) src/Foo.cs:12 (pr note)", lines);
+        Assert.Contains("follow-up: documentation-accuracy/plan-d4 (major) src/Foo.cs:12 (pr note)", lines);
+        Assert.DoesNotContain(lines, line => line.StartsWith("fix:", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A security lens finding is always a defect, so a critical hardening it reports is still fixed in cycle 3, when
+    /// the same kind from any other lens would be dropped.
+    /// </summary>
+    [Fact]
+    public void ASecurityHardeningIsKeptAsADefectInCycle3()
+    {
+        string cycle = OutCycleFolder(3);
+        _services.Files.CreateDirectory(cycle);
+        WriteSeat("security", FindingSeat(lens: "security", id: "security/key-in-argv", severity: "critical", kind: "hardening"));
+        ScriptChange();
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--out", Path.Combine(cycle, "findings.json"), .. NotSeatedExcept("security")]);
+
+        Assert.Equal(1, run.Result);
+        Assert.DoesNotContain(MessagesWithCode(run.Output, KindRouting), line => line.StartsWith("Dropped", StringComparison.Ordinal));
+        IReadOnlyList<string> lines = MessagesWithCode(run.Output, FixRound);
+        Assert.Contains("fix: security/key-in-argv (critical) src/Foo.cs:12", lines);
+    }
+
+    /// <summary>A seat that wrote no kind is read as a defect, and each such finding draws its own warning.</summary>
+    [Fact]
+    public void AFindingsWithNoKindIsKeptWithAWarning()
+    {
+        WriteSeat("correctness", FindingSeat(severity: "major"));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains(
+            MessagesWithCode(run.Output, KindRouting),
+            line => line == "'correctness/off-by-one': the seat wrote no kind; read as a defect.");
+        Assert.Contains(
+            MessagesWithCode(run.Output, KindRouting),
+            line => line.Contains("routed as cycle 1", StringComparison.Ordinal));
+        Assert.Contains("fix: correctness/off-by-one (major) src/Foo.cs:12", MessagesWithCode(run.Output, FixRound));
+    }
+
+    /// <summary>With no cycle path of its own, the verdict reads the cycle number from the <c>--prior</c> folder.</summary>
+    [Fact]
+    public void APriorCycleNamesTheCurrentCycleWhenNoOutPathDoes()
+    {
+        WriteCycles(Minors(0), Minors(0));
+        WriteSeat("correctness", FindingSeat(severity: "critical", kind: "hardening"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", CycleFolder(2), .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains(
+            MessagesWithCode(run.Output, KindRouting),
+            line => line.Contains("pr note: hardening outside the cycle 3 schedule.", StringComparison.Ordinal));
+        Assert.Contains(MessagesWithCode(run.Output, "KW-REVIEW-024"), line => line.StartsWith("APPROVE", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The findings document keeps only what the verdict kept, so the next cycle's recheck, which reads it and filters
+    /// by the fix level, never re-checks a finding dropped by its kind.
+    /// </summary>
+    [Fact]
+    public void TheNextCycleRecheckExcludesADroppedHardeningAndPlanObjection()
+    {
+        string cycle = OutCycleFolder(1);
+        _services.Files.CreateDirectory(cycle);
+        string outPath = Path.Combine(cycle, "findings.json");
+        WriteSeat("correctness", FindingSeat(severity: "minor", kind: "hardening"));
+        WriteSeat("documentation-accuracy", FindingSeat(
+            lens: "documentation-accuracy",
+            id: "documentation-accuracy/plan-t2",
+            severity: "major",
+            kind: "plan-objection",
+            basis: "plan T2 says the selector stays in Application."));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--out", outPath, .. NotSeatedExcept("correctness", "documentation-accuracy")]);
+
+        Assert.Equal(0, run.Result);
+        FindingsReport stored = ReviewJson.ReadFindings(_services.Files.ReadAllText(outPath));
+        // The next cycle's recheck is this document filtered by the fix level (ReviewCycleSelector.ReadRecheck).
+        Assert.Empty(stored.Findings);
+        Assert.DoesNotContain(stored.Findings, new ReviewPolicy().FixRoundTakes);
+    }
+
+    /// <summary>
+    /// A round that continues writes one ready packet beside the cycle's findings and prints its dispatch block, so the
+    /// conductor sends it unchanged instead of paraphrasing the <c>fix:</c> line.
+    /// </summary>
+    [Fact]
+    public void AContinuingRoundWritesOneFixPacketAndPrintsItsDispatchBlock()
+    {
+        string cycle = CycleFolder(3);
+        _services.Cycles.WriteIdentity(cycle, Identity);
+        WriteFile("repo/docs/plans/demo.md", "---\nid: demo\ntitle: Demo\ndoc-type: plan\nstatus: Ready\n---\n\n# Demo\n");
+        WriteFile(
+            "repo/docs/plans/demo.tasks.yml",
+            "schema-version: 1\nplan: docs/plans/demo.md\ntasks:\n  - id: T1\n    files:\n      - src/Foo.cs\n");
+        ScriptChange("docs/plans/demo.md", "src/Foo.cs");
+        WriteSeat("correctness", FindingSeat(severity: "major"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--out", Path.Combine(cycle, "findings.json"), .. NotSeatedExcept("correctness")]);
+
+        Assert.Contains(MessagesWithCode(run.Output, FixRound), block =>
+            block.StartsWith("--- fix T1 ---", StringComparison.Ordinal)
+            && block.Contains("KYBER-ARBITER: true", StringComparison.Ordinal)
+            && block.Contains("PLAN_FILE: docs/plans/demo.md", StringComparison.Ordinal)
+            && block.Contains("TASK: T1", StringComparison.Ordinal)
+            && block.Contains($"Fix packet: {Path.Combine(cycle, "fix-packets", "task-T1.md")}", StringComparison.Ordinal)
+            && block.EndsWith("--- end ---", StringComparison.Ordinal));
+        Assert.True(_services.Files.FileExists(Path.Combine(cycle, "fix-packets", "task-T1.md")));
+    }
+
+    /// <summary>A clean review sends nothing to a fix round, so it writes no packet.</summary>
+    [Fact]
+    public void ACleanRoundWritesNoFixPackets()
+    {
+        string cycle = CycleFolder(3);
+        _services.Cycles.WriteIdentity(cycle, Identity);
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--out", Path.Combine(cycle, "findings.json"), .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.False(_services.Files.DirectoryExists(Path.Combine(cycle, "fix-packets")));
+    }
+
+    /// <summary>A capped loop sends its findings to human review, so it writes no packet either.</summary>
+    [Fact]
+    public void ACappedRoundWritesNoFixPackets()
+    {
+        WriteCycles(Minors(4), Minors(3), Minors(2), Minors(1));
+        string cycle = CycleFolder(5);
+        _services.Cycles.WriteIdentity(cycle, Identity);
+        WriteSeat("security", FindingSeat(lens: "security", id: "security/m1", severity: "minor"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", CycleFolder(4), "--out", Path.Combine(cycle, "findings.json"),
+                .. NotSeatedExcept("security")]);
+
+        Assert.Contains(MessagesWithCode(run.Output, FixRound), line => line.StartsWith("open:", StringComparison.Ordinal));
+        Assert.False(_services.Files.DirectoryExists(Path.Combine(cycle, "fix-packets")));
+    }
+
+    /// <summary>
+    /// The first verdict of a cycle runs before the cycle records its change, so the packet writer must still name
+    /// the cycle folder from <c>--out</c> and write the packets the normal flow dispatches from.
+    /// </summary>
+    [Fact]
+    public void AContinuingRoundWritesPacketsBeforeTheCycleRecordsItsIdentity()
+    {
+        string cycle = OutCycleFolder(3);
+        _services.Files.CreateDirectory(cycle);
+        WriteSeat("correctness", FindingSeat(severity: "major"));
+        ScriptChange();
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--out", Path.Combine(cycle, "findings.json"), .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.True(_services.Files.FileExists(Path.Combine(cycle, "fix-packets", "unassigned.md")));
+        Assert.DoesNotContain(
+            MessagesWithCode(run.Output, FixRound),
+            line => line.Contains("the cycle folder could not be named", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A continuing round that cannot name a cycle folder writes no packet, so it says so instead of leaving the
+    /// conductor to guess why no dispatch block followed the <c>fix:</c> lines.
+    /// </summary>
+    [Fact]
+    public void AContinuingRoundWithNoCycleFolderWarnsThatThePacketsWereNotWritten()
+    {
+        WriteSeat("correctness", FindingSeat(severity: "major"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--out", Path.Combine(_services.Root, "report.json"), .. NotSeatedExcept("correctness")]);
+
+        AssertDiagnostic(
+            run.Output,
+            FixRound,
+            "warning",
+            "fix packets: not written — the cycle folder could not be named (pass --out inside the cycle folder); " +
+            "dispatch from the fix: lines and findings.json");
+        Assert.DoesNotContain(
+            MessagesWithCode(run.Output, FixRound),
+            line => line.StartsWith("--- fix ", StringComparison.Ordinal));
+    }
+
+    /// <summary>Scripts the change the packet writer reads: a merge base, the changed paths and no untracked file.</summary>
+    private void ScriptChange(params string[] paths)
+    {
+        string status = string.Concat(paths.Select(path => $"M\0{path}\0"));
+        _ = _services.Processes
+            .Script("git", new ProcessRunResult(0, "base123\n", false), "merge-base", "origin/HEAD", "HEAD")
+            .Script("git", new ProcessRunResult(0, status, false), "diff", "-z", "--name-status", "-M", "--relative", "base123", "--")
+            .Script("git", new ProcessRunResult(0, string.Empty, false), "ls-files", "-z", "--others", "--exclude-standard", "--");
+    }
+
     private string CycleFolder(int number) => Path.Combine(_services.Root, "cycles", $"cycle-{number}");
+
+    /// <summary>A cycle folder the verdict can name its cycle from: its parent is the review folder.</summary>
+    private string OutCycleFolder(int number) => Path.Combine(_services.Root, "review", $"cycle-{number}");
 
     /// <summary>The ids of <paramref name="count"/> distinct minor findings.</summary>
     private static string[] Minors(int count) => [.. Enumerable.Range(1, count).Select(index => $"security/m{index}")];

@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Host;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
@@ -8,12 +9,16 @@ namespace KyberWeave.Core.Docs.Validation;
 /// <summary>
 /// Asks the decision model, once per task file, which agent should do each task: the task's title, capabilities and
 /// files against the name and description of every agent that takes implementation or documentation work (ADR 0082).
+/// The same request also asks whether the architect's difficulty rating fits the task by the shipped rubric.
 /// </summary>
 /// <remarks>
 /// Each task is its own question, so the model reads only that task's state (one batched request read several tasks'
 /// state as one and answered every question at about 0.3). The requests run in parallel, so the cost is about one
-/// round trip however many tasks the plan holds, and an unreachable model costs at most one timeout. Only an answer at or above the floor is kept; below it, or on any provider fault,
-/// the task gets no pick and the conductor chooses from the capabilities, as it does when no model is configured.
+/// round trip however many tasks the plan holds, and an unreachable model costs at most one timeout. The agreement
+/// answer is independent of the pick: it is kept even when the pick is missing, unsure or names no candidate, so the
+/// architect's rating is still checked. Only a pick at or above the floor is kept; below it, or on any provider fault,
+/// the task gets no agent and the conductor chooses from the capabilities, as it does when no model is configured.
+/// The architect rates the task; the model only checks that rating and never changes it.
 /// </remarks>
 public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
 {
@@ -77,28 +82,34 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     /// <summary>The question every pick asks.</summary>
     public const string Question = "Which agent should do this task, judged by the abilities it needs and the files it changes?";
 
-    /// <summary>The difficulty question, asked in the same call as the pick (the shipped <c>KW-ARB-DIFFICULTY-001</c> question).</summary>
-    public const string DifficultyQuestion = "How hard is this task: easy, standard or hard?";
+    /// <summary>The agreement question, asked in the same call as the pick, judged by the shipped difficulty rubric.</summary>
+    public const string AgreementQuestion = "Does the architect's difficulty rating fit this task, judged by the rubric?";
 
-    /// <summary>The answer that maps to <c>medium</c>; the shipped rule spells the middle value <c>standard</c>.</summary>
-    public const string StandardAnswer = "standard";
+    /// <summary>The manifest name of the one difficulty rubric the architect and the decision model both judge by.</summary>
+    public const string RubricResourceName = "Squad.difficulty-rubric.md";
 
     private const string RulePrefix = "KW-DOC-TASKS-PICK-";
-    private const string DifficultyPrefix = "KW-DOC-TASKS-RATE-";
+    private const string AgreementPrefix = "KW-DOC-TASKS-AGREE-";
     private const int MaxCapabilityCharacters = 1200;
 
     private readonly IArbiterProvider _provider;
     private readonly IReadOnlyList<ArbiterSquadAgent> _candidates;
+    private readonly IEmbeddedResources _resources;
+    private string? _rubric;
+    private bool _rubricRead;
 
-    /// <summary>Creates a picker over a provider and the agents it may choose from.</summary>
+    /// <summary>Creates a picker over a provider, the agents it may choose from and the shipped content it reads.</summary>
     /// <param name="provider">The decision model.</param>
     /// <param name="candidates">The agents a task may go to, with their descriptions.</param>
-    public PlanTaskAgentPick(IArbiterProvider provider, IReadOnlyList<ArbiterSquadAgent> candidates)
+    /// <param name="resources">The embedded shipped content, which holds the difficulty rubric.</param>
+    public PlanTaskAgentPick(IArbiterProvider provider, IReadOnlyList<ArbiterSquadAgent> candidates, IEmbeddedResources resources)
     {
         ArgumentNullException.ThrowIfNull(provider);
         ArgumentNullException.ThrowIfNull(candidates);
+        ArgumentNullException.ThrowIfNull(resources);
         _provider = provider;
         _candidates = candidates;
+        _resources = resources;
     }
 
     /// <inheritdoc />
@@ -222,8 +233,14 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
 
         for (int index = 0; index < asked.Count; index++)
         {
-            if (choices[index] is { } choice && names.Contains(choice.Agent))
-                picks[asked[index].Id!] = choice;
+            if (choices[index] is not { } choice)
+                continue;
+
+            // An answer naming no candidate is no pick, exactly as a missing one; the agreement it arrived with
+            // is independent of the pick, so it is kept.
+            picks[asked[index].Id!] = choice.Agent is not null && !names.Contains(choice.Agent)
+                ? choice with { Agent = null, Confidence = 0 }
+                : choice;
         }
 
         return picks;
@@ -233,75 +250,118 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     private async Task<PlanTaskAgentChoice?> AskAsync(PlanTaskFileEntry task)
     {
         const string key = "pick";
+        string? rubric = Rubric();
         ArbiterFactSet facts = new ArbiterFactSet()
             .With($"{key}.title", TitleOf(task), ArbiterFactLabel.Derived)
             .With($"{key}.capabilities", Bounded(task.Capabilities ?? "(not stated)"), ArbiterFactLabel.Derived)
-            .With($"{key}.files", string.Join(", ", task.Files ?? []), ArbiterFactLabel.Derived);
+            .With($"{key}.files", string.Join(", ", task.Files ?? []), ArbiterFactLabel.Derived)
+            .With($"{key}.task", task.Prompt ?? "(not stated)", ArbiterFactLabel.Asserted)
+            .With($"{key}.architect-rating", TierLabel(task.Difficulty), ArbiterFactLabel.Derived)
+            .With($"{key}.rubric", rubric ?? "(not available)", ArbiterFactLabel.Asserted);
         string id = RulePrefix + task.Id;
-        string difficultyId = DifficultyPrefix + task.Id;
+        string agreementId = AgreementPrefix + task.Id;
+        List<ArbiterRule> rules = [RuleFor(task.Id!, key)];
+        if (rubric is not null)
+        {
+            rules.Add(AgreementRuleFor(task.Id!, key));
+        }
+
         ArbiterStep1BatchResult result;
         try
         {
-            // One request per task carries both questions, so the rating costs no second round trip.
-            result = await _provider.AskStep1Async(
-                [RuleFor(task.Id!, key), DifficultyRuleFor(task.Id!, key)], facts).ConfigureAwait(false);
+            // One request per task carries both questions, so the check costs no second round trip.
+            result = await _provider.AskStep1Async(rules, facts).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             return null;
         }
 
-        if (!result.AnswersByRule.TryGetValue(id, out string? answer))
-            return null;
+        string? answer = result.AnswersByRule.TryGetValue(id, out string? picked) ? picked : null;
+
+        // The agreement is read first and on its own: a pick the floor rejects must not throw away a confident
+        // verdict on the architect's rating.
+        DifficultyAgreement? agreement = null;
+        if (rubric is not null
+            && result.AnswersByRule.TryGetValue(agreementId, out string? verdict)
+            && verdict is DifficultyAgreement.Agreed or DifficultyAgreement.NotAgreed
+            && result.ScoresByRule is not null
+            && result.ScoresByRule.TryGetValue(agreementId, out ArbiterStep1Score? agreementScore)
+            && agreementScore.Confidence is { } agreementConfidence
+            && agreementConfidence >= ConfidenceFloor)
+        {
+            agreement = new DifficultyAgreement(verdict, Math.Round(agreementConfidence, 3));
+        }
+
+        // The pick stays optional: a missing answer, a confidence that is not a finite number, or one below the
+        // floor writes no agent and leaves the conductor to choose from the capabilities.
         double? confidence = result.ScoresByRule is not null && result.ScoresByRule.TryGetValue(id, out ArbiterStep1Score? score)
             ? score.Confidence
             : null;
-        if (confidence is not { } sure || sure < ConfidenceFloor)
+        if (answer is null || confidence is not { } sure || !double.IsFinite(sure) || sure < ConfidenceFloor)
         {
-            return null;
+            return new PlanTaskAgentChoice(null, 0, agreement);
         }
 
-        string? difficulty = null;
-        double? difficultyConfidence = null;
-        if (result.AnswersByRule.TryGetValue(difficultyId, out string? rated)
-            && result.ScoresByRule is not null
-            && result.ScoresByRule.TryGetValue(difficultyId, out ArbiterStep1Score? difficultyScore)
-            && difficultyScore.Confidence >= ConfidenceFloor
-            && DifficultyOf(rated) is { } ratedDifficulty)
-        {
-            difficulty = ratedDifficulty;
-            difficultyConfidence = Math.Round(difficultyScore.Confidence!.Value, 3);
-        }
-
-        return new PlanTaskAgentChoice(answer, Math.Round(sure, 3), difficulty, difficultyConfidence);
+        return new PlanTaskAgentChoice(answer, Math.Round(sure, 3), agreement);
     }
 
     /// <summary>
-    /// The difficulty to record for an answer, or null when the answer is not one the difficulty
-    /// question offered. A value that is not a legal difficulty is never recorded: the agent's name
-    /// or a model the question did not list would otherwise be written into the task file as a
-    /// difficulty, and the task-file check would refuse the plan.
+    /// The shipped difficulty rubric, read through the embedded-content seam, without the leading note that says who
+    /// else carries the same text. Null when the resource cannot be read, which asks no agreement question.
     /// </summary>
-    private static string? DifficultyOf(string? answer) => answer switch
+    private string? Rubric()
     {
-        "easy" => "easy",
-        StandardAnswer => "medium",
-        "hard" => "hard",
-        _ => null,
+        if (_rubricRead)
+        {
+            return _rubric;
+        }
+
+        _rubricRead = true;
+        try
+        {
+            string text = _resources.ReadAllText(RubricResourceName);
+            int end = text.IndexOf("-->", StringComparison.Ordinal);
+            _rubric = (end >= 0 ? text[(end + 3)..] : text).Trim();
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            _rubric = null;
+        }
+
+        return _rubric;
+    }
+
+    /// <summary>The architect's rating with the tier the rubric reads it as: <c>easy (standard)</c> and so on.</summary>
+    /// <param name="difficulty">The rating in use: <c>easy</c>, <c>medium</c> or <c>hard</c>, or null when none is recorded.</param>
+    public static string TierLabel(string? difficulty) => difficulty?.Trim() switch
+    {
+        "easy" => "easy (standard)",
+        "medium" => "medium (intermediate)",
+        "hard" => "hard (advanced)",
+        _ => difficulty ?? "(none)",
     };
 
-    /// <summary>The difficulty rule, with the shipped rule's question, answers and criteria, asked beside the pick.</summary>
-    /// <remarks>The criteria rate decisions rather than size and have not been re-tuned since that rewording: the confidence floor was set on the earlier wording.</remarks>
-    private static ArbiterRule DifficultyRuleFor(string taskId, string key) => new(
-        DifficultyPrefix + taskId,
+    /// <summary>The rubric's own name for a rating's tier: <c>standard</c>, <c>intermediate</c> or <c>advanced</c>.</summary>
+    /// <param name="difficulty">The rating in use: <c>easy</c>, <c>medium</c> or <c>hard</c>, or null when none is recorded.</param>
+    public static string TierNameOf(string? difficulty) => difficulty?.Trim() switch
+    {
+        "easy" => "standard",
+        "medium" => "intermediate",
+        "hard" => "advanced",
+        _ => "unrated",
+    };
+
+    /// <summary>The agreement rule, judged by the same rubric the architect rated the task with, asked beside the pick.</summary>
+    private static ArbiterRule AgreementRuleFor(string taskId, string key) => new(
+        AgreementPrefix + taskId,
         "docs.tasks",
-        DifficultyQuestion,
-        ["easy", StandardAnswer, "hard"],
+        AgreementQuestion,
+        [DifficultyAgreement.Agreed, DifficultyAgreement.NotAgreed],
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["easy"] = RuleEffects.Allow,
-            [StandardAnswer] = RuleEffects.Allow,
-            ["hard"] = RuleEffects.Allow,
+            [DifficultyAgreement.Agreed] = RuleEffects.Allow,
+            [DifficultyAgreement.NotAgreed] = RuleEffects.Allow,
         },
         Ask: new RuleAsk(
             "choice",
@@ -310,12 +370,14 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
                 ["title"] = $"{key}.title",
                 ["capabilities"] = $"{key}.capabilities",
                 ["files"] = $"{key}.files",
+                ["task"] = $"{key}.task",
+                ["architect-rating"] = $"{key}.architect-rating",
+                ["rubric"] = $"{key}.rubric",
             },
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                ["easy"] = "Every change is stated in the task and an existing pattern covers it, in however many files.",
-                [StandardAnswer] = "The worker makes design choices the task leaves open, in code that has patterns to follow.",
-                ["hard"] = "There is no pattern to copy, a wrong choice breaks other callers, or the work involves concurrency, security or a data migration.",
+                [DifficultyAgreement.Agreed] = "The rubric puts the task in the tier the architect chose.",
+                [DifficultyAgreement.NotAgreed] = "The rubric puts the task in a different tier.",
             },
             ConfidenceAtLeast: ConfidenceFloor));
 

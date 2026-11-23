@@ -4,8 +4,9 @@ title: Tauri coding standard
 doc-type: coding-standard
 status: current
 technology: tauri
+builds-on: rust
 owner: dpalfery
-last-reviewed: 2026-11-15
+last-reviewed: 2026-11-22
 ---
 
 # Tauri coding standard

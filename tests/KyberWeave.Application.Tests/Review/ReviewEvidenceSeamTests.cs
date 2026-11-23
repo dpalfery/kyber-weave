@@ -72,5 +72,7 @@ public sealed class ReviewEvidenceSeamTests
         public (string MergeBase, string Patch) DiffSinceMergeBase(string workingDirectory, string baseRef) => ("base", "diff");
 
         public string DiffSince(string workingDirectory, string commit) => "fix";
+
+        public IReadOnlyList<string> LogOneline(string workingDirectory, string fromCommit, IReadOnlyList<string> paths) => [];
     }
 }

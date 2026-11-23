@@ -781,7 +781,8 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
 
             string fullPath = ResolvePhysicalPath(
                 scope, root, globalRoots, block.Target, relativePath, isSingleRootLayout: false, _semantics);
-            (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post, IReadOnlyList<JsonNode> subagentStop) = SplitBlockEntries(block);
+            (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post, IReadOnlyList<JsonNode> subagentStop,
+                IReadOnlyList<JsonNode> sessionStart, IReadOnlyList<JsonNode> sessionEnd) = SplitBlockEntries(block);
 
             bool existsAsFile = _files.FileExists(fullPath);
             string spliced;
@@ -790,7 +791,8 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
             {
                 byte[] currentBytes = _files.ReadAllBytes(fullPath);
                 string currentText = DecodeBlockText(relativePath, currentBytes);
-                (spliced, owned) = SpliceBlockContent(block.Format, relativePath, currentText, pre, post, subagentStop);
+                (spliced, owned) = SpliceBlockContent(
+                        block.Format, relativePath, currentText, pre, post, subagentStop, sessionStart, sessionEnd);
                 preconditions.Add(SquadFilePrecondition.Exact(
                     relativePath,
                     block.Target,
@@ -803,7 +805,8 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
                 if (_files.DirectoryExists(fullPath))
                     throw UnmanagedCollision(relativePath);
 
-                (spliced, owned) = SpliceBlockContent(block.Format, relativePath, null, pre, post, subagentStop);
+                (spliced, owned) = SpliceBlockContent(
+                        block.Format, relativePath, null, pre, post, subagentStop, sessionStart, sessionEnd);
                 preconditions.Add(SquadFilePrecondition.Missing(relativePath, block.Target));
                 mutations.Add(SquadFileMutation.Write(relativePath, block.Target, Encoding.UTF8.GetBytes(spliced)));
             }
@@ -869,7 +872,8 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
             renderedIdentities.Add(identity);
             string fullPath = ResolvePhysicalPath(
                 scope, root, globalRoots, block.Target, relativePath, isSingleRootLayout: false, _semantics);
-            (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post, IReadOnlyList<JsonNode> subagentStop) = SplitBlockEntries(block);
+            (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post, IReadOnlyList<JsonNode> subagentStop,
+                IReadOnlyList<JsonNode> sessionStart, IReadOnlyList<JsonNode> sessionEnd) = SplitBlockEntries(block);
 
             if (!previousByIdentity.TryGetValue(identity, out SquadOwnedBlock? previous))
             {
@@ -881,7 +885,7 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
                     byte[] currentBytes = _files.ReadAllBytes(fullPath);
                     string currentText = DecodeBlockText(relativePath, currentBytes);
                     (string spliced, IReadOnlyList<SquadHookOwnedEntry> owned) = SpliceBlockContent(
-                        block.Format, relativePath, currentText, pre, post, subagentStop);
+                        block.Format, relativePath, currentText, pre, post, subagentStop, sessionStart, sessionEnd);
                     preconditions.Add(SquadFilePrecondition.Exact(
                         relativePath,
                         block.Target,
@@ -897,7 +901,7 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
                 else
                 {
                     (string spliced, IReadOnlyList<SquadHookOwnedEntry> owned) = SpliceBlockContent(
-                        block.Format, relativePath, null, pre, post, subagentStop);
+                        block.Format, relativePath, null, pre, post, subagentStop, sessionStart, sessionEnd);
                     preconditions.Add(SquadFilePrecondition.Missing(relativePath, block.Target));
                     mutations.Add(SquadFileMutation.Write(relativePath, block.Target, Encoding.UTF8.GetBytes(spliced)));
                     nextBlocks.Add(new SquadOwnedBlock(
@@ -920,7 +924,7 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
             if (!_files.FileExists(fullPath))
             {
                 (string spliced, IReadOnlyList<SquadHookOwnedEntry> owned) = SpliceBlockContent(
-                    block.Format, relativePath, null, pre, post, subagentStop);
+                    block.Format, relativePath, null, pre, post, subagentStop, sessionStart, sessionEnd);
                 preconditions.Add(SquadFilePrecondition.Missing(relativePath, block.Target));
                 mutations.Add(SquadFileMutation.Write(relativePath, block.Target, Encoding.UTF8.GetBytes(spliced)));
                 nextBlocks.Add(new SquadOwnedBlock(
@@ -943,7 +947,7 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
             }
 
             (string rewritten, IReadOnlyList<SquadHookOwnedEntry> rewrittenOwned) = SpliceBlockContent(
-                block.Format, relativePath, currentJson, pre, post, subagentStop);
+                block.Format, relativePath, currentJson, pre, post, subagentStop, sessionStart, sessionEnd);
             preconditions.Add(SquadFilePrecondition.Exact(
                 relativePath,
                 block.Target,
@@ -1108,17 +1112,37 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
     }
 
     /// <summary>
-    /// Splits a rendered block's entries into the pre, post and (Factory only) SubagentStop hook
-    /// containers by their logical container name. Anything else is a renderer bug, refused
-    /// before it can silently land in the wrong container.
+    /// Refuses a container only the Factory hook file holds, so a renderer bug cannot write a key the harness never
+    /// reads.
     /// </summary>
-    private static (IReadOnlyList<JsonNode> Pre, IReadOnlyList<JsonNode> Post, IReadOnlyList<JsonNode> SubagentStop) SplitBlockEntries(
-        SquadRenderedBlock block)
+    private static void RequireFactoryFor(SquadRenderedBlock block, string container)
+    {
+        if (block.Format != SquadHookBlockFormat.Factory)
+        {
+            throw new SquadDeploymentConflictException(
+                $"Rendered Squad block '{block.RelativePath}' names {container}, which only " +
+                "the Factory hook file holds. Fix the upstream render before deploying it.");
+        }
+    }
+
+    /// <summary>
+    /// Splits a rendered block's entries into the pre, post, SubagentStop and session-event hook containers by their
+    /// logical container name. Anything else is a renderer bug, refused before it can silently land in the wrong
+    /// container.
+    /// </summary>
+    private static (
+        IReadOnlyList<JsonNode> Pre,
+        IReadOnlyList<JsonNode> Post,
+        IReadOnlyList<JsonNode> SubagentStop,
+        IReadOnlyList<JsonNode> SessionStart,
+        IReadOnlyList<JsonNode> SessionEnd) SplitBlockEntries(SquadRenderedBlock block)
     {
         ArgumentNullException.ThrowIfNull(block.Entries);
         List<JsonNode> pre = [];
         List<JsonNode> post = [];
         List<JsonNode> subagentStop = [];
+        List<JsonNode> sessionStart = [];
+        List<JsonNode> sessionEnd = [];
         foreach (SquadRenderedBlockEntry entry in block.Entries)
         {
             ArgumentNullException.ThrowIfNull(entry);
@@ -1143,16 +1167,31 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
 
             if (string.Equals(entry.Container, "SubagentStop", StringComparison.OrdinalIgnoreCase))
             {
-                // Only Factory's hook file has this container; a renderer that names it for any
-                // other shape would otherwise write a key that harness never reads.
-                if (block.Format != SquadHookBlockFormat.Factory)
+                // Only Factory's and Claude's hook files have this container; a renderer that names it for
+                // any other shape would otherwise write a key that harness never reads.
+                if (!SquadHookJsonBlock.SupportsSubagentStop(block.Format))
                 {
                     throw new SquadDeploymentConflictException(
                         $"Rendered Squad block '{block.RelativePath}' names SubagentStop, which only " +
-                        "the Factory hook file holds. Fix the upstream render before deploying it.");
+                        "the Factory and Claude hook files hold. Fix the upstream render before deploying it.");
                 }
 
                 subagentStop.Add(entry.Entry);
+                continue;
+            }
+
+            if (string.Equals(entry.Container, "SessionStart", StringComparison.OrdinalIgnoreCase))
+            {
+                // Only Factory's hook file holds the session events its worker guard joins.
+                RequireFactoryFor(block, "SessionStart");
+                sessionStart.Add(entry.Entry);
+                continue;
+            }
+
+            if (string.Equals(entry.Container, "SessionEnd", StringComparison.OrdinalIgnoreCase))
+            {
+                RequireFactoryFor(block, "SessionEnd");
+                sessionEnd.Add(entry.Entry);
                 continue;
             }
 
@@ -1199,7 +1238,7 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
                 $"'{entry.Container ?? "null"}'. Fix the upstream render before deploying it.");
         }
 
-        return (pre, post, subagentStop);
+        return (pre, post, subagentStop, sessionStart, sessionEnd);
     }
 
     private static IReadOnlyList<SquadHookDrift> FindBlockDrift(
@@ -1272,11 +1311,14 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
         string? existingJson,
         IReadOnlyList<JsonNode> preToolUse,
         IReadOnlyList<JsonNode> postToolUse,
-        IReadOnlyList<JsonNode> subagentStop)
+        IReadOnlyList<JsonNode> subagentStop,
+        IReadOnlyList<JsonNode> sessionStart,
+        IReadOnlyList<JsonNode> sessionEnd)
     {
         try
         {
-            return SquadHookJsonBlock.SpliceContent(format, existingJson, preToolUse, postToolUse, subagentStop);
+            return SquadHookJsonBlock.SpliceContent(
+                format, existingJson, preToolUse, postToolUse, subagentStop, sessionStart, sessionEnd);
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {

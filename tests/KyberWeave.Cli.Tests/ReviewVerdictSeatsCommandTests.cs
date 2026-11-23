@@ -659,7 +659,10 @@ public sealed partial class ReviewVerdictSeatsCommandTests : IDisposable
         int line = 12,
         string excerpt = "if (i < count)",
         string[]? trailers = null,
-        string file = "src/Foo.cs")
+        string file = "src/Foo.cs",
+        string? kind = null,
+        string? basis = null,
+        string claim = "The loop bound excludes the final element.")
     {
         List<string> lines =
         [
@@ -671,12 +674,16 @@ public sealed partial class ReviewVerdictSeatsCommandTests : IDisposable
             $"  file: {file}",
             $"  line: {line}",
             $"  excerpt: \"{excerpt}\"",
-            "  claim: The loop bound excludes the final element.",
+            $"  claim: \"{claim}\"",
             "  evidence: src/Foo.cs",
             "  failure_scenario: The last element is never processed.",
-            "  suggestion: Use <= or count + 1.",
-            "```"
+            "  suggestion: Use <= or count + 1."
         ];
+        if (kind is not null)
+            lines.Add($"  kind: {kind}");
+        if (basis is not null)
+            lines.Add($"  basis: \"{basis}\"");
+        lines.Add("```");
         lines.AddRange(trailers ?? DefaultTrailers);
         return string.Join('\n', lines) + "\n";
     }

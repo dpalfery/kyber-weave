@@ -134,6 +134,14 @@ public sealed class DocsTasksCommand(
 
         CommandHelpers.Finish(console, report, settings, "docs tasks", "Task file");
 
+        if (!settings.NoInfo && ReportRenderer.IsHuman(settings.FormatFor(console)))
+        {
+            foreach (string check in outcome.DifficultyChecks ?? [])
+            {
+                console.MarkupLine($"[grey]{Markup.Escape(check)}[/]");
+            }
+        }
+
         if (ReportRenderer.IsHuman(settings.FormatFor(console)) && !report.HasErrors && outcome.Json is not null)
         {
             if (mode == PlanTaskFileMode.Preview)

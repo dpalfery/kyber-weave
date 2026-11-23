@@ -136,6 +136,37 @@ public sealed class SquadSourceTests
         Assert.Contains("edit/rename", diagnostic.Hint!, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// <c>skill</c> is the Copilot CLI's skill loader. A subagent gets only the tools its
+    /// <c>tools:</c> line names, so an agent without it cannot read any deployed skill; it reads
+    /// a skill already deployed beside the agent and needs no capability of its own.
+    /// </summary>
+    [Fact]
+    public void LoadAgentAcceptsCopilotSkillLoaderWithoutAnyCapabilityGrant()
+    {
+        SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "profiles/capabilities.yml",
+            "profiles:\n",
+            "profiles:\n" +
+            "  no-grants:\n" +
+            "    permissions:\n" +
+            "      filesystem.read: deny\n" +
+            "      filesystem.write: deny\n" +
+            "      delegate: deny\n");
+        fixture.Replace(
+            "agents/architect.md",
+            "capability-profile: architect\n" +
+            "copilot-tools: [vscode, read]",
+            "capability-profile: no-grants\n" +
+            "copilot-tools: [vscode, skill]");
+
+        SquadSource source = fixture.Load();
+
+        SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
+        Assert.Contains("skill", architect.CopilotTools, StringComparer.Ordinal);
+    }
+
     [Fact]
     public void LoadAgentRepeatsCopilotToolReportsDuplicateAndSourceLocation()
     {
