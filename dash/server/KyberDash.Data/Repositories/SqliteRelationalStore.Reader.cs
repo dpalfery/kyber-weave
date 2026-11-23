@@ -139,12 +139,11 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(spanId);
 
-        string sql = TabReadScriptHeader +
-                     $"SELECT hex(CAST(session_key AS BLOB)) FROM record_session_link WHERE span_id = {TextExpr(spanId)} LIMIT 1;\n";
-        foreach (string line in TabLines(ExecuteSqlite(sql)))
+        Dictionary<string, List<CollectedRecord>> recordsBySession =
+            QueryContentFreeRecordsBySession([], includeToolMetadata: true, scopedSpanId: spanId);
+        foreach (List<CollectedRecord> records in recordsBySession.Values)
         {
-            string sessionKey = ParseHexRequired(line, "record_session_link.session_key");
-            foreach (CollectedRecord record in SessionRecordsContentFree(sessionKey))
+            foreach (CollectedRecord record in records)
             {
                 if (string.Equals(record.RecordId, spanId, StringComparison.Ordinal))
                 {
@@ -2012,17 +2011,28 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// </param>
     private Dictionary<string, List<CollectedRecord>> QueryContentFreeRecordsBySession(
         IReadOnlyList<string> sessionKeys,
-        bool includeToolMetadata = false)
+        bool includeToolMetadata = false,
+        string? scopedSpanId = null)
     {
         Dictionary<string, List<CollectedRecord>> recordsBySession = new(StringComparer.Ordinal);
-        if (sessionKeys.Count == 0)
+        if (sessionKeys.Count == 0 && scopedSpanId is null)
         {
             return recordsBySession;
         }
 
+        // A span-scoped read filters the record tables by that span alone, so the span inspector
+        // pays for one record rather than its session's whole conversation metadata.
+        string? spanExpr = scopedSpanId is null ? null : TextExpr(scopedSpanId);
         string keyFilter = string.Join(", ", sessionKeys.Select(static key => TextExpr(key)));
-        string recordFilter = $" WHERE rsl.session_key IN ({keyFilter})";
-        string tokenFilter = $" WHERE r.span_id IN (SELECT rsl.span_id FROM record_session_link rsl WHERE rsl.session_key IN ({keyFilter}))";
+        string recordFilter = spanExpr is null
+            ? $" WHERE rsl.session_key IN ({keyFilter})"
+            : $" WHERE r.span_id = {spanExpr}";
+        string tokenFilter = spanExpr is null
+            ? $" WHERE r.span_id IN (SELECT rsl.span_id FROM record_session_link rsl WHERE rsl.session_key IN ({keyFilter}))"
+            : $" WHERE r.span_id = {spanExpr}";
+        string linkedSpanIds = spanExpr is null
+            ? $"(SELECT rsl.span_id FROM record_session_link rsl WHERE rsl.session_key IN ({keyFilter}))"
+            : $"({spanExpr})";
 
         StringBuilder sql = new(TabReadScriptHeader);
         sql.Append(
@@ -2066,8 +2076,6 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
         if (includeToolMetadata)
         {
-            string linkedSpanIds = $"(SELECT rsl.span_id FROM record_session_link rsl WHERE rsl.session_key IN ({keyFilter}))";
-
             sql.Append(
                 "SELECT 'TDEF', hex(CAST(td.span_id AS BLOB)), td.position, hex(CAST(td.tool_name AS BLOB)), " +
                 "typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), ''), td.schema_tokens " +
@@ -2188,16 +2196,17 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 header.Signals,
                 header.ReportedInputTokens,
                 header.ReportedOutputTokens);
-            if (record.SessionKey is not null)
+            // A record with no session link is grouped under the empty key rather than dropped,
+            // so a span-scoped read still answers it. A session key is never empty, so the
+            // session-scoped callers are unaffected.
+            string groupingKey = record.SessionKey ?? string.Empty;
+            if (!recordsBySession.TryGetValue(groupingKey, out List<CollectedRecord>? sessionRecords))
             {
-                if (!recordsBySession.TryGetValue(record.SessionKey, out List<CollectedRecord>? sessionRecords))
-                {
-                    sessionRecords = [];
-                    recordsBySession[record.SessionKey] = sessionRecords;
-                }
-
-                sessionRecords.Add(record);
+                sessionRecords = [];
+                recordsBySession[groupingKey] = sessionRecords;
             }
+
+            sessionRecords.Add(record);
         }
 
         return recordsBySession;

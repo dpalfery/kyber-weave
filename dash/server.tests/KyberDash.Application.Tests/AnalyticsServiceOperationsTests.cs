@@ -149,7 +149,7 @@ public class AnalyticsServiceOperationsTests
             .Returns(Array.Empty<CollectedRecord>());
         reader.Setup(store => store.CountRecords(It.IsAny<string?>())).Returns(0);
         reader.Setup(store => store.Harnesses()).Returns(Array.Empty<string>());
-        reader.Setup(store => store.ListSessionAggregates(It.IsAny<string?>(), It.IsAny<IModelPricingLookup?>()))
+        reader.Setup(store => store.SessionAttributions())
             .Throws(new InvalidOperationException("the store could not be read"));
 
         return (reader, new InMemoryRelationalStore(), new InMemoryRelationalStore());

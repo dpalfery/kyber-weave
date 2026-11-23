@@ -855,9 +855,13 @@ public sealed class AnalyticsReadPathTests
             ("quarantine", () => _ = bridge.GetQuarantinePage(null, 10, 0, 1)),
             ("harnesses", () => _ = bridge.GetHarnesses()),
             ("runs", () => _ = bridge.GetRuns()),
+            ("harness detail", () => _ = bridge.GetHarnessById("claude-code")),
+            ("compare", () => _ = bridge.GetCompare()),
             ("report", () => _ = bridge.GetReport()),
             ("analytics status", () => _ = bridge.ExecuteAnalytics("status", null)),
+            ("analytics catalog", () => _ = bridge.ExecuteAnalytics("catalog", null)),
             ("analytics query", () => _ = bridge.ExecuteAnalytics("query", null)),
+            ("analytics outcomes", () => _ = bridge.ExecuteAnalytics("outcomes", null)),
             ("analytics findings", () => _ = bridge.ExecuteAnalytics("findings", null)),
         ];
 
@@ -870,6 +874,144 @@ public sealed class AnalyticsReadPathTests
                 $"the {path} path materialized {store.MaterializedContentBytes} content bytes");
             Assert.DoesNotContain(store.ReadLog, read => contentBearingReads.Contains(read));
         }
+    }
+
+    /// <summary>
+    /// The span inspector answers one span's metadata from the single content-free record read and
+    /// never issues a session-wide read, so opening the panel does not pay for the conversation.
+    /// </summary>
+    [Fact]
+    public void SpanAttributesAnswerOneSpansMetadataWithoutSessionReads()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        WriteSession(
+            store,
+            "sess-span-a",
+            [
+                Turn(
+                    "span-a1",
+                    "sess-span-a",
+                    0,
+                    inputTokens: 400,
+                    outputTokens: 60,
+                    parts: [TextPart(0, "user_prompt", new string('p', 4_096))],
+                    declaredContextWindow: 2_000),
+            ]);
+        WriteSession(
+            store,
+            "sess-span-b",
+            [Turn("span-b1", "sess-span-b", 0, inputTokens: 100, parts: [TextPart(0, "user_prompt", "other session text")])]);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
+        bridge.EnsureProjected();
+
+        store.ClearReadLog();
+        JsonElement attributes = bridge.GetSpanAttributes("span-a1")!.Value;
+
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.Equal([nameof(InMemoryRelationalStore.RecordContentFree)], store.ReadLog);
+        Assert.Equal("span-a1", attributes.GetProperty("spanId").GetString());
+        Assert.Equal("sess-span-a", attributes.GetProperty("sessionId").GetString());
+        Assert.Equal("claude-code", attributes.GetProperty("harness").GetString());
+        Assert.Equal(400, attributes.GetProperty("tokens").GetProperty("freshInput").GetInt64());
+        Assert.Equal("claude-sonnet-4-6", attributes.GetProperty("attributes").GetProperty("gen_ai.response.model").GetString());
+        Assert.DoesNotContain("other session text", attributes.GetRawText(), StringComparison.Ordinal);
+        Assert.Null(bridge.GetSpanAttributes("no-such-span"));
+    }
+
+    /// <summary>
+    /// The timeline answers from the content-free record read for the named session: it never
+    /// materializes a conversation and reads no other session's records.
+    /// </summary>
+    [Fact]
+    public void TimelineAnswersFromContentFreeRecords()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-timeline";
+        WriteSession(
+            store,
+            sessionKey,
+            [
+                Turn(
+                    "span-tl-1",
+                    sessionKey,
+                    0,
+                    inputTokens: 400,
+                    parts: [TextPart(0, "user_prompt", new string('p', 4_096))],
+                    declaredContextWindow: 2_000),
+                Turn(
+                    "span-tl-2",
+                    sessionKey,
+                    1,
+                    inputTokens: 1_800,
+                    outputTokens: 120,
+                    parts: [TextPart(0, "tool_result_content", new string('r', 4_096))],
+                    declaredContextWindow: 2_000),
+            ]);
+        WriteSession(store, "sess-timeline-other", [Turn("span-tl-3", "sess-timeline-other", 0, inputTokens: 50)]);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
+        bridge.EnsureProjected();
+
+        store.ClearReadLog();
+        JsonElement timeline = bridge.GetTimeline(sessionKey);
+
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.Equal(
+            [
+                nameof(InMemoryRelationalStore.CountRecords),
+                nameof(InMemoryRelationalStore.GetSession),
+                nameof(InMemoryRelationalStore.SessionRecordsContentFree),
+            ],
+            store.ReadLog);
+        JsonElement session = Assert.Single(timeline.GetProperty("sessions").EnumerateArray());
+        Assert.Equal(sessionKey, session.GetProperty("sessionId").GetString());
+        Assert.Equal(JsonValueKind.Object, session.GetProperty("timeline").ValueKind);
+        Assert.DoesNotContain("span-tl-3", timeline.GetRawText(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Stored fields is the read model's sanctioned exception: the raw persisted rows are the view,
+    /// content text included, and it answers only for the named session.
+    /// </summary>
+    [Fact]
+    public void StoredFieldsStaysScopedToTheNamedSession()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        WriteSession(
+            store,
+            "sess-fields-a",
+            [Turn("span-fa", "sess-fields-a", 0, parts: [TextPart(0, "user_prompt", "alpha conversation text")])],
+            title: "alpha session");
+        WriteSession(
+            store,
+            "sess-fields-b",
+            [Turn("span-fb", "sess-fields-b", 0, parts: [TextPart(0, "user_prompt", "beta conversation text")])],
+            title: "beta session");
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
+        bridge.EnsureProjected();
+
+        store.ClearReadLog();
+        JsonElement view = bridge.GetStoredFields("sess-fields-a")!.Value;
+
+        Assert.Equal(
+            [
+                nameof(InMemoryRelationalStore.CountRecords),
+                nameof(InMemoryRelationalStore.GetSession),
+                nameof(InMemoryRelationalStore.StoredFields),
+            ],
+            store.ReadLog);
+        Assert.Equal("sess-fields-a", view.GetProperty("sessionKey").GetString());
+        string raw = view.GetRawText();
+        Assert.Contains("alpha conversation text", raw, StringComparison.Ordinal);
+        Assert.Contains("alpha session", raw, StringComparison.Ordinal);
+        Assert.DoesNotContain("beta conversation text", raw, StringComparison.Ordinal);
+        Assert.DoesNotContain("sess-fields-b", raw, StringComparison.Ordinal);
+        Assert.Null(bridge.GetStoredFields("no-such-session"));
     }
 
     /// <summary>Runs, harnesses, findings, report, compare, and timeline answer from the projection store.</summary>

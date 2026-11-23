@@ -490,7 +490,8 @@ public interface IRelationalStoreReader
     /// <remarks>
     /// The inspector prices attributes, tokens, cost, and signals, none of which is content. A
     /// captured prompt the inspector shows comes from <see cref="TurnContentParts"/>, so reading
-    /// a span attribute never materializes a conversation.
+    /// a span attribute never materializes a conversation. The read is scoped to the span: an
+    /// adapter filters the record tables by that span, not by its session's records.
     /// </remarks>
     CollectedRecord? RecordContentFree(string spanId);
 

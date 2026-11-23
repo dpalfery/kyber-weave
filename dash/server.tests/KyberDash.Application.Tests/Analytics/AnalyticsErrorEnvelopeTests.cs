@@ -27,7 +27,7 @@ public sealed class AnalyticsErrorEnvelopeTests
         }
         else
         {
-            reader.Setup(store => store.ListSessionAggregates(It.IsAny<string?>(), It.IsAny<IModelPricingLookup?>()))
+            reader.Setup(store => store.SessionAttributions())
                 .Throws(storeException);
         }
 
@@ -45,7 +45,7 @@ public sealed class AnalyticsErrorEnvelopeTests
     public void InvalidArgumentFaultReturnsBadRequestContractV1Envelope(Exception argumentException)
     {
         (Mock<IRelationalStoreReader> reader, Mock<IProjectionStore> projections, Mock<IOperationalStore> operational) = CreateBaseStoreMocks();
-        reader.Setup(store => store.ListSessionAggregates(It.IsAny<string?>(), It.IsAny<IModelPricingLookup?>()))
+        reader.Setup(store => store.SessionAttributions())
             .Throws(argumentException);
         KyberBridgeEngine engine = CreateEngine(reader.Object, projections.Object, operational.Object);
 
@@ -73,7 +73,7 @@ public sealed class AnalyticsErrorEnvelopeTests
     public void UnexpectedFaultReturnsNonEmptyInternalErrorContractV1Envelope()
     {
         (Mock<IRelationalStoreReader> reader, Mock<IProjectionStore> projections, Mock<IOperationalStore> operational) = CreateBaseStoreMocks();
-        reader.Setup(store => store.ListSessionAggregates(It.IsAny<string?>(), It.IsAny<IModelPricingLookup?>()))
+        reader.Setup(store => store.SessionAttributions())
             .Throws(new InvalidOperationException("Corrupted rollup state"));
         KyberBridgeEngine engine = CreateEngine(reader.Object, projections.Object, operational.Object);
 
@@ -112,6 +112,7 @@ public sealed class AnalyticsErrorEnvelopeTests
         reader.Setup(store => store.Harnesses()).Returns(Array.Empty<string>());
         reader.Setup(store => store.ListSessionAggregates(It.IsAny<string?>(), It.IsAny<IModelPricingLookup?>()))
             .Returns(Array.Empty<SessionAggregateView>());
+        reader.Setup(store => store.SessionAttributions()).Returns(Array.Empty<StoredSessionAttribution>());
 
         Mock<IProjectionStore> projections = new();
         projections.Setup(store => store.ListSessionProjections(It.IsAny<string?>()))

@@ -131,8 +131,19 @@ public class StoreInterfaceShapeTests
                 nameof(IRelationalStoreReader.SessionSummaryFigures),
                 nameof(IRelationalStoreReader.SessionDetailFigures),
                 nameof(IRelationalStoreReader.TurnFigures),
+                nameof(IRelationalStoreReader.RecordContentFree),
                 nameof(IRelationalStoreReader.SessionRecordsContentFree),
             ]);
+
+        MethodInfo? recordContentFree = typeof(IRelationalStoreReader).GetMethod(nameof(IRelationalStoreReader.RecordContentFree));
+        Assert.NotNull(recordContentFree);
+        Assert.Equal(typeof(CollectedRecord), recordContentFree.ReturnType);
+        Assert.Equal([typeof(string)], recordContentFree.GetParameters().Select(static p => p.ParameterType).ToArray());
+
+        MethodInfo? sessionRecordsContentFree = typeof(IRelationalStoreReader).GetMethod(nameof(IRelationalStoreReader.SessionRecordsContentFree));
+        Assert.NotNull(sessionRecordsContentFree);
+        Assert.Equal(typeof(IReadOnlyList<CollectedRecord>), sessionRecordsContentFree.ReturnType);
+        Assert.Equal([typeof(string)], sessionRecordsContentFree.GetParameters().Select(static p => p.ParameterType).ToArray());
 
         MethodInfo? storedFields = typeof(IRelationalStoreReader).GetMethod(nameof(IRelationalStoreReader.StoredFields));
         Assert.NotNull(storedFields);

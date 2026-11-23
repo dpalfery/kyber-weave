@@ -96,6 +96,36 @@ public class SqliteRelationalStoreReadTests : IDisposable
     }
 
     /// <summary>
+    /// <see cref="IRelationalStoreReader.RecordContentFree"/> answers the span inspector from one
+    /// span-scoped script: it never reads the span's whole session, and a record with no session
+    /// link still answers its metadata instead of reading as absent.
+    /// </summary>
+    [Fact]
+    public void RecordContentFreeReadsOneSpanWithoutReadingItsSession()
+    {
+        string dbPath = Path.Combine(directory.Path, "span-content-free", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+        WriteAttributionTurn(sqlite, memory, "span-alpha-1", "alpha", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-alpha-2", "alpha", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-beta-1", "beta", "codex");
+
+        sqlite.ClearRecordedSql();
+        CollectedRecord? single = sqlite.RecordContentFree("span-alpha-2");
+
+        Assert.NotNull(single);
+        Assert.Equal("span-alpha-2", single!.RecordId);
+        Assert.Equal("alpha", single.SessionKey);
+        Assert.Equivalent(memory.RecordContentFree("span-alpha-2"), single, strict: true);
+        string script = Assert.Single(sqlite.ExecutedSql);
+        // The scope is the span, encoded as the injection-proof CAST(X'...' AS TEXT) literal the
+        // data layer builds for every text predicate.
+        string spanLiteral = "CAST(X'" + Convert.ToHexString(System.Text.Encoding.UTF8.GetBytes("span-alpha-2")) + "' AS TEXT)";
+        Assert.Contains(spanLiteral, script, StringComparison.Ordinal);
+        Assert.DoesNotContain("session_key IN", script, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A reported input total is the checksum of fresh, cache-read, and cache-write tokens.
     /// It is not billed at the fresh rate, and a side the harness did not report is not
     /// billed as zero. A reported output total is one rate and is billed. A class breakdown
