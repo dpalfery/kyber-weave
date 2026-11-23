@@ -28,11 +28,14 @@ def load(name, default=None):
         return default
 
 
+def is_num(x):
+    """Whether x is an event-stream number: a finite int or float, never a bool, string, NaN or Infinity."""
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+
+
 def num(x):
-    """An event-stream number: a finite int or float, never a bool, string, NaN or Infinity."""
-    if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x):
-        return 0
-    return x
+    """x when it is an event-stream number, otherwise 0."""
+    return x if is_num(x) else 0
 
 
 events = []
@@ -66,8 +69,8 @@ for e in events:
     else:
         d = data
     t = e.get("type")
-    if t == "session.usage_checkpoint" and (num(d.get("totalNanoAiu")) or d.get("totalNanoAiu") == 0):
-        nano_aiu = max(nano_aiu or 0, num(d["totalNanoAiu"]))
+    if t == "session.usage_checkpoint" and is_num(d.get("totalNanoAiu")):
+        nano_aiu = max(nano_aiu or 0, d["totalNanoAiu"])
         checkpoint = d
     elif t == "model.call_start":
         model_calls[d.get("model", "?")] += 1
@@ -115,9 +118,8 @@ for m in (checkpoint or {}).get("providerModelMetrics") or []:
     if not isinstance(usage, dict):
         continue
     for k, v in usage.items():
-        n = num(v)
-        if n or v == 0:
-            tokens[k] += n
+        if is_num(v):
+            tokens[k] += v
 
 # Copilot CLI 1.0.115 reports spend and tokens per sub-agent dispatch, but no longer
 # aggregates either per role in the checkpoint.

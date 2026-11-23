@@ -63,10 +63,11 @@ public sealed class InFlightLedger : IArbiterLedger
 
         long snapshot = _log.ByteLength(FilePath);
         ArbiterLogRead<ArbiterLedgerEvent> read = ReadAllWithDiagnostics();
-        // A read that did not see the whole log cannot pair safely: the oldest pre it would match first may be the
-        // one the window cut off, so a match here would claim the wrong dispatch. No match is the fail-closed
-        // answer, the way a missing pre reads, and the post is stored unpaired.
-        bool complete = !read.Truncated && read.Unreadable is null;
+        // A read that did not see every line of the log (cut off, unreadable, or with a line that was not a record)
+        // cannot pair safely: the oldest pre it would match first may be the one it missed, so a match here would
+        // claim the wrong dispatch. No match is the fail-closed answer, the way a missing pre reads, and the post is
+        // stored unpaired.
+        bool complete = !read.Truncated && read.Unreadable is null && read.MalformedLines == 0;
         IReadOnlyList<ArbiterLedgerEvent> events = read.Records;
         string? match = complete ? ArbiterLedgerQueries.MatchPre(events, record) : null;
         return _log.AppendLineAsync(
@@ -172,7 +173,7 @@ public sealed class InFlightLedger : IArbiterLedger
         // The append path's fail-closed rule: a read that did not see the whole log must not pair with the
         // wrong pre, so it reads as no match, the way an empty log reads.
         ArbiterLogRead<ArbiterLedgerEvent> read = ReadAllWithDiagnostics();
-        return read.Truncated || read.Unreadable is not null
+        return read.Truncated || read.Unreadable is not null || read.MalformedLines > 0
             ? null
             : ArbiterLedgerQueries.MatchPre(read.Records, post);
     }
