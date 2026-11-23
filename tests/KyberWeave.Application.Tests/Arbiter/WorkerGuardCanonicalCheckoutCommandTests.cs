@@ -229,6 +229,37 @@ public sealed class WorkerGuardCanonicalCheckoutCommandTests
     }
 
     [Fact]
+    public void AGitDirectoryOptionTheGuardCannotPlaceIsRefused()
+    {
+        StartRun();
+
+        string reason = DenialReason(Guard("copilot-cli", Copilot(_worktree, "git -C $HOME/repo status")));
+
+        Assert.StartsWith(RuleId, reason, StringComparison.Ordinal);
+        Assert.Contains("absolute path", reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AGitDirOptionNotEndingInGitIsJudgedAlongsideTheWorkingDirectory()
+    {
+        StartRun();
+
+        Assert.NotEmpty(Guard(
+            "copilot-cli",
+            Copilot(_worktree, $"git --git-dir={Path.Combine(_repo, "custom-git")} status")));
+    }
+
+    [Fact]
+    public void AGitDirOptionNotEndingInGitIsJudgedEvenWithAWorkTree()
+    {
+        StartRun();
+
+        Assert.NotEmpty(Guard(
+            "copilot-cli",
+            Copilot(_worktree, $"git --git-dir={Path.Combine(_repo, "custom-git")} --work-tree={_worktree} status")));
+    }
+
+    [Fact]
     public void AChangeDirectoryToAPathTheGuardCannotPlaceIsRefused()
     {
         StartRun();
