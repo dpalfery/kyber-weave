@@ -1346,7 +1346,7 @@ The grant spelling is the harness's, not ours:
 | `copilot` | `kw-docs/*` in the agent's own `copilot-tools` |
 | `opencode`, `kilo` | `kw-docs_*` |
 | `pi` | `ext:pi-mcp-adapter/mcp__kw_docs__<tool>` |
-| `factory` | enumerated `{server}___{tool}` names in `tools` — `kw-docs___*` for every entitled droid plus `codegraph___codegraph_explore` for read-entitled specialists (`conductor` keeps the `kw-docs` family alone); `mcpServers` retains the granted names as declared intent |
+| `factory` | enumerated `{server}___{tool}` names in `tools` — one per roster tool of `kw-docs` for every entitled droid (e.g. `kw-docs___docs_get_source_repository_and_revision`), plus `codegraph___codegraph_explore` for read-entitled specialists (`conductor` keeps the `kw-docs` family alone); `mcpServers` retains the granted names as declared intent |
 | `antigravity` | `mcpServers: [{name: kw-docs, command: kyber-weave-mcp, args: [--repo-root, .]}]` |
 | `cursor`, `codex`, `warp` | no per-agent key; the session's server is the grant |
 
