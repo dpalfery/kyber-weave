@@ -376,6 +376,74 @@ public record SessionListFigure(
     int ProblemsCount);
 
 /// <summary>
+/// Read-time figures the bounded session summary page renders, derived from content-free record
+/// scalars, the stored session projection, and ingest diagnostics (<c>DD-13</c>).
+/// </summary>
+/// <param name="SessionKey">Canonical session key.</param>
+/// <param name="HarnessId">Harness identifier of the session row.</param>
+/// <param name="TurnCount">Number of turns in the session.</param>
+/// <param name="RequestCount">Number of top-level requests in the session.</param>
+/// <param name="TotalInput">Sum of combined input tokens across turns, or <see langword="null"/> when no turn reported tokens.</param>
+/// <param name="TotalOutput">Sum of output tokens across turns, or <see langword="null"/> when absent.</param>
+/// <param name="TotalCacheRead">Sum of cache-read tokens across turns, or <see langword="null"/> when absent.</param>
+/// <param name="TotalCacheCreation">Sum of cache-creation tokens across turns, or <see langword="null"/> when absent.</param>
+/// <param name="DurationMs">Session duration in milliseconds, or <see langword="null"/> when unavailable.</param>
+/// <param name="Models">Distinct models observed across session turns in turn order.</param>
+/// <param name="CacheHitRatio">Cache-read share of total input, or <see langword="null"/>.</param>
+/// <param name="CacheCreationCoverage">Count of turns writing prompt cache, or <see langword="null"/>.</param>
+/// <param name="ToolCalls">Count of tool calls, or <see langword="null"/> when zero or unrecorded.</param>
+/// <param name="ToolsInvoked">Distinct invoked tool names in projection order.</param>
+/// <param name="HasToolDefinitions">Whether the session projection ranked at least one tool schema.</param>
+/// <param name="ToolsOffered">Distinct advertised tool names in projection order.</param>
+/// <param name="ReportedCost">Non-blended harness-reported cost summary when present, or <see langword="null"/>.</param>
+/// <param name="PublishedCost">Non-blended published-rate cost summary computed across turns.</param>
+/// <param name="CostBasisMismatch">Structured basis mismatch verdict when both valued harness and published costs occur.</param>
+/// <param name="Coverage">Schema and context projection measurability flags.</param>
+/// <param name="Problems">Ingest and pricing diagnostics associated with the session.</param>
+/// <remarks>
+/// Carries no content: no <c>content_part</c>, tool-call text, tool-definition, or
+/// agent-invocation column is read to build it. The figures that would need those columns —
+/// per-tool schema residency and request prompt previews — belong to the detail route's
+/// content-bearing sections, not this summary.
+/// </remarks>
+public record SessionSummaryFigure(
+    string SessionKey,
+    string HarnessId,
+    int TurnCount,
+    int RequestCount,
+    long? TotalInput,
+    long? TotalOutput,
+    long? TotalCacheRead,
+    long? TotalCacheCreation,
+    long? DurationMs,
+    IReadOnlyList<string> Models,
+    double? CacheHitRatio,
+    int? CacheCreationCoverage,
+    int? ToolCalls,
+    IReadOnlyList<string> ToolsInvoked,
+    bool HasToolDefinitions,
+    IReadOnlyList<string> ToolsOffered,
+    ReadTimeCostSummary? ReportedCost,
+    ReadTimeCostSummary PublishedCost,
+    ReadTimeCostBasisMismatch? CostBasisMismatch,
+    ReadTimeSessionCoverage Coverage,
+    IReadOnlyList<Problem> Problems);
+
+/// <summary>
+/// Read-time figures the session detail header renders, with the session's per-turn figures
+/// (<c>DD-13</c>).
+/// </summary>
+/// <param name="Summary">Bounded summary figures the header shows.</param>
+/// <param name="Turns">Per-turn figures in turn order.</param>
+/// <remarks>
+/// Content-free for the same reason as <see cref="SessionSummaryFigure"/>: the detail header and
+/// the turn list price stored token counts, reported costs, models, and timestamps only.
+/// </remarks>
+public record SessionDetailFigure(
+    SessionSummaryFigure Summary,
+    IReadOnlyList<ReadTimeTurnSummary> Turns);
+
+/// <summary>
 /// Typed read-only query contract over normalized telemetry, session, and record tables in
 /// the relational KyberDash store.
 /// </summary>
@@ -522,6 +590,34 @@ public interface IRelationalStoreReader
     /// answers zeroed figures with absent token totals.
     /// </remarks>
     IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null);
+
+    /// <summary>
+    /// Reads the bounded summary figures for one session over content-free record scalars only
+    /// (<c>DD-13</c>).
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
+    /// <returns>The summary figures, or <see langword="null"/> when the session row is absent.</returns>
+    SessionSummaryFigure? SessionSummaryFigures(string sessionKey, IModelPricingLookup? pricing = null);
+
+    /// <summary>
+    /// Reads the session detail header figures together with every turn's figures, over
+    /// content-free record scalars only (<c>DD-13</c>).
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
+    /// <returns>The detail figures, or <see langword="null"/> when the session row is absent.</returns>
+    SessionDetailFigure? SessionDetailFigures(string sessionKey, IModelPricingLookup? pricing = null);
+
+    /// <summary>
+    /// Reads one turn's figures, scoped to <paramref name="turnIndex"/>, over content-free
+    /// record scalars only (<c>DD-13</c>).
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="turnIndex">Zero-based turn index.</param>
+    /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
+    /// <returns>The turn's figures, or <see langword="null"/> when the index is outside the session.</returns>
+    ReadTimeTurnSummary? TurnFigures(string sessionKey, int turnIndex, IModelPricingLookup? pricing = null);
 
     /// <summary>Computes read-time per-turn summaries for <paramref name="sessionKey"/> (<c>DD-13</c>).</summary>
     /// <param name="sessionKey">Canonical session key to inspect.</param>

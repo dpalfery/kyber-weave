@@ -127,6 +127,10 @@ public class StoreInterfaceShapeTests
                 nameof(IRelationalStoreReader.GetSessionAggregate),
                 nameof(IRelationalStoreReader.ListSessionAggregates),
                 nameof(IRelationalStoreReader.SessionTurnSummaries),
+                nameof(IRelationalStoreReader.SessionListFigures),
+                nameof(IRelationalStoreReader.SessionSummaryFigures),
+                nameof(IRelationalStoreReader.SessionDetailFigures),
+                nameof(IRelationalStoreReader.TurnFigures),
             ]);
 
         MethodInfo? storedFields = typeof(IRelationalStoreReader).GetMethod(nameof(IRelationalStoreReader.StoredFields));

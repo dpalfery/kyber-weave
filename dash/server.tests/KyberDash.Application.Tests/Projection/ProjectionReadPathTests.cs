@@ -473,6 +473,15 @@ public class ProjectionReadPathTests
         public IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null) => inner.SessionListFigures(harnessId, pricing);
 
         /// <inheritdoc />
+        public SessionSummaryFigure? SessionSummaryFigures(string sessionKey, IModelPricingLookup? pricing = null) => inner.SessionSummaryFigures(sessionKey, pricing);
+
+        /// <inheritdoc />
+        public SessionDetailFigure? SessionDetailFigures(string sessionKey, IModelPricingLookup? pricing = null) => inner.SessionDetailFigures(sessionKey, pricing);
+
+        /// <inheritdoc />
+        public ReadTimeTurnSummary? TurnFigures(string sessionKey, int turnIndex, IModelPricingLookup? pricing = null) => inner.TurnFigures(sessionKey, turnIndex, pricing);
+
+        /// <inheritdoc />
         public IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null) => inner.SessionTurnSummaries(sessionKey, pricing);
     }
 }

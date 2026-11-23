@@ -324,6 +324,183 @@ public sealed class AnalyticsReadPathTests
         Assert.Equal(0, none.GetArrayLength());
     }
 
+    /// <summary>
+    /// Selecting a large session answers its detail figures and every per-turn figure from the
+    /// content-free read model: the figures equal the broad aggregate and turn summaries the
+    /// detail payload used to pay for, and reading them materializes no content, so a session
+    /// with many large turns never pulls its text out of the store.
+    /// </summary>
+    [Fact]
+    public void SessionDetailAnswersTurnFiguresWithoutContentReads()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-detail-many";
+        WriteSession(
+            store,
+            sessionKey,
+            [.. Enumerable.Range(0, 128).Select(static i => Turn(
+                $"turn-many-{i:D3}",
+                sessionKey,
+                i,
+                inputTokens: 1_000 + i,
+                cacheRead: 200 + i,
+                outputTokens: 100 + i,
+                model: i % 2 == 0 ? "claude-sonnet-4-6" : "gpt-5.1-codex",
+                reportedCostUsd: 0.01,
+                parts: [TextPart(0, "user_prompt", new string('x', 8_192))]))]);
+        _ = CreateProjection(store, pricing).ProjectAll();
+
+        IModelPricingLookup lookup = pricing.LoadPricingTables();
+        SessionAggregateView aggregate = store.GetSessionAggregate(sessionKey, lookup)!;
+        IReadOnlyList<ReadTimeTurnSummary> turns = store.SessionTurnSummaries(sessionKey, lookup);
+        Assert.Equal(128, turns.Count);
+
+        store.ClearReadLog();
+        SessionDetailFigure detail = store.SessionDetailFigures(sessionKey, lookup)!;
+
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.DoesNotContain(store.ReadLog, read => ContentBearingReads.Contains(read));
+        Assert.Equal([nameof(InMemoryRelationalStore.SessionDetailFigures)], store.ReadLog);
+        AssertSummaryMatchesAggregate(detail.Summary, aggregate);
+        Assert.Equivalent(turns, detail.Turns, strict: true);
+        Assert.Null(store.SessionDetailFigures("missing", lookup));
+
+        // The pages answer those same figures: the detail header, the bounded summary, and one
+        // turn come off the read models rather than a second aggregate or turn-summary pass.
+        KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
+        JsonElement payload = bridge.GetSessionDetail(sessionKey)!.Value;
+        Assert.Equal(detail.Summary.TurnCount, payload.GetProperty("summary").GetProperty("turn_count").GetInt32());
+        Assert.Equal(detail.Summary.TotalInput, payload.GetProperty("summary").GetProperty("total_input").GetInt64());
+        Assert.Equal(detail.Summary.TotalOutput, payload.GetProperty("summary").GetProperty("total_output").GetInt64());
+        Assert.Equal(detail.Summary.DurationMs, payload.GetProperty("summary").GetProperty("duration_ms").GetInt64());
+        Assert.Equal(detail.Summary.Problems.Count, payload.GetProperty("problems_count").GetInt32());
+        Assert.Equal(detail.Turns.Count, payload.GetProperty("turns").GetArrayLength());
+        JsonElement summaryPayload = bridge.GetSessionSummary(sessionKey)!.Value;
+        Assert.Equal(detail.Summary.TurnCount, summaryPayload.GetProperty("summary").GetProperty("turn_count").GetInt32());
+        Assert.Equal(detail.Summary.TotalInput, summaryPayload.GetProperty("summary").GetProperty("total_input").GetInt64());
+        Assert.Equal(
+            detail.Turns[1].SpanId,
+            bridge.GetTurnFigures(sessionKey, 1)!.Value.GetProperty("turn").GetProperty("spanId").GetString());
+        Assert.Null(bridge.GetTurnFigures(sessionKey, detail.Turns.Count));
+    }
+
+    /// <summary>
+    /// The bounded summary page answers from the content-free summary read model alone: no turn
+    /// summary is read, no content is materialized, and every figure equals the broad aggregate.
+    /// </summary>
+    [Fact]
+    public void SessionSummaryAnswersWithoutTurnOrContentReads()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-summary-many";
+        WriteSession(
+            store,
+            sessionKey,
+            [.. Enumerable.Range(0, 128).Select(static i => Turn(
+                $"turn-summary-{i:D3}",
+                sessionKey,
+                i,
+                inputTokens: 800 + i,
+                cacheRead: 50 + i,
+                outputTokens: 40 + i,
+                reportedCostUsd: 0.02,
+                parts: [TextPart(0, "tool_result_content", new string('y', 8_192))]))]);
+        _ = CreateProjection(store, pricing).ProjectAll();
+
+        IModelPricingLookup lookup = pricing.LoadPricingTables();
+        SessionAggregateView aggregate = store.GetSessionAggregate(sessionKey, lookup)!;
+
+        store.ClearReadLog();
+        SessionSummaryFigure summary = store.SessionSummaryFigures(sessionKey, lookup)!;
+
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.DoesNotContain(store.ReadLog, read => ContentBearingReads.Contains(read));
+        Assert.Equal([nameof(InMemoryRelationalStore.SessionSummaryFigures)], store.ReadLog);
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.SessionTurnSummaries), store.ReadLog);
+        AssertSummaryMatchesAggregate(summary, aggregate);
+        Assert.Null(store.SessionSummaryFigures("missing", lookup));
+    }
+
+    /// <summary>
+    /// One turn's figures answer scoped to its index — the same figure the turn list carries —
+    /// and an index outside the session answers nothing without reading content.
+    /// </summary>
+    [Fact]
+    public void TurnFiguresAnswerOneTurnScopedToItsIndex()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-turn-figures";
+        WriteSession(
+            store,
+            sessionKey,
+            [
+                Turn("turn-fig-0", sessionKey, 0, inputTokens: 100, outputTokens: 10, parts: [TextPart(0, "user_prompt", "first turn text")]),
+                Turn("turn-fig-1", sessionKey, 1, inputTokens: 200, outputTokens: 20, parts: [TextPart(0, "user_prompt", "second turn text")]),
+                Turn("turn-fig-2", sessionKey, 2, inputTokens: 300, outputTokens: 30, parts: [TextPart(0, "user_prompt", "third turn text")]),
+            ]);
+        _ = CreateProjection(store, pricing).ProjectAll();
+
+        IModelPricingLookup lookup = pricing.LoadPricingTables();
+        IReadOnlyList<ReadTimeTurnSummary> turns = store.SessionTurnSummaries(sessionKey, lookup);
+        Assert.Equal(3, turns.Count);
+
+        store.ClearReadLog();
+        ReadTimeTurnSummary second = store.TurnFigures(sessionKey, 1, lookup)!;
+
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.DoesNotContain(store.ReadLog, read => ContentBearingReads.Contains(read));
+        Assert.Equivalent(turns[1], second, strict: true);
+        Assert.Equal("turn-fig-1", second.SpanId);
+        Assert.Null(store.TurnFigures(sessionKey, turns.Count, lookup));
+        Assert.Null(store.TurnFigures(sessionKey, -1, lookup));
+        Assert.Null(store.TurnFigures("missing", 0, lookup));
+    }
+
+    /// <summary>Reader methods that materialize conversation text, so a path may not issue them.</summary>
+    private static readonly string[] ContentBearingReads =
+    [
+        nameof(InMemoryRelationalStore.Records),
+        nameof(InMemoryRelationalStore.SessionRecordsForRebuild),
+        nameof(InMemoryRelationalStore.AllSessionRecordsForMaintenance),
+        nameof(InMemoryRelationalStore.GetRecord),
+        nameof(InMemoryRelationalStore.GetSessionAggregate),
+        nameof(InMemoryRelationalStore.ListSessionAggregates),
+        nameof(InMemoryRelationalStore.SessionTurnSummaries),
+        nameof(InMemoryRelationalStore.ContentParts),
+        nameof(InMemoryRelationalStore.ToolCalls),
+        nameof(InMemoryRelationalStore.ToolDefinitions),
+        nameof(InMemoryRelationalStore.AgentInvocations),
+        nameof(InMemoryRelationalStore.SkillsInvoked),
+    ];
+
+    private static void AssertSummaryMatchesAggregate(SessionSummaryFigure summary, SessionAggregateView aggregate)
+    {
+        Assert.Equal(aggregate.SessionKey, summary.SessionKey);
+        Assert.Equal(aggregate.HarnessId, summary.HarnessId);
+        Assert.Equal(aggregate.TurnCount, summary.TurnCount);
+        Assert.Equal(aggregate.RequestCount, summary.RequestCount);
+        Assert.Equal(aggregate.TotalInput, summary.TotalInput);
+        Assert.Equal(aggregate.TotalOutput, summary.TotalOutput);
+        Assert.Equal(aggregate.TotalCacheRead, summary.TotalCacheRead);
+        Assert.Equal(aggregate.TotalCacheCreation, summary.TotalCacheCreation);
+        Assert.Equal(aggregate.DurationMs, summary.DurationMs);
+        Assert.Equal(aggregate.Models, summary.Models);
+        Assert.Equal(aggregate.CacheHitRatio, summary.CacheHitRatio);
+        Assert.Equal(aggregate.CacheCreationCoverage, summary.CacheCreationCoverage);
+        Assert.Equal(aggregate.ToolCalls, summary.ToolCalls);
+        Assert.Equal(aggregate.ToolsInvoked, summary.ToolsInvoked);
+        Assert.Equal(aggregate.HasToolDefinitions, summary.HasToolDefinitions);
+        Assert.Equal(aggregate.ToolsOffered, summary.ToolsOffered);
+        Assert.Equivalent(aggregate.ReportedCost, summary.ReportedCost, strict: true);
+        Assert.Equivalent(aggregate.PublishedCost, summary.PublishedCost, strict: true);
+        Assert.Equivalent(aggregate.CostBasisMismatch, summary.CostBasisMismatch, strict: true);
+        Assert.Equivalent(aggregate.Coverage, summary.Coverage, strict: true);
+        Assert.Equivalent(aggregate.Problems, summary.Problems, strict: true);
+    }
+
     private static void AssertFigureMatchesAggregate(
         SessionListFigure figure,
         SessionAggregateView aggregate,
@@ -933,6 +1110,36 @@ public sealed class AnalyticsReadPathTests
             }
 
             return figures;
+        }
+
+        public SessionSummaryFigure? SessionSummaryFigures(string sessionKey, IModelPricingLookup? pricing = null)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return inner.SessionSummaryFigures(sessionKey, pricing);
+        }
+
+        public SessionDetailFigure? SessionDetailFigures(string sessionKey, IModelPricingLookup? pricing = null)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return inner.SessionDetailFigures(sessionKey, pricing);
+        }
+
+        public ReadTimeTurnSummary? TurnFigures(string sessionKey, int turnIndex, IModelPricingLookup? pricing = null)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return inner.TurnFigures(sessionKey, turnIndex, pricing);
         }
 
         public IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null)

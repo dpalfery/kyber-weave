@@ -759,6 +759,352 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     }
 
     /// <inheritdoc />
+    public SessionSummaryFigure? SessionSummaryFigures(string sessionKey, IModelPricingLookup? pricing = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        CollectedSession? session = GetSession(sessionKey);
+        if (session is null)
+        {
+            return null;
+        }
+
+        return BuildSessionSummaryFigure(
+            session,
+            ReadContentFreeSessionRecords(sessionKey),
+            GetSessionProjection(sessionKey),
+            GetSessionTurns(sessionKey),
+            QuerySessionIngestProblems(sessionKey),
+            pricing);
+    }
+
+    /// <inheritdoc />
+    public SessionDetailFigure? SessionDetailFigures(string sessionKey, IModelPricingLookup? pricing = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        CollectedSession? session = GetSession(sessionKey);
+        if (session is null)
+        {
+            return null;
+        }
+
+        IReadOnlyList<CollectedRecord> records = ReadContentFreeSessionRecords(sessionKey);
+        IReadOnlyList<StoredSessionTurn> projectedTurns = GetSessionTurns(sessionKey);
+        SessionSummaryFigure summary = BuildSessionSummaryFigure(
+            session,
+            records,
+            GetSessionProjection(sessionKey),
+            projectedTurns,
+            QuerySessionIngestProblems(sessionKey),
+            pricing);
+        return new SessionDetailFigure(
+            summary,
+            BuildContentFreeTurnSummaries(projectedTurns, records, session.HarnessId, pricing));
+    }
+
+    /// <inheritdoc />
+    public ReadTimeTurnSummary? TurnFigures(string sessionKey, int turnIndex, IModelPricingLookup? pricing = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        if (turnIndex < 0)
+        {
+            return null;
+        }
+
+        CollectedSession? session = GetSession(sessionKey);
+        IReadOnlyList<CollectedRecord> records = ReadContentFreeSessionRecords(sessionKey);
+        if (session is null && records.Count == 0)
+        {
+            return null;
+        }
+
+        string harnessId = session is not null ? session.HarnessId : records[0].HarnessId;
+        IReadOnlyList<ReadTimeTurnSummary> turns =
+            BuildContentFreeTurnSummaries(GetSessionTurns(sessionKey), records, harnessId, pricing);
+        return turnIndex < turns.Count ? turns[turnIndex] : null;
+    }
+
+    private IReadOnlyList<CollectedRecord> ReadContentFreeSessionRecords(string sessionKey)
+    {
+        Dictionary<string, List<CollectedRecord>> recordsBySession = QueryContentFreeRecordsBySession([sessionKey]);
+        return recordsBySession.TryGetValue(sessionKey, out List<CollectedRecord>? records) ? records : [];
+    }
+
+    private static IReadOnlyList<ReadTimeTurnSummary> BuildContentFreeTurnSummaries(
+        IReadOnlyList<StoredSessionTurn> projectedTurns,
+        IReadOnlyList<CollectedRecord> records,
+        string harnessId,
+        IModelPricingLookup? pricing)
+    {
+        List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntriesForReader(projectedTurns, records);
+        List<ReadTimeTurnSummary> summaries = new(turnEntries.Count);
+        foreach ((int position, CollectedRecord turnRecord) in turnEntries)
+        {
+            summaries.Add(BuildReaderTurnSummary(turnRecord, position, harnessId, pricing, out _, out _));
+        }
+
+        return summaries;
+    }
+
+    /// <summary>
+    /// Derives one session's bounded summary figures from content-free record scalars, its
+    /// stored projection, and ingest diagnostics: the figures
+    /// <see cref="BuildSessionAggregateView"/> computes from token counts, reported costs,
+    /// models, timestamps, and projection metadata, with no content column read.
+    /// </summary>
+    private static SessionSummaryFigure BuildSessionSummaryFigure(
+        CollectedSession session,
+        IReadOnlyList<CollectedRecord> records,
+        StoredSessionProjection? projection,
+        IReadOnlyList<StoredSessionTurn> projectedTurns,
+        IReadOnlyList<Problem> storedProblems,
+        IModelPricingLookup? pricing)
+    {
+        string sessionKey = session.SessionKey;
+        string harnessId = session.HarnessId;
+
+        HashSet<string> sessionSpanIds = new(StringComparer.Ordinal);
+        foreach (CollectedRecord record in records)
+        {
+            _ = sessionSpanIds.Add(record.RecordId);
+        }
+
+        List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntriesForReader(projectedTurns, records);
+
+        List<CostBlock> turnPublishedBlocks = new(turnEntries.Count);
+        List<CostBlock> valuedTurnPublishedBlocks = [];
+        List<CostBlock> valuedTurnHarnessBlocks = [];
+        List<string> models = [];
+        HashSet<string> seenModels = new(StringComparer.Ordinal);
+        long totalInput = 0;
+        bool hasInput = false;
+        long totalOutput = 0;
+        bool hasOutput = false;
+        long totalCacheRead = 0;
+        bool hasCacheRead = false;
+        long totalCacheCreation = 0;
+        bool hasCacheCreation = false;
+        int cacheCreationTurns = 0;
+
+        foreach ((int position, CollectedRecord turnRecord) in turnEntries)
+        {
+            ReadTimeTurnSummary turnSummary = BuildReaderTurnSummary(
+                turnRecord,
+                position,
+                harnessId,
+                pricing,
+                out CostBlock publishedBlock,
+                out CostBlock? harnessBlock);
+
+            turnPublishedBlocks.Add(publishedBlock);
+            if (publishedBlock.Value is double publishedValue && double.IsFinite(publishedValue))
+            {
+                valuedTurnPublishedBlocks.Add(publishedBlock);
+            }
+
+            if (harnessBlock is not null && harnessBlock.Value is double harnessValue && double.IsFinite(harnessValue))
+            {
+                valuedTurnHarnessBlocks.Add(harnessBlock);
+            }
+
+            if (!string.IsNullOrEmpty(turnRecord.Model) && seenModels.Add(turnRecord.Model))
+            {
+                models.Add(turnRecord.Model);
+            }
+
+            if (turnSummary.InputTokens.HasValue)
+            {
+                totalInput += turnSummary.InputTokens.Value;
+                hasInput = true;
+            }
+
+            if (turnSummary.OutputTokens.HasValue)
+            {
+                totalOutput += turnSummary.OutputTokens.Value;
+                hasOutput = true;
+            }
+
+            if (turnSummary.CacheReadTokens.HasValue)
+            {
+                totalCacheRead += turnSummary.CacheReadTokens.Value;
+                hasCacheRead = true;
+            }
+
+            if (turnSummary.CacheCreationTokens.HasValue)
+            {
+                totalCacheCreation += turnSummary.CacheCreationTokens.Value;
+                hasCacheCreation = true;
+                if (turnSummary.CacheCreationTokens.Value > 0)
+                {
+                    cacheCreationTurns++;
+                }
+            }
+        }
+
+        List<CollectedRecord> rootRecords =
+        [
+            .. records
+                .Where(r => r.ParentRecordId is null ||
+                            string.Equals(r.ParentRecordId, r.RecordId, StringComparison.Ordinal) ||
+                            !sessionSpanIds.Contains(r.ParentRecordId))
+                .OrderBy(static r => r.StartedAt)
+                .ThenBy(static r => r.RecordId, StringComparer.Ordinal),
+        ];
+
+        bool hasNesting = records.Any(r =>
+            r.ParentRecordId is not null &&
+            !string.Equals(r.ParentRecordId, r.RecordId, StringComparison.Ordinal) &&
+            sessionSpanIds.Contains(r.ParentRecordId));
+
+        IReadOnlyList<CollectedRecord> durationCandidates = hasNesting ? rootRecords : records;
+        long totalDuration = 0;
+        bool hasDuration = false;
+        foreach (CollectedRecord candidate in durationCandidates)
+        {
+            long? ms = ComputeReaderDurationMs(candidate);
+            if (ms.HasValue)
+            {
+                totalDuration += ms.Value;
+                hasDuration = true;
+            }
+        }
+
+        List<Problem> extraProblems = [];
+
+        List<CostBlock> reportedRecordBlocks = [];
+        foreach (CollectedRecord record in records)
+        {
+            if (record.ReportedCost is null)
+            {
+                continue;
+            }
+
+            IReadOnlyDictionary<string, double>? byModel = !string.IsNullOrEmpty(record.Model)
+                ? new Dictionary<string, double>(StringComparer.Ordinal) { [record.Model] = record.ReportedCost.Amount }
+                : null;
+            reportedRecordBlocks.Add(new CostBlock(
+                CostBasis.Harness,
+                CostStatus.Priced,
+                record.ReportedCost.Amount,
+                record.ReportedCost.Currency,
+                byModel));
+        }
+
+        ReadTimeCostSummary? sessionReportedCost = reportedRecordBlocks.Count > 0
+            ? AggregateReaderCostBlocks(reportedRecordBlocks, CostBasis.Harness, extraProblems)
+            : null;
+
+        ReadTimeCostSummary sessionPublishedCost = turnPublishedBlocks.Count > 0
+            ? AggregateReaderCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
+            : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
+
+        ReadTimeCostBasisMismatch? basisMismatch = null;
+        if (valuedTurnHarnessBlocks.Count > 0 && valuedTurnPublishedBlocks.Count > 0)
+        {
+            List<CostBlock> combined = [.. valuedTurnHarnessBlocks, .. valuedTurnPublishedBlocks];
+            CostTotalResult mismatchTotal = CanonPricing.SumCosts(combined);
+            CostBasisMismatch? domainMismatch = CanonPricing.CostBasisMismatchOf(combined, mismatchTotal);
+            if (domainMismatch is not null)
+            {
+                List<ReadTimeBasisTotal> totalsByBasis =
+                [
+                    .. domainMismatch.TotalsByBasis
+                        .OrderBy(static kv => kv.Key, StringComparer.Ordinal)
+                        .Select(static kv => new ReadTimeBasisTotal(kv.Key, kv.Value)),
+                ];
+                basisMismatch = new ReadTimeCostBasisMismatch(
+                    domainMismatch.Code,
+                    domainMismatch.Message,
+                    domainMismatch.Bases,
+                    totalsByBasis);
+            }
+
+            if (mismatchTotal.Problem is not null)
+            {
+                extraProblems.Add(mismatchTotal.Problem);
+            }
+        }
+
+        long? nullableTotalInput = hasInput ? totalInput : null;
+        long? nullableTotalOutput = hasOutput ? totalOutput : null;
+        long? nullableTotalCacheRead = hasCacheRead ? totalCacheRead : null;
+        long? nullableTotalCacheCreation = hasCacheCreation ? totalCacheCreation : null;
+
+        double? cacheHitRatio = nullableTotalInput is > 0 && nullableTotalCacheRead.HasValue
+            ? (double)nullableTotalCacheRead.Value / nullableTotalInput.Value
+            : null;
+        int? cacheCreationCoverage = nullableTotalInput is > 0 && nullableTotalCacheCreation.HasValue && turnEntries.Count > 0
+            ? cacheCreationTurns
+            : null;
+
+        // The detail header's tool figures come from the projection's ranked schema rather than
+        // the tool-call and tool-definition rows: those tables carry invocation and definition
+        // payloads, and the projection already ranks the same session.
+        IReadOnlyList<StoredSchemaRankedTool> rankedTools = projection?.Schema?.RankedTools ?? [];
+        List<string> toolsInvoked = [];
+        List<string> toolsOffered = [];
+        HashSet<string> seenInvokedTools = new(StringComparer.Ordinal);
+        HashSet<string> seenOfferedTools = new(StringComparer.Ordinal);
+        int rankedInvocations = 0;
+        foreach (StoredSchemaRankedTool ranked in rankedTools)
+        {
+            if (seenOfferedTools.Add(ranked.ToolName))
+            {
+                toolsOffered.Add(ranked.ToolName);
+            }
+
+            if (!ranked.Invoked)
+            {
+                continue;
+            }
+
+            rankedInvocations++;
+            if (seenInvokedTools.Add(ranked.ToolName))
+            {
+                toolsInvoked.Add(ranked.ToolName);
+            }
+        }
+
+        int invocationCount = projection?.Schema?.InvocationCount ?? 0;
+        int? toolCalls = invocationCount > 0 ? invocationCount : rankedInvocations > 0 ? rankedInvocations : null;
+
+        int requestCount = projection is not null && projection.RequestSpanIds.Count > 0
+            ? projection.RequestSpanIds.Count
+            : rootRecords.Count;
+
+        ReadTimeSessionCoverage coverage = new(
+            SchemaMeasurable: projection?.Schema is not null,
+            ContextMeasurable: projection?.Context is not null);
+
+        List<Problem> problems = [.. storedProblems];
+        problems.AddRange(extraProblems);
+
+        return new SessionSummaryFigure(
+            SessionKey: sessionKey,
+            HarnessId: harnessId,
+            TurnCount: turnEntries.Count,
+            RequestCount: requestCount,
+            TotalInput: nullableTotalInput,
+            TotalOutput: nullableTotalOutput,
+            TotalCacheRead: nullableTotalCacheRead,
+            TotalCacheCreation: nullableTotalCacheCreation,
+            DurationMs: hasDuration ? totalDuration : null,
+            Models: models,
+            CacheHitRatio: cacheHitRatio,
+            CacheCreationCoverage: cacheCreationCoverage,
+            ToolCalls: toolCalls,
+            ToolsInvoked: toolsInvoked,
+            HasToolDefinitions: rankedTools.Count > 0,
+            ToolsOffered: toolsOffered,
+            ReportedCost: sessionReportedCost,
+            PublishedCost: sessionPublishedCost,
+            CostBasisMismatch: basisMismatch,
+            Coverage: coverage,
+            Problems: problems);
+    }
+
+    /// <inheritdoc />
     public IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);

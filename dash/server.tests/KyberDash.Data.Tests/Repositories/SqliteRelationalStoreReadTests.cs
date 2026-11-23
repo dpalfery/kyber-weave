@@ -630,6 +630,10 @@ public class SqliteRelationalStoreReadTests : IDisposable
             Assert.Equivalent(memoryReader.StoredFields(sessionKey), sqliteReader.StoredFields(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.GetSessionAggregate(sessionKey), sqliteReader.GetSessionAggregate(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.SessionTurnSummaries(sessionKey), sqliteReader.SessionTurnSummaries(sessionKey), strict: true);
+            Assert.Equivalent(memoryReader.SessionSummaryFigures(sessionKey), sqliteReader.SessionSummaryFigures(sessionKey), strict: true);
+            Assert.Equivalent(memoryReader.SessionDetailFigures(sessionKey), sqliteReader.SessionDetailFigures(sessionKey), strict: true);
+            Assert.Equivalent(memoryReader.TurnFigures(sessionKey, 0), sqliteReader.TurnFigures(sessionKey, 0), strict: true);
+            Assert.Equivalent(memoryReader.TurnFigures(sessionKey, int.MaxValue), sqliteReader.TurnFigures(sessionKey, int.MaxValue), strict: true);
 
             AssertPairFilterParity(memoryReader, sqliteReader, null, sessionKey);
             foreach (string spanId in spanIds.Take(2))

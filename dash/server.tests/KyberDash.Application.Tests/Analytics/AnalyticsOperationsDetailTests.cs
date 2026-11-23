@@ -395,6 +395,36 @@ public sealed class AnalyticsOperationsDetailTests
             return figures;
         }
 
+        public SessionSummaryFigure? SessionSummaryFigures(string sessionKey, IModelPricingLookup? pricing = null)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return inner.SessionSummaryFigures(sessionKey, pricing);
+        }
+
+        public SessionDetailFigure? SessionDetailFigures(string sessionKey, IModelPricingLookup? pricing = null)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return inner.SessionDetailFigures(sessionKey, pricing);
+        }
+
+        public ReadTimeTurnSummary? TurnFigures(string sessionKey, int turnIndex, IModelPricingLookup? pricing = null)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return inner.TurnFigures(sessionKey, turnIndex, pricing);
+        }
+
         public IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null)
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))

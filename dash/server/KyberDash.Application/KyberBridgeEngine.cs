@@ -19,11 +19,11 @@ namespace KyberDash.Application;
 /// <para>
 /// Every route answers from typed store rows: the engine reads only the relational store
 /// contracts and parses no persisted store JSON. The sessions list answers from the
-/// content-free <see cref="IRelationalStoreReader.SessionListFigures"/> read model; session
-/// detail figures come from
-/// <see cref="IRelationalStoreReader.GetSessionAggregate"/>,
-/// <see cref="IRelationalStoreReader.ListSessionAggregates"/>, and
-/// <see cref="IRelationalStoreReader.SessionTurnSummaries"/> priced at read time through
+/// content-free <see cref="IRelationalStoreReader.SessionListFigures"/> read model, and the
+/// session detail, summary, and turn pages answer their figures from the content-free
+/// <see cref="IRelationalStoreReader.SessionDetailFigures"/>,
+/// <see cref="IRelationalStoreReader.SessionSummaryFigures"/>, and
+/// <see cref="IRelationalStoreReader.TurnFigures"/> read models priced at read time through
 /// <see cref="IPricingRepository.LoadPricingTables"/> as the <see cref="IModelPricingLookup"/>;
 /// run, harness, finding, and prediction reads come from <see cref="IProjectionStore"/>; settings,
 /// quarantine, problems, and audit reads come from <see cref="IOperationalStore"/>.
@@ -300,14 +300,14 @@ public class KyberBridgeEngine
 
         CollectedSession? session = reader.GetSession(sessionId);
         IModelPricingLookup lookup = pricing.LoadPricingTables();
-        (SessionAggregateView? aggregate, IReadOnlyList<ReadTimeTurnSummary> turns, string? projectionStatus) =
-            ReadSessionFigures(sessionId, lookup);
+        (SessionDetailFigure? figures, SessionAggregateView? aggregate, string? projectionStatus) =
+            ReadSessionDetailFigures(sessionId, lookup);
 
         Dictionary<string, object?> root = new(StringComparer.Ordinal)
         {
             ["session_id"] = projection.SessionId,
             ["sessionId"] = projection.SessionId,
-            ["harness"] = ResolveHarness(aggregate, session),
+            ["harness"] = figures?.Summary.HarnessId ?? ResolveHarness(aggregate, session),
             ["label"] = projection.Label,
             ["is_subagent"] = projection.IsSubagent,
             ["parent_session"] = projection.ParentSessionId,
@@ -316,11 +316,13 @@ public class KyberBridgeEngine
             ["branch"] = session?.Workspace?.Branch,
             ["started"] = projection.StartedAtUtc,
             ["ended"] = projection.EndedAtUtc,
-            ["problems_count"] = aggregate?.Problems.Count ?? 0,
+            ["problems_count"] = figures?.Summary.Problems.Count ?? 0,
             ["context_limit_source"] = ResolveContextLimitSource(projection),
-            ["summary"] = aggregate is null ? null : BuildSessionSummary(aggregate),
-            ["problems"] = aggregate?.Problems ?? Array.Empty<Problem>(),
-            ["turns"] = turns.Select(ToTurnDto).ToList(),
+            ["summary"] = figures is null ? null : BuildSessionSummary(figures.Summary),
+            ["problems"] = figures?.Summary.Problems ?? Array.Empty<Problem>(),
+            ["turns"] = figures is null
+                ? new List<Dictionary<string, object?>>()
+                : [.. figures.Turns.Select(ToTurnDto)],
             ["tools"] = aggregate is null ? Array.Empty<object>() : ToolRows(aggregate),
             ["timeline"] = TimelineChildren(projection.SessionId),
             ["requests"] = aggregate is null ? Array.Empty<object>() : RequestRows(aggregate),
@@ -348,12 +350,12 @@ public class KyberBridgeEngine
 
         CollectedSession? session = reader.GetSession(sessionId);
         IModelPricingLookup lookup = pricing.LoadPricingTables();
-        (SessionAggregateView? aggregate, _, string? projectionStatus) = ReadSessionFigures(sessionId, lookup);
+        (SessionSummaryFigure? figures, string? projectionStatus) = ReadSessionSummaryFigures(sessionId, lookup);
 
         Dictionary<string, object?> payload = new(StringComparer.Ordinal)
         {
             ["session_id"] = projection.SessionId,
-            ["harness"] = ResolveHarness(aggregate, session),
+            ["harness"] = figures?.HarnessId ?? session?.HarnessId ?? string.Empty,
             ["label"] = projection.Label,
             ["is_subagent"] = projection.IsSubagent,
             ["parent_session"] = projection.ParentSessionId,
@@ -362,9 +364,9 @@ public class KyberBridgeEngine
             ["branch"] = session?.Workspace?.Branch,
             ["started"] = projection.StartedAtUtc,
             ["ended"] = projection.EndedAtUtc,
-            ["problems"] = aggregate?.Problems.Count ?? 0,
+            ["problems"] = figures?.Problems.Count ?? 0,
             ["context_limit_source"] = ResolveContextLimitSource(projection),
-            ["summary"] = aggregate is null ? null : BuildSessionSummary(aggregate),
+            ["summary"] = figures is null ? null : BuildSessionSummary(figures),
         };
 
         if (projectionStatus is not null)
@@ -382,8 +384,8 @@ public class KyberBridgeEngine
     public JsonElement? GetTurnFigures(string sessionId, int turnIndex)
     {
         EnsureProjected();
-        IReadOnlyList<ReadTimeTurnSummary> turns = TrySessionTurnSummaries(sessionId);
-        if (turnIndex < 0 || turnIndex >= turns.Count)
+        ReadTimeTurnSummary? turn = TryTurnFigures(sessionId, turnIndex);
+        if (turn is null)
         {
             return null;
         }
@@ -392,7 +394,7 @@ public class KyberBridgeEngine
         {
             sessionId,
             turnIndex,
-            turn = ToTurnDto(turns[turnIndex]),
+            turn = ToTurnDto(turn),
         }, CamelCaseJsonOptions);
     }
 
@@ -405,13 +407,13 @@ public class KyberBridgeEngine
     public JsonElement? GetTurnContent(string sessionId, int turnIndex, int budget = ContentResponseBudget, bool full = false)
     {
         EnsureProjected();
-        IReadOnlyList<ReadTimeTurnSummary> turns = TrySessionTurnSummaries(sessionId);
-        if (turnIndex < 0 || turnIndex >= turns.Count)
+        ReadTimeTurnSummary? figures = TryTurnFigures(sessionId, turnIndex);
+        if (figures is null)
         {
             return null;
         }
 
-        Dictionary<string, object?> turn = ToTurnDto(turns[turnIndex]);
+        Dictionary<string, object?> turn = ToTurnDto(figures);
         string serialized = JsonSerializer.Serialize(turn, CamelCaseJsonOptions);
         int totalBytes = Encoding.UTF8.GetByteCount(serialized);
         int effectiveBudget = budget > 0 ? budget : ContentResponseBudget;
@@ -1503,17 +1505,42 @@ public class KyberBridgeEngine
         }, CamelCaseJsonOptions);
     }
 
-    /// <summary>Reads a session's aggregate and turn summaries, isolating any fault to that session.</summary>
+    /// <summary>
+    /// Reads a session's detail figures from the content-free read model, plus the broad
+    /// aggregate the payload's content-bearing sections still need, isolating any fault to that
+    /// session.
+    /// </summary>
     /// <param name="sessionKey">Canonical session key.</param>
     /// <param name="lookup">Read-time pricing tables.</param>
-    /// <returns>The aggregate when readable, the turn summaries when readable, and the isolation marker when either read failed.</returns>
-    private (SessionAggregateView? Aggregate, IReadOnlyList<ReadTimeTurnSummary> Turns, string? ProjectionStatus) ReadSessionFigures(
+    /// <returns>
+    /// The detail figures when readable, the aggregate when readable, and the isolation marker
+    /// when either read failed.
+    /// </returns>
+    /// <remarks>
+    /// The header figures and every turn figure come from
+    /// <see cref="IRelationalStoreReader.SessionDetailFigures"/>, which reads no content column.
+    /// The tool rows and request prompt previews stay on
+    /// <see cref="IRelationalStoreReader.GetSessionAggregate"/> because they are derived from tool
+    /// definitions and captured prompt text; the projections carry no prompt, so moving them
+    /// needs a stored prompt preview first.
+    /// </remarks>
+    private (SessionDetailFigure? Figures, SessionAggregateView? Aggregate, string? ProjectionStatus) ReadSessionDetailFigures(
         string sessionKey,
         IModelPricingLookup lookup)
     {
+        SessionDetailFigure? figures = null;
         SessionAggregateView? aggregate = null;
-        IReadOnlyList<ReadTimeTurnSummary> turns = [];
         string? status = null;
+
+        try
+        {
+            figures = reader.SessionDetailFigures(sessionKey, lookup);
+        }
+        catch (Exception ex)
+        {
+            RecordProjectionFailure(sessionKey, ex.Message);
+            status = ProjectionFailedStatus;
+        }
 
         try
         {
@@ -1525,17 +1552,39 @@ public class KyberBridgeEngine
             status = ProjectionFailedStatus;
         }
 
+        return (figures, aggregate, status);
+    }
+
+    /// <summary>Reads a session's bounded summary figures, isolating any fault to that session.</summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="lookup">Read-time pricing tables.</param>
+    /// <returns>The figures when readable, and the isolation marker when the read failed.</returns>
+    private (SessionSummaryFigure? Figures, string? ProjectionStatus) ReadSessionSummaryFigures(
+        string sessionKey,
+        IModelPricingLookup lookup)
+    {
         try
         {
-            turns = reader.SessionTurnSummaries(sessionKey, lookup);
+            return (reader.SessionSummaryFigures(sessionKey, lookup), null);
         }
         catch (Exception ex)
         {
             RecordProjectionFailure(sessionKey, ex.Message);
-            status = ProjectionFailedStatus;
+            return (null, ProjectionFailedStatus);
         }
+    }
 
-        return (aggregate, turns, status);
+    private ReadTimeTurnSummary? TryTurnFigures(string sessionKey, int turnIndex)
+    {
+        try
+        {
+            return reader.TurnFigures(sessionKey, turnIndex, pricing.LoadPricingTables());
+        }
+        catch (Exception ex)
+        {
+            RecordProjectionFailure(sessionKey, ex.Message);
+            return null;
+        }
     }
 
     /// <summary>
@@ -1559,19 +1608,6 @@ public class KyberBridgeEngine
             CostBasisMismatch: aggregate.CostBasisMismatch,
             Models: aggregate.Models,
             ProblemsCount: aggregate.Problems.Count);
-
-    private IReadOnlyList<ReadTimeTurnSummary> TrySessionTurnSummaries(string sessionKey)
-    {
-        try
-        {
-            return reader.SessionTurnSummaries(sessionKey, pricing.LoadPricingTables());
-        }
-        catch (Exception ex)
-        {
-            RecordProjectionFailure(sessionKey, ex.Message);
-            return [];
-        }
-    }
 
     private void RecordProjectionFailure(string sessionKey, string message)
     {
@@ -1720,32 +1756,32 @@ public class KyberBridgeEngine
         return rows;
     }
 
-    private static object BuildSessionSummary(SessionAggregateView aggregate) =>
+    private static object BuildSessionSummary(SessionSummaryFigure summary) =>
         new
         {
-            turn_count = aggregate.TurnCount,
-            request_count = aggregate.RequestCount,
-            total_input = aggregate.TotalInput,
-            total_output = aggregate.TotalOutput,
-            total_cache_read = aggregate.TotalCacheRead,
-            total_cache_creation = aggregate.TotalCacheCreation,
-            duration_ms = aggregate.DurationMs,
-            models = aggregate.Models,
-            cache_hit_ratio = aggregate.CacheHitRatio,
-            cache_creation_coverage = aggregate.CacheCreationCoverage,
-            tool_calls = aggregate.ToolCalls,
-            tools_invoked = aggregate.ToolsInvoked,
-            tools_offered = aggregate.ToolsOffered,
-            has_tool_definitions = aggregate.HasToolDefinitions,
-            cost = aggregate.PublishedCost,
-            cost_reported = aggregate.ReportedCost,
-            cost_basis_mismatch = aggregate.CostBasisMismatch,
+            turn_count = summary.TurnCount,
+            request_count = summary.RequestCount,
+            total_input = summary.TotalInput,
+            total_output = summary.TotalOutput,
+            total_cache_read = summary.TotalCacheRead,
+            total_cache_creation = summary.TotalCacheCreation,
+            duration_ms = summary.DurationMs,
+            models = summary.Models,
+            cache_hit_ratio = summary.CacheHitRatio,
+            cache_creation_coverage = summary.CacheCreationCoverage,
+            tool_calls = summary.ToolCalls,
+            tools_invoked = summary.ToolsInvoked,
+            tools_offered = summary.ToolsOffered,
+            has_tool_definitions = summary.HasToolDefinitions,
+            cost = summary.PublishedCost,
+            cost_reported = summary.ReportedCost,
+            cost_basis_mismatch = summary.CostBasisMismatch,
             coverage = new
             {
-                schema_measurable = aggregate.Coverage.SchemaMeasurable,
-                context_measurable = aggregate.Coverage.ContextMeasurable,
+                schema_measurable = summary.Coverage.SchemaMeasurable,
+                context_measurable = summary.Coverage.ContextMeasurable,
             },
-            problems = aggregate.Problems,
+            problems = summary.Problems,
         };
 
     private static Dictionary<string, object?> ToTurnDto(ReadTimeTurnSummary turn) => new(StringComparer.Ordinal)
