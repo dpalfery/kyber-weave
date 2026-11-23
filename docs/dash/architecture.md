@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-20
+last-reviewed: 2026-11-22
 decided-by:
   - adr/0084-kyberdash-csharp-engine
   - adr/0020-kyberdash-one-time-fork
@@ -110,6 +110,18 @@ code-refs:
   - IHarnessSourceReader
   - IHarnessMapper
   - StoredFieldsView
+  - ProjectIncrementalForReads
+  - SessionAttributions
+  - SessionRecordsForRebuild
+  - AllSessionRecordsForMaintenance
+  - SessionListFigures
+  - SessionSummaryFigures
+  - SessionDetailFigures
+  - TurnFigures
+  - SessionRecordsContentFree
+  - RecordContentFree
+  - TurnContentParts
+  - SourceRecordCounts
 ---
 
 # KyberDash architecture
@@ -1204,6 +1216,131 @@ entries (`tableName`, `columnNames`, `rows`, `missingParentKeys`). Every reachab
 column is labeled `table.column`; a parent key with no row in an optional child table is listed
 in `missingParentKeys` and rendered as "not reported" (never `0` or `""`). An unknown session
 answers HTTP 404.
+
+## Read-path invariants and the read-model register
+
+A read is shaped by its consumer. Every dashboard read answers from one purpose-named store
+method whose result **is** the page's shape, so a page cannot over-fetch by accident and a new
+page gets a new named read instead of borrowing a broad one. On a small store this is invisible;
+on a store where one session holds half a gigabyte of captured text it is the difference between
+a page that paints and a request that materializes the corpus before discarding most of it.
+
+The contract lives in `IRelationalStoreReader`
+(`dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs`), whose XML docs state
+each read's scope and content policy. Three invariants hold over it:
+
+- **Selecting a session never materializes its content.** The list, summary, detail and turn
+  reads carry figures computed from record scalars only.
+- **Selecting a turn never materializes the session.** `TurnFigures` is scoped to one turn index.
+- **Content text is read by coordinate, not by session.** `TurnContentParts` reads
+  `(session_key, span, position)`, so the content view pays for the parts it renders.
+
+The broad reads this replaced — `Records`, `GetRecord`, `ContentParts`, `GetSessionAggregate`,
+`ListSessionAggregates`, `SessionTurnSummaries` — are retired from the interface and from all four
+implementers. `StoreInterfaceShapeTests.TheReaderInterfaceCarriesNoBroadReads` fails if one comes
+back.
+
+### The read-model register
+
+| Endpoint(s) | Read model (scoping key) | Content text |
+|---|---|---|
+| `GET /api/kyber/sessions` (and the `/session` alias) | `SessionListFigures(harnessId?)` — one batched pass over the session rows and each session's linked record scalars, turns and ingest problems, joined to the `session_projection` rows for label, hierarchy and timestamps | No |
+| `GET /api/kyber/session/{id}` | `SessionDetailFigures(sessionKey)` — the header's figures plus each turn's `ReadTimeTurnSummary` | No |
+| `GET /api/kyber/session/{id}/summary` | `SessionSummaryFigures(sessionKey)` — the bounded summary the SPA's navigation pins | No |
+| `GET /api/kyber/session/{id}/turn/{index}` | `TurnFigures(sessionKey, turnIndex)` — one turn's spans, tool calls, token and cost facts | No |
+| `GET /api/kyber/timeline` and the detail timeline | `SessionRecordsContentFree(sessionKey)` — linked records with token counts, models, timestamps, signals, tool-call metadata and tool definitions, and no content part, tool input text or tool result text | No |
+| `GET /api/kyber/span/{id}/attributes` | `RecordContentFree(spanId)` — one record's metadata; a captured prompt the inspector shows comes from `TurnContentParts`, so reading attributes never materializes a conversation | No |
+| `GET /api/kyber/session/{id}/turn/{index}/content`, `GET /api/kyber/session/{id}/content` | `TurnContentParts(sessionKey, turnIndex?, spanId?, part?, budget, full)` — parts by `(session_key, span, position)`, honouring the response budget and the `full` flag | **Yes — the one request-path content read, scoped to that turn or request** |
+| `GET /api/kyber/session/{id}/stored-fields` | `StoredFields(sessionKey)` — catalog-driven inventory of the named session's stored columns, rows and missing parent keys. Heavy by design and named as a sanctioned exception below | Yes — the named session's stored rows, content columns included |
+| `GET /api/kyber/coverage` | `SourceRecordCounts()`, `CountRecords(harnessId?)`, `Sources(harnessId?)` — every count is answered in the store rather than by materializing records | No |
+| `GET /api/kyber/harnesses`, `/harness/{id}` | `Harnesses()` plus `SessionListFigures` rollups | No |
+| `GET /api/kyber/report` | `ReportService` over `SessionListFigures` / `SessionDetailFigures` | No |
+| `GET /api/kyber/analytics/*` | Session-level operations over the list, summary and detail figures; span- and turn-level operations over `RecordContentFree`, `SessionRecordsContentFree` and `TurnFigures`, with per-operation shapes unchanged | No |
+| `/api/kyber/runs`, `/run/{id}`, `/compare*`, `/findings`, `/finding/{id}`, `/problems`, `/quarantine*`, `/jobs`, `/settings`, `/meta`, `/version`, `/capture`, `/model-catalog`, `/predictions`, `/calibration`, `/review`, `/api/events` | Projection store or operational store only; no relational-reader read | No |
+
+**How the boundary is held.** `AnalyticsReadPathTests.EveryOtherPathLeavesContentUnread` sweeps
+21 endpoints over an instrumented fake and fails on the first materialized content byte — a path
+test measured 1,048,607 bytes before the list, detail and summary reads were shaped, and zero
+after. `AnalyticsReadPathTests.TurnContentReadsOnlyTheRequestedTurnsParts` pins the scoped read's
+budget, `full` flag and coordinate scoping; `StoredFieldsStaysScopedToTheNamedSession` pins the
+inventory to its own session. The checkable rules that keep a new read in this shape are
+`KW-STD-SQL-001..003` and `KW-STD-TEST-001..002` in the
+[SQLite standard](../standards/sqlite/sqlite.standards.md) and the
+[test standard](../standards/test/test.standards.md); the register above is their worked example.
+
+### The maintenance-read boundary
+
+Whole-store reads exist, are off the request path, and are named so they cannot be mistaken for a
+page read:
+
+- `AllSessionRecordsForMaintenance()` — every stored record and child row in one query. Reserved
+  for `kyber build` (`CanonProjectionService.ProjectAll`), a wildcard projection rebuild, and
+  doctor.
+- `SessionRecordsForRebuild(sessionKey)` — full records, content included, for the one session a
+  projection pass rebuilds (token counting, timeline, findings and previews need the part text).
+- `SessionAttributions()` — distinct `(session key, harness)` pairs with record counts from one
+  grouped query over `record` joined to `record_session_link`. It feeds the pass's identities,
+  skip decisions and per-session record budgets without materializing a record. Its ordering
+  (session key, then harness) is load-bearing: attribution-driven id claiming must assign the
+  same session ids as sorted-key record iteration, or every stored projection's id churns.
+
+`ArchitectureBoundaryTests.RequestPathsCannotReachMaintenanceReads` scans `dash/server` and fails,
+naming the file, when anything outside the contract, the SQLite adapter, `CanonSessionProjectorEngine.cs`,
+the CLI `Program.cs` and `DoctorService.cs` names the maintenance read. `Sessions`, `Sources`,
+`CountRecords`, `StoredFields` and `SessionModelUsages` stay because each is already
+purpose-named, cheap and scoped; the child-table query members (`TokenCounts`, `ReportedTotals`,
+`ReportedCosts`, `SkillsInvoked`, `ToolCalls`, `ToolDefinitions`, `AgentInvocations`,
+`RecordSignals`) stay where a named maintenance consumer remains.
+
+### Read-path deferral and single-flight
+
+`CanonSessionProjectorEngine` has two entries, and which one a caller uses is the whole contract:
+
+```mermaid
+flowchart LR
+    DASH["dashboard GET<br/>KyberBridgeEngine.EnsureProjected"] --> READS["ProjectIncrementalForReads()"]
+    READS --> ATTRIB["SessionAttributions()<br/>identities, skips, budgets"]
+    ATTRIB --> SMALL["dirty session under the record budget<br/>SessionRecordsForRebuild(key)"]
+    ATTRIB --> BIG["dirty session over the budget<br/>(default 2,000 records)"]
+    BIG --> DEFER["deferred: left dirty,<br/>reported in deferredSessions"]
+    JOBS["maintenance tick, kyber build,<br/>refresh, clean"] --> FULL["ProjectIncremental()<br/>never defers"]
+    FULL --> ALL["AllSessionRecordsForMaintenance()"]
+    DEFER --> JOBS
+```
+
+- `ProjectIncremental()` is the maintenance entry: the scheduler's tick, CLI `kyber build`, refresh
+  and clean. It never defers.
+- `ProjectIncrementalForReads()` is the request path. It defers a dirty session whose record count
+  exceeds the budget (default 2,000, constructor-injectable), writes the key back as still dirty so
+  the next pass retries it, and reports it. The bounded GET latency is a property of the deferral,
+  not of the store being small.
+- A single-flight guard inside the projector pass entry makes a concurrent caller return a skipped
+  report and serve the current projections instead of stacking a second pass; waiting would make
+  the second GET as slow as the first, and the polling UI already tolerates slightly stale
+  projections.
+- `KyberBridgeEngine.BuildProjectionHealth` reports `deferredSessions` from the dirty state while
+  `status` stays `"ok"`: deferral is expected behaviour, not a fault. The same object already
+  reports `failedSessions` and `lastError`, and it is the `projection` block of
+  `GET /api/kyber/coverage`.
+
+What an operator sees when a session is deferred — and why `stored-fields` on an oversized
+session stays slow by design — is in the [runbook](runbook.md#11-slow-dashboard-responses-on-a-large-store).
+
+### Sanctioned exceptions
+
+Three reads stay heavier than the page they serve, each named so a reader does not mistake it for
+a defect:
+
+- **`StoredFields(sessionKey)`** is a raw per-session inventory: it reads the named session's
+  stored rows including content columns, and that inventory is the view. Scoping it to the session
+  is the contract; making it cheap would change what it answers.
+- **The maintenance reads above** are whole-store or whole-session by definition and are reachable
+  only from the paths `RequestPathsCannotReachMaintenanceReads` allows.
+- **The projection rebuild** reads content for the dirty sessions it rebuilds, because token
+  counting, timeline derivation and findings consume the part text.
+
+Nothing else on a request path may read a content-text column. A new page adds a read model to the
+register above; it does not widen an existing one.
 
 ## Normalization layer
 

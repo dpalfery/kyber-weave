@@ -1,6 +1,6 @@
 schema-version: 2
 plan: docs/plans/2026-11-22-dash-api-stalls-on-large-store.md
-execution-digest: a91d4ec8063360049e666d34d8896a6c3270c2bc60fbc33805acef737d2c77bc
+execution-digest: 6c687a19892440b2f70a784a5f21add0c54e72e5e56015f766fc152ebea7c4c1
 tasks:
   - id: T1
     capabilities: C# application-layer engine work (projection, concurrency) and data-layer query work over the KyberDash SQLite store, with in-memory unit tests over the shared fake.
@@ -377,7 +377,7 @@ tasks:
         - `kyber-weave review gates . --agent <worker> --task T6 --red`
         - `kyber-weave review gates . --agent <worker> --task T6`
       - **Acceptance:**
-        - The operations and parity suites pass unchanged in their assertions; `AnalyticsNeverIssuesAContentRead` holds; the run reports a non-zero test count.
+        - The operations and parity suites pass unchanged in their assertions; the sweep `EveryOtherPathLeavesContentUnread` holds; the run reports a non-zero test count.
 
       Reference content for this task, quoted exactly from its source document and complete as given:
 
@@ -388,7 +388,7 @@ tasks:
 
       |---|---|---|---|---|---|
 
-      | T6 | `AnalyticsServiceOperationsTests.cs`, `AnalyticsErrorEnvelopeTests.cs`, `AnalyticsOperationsDetailTests.cs`, `ApplicationParityTests.cs` (extend) | `dotnet test dash/server/KyberDash.sln -c Release --filter "FullyQualifiedName~AnalyticsServiceOperationsTests"` | Every analytics operation and the report answer from the purpose-named read models with output identical to today (the operations suite already pins the shapes); `AnalyticsNeverIssuesAContentRead` on the sweep. | The migration's instrumentation assertion fails while analytics still reads through `ListSessionAggregates`/broad reads. | The operations and parity suites pass unchanged in their assertions; the sweep holds; the run reports a non-zero test count. |
+      | T6 | `AnalyticsServiceOperationsTests.cs`, `AnalyticsErrorEnvelopeTests.cs`, `AnalyticsOperationsDetailTests.cs`, `ApplicationParityTests.cs` (extend) | `dotnet test dash/server/KyberDash.sln -c Release --filter "FullyQualifiedName~AnalyticsServiceOperationsTests"` | Every analytics operation and the report answer from the purpose-named read models with output identical to today (the operations suite already pins the shapes); the endpoint sweep `AnalyticsReadPathTests.EveryOtherPathLeavesContentUnread` reports zero content reads with the analytics and report paths in it. | The migration's instrumentation assertion fails while analytics still reads through `ListSessionAggregates`/broad reads. | The operations and parity suites pass unchanged in their assertions; the sweep holds; the run reports a non-zero test count. |
 
 
       Results of the tasks this one follows, as their workers reported them:

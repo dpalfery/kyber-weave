@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-11-20
+last-reviewed: 2026-11-22
 decided-by:
   - adr/0084-kyberdash-csharp-engine
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
@@ -19,6 +19,8 @@ code-refs:
   - JobSchedulerService
   - CanonRefreshEngine
   - CanonSessionProjectorEngine
+  - ProjectIncrementalForReads
+  - TurnContentParts
   - CanonPricing
   - CleanService
   - SettingsService
@@ -2010,6 +2012,51 @@ here.
   [Harness OpenTelemetry capture](#harness-opentelemetry-capture). A Kilo installed only under VS
   Code Insiders, JetBrains or a non-standard Windows location is not detected by design; the
   import above still works.
+
+### 11. Slow dashboard responses on a large store
+
+- **Symptom**: the SPA shell loads and its assets answer 200, the Sessions list eventually paints,
+  but the Context Doctor panel sits on "Reading sessions…" and opening a session takes tens of
+  seconds. Measured on a 579 MB store: `/api/kyber/sessions` at 10.3 s growing to 26.5 s and
+  `/api/kyber/coverage` at 11.8 s growing to 52.9 s, worsening with every pass, while
+  `/api/kyber/jobs` (5 ms) and `/api/kyber/settings` (2 ms) stayed fast — the server was healthy,
+  the reads were not.
+- **Cause**: continuous capture advances the store's write marker every second or two, so a
+  dashboard GET always found the projection dirty. Every GET then ran a full projection pass that
+  materialized every session's content text — roughly a gigabyte of strings per pass on that store
+  — before skipping the sessions that were already clean, and repeated polls ran concurrent passes
+  on top of each other.
+- **What the fixed engine does instead**: reads are shaped to the page, so the list, summary,
+  detail, turn, timeline, coverage and analytics paths answer from figures computed over
+  content-free record scalars ([the read-model register](architecture.md#the-read-model-register)).
+  Content text is read by one view, one turn or one request at a time, from
+  `TurnContentParts(sessionKey, turnIndex, spanId, part, budget, full)`. The projection pass reads
+  only the dirty sessions it rebuilds and defers oversized ones to the maintenance tick, and a
+  second concurrent pass returns instead of stacking.
+- **What to expect on an oversized store.** The Sessions list, the context report, coverage and
+  findings answer from figures regardless of how much text a session holds. Opening a session is
+  cheap for the same reason: nothing on the list, summary or detail path reads that session's
+  content. The Context view is the one heavy page, and it pays only for the turn or the request
+  you opened.
+- **Deferred sessions.** A dirty session whose record count exceeds the read-path budget (default
+  2,000 records) is deferred rather than rebuilt inside a GET: its stored projection stays as it
+  was and its key stays dirty, so its figures can lag capture by up to the refresh cadence
+  (`jobs.refresh_cadence_minutes`, default 5, range 1–1440). Coverage's projection health reports
+  them while `status` stays `"ok"` — `deferredSessions` lists the lagging keys, beside
+  `failedSessions` and `lastError`, and deferral is expected behaviour rather than a fault. To
+  refresh them sooner, shorten the cadence
+  (`kyberdash dash settings set jobs.refresh_cadence_minutes 1`) and let one maintenance tick run;
+  the maintenance pass never defers and rebuilds them.
+- **What stays heavy by design.** `stored-fields` on a session holding hundreds of megabytes of
+  captured text stays slow: the view is a raw inventory of every stored row of the *named* session,
+  content columns included, and scoping it to the session is the contract. A maintenance rebuild
+  (`kyber build`, a projection tick) reads the sessions it rebuilds for the same reason — token
+  counting and findings consume the part text. Neither is on a dashboard page read.
+- **Not a remedy.** `kyberdash dash clean` discards captured data, and these docs do not prescribe
+  it. Removing data is the owner's decision, taken with the loss in view; this entry documents how
+  the dashboard behaves on an oversized store, not how to shrink one. The content-retention window
+  ([§4](#4-content-retention-policy)) does not help either: a session that is actively captured
+  stays inside the window, so its text keeps arriving faster than any window closes over it.
 
 ---
 
