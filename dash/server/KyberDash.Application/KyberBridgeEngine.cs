@@ -1890,15 +1890,26 @@ public class KyberBridgeEngine
         }
 
         IModelPricingLookup pricingLookup = pricing.LoadPricingTables();
-        // The report prices only its scoped sessions, each through the content-free summary read
-        // model, so a report over a large store never materializes conversation text.
-        Dictionary<string, SessionSummaryFigure> aggregatesById = new(StringComparer.Ordinal);
-        foreach (ReportSessionEntry entry in scopedSessions)
+        // The report prices its whole scoped window with one keyed batched read over the
+        // content-free report figures, so a report never materializes conversation text and its
+        // statement count never scales with the window (decision D13).
+        Dictionary<string, SessionReportFigure> aggregatesById = new(StringComparer.Ordinal);
+        try
         {
-            (SessionSummaryFigure? figures, _) = ReadSessionSummaryFigures(entry.Session.SessionKey, pricingLookup);
-            if (figures is not null)
+            foreach (SessionReportFigure figure in reader.SessionReportFigures(
+                [.. scopedSessions.Select(static entry => entry.Session.SessionKey)],
+                pricingLookup))
             {
-                aggregatesById[entry.Session.SessionKey] = figures;
+                aggregatesById[figure.SessionKey] = figure;
+            }
+        }
+        catch (Exception ex)
+        {
+            // The window's figures failed as one batch, so every scoped session carries the
+            // isolation marker, exactly as each session did when its own read failed.
+            foreach (ReportSessionEntry entry in scopedSessions)
+            {
+                RecordProjectionFailure(entry.Session.SessionKey, ex.Message);
             }
         }
 
@@ -4396,7 +4407,7 @@ public class KyberBridgeEngine
         IReadOnlyDictionary<string, int> totalHarnessCounts,
         IReadOnlyDictionary<string, int> inWindowHarnessCounts,
         IReadOnlyDictionary<string, StoredHarnessRollup> storedRollupsByHarness,
-        IReadOnlyDictionary<string, SessionSummaryFigure> aggregatesById,
+        IReadOnlyDictionary<string, SessionReportFigure> aggregatesById,
         IReadOnlyList<StoredRun> allRuns,
         DateTimeOffset cutoff,
         bool unfilteredSessionsAndRuns)
@@ -4443,7 +4454,7 @@ public class KyberBridgeEngine
     private HarnessRollupRow BuildWindowHarnessRollupRow(
         string harnessId,
         IReadOnlyList<ReportSessionEntry> harnessSessions,
-        IReadOnlyDictionary<string, SessionSummaryFigure> aggregatesById,
+        IReadOnlyDictionary<string, SessionReportFigure> aggregatesById,
         IReadOnlyList<StoredRun> allRuns,
         DateTimeOffset cutoff,
         bool allowExecutionFallback)
@@ -4500,7 +4511,7 @@ public class KyberBridgeEngine
                 unknownWindowSessions++;
             }
 
-            if (!aggregatesById.TryGetValue(entry.Session.SessionKey, out SessionSummaryFigure? aggregate))
+            if (!aggregatesById.TryGetValue(entry.Session.SessionKey, out SessionReportFigure? aggregate))
             {
                 continue;
             }
@@ -4628,8 +4639,8 @@ public class KyberBridgeEngine
             }
         }
 
-        (SessionDetailFigure? latestFigures, _) = ReadSessionDetailFigures(newest.Session.SessionKey, pricingLookup);
-        IReadOnlyList<ReadTimeTurnSummary> turns = latestFigures?.Turns ?? [];
+        (SessionTurnFigureSet? latestTurnSet, _) = TrySessionTurnFigures(newest.Session.SessionKey, pricingLookup);
+        IReadOnlyList<ReadTimeTurnSummary> turns = latestTurnSet?.Turns ?? [];
 
         StoredSessionProjection? projection = newest.Projection;
         string harness = newest.Harness;
@@ -4638,7 +4649,9 @@ public class KyberBridgeEngine
             : !string.IsNullOrWhiteSpace(projection?.StartedAtUtc)
                 ? projection.StartedAtUtc
                 : generatedAt;
-        int turnCount = latestFigures?.Summary.TurnCount ?? Math.Max(turns.Count, projection?.Context?.Turns.Count ?? 0);
+        int turnCount = latestTurnSet is not null
+            ? turns.Count
+            : Math.Max(turns.Count, projection?.Context?.Turns.Count ?? 0);
 
         object latestTurn;
         List<object> toolDefinitionSources = [];
@@ -4759,7 +4772,7 @@ public class KyberBridgeEngine
 
     private static List<object> BuildReportCost(
         IReadOnlyList<ReportSessionEntry> scopedSessions,
-        IReadOnlyDictionary<string, SessionSummaryFigure> aggregatesById)
+        IReadOnlyDictionary<string, SessionReportFigure> aggregatesById)
     {
         double harnessUsd = 0;
         bool hasHarness = false;
@@ -4768,7 +4781,7 @@ public class KyberBridgeEngine
 
         foreach (ReportSessionEntry entry in scopedSessions)
         {
-            if (!aggregatesById.TryGetValue(entry.Session.SessionKey, out SessionSummaryFigure? aggregate))
+            if (!aggregatesById.TryGetValue(entry.Session.SessionKey, out SessionReportFigure? aggregate))
             {
                 continue;
             }

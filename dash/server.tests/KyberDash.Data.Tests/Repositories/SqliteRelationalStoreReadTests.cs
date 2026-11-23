@@ -925,6 +925,47 @@ public class SqliteRelationalStoreReadTests : IDisposable
         Assert.Equal(new HashSet<string>(pageKeys, StringComparer.Ordinal), priced);
     }
 
+    /// <summary>
+    /// The keyed report figures read prices each named session exactly as the per-session
+    /// summary read prices it, and both stores agree on the same parity seeds — token-less,
+    /// multi-harness, empty, and content-bearing — so batching changes where the report's
+    /// figures are read, never what they say.
+    /// </summary>
+    [Fact]
+    public void KeyedSessionReportFiguresMatchThePerSessionSummaryReadOnTheNamedSeeds()
+    {
+        string dbPath = Path.Combine(directory.Path, "keyed-report-figures", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+        SeedPopulatedStores(sqlite, memory);
+
+        string[] keys = [.. sqlite.SessionListFigures().Select(static figure => figure.SessionKey)];
+
+        IReadOnlyList<SessionReportFigure> sqliteFigures = sqlite.SessionReportFigures(keys);
+        Assert.Equivalent(memory.SessionReportFigures(keys), sqliteFigures, strict: true);
+        Assert.Empty(sqlite.SessionReportFigures([]));
+
+        foreach (SessionReportFigure figure in sqliteFigures)
+        {
+            SessionSummaryFigure? summary = sqlite.SessionSummaryFigures(figure.SessionKey);
+            Assert.NotNull(summary);
+            Assert.Equal(summary.SessionKey, figure.SessionKey);
+            Assert.Equal(summary.TotalInput, figure.TotalInput);
+            Assert.Equal(summary.TotalCacheRead, figure.TotalCacheRead);
+            Assert.Equivalent(summary.ToolsOffered, figure.ToolsOffered, strict: true);
+            Assert.Equivalent(summary.ToolsInvoked, figure.ToolsInvoked, strict: true);
+            // Structural comparison: the two reads build separate ByModel list instances the
+            // records' own equality would compare by reference.
+            Assert.Equivalent(summary.ReportedCost, figure.ReportedCost, strict: true);
+            Assert.Equivalent(summary.PublishedCost, figure.PublishedCost, strict: true);
+        }
+
+        // A subset answers that subset, so a report prices only its own window.
+        string[] windowKeys = [.. keys.Take(3)];
+        HashSet<string> priced = [.. sqlite.SessionReportFigures(windowKeys).Select(static figure => figure.SessionKey)];
+        Assert.Equal(new HashSet<string>(windowKeys, StringComparer.Ordinal), priced);
+    }
+
     /// <summary>Writes one projection row with a controlled tree shape onto both stores.</summary>
     private static void WriteProjection(
         SqliteRelationalStore sqlite,

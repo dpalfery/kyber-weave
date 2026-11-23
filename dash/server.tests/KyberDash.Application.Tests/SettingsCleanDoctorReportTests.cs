@@ -1477,10 +1477,12 @@ public static class SettingsCleanDoctorReportTests
 
             JsonElement report = bridge.GetReport(null, null, null, 50, 7);
 
-            // The report prices each scoped session through the content-free summary read and
-            // reads the latest session's turns once through the detail read.
-            Assert.Equal(1, store.ReadLog.Count(static name => name == nameof(IRelationalStoreReader.SessionDetailFigures)));
-            Assert.Equal(5, store.ReadLog.Count(static name => name == nameof(IRelationalStoreReader.SessionSummaryFigures)));
+            // The report prices its whole scoped window with one batched report-figures read and
+            // reads the latest session's turns once through the turn read — no per-session loop.
+            Assert.Equal(1, store.ReadLog.Count(static name => name == nameof(IRelationalStoreReader.SessionReportFigures)));
+            Assert.Equal(1, store.ReadLog.Count(static name => name == nameof(IRelationalStoreReader.SessionTurnFigures)));
+            Assert.DoesNotContain(nameof(IRelationalStoreReader.SessionSummaryFigures), store.ReadLog);
+            Assert.DoesNotContain(nameof(IRelationalStoreReader.SessionDetailFigures), store.ReadLog);
             Assert.Equal(5, report.GetProperty("sessionCount").GetInt32());
 
             JsonElement latestSession = report.GetProperty("latestSession");

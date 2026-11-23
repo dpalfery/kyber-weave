@@ -2102,6 +2102,17 @@ public sealed class AnalyticsReadPathTests
             return inner.SessionSummaryFigures(sessionKey, pricing);
         }
 
+        public IReadOnlyList<SessionReportFigure> SessionReportFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null)
+        {
+            IReadOnlyList<SessionReportFigure> figures = inner.SessionReportFigures(sessionKeys, pricing);
+            if (figures.Any(figure => string.Equals(figure.SessionKey, failingSessionKey, StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return figures;
+        }
+
         public SessionDetailFigure? SessionDetailFigures(string sessionKey, IModelPricingLookup? pricing = null)
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))

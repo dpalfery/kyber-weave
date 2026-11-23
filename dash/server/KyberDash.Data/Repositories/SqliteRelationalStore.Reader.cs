@@ -1322,6 +1322,63 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     }
 
     /// <inheritdoc />
+    public IReadOnlyList<SessionReportFigure> SessionReportFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null)
+    {
+        ArgumentNullException.ThrowIfNull(sessionKeys);
+        string[] keys = [.. sessionKeys.Distinct(StringComparer.Ordinal)];
+        if (keys.Length == 0)
+        {
+            return [];
+        }
+
+        // One batch each for the named sessions, their content-free record scalars (tool
+        // metadata included — the report prices offered and invoked tools), and their stored
+        // turns. The report figures are projection-independent, so no projection, problem, or
+        // skill read runs, and no statement lists the store's sessions or projections.
+        string filter = SessionKeyListFilter(keys);
+        IReadOnlyList<CollectedSession> sessions = QuerySessions($"s.session_id IN ({filter})", $"u.session_id IN ({filter})");
+        if (sessions.Count == 0)
+        {
+            return [];
+        }
+
+        List<string> pricedKeys = [.. sessions.Select(static s => s.SessionKey)];
+        Dictionary<string, List<CollectedRecord>> recordsBySession = QueryContentFreeRecordsBySession(pricedKeys, includeToolMetadata: true);
+        Dictionary<string, IReadOnlyList<StoredSessionTurn>> turnsBySession = QuerySessionTurnsBySession(pricedKeys);
+
+        List<SessionReportFigure> figures = new(sessions.Count);
+        foreach (CollectedSession session in sessions)
+        {
+            IReadOnlyList<CollectedRecord> records = recordsBySession.TryGetValue(session.SessionKey, out List<CollectedRecord>? sessionRecords)
+                ? sessionRecords
+                : [];
+            IReadOnlyList<StoredSessionTurn> turns = turnsBySession.TryGetValue(session.SessionKey, out IReadOnlyList<StoredSessionTurn>? sessionTurns)
+                ? sessionTurns
+                : [];
+            figures.Add(BuildSessionReportFigure(session, records, turns, pricing));
+        }
+
+        return figures;
+    }
+
+    /// <summary>
+    /// Projects one session's report figures from the shared summary builder with the projection
+    /// left unread: every field the report prices — the token totals, the tool names, and the two
+    /// cost summaries — is computed from the content-free records and the stored turns alone, so
+    /// the batched read answers exactly what <see cref="SessionSummaryFigures"/> answers for the
+    /// session, byte for byte.
+    /// </summary>
+    private static SessionReportFigure BuildSessionReportFigure(
+        CollectedSession session,
+        IReadOnlyList<CollectedRecord> records,
+        IReadOnlyList<StoredSessionTurn> projectedTurns,
+        IModelPricingLookup? pricing)
+    {
+        SessionSummaryFigure summary = BuildSessionFigures(session, records, null, projectedTurns, [], pricing).Summary;
+        return new SessionReportFigure(summary);
+    }
+
+    /// <inheritdoc />
     public SessionDetailFigure? SessionDetailFigures(string sessionKey, IModelPricingLookup? pricing = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);

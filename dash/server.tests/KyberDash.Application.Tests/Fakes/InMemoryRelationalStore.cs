@@ -1100,6 +1100,36 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
+    public IReadOnlyList<SessionReportFigure> SessionReportFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null)
+    {
+        ArgumentNullException.ThrowIfNull(sessionKeys);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionReportFigures));
+            HashSet<string> keys = new(sessionKeys, StringComparer.Ordinal);
+            TableMetadata sessionMeta = GetTableMetadata("session");
+            List<SessionReportFigure> figures = [];
+            foreach (object?[] row in state.GetRows("session"))
+            {
+                string sessionKey = GetString(sessionMeta, row, "session_id");
+                if (!keys.Contains(sessionKey))
+                {
+                    continue;
+                }
+
+                SessionSummaryFigure? summary = BuildSessionFigures(state, sessionKey, CollectSessionRecordsContentFree(state, sessionKey), pricing)?.Summary;
+                if (summary is not null)
+                {
+                    figures.Add(new SessionReportFigure(summary));
+                }
+            }
+
+            return figures;
+        }
+    }
+
+    /// <inheritdoc />
     public SessionDetailFigure? SessionDetailFigures(string sessionKey, IModelPricingLookup? pricing = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
