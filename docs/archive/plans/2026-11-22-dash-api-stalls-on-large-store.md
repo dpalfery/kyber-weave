@@ -2,7 +2,7 @@
 id: plans/2026-11-22-dash-api-stalls-on-large-store
 title: Bound KyberDash dashboard read latency on large canon stores
 doc-type: plan
-status: current
+status: archived
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-11-22
@@ -14,7 +14,7 @@ impact-components:
 
 # Bound KyberDash dashboard read latency on large canon stores
 
-**Status: Ready, 2026-11-22.**
+**Status: Archived, 2026-11-23.**
 
 ## Problem and goal
 
@@ -180,13 +180,13 @@ by the compiler.
 
 | ID | Destination | Documentation impact | Impact components | Last reviewed | Status |
 |---|---|---|---|---|---|
-| H1, D3, D7 | [runbook §11, slow dashboard responses on a large store](../dash/runbook.md#11-slow-dashboard-responses-on-a-large-store) — the symptom, the cause, the read contract that replaced it, deferred sessions in projection health, `stored-fields` heavy by design, and why `dash clean` is the owner's decision rather than a documented remedy | extends-component | KyberDash | 2026-11-22 | harvested |
-| H2, D1, D5 | [architecture, read-path invariants and the read-model register](../dash/architecture.md#read-path-invariants-and-the-read-model-register) — the shaped-read contract, the retired broad members, and the boundary test that keeps them out | extends-component | KyberDash | 2026-11-22 | harvested |
-| D2, D10 | [architecture, the maintenance-read boundary](../dash/architecture.md#the-maintenance-read-boundary) — the maintenance-named whole-store read, the per-key rebuild read, attributions for identities and budgets, and the unchanged schema 25 (no migration, no new table or index) | extends-component | KyberDash | 2026-11-22 | harvested |
-| D4, D11 | [architecture, the read-model register](../dash/architecture.md#the-read-model-register) and [read-path deferral and single-flight](../dash/architecture.md#read-path-deferral-and-single-flight) — one read model per page at the page's level, and a concurrent pass that returns instead of stacking | extends-component | KyberDash | 2026-11-22 | harvested |
-| D9 | [architecture, the read-model register](../dash/architecture.md#the-read-model-register) — the `/api/kyber/sessions` row: `SessionListFigures(harnessId?)` joined to the stored projection rows, one batched content-free pass | extends-component | KyberDash | 2026-11-22 | harvested |
-| H3, D13 | [SQLite standard, store reads are shaped to their consumer](../standards/sqlite/sqlite.standards.md#store-reads-are-shaped-to-their-consumer) — `KW-STD-SQL-001..003`; [test standard, read-path tests assert the shape of the reads](../standards/test/test.standards.md#read-path-tests-assert-the-shape-of-the-reads) — `KW-STD-TEST-001..002`; [review guidance, class 4 `R17`](../../REVIEW.md) — each rule cites the read-model register and the shipped code as the worked example, with the maintenance read, the `StoredFields` inventory and the projection rebuild's content read carved out as sanctioned | extends-component | KyberDash | 2026-11-23 | harvested |
-| H4 | [ADR 0091, store reads are shaped by their consumer](../adr/0091-store-reads-are-shaped-by-their-consumer.md), registered in the [ADR index](../adr/README.md) — the durable decision with its rejected alternatives (`includeContent` switch, DB-side aggregation, precomputed-table-only reads) and its `decided-by` provenance. The same contract, with its sanctioned carve-outs, is described for readers in [architecture, read-path invariants and the read-model register](../dash/architecture.md#read-path-invariants-and-the-read-model-register): a consumer-shaped read is the rule, content text belongs to the view or the rebuild that consumes it, maintenance may scan the corpus and request paths may not, and read-path projection defers and is single-flight | extends-component | KyberDash | 2026-11-23 | harvested |
+| H1, D3, D7 | [runbook §11, slow dashboard responses on a large store](../../dash/runbook.md#11-slow-dashboard-responses-on-a-large-store) — the symptom, the cause, the read contract that replaced it, deferred sessions in projection health, `stored-fields` heavy by design, and why `dash clean` is the owner's decision rather than a documented remedy | extends-component | KyberDash | 2026-11-22 | harvested |
+| H2, D1, D5 | [architecture, read-path invariants and the read-model register](../../dash/architecture.md#read-path-invariants-and-the-read-model-register) — the shaped-read contract, the retired broad members, and the boundary test that keeps them out | extends-component | KyberDash | 2026-11-22 | harvested |
+| D2, D10 | [architecture, the maintenance-read boundary](../../dash/architecture.md#the-maintenance-read-boundary) — the maintenance-named whole-store read, the per-key rebuild read, attributions for identities and budgets, and the unchanged schema 25 (no migration, no new table or index) | extends-component | KyberDash | 2026-11-22 | harvested |
+| D4, D11 | [architecture, the read-model register](../../dash/architecture.md#the-read-model-register) and [read-path deferral and single-flight](../../dash/architecture.md#read-path-deferral-and-single-flight) — one read model per page at the page's level, and a concurrent pass that returns instead of stacking | extends-component | KyberDash | 2026-11-22 | harvested |
+| D9 | [architecture, the read-model register](../../dash/architecture.md#the-read-model-register) — the `/api/kyber/sessions` row: `SessionListFigures(harnessId?)` joined to the stored projection rows, one batched content-free pass | extends-component | KyberDash | 2026-11-22 | harvested |
+| H3, D13 | [SQLite standard, store reads are shaped to their consumer](../../standards/sqlite/sqlite.standards.md#store-reads-are-shaped-to-their-consumer) — `KW-STD-SQL-001..003`; [test standard, read-path tests assert the shape of the reads](../../standards/test/test.standards.md#read-path-tests-assert-the-shape-of-the-reads) — `KW-STD-TEST-001..002`; [review guidance, class 4 `R17`](../../../REVIEW.md) — each rule cites the read-model register and the shipped code as the worked example, with the maintenance read, the `StoredFields` inventory and the projection rebuild's content read carved out as sanctioned | extends-component | KyberDash | 2026-11-23 | harvested |
+| H4 | [ADR 0091, store reads are shaped by their consumer](../../adr/0091-store-reads-are-shaped-by-their-consumer.md), registered in the [ADR index](../../adr/README.md) — the durable decision with its rejected alternatives (`includeContent` switch, DB-side aggregation, precomputed-table-only reads) and its `decided-by` provenance. The same contract, with its sanctioned carve-outs, is described for readers in [architecture, read-path invariants and the read-model register](../../dash/architecture.md#read-path-invariants-and-the-read-model-register): a consumer-shaped read is the rule, content text belongs to the view or the rebuild that consumes it, maintenance may scan the corpus and request paths may not, and read-path projection defers and is single-flight | extends-component | KyberDash | 2026-11-23 | harvested |
 | D6 | Documentation waiver — the uncommitted `EXISTS`→`IN` predicate tweak is a query-plan note about code this change retires; the new per-session queries choose their own predicate, so no invariant survives for a reader to consult | none | KyberDash | 2026-11-22 | waived |
 | D8 | Documentation waiver — the autonomy and development-mode provenance of this run, with no behavioural or architectural invariant behind it | none | KyberDash | 2026-11-22 | waived |
 | D12 | Documentation waiver — how the interface migration was sliced for reviewability; the slices are done and no rule about sequencing survives them | none | KyberDash | 2026-11-22 | waived |
