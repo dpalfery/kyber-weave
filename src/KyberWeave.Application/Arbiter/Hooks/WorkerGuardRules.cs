@@ -623,10 +623,13 @@ internal static class WorkerGuardRules
             {
                 directories.Add(parent);
             }
-            else if (!hasWorkTree)
+            else
             {
                 directories.Add(value);
-                alsoRunsInWorkingDirectory = true;
+                if (!hasWorkTree)
+                {
+                    alsoRunsInWorkingDirectory = true;
+                }
             }
         }
 
