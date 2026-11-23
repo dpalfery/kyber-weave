@@ -180,9 +180,10 @@ public sealed class FactoryRendererContractTests : IDisposable
             Assert.All(
                 ExpectedFactoryTools(capProfile),
                 tool => Assert.Contains(tool, DocumentedFactoryTools, StringComparer.Ordinal));
-            Assert.All(
-                expectedMcpToolIds,
-                toolId => Assert.Contains("___", toolId, StringComparison.Ordinal));
+            // Pin the rendered ids independently of the helper that builds the expectation:
+            // every rendered ___ entry is exactly {server}___{tool} over portable names.
+            foreach (string renderedId in tools.Where(tool => tool.Contains("___", StringComparison.Ordinal)))
+                Assert.Matches(@"^[A-Za-z0-9_-]+___[A-Za-z0-9_-]+$", renderedId);
             foreach (string forbidden in ForbiddenFactoryTools)
                 Assert.DoesNotContain(forbidden, tools, StringComparer.Ordinal);
 
