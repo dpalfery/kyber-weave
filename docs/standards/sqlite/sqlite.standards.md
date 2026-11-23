@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: sqlite
 owner: dpalfery
-last-reviewed: 2026-11-22
+last-reviewed: 2026-11-23
 ---
 
 # SQLite coding standard
@@ -116,29 +116,33 @@ whole-corpus scan is maintenance work, so it lives behind a maintenance-named me
 `AllSessionRecordsForMaintenance()` in
 [`SqliteRelationalStore.Reader.cs`](../../../dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs)
 is the worked example — and no request path calls one:
-`ArchitectureBoundaryTests.RequestPathsCannotReachMaintenanceReads` fails on a new caller. Two
-kinds of read are sanctioned rather than defects: those maintenance reads, and the per-session
-`StoredFields(sessionKey)` inventory, whose raw rows are the view.
+`ArchitectureBoundaryTests.RequestPathsCannotReachMaintenanceReads` fails on a new caller. Three
+kinds of read are sanctioned rather than defects: those maintenance reads; the section-scoped
+content reads — the shown requests page's prompt previews, the inspected span's consent-allowed
+prompt, and the opened stored table's page — each pinned to the screen that shows it; and the
+content-free stored-fields inventory, which reads no content at all.
 
 **Content text is read only where it is consumed** (KW-STD-SQL-002). The content columns —
 `content_part_text`, tool-call input text and tool-call result text — are selected by exactly
 three paths, each scoped: the content view, by `(session_key, span, position)` through
-`TurnContentParts`; the stored-fields inventory, for the one session named; and the projection
-rebuild, for the session being rebuilt, which derives persisted figures from the text. A fourth
-path that selects one of them is a defect.
+`TurnContentParts`; the section-scoped reads — `RequestPromptPreviews` for the shown requests
+page, `SpanPromptText` for the inspected span, `StoredFieldsRows` for the opened table's page;
+and the projection rebuild, for the session being rebuilt, which derives persisted figures from
+the text. A fourth path that selects one of them is a defect.
 
 **A read's cost is proportional to its input, not to the corpus** (KW-STD-SQL-003). An
 incremental pass reads only what changed: per-dirty-key reads for the work it does, and the
 attribution pairs of `SessionAttributions()` to decide a skip, never the store to decide it. A
-list endpoint's store-query count is bounded regardless of row count — one batched figures read
-such as `SessionListFigures(harnessId?)`, never a read per row. An expensive shared refresh on
+list endpoint's store-query count is bounded regardless of row count — the sessions page reads
+one header page plus one keyed figures read for the page (`SessionHeaderPage` then
+`SessionListFigures(keys)`), never a read per row. An expensive shared refresh on
 the request path is single-flight or it moves off that path: `ProjectIncrementalForReads()`
 defers a session over its record budget and reports it in `deferredSessions`, while
 `ProjectIncremental()` is the maintenance entry that never defers.
 
 Why the rules exist: on a 579 MB store whose largest session held 485 MB of captured text, the
 sessions list materialized 1,048,607 bytes of content before the reads were shaped and zero
-afterwards. `AnalyticsReadPathTests.EveryOtherPathLeavesContentUnread` sweeps 21 endpoints and
+afterwards. `AnalyticsReadPathTests.EveryOtherPathLeavesContentUnread` sweeps 29 request paths and
 fails on the first materialized content byte. The assertions that keep a new path in this shape
 are `KW-STD-TEST-001` and `KW-STD-TEST-002` in the
 [test standard](../test/test.standards.md#read-path-tests-assert-the-shape-of-the-reads).

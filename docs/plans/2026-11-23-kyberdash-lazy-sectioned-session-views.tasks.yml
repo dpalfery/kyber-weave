@@ -1,6 +1,6 @@
 schema-version: 2
 plan: docs/plans/2026-11-23-kyberdash-lazy-sectioned-session-views.md
-execution-digest: a4daaebd97b5d076be1ef508484b49b8fa983e88bf7d326a265bf29a91e54630
+execution-digest: 8f5a827c2d6187473168926c609e8f70667fa064ce5faa9e29835af9da353618
 tasks:
   - id: T1
     capabilities: C# read-path work in the KyberDash engine with read-log tests over the shared fake.
@@ -622,7 +622,30 @@ tasks:
       - T9
     files:
       - dash/web/src/components/AgentSessionDashboard.tsx
-      - dash/web/src/components/session/**
+      - dash/web/src/components/session/SessionChartsSection.tsx
+      - dash/web/src/components/session/SessionCostSection.tsx
+      - dash/web/src/components/session/SessionProblemsSection.tsx
+      - dash/web/src/components/session/SessionReconciliationSection.tsx
+      - dash/web/src/components/session/SessionRequestsSection.tsx
+      - dash/web/src/components/session/SessionServersSection.tsx
+      - dash/web/src/components/session/SessionSkillsSection.tsx
+      - dash/web/src/components/session/SessionSummarySection.tsx
+      - dash/web/src/components/session/SessionTimelineSection.tsx
+      - dash/web/src/components/session/SessionToolsSection.tsx
+      - dash/web/src/components/session/SectionError.tsx
+      - dash/web/src/components/session/SectionLoading.tsx
+      - dash/web/src/components/session/types.ts
+      - dash/web/src/components/session/useSectionPage.ts
+      - dash/web/src/components/session/SessionChartsSection.test.tsx
+      - dash/web/src/components/session/SessionCostSection.test.tsx
+      - dash/web/src/components/session/SessionProblemsSection.test.tsx
+      - dash/web/src/components/session/SessionReconciliationSection.test.tsx
+      - dash/web/src/components/session/SessionRequestsSection.test.tsx
+      - dash/web/src/components/session/SessionServersSection.test.tsx
+      - dash/web/src/components/session/SessionSkillsSection.test.tsx
+      - dash/web/src/components/session/SessionSummarySection.test.tsx
+      - dash/web/src/components/session/SessionTimelineSection.test.tsx
+      - dash/web/src/components/session/SessionToolsSection.test.tsx
     session: dash-sections-ui
     prompt: >
       Task T10: Session view layout — sections issued in page order
@@ -630,7 +653,7 @@ tasks:
       Worktree: {worktree}
 
 
-      - **Objective:** The session view renders from per-section queries issued at mount in page order; header, banners and overview render from `/summary`; requests and reconciliation lists page; no raw `fetch`.
+      - **Objective:** The session view renders from per-section queries issued at mount in page order; header, banners and overview render from `/summary` (header, subagent notice, reconciliation badge from `summary.reconciliation`, harness notes, requests banner with the pager and "N user requests" from the total, aux banner, overview strip); requests and reconciliation lists page; no raw `fetch`.
 
       - **Capabilities:** React UI refactor over TanStack Query and the shared API client, with Vitest and Testing Library tests.
 
@@ -643,7 +666,10 @@ tasks:
       - **Depends on:** T9
 
       - **Files:**
-        - `dash/web/src/components/AgentSessionDashboard.tsx`: `AgentSessionLoader` loads the summary through the client; `AgentSessionContent` becomes a layout of section components in today's order, each owning its query and four states. New section components under `dash/web/src/components/session/` (one file per section). Header, subagent notice, reconciliation badge (from `summary.reconciliation`), harness notes, requests banner (first page of requests with the pager and "N user requests" from the total), aux banner and overview strip render from `/summary` and their own queries. Keep every `data-testid` the e2e specs use.
+        - `dash/web/src/components/AgentSessionDashboard.tsx`: `AgentSessionLoader` loads the summary through the client; `AgentSessionContent` becomes a layout of section components in today's order, each owning its query and four states. Keep every `data-testid` the e2e specs use.
+        - `dash/web/src/components/session/SessionChartsSection.tsx`, `dash/web/src/components/session/SessionCostSection.tsx`, `dash/web/src/components/session/SessionProblemsSection.tsx`, `dash/web/src/components/session/SessionReconciliationSection.tsx`, `dash/web/src/components/session/SessionRequestsSection.tsx`, `dash/web/src/components/session/SessionServersSection.tsx`, `dash/web/src/components/session/SessionSkillsSection.tsx`, `dash/web/src/components/session/SessionSummarySection.tsx`, `dash/web/src/components/session/SessionTimelineSection.tsx`, `dash/web/src/components/session/SessionToolsSection.tsx`: one section component per section.
+        - `dash/web/src/components/session/SectionError.tsx`, `dash/web/src/components/session/SectionLoading.tsx`, `dash/web/src/components/session/types.ts`, `dash/web/src/components/session/useSectionPage.ts`: the shared section shell, paging hook and types.
+        - `dash/web/src/components/session/SessionChartsSection.test.tsx`, `dash/web/src/components/session/SessionCostSection.test.tsx`, `dash/web/src/components/session/SessionProblemsSection.test.tsx`, `dash/web/src/components/session/SessionReconciliationSection.test.tsx`, `dash/web/src/components/session/SessionRequestsSection.test.tsx`, `dash/web/src/components/session/SessionServersSection.test.tsx`, `dash/web/src/components/session/SessionSkillsSection.test.tsx`, `dash/web/src/components/session/SessionSummarySection.test.tsx`, `dash/web/src/components/session/SessionTimelineSection.test.tsx`, `dash/web/src/components/session/SessionToolsSection.test.tsx`: one section test per section.
         - Charts, tools, skills, cost and timeline sections render their existing components fed from the new queries with minimal adaptation; their paging and scale work is T11–T13.
         - Tests per the Test contract.
       - **Commands:**
@@ -693,7 +719,11 @@ tasks:
       - dash/web/src/components/SchemaCostRanking.tsx
       - dash/web/src/components/SkillsPanel.tsx
       - dash/web/src/components/SessionCostPanel.tsx
-      - dash/web/src/components/session/**
+      - dash/web/src/components/session/SessionChartsSection.tsx
+      - dash/web/src/components/session/SessionToolsSection.tsx
+      - dash/web/src/components/session/SessionSkillsSection.tsx
+      - dash/web/src/components/session/SessionCostSection.tsx
+      - dash/web/src/components/session/SessionProblemsSection.tsx
     session: dash-sections-ui
     prompt: >
       Task T11: Charts, tool ranking, skills and cost panel on their own data
@@ -714,7 +744,8 @@ tasks:
       - **Depends on:** T10
 
       - **Files:**
-        - `dash/web/src/components/SessionSpendCharts.tsx` (from `/charts`), `dash/web/src/components/SchemaCostRanking.tsx` (paged rows; `aggregate` for scale, `byServer`, waste and counts), `dash/web/src/components/SkillsPanel.tsx` (paged; `aggregate.maxTokens`), `dash/web/src/components/SessionCostPanel.tsx` (cost blocks from the summary; problems list paged), and the matching section components under `dash/web/src/components/session/`.
+        - `dash/web/src/components/SessionSpendCharts.tsx` (from `/charts`), `dash/web/src/components/SchemaCostRanking.tsx` (paged rows; `aggregate` for scale, `byServer`, waste and counts), `dash/web/src/components/SkillsPanel.tsx` (paged; `aggregate.maxTokens`), `dash/web/src/components/SessionCostPanel.tsx` (cost blocks from the summary; problems list paged).
+        - `dash/web/src/components/session/SessionChartsSection.tsx`, `dash/web/src/components/session/SessionToolsSection.tsx`, `dash/web/src/components/session/SessionSkillsSection.tsx`, `dash/web/src/components/session/SessionCostSection.tsx`, `dash/web/src/components/session/SessionProblemsSection.tsx`: the matching section components.
         - Tests per the Test contract.
       - **Commands:**
         - `kyber-weave review gates . --agent <worker> --task T11 --red`
@@ -731,7 +762,7 @@ tasks:
 
       |---|---|---|---|---|---|
 
-      | T11 | `SessionSpendCharts.test.tsx`, `SchemaCostRanking.test.tsx`, `SkillsPanel.test.tsx`, `SessionCostPanel.test.tsx` | `npm --prefix dash run test:related -- <changed files>` | Charts render from `/charts`; the tool ranking, skills and problems lists page at 25; bar scales, waste banner and "N of M tools never called" come from the summary or the section `aggregate` — with page 2 held back they already show whole-session values. | Components read the monolithic payload. | Named tests pass. |
+      | T11 | `dash/web/src/components/SessionSpendCharts.test.tsx`, `dash/web/src/components/SchemaCostRanking.test.tsx`, `dash/web/src/components/SkillsPanel.test.tsx`, `dash/web/src/components/SessionCostPanel.test.tsx` | `npm --prefix dash run test:related -- <changed files>` | Charts render from `/charts`; the tool ranking, skills and problems lists page at 25; bar scales, waste banner and "N of M tools never called" come from the summary or the section `aggregate` — with page 2 held back they already show whole-session values. | Components read the monolithic payload. | Named tests pass. |
 
 
       Results of the tasks this one follows, as their workers reported them:

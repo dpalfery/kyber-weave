@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: test
 owner: dpalfery
-last-reviewed: 2026-11-22
+last-reviewed: 2026-11-23
 decided-by:
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
 ---
@@ -160,8 +160,9 @@ a dashboard stayed legal at review while a 579 MB store made it unusable.
 
 **A read path's test asserts which store reads the path issues** (KW-STD-TEST-001), over the
 fake's instrumented read log, not only the values returned: that the sessions list takes
-`SessionListFigures` and reads no content, that the stored-fields inventory stays scoped to its
-one session. Assert the named reads, not a byte count or a duration — a named read is stable and
+`SessionHeaderPage` plus the keyed `SessionListFigures` and reads no content, that each section
+route issues only its own reads, that the stored-fields rows route stays scoped to the opened
+table's SQL-limited page. Assert the named reads, not a byte count or a duration — a named read is stable and
 a measurement is not. This is the mechanical lever behind the store-read rules in the
 [SQLite standard](../sqlite/sqlite.standards.md#store-reads-are-shaped-to-their-consumer): a
 later change that widens a read fails this test with no reviewer having to remember the rule. It
@@ -178,7 +179,7 @@ what was asked of it.
 query's figures; the page is served by a bridge path that can still reach a broader read, and
 that gap is the defect that shipped. A read path gets an assertion on the path, not only on the
 model it happens to call. The worked examples are
-`AnalyticsReadPathTests.EveryOtherPathLeavesContentUnread`, which sweeps 21 endpoints over an
+`AnalyticsReadPathTests.EveryOtherPathLeavesContentUnread`, which sweeps 29 request paths over an
 instrumented fake and fails on the first materialized content byte, and
 `ArchitectureBoundaryTests.RequestPathsCannotReachMaintenanceReads`, which fails when a caller
 outside the allowed list names the maintenance read.

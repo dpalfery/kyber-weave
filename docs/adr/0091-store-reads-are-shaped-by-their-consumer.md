@@ -4,7 +4,7 @@ title: Store reads are shaped by their consumer
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-22
+last-reviewed: 2026-11-23
 component: KyberDash
 decided-by: []
 supersedes: []
@@ -16,8 +16,13 @@ code-refs:
   - AllSessionRecordsForMaintenance
   - ProjectIncrementalForReads
   - SessionListFigures
+  - SessionTurnFigures
   - TurnContentParts
-  - StoredFields
+  - StoredFieldsInventory
+  - StoredFieldsRows
+  - RequestPromptPreviews
+  - SpanPromptText
+  - SessionReportFigures
 ---
 
 # ADR 0091: Store reads are shaped by their consumer
@@ -62,10 +67,13 @@ must match its consumer.
 2. **Content text is read only where it is consumed, and only scoped (D5, D11).** The content
    columns — `content_part_text`, tool-call input text, tool-call result text — are selected by
    exactly three paths: the content view, by coordinate through
-   `TurnContentParts(sessionKey, turnIndex, spanId, part, budget, full)`; the stored-fields
-   inventory, for the one session named; and the projection rebuild, for the session being
+   `TurnContentParts(sessionKey, turnIndex, spanId, part, budget, full)`; the section-scoped
+   reads — the shown requests page's prompt previews (`RequestPromptPreviews`), the inspected
+   span's consent-allowed prompt (`SpanPromptText`), and the opened stored table's page
+   (`StoredFieldsRows`); and the projection rebuild, for the session being
    rebuilt. Selecting a session never materializes its content, and selecting a turn never
-   materializes the session.
+   materializes the session. The stored-fields inventory itself is content-free since
+   [ADR 0092](0092-dashboard-views-load-by-section-and-page.md).
 
 3. **Maintenance may scan the corpus; a request path may not.** Whole-store and whole-session
    reads exist, under maintenance names that cannot be mistaken for a page read:
@@ -119,10 +127,12 @@ must match its consumer.
 - **The interface shape** is enforced by
   `StoreInterfaceShapeTests.TheReaderInterfaceCarriesNoBroadReads`, which fails if a broad read
   returns to `IRelationalStoreReader`.
-- **The endpoint sweep** `AnalyticsReadPathTests.EveryOtherPathLeavesContentUnread` covers 21
-  endpoints over an instrumented fake and fails on the first materialized content byte: a path
+- **The endpoint sweep** `AnalyticsReadPathTests.EveryOtherPathLeavesContentUnread` covers 29
+  request paths over an instrumented fake and fails on the first materialized content byte: a path
   test measured 1,048,607 bytes before the list, detail and summary reads were shaped and zero
-  after.
+  after. Since [ADR 0092](0092-dashboard-views-load-by-section-and-page.md) the sweep also pins
+  the two sanctioned prompt reads to the paths that display them, and every section route carries
+  its own zero-content pin.
 - **Read-path deferral** bounds GET latency by construction rather than by the store being small.
   Deferred sessions refresh at the maintenance cadence
   (`jobs.refresh_cadence_minutes`, default 5 minutes) and are visible to the Context Doctor through
@@ -136,9 +146,12 @@ must match its consumer.
 Three reads stay heavier than the page they serve, and each is named so a reader does not mistake
 it for a defect:
 
-- **`StoredFields(sessionKey)`** is a raw per-session inventory: it reads the named session's
-  stored rows including content columns, and that inventory is the view. Scoping it to the session
-  is the contract; making it cheap would change what it answers.
+- **The section-scoped content reads** answer only the screen that shows them: the shown
+  requests page's prompt previews (`RequestPromptPreviews`), the one consent-allowed prompt of
+  the inspected span (`SpanPromptText`), and the rows of the one stored table the viewer opened
+  (`StoredFieldsRows`, one SQL-limited page of 25). Scoping them to the displayed page is the
+  contract; pre-reading them would change what they cost. The stored-fields inventory is
+  content-free and is not an exception at all.
 - **The maintenance reads** are whole-store or whole-session by definition, and
   `RequestPathsCannotReachMaintenanceReads` keeps every request path off them.
 - **The projection rebuild** reads content for the sessions it rebuilds, because token counting,
@@ -151,15 +164,16 @@ record, not a local decision.
 
 - A deferred session's figures lag capture by up to one maintenance tick. It is surfaced as
   `deferredSessions`, not hidden.
-- The session-detail payload no longer carries request prompt previews, because the detail read is
-  content-free. The prompt text is available from the scoped content endpoint, so restoring the
-  preview is a display-layer change, not a store read.
+- The section routes carry prompt previews only for the requests page shown, so the prompt
+  text a viewer sees stays available without any session-wide content read. Restoring a preview
+  elsewhere is a display-layer change with its own scoped read, not a store read.
 - Some aggregate-only figures (context-bucket bounds and the unused-schema range) lost their last
   assertion when the broad aggregate was retired; no page renders them.
 
 ## Related
 
 - [KyberDash architecture](../dash/architecture.md#read-path-invariants-and-the-read-model-register) — the read-model register, the maintenance-read boundary, deferral and single-flight, and the worked example of the rules
+- [ADR 0092](0092-dashboard-views-load-by-section-and-page.md) — the section split that extends this rule: one endpoint and one query per section, server-side paging, content only on display, and the retired monolithic payload
 - [KyberDash runbook](../dash/runbook.md#11-slow-dashboard-responses-on-a-large-store) — what an operator sees on an oversized store, including deferred sessions
 - [SQLite standard](../standards/sqlite/sqlite.standards.md#store-reads-are-shaped-to-their-consumer) — `KW-STD-SQL-001` to `KW-STD-SQL-003`
 - [Test standard](../standards/test/test.standards.md#read-path-tests-assert-the-shape-of-the-reads) — `KW-STD-TEST-001` and `KW-STD-TEST-002`

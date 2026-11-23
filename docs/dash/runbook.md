@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-11-22
+last-reviewed: 2026-11-23
 decided-by:
   - adr/0084-kyberdash-csharp-engine
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
@@ -2050,19 +2050,30 @@ here.
   dashboard GET always found the projection dirty. Every GET then ran a full projection pass that
   materialized every session's content text — roughly a gigabyte of strings per pass on that store
   — before skipping the sessions that were already clean, and repeated polls ran concurrent passes
-  on top of each other.
+  on top of each other. The sessions list then re-read every session twice more, and opening a
+  session built the whole detail payload (every turn, the full span tree) in one response.
 - **What the fixed engine does instead**: reads are shaped to the page, so the list, summary,
-  detail, turn, timeline, coverage and analytics paths answer from figures computed over
+  section, turn, timeline, coverage and analytics paths answer from figures computed over
   content-free record scalars ([the read-model register](architecture.md#the-read-model-register)).
-  Content text is read by one view, one turn or one request at a time, from
-  `TurnContentParts(sessionKey, turnIndex, spanId, part, budget, full)`. The projection pass reads
-  only the dirty sessions it rebuilds and defers oversized ones to the maintenance tick, and a
-  second concurrent pass returns instead of stacking.
+  The sessions list resolves, filters, searches and pages in SQL and prices only the page it
+  returns; the session view is ten section queries issued at mount in page order, each paging
+  its own list at 25 (sessions at 100). Content text is read by one view, one turn or one request
+  at a time, from `TurnContentParts(sessionKey, turnIndex, spanId, part, budget, full)` and the
+  two section-scoped content reads (the shown requests page's prompt previews, the inspected
+  span's consent-allowed prompt). The projection pass reads only the dirty sessions it rebuilds
+  and defers oversized ones to the maintenance tick, and a second concurrent pass returns instead
+  of stacking.
 - **What to expect on an oversized store.** The Sessions list, the context report, coverage and
-  findings answer from figures regardless of how much text a session holds. Opening a session is
-  cheap for the same reason: nothing on the list, summary or detail path reads that session's
-  content. The Context view is the one heavy page, and it pays only for the turn or the request
-  you opened.
+  findings answer from figures regardless of how much text a session holds. Opening a session
+  paints the header first from `/summary` while the sections fill in below in page order; only
+  the first page of each list is fetched, and the next page is fetched when the viewer presses
+  the page button. Nothing on the list, summary or section paths reads that session's content.
+  The charts section is the one heavy section by design: it carries the whole session's turns
+  and context object (content-free, but per-turn tool-definition maps grow with servers ×
+  turns), so on a session with tens of thousands of turns it is the last section to arrive —
+  still a fraction of the retired whole-payload response. The timeline section rebuilds the
+  session's metadata tree (never its content) once per page. Under live capture a new session
+  can shift the sessions list by one row between pages.
 - **Deferred sessions.** A dirty session whose record count exceeds the read-path budget (default
   2,000 records) is deferred rather than rebuilt inside a GET: its stored projection stays as it
   was and its key stays dirty, so its figures can lag capture by up to the refresh cadence
@@ -2072,11 +2083,12 @@ here.
   refresh them sooner, shorten the cadence
   (`kyberdash dash settings set jobs.refresh_cadence_minutes 1`) and let one maintenance tick run;
   the maintenance pass never defers and rebuilds them.
-- **What stays heavy by design.** `stored-fields` on a session holding hundreds of megabytes of
-  captured text stays slow: the view is a raw inventory of every stored row of the *named* session,
-  content columns included, and scoping it to the session is the contract. A maintenance rebuild
-  (`kyber build`, a projection tick) reads the sessions it rebuilds for the same reason — token
-  counting and findings consume the part text. Neither is on a dashboard page read.
+- **What stays heavy by design.** A stored-fields table holding hundreds of megabytes of captured
+  text no longer stalls the view: the inventory is content-free and a table's rows page in SQL
+  at 25. The costs that remain are the ones the design names: the charts payload on a very long
+  session, the per-page timeline metadata tree, a maintenance rebuild (`kyber build`, a projection
+  tick), which reads the sessions it rebuilds because token counting and findings consume the
+  part text. Neither the rebuild nor any content read is on a dashboard page read.
 - **Not a remedy.** `kyberdash dash clean` discards captured data, and these docs do not prescribe
   it. Removing data is the owner's decision, taken with the loss in view; this entry documents how
   the dashboard behaves on an oversized store, not how to shrink one. The content-retention window
