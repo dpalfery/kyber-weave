@@ -126,6 +126,21 @@ public sealed class ReviewGatesTaskGateNextStepTests
     }
 
     [Fact]
+    public void AnAcceptedFailingRunQuotesTheAgentSoItCannotStartASecondCommand()
+    {
+        const string Evil = "a; echo pwned";
+        string quoted = ShellQuote.Quote(Evil);
+
+        IReadOnlyList<string> viaPlan = TaskGateNextStep.AfterFailingRun(accepted: true, Evil, Paths, "T3", fromPlan: true);
+        Assert.Contains("--agent " + quoted, viaPlan[^1], StringComparison.Ordinal);
+        Assert.DoesNotContain("--agent " + Evil, viaPlan[^1], StringComparison.Ordinal);
+
+        IReadOnlyList<string> viaPaths = TaskGateNextStep.AfterFailingRun(accepted: true, Evil, Paths, "T3");
+        Assert.Contains("--agent " + quoted, viaPaths[^1], StringComparison.Ordinal);
+        Assert.DoesNotContain("--agent " + Evil, viaPaths[^1], StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ARejectedFailingRunSaysToFixAndRunItAgainWithoutAStub()
     {
         string line = Assert.Single(TaskGateNextStep.AfterFailingRun(accepted: false, "react-dev", Paths, "T3"));

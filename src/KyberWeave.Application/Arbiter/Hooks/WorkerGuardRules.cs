@@ -449,7 +449,7 @@ internal static class WorkerGuardRules
             }
             else if (IsGitProgram(token))
             {
-                IReadOnlyList<string> directories = GitDirectories(tokens, index);
+                (IReadOnlyList<string> directories, bool alsoRunsInWorkingDirectory) = GitDirectories(tokens, index);
                 if (directories.Count > 0)
                 {
                     foreach (string directory in directories)
@@ -460,9 +460,18 @@ internal static class WorkerGuardRules
                         }
                         else
                         {
-                            // The step names a directory this guard cannot place, so it may run anywhere: judge the cwd.
+                            // The step names a directory this guard cannot place, so it may run anywhere:
+                            // refuse like an unplaceable cd rather than judging the cwd alone.
+                            hasUnplaceableDirectory = true;
                             runsInWorkingDirectory = true;
                         }
+                    }
+
+                    // A --git-dir that names no .git leaves git in the shell's directory while changing
+                    // the repository it names, so judge that directory as well.
+                    if (alsoRunsInWorkingDirectory && current is null)
+                    {
+                        runsInWorkingDirectory = true;
                     }
                 }
                 else if (current is null)
@@ -528,12 +537,17 @@ internal static class WorkerGuardRules
     /// <summary>
     /// The directories a <c>git</c> step at <paramref name="index" /> runs in, as the command names them: a
     /// <c>-C</c> or <c>--work-tree</c> directory, and the parent of a <c>--git-dir</c> that ends in <c>.git</c>.
+    /// A <c>--git-dir</c> that names no <c>.git</c> with no <c>--work-tree</c> leaves git in the shell's directory
+    /// while changing the repository it names, so its value is returned as a directory to judge and
+    /// <c>AlsoRunsInWorkingDirectory</c> is true, meaning the shell's directory must be judged as well.
     /// Only git's global options, which come before its subcommand, are read, so a subcommand's own <c>-C</c> is
     /// never taken for a directory change. An empty list means the step names no directory of its own.
     /// </summary>
-    private static IReadOnlyList<string> GitDirectories(string[] tokens, int index)
+    private static (IReadOnlyList<string> Directories, bool AlsoRunsInWorkingDirectory) GitDirectories(string[] tokens, int index)
     {
         List<string> directories = [];
+        List<string> gitDirValues = [];
+        bool hasWorkTree = false;
         for (int next = index + 1; next < tokens.Length && !IsCommandSeparator(tokens[next]); next++)
         {
             string option = tokens[next];
@@ -546,7 +560,20 @@ internal static class WorkerGuardRules
             {
                 if (next + 1 < tokens.Length && !IsCommandSeparator(tokens[next + 1]))
                 {
-                    AddGitDirectory(directories, option, tokens[++next]);
+                    string value = tokens[++next];
+                    if (string.Equals(option, "--work-tree", StringComparison.Ordinal))
+                    {
+                        hasWorkTree = true;
+                        AddGitDirectory(directories, option, value);
+                    }
+                    else if (string.Equals(option, "--git-dir", StringComparison.Ordinal))
+                    {
+                        gitDirValues.Add(value);
+                    }
+                    else
+                    {
+                        AddGitDirectory(directories, option, value);
+                    }
                 }
 
                 continue;
@@ -561,7 +588,18 @@ internal static class WorkerGuardRules
             int equals = option.IndexOf('=', StringComparison.Ordinal);
             if (equals > 0 && option[..equals] is "--work-tree" or "--git-dir")
             {
-                AddGitDirectory(directories, option[..equals], option[(equals + 1)..]);
+                string name = option[..equals];
+                string value = option[(equals + 1)..];
+                if (string.Equals(name, "--work-tree", StringComparison.Ordinal))
+                {
+                    hasWorkTree = true;
+                    AddGitDirectory(directories, name, value);
+                }
+                else
+                {
+                    gitDirValues.Add(value);
+                }
+
                 continue;
             }
 
@@ -571,7 +609,31 @@ internal static class WorkerGuardRules
             }
         }
 
-        return directories;
+        bool alsoRunsInWorkingDirectory = false;
+        foreach (string value in gitDirValues)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            string trimmed = value.TrimEnd('/', '\\');
+            if (string.Equals(Path.GetFileName(trimmed), ".git", StringComparison.Ordinal)
+                && Path.GetDirectoryName(trimmed) is { Length: > 0 } parent)
+            {
+                directories.Add(parent);
+            }
+            else
+            {
+                directories.Add(value);
+                if (!hasWorkTree)
+                {
+                    alsoRunsInWorkingDirectory = true;
+                }
+            }
+        }
+
+        return (directories, alsoRunsInWorkingDirectory);
     }
 
     /// <summary>
