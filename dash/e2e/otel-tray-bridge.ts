@@ -570,7 +570,10 @@ export async function startTrayBridge(options: {
       reportFetchedAt = new Date().toISOString()
       lastError = null
     } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error)
+      // viewState.error feeds the snapshot served over HTTP, so it carries a static
+      // reason while the caught text stays in the bridge log for debugging.
+      console.error('tray report refresh failed:', error instanceof Error ? error.message : String(error))
+      lastError = 'report refresh failed'
       jobs = null
       sharedSettings = null
       coverage = null
@@ -806,7 +809,10 @@ export async function startTrayBridge(options: {
           invocations.push({ cmd, args, ok: true, at: new Date().toISOString() })
           sendJson(res, 200, { ok: true, result: outcome.result, emittedEvents: outcome.emittedEvents })
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
+          // Never reflect backend error internals in an HTTP response; the detail
+          // stays in the bridge log for debugging.
+          console.error(`tray invoke ${cmd} failed:`, error instanceof Error ? error.message : String(error))
+          const message = 'tray command failed'
           invocations.push({ cmd, args, ok: false, error: message, at: new Date().toISOString() })
           sendJson(res, 400, { ok: false, error: { kind: 'runtime', message } })
         }
@@ -850,8 +856,10 @@ export async function startTrayBridge(options: {
       res.writeHead(405, { 'content-type': 'text/plain; charset=utf-8' })
       res.end('Method not allowed')
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      sendJson(res, 500, { ok: false, error: { kind: 'runtime', message } })
+      // The response carries a static reason, never the caught error's text; the
+      // detail stays in the bridge log for debugging.
+      console.error('tray bridge request failed:', error instanceof Error ? error.message : String(error))
+      sendJson(res, 500, { ok: false, error: { kind: 'runtime', message: 'internal bridge error' } })
     }
   })
 
