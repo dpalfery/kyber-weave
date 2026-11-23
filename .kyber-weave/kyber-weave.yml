@@ -309,14 +309,18 @@ review:
     # fixed (`typecheck`, `test`, `lint`, `check:reachable`), so a script
     # rename is a gate-name collision that surfaces on the very next review.
     #
-    # Each declares dash/node_modules in requires-paths. Without it a
-    # contributor on a fresh clone is handed module-not-found output from a
-    # tool that never had what it needed; with it the gate does not start and
-    # the review names the install that unblocks it.
+    # ts-typecheck, ts-test and ts-lint declare dash/node_modules and
+    # dash/web/node_modules in requires-paths: the web workspace resolves its
+    # src imports from its own install. ts-reachable declares dash/node_modules
+    # only, since check:reachable follows file references and never resolves a
+    # web import. Without a declared install a contributor on a fresh clone is
+    # handed module-not-found output from a tool that never had what it needed;
+    # with it the gate does not start and the review names the install that
+    # unblocks it.
     - id: ts-typecheck
       include: ["dash/**"]
       run: [npm, run, --prefix, dash, typecheck]
-      requires-paths: ["dash/node_modules"]
+      requires-paths: ["dash/node_modules", "dash/web/node_modules"]
       blocking: true
       applies-when:
         paths: ["dash/**"]
@@ -339,7 +343,7 @@ review:
     - id: ts-test
       include: ["dash/**"]
       run: [npm, run, --prefix, dash, test, --, --coverage]
-      requires-paths: ["dash/node_modules"]
+      requires-paths: ["dash/node_modules", "dash/web/node_modules"]
       # Full-suite gates run only for the review council or CI; a dev agent's run is refused.
       full-suite: true
       blocking: true
@@ -353,7 +357,7 @@ review:
     - id: ts-lint
       include: ["dash/**"]
       run: [npm, run, --prefix, dash, lint]
-      requires-paths: ["dash/node_modules"]
+      requires-paths: ["dash/node_modules", "dash/web/node_modules"]
       blocking: true
       applies-when:
         paths: ["dash/**"]
@@ -598,6 +602,12 @@ review:
       - *fmt-style
       - *dotnet-build
       - *suppressions
+      # Gate configuration and repository-policy tests are test-dev's subject, so test-dev runs the
+      # policy project too; without this entry a policy-test change has no RED or GREEN gate.
+      - id: test-policy
+        include: *net-test-paths
+        run: [dotnet, test, tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj, -c, Release, --no-build, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+        blocking: true
       - *dotnet-unit-application
       - *dotnet-unit-cli
       - *dotnet-unit-data
