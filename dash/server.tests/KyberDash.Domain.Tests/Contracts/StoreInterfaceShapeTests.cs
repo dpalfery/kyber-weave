@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
+using KyberDash.Contracts.Services;
 using KyberDash.Data.Collector;
 using KyberDash.Domain;
 using KyberDash.Domain.Schema;
@@ -88,6 +89,19 @@ public class StoreInterfaceShapeTests
     }
 
     [Fact]
+    public void RetiredSessionDetailReadsAreGoneFromTheContracts()
+    {
+        // The monolithic detail read retired with its route: no reader member, no service
+        // member, and no figure record carries the name — the section routes serve those fields.
+        Assert.Null(typeof(IRelationalStoreReader).GetMethod("SessionDetailFigures", [typeof(string), typeof(IModelPricingLookup)]));
+        Assert.Null(typeof(IDashboardQueryService).GetMethod("GetSessionDetail", [typeof(string)]));
+        Assert.Null(
+            typeof(IRelationalStoreReader).Assembly.GetType(
+                "KyberDash.Contracts.Repositories.SessionDetailFigure",
+                throwOnError: false));
+    }
+
+    [Fact]
     public void RelationalStoreInterfaces_ExposeRequiredTypedOperations()
     {
         AssertHasMethods(
@@ -126,7 +140,7 @@ public class StoreInterfaceShapeTests
                 nameof(IRelationalStoreReader.StoredFieldsRows),
                 nameof(IRelationalStoreReader.SessionListFigures),
                 nameof(IRelationalStoreReader.SessionSummaryFigures),
-                nameof(IRelationalStoreReader.SessionDetailFigures),
+                nameof(IRelationalStoreReader.SessionReportFigures),
                 nameof(IRelationalStoreReader.TurnFigures),
                 nameof(IRelationalStoreReader.RecordContentFree),
                 nameof(IRelationalStoreReader.SessionRecordsContentFree),

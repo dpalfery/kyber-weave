@@ -1482,7 +1482,7 @@ public static class SettingsCleanDoctorReportTests
             Assert.Equal(1, store.ReadLog.Count(static name => name == nameof(IRelationalStoreReader.SessionReportFigures)));
             Assert.Equal(1, store.ReadLog.Count(static name => name == nameof(IRelationalStoreReader.SessionTurnFigures)));
             Assert.DoesNotContain(nameof(IRelationalStoreReader.SessionSummaryFigures), store.ReadLog);
-            Assert.DoesNotContain(nameof(IRelationalStoreReader.SessionDetailFigures), store.ReadLog);
+            Assert.DoesNotContain(nameof(IRelationalStoreReader.TurnFigures), store.ReadLog);
             Assert.Equal(5, report.GetProperty("sessionCount").GetInt32());
 
             JsonElement latestSession = report.GetProperty("latestSession");

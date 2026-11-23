@@ -421,16 +421,6 @@ public sealed class AnalyticsOperationsDetailTests
             return figures;
         }
 
-        public SessionDetailFigure? SessionDetailFigures(string sessionKey, IModelPricingLookup? pricing = null)
-        {
-            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException("projection exploded");
-            }
-
-            return inner.SessionDetailFigures(sessionKey, pricing);
-        }
-
         public ReadTimeTurnSummary? TurnFigures(string sessionKey, int turnIndex, IModelPricingLookup? pricing = null)
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))

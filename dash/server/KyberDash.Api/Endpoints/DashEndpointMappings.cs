@@ -52,7 +52,6 @@ public static class DashEndpointMappings
         RouteGroupBuilder kyber = endpoints.MapGroup("/api/kyber");
         kyber.MapGet("/sessions", SessionsAsync);
         kyber.MapGet("/session", SessionsAsync);
-        kyber.MapGet("/session/{id}", SessionDetailAsync);
         kyber.MapGet("/session/{id}/summary", SessionSummaryAsync);
         kyber.MapGet("/session/{id}/charts", SessionChartsAsync);
         kyber.MapGet("/session/{id}/requests", SessionRequestsAsync);
@@ -253,14 +252,6 @@ public static class DashEndpointMappings
     private static bool OffsetStartsThePage(IQueryCollection query, int limit, int page) =>
         DashHttp.OptionalNonNegativeInt(query, "offset") is not int rawOffset
         || rawOffset == (long)(page - 1) * limit;
-
-    private static async Task<IResult> SessionDetailAsync(string id, IDashboardQueryService query, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(query);
-        return await Task.Run<IResult>(
-            () => DashHttp.FromNullableJson(query.GetSessionDetail(id), "Session not found"),
-            cancellationToken).ConfigureAwait(false);
-    }
 
     private static async Task<IResult> SessionSummaryAsync(string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {

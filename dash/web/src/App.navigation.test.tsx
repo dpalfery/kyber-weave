@@ -531,11 +531,12 @@ describe('session deep links consume the bounded summary route', () => {
     expect(stack.some((node) => node.level === 'run')).toBe(false)
   })
 
-  it('keeps the turns consumer on the detail route, still reading body.turns', async () => {
+  it('keeps the turns consumer on the charts section route, still reading body.turns', async () => {
     // fetchKyberSessionTurns is TurnDetail's inspector feed, not the ancestry
-    // consumer: it needs the turns array only the detail route serves, so the
-    // switch must not repoint it. The module mock above leaves this export
-    // real, so the static import reaches the true consumer.
+    // consumer: it needs the turns array the charts section serves (the same
+    // rows the retired detail route carried), so the switch must not repoint
+    // it. The module mock above leaves this export real, so the static import
+    // reaches the true consumer.
     const turns = [{ index: 0 }, { index: 1 }]
     const fetchMock = vi.fn(async (_url: string) => new Response(JSON.stringify({ turns }), {
       status: 200, headers: { 'Content-Type': 'application/json' },
@@ -548,7 +549,7 @@ describe('session deep links consume the bounded summary route', () => {
       vi.unstubAllGlobals()
     }
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/kyber/session/sess-codex-1')
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/kyber/session/sess-codex-1/charts')
     expect(rows).toEqual(turns)
   })
 })

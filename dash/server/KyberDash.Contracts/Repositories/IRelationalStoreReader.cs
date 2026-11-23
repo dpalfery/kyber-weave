@@ -442,8 +442,8 @@ public record SessionListFigure(
 /// <remarks>
 /// Carries no content: no <c>content_part</c>, tool-call text, tool-definition, or
 /// agent-invocation column is read to build it. The figures that would need those columns —
-/// per-tool schema residency and request prompt previews — belong to the detail route's
-/// content-bearing sections, not this summary.
+/// per-tool schema residency and request prompt previews — belong to the sections that read
+/// those columns, not this summary.
 /// </remarks>
 public record SessionSummaryFigure(
     string SessionKey,
@@ -513,34 +513,6 @@ public record SessionReportFigure(
 }
 
 /// <summary>
-/// Read-time figures the session detail header renders, with the session's per-turn figures,
-/// tool residency rows, and request metadata (<c>DD-13</c>).
-/// </summary>
-/// <param name="Summary">Bounded summary figures the header shows.</param>
-/// <param name="Turns">Per-turn figures in turn order.</param>
-/// <param name="Tools">Per-tool residency and invocation summaries in ranking order.</param>
-/// <param name="Requests">Ordered request summaries. A request's prompt preview is content, so it stays absent here.</param>
-/// <param name="Servers">Per-server schema and invocation rollups in projection order.</param>
-/// <param name="Reconciliation">Per-turn reported vs. tokenized input/output reconciliation entries.</param>
-/// <param name="FirstContextBucket">First projected context turn bucket summary when present.</param>
-/// <param name="LastContextBucket">Last projected context turn bucket summary when present.</param>
-/// <param name="UnusedRange">Cost or residency bounds for uninvoked schemas when measurable, or <see langword="null"/>.</param>
-/// <remarks>
-/// Content-free for the same reason as <see cref="SessionSummaryFigure"/>: the detail header, the
-/// turn list, and the tool and request rows price stored metadata only.
-/// </remarks>
-public record SessionDetailFigure(
-    SessionSummaryFigure Summary,
-    IReadOnlyList<ReadTimeTurnSummary> Turns,
-    IReadOnlyList<ReadTimeSessionToolSummary> Tools,
-    IReadOnlyList<ReadTimeSessionRequestSummary> Requests,
-    IReadOnlyList<ReadTimeSessionServerSummary> Servers,
-    IReadOnlyList<ReadTimeTurnReconciliation> Reconciliation,
-    ReadTimeContextBucketSummary? FirstContextBucket,
-    ReadTimeContextBucketSummary? LastContextBucket,
-    UnusedSchemaRange? UnusedRange);
-
-/// <summary>
 /// The per-turn figures of one session together with its first and last context edges
 /// (<c>DD-13</c>).
 /// </summary>
@@ -551,7 +523,7 @@ public record SessionDetailFigure(
 /// Content-free like the figures it groups: the turn list prices the records' token and cost
 /// columns, and the context edges price the stored projection's first and last context turn plus
 /// the matching record's reported input. The charts section and the run page build their payloads
-/// from this set, so neither pays the detail figure set's tool and request rows.
+/// from this set, so neither pays the tools and requests sections' rows.
 /// </remarks>
 public record SessionTurnFigureSet(
     IReadOnlyList<ReadTimeTurnSummary> Turns,
@@ -741,7 +713,7 @@ public interface IRelationalStoreReader
     /// <remarks>
     /// Scoped by <c>(session_key, span, position)</c>, so the content view pays for the parts it
     /// renders and never for the session's whole conversation. Every other read model in this
-    /// contract is content-free: list, detail, summary, turn figures, timeline, coverage,
+    /// contract is content-free: list, summary, turn figures, timeline, coverage,
     /// findings, problems, quarantine, harnesses, runs, report, and analytics must not reach a
     /// content-text column, and none of them calls this member. The span inspector's
     /// <see cref="SpanPromptText"/> is the only other content-text read on a request path.
@@ -872,15 +844,6 @@ public interface IRelationalStoreReader
     IReadOnlyList<SessionReportFigure> SessionReportFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null);
 
     /// <summary>
-    /// Reads the session detail header figures together with every turn's figures, over
-    /// content-free record scalars only (<c>DD-13</c>).
-    /// </summary>
-    /// <param name="sessionKey">Canonical session key.</param>
-    /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
-    /// <returns>The detail figures, or <see langword="null"/> when the session row is absent.</returns>
-    SessionDetailFigure? SessionDetailFigures(string sessionKey, IModelPricingLookup? pricing = null);
-
-    /// <summary>
     /// Reads one turn's figures, scoped to <paramref name="turnIndex"/>, over content-free
     /// record scalars only (<c>DD-13</c>).
     /// </summary>
@@ -899,8 +862,8 @@ public interface IRelationalStoreReader
     /// <returns>The turn figure set, or <see langword="null"/> when the session row is absent and no record is linked.</returns>
     /// <remarks>
     /// The charts section answers its whole payload from this read plus the stored context
-    /// projection, and the run page prices a run's turns from it — so neither pays the detail
-    /// figure set's tool and request rows, and neither materializes content.
+    /// projection, and the run page prices a run's turns from it — so neither pays the tools and
+    /// requests sections' rows, and neither materializes content.
     /// </remarks>
     SessionTurnFigureSet? SessionTurnFigures(string sessionKey, IModelPricingLookup? pricing = null);
 
@@ -915,9 +878,9 @@ public interface IRelationalStoreReader
     /// <remarks>
     /// The requests section answers its rows from this read plus
     /// <see cref="RequestPromptPreviews"/> for the page's spans, so the section never reads the
-    /// detail figure set's tool, cost, or schema rows, and never materializes content on its own.
-    /// A session without a session row answers an empty page, as the figures the detail payload
-    /// builds from do.
+    /// tool figures' cost or schema rows, and never materializes content on its own.
+    /// A session without a session row answers an empty page, as the figures the summary
+    /// payload builds from do.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
     SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit);
@@ -933,8 +896,8 @@ public interface IRelationalStoreReader
     /// <returns>The page's reconciliation rows and the session's measurable-row total.</returns>
     /// <remarks>
     /// The reconciliation section answers its rows from this read alone, so it never reads the
-    /// detail figure set's tool, cost, or schema rows. Unmeasurable rows — either match absent —
-    /// are not part of the set, as today's detail payload omits them.
+    /// tool figures' cost or schema rows. Unmeasurable rows — either match absent —
+    /// are not part of the set, as today's section payload omits them.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
     SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit);

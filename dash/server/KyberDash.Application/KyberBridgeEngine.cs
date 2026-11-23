@@ -24,9 +24,9 @@ namespace KyberDash.Application;
 /// <see cref="IRelationalStoreReader.SessionListFigures(IReadOnlyCollection{string}, IModelPricingLookup?)"/>
 /// read model; the run, harness, and comparison pages price whole harnesses through the
 /// harness-scoped <see cref="IRelationalStoreReader.SessionListFigures(string?, IModelPricingLookup?)"/>.
-/// The session detail, summary, and turn pages answer their figures from the content-free
-/// <see cref="IRelationalStoreReader.SessionDetailFigures"/>,
-/// <see cref="IRelationalStoreReader.SessionSummaryFigures"/>, and
+/// The session section pages answer their figures from the content-free
+/// <see cref="IRelationalStoreReader.SessionSummaryFigures"/>,
+/// <see cref="IRelationalStoreReader.SessionTurnFigures"/>, and
 /// <see cref="IRelationalStoreReader.TurnFigures"/> read models priced at read time through
 /// <see cref="IPricingRepository.LoadPricingTables"/> as the <see cref="IModelPricingLookup"/>;
 /// run, harness, finding, and prediction reads come from <see cref="IProjectionStore"/>; settings,
@@ -420,67 +420,6 @@ public class KyberBridgeEngine
             Problems: figure?.ProblemsCount ?? 0,
             ProjectionStatus: faultedSessions.Contains(header.SessionId) ? ProjectionFailedStatus : null,
             Subagents: []);
-    }
-
-    /// <summary>Returns the hydrated full session payload (with materialized turns), or <see langword="null"/> if missing.</summary>
-    /// <param name="sessionId">Canonical session identifier.</param>
-    /// <returns>Full session JSON element, or <see langword="null"/>.</returns>
-    public JsonElement? GetSessionDetail(string sessionId)
-    {
-        EnsureProjected();
-        StoredSessionProjection? projection = projections.GetSessionProjection(sessionId);
-        if (projection is null)
-        {
-            return null;
-        }
-
-        CollectedSession? session = reader.GetSession(sessionId);
-        IModelPricingLookup lookup = pricing.LoadPricingTables();
-        (SessionDetailFigure? figures, string? projectionStatus) = ReadSessionDetailFigures(sessionId, lookup);
-        (List<TimelineNode> timeline, string? timelineStatus) = ReadSessionTimeline(projection.SessionId);
-        projectionStatus ??= timelineStatus;
-        string harness = figures?.Summary.HarnessId ?? session?.HarnessId ?? string.Empty;
-        IReadOnlyList<ReadTimeTurnSummary> turns = figures?.Turns ?? [];
-        (IReadOnlyList<string> distinctSkills, IReadOnlyDictionary<string, int> skillCounts) =
-            CollectSkillCounts(figures?.Summary.SkillInvocations ?? []);
-
-        Dictionary<string, object?> root = new(StringComparer.Ordinal)
-        {
-            ["session_id"] = projection.SessionId,
-            ["sessionId"] = projection.SessionId,
-            ["harness"] = harness,
-            ["label"] = projection.Label,
-            ["is_subagent"] = projection.IsSubagent,
-            ["parent_session"] = projection.ParentSessionId,
-            ["agent_name"] = projection.AgentName,
-            ["repo"] = session?.Workspace?.Repository,
-            ["branch"] = session?.Workspace?.Branch,
-            ["started"] = projection.StartedAtUtc,
-            ["ended"] = projection.EndedAtUtc,
-            ["span_count"] = projection.SpanCount,
-            ["problems_count"] = figures?.Summary.Problems.Count ?? 0,
-            ["context_limit_source"] = ResolveContextLimitSource(projection),
-            ["costBasisMismatch"] = BuildCostBasisMismatchObject(figures?.Summary.CostBasisMismatch),
-            ["summary"] = figures is null ? null : BuildSessionSummary(figures.Summary, projection, harness, distinctSkills),
-            ["problems"] = figures?.Summary.Problems ?? Array.Empty<Problem>(),
-            ["turns"] = turns.Select(ToTurnDto).ToList(),
-            ["tools"] = figures is null ? Array.Empty<object>() : ToolRows(figures.Tools, figures.Summary.ToolsOffered),
-            ["servers"] = figures is null ? Array.Empty<object>() : ServerRows(figures.Tools, figures.Servers),
-            ["skills"] = BuildSkillsPayload(distinctSkills, skillCounts, harness),
-            ["reconciliation"] = figures is null ? Array.Empty<object>() : ReconciliationRows(figures.Reconciliation),
-            ["context"] = BuildContextPayload(projection, figures?.FirstContextBucket, figures?.LastContextBucket, turns),
-            ["schema"] = BuildSchemaPayload(projection, figures),
-            ["notes"] = BuildNotes(projection, figures?.Summary, distinctSkills),
-            ["timeline"] = timeline,
-            ["requests"] = figures is null ? Array.Empty<object>() : RequestRows(figures.Requests),
-        };
-
-        if (projectionStatus is not null)
-        {
-            root["projection_status"] = projectionStatus;
-        }
-
-        return JsonSerializer.SerializeToElement(root, CamelCaseJsonOptions);
     }
 
     /// <summary>Returns the bounded session summary (without full turn bodies), or <see langword="null"/> if missing.</summary>
@@ -2497,35 +2436,6 @@ public class KyberBridgeEngine
         }, CamelCaseJsonOptions);
     }
 
-    /// <summary>
-    /// Reads a session's detail figures from the content-free read model, isolating any fault to
-    /// that session.
-    /// </summary>
-    /// <param name="sessionKey">Canonical session key.</param>
-    /// <param name="lookup">Read-time pricing tables.</param>
-    /// <returns>The figures when readable, and the isolation marker when the read failed.</returns>
-    /// <remarks>
-    /// The detail page reads no content: the header figures, turn list, tool rows, and request
-    /// metadata all come from
-    /// <see cref="IRelationalStoreReader.SessionDetailFigures"/>, and the timeline hydrates
-    /// <see cref="IRelationalStoreReader.SessionRecordsContentFree"/>. A request's prompt preview
-    /// is content, so it stays absent until a scoped content read restores it.
-    /// </remarks>
-    private (SessionDetailFigure? Figures, string? ProjectionStatus) ReadSessionDetailFigures(
-        string sessionKey,
-        IModelPricingLookup lookup)
-    {
-        try
-        {
-            return (reader.SessionDetailFigures(sessionKey, lookup), null);
-        }
-        catch (Exception ex)
-        {
-            RecordProjectionFailure(sessionKey, ex.Message);
-            return (null, ProjectionFailedStatus);
-        }
-    }
-
     /// <summary>Reads a session's bounded summary figures, isolating any fault to that session.</summary>
     /// <param name="sessionKey">Canonical session key.</param>
     /// <param name="lookup">Read-time pricing tables.</param>
@@ -2762,22 +2672,6 @@ public class KyberBridgeEngine
         ["childCount"] = node.Children.Count,
     };
 
-    /// <summary>Reads a session's timeline span tree, isolating any fault to that session.</summary>
-    /// <param name="sessionId">Canonical session identifier.</param>
-    /// <returns>The timeline children when readable, and the isolation marker when the read failed.</returns>
-    private (List<TimelineNode> Children, string? ProjectionStatus) ReadSessionTimeline(string sessionId)
-    {
-        try
-        {
-            return (TimelineChildren(sessionId), null);
-        }
-        catch (Exception ex)
-        {
-            RecordProjectionFailure(sessionId, ex.Message);
-            return ([], ProjectionFailedStatus);
-        }
-    }
-
     private void RecordProjectionFailure(string sessionKey, string message)
     {
         lock (projectionFailureLock)
@@ -2853,24 +2747,6 @@ public class KyberBridgeEngine
 
     private static string? ResolveContextLimitSource(StoredSessionProjection projection) =>
         projection.Context?.ContextLimitSource ?? projection.ContextUnmeasurableReason;
-
-    private List<TimelineNode> TimelineChildren(string sessionId)
-    {
-        List<CollectedRecord> stored = [.. reader.SessionRecordsContentFree(sessionId)];
-        List<CanonicalRecord> records = new(stored.Count);
-        foreach (CollectedRecord storedRecord in stored)
-        {
-            records.Add(CanonRecordHydration.Hydrate(storedRecord));
-        }
-
-        records.Sort(CompareRecords);
-        if (records.Count == 0)
-        {
-            return [];
-        }
-
-        return [.. CanonContextAnalysis.BuildTimeline(records).Children];
-    }
 
     private static List<Dictionary<string, object?>> RequestRows(IReadOnlyList<ReadTimeSessionRequestSummary> requests)
     {
@@ -3214,95 +3090,6 @@ public class KyberBridgeEngine
         }
 
         return null;
-    }
-
-    private static Dictionary<string, object?> BuildSchemaPayload(
-        StoredSessionProjection projection,
-        SessionDetailFigure? figures)
-    {
-        if (projection.Schema is not StoredSessionSchema schema)
-        {
-            string reason = !string.IsNullOrWhiteSpace(projection.SchemaUnmeasurableReason)
-                ? projection.SchemaUnmeasurableReason
-                : "Session did not export tool schema definitions.";
-
-            return new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["measurable"] = false,
-                ["invocationCount"] = figures?.Summary.ToolCalls ?? 0,
-                ["reason"] = reason,
-            };
-        }
-
-        List<Dictionary<string, object?>> ranked = [];
-        List<Dictionary<string, object?>> neverInvoked = [];
-        foreach (StoredSchemaRankedTool tool in schema.RankedTools.OrderBy(static t => t.Position))
-        {
-            Dictionary<string, object?> dto = ToRankedToolDto(tool);
-            ranked.Add(dto);
-            if (!tool.Invoked)
-            {
-                neverInvoked.Add(dto);
-            }
-        }
-
-        Dictionary<string, long> byServer = new(StringComparer.Ordinal);
-        foreach (StoredSchemaServerTokens server in schema.Servers)
-        {
-            byServer[server.ServerName] = byServer.GetValueOrDefault(server.ServerName) + server.Tokens;
-        }
-
-        Dictionary<string, object?> unusedRange;
-        if (figures?.UnusedRange is UnusedSchemaRange range)
-        {
-            unusedRange = new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["tokenResidencies"] = range.TokenResidencies,
-                ["floor"] = range.Floor,
-                ["ceiling"] = range.Ceiling,
-                ["currency"] = range.Currency,
-            };
-        }
-        else
-        {
-            long residencies = schema.UnusedTokenResidencies
-                ?? schema.RankedTools.Where(static t => !t.Invoked).Sum(static t => t.CostTokens);
-            unusedRange = new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["tokenResidencies"] = residencies,
-                ["floor"] = 0.0,
-                ["ceiling"] = (double)residencies,
-                ["currency"] = null,
-            };
-        }
-
-        return new Dictionary<string, object?>(StringComparer.Ordinal)
-        {
-            ["measurable"] = true,
-            ["invocationCount"] = schema.InvocationCount,
-            ["turns"] = schema.TurnCount,
-            ["ranked"] = ranked,
-            ["neverInvoked"] = neverInvoked,
-            ["byServer"] = byServer,
-            ["unusedRange"] = unusedRange,
-        };
-    }
-
-    private static Dictionary<string, object?> ToRankedToolDto(StoredSchemaRankedTool tool)
-    {
-        Dictionary<string, object?> dto = new(StringComparer.Ordinal)
-        {
-            ["name"] = tool.ToolName,
-            ["cost"] = tool.CostTokens,
-            ["invoked"] = tool.Invoked,
-        };
-
-        if (!string.IsNullOrWhiteSpace(tool.ServerName))
-        {
-            dto["server"] = tool.ServerName;
-        }
-
-        return dto;
     }
 
     private static List<string> BuildNotes(

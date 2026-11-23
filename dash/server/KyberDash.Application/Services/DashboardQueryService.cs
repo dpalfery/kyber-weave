@@ -38,9 +38,6 @@ public class DashboardQueryService : IDashboardQueryService
         bridge.GetSubagentPage(parentId, page, limit);
 
     /// <inheritdoc />
-    public JsonElement? GetSessionDetail(string sessionId) => bridge.GetSessionDetail(sessionId);
-
-    /// <inheritdoc />
     public JsonElement? GetSessionSummary(string sessionId) => bridge.GetSessionSummary(sessionId);
 
     /// <inheritdoc />

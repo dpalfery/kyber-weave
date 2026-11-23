@@ -174,9 +174,6 @@ public interface IDashboardQueryService
     /// <param name="limit">Subagents on the page; 25 unless given.</param>
     JsonElement GetSubagentPage(string parentId, int page = 1, int limit = 25);
 
-    /// <summary>Returns full session detail payload.</summary>
-    JsonElement? GetSessionDetail(string sessionId);
-
     /// <summary>Returns lightweight session summary payload.</summary>
     JsonElement? GetSessionSummary(string sessionId);
 

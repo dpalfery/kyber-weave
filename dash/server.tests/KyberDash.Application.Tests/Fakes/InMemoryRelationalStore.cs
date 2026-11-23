@@ -1130,34 +1130,6 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
-    public SessionDetailFigure? SessionDetailFigures(string sessionKey, IModelPricingLookup? pricing = null)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
-
-        lock (syncRoot)
-        {
-            NoteRead(nameof(SessionDetailFigures));
-            List<CollectedRecord> records = CollectSessionRecordsContentFree(state, sessionKey);
-            SessionFigureSet? figures = BuildSessionFigures(state, sessionKey, records, pricing);
-            if (figures is null)
-            {
-                return null;
-            }
-
-            return new SessionDetailFigure(
-                figures.Summary with { SkillInvocations = CollectSkillInvocations(state, spanId: null, sessionKey) },
-                BuildSessionTurnFigures(state, sessionKey, records, figures.Summary.HarnessId, pricing),
-                figures.Tools,
-                figures.Requests,
-                figures.Servers,
-                figures.Reconciliation,
-                figures.FirstContextBucket,
-                figures.LastContextBucket,
-                figures.UnusedRange);
-        }
-    }
-
-    /// <inheritdoc />
     public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);

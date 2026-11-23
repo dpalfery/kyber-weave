@@ -355,13 +355,13 @@ public sealed class AnalyticsReadPathTests
     }
 
     /// <summary>
-    /// Selecting a large session answers its detail figures and every per-turn figure from the
-    /// content-free read model: the figures equal the broad aggregate and turn summaries the
-    /// detail payload used to pay for, and reading them materializes no content, so a session
-    /// with many large turns never pulls its text out of the store.
+    /// Selecting a large session answers its per-turn figures from the content-free read model:
+    /// the turn figure set carries the same per-turn summaries the detail payload used to pay
+    /// for, and reading it materializes no content, so a session with many large turns never
+    /// pulls its text out of the store.
     /// </summary>
     [Fact]
-    public void SessionDetailAnswersTurnFiguresWithoutContentReads()
+    public void SessionTurnFiguresAnswerTheTurnListWithoutContentReads()
     {
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
@@ -384,40 +384,46 @@ public sealed class AnalyticsReadPathTests
         IModelPricingLookup lookup = pricing.LoadPricingTables();
 
         store.ClearReadLog();
-        SessionDetailFigure detail = store.SessionDetailFigures(sessionKey, lookup)!;
+        SessionTurnFigureSet turnSet = store.SessionTurnFigures(sessionKey, lookup)!;
 
-        Assert.Equal(128, detail.Turns.Count);
+        Assert.Equal(128, turnSet.Turns.Count);
         Assert.Equal(0, store.MaterializedContentBytes);
         Assert.DoesNotContain(store.ReadLog, read => ContentBearingReads.Contains(read));
-        Assert.Equal([nameof(InMemoryRelationalStore.SessionDetailFigures)], store.ReadLog);
+        Assert.Equal([nameof(InMemoryRelationalStore.SessionTurnFigures)], store.ReadLog);
 
-        // The detail turn list and the single-turn read answer the same figure for the same index.
-        Assert.Equivalent(detail.Turns[0], store.TurnFigures(sessionKey, 0, lookup), strict: true);
-        Assert.Equivalent(detail.Turns[127], store.TurnFigures(sessionKey, 127, lookup), strict: true);
-        Assert.Null(store.SessionDetailFigures("missing", lookup));
+        // The turn set and the single-turn read answer the same figure for the same index.
+        Assert.Equivalent(turnSet.Turns[0], store.TurnFigures(sessionKey, 0, lookup), strict: true);
+        Assert.Equivalent(turnSet.Turns[127], store.TurnFigures(sessionKey, 127, lookup), strict: true);
+        Assert.Null(store.SessionTurnFigures("missing", lookup));
 
-        // The pages answer those same figures: the detail header, the bounded summary, and one
-        // turn come off the read models rather than a second aggregate or turn-summary pass.
+        // The summary figures answer standalone, and the section pages project them: the summary
+        // section carries the totals and the charts section the turn list, each from its own
+        // content-free read.
+        store.ClearReadLog();
+        SessionSummaryFigure summary = store.SessionSummaryFigures(sessionKey, lookup)!;
+
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.Equal([nameof(InMemoryRelationalStore.SessionSummaryFigures)], store.ReadLog);
+
         KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
-        JsonElement payload = bridge.GetSessionDetail(sessionKey)!.Value;
-        Assert.Equal(detail.Summary.TurnCount, payload.GetProperty("summary").GetProperty("turn_count").GetInt32());
-        Assert.Equal(detail.Summary.TotalInput, payload.GetProperty("summary").GetProperty("total_input").GetInt64());
-        Assert.Equal(detail.Summary.TotalOutput, payload.GetProperty("summary").GetProperty("total_output").GetInt64());
-        Assert.Equal(detail.Summary.DurationMs, payload.GetProperty("summary").GetProperty("duration_ms").GetInt64());
-        Assert.Equal(detail.Summary.Problems.Count, payload.GetProperty("problems_count").GetInt32());
-        Assert.Equal(detail.Turns.Count, payload.GetProperty("turns").GetArrayLength());
         JsonElement summaryPayload = bridge.GetSessionSummary(sessionKey)!.Value;
-        Assert.Equal(detail.Summary.TurnCount, summaryPayload.GetProperty("summary").GetProperty("turn_count").GetInt32());
-        Assert.Equal(detail.Summary.TotalInput, summaryPayload.GetProperty("summary").GetProperty("total_input").GetInt64());
+        Assert.Equal(summary.TurnCount, summaryPayload.GetProperty("summary").GetProperty("turn_count").GetInt32());
+        Assert.Equal(summary.TotalInput, summaryPayload.GetProperty("summary").GetProperty("total_input").GetInt64());
+        Assert.Equal(summary.TotalOutput, summaryPayload.GetProperty("summary").GetProperty("total_output").GetInt64());
+        Assert.Equal(summary.DurationMs, summaryPayload.GetProperty("summary").GetProperty("duration_ms").GetInt64());
+        Assert.Equal(summary.Problems.Count, summaryPayload.GetProperty("problems_count").GetInt32());
+        JsonElement chartsPayload = bridge.GetSessionCharts(sessionKey)!.Value;
+        Assert.Equal(turnSet.Turns.Count, chartsPayload.GetProperty("turns").GetArrayLength());
         Assert.Equal(
-            detail.Turns[1].SpanId,
+            turnSet.Turns[1].SpanId,
             bridge.GetTurnFigures(sessionKey, 1)!.Value.GetProperty("turn").GetProperty("spanId").GetString());
-        Assert.Null(bridge.GetTurnFigures(sessionKey, detail.Turns.Count));
+        Assert.Null(bridge.GetTurnFigures(sessionKey, turnSet.Turns.Count));
     }
 
     /// <summary>
     /// The bounded summary page answers from the content-free summary read model alone: no turn
-    /// summary is read, no content is materialized, and the bounded summary equals the detail header's.
+    /// summary is read, no content is materialized, and the summary section payload carries the
+    /// same totals the figures hold.
     /// </summary>
     [Fact]
     public void SessionSummaryAnswersWithoutTurnOrContentReads()
@@ -440,7 +446,6 @@ public sealed class AnalyticsReadPathTests
         _ = CreateProjection(store, pricing).ProjectAll();
 
         IModelPricingLookup lookup = pricing.LoadPricingTables();
-        SessionDetailFigure detail = store.SessionDetailFigures(sessionKey, lookup)!;
 
         store.ClearReadLog();
         SessionSummaryFigure summary = store.SessionSummaryFigures(sessionKey, lookup)!;
@@ -448,8 +453,15 @@ public sealed class AnalyticsReadPathTests
         Assert.Equal(0, store.MaterializedContentBytes);
         Assert.DoesNotContain(store.ReadLog, read => ContentBearingReads.Contains(read));
         Assert.Equal([nameof(InMemoryRelationalStore.SessionSummaryFigures)], store.ReadLog);
-        Assert.Equivalent(detail.Summary, summary, strict: true);
         Assert.Null(store.SessionSummaryFigures("missing", lookup));
+
+        // The summary section payload answers from that same read model — the bounded header
+        // the detail route used to serve, from the summary figures alone.
+        KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
+        JsonElement payload = bridge.GetSessionSummary(sessionKey)!.Value;
+        Assert.Equal(summary.TurnCount, payload.GetProperty("summary").GetProperty("turn_count").GetInt32());
+        Assert.Equal(summary.TotalInput, payload.GetProperty("summary").GetProperty("total_input").GetInt64());
+        Assert.Equal(summary.TotalOutput, payload.GetProperty("summary").GetProperty("total_output").GetInt64());
     }
 
     /// <summary>
@@ -489,13 +501,14 @@ public sealed class AnalyticsReadPathTests
     }
 
     /// <summary>
-    /// The session detail page answers without materializing content: the bridge's public
-    /// <see cref="KyberBridgeEngine.GetSessionDetail"/> reads no content-bearing column and no
-    /// content bytes for a session with many large turns, while the payload still carries its
-    /// summary, turn, problem, tool, and request figures.
+    /// The session sections answer without materializing content: the summary, charts, and tools
+    /// reads touch no content-bearing column and no content bytes for a session with many large
+    /// turns, while the payloads still carry their summary, turn, tool, and request figures. The
+    /// requests section's prompt previews ride the page-scoped preview read, bounded at 200
+    /// characters even when each turn carries four kilobytes of text.
     /// </summary>
     [Fact]
-    public void SessionDetailPageAnswersWithoutContentReads()
+    public void SectionRoutesAnswerWithoutContentReads()
     {
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
@@ -519,26 +532,32 @@ public sealed class AnalyticsReadPathTests
         KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
 
         store.ClearReadLog();
-        JsonElement payload = bridge.GetSessionDetail(sessionKey)!.Value;
+        JsonElement summary = bridge.GetSessionSummary(sessionKey)!.Value;
+        JsonElement charts = bridge.GetSessionCharts(sessionKey)!.Value;
+        JsonElement tools = bridge.GetSessionTools(sessionKey)!.Value;
 
         Assert.Equal(0, store.MaterializedContentBytes);
         Assert.DoesNotContain(store.ReadLog, read => ContentBearingReads.Contains(read));
-        Assert.Equal(128, payload.GetProperty("turns").GetArrayLength());
-        Assert.Equal(128, payload.GetProperty("summary").GetProperty("turn_count").GetInt32());
-        Assert.True(payload.GetProperty("summary").GetProperty("total_input").GetInt64() > 0);
-        Assert.Equal(0, payload.GetProperty("problems_count").GetInt32());
-        JsonElement tool = Assert.Single(payload.GetProperty("tools").EnumerateArray());
+        Assert.Equal(128, charts.GetProperty("turns").GetArrayLength());
+        Assert.Equal(128, summary.GetProperty("summary").GetProperty("turn_count").GetInt32());
+        Assert.True(summary.GetProperty("summary").GetProperty("total_input").GetInt64() > 0);
+        Assert.Equal(0, summary.GetProperty("problems_count").GetInt32());
+        JsonElement tool = Assert.Single(tools.GetProperty("tools").EnumerateArray());
         Assert.Equal("read", tool.GetProperty("name").GetString());
         Assert.Equal(1, tool.GetProperty("invocations").GetInt32());
-        Assert.NotEmpty(payload.GetProperty("requests").EnumerateArray());
-        Assert.False(payload.TryGetProperty("projection_status", out _));
+        Assert.False(summary.TryGetProperty("projection_status", out _));
 
-        // The bounded summary page answers through the same content-free path.
+        // The requests section answers through the same content-free path plus its one scoped
+        // preview read: every row's prompt is the page's own 200-character preview, never the
+        // session's conversation.
         store.ClearReadLog();
-        JsonElement summary = bridge.GetSessionSummary(sessionKey)!.Value;
-        Assert.Equal(0, store.MaterializedContentBytes);
+        JsonElement requests = bridge.GetSessionRequests(sessionKey)!.Value;
+        Assert.NotEmpty(requests.GetProperty("requests").EnumerateArray());
+        Assert.Contains(nameof(InMemoryRelationalStore.RequestPromptPreviews), store.ReadLog);
         Assert.DoesNotContain(store.ReadLog, read => ContentBearingReads.Contains(read));
-        Assert.Equal(128, summary.GetProperty("summary").GetProperty("turn_count").GetInt32());
+        Assert.All(
+            requests.GetProperty("requests").EnumerateArray(),
+            static row => Assert.Equal(200, row.GetProperty("prompt").GetString()!.Length));
     }
 
     /// <summary>Attaches one tool invocation and one tool definition, both metadata only.</summary>
@@ -590,9 +609,9 @@ public sealed class AnalyticsReadPathTests
         Assert.Equal(session?.Workspace?.Branch, figure.Branch);
     }
 
-    /// <summary>Session detail, summary, and span attributes answer from typed rows with no store JSON.</summary>
+    /// <summary>Summary and charts sections, and span attributes, answer from typed rows with no store JSON.</summary>
     [Fact]
-    public void GetSessionDetailAnswersTypedSummaryTurnsAndSpanAttributes()
+    public void SectionRoutesAnswerTypedSummaryTurnsAndSpanAttributes()
     {
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
@@ -604,14 +623,15 @@ public sealed class AnalyticsReadPathTests
         _ = CreateProjection(store, pricing).ProjectAll();
         KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
 
-        JsonElement detail = bridge.GetSessionDetail("sess-detail")!.Value;
-        Assert.Equal("sess-detail", detail.GetProperty("session_id").GetString());
-        Assert.Equal("sess-detail", detail.GetProperty("sessionId").GetString());
-        Assert.Equal(0, detail.GetProperty("problems_count").GetInt32());
-        Assert.Equal(400, detail.GetProperty("summary").GetProperty("total_input").GetInt64());
-        Assert.True(detail.GetProperty("summary").TryGetProperty("coverage", out _));
+        JsonElement summary = bridge.GetSessionSummary("sess-detail")!.Value;
+        Assert.Equal("sess-detail", summary.GetProperty("session_id").GetString());
+        Assert.Equal(0, summary.GetProperty("problems_count").GetInt32());
+        Assert.Equal(400, summary.GetProperty("summary").GetProperty("total_input").GetInt64());
+        Assert.True(summary.GetProperty("summary").TryGetProperty("coverage", out _));
 
-        JsonElement turn = Assert.Single(detail.GetProperty("turns").EnumerateArray());
+        JsonElement charts = bridge.GetSessionCharts("sess-detail")!.Value;
+        Assert.Equal("sess-detail", charts.GetProperty("sessionId").GetString());
+        JsonElement turn = Assert.Single(charts.GetProperty("turns").EnumerateArray());
         Assert.Equal(0, turn.GetProperty("turnIndex").GetInt32());
         Assert.Equal("turn-d1", turn.GetProperty("spanId").GetString());
         Assert.StartsWith("2026-11-19T10:00:00", turn.GetProperty("timestamp").GetString(), StringComparison.Ordinal);
@@ -778,7 +798,7 @@ public sealed class AnalyticsReadPathTests
 
     /// <summary>
     /// Every request path except the content view and the two scoped prompt reads leaves content
-    /// unread. The sweep calls the list, detail, summary, turn-figure, span-attribute, timeline,
+    /// unread. The sweep calls the list, summary, charts, turn-figure, span-attribute, timeline,
     /// coverage, findings, problems, quarantine, harness, run, report, and analytics paths over
     /// the instrumented fake against a session whose turns carry four kilobytes of text each,
     /// and each path records zero materialized content bytes and no content-bearing read.
@@ -845,7 +865,6 @@ public sealed class AnalyticsReadPathTests
         [
             ("sessions list", () => _ = bridge.GetSessionPage()),
             ("sessions list filtered", () => _ = bridge.GetSessionPage(harness: "claude-code")),
-            ("session detail", () => _ = bridge.GetSessionDetail(sessionKey)),
             ("session summary", () => _ = bridge.GetSessionSummary(sessionKey)),
             ("session charts", () => _ = bridge.GetSessionCharts(sessionKey)),
             ("session reconciliation", () => _ = bridge.GetSessionReconciliation(sessionKey)),
@@ -1548,10 +1567,10 @@ public sealed class AnalyticsReadPathTests
         Assert.False(healthySummary.TryGetProperty("projection_status", out _));
         Assert.Equal(400, healthySummary.GetProperty("summary").GetProperty("total_input").GetInt64());
 
-        JsonElement brokenDetail = bridge.GetSessionDetail("sess-broken")!.Value;
-        Assert.Equal("PROJECTION_FAILED", brokenDetail.GetProperty("projection_status").GetString());
-        Assert.Equal(0, brokenDetail.GetProperty("turns").GetArrayLength());
-        Assert.Equal(1, bridge.GetSessionDetail("sess-healthy")!.Value.GetProperty("turns").GetArrayLength());
+        JsonElement brokenCharts = bridge.GetSessionCharts("sess-broken")!.Value;
+        Assert.Equal("PROJECTION_FAILED", brokenCharts.GetProperty("projection_status").GetString());
+        Assert.Equal(0, brokenCharts.GetProperty("turns").GetArrayLength());
+        Assert.Equal(1, bridge.GetSessionCharts("sess-healthy")!.Value.GetProperty("turns").GetArrayLength());
 
         (int statusCode, JsonElement envelope) = bridge.ExecuteAnalytics("query", null);
         Assert.Equal(200, statusCode);
@@ -1562,9 +1581,9 @@ public sealed class AnalyticsReadPathTests
         Assert.Contains("sess-broken", [.. projectionHealth.GetProperty("failedSessions").EnumerateArray().Select(static s => s.GetString())], StringComparer.Ordinal);
     }
 
-    /// <summary>Session detail projects 1-based context, schema, skills, servers, reconciliation, notes, costBasisMismatch, and dual turn keys.</summary>
+    /// <summary>Summary, charts, tools, servers, skills, and reconciliation sections project 1-based context, schema, skills, servers, reconciliation, notes, costBasisMismatch, and dual turn keys.</summary>
     [Fact]
-    public void GetSessionDetailProjectsMultiTurnOtlpContextSchemaSkillsServersReconciliationAndDualTurnKeys()
+    public void SectionRoutesProjectMultiTurnOtlpContextSchemaSkillsServersReconciliationAndDualTurnKeys()
     {
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new(snapshot: new Dictionary<string, ModelCosts>(StringComparer.Ordinal)
@@ -1670,17 +1689,22 @@ public sealed class AnalyticsReadPathTests
         _ = CreateProjection(store, pricing).ProjectAll();
         KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
 
-        JsonElement detail = bridge.GetSessionDetail("sess-otlp-rich")!.Value;
+        JsonElement summary = bridge.GetSessionSummary("sess-otlp-rich")!.Value;
+        JsonElement charts = bridge.GetSessionCharts("sess-otlp-rich")!.Value;
+        JsonElement toolsPage = bridge.GetSessionTools("sess-otlp-rich")!.Value;
+        JsonElement serversPage = bridge.GetSessionServers("sess-otlp-rich")!.Value;
+        JsonElement skillsPage = bridge.GetSessionSkills("sess-otlp-rich")!.Value;
+        JsonElement reconciliationPage = bridge.GetSessionReconciliation("sess-otlp-rich")!.Value;
 
-        Assert.Equal(4, detail.GetProperty("span_count").GetInt32());
+        Assert.Equal(4, summary.GetProperty("span_count").GetInt32());
 
-        JsonElement mismatch = detail.GetProperty("costBasisMismatch");
+        JsonElement mismatch = summary.GetProperty("costBasisMismatch");
         Assert.Equal("COST_BASIS_MISMATCH", mismatch.GetProperty("code").GetString());
         Assert.Equal(JsonValueKind.Object, mismatch.GetProperty("totalsByBasis").ValueKind);
         Assert.True(mismatch.GetProperty("totalsByBasis").TryGetProperty("harness", out _));
         Assert.True(mismatch.GetProperty("totalsByBasis").TryGetProperty("published", out _));
 
-        List<JsonElement> turnDtos = [.. detail.GetProperty("turns").EnumerateArray()];
+        List<JsonElement> turnDtos = [.. charts.GetProperty("turns").EnumerateArray()];
         Assert.Equal(2, turnDtos.Count);
         JsonElement firstTurn = turnDtos[0];
         Assert.Equal(0, firstTurn.GetProperty("turnIndex").GetInt32());
@@ -1695,7 +1719,7 @@ public sealed class AnalyticsReadPathTests
         Assert.Equal(50, firstTurn.GetProperty("cache_creation").GetInt64());
         Assert.Equal(10, firstTurn.GetProperty("reasoning").GetInt64());
 
-        JsonElement context = detail.GetProperty("context");
+        JsonElement context = charts.GetProperty("context");
         Assert.True(context.GetProperty("measurable").GetBoolean());
         List<JsonElement> contextTurns = [.. context.GetProperty("turns").EnumerateArray()];
         Assert.Equal(2, contextTurns.Count);
@@ -1717,14 +1741,17 @@ public sealed class AnalyticsReadPathTests
             Assert.True(flagged.GetInt32() >= 1);
         }
 
-        JsonElement schema = detail.GetProperty("schema");
-        Assert.True(schema.GetProperty("measurable").GetBoolean());
-        Assert.Equal(3, schema.GetProperty("ranked").GetArrayLength());
-        Assert.Contains(schema.GetProperty("neverInvoked").EnumerateArray(), static t => t.GetProperty("name").GetString() == "unused_mcp_tool");
+        JsonElement schema = toolsPage.GetProperty("aggregate");
+        Assert.True(summary.GetProperty("summary").GetProperty("coverage").GetProperty("schema_measurable").GetBoolean());
+        // The stored schema ranked three tools; the section's rows carry those three marked
+        // in-definitions beside the fourth row the Skill invocation adds without a definition.
+        Assert.Equal(4, toolsPage.GetProperty("total").GetInt32());
+        Assert.Equal(3, toolsPage.GetProperty("tools").EnumerateArray().Count(static t => t.GetProperty("in_definitions").GetBoolean()));
+        Assert.Contains(toolsPage.GetProperty("tools").EnumerateArray(), static t => t.GetProperty("name").GetString() == "unused_mcp_tool" && !t.GetProperty("invoked").GetBoolean());
         Assert.True(schema.GetProperty("byServer").GetProperty("docs-mcp").GetInt64() > 0);
         Assert.True(schema.GetProperty("unusedRange").GetProperty("tokenResidencies").GetInt64() > 0);
 
-        List<JsonElement> tools = [.. detail.GetProperty("tools").EnumerateArray()];
+        List<JsonElement> tools = [.. toolsPage.GetProperty("tools").EnumerateArray()];
         JsonElement mcpTool = Assert.Single(tools, static t => t.GetProperty("name").GetString() == "search_docs");
         Assert.True(mcpTool.GetProperty("in_definitions").GetBoolean());
         Assert.True(mcpTool.GetProperty("is_mcp").GetBoolean());
@@ -1732,20 +1759,20 @@ public sealed class AnalyticsReadPathTests
         Assert.True(builtinTool.GetProperty("in_definitions").GetBoolean());
         Assert.False(builtinTool.GetProperty("is_mcp").GetBoolean());
 
-        JsonElement server = Assert.Single(detail.GetProperty("servers").EnumerateArray());
+        JsonElement server = Assert.Single(serversPage.GetProperty("servers").EnumerateArray());
         Assert.Equal("docs-mcp", server.GetProperty("server").GetString());
         Assert.True(server.GetProperty("is_mcp").GetBoolean());
         Assert.Equal(2, server.GetProperty("tools").GetInt32());
 
-        JsonElement skills = detail.GetProperty("skills");
+        JsonElement skills = skillsPage;
         Assert.True(skills.GetProperty("measurable").GetBoolean());
         JsonElement docsSkill = Assert.Single(skills.GetProperty("rows").EnumerateArray());
         Assert.Equal("docs", docsSkill.GetProperty("name").GetString());
         Assert.Equal("not_measurable", docsSkill.GetProperty("listed").GetProperty("availability").GetString());
         Assert.Equal(1, docsSkill.GetProperty("invocations").GetInt32());
-        Assert.Equal(["docs"], [.. detail.GetProperty("summary").GetProperty("skills_invoked").EnumerateArray().Select(static s => s.GetString())]);
+        Assert.Equal(["docs"], [.. summary.GetProperty("summary").GetProperty("skills_invoked").EnumerateArray().Select(static s => s.GetString())]);
 
-        List<JsonElement> reconciliation = [.. detail.GetProperty("reconciliation").EnumerateArray()];
+        List<JsonElement> reconciliation = [.. reconciliationPage.GetProperty("reconciliation").EnumerateArray()];
         Assert.Equal(2, reconciliation.Count);
         Assert.All(reconciliation, static row =>
         {
@@ -1758,12 +1785,12 @@ public sealed class AnalyticsReadPathTests
             Assert.True(row.TryGetProperty("sum_chat_output", out _));
         });
 
-        Assert.True(detail.GetProperty("notes").GetArrayLength() > 0);
+        Assert.True(summary.GetProperty("notes").GetArrayLength() > 0);
     }
 
     /// <summary>Pi OTLP session without schemas, message parts, or skill listings projects honest not_measurable blocks.</summary>
     [Fact]
-    public void GetSessionDetailReportsHonestNotMeasurableGapsForPiOtlpSession()
+    public void SectionRoutesReportHonestNotMeasurableGapsForPiOtlpSession()
     {
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
@@ -1803,34 +1830,42 @@ public sealed class AnalyticsReadPathTests
         _ = CreateProjection(store, pricing).ProjectAll();
         KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
 
-        JsonElement detail = bridge.GetSessionDetail("sess-pi-gap")!.Value;
+        JsonElement summary = bridge.GetSessionSummary("sess-pi-gap")!.Value;
+        JsonElement charts = bridge.GetSessionCharts("sess-pi-gap")!.Value;
+        JsonElement toolsPage = bridge.GetSessionTools("sess-pi-gap")!.Value;
 
-        Assert.Equal("pi", detail.GetProperty("harness").GetString());
-        Assert.Equal(2, detail.GetProperty("span_count").GetInt32());
-        Assert.Equal(JsonValueKind.Null, detail.GetProperty("costBasisMismatch").ValueKind);
+        Assert.Equal("pi", summary.GetProperty("harness").GetString());
+        Assert.Equal(2, summary.GetProperty("span_count").GetInt32());
+        Assert.Equal(JsonValueKind.Null, summary.GetProperty("costBasisMismatch").ValueKind);
 
-        JsonElement context = detail.GetProperty("context");
+        JsonElement context = charts.GetProperty("context");
         Assert.False(context.GetProperty("measurable").GetBoolean());
         Assert.False(string.IsNullOrWhiteSpace(context.GetProperty("reason").GetString()));
 
-        JsonElement schema = detail.GetProperty("schema");
-        Assert.False(schema.GetProperty("measurable").GetBoolean());
-        Assert.Equal(1, schema.GetProperty("invocationCount").GetInt32());
-        Assert.False(string.IsNullOrWhiteSpace(schema.GetProperty("reason").GetString()));
+        // The schema's honest gap: the summary's coverage flags it unmeasurable, the notes carry
+        // the projection's own reason, and the tools section still counts the invocation.
+        Assert.False(summary.GetProperty("summary").GetProperty("coverage").GetProperty("schema_measurable").GetBoolean());
+        Assert.Equal(1, toolsPage.GetProperty("aggregate").GetProperty("invocationCount").GetInt32());
+        StoredSessionProjection? stored = store.GetSessionProjection("sess-pi-gap");
+        Assert.NotNull(stored);
+        Assert.False(string.IsNullOrWhiteSpace(stored.SchemaUnmeasurableReason));
+        Assert.Contains(
+            summary.GetProperty("notes").EnumerateArray(),
+            note => note.GetString() == stored.SchemaUnmeasurableReason);
 
-        JsonElement skills = detail.GetProperty("skills");
+        JsonElement skills = bridge.GetSessionSkills("sess-pi-gap")!.Value;
         Assert.Equal("not_measurable", skills.GetProperty("availability").GetString());
         Assert.False(string.IsNullOrWhiteSpace(skills.GetProperty("reason").GetString()));
 
-        JsonElement bashTool = Assert.Single(detail.GetProperty("tools").EnumerateArray());
+        JsonElement bashTool = Assert.Single(toolsPage.GetProperty("tools").EnumerateArray());
         Assert.Equal("Bash", bashTool.GetProperty("name").GetString());
         Assert.False(bashTool.GetProperty("in_definitions").GetBoolean());
         Assert.False(bashTool.GetProperty("is_mcp").GetBoolean());
         Assert.Equal(JsonValueKind.Null, bashTool.GetProperty("total_schema_cost").ValueKind);
 
-        Assert.Equal("not_measurable", detail.GetProperty("summary").GetProperty("tools_offered").GetProperty("availability").GetString());
-        Assert.True(detail.GetProperty("notes").GetArrayLength() > 0);
-        Assert.Null(bridge.GetSessionDetail("nonexistent-pi-session"));
+        Assert.Equal("not_measurable", summary.GetProperty("summary").GetProperty("tools_offered").GetProperty("availability").GetString());
+        Assert.True(summary.GetProperty("notes").GetArrayLength() > 0);
+        Assert.Null(bridge.GetSessionSummary("nonexistent-pi-session"));
     }
 
     private static CanonProjectionService CreateProjection(InMemoryRelationalStore store, FakePricingRepository pricing) =>
@@ -2111,16 +2146,6 @@ public sealed class AnalyticsReadPathTests
             }
 
             return figures;
-        }
-
-        public SessionDetailFigure? SessionDetailFigures(string sessionKey, IModelPricingLookup? pricing = null)
-        {
-            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException("projection exploded");
-            }
-
-            return inner.SessionDetailFigures(sessionKey, pricing);
         }
 
         public ReadTimeTurnSummary? TurnFigures(string sessionKey, int turnIndex, IModelPricingLookup? pricing = null)

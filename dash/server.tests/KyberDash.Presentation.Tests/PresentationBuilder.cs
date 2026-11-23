@@ -80,7 +80,6 @@ public class PresentationBuilder
             .Returns(PresentationTestData.PageEnvelope("sessions"));
         Query.Setup(q => q.GetSubagentPage(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>()))
             .Returns(PresentationTestData.PageEnvelope("subagents"));
-        Query.Setup(q => q.GetSessionDetail(It.IsAny<string>())).Returns((JsonElement?)null);
         Query.Setup(q => q.GetSessionSummary(It.IsAny<string>())).Returns((JsonElement?)null);
         Query.Setup(q => q.GetSessionCharts(It.IsAny<string>())).Returns((JsonElement?)null);
         Query.Setup(q => q.GetSessionRequests(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>())).Returns((JsonElement?)null);

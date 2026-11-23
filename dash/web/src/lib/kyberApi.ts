@@ -298,8 +298,8 @@ export type KyberSessionTurn = KyberSessionTurnRow & {
  * With a turn index, the read is the bounded per-turn route: one row, never
  * the session's whole payload — which is what a single turn's counters cost
  * before (up to 10,933 turn rows to read four numbers). Without one, the read
- * is still the detail route's turns array, the shape a list-style consumer
- * expects.
+ * is the charts section's turns array — the same rows the retired detail
+ * route served — the shape a list-style consumer expects.
  */
 export async function fetchKyberSessionTurns(sessionId: string): Promise<KyberSessionTurnRow[]>
 export async function fetchKyberSessionTurns(
@@ -320,7 +320,7 @@ export async function fetchKyberSessionTurns(
       turn_index: section.turnIndex,
     }
   }
-  const body = await fetchJson<{ turns?: KyberSessionTurnRow[] }>(`/api/kyber/session/${encodeURIComponent(sessionId)}`)
+  const body = await fetchJson<{ turns?: KyberSessionTurnRow[] }>(`/api/kyber/session/${encodeURIComponent(sessionId)}/charts`)
   return Array.isArray(body.turns) ? body.turns : []
 }
 

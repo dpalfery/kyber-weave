@@ -132,13 +132,19 @@ public class MinimalApiEndpointTests
     }
 
     [Fact]
-    public async Task MissingSessionReturnsNotFound()
+    public async Task TheMonolithicSessionDetailRouteIsGone()
     {
         await using Host host = await Host.StartAsync();
 
         HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/session/absent", UriKind.Relative));
 
+        // The retired monolithic route matches no endpoint: the request falls to the SPA
+        // fallback, whose /api guard answers the bare "Not found" envelope — never the route's
+        // own "Session not found", and no session read runs.
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("Not found", body.RootElement.GetProperty("error").GetString());
+        host.Builder.Query.Verify(q => q.GetSessionSummary(It.IsAny<string>()), Times.Never);
     }
 
     [Fact]

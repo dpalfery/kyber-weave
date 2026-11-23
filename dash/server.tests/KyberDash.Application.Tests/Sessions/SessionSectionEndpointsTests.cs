@@ -11,8 +11,8 @@ namespace KyberDash.Application.Tests.Sessions;
 /// <summary>
 /// The section endpoints answer their slice of the session view from purpose-named content-free
 /// reads: <see cref="KyberBridgeEngine.GetSessionSummary"/> carries every field the summary
-/// section renders with parity to the detail payload it widens, the charts section equals the
-/// detail payload's turn list and context object without paying for any other section's reads,
+/// section renders, the charts section carries the turn figures read's turn list and the stored
+/// context projection's context object without paying for any other section's reads,
 /// the turn section carries that turn's stored context buckets, the requests, reconciliation and
 /// problems sections page today's rows at 25 with the true total, the tools section pages the
 /// ranked rows with the aggregate priced over every row, the servers and skills sections page
@@ -38,8 +38,9 @@ public sealed class SessionSectionEndpointsTests
 
     /// <summary>
     /// The widened summary section carries the summary, notes, cost-basis mismatch, span count,
-    /// reconciliation totals, and unused-tool count with parity to the detail payload it replaced,
-    /// from the content-free summary figures alone.
+    /// reconciliation totals, and unused-tool count for the seeded session, from the content-free
+    /// summary figures alone — parity checked against the store's figures and the section routes
+    /// that serve the rows the totals count.
     /// </summary>
     [Fact]
     public void TheSummarySectionCarriesTheContractFields()
@@ -52,26 +53,37 @@ public sealed class SessionSectionEndpointsTests
         KyberBridgeEngine bridge = CreateBridge(store, pricing);
         bridge.EnsureProjected();
 
-        JsonElement detail = bridge.GetSessionDetail(sessionKey)!.Value;
         store.ClearReadLog();
         JsonElement summary = bridge.GetSessionSummary(sessionKey)!.Value;
 
-        Assert.Equal(detail.GetProperty("summary").GetRawText(), summary.GetProperty("summary").GetRawText());
-        Assert.Equal(detail.GetProperty("notes").GetRawText(), summary.GetProperty("notes").GetRawText());
-        Assert.Equal(
-            detail.GetProperty("costBasisMismatch").GetRawText(),
-            summary.GetProperty("costBasisMismatch").GetRawText());
-        Assert.Equal(detail.GetProperty("span_count").GetInt32(), summary.GetProperty("span_count").GetInt32());
+        // The summary block carries the seeded session's figures: 128 turns whose measured input
+        // is fresh + cache-read (1,200 + 2i each), so 169,856 input tokens — the header the
+        // detail route used to serve.
+        Assert.Equal(128, summary.GetProperty("summary").GetProperty("turn_count").GetInt32());
+        Assert.Equal(169_856, summary.GetProperty("summary").GetProperty("total_input").GetInt64());
+        Assert.True(summary.GetProperty("notes").GetArrayLength() > 0);
+        StoredSessionProjection? storedHeader = store.GetSessionProjection(sessionKey);
+        Assert.NotNull(storedHeader);
+        Assert.Equal(storedHeader.SpanCount, summary.GetProperty("span_count").GetInt32());
 
-        // The reconciliation totals count the same rows the detail payload lists.
+        // The reconciliation totals count the same rows the reconciliation section pages.
         int total = 0;
         int mismatched = 0;
-        foreach (JsonElement row in detail.GetProperty("reconciliation").EnumerateArray())
+        for (int page = 1; ; page++)
         {
-            total++;
-            if (!row.GetProperty("input_match").GetBoolean() || !row.GetProperty("output_match").GetBoolean())
+            JsonElement reconciliationPage = bridge.GetSessionReconciliation(sessionKey, page)!.Value;
+            foreach (JsonElement row in reconciliationPage.GetProperty("reconciliation").EnumerateArray())
             {
-                mismatched++;
+                total++;
+                if (!row.GetProperty("input_match").GetBoolean() || !row.GetProperty("output_match").GetBoolean())
+                {
+                    mismatched++;
+                }
+            }
+
+            if (reconciliationPage.GetProperty("reconciliation").EnumerateArray().Count() < 25)
+            {
+                break;
             }
         }
 
@@ -80,18 +92,15 @@ public sealed class SessionSectionEndpointsTests
         Assert.Equal(total, summary.GetProperty("reconciliation").GetProperty("total").GetInt32());
         Assert.Equal(mismatched, summary.GetProperty("reconciliation").GetProperty("mismatched").GetInt32());
 
-        // The unused-tool count is offered minus invoked by name, computed on the server.
-        HashSet<string> invoked =
-        [
-            .. detail.GetProperty("summary").GetProperty("tools_invoked").EnumerateArray()
-                .Select(static name => name.GetString() ?? string.Empty),
-        ];
-        int unusedFromDetail = detail.GetProperty("summary").GetProperty("tools_offered").EnumerateArray()
-            .Count(name => !invoked.Contains(name.GetString() ?? string.Empty));
+        // The unused-tool count is offered minus invoked by name, computed on the server, and
+        // equals the tools section's aggregate over the same rows.
+        JsonElement toolsPage = bridge.GetSessionTools(sessionKey)!.Value;
         Assert.Equal(2, summary.GetProperty("tools_offered_count").GetInt32());
         Assert.Equal(1, summary.GetProperty("tools_invoked_count").GetInt32());
-        Assert.Equal(1, unusedFromDetail);
-        Assert.Equal(unusedFromDetail, summary.GetProperty("unused_tools_count").GetInt32());
+        Assert.Equal(1, toolsPage.GetProperty("aggregate").GetProperty("unusedCount").GetInt32());
+        Assert.Equal(
+            toolsPage.GetProperty("aggregate").GetProperty("unusedCount").GetInt32(),
+            summary.GetProperty("unused_tools_count").GetInt32());
         Assert.Equal(1, summary.GetProperty("skills_count").GetInt32());
         Assert.Equal(0, summary.GetProperty("problems_count").GetInt32());
 
@@ -104,13 +113,13 @@ public sealed class SessionSectionEndpointsTests
     }
 
     /// <summary>
-    /// The charts section equals the detail payload's turn list and context object on a 128-turn
-    /// session — including the first and last context edges, which price the records' reported
-    /// input rather than the stored projection's measured input — and issues no tool, skill,
-    /// request, timeline, or content read.
+    /// The charts section carries the turn figures read's turn list and the stored context
+    /// projection's context object on a 128-turn session — including the first and last context
+    /// edges, which price the records' reported input rather than the stored projection's
+    /// measured input — and issues no tool, skill, request, timeline, or content read.
     /// </summary>
     [Fact]
-    public void TheChartsSectionEqualsTheDetailTurnsAndContext()
+    public void TheChartsSectionCarriesTheTurnFiguresTurnsAndContext()
     {
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
@@ -120,13 +129,9 @@ public sealed class SessionSectionEndpointsTests
         KyberBridgeEngine bridge = CreateBridge(store, pricing);
         bridge.EnsureProjected();
 
-        JsonElement detail = bridge.GetSessionDetail(sessionKey)!.Value;
+        SessionTurnFigureSet turnSet = store.SessionTurnFigures(sessionKey, pricing.LoadPricingTables())!;
         store.ClearReadLog();
         JsonElement charts = bridge.GetSessionCharts(sessionKey)!.Value;
-
-        Assert.Equal(sessionKey, charts.GetProperty("sessionId").GetString());
-        Assert.Equal(detail.GetProperty("turns").GetRawText(), charts.GetProperty("turns").GetRawText());
-        Assert.Equal(detail.GetProperty("context").GetRawText(), charts.GetProperty("context").GetRawText());
 
         // The charts read is the turn figures pass alone; the projection reads are the 404 header
         // check and the stored context projection. The filtered names are EnsureProjected's
@@ -144,6 +149,32 @@ public sealed class SessionSectionEndpointsTests
             store.SessionProjectionReadLog
                 .Where(static read => read is not ("ListSessionProjections" or "ListHarnessRollups"))
                 .ToList());
+
+        Assert.Equal(sessionKey, charts.GetProperty("sessionId").GetString());
+
+        // The charts turn list is the turn figures read's own list, in turn order, with the
+        // dual-key row shape the turn page renders.
+        List<JsonElement> turnRows = [.. charts.GetProperty("turns").EnumerateArray()];
+        Assert.Equal(turnSet.Turns.Count, turnRows.Count);
+        for (int index = 0; index < turnRows.Count; index++)
+        {
+            Assert.Equal(turnSet.Turns[index].SpanId, turnRows[index].GetProperty("spanId").GetString());
+            Assert.Equal(turnSet.Turns[index].Position, turnRows[index].GetProperty("turnIndex").GetInt32());
+            Assert.Equal(turnSet.Turns[index].InputTokens, turnRows[index].GetProperty("inputTokens").GetInt64());
+            Assert.Equal(turnSet.Turns[index].OutputTokens, turnRows[index].GetProperty("outputTokens").GetInt64());
+        }
+
+        // The context object's per-turn entries are the same entries the turn section serves.
+        List<JsonElement> contextTurns = [.. charts.GetProperty("context").GetProperty("turns").EnumerateArray()];
+        Assert.Equal(turnSet.Turns.Count, contextTurns.Count);
+        JsonElement turnSection = bridge.GetTurnFigures(sessionKey, 1)!.Value;
+        Assert.Equal(contextTurns[1].GetRawText(), turnSection.GetProperty("context").GetRawText());
+        Assert.True(charts.GetProperty("context").TryGetProperty("first", out JsonElement firstEdge));
+        Assert.True(firstEdge.TryGetProperty("buckets", out _));
+        Assert.True(firstEdge.TryGetProperty("reported_input", out _));
+        Assert.True(charts.GetProperty("context").TryGetProperty("last", out JsonElement lastEdge));
+        Assert.True(lastEdge.TryGetProperty("buckets", out _));
+        Assert.True(lastEdge.TryGetProperty("reported_input", out _));
     }
 
     /// <summary>
@@ -161,13 +192,13 @@ public sealed class SessionSectionEndpointsTests
         KyberBridgeEngine bridge = CreateBridge(store, pricing);
         bridge.EnsureProjected();
 
-        JsonElement detail = bridge.GetSessionDetail(sessionKey)!.Value;
+        JsonElement charts = bridge.GetSessionCharts(sessionKey)!.Value;
         store.ClearReadLog();
         JsonElement figures = bridge.GetTurnFigures(sessionKey, 1)!.Value;
 
         Assert.Equal("turn-sec-001", figures.GetProperty("turn").GetProperty("spanId").GetString());
         Assert.Equal(
-            detail.GetProperty("context").GetProperty("turns")[1].GetRawText(),
+            charts.GetProperty("context").GetProperty("turns")[1].GetRawText(),
             figures.GetProperty("context").GetRawText());
         Assert.Equal(0, store.MaterializedContentBytes);
         Assert.Equal(
@@ -192,21 +223,22 @@ public sealed class SessionSectionEndpointsTests
         KyberBridgeEngine bridge = CreateBridge(store, pricing);
         bridge.EnsureProjected();
 
-        JsonElement detail = bridge.GetSessionDetail(sessionKey)!.Value;
-        JsonElement[] detailRows = [.. detail.GetProperty("requests").EnumerateArray()];
+        SessionRequestFigurePageResult firstFigures = store.SessionRequestFigures(sessionKey, 1, 25);
+        SessionRequestFigurePageResult secondFigures = store.SessionRequestFigures(sessionKey, 2, 25);
+        SessionRequestFigurePageResult lastFigures = store.SessionRequestFigures(sessionKey, 6, 25);
 
         store.ClearReadLog();
         JsonElement page = bridge.GetSessionRequests(sessionKey)!.Value;
 
-        Assert.Equal(detailRows.Length, page.GetProperty("total").GetInt32());
+        Assert.Equal(firstFigures.Total, page.GetProperty("total").GetInt32());
         JsonElement[] rows = [.. page.GetProperty("requests").EnumerateArray()];
         Assert.Equal(25, rows.Length);
         for (int index = 0; index < rows.Length; index++)
         {
-            Assert.Equal(detailRows[index].GetProperty("request").GetRawText(), rows[index].GetProperty("request").GetRawText());
-            Assert.Equal(detailRows[index].GetProperty("timestamp").GetRawText(), rows[index].GetProperty("timestamp").GetRawText());
-            Assert.Equal(detailRows[index].GetProperty("turns").GetRawText(), rows[index].GetProperty("turns").GetRawText());
-            Assert.Equal(detailRows[index].GetProperty("model").GetRawText(), rows[index].GetProperty("model").GetRawText());
+            Assert.Equal(firstFigures.Items[index].RequestSpanId, rows[index].GetProperty("request").GetString());
+            Assert.Equal(firstFigures.Items[index].TimestampUtc, rows[index].GetProperty("timestamp").GetString());
+            Assert.Equal(firstFigures.Items[index].Turns, rows[index].GetProperty("turns").GetInt32());
+            Assert.Equal(firstFigures.Items[index].Model, rows[index].GetProperty("model").GetString());
         }
 
         // Every preview is the scoped part read's first 200 characters of the page's requests'
@@ -237,22 +269,22 @@ public sealed class SessionSectionEndpointsTests
         store.ClearReadLog();
         store.PromptPreviewReads.Clear();
         JsonElement second = bridge.GetSessionRequests(sessionKey, page: 2)!.Value;
-        Assert.Equal(detailRows[25].GetProperty("request").GetRawText(), second.GetProperty("requests").EnumerateArray().First().GetProperty("request").GetRawText());
-        Assert.Equal(detailRows.Length, second.GetProperty("total").GetInt32());
+        Assert.Equal(secondFigures.Items[0].RequestSpanId, second.GetProperty("requests").EnumerateArray().First().GetProperty("request").GetString());
+        Assert.Equal(firstFigures.Total, second.GetProperty("total").GetInt32());
         _ = Assert.Single(store.PromptPreviewReads);
 
         store.ClearReadLog();
         store.PromptPreviewReads.Clear();
         JsonElement lastPage = bridge.GetSessionRequests(sessionKey, page: 6)!.Value;
         Assert.Equal(3, lastPage.GetProperty("requests").EnumerateArray().Count());
-        Assert.Equal(detailRows[127].GetProperty("request").GetRawText(), lastPage.GetProperty("requests").EnumerateArray().Last().GetProperty("request").GetRawText());
-        Assert.Equal(detailRows.Length, lastPage.GetProperty("total").GetInt32());
+        Assert.Equal(lastFigures.Items[^1].RequestSpanId, lastPage.GetProperty("requests").EnumerateArray().Last().GetProperty("request").GetString());
+        Assert.Equal(firstFigures.Total, lastPage.GetProperty("total").GetInt32());
 
         store.ClearReadLog();
         store.PromptPreviewReads.Clear();
         JsonElement past = bridge.GetSessionRequests(sessionKey, page: 7)!.Value;
         Assert.Empty(past.GetProperty("requests").EnumerateArray().ToList());
-        Assert.Equal(detailRows.Length, past.GetProperty("total").GetInt32());
+        Assert.Equal(firstFigures.Total, past.GetProperty("total").GetInt32());
     }
 
     /// <summary>
@@ -270,19 +302,23 @@ public sealed class SessionSectionEndpointsTests
         KyberBridgeEngine bridge = CreateBridge(store, pricing);
         bridge.EnsureProjected();
 
-        JsonElement detail = bridge.GetSessionDetail(sessionKey)!.Value;
-        JsonElement[] detailRows = [.. detail.GetProperty("reconciliation").EnumerateArray()];
-        Assert.Equal(128, detailRows.Length);
+        SessionReconciliationFigurePageResult firstFigures = store.SessionReconciliationFigures(sessionKey, 1, 25);
+        SessionReconciliationFigurePageResult secondFigures = store.SessionReconciliationFigures(sessionKey, 2, 25);
+        SessionReconciliationFigurePageResult lastFigures = store.SessionReconciliationFigures(sessionKey, 6, 25);
+        Assert.Equal(128, firstFigures.Total);
 
         store.ClearReadLog();
         JsonElement page = bridge.GetSessionReconciliation(sessionKey)!.Value;
 
-        Assert.Equal(detailRows.Length, page.GetProperty("total").GetInt32());
+        Assert.Equal(firstFigures.Total, page.GetProperty("total").GetInt32());
         JsonElement[] rows = [.. page.GetProperty("reconciliation").EnumerateArray()];
         Assert.Equal(25, rows.Length);
         for (int index = 0; index < rows.Length; index++)
         {
-            Assert.Equal(detailRows[index].GetRawText(), rows[index].GetRawText());
+            Assert.Equal(firstFigures.Items[index].RequestSpanId, rows[index].GetProperty("request").GetString());
+            Assert.Equal(firstFigures.Items[index].RootInput, rows[index].GetProperty("root_input").GetInt64());
+            Assert.Equal(firstFigures.Items[index].SumChatInput, rows[index].GetProperty("sum_chat_input").GetInt64());
+            Assert.Equal(firstFigures.Items[index].InputMatch, rows[index].GetProperty("input_match").GetBoolean());
         }
 
         Assert.Equal(0, store.MaterializedContentBytes);
@@ -297,15 +333,15 @@ public sealed class SessionSectionEndpointsTests
         Assert.DoesNotContain(store.ReadLog, static read => ContentBearingReads.Contains(read));
 
         JsonElement second = bridge.GetSessionReconciliation(sessionKey, page: 2)!.Value;
-        Assert.Equal(detailRows[25].GetRawText(), second.GetProperty("reconciliation").EnumerateArray().First().GetRawText());
+        Assert.Equal(secondFigures.Items[0].RequestSpanId, second.GetProperty("reconciliation").EnumerateArray().First().GetProperty("request").GetString());
 
         JsonElement lastPage = bridge.GetSessionReconciliation(sessionKey, page: 6)!.Value;
         Assert.Equal(3, lastPage.GetProperty("reconciliation").EnumerateArray().Count());
-        Assert.Equal(detailRows[127].GetRawText(), lastPage.GetProperty("reconciliation").EnumerateArray().Last().GetRawText());
+        Assert.Equal(lastFigures.Items[^1].RequestSpanId, lastPage.GetProperty("reconciliation").EnumerateArray().Last().GetProperty("request").GetString());
 
         JsonElement past = bridge.GetSessionReconciliation(sessionKey, page: 7)!.Value;
         Assert.Empty(past.GetProperty("reconciliation").EnumerateArray().ToList());
-        Assert.Equal(detailRows.Length, past.GetProperty("total").GetInt32());
+        Assert.Equal(firstFigures.Total, past.GetProperty("total").GetInt32());
     }
 
     /// <summary>
@@ -330,19 +366,21 @@ public sealed class SessionSectionEndpointsTests
         KyberBridgeEngine bridge = CreateBridge(store, pricing);
         bridge.EnsureProjected();
 
-        JsonElement detail = bridge.GetSessionDetail(sessionKey)!.Value;
-        JsonElement[] detailRows = [.. detail.GetProperty("problems").EnumerateArray()];
-        Assert.Equal(30, detailRows.Length);
+        SessionProblemPageResult firstFigures = store.SessionProblems(sessionKey, 1, 25);
+        SessionProblemPageResult secondFigures = store.SessionProblems(sessionKey, 2, 25);
+        Assert.Equal(30, firstFigures.Total);
 
         store.ClearReadLog();
         JsonElement page = bridge.GetSessionProblems(sessionKey)!.Value;
 
-        Assert.Equal(detailRows.Length, page.GetProperty("total").GetInt32());
+        Assert.Equal(firstFigures.Total, page.GetProperty("total").GetInt32());
         JsonElement[] rows = [.. page.GetProperty("problems").EnumerateArray()];
         Assert.Equal(25, rows.Length);
         for (int index = 0; index < rows.Length; index++)
         {
-            Assert.Equal(detailRows[index].GetRawText(), rows[index].GetRawText());
+            Assert.Equal(firstFigures.Items[index].Code, rows[index].GetProperty("code").GetString());
+            Assert.Equal(firstFigures.Items[index].Message, rows[index].GetProperty("message").GetString());
+            Assert.Equal(firstFigures.Items[index].Location, rows[index].GetProperty("location").GetString());
         }
 
         Assert.Equal(0, store.MaterializedContentBytes);
@@ -358,7 +396,7 @@ public sealed class SessionSectionEndpointsTests
 
         JsonElement second = bridge.GetSessionProblems(sessionKey, page: 2)!.Value;
         Assert.Equal(5, second.GetProperty("problems").EnumerateArray().Count());
-        Assert.Equal(detailRows[25].GetRawText(), second.GetProperty("problems").EnumerateArray().First().GetRawText());
+        Assert.Equal(secondFigures.Items[0].Message, second.GetProperty("problems").EnumerateArray().First().GetProperty("message").GetString());
     }
 
     /// <summary>
@@ -394,15 +432,14 @@ public sealed class SessionSectionEndpointsTests
         Assert.Equal("sess-run-a", first.GetProperty("sessionId").GetString());
         Assert.Equal(JsonValueKind.String, first.GetProperty("executionId").ValueKind);
 
-        // The run page pays the turn figures read, not the detail figure set.
+        // The run page pays the turn figures read, not the tool figure set.
         Assert.Contains(nameof(InMemoryRelationalStore.SessionTurnFigures), store.ReadLog);
-        Assert.DoesNotContain(nameof(InMemoryRelationalStore.SessionDetailFigures), store.ReadLog);
         Assert.DoesNotContain(store.ReadLog, static read => ContentBearingReads.Contains(read));
     }
 
     /// <summary>
     /// The tools section pages the ranked tool rows — never-invoked rows included — at 25 with
-    /// the true total, and its aggregate equals what today's detail payload yields over all rows,
+    /// the true total, and its aggregate equals the tool figures' own page-independent aggregates
     /// on page 1 and on page 2: the largest resident cost, the resident cost total, the invocation
     /// count, the unused count, the unused range, the per-server rollup, and the span that carries
     /// the session's tool definitions.
@@ -418,11 +455,8 @@ public sealed class SessionSectionEndpointsTests
         KyberBridgeEngine bridge = CreateBridge(store, pricing);
         bridge.EnsureProjected();
 
-        JsonElement detail = bridge.GetSessionDetail(sessionKey)!.Value;
-        JsonElement schema = detail.GetProperty("schema");
-        Assert.True(schema.GetProperty("measurable").GetBoolean());
-        JsonElement[] rankedRows = [.. schema.GetProperty("ranked").EnumerateArray()];
-        Assert.Equal(30, rankedRows.Length);
+        SessionToolFigureSet toolFigures = store.SessionToolFigures(sessionKey, pricing.LoadPricingTables());
+        Assert.Equal(30, toolFigures.Tools.Count);
 
         store.ClearReadLog();
         JsonElement page = bridge.GetSessionTools(sessionKey)!.Value;
@@ -430,41 +464,46 @@ public sealed class SessionSectionEndpointsTests
         Assert.Equal(30, page.GetProperty("total").GetInt32());
         JsonElement[] rows = [.. page.GetProperty("tools").EnumerateArray()];
         Assert.Equal(25, rows.Length);
-        JsonElement[] detailRows = [.. detail.GetProperty("tools").EnumerateArray()];
         for (int index = 0; index < rows.Length; index++)
         {
-            // The ranked rows carry today's payload row shape: the name and cost the schema
-            // ranking shows, and the invocations and residency the payload's tools array carries.
-            Assert.Equal(rankedRows[index].GetProperty("name").GetString(), rows[index].GetProperty("name").GetString());
-            Assert.Equal(rankedRows[index].GetProperty("cost").GetRawText(), rows[index].GetProperty("total_schema_cost").GetRawText());
-            Assert.Equal(detailRows[index].GetRawText(), rows[index].GetRawText());
+            // The ranked rows carry today's payload row shape in the figures' ranking order: the
+            // name the schema ranking shows, and the invocations and residency the tools array
+            // carries.
+            Assert.Equal(toolFigures.Tools[index].Name, rows[index].GetProperty("name").GetString());
+            Assert.Equal(toolFigures.Tools[index].Invocations, rows[index].GetProperty("invocations").GetInt32());
+            Assert.Equal(toolFigures.Tools[index].Invoked, rows[index].GetProperty("invoked").GetBoolean());
+            Assert.Equal(toolFigures.Tools[index].TotalSchemaCost, rows[index].GetProperty("total_schema_cost").GetInt64());
         }
 
         // The ranking includes the never-invoked rows: tool-29 sits at the top of page 1 and
         // tool-00 at the end of the ranking, on page 2 — two invoked rows across both pages.
         Assert.Equal(1, rows.Count(static row => row.GetProperty("invoked").GetBoolean()));
 
-        // The aggregate equals what today's payload yields over all rows, not just the page: the
-        // largest resident cost, the resident cost total, the invocations the rows carry, the
+        // The aggregate equals the tool figures' page-independent aggregates, not just the page:
+        // the largest resident cost, the resident cost total, the invocations the rows carry, the
         // rows never invoked, the unused range, the per-server rollup, and the span that carries
         // the session's tool definitions.
         JsonElement aggregate = page.GetProperty("aggregate");
-        Assert.Equal(detailRows.Where(static row => row.TryGetProperty("total_schema_cost", out JsonElement cost) && cost.ValueKind == JsonValueKind.Number).Max(static row => row.GetProperty("total_schema_cost").GetInt64()), aggregate.GetProperty("maxCost").GetInt64());
-        Assert.Equal(detailRows.Where(static row => row.TryGetProperty("total_schema_cost", out JsonElement cost) && cost.ValueKind == JsonValueKind.Number).Sum(static row => row.GetProperty("total_schema_cost").GetInt64()), aggregate.GetProperty("residentCostTotal").GetInt64());
-        Assert.Equal(detailRows.Sum(static row => row.GetProperty("invocations").GetInt32()), aggregate.GetProperty("invocationCount").GetInt32());
-        Assert.Equal(detailRows.Count(static row => !row.GetProperty("invoked").GetBoolean()), aggregate.GetProperty("unusedCount").GetInt32());
-        Assert.Equal(schema.GetProperty("unusedRange").GetRawText(), aggregate.GetProperty("unusedRange").GetRawText());
-        Assert.Equal(schema.GetProperty("byServer").GetRawText(), aggregate.GetProperty("byServer").GetRawText());
+        Assert.Equal(toolFigures.MaxCost, aggregate.GetProperty("maxCost").GetInt64());
+        Assert.Equal(toolFigures.ResidentCostTotal, aggregate.GetProperty("residentCostTotal").GetInt64());
+        Assert.Equal(toolFigures.InvocationCount, aggregate.GetProperty("invocationCount").GetInt32());
+        Assert.Equal(toolFigures.UnusedCount, aggregate.GetProperty("unusedCount").GetInt32());
+        Assert.NotNull(toolFigures.UnusedRange);
+        Assert.Equal(toolFigures.UnusedRange.TokenResidencies, aggregate.GetProperty("unusedRange").GetProperty("tokenResidencies").GetInt64());
+        foreach (StoredSchemaServerTokens server in toolFigures.ByServer)
+        {
+            Assert.Equal(server.Tokens, aggregate.GetProperty("byServer").GetProperty(server.ServerName).GetInt64());
+        }
+
         Assert.Equal("turn-tools-000", aggregate.GetProperty("definitionsSpanId").GetString());
 
         // The tools read prices the tool tables and the stored schema only: no content, no
-        // detail-figure set, no full projection read.
+        // full projection read.
         Assert.Equal(0, store.MaterializedContentBytes);
         Assert.DoesNotContain(store.ReadLog, static read => ContentBearingReads.Contains(read));
         Assert.Equal(
             (IReadOnlyList<string>)[nameof(InMemoryRelationalStore.SessionToolFigures)],
             store.ReadLog.Where(static read => read != "CountRecords").ToList());
-        Assert.DoesNotContain(nameof(InMemoryRelationalStore.SessionDetailFigures), store.ReadLog);
         Assert.DoesNotContain(nameof(InMemoryRelationalStore.GetSessionProjection), store.SessionProjectionReadLog);
 
         // Page 2 carries the remaining ranked rows — including the second invoked one — and the
@@ -473,7 +512,7 @@ public sealed class SessionSectionEndpointsTests
         JsonElement second = bridge.GetSessionTools(sessionKey, page: 2)!.Value;
         JsonElement[] secondRows = [.. second.GetProperty("tools").EnumerateArray()];
         Assert.Equal(5, secondRows.Length);
-        Assert.Equal(rankedRows[25].GetProperty("name").GetString(), secondRows[0].GetProperty("name").GetString());
+        Assert.Equal(toolFigures.Tools[25].Name, secondRows[0].GetProperty("name").GetString());
         Assert.Equal(1, secondRows.Count(static row => row.GetProperty("invoked").GetBoolean()));
         Assert.Equal("tool-00", secondRows.Last(static row => row.GetProperty("invoked").GetBoolean()).GetProperty("name").GetString());
         Assert.Equal(aggregate.GetRawText(), second.GetProperty("aggregate").GetRawText());
@@ -484,8 +523,8 @@ public sealed class SessionSectionEndpointsTests
     }
 
     /// <summary>
-    /// The servers section pages today's per-server rollup rows at 25 with the true total, from
-    /// the same tool figures read the tools section pays.
+    /// The servers section pages the tool figures' per-server rollup rows at 25 with the true
+    /// total, from the same tool figures read the tools section pays.
     /// </summary>
     [Fact]
     public void TheServersSectionPagesTodaysRowsAt25()
@@ -498,19 +537,23 @@ public sealed class SessionSectionEndpointsTests
         KyberBridgeEngine bridge = CreateBridge(store, pricing);
         bridge.EnsureProjected();
 
-        JsonElement detail = bridge.GetSessionDetail(sessionKey)!.Value;
-        JsonElement[] detailRows = [.. detail.GetProperty("servers").EnumerateArray()];
-        Assert.Equal(2, detailRows.Length);
+        SessionToolFigureSet toolFigures = store.SessionToolFigures(sessionKey, pricing.LoadPricingTables());
+        Assert.Equal(2, toolFigures.Servers.Count);
 
         store.ClearReadLog();
         JsonElement page = bridge.GetSessionServers(sessionKey)!.Value;
 
-        Assert.Equal(detailRows.Length, page.GetProperty("total").GetInt32());
+        Assert.Equal(toolFigures.Servers.Count, page.GetProperty("total").GetInt32());
         JsonElement[] rows = [.. page.GetProperty("servers").EnumerateArray()];
-        Assert.Equal(detailRows.Length, rows.Length);
+        Assert.Equal(toolFigures.Servers.Count, rows.Length);
         for (int index = 0; index < rows.Length; index++)
         {
-            Assert.Equal(detailRows[index].GetRawText(), rows[index].GetRawText());
+            Assert.Equal(toolFigures.Servers[index].Server, rows[index].GetProperty("server").GetString());
+            Assert.Equal(toolFigures.Servers[index].IsMcp, rows[index].GetProperty("is_mcp").GetBoolean());
+            Assert.Equal(toolFigures.Servers[index].Tools, rows[index].GetProperty("tools").GetInt32());
+            Assert.Equal(toolFigures.Servers[index].SchemaTokens, rows[index].GetProperty("schema_tokens").GetInt64());
+            Assert.Equal(toolFigures.Servers[index].Invocations, rows[index].GetProperty("invocations").GetInt32());
+            Assert.Equal(toolFigures.Servers[index].UnusedTools, rows[index].GetProperty("unused_tools").GetInt32());
         }
 
         Assert.Equal(0, store.MaterializedContentBytes);
@@ -522,8 +565,8 @@ public sealed class SessionSectionEndpointsTests
 
     /// <summary>
     /// The skills section pages the session's distinct skill rows at 25 with the true total,
-    /// carrying the same rows the detail payload's skills block lists, and answers a session that
-    /// invoked no skills with the not-measurable block the detail payload carries.
+    /// carrying one row per invoked skill in invocation order, and answers a session that
+    /// invoked no skills with the not-measurable block the summary section carries.
     /// </summary>
     [Fact]
     public void TheSkillsSectionPagesTodaysRowsAt25()
@@ -553,10 +596,6 @@ public sealed class SessionSectionEndpointsTests
         KyberBridgeEngine bridge = CreateBridge(store, pricing);
         bridge.EnsureProjected();
 
-        JsonElement detail = bridge.GetSessionDetail(sessionKey)!.Value;
-        JsonElement[] detailRows = [.. detail.GetProperty("skills").GetProperty("rows").EnumerateArray()];
-        Assert.Equal(30, detailRows.Length);
-
         store.ClearReadLog();
         JsonElement page = bridge.GetSessionSkills(sessionKey)!.Value;
 
@@ -566,7 +605,8 @@ public sealed class SessionSectionEndpointsTests
         Assert.Equal(25, rows.Length);
         for (int index = 0; index < rows.Length; index++)
         {
-            Assert.Equal(detailRows[index].GetRawText(), rows[index].GetRawText());
+            Assert.Equal($"skill-{index:D2}", rows[index].GetProperty("name").GetString());
+            Assert.Equal(1, rows[index].GetProperty("invocations").GetInt32());
         }
 
         Assert.Equal(0, store.MaterializedContentBytes);
@@ -576,10 +616,10 @@ public sealed class SessionSectionEndpointsTests
         JsonElement second = bridge.GetSessionSkills(sessionKey, page: 2)!.Value;
         JsonElement[] secondRows = [.. second.GetProperty("rows").EnumerateArray()];
         Assert.Equal(5, secondRows.Length);
-        Assert.Equal(detailRows[25].GetRawText(), secondRows[0].GetRawText());
+        Assert.Equal("skill-25", secondRows[0].GetProperty("name").GetString());
         Assert.Equal(30, second.GetProperty("total").GetInt32());
 
-        // A session that invoked no skills answers the not-measurable block the detail payload
+        // A session that invoked no skills answers the not-measurable block the summary section
         // carries, with no rows.
         JsonElement none = bridge.GetSessionSkills("sess-noskills")!.Value;
         Assert.Equal("not_measurable", none.GetProperty("availability").GetString());
@@ -603,8 +643,7 @@ public sealed class SessionSectionEndpointsTests
         KyberBridgeEngine bridge = CreateBridge(store, pricing);
         bridge.EnsureProjected();
 
-        JsonElement detail = bridge.GetSessionDetail(sessionKey)!.Value;
-        JsonElement[] today = [.. detail.GetProperty("timeline").EnumerateArray()];
+        JsonElement[] today = TodayTimelineNodes(store, sessionKey);
         Assert.Equal(32, today.Length);
 
         store.ClearReadLog();
@@ -675,8 +714,7 @@ public sealed class SessionSectionEndpointsTests
         KyberBridgeEngine bridge = CreateBridge(store, pricing);
         bridge.EnsureProjected();
 
-        JsonElement detail = bridge.GetSessionDetail(sessionKey)!.Value;
-        JsonElement[] today = [.. detail.GetProperty("timeline").EnumerateArray()];
+        JsonElement[] today = TodayTimelineNodes(store, sessionKey);
         JsonElement todayAuxiliary = Assert.Single(
             today,
             static node => node.GetProperty("spanId").GetString() == "(auxiliary)");
@@ -743,7 +781,7 @@ public sealed class SessionSectionEndpointsTests
         KyberBridgeEngine bridge = CreateBridge(store, pricing);
         bridge.EnsureProjected();
 
-        // Today's tree: BuildTimeline over the records the detail timeline hydrates.
+        // Today's tree: BuildTimeline over the records the timeline read model prices.
         List<CanonicalRecord> todayRecords =
             [.. store.SessionRecordsContentFree(sessionKey).Select(CanonRecordHydration.Hydrate)];
         todayRecords.Sort(static (left, right) =>
@@ -972,10 +1010,8 @@ public sealed class SessionSectionEndpointsTests
             ReportedInputTokens: null,
             ReportedOutputTokens: null);
 
-    /// <summary>
-    /// Asserts one timeline section row carries today's node fields minus <c>children</c> plus its
-    /// <c>childCount</c>, against the same node in the detail payload's timeline tree.
-    /// </summary>
+    /// <summary>Asserts one timeline section row carries today's node fields minus <c>children</c> plus its
+    /// <c>childCount</c>, against the same node in today's <c>BuildTimeline</c> tree.</summary>
     private static void AssertTimelineRowCarriesTodaysFields(JsonElement row, JsonElement today)
     {
         Assert.Equal(today.GetProperty("spanId").GetString(), row.GetProperty("spanId").GetString());
@@ -1018,6 +1054,42 @@ public sealed class SessionSectionEndpointsTests
 
         return (start == long.MaxValue ? 0 : start, end == long.MinValue ? 0 : end);
     }
+
+    /// <summary>
+    /// Today's timeline tree: <see cref="CanonContextAnalysis.BuildTimeline"/> over the session's
+    /// content-free records — the tree the timeline read model prices — serialized to the row
+    /// shape the detail route used to serve, so the section's pages are compared field for field.
+    /// </summary>
+    private static JsonElement[] TodayTimelineNodes(InMemoryRelationalStore store, string sessionKey)
+    {
+        List<CanonicalRecord> records =
+            [.. store.SessionRecordsContentFree(sessionKey).Select(CanonRecordHydration.Hydrate)];
+        records.Sort(static (left, right) =>
+        {
+            int byTimestamp = string.CompareOrdinal(left.Timestamp, right.Timestamp);
+            return byTimestamp != 0 ? byTimestamp : string.CompareOrdinal(left.SpanId, right.SpanId);
+        });
+
+        TimelineNode root = CanonContextAnalysis.BuildTimeline(records);
+        return [.. root.Children.Select(TodayTimelineNode)];
+    }
+
+    private static JsonElement TodayTimelineNode(TimelineNode node) =>
+        JsonSerializer.SerializeToElement(new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["spanId"] = node.SpanId,
+            ["parentId"] = node.ParentId,
+            ["startMs"] = node.StartMs,
+            ["durationMs"] = node.DurationMs,
+            ["kind"] = node.Kind,
+            ["name"] = node.Name,
+            ["status"] = node.Status,
+            ["attributes"] = node.Attributes,
+            ["isSubagent"] = node.IsSubagent,
+            ["isAuxiliary"] = node.IsAuxiliary,
+            ["cost"] = node.Cost,
+            ["children"] = node.Children.Select(TodayTimelineNode).ToList(),
+        });
 
     /// <summary>Seeds one batch of ingest problems attached to <paramref name="sessionKey"/>.</summary>
     private static void WriteProblems(InMemoryRelationalStore store, string sessionKey, int count)

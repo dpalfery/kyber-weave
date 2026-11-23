@@ -1379,38 +1379,6 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     }
 
     /// <inheritdoc />
-    public SessionDetailFigure? SessionDetailFigures(string sessionKey, IModelPricingLookup? pricing = null)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
-
-        CollectedSession? session = GetSession(sessionKey);
-        if (session is null)
-        {
-            return null;
-        }
-
-        IReadOnlyList<CollectedRecord> records = SessionRecordsContentFree(sessionKey);
-        IReadOnlyList<StoredSessionTurn> projectedTurns = GetSessionTurns(sessionKey);
-        SessionFigureSet figures = BuildSessionFigures(
-            session,
-            records,
-            GetSessionProjection(sessionKey),
-            projectedTurns,
-            QuerySessionIngestProblems(sessionKey),
-            pricing);
-        return new SessionDetailFigure(
-            figures.Summary with { SkillInvocations = SkillsInvoked(sessionKey: sessionKey) },
-            BuildContentFreeTurnSummaries(projectedTurns, records, session.HarnessId, pricing),
-            figures.Tools,
-            figures.Requests,
-            figures.Servers,
-            figures.Reconciliation,
-            figures.FirstContextBucket,
-            figures.LastContextBucket,
-            figures.UnusedRange);
-    }
-
-    /// <inheritdoc />
     public ReadTimeTurnSummary? TurnFigures(string sessionKey, int turnIndex, IModelPricingLookup? pricing = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);

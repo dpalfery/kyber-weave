@@ -162,13 +162,14 @@ public class ApplicationParityTests
 
         Assert.Contains("sess-copilot", query.GetSessionPage().GetRawText(), StringComparison.Ordinal);
         Assert.NotNull(query.GetSessionSummary("sess-copilot"));
-        Assert.NotNull(query.GetSessionDetail("sess-copilot"));
-        Assert.Null(query.GetSessionDetail("missing"));
+        Assert.NotNull(query.GetSessionCharts("sess-copilot"));
+        Assert.Null(query.GetSessionCharts("missing"));
         Assert.NotNull(store.SessionSummaryFigures("sess-copilot"));
-        Assert.NotNull(store.SessionDetailFigures("sess-copilot"));
+        Assert.NotNull(store.SessionTurnFigures("sess-copilot"));
         Assert.NotNull(store.TurnFigures("sess-copilot", 0));
         Assert.Null(store.TurnFigures("sess-copilot", 1));
         Assert.Null(store.SessionSummaryFigures("missing"));
+        Assert.Null(store.SessionTurnFigures("missing"));
         string harnessPayload = query.GetHarnesses().GetRawText();
         Assert.Contains("\"copilot\"", harnessPayload, StringComparison.Ordinal);
         Assert.Contains("\"sampleCount\"", harnessPayload, StringComparison.Ordinal);

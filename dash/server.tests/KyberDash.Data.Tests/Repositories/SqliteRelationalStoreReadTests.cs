@@ -1196,7 +1196,7 @@ public class SqliteRelationalStoreReadTests : IDisposable
             }
 
             Assert.Equivalent(memoryReader.SessionSummaryFigures(sessionKey), sqliteReader.SessionSummaryFigures(sessionKey), strict: true);
-            Assert.Equivalent(memoryReader.SessionDetailFigures(sessionKey), sqliteReader.SessionDetailFigures(sessionKey), strict: true);
+            Assert.Equivalent(memoryReader.SessionTurnFigures(sessionKey), sqliteReader.SessionTurnFigures(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.TurnFigures(sessionKey, 0), sqliteReader.TurnFigures(sessionKey, 0), strict: true);
             Assert.Equivalent(memoryReader.SessionRequestFigures(sessionKey, 1, 25), sqliteReader.SessionRequestFigures(sessionKey, 1, 25), strict: true);
             Assert.Equivalent(memoryReader.SessionRequestFigures(sessionKey, 2, 25), sqliteReader.SessionRequestFigures(sessionKey, 2, 25), strict: true);

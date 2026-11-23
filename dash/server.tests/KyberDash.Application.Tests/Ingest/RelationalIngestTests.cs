@@ -199,14 +199,15 @@ public class RelationalIngestTests
         Assert.NotNull(projection);
         Assert.Equal("kw-probe runA shared-service", projection.Label);
 
-        SessionDetailFigure? figure = store.SessionDetailFigures(sessionId, pricing.LoadPricingTables());
-        Assert.NotNull(figure);
-        Assert.Equal(2, figure.Summary.ToolCalls);
-        Assert.NotNull(figure.Summary.ReportedCost);
-        Assert.Equal(CostBasis.Harness, figure.Summary.ReportedCost.Basis);
-        Assert.Equal(0d, figure.Summary.ReportedCost.Value);
-        Assert.Contains(figure.Tools, static tool => tool.Name == "read" && tool.Invocations == 1);
-        Assert.Contains(figure.Tools, static tool => tool.Name == "skill" && tool.Invocations == 1);
+        SessionSummaryFigure? summary = store.SessionSummaryFigures(sessionId, pricing.LoadPricingTables());
+        Assert.NotNull(summary);
+        Assert.Equal(2, summary.ToolCalls);
+        Assert.NotNull(summary.ReportedCost);
+        Assert.Equal(CostBasis.Harness, summary.ReportedCost.Basis);
+        Assert.Equal(0d, summary.ReportedCost.Value);
+        SessionToolFigureSet toolFigures = store.SessionToolFigures(sessionId);
+        Assert.Contains(toolFigures.Tools, static tool => tool.Name == "read" && tool.Invocations == 1);
+        Assert.Contains(toolFigures.Tools, static tool => tool.Name == "skill" && tool.Invocations == 1);
 
         KyberBridgeEngine bridge = new(
             store,
@@ -215,11 +216,12 @@ public class RelationalIngestTests
             pricing,
             new CanonSessionProjectorEngine(store, store, store, pricing),
             new CanonRollupsEngine(store, store, pricing));
-        JsonElement detail = bridge.GetSessionDetail(sessionId)!.Value;
+        JsonElement tools = bridge.GetSessionTools(sessionId)!.Value;
         Assert.Contains(
-            detail.GetProperty("tools").EnumerateArray(),
+            tools.GetProperty("tools").EnumerateArray(),
             static tool => tool.GetProperty("name").GetString() == "read" && tool.GetProperty("invocations").GetInt32() == 1);
-        Assert.Equal(0d, detail.GetProperty("summary").GetProperty("cost_reported").GetProperty("value").GetDouble());
+        JsonElement summaryPayload = bridge.GetSessionSummary(sessionId)!.Value;
+        Assert.Equal(0d, summaryPayload.GetProperty("summary").GetProperty("cost_reported").GetProperty("value").GetDouble());
     }
 
     /// <summary>
@@ -266,7 +268,7 @@ public class RelationalIngestTests
             pricing,
             new CanonSessionProjectorEngine(store, store, store, pricing),
             new CanonRollupsEngine(store, store, pricing));
-        JsonElement summary = bridge.GetSessionDetail(sessionId)!.Value.GetProperty("summary");
+        JsonElement summary = bridge.GetSessionSummary(sessionId)!.Value.GetProperty("summary");
         Assert.Equal(JsonValueKind.Null, summary.GetProperty("total_input").ValueKind);
 
         JsonElement listed = Assert.Single(
@@ -278,17 +280,18 @@ public class RelationalIngestTests
         Assert.Contains("droid", reason, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("token", reason, StringComparison.OrdinalIgnoreCase);
 
-        JsonElement timeline = bridge.GetSessionDetail(sessionId)!.Value.GetProperty("timeline");
+        JsonElement timeline = bridge.GetSessionTimeline(sessionId)!.Value.GetProperty("nodes");
         Assert.Contains(timeline.EnumerateArray(), static node => node.GetProperty("name").GetString() == "factory.turn");
     }
 
     /// <summary>
     /// A Factory turn captured with content consent keeps the prompt in the store as a content
-    /// part, but the session detail page publishes none: its timeline span and request rows come
-    /// from content-free metadata, so the prompt returns only through a scoped content read.
+    /// part, but the content-free sections publish none: the timeline section's span attributes
+    /// and read carry no prompt text, and the prompt surfaces only through the requests section's
+    /// page-scoped preview read and the scoped content read.
     /// </summary>
     [Fact]
-    public void IngestBatch_FactoryTurnWithConsent_KeepsPromptOutOfTheContentFreeDetailPayload()
+    public void IngestBatch_FactoryTurnWithConsent_KeepsPromptOutOfTheContentFreeSections()
     {
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
@@ -320,17 +323,24 @@ public class RelationalIngestTests
             pricing,
             new CanonSessionProjectorEngine(store, store, store, pricing),
             new CanonRollupsEngine(store, store, pricing));
-        JsonElement detail = bridge.GetSessionDetail(sessionId)!.Value;
+        store.ClearReadLog();
+        JsonElement timeline = bridge.GetSessionTimeline(sessionId)!.Value.GetProperty("nodes");
         JsonElement node = Assert.Single(
-            detail.GetProperty("timeline").EnumerateArray(),
+            timeline.EnumerateArray(),
             static row => row.GetProperty("name").GetString() == "factory.turn");
         Assert.False(node.GetProperty("attributes").TryGetProperty(FactoryKeys.PromptText, out _));
-        Assert.Contains(
-            detail.GetProperty("requests").EnumerateArray(),
-            static row => row.GetProperty("prompt").ValueKind == JsonValueKind.Null);
+        Assert.Equal(0, store.MaterializedContentBytes);
 
-        // The capture is still stored: a scoped content read, not the detail page, is what
-        // returns the prompt.
+        // The prompt reaches a payload only through the requests section's page-scoped preview
+        // read — never a whole-conversation one.
+        JsonElement requests = bridge.GetSessionRequests(sessionId)!.Value;
+        Assert.Contains(
+            requests.GetProperty("requests").EnumerateArray(),
+            static row => row.GetProperty("prompt").ValueKind == JsonValueKind.String);
+        Assert.Contains(nameof(InMemoryRelationalStore.RequestPromptPreviews), store.ReadLog);
+
+        // The capture is still stored: a scoped content read, not the content-free sections, is
+        // what returns the prompt.
         Assert.Contains(
             store.FindRecordParts("aaaaaaaaaaaaaaaa"),
             part => part.PlainText == prompt);
