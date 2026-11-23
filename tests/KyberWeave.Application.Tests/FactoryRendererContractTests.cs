@@ -168,17 +168,24 @@ public sealed class FactoryRendererContractTests : IDisposable
 
             SquadCapabilityProfile capProfile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
             IReadOnlyList<string> tools = RequireSequence(frontmatter, "tools", agent.Name);
-            Assert.Equal(ExpectedFactoryTools(capProfile), tools);
-            Assert.All(tools, tool =>
-                Assert.Contains(tool, DocumentedFactoryTools, StringComparer.Ordinal));
-            foreach (string forbidden in ForbiddenFactoryTools)
-                Assert.DoesNotContain(forbidden, tools, StringComparer.Ordinal);
 
             // The whitelist is computed from the loaded source — the servers the squad's own
             // mcp.json declares plus the entitlement rule — never from the renderer. A blanket
             // mcpServers: [] satisfies an Assert.Empty here but not this.
             IReadOnlyList<string> expectedMcpServers =
                 ExpectedFactoryMcpServers(source, agent, declaredMcpServers);
+            IReadOnlyList<string> expectedMcpToolIds =
+                ExpectedFactoryMcpToolIds(source, expectedMcpServers);
+            Assert.Equal([.. ExpectedFactoryTools(capProfile), .. expectedMcpToolIds], tools);
+            Assert.All(
+                ExpectedFactoryTools(capProfile),
+                tool => Assert.Contains(tool, DocumentedFactoryTools, StringComparer.Ordinal));
+            Assert.All(
+                expectedMcpToolIds,
+                toolId => Assert.Contains("___", toolId, StringComparison.Ordinal));
+            foreach (string forbidden in ForbiddenFactoryTools)
+                Assert.DoesNotContain(forbidden, tools, StringComparer.Ordinal);
+
             IReadOnlyList<string> mcpServers = RequireSequence(frontmatter, "mcpServers", agent.Name);
             Assert.True(
                 expectedMcpServers.SequenceEqual(mcpServers, StringComparer.Ordinal),
@@ -389,6 +396,121 @@ public sealed class FactoryRendererContractTests : IDisposable
             SquadMcpGrantProjection.GrantsKyberWeave(source, conductor, SquadTarget.Factory),
             "The source's own profile denies 'filesystem.read' to the orchestrator, so this suite "
             + "cannot state the conductor is entitled to kw-docs.");
+    }
+
+    /// <summary>
+    ///     A read-entitled specialist droid carries a <c>{server}___{tool}</c> entry under
+    ///     <c>tools</c> for every roster tool of each granted server, after the semantic tool
+    ///     IDs — the runtime grant the <c>mcpServers</c> whitelist cannot express on its own —
+    ///     while the orchestrator carries the <c>kw-docs</c> entries and no <c>codegraph</c> one.
+    /// </summary>
+    /// <remarks>
+    ///     The expectation is derived from the loaded toolchain roster, never from the renderer,
+    ///     so a renamed roster tool or a re-added orchestrator carve-out fails the build.
+    /// </remarks>
+    [Fact]
+    public async Task RenderAsync_Factory_ToolsNameGrantedMcpToolIdsAfterSemanticTools()
+    {
+        SquadSource source = CanonicalSquadTree.Shared.Load();
+        IReadOnlyList<string> declaredMcpServers = DeclaredFactoryMcpServers(source);
+
+        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+            ProductRoot,
+            [SquadTarget.Factory],
+            SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // A read-entitled specialist: every roster tool of every granted server.
+        SquadAgent specialist = Assert.Single(source.Agents, agent => agent.Name == "architect");
+        IReadOnlyList<string> specialistServers =
+            ExpectedFactoryMcpServers(source, specialist, declaredMcpServers);
+        Assert.Equal(["codegraph", "kw-docs"], specialistServers);
+        IReadOnlyList<string> expectedSpecialistIds =
+            ExpectedFactoryMcpToolIds(source, specialistServers);
+        Assert.Contains("codegraph___codegraph_explore", expectedSpecialistIds, StringComparer.Ordinal);
+        Assert.True(
+            expectedSpecialistIds.Count > 1,
+            "The roster names no kw-docs tool, so nothing about the multi-server grant is exercised.");
+        IReadOnlyList<string> specialistTools =
+            RequireSequence(RenderedAgentFrontmatter(result, specialist.Name), "tools", specialist.Name);
+        Assert.Equal(
+            [.. ExpectedFactoryTools(source.CapabilityProfiles.Profiles[specialist.CapabilityProfile]), .. expectedSpecialistIds],
+            specialistTools);
+
+        // The orchestrator: the kw-docs entries, and no codegraph entry.
+        SquadAgent orchestrator = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        IReadOnlyList<string> orchestratorServers =
+            ExpectedFactoryMcpServers(source, orchestrator, declaredMcpServers);
+        Assert.Equal(["kw-docs"], orchestratorServers);
+        IReadOnlyList<string> orchestratorTools =
+            RequireSequence(RenderedAgentFrontmatter(result, orchestrator.Name), "tools", orchestrator.Name);
+        IReadOnlyList<string> expectedOrchestratorIds =
+            ExpectedFactoryMcpToolIds(source, orchestratorServers);
+        Assert.NotEmpty(expectedOrchestratorIds);
+        Assert.All(
+            expectedOrchestratorIds,
+            toolId => Assert.Contains(toolId, orchestratorTools, StringComparer.Ordinal));
+        Assert.DoesNotContain(
+            orchestratorTools,
+            tool => tool.StartsWith("codegraph___", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    ///     A profile that denies <c>filesystem.read</c> carries no MCP tool id under
+    ///     <c>tools</c> — no <c>___</c> entry at all — while its <c>mcpServers</c> stays
+    ///     <c>[]</c>, so the denial withholds the grant on both keys.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Factory_DeniedProfileToolsCarryNoMcpToolIds()
+    {
+        McpDeclarationSquadTree fixture =
+            McpDeclarationSquadTree.WithFileReadDeniedAgent("review-lens");
+        SquadSource source = fixture.Tree.Load();
+        IReadOnlyList<string> declared = DeclaredFactoryMcpServers(source);
+        Assert.NotEmpty(declared);
+
+        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+            fixture.ProductRoot,
+            [SquadTarget.Factory],
+            SquadDeploymentScope.Project).Prepared(fixture.Tree));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
+        Assert.Empty(ExpectedFactoryMcpServers(source, denied, declared));
+        YamlMappingNode frontmatter = RenderedAgentFrontmatter(result, denied.Name);
+        Assert.Empty(RequireSequence(frontmatter, "mcpServers", denied.Name));
+        Assert.DoesNotContain(
+            RequireSequence(frontmatter, "tools", denied.Name),
+            tool => tool.Contains("___", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    ///     A squad that declares no MCP server at all grants no MCP tool id: no droid's
+    ///     <c>tools</c> carries a <c>___</c> entry, so an empty declaration cannot turn into a
+    ///     grant through the roster alone.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Factory_EmptyMcpDeclarationGrantsNoMcpToolIds()
+    {
+        McpDeclarationSquadTree fixture = McpDeclarationSquadTree.WithServers();
+        SquadSource source = fixture.Tree.Load();
+        Assert.Empty(DeclaredFactoryMcpServers(source));
+        Assert.NotEmpty(source.Agents);
+
+        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+            fixture.ProductRoot,
+            [SquadTarget.Factory],
+            SquadDeploymentScope.Project).Prepared(fixture.Tree));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            YamlMappingNode frontmatter = RenderedAgentFrontmatter(result, agent.Name);
+            Assert.Empty(RequireSequence(frontmatter, "mcpServers", agent.Name));
+            Assert.DoesNotContain(
+                RequireSequence(frontmatter, "tools", agent.Name),
+                tool => tool.Contains("___", StringComparison.Ordinal));
+        }
     }
 
     /// <summary>
@@ -1163,6 +1285,28 @@ public sealed class FactoryRendererContractTests : IDisposable
             }
 
         return granted;
+    }
+
+    /// <summary>
+    ///     The <c>{server}___{tool}</c> entries a droid's <c>tools</c> list must carry for its
+    ///     granted servers: one per roster tool of each granted server, in granted-server then
+    ///     roster order. A granted server the roster does not name contributes nothing.
+    /// </summary>
+    /// <remarks>
+    ///     The expectation is derived from the loaded toolchain roster rather than from the
+    ///     renderer, so a renamed roster tool fails here instead of silently dropping the grant.
+    /// </remarks>
+    private static IReadOnlyList<string> ExpectedFactoryMcpToolIds(
+        SquadSource source,
+        IReadOnlyList<string> grantedServers)
+    {
+        List<string> toolIds = [];
+        foreach (string server in grantedServers)
+            if (source.Toolchain.RequiredMcpTools.TryGetValue(server, out IReadOnlyList<string>? tools))
+                foreach (string tool in tools)
+                    toolIds.Add($"{server}___{tool}");
+
+        return toolIds;
     }
 
     /// <summary>The rendered droid's frontmatter, located by the identity the agent names.</summary>

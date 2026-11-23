@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Domain/Squad
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-22
 status: current
 decided-by:
   - adr/0067-copilot-system-prompt-override-is-machine-wide
@@ -312,21 +312,25 @@ through its skill; the droid at `.factory/droids/<name>.md` is kept for
 Task dispatch. The skill runs under the session's permissions — the droid's explicit tools
 allow-list, its `mcpServers` whitelist, and the `ask` narrowing do not apply to it.
 
-**MCP servers:** a Task-dispatched droid sees MCP servers only through the `mcpServers`
-whitelist carried in its own droid file. `FactoryRenderer` derives that list from the server
+**MCP servers:** a Task-dispatched droid reaches an MCP tool only through the
+`{server}___{tool}` entries in its own droid file's `tools` list — the `mcpServers`
+whitelist beside them documents intent but grants nothing at runtime. `FactoryRenderer`
+derives the grant from the server
 names the squad itself declares in the `mcp.json` beside its canonical source — today exactly
 `kw-docs`, launched as `kyber-weave-mcp --repo-root .` — and grants it to every droid whose
 capability profile allows `filesystem.read`, `conductor` included ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md));
-`mcpServers: []` remains the fail-closed value for a droid whose profile grants no read
-entitlement and for a squad that declares no servers. The key is never omitted, because Factory reads an
-omitted `mcpServers` as "inherit the session-parent's servers", which is the widening the empty
-list exists to prevent. App-level configuration is the other half of the same wiring and it is
+`mcpServers: []` with no `___` entry under `tools` remains the fail-closed value for a droid
+whose profile grants no read
+entitlement and for a squad that declares no servers. Neither key is ever omitted, because Factory reads an
+omitted `mcpServers` as "inherit the session-parent's servers" and an omitted `tools` as "allow
+every tool", and either widening is what the explicit lists exist to prevent. App-level configuration is the other half of the same wiring and it is
 yours, not Squad's: Squad writes no Factory settings file and does not create or adopt
 `.factory/mcp.json` or `~/.factory/mcp.json`. `squad install` and `squad update` read those files
 and print a `factory-mcp-not-configured` warning when a server the droids are allowed has no
 definition there; `squad doctor` verifies neither. A droid needs
-both halves — Squad's whitelist names a server, and your file launches it — so wire the file
-first, then confirm the droid names the server. The [MCP runbook](../docgraph/mcp-runbook.md#factory)
+both halves — Squad's `tools` entries name the tool ids, and your file launches the server behind
+them — so wire the file
+first, then confirm the droid names the server's tool ids. The [MCP runbook](../docgraph/mcp-runbook.md#factory)
 carries the exact entry, and its troubleshooting row covers a dispatched droid that lists no MCP
 tools. [MCP access across harnesses](#mcp-access-across-harnesses) carries the rule and the other
 targets' forms.
@@ -578,7 +582,7 @@ other profile decision are untouched. Do not "fix" it back: change the ADR first
 | Devin | The same enumerated names in `allowed-tools`, on the **subagent path only** | **Nothing — structurally inexpressible.** `conductor` lowers to a skill, and a Devin skill carries no rendered `allowed-tools`, so it reaches `kw-docs` only through the session it runs in |
 | OpenCode | The server-scoped permission key `kw-docs_*` | Granted |
 | Command Code | Enumerated `mcp__` names in the agent's `tools`; the parent-MCP withholding sentence appears only when nothing is granted | The eight `kw-docs` names |
-| Factory | Per-droid server-level `mcpServers` whitelist; the key is never omitted | `mcpServers: [kw-docs]` |
+| Factory | Per-droid `tools` entries (`{server}___{tool}` per roster tool of each granted server); `mcpServers` still carries the whitelist as declared intent and neither key is ever omitted | `tools: [..., kw-docs___docs_get_coding_standard_for_technology, ...]` |
 | Copilot | The agent's own `copilot-tools` frontmatter entry `kw-docs/*` — canonical source, not renderer output | That one entry |
 | Pi | Renderer-derived overlay on every entitled **subagent**: `extensions: [pi-mcp-adapter]`, the proxy entry `ext:pi-mcp-adapter/mcp`, then one `ext:pi-mcp-adapter/mcp__kw_docs__<tool>` entry per roster tool | Granted on the agent file. `conductor` lowers to a skill, and a skill's frontmatter carries no `tools` or `extensions`, so it reaches the server only if its session has it configured — its degradation record says so |
 | Kilo | The agent frontmatter `permission` map entry `kw-docs_*: allow`; an agent outside the entitlement emits no `permission` key at all | Granted: `permission: {kw-docs_*: allow}`. This is an approval, not isolation: `allow` removes the ask prompt, and a headless subagent's ask would fail closed |

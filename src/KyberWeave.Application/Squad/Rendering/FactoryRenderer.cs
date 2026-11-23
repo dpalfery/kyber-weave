@@ -34,14 +34,18 @@ namespace KyberWeave.Core.Squad.Rendering;
 ///         available to a subagent.
 ///     </para>
 ///     <para>
-///         Omitting <c>mcpServers</c> inherits the parent session's MCP tools (widening), so Factory
-///         documents the key as an exclusion that is only honoured when it is present: <c>[]</c>
-///         excludes every server, an absent key keeps the parent's availability, and a scalar is
-///         rejected. This renderer therefore never omits the key and never emits a scalar. Its value
-///         is the whitelist the droid is entitled to — the servers the squad's own <c>mcp.json</c>
+///         Omitting <c>mcpServers</c> inherits the parent session's MCP tools (widening), so this
+///         renderer never omits the key and never emits a scalar. Its value is the whitelist the
+///         droid is entitled to — the servers the squad's own <c>mcp.json</c>
 ///         declares (excluding the <c>kw-arbiter</c> hook server), in ordinal order — for a
 ///         droid whose capability profile resolves and allows <c>filesystem.read</c>, and <c>[]</c>
-///         for every other droid. The declaration is partitioned by the same entitlement classes every
+///         for every other droid. The key documents intent but grants nothing at runtime on its
+///         own: a droid that names servers there and nothing under <c>tools</c> reaches no MCP
+///         tool, so the runtime grant is the <c>{server}___{tool}</c> entries the renderer
+///         appends to <c>tools</c> — one per roster tool of each granted server, after the
+///         semantic tool IDs, in granted-server then roster order. A granted server the roster
+///         does not name contributes no entry (fail closed). The declaration is partitioned by
+///         the same entitlement classes every
 ///         renderer uses: universal servers (<c>kw-docs</c>) are granted to the pure orchestrator
 ///         (profile id <c>orchestrator</c>) as well, while orchestrator-excluded servers (today
 ///         <c>codegraph</c>) are granted to the same read-entitled specialists but withheld from the
@@ -172,7 +176,14 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
             context.CapabilityProfiles,
             context.GetOrCreateState(static c => DeclaredMcpServerNames(c.Source)));
 
-        context.AddPrincipal(RenderDroid(context, agent, mcpServers), agent.Resources);
+        // The runtime grant: the harness ignores the mcpServers whitelist, so each granted
+        // server also contributes its roster tool ids to the tools allow-list. A granted
+        // server the roster does not name contributes nothing (fail closed).
+        IReadOnlyList<string> mcpToolIds = ResolveGrantedMcpToolIds(
+            mcpServers,
+            context.Source.Toolchain.RequiredMcpTools);
+
+        context.AddPrincipal(RenderDroid(context, agent, mcpServers, mcpToolIds), agent.Resources);
 
         context.AddEntryPointSkillProjection(
             agent,
@@ -206,7 +217,8 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
     private static SquadDeploymentFile RenderDroid(
         SquadHarnessRenderContext context,
         SquadAgent agent,
-        IReadOnlyList<string> mcpServers)
+        IReadOnlyList<string> mcpServers,
+        IReadOnlyList<string> mcpToolIds)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -227,8 +239,11 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
 
         // Always emit tools: omitting the key allows every Factory tool (widening). An empty
         // grant is tools: [] (fail-closed), never omitted and never 'all'. An unresolvable profile
-        // grants nothing (Factory omit = all tools).
-        frontmatter["tools"] = new FactoryYamlFlowSequence(Tools.Resolve(agent.CapabilityProfile, context.CapabilityProfiles));
+        // grants nothing (Factory omit = all tools). The granted MCP tool ids follow the semantic
+        // tool IDs at fixed positions, because the mcpServers whitelist documents intent but the
+        // harness honours only the entries under tools.
+        frontmatter["tools"] = new FactoryYamlFlowSequence(
+            [.. Tools.Resolve(agent.CapabilityProfile, context.CapabilityProfiles), .. mcpToolIds]);
 
         // Omitting mcpServers inherits parent MCP. Emit the key always, carrying the droid's
         // whitelist or [] when it is entitled to none, so the widening cannot happen.
@@ -281,6 +296,29 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
             }
 
         return granted;
+    }
+
+    /// <summary>
+    ///     The Factory MCP tool ids the runtime grant carries for the droid's granted servers:
+    ///     one <c>{server}___{tool}</c> entry per roster tool of each granted server.
+    /// </summary>
+    /// <remarks>
+    ///     Server order is the granted-servers order (already ordinal); tool order is the roster
+    ///     order, so a rename in <c>toolchain.yml</c> moves the entry without a renderer edit. A
+    ///     granted server the roster does not name contributes no entry, so the grant fails closed
+    ///     rather than naming a tool the server never registered.
+    /// </remarks>
+    private static IReadOnlyList<string> ResolveGrantedMcpToolIds(
+        IReadOnlyList<string> grantedServers,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> requiredMcpTools)
+    {
+        List<string> toolIds = [];
+        foreach (string server in grantedServers)
+            if (requiredMcpTools.TryGetValue(server, out IReadOnlyList<string>? tools))
+                foreach (string tool in tools)
+                    toolIds.Add($"{server}___{tool}");
+
+        return toolIds;
     }
 
     /// <summary>
