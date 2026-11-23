@@ -228,17 +228,19 @@ test('Context Doctor, All Harnesses view, and Gemini exclusion behave honestly',
   }
   await expect(selector.getByTestId('harness-tab-gemini')).toHaveCount(0)
 
-  // Session selector includes all 7 stored sessions and excludes gemini.
+  // Session picker includes all 7 stored sessions and excludes gemini. The
+  // picker is a search combobox over the store's paged answer (Task T3): its
+  // options render while it is open.
   await expect(page.getByTestId('context-doctor-session-scope-note')).toContainText(/Findings cover/)
-  const sessionSelect = page.getByTestId('context-doctor-session-select')
-  await expect(sessionSelect).toBeVisible()
-  const optionValues = await sessionSelect.locator('option').evaluateAll((opts) =>
-    opts.map((opt) => (opt as HTMLOptionElement).value),
-  )
+  const sessionCombobox = page.getByTestId('context-doctor-session-combobox')
+  await expect(sessionCombobox).toBeVisible()
+  await sessionCombobox.click()
+  const sessionListbox = page.getByTestId('context-doctor-session-listbox')
+  await expect(sessionListbox).toBeVisible()
   for (const contract of STORED_OTLP_HARNESS_CONTRACTS) {
-    expect(optionValues).toContain(contract.sessionId)
+    await expect(sessionListbox.getByTestId(`session-option-${contract.sessionId}`)).toBeVisible()
   }
-  expect(optionValues).not.toContain(GEMINI_EXCLUDED_SESSION_ID)
+  await expect(sessionListbox.getByTestId(`session-option-${GEMINI_EXCLUDED_SESSION_ID}`)).toHaveCount(0)
 
   // Filter Context Doctor by a specific stored harness and verify scope note updates.
   await selector.getByTestId('harness-tab-opencode').click()
