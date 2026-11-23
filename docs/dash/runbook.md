@@ -198,7 +198,8 @@ Claude Code process or written into `~/.claude/settings.json` by
 
 **Data-exposure warning.** With these enabled, the receiver stores the system prompt, tool
 definitions, message history, and the user's prompt as plaintext content parts, served on the
-loopback-only `/api/kyber/*` API. Assembled turn text is purged after 14 days; the raw packet
+loopback-only `/api/kyber/*` API. Assembled turn text is retained for 14 days by policy, though
+the relational engine does not yet delete it ([§4](#4-content-retention-policy)); the raw packet
 keeps exactly what the sender sent until you wipe the `claude-code` harness or the whole
 database ([§4](#4-content-retention-policy),
 [ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). Set them only when you
@@ -439,8 +440,8 @@ produce identical derived rows.
 
 ### 2a. Local harness-source refresh (`dash refresh`)
 
-Fill or update `canon.db` from installed native session stores, then purge expired content
-and rebuild derived tables:
+Fill or update `canon.db` from installed native session stores, then record the content-retention
+mark and rebuild derived tables:
 
 ```bash
 kyberdash kyber refresh
@@ -1102,18 +1103,21 @@ standing privacy and storage liability ([ADR 0014](../adr/0014-unclipped-turn-in
 
 - **Default 14-day rolling retention**: Full plaintext in `content_json` / `parts_json` is
   retained for 14 days to support the Context Inspector.
-- **Automatic purge on refresh**: `CanonRefreshEngine.RefreshHarnessSources` / `PurgeExpiredContent` clears expired content after source
-  jobs drain, and the maintenance pass calls it too, so the window still advances on a
-  schedule that is not reading folder sources. Rows older than 14 days have content emptied
-  in place (`'{}'` / NULL parts). Token metrics, timestamps, findings, and `records.raw`
-  stay.
-- **The window does not cover raw packets.** Assembled turn text is purged after 14 days.
+- **Automatic purge on refresh records the window; it does not yet delete.** `CanonRefreshEngine.RefreshHarnessSources` / `PurgeExpiredContent` runs after source
+  jobs drain, and the maintenance pass calls it too, so the cutoff advances on a
+  schedule that is not reading folder sources — but on the relational engine it only writes
+  `content_retention_days` and the purge cutoff and reports `purged: 0`. Rows older than 14 days
+  keep their content, and `canon.db` does not shrink on the retention window: deleting expired
+  content is a known gap in the ingestion service, so do not plan on space being reclaimed.
+- **The window does not cover raw packets.** Assembled turn text falls outside the retention
+  window after 14 days, though it is not yet deleted (above).
   The raw packet keeps exactly what the sender sent until you wipe the `claude-code` harness
   or the whole database ([§2b](#2b-database-clean-dash-clean),
   [ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). Never read the 14-day
   window as "all prompt text expires"; raw packets outlive it by design
   ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)).
-- There is no shipped `kyber purge-content` CLI. Re-run `dash refresh` to apply the window.
+- There is no shipped `kyber purge-content` CLI. Re-running `dash refresh` advances the retention
+  mark only; it deletes nothing.
 
 ### 5. LLM Review Provider Configuration & Privacy Guardrails
 
