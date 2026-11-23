@@ -30,6 +30,7 @@ decided-by:
   - adr/0041-kyberdash-retire-legacy-context-schema-routes
   - adr/0043-kyberdash-analysis-mcp-read-only-boundary
   - adr/0090-kyberdash-relational-store
+  - adr/0091-store-reads-are-shaped-by-their-consumer
 keywords:
   - dashboard
   - codeburn
@@ -1140,8 +1141,8 @@ Catalog rules, enforced by `RelationalSchemaCatalogTests`:
   `position` (`IsRepeatedItem`); non-repeated composite keys are allow-listed instead.
 - Projection tables store only non-derivable outputs. Turn counts, token totals, durations,
   models, costs, cache ratios, tool counts, coverage, problems, and reconciliation are computed
-  at read time (DD-13) via `IRelationalStoreReader.GetSessionAggregate`,
-  `ListSessionAggregates`, and `SessionTurnSummaries`, never stored.
+  at read time (DD-13) by the purpose-named figures reads — `IRelationalStoreReader.SessionListFigures`,
+  `SessionDetailFigures`, `SessionSummaryFigures`, `TurnFigures` — and never stored.
 - Mutually exclusive verdicts use exclusive pairs: `session_context` vs
   `session_context_unmeasurable`, `session_schema` vs `session_schema_unmeasurable`, and
   `content_part_text` vs `content_part_withheld`.
