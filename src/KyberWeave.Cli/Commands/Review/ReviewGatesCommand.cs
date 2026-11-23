@@ -83,6 +83,16 @@ public sealed class ReviewGatesCommand(
             return ClientInputExitCode;
         }
 
+        // --council writes the full council report, and a council run that names no --out file would finish with its
+        // report nowhere. Refused before any gate runs. Task gates never take --council, so --agent runs are not asked.
+        if (settings.Council && settings.Out is null && settings.Agent is null)
+        {
+            WriteClientInputError(
+                $"{ReviewGateReporting.InvalidInput}: --council needs --out, the file the full report is written to. " +
+                "review seats prints the complete command for a council run.");
+            return ClientInputExitCode;
+        }
+
         if (settings.Agent is null && settings.HasAgentOnlyOptions)
         {
             WriteClientInputError(
