@@ -459,6 +459,76 @@ public sealed class AnalyticsReadPathTests
         Assert.Null(store.TurnFigures("missing", 0, lookup));
     }
 
+    /// <summary>
+    /// The session detail page answers without materializing content: the bridge's public
+    /// <see cref="KyberBridgeEngine.GetSessionDetail"/> reads no content-bearing column and no
+    /// content bytes for a session with many large turns, while the payload still carries its
+    /// summary, turn, problem, tool, and request figures.
+    /// </summary>
+    [Fact]
+    public void SessionDetailPageAnswersWithoutContentReads()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-detail-page";
+        List<CollectedRecord> turns =
+        [
+            .. Enumerable.Range(0, 128).Select(static i => Turn(
+                $"turn-page-{i:D3}",
+                sessionKey,
+                i,
+                inputTokens: 1_000 + i,
+                cacheRead: 200 + i,
+                outputTokens: 100 + i,
+                model: i % 2 == 0 ? "claude-sonnet-4-6" : "gpt-5.1-codex",
+                reportedCostUsd: 0.01,
+                parts: [TextPart(0, "user_prompt", new string('x', 8_192))])),
+        ];
+        turns[0] = WithToolCall(turns[0]);
+        WriteSession(store, sessionKey, turns);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
+
+        store.ClearReadLog();
+        JsonElement payload = bridge.GetSessionDetail(sessionKey)!.Value;
+
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.DoesNotContain(store.ReadLog, read => ContentBearingReads.Contains(read));
+        Assert.Equal(128, payload.GetProperty("turns").GetArrayLength());
+        Assert.Equal(128, payload.GetProperty("summary").GetProperty("turn_count").GetInt32());
+        Assert.True(payload.GetProperty("summary").GetProperty("total_input").GetInt64() > 0);
+        Assert.Equal(0, payload.GetProperty("problems_count").GetInt32());
+        JsonElement tool = Assert.Single(payload.GetProperty("tools").EnumerateArray());
+        Assert.Equal("read", tool.GetProperty("name").GetString());
+        Assert.Equal(1, tool.GetProperty("invocations").GetInt32());
+        Assert.NotEmpty(payload.GetProperty("requests").EnumerateArray());
+        Assert.False(payload.TryGetProperty("projection_status", out _));
+
+        // The bounded summary page answers through the same content-free path.
+        store.ClearReadLog();
+        JsonElement summary = bridge.GetSessionSummary(sessionKey)!.Value;
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.DoesNotContain(store.ReadLog, read => ContentBearingReads.Contains(read));
+        Assert.Equal(128, summary.GetProperty("summary").GetProperty("turn_count").GetInt32());
+    }
+
+    /// <summary>Attaches one tool invocation and one tool definition, both metadata only.</summary>
+    private static CollectedRecord WithToolCall(CollectedRecord record) =>
+        record with
+        {
+            Tool = new CollectedToolCall(
+                CallId: "call-detail-page",
+                ToolName: "read",
+                McpServerName: null,
+                McpToolName: null,
+                Input: new CollectedToolContent("tool input text", 15, 15, null, null),
+                Result: new CollectedToolContent("tool result text", 16, 16, null, null),
+                Succeeded: true,
+                Error: null,
+                ExitCode: 0),
+            ToolDefinitions = [new CollectedToolDefinition(0, "read", null, 120)],
+        };
+
     /// <summary>Reader methods that materialize conversation text, so a path may not issue them.</summary>
     private static readonly string[] ContentBearingReads =
     [
@@ -1140,6 +1210,16 @@ public sealed class AnalyticsReadPathTests
             }
 
             return inner.TurnFigures(sessionKey, turnIndex, pricing);
+        }
+
+        public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return inner.SessionRecordsContentFree(sessionKey);
         }
 
         public IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null)

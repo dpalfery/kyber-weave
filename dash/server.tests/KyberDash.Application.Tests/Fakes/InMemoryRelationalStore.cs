@@ -868,7 +868,7 @@ public class InMemoryRelationalStore :
         lock (syncRoot)
         {
             NoteRead(nameof(SessionSummaryFigures));
-            return BuildSessionSummaryFigure(state, sessionKey, CollectSessionRecordsContentFree(state, sessionKey), pricing);
+            return BuildSessionFigures(state, sessionKey, CollectSessionRecordsContentFree(state, sessionKey), pricing)?.Summary;
         }
     }
 
@@ -881,15 +881,29 @@ public class InMemoryRelationalStore :
         {
             NoteRead(nameof(SessionDetailFigures));
             List<CollectedRecord> records = CollectSessionRecordsContentFree(state, sessionKey);
-            SessionSummaryFigure? summary = BuildSessionSummaryFigure(state, sessionKey, records, pricing);
-            if (summary is null)
+            SessionFigureSet? figures = BuildSessionFigures(state, sessionKey, records, pricing);
+            if (figures is null)
             {
                 return null;
             }
 
             return new SessionDetailFigure(
-                summary,
-                BuildSessionTurnFigures(state, sessionKey, records, summary.HarnessId, pricing));
+                figures.Summary,
+                BuildSessionTurnFigures(state, sessionKey, records, figures.Summary.HarnessId, pricing),
+                figures.Tools,
+                figures.Requests);
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionRecordsContentFree));
+            return CollectSessionRecordsContentFree(state, sessionKey);
         }
     }
 
@@ -5656,11 +5670,12 @@ public class InMemoryRelationalStore :
     /// no list figure reads them.
     /// </summary>
     /// <summary>
-    /// Derives one session's bounded summary figures from content-free record scalars, its
-    /// stored projection, and ingest diagnostics: the figures
-    /// <see cref="BuildSessionAggregateView"/> computes, minus every content-bearing column.
+    /// Derives one session's bounded summary figures, tool residency rows, and request metadata
+    /// from content-free record scalars, its stored projection, and ingest diagnostics: the
+    /// figures <see cref="BuildSessionAggregateView"/> computes, minus every content-bearing
+    /// column.
     /// </summary>
-    private static SessionSummaryFigure? BuildSessionSummaryFigure(
+    private static SessionFigureSet? BuildSessionFigures(
         StoreState currentState,
         string sessionKey,
         List<CollectedRecord> records,
@@ -5676,9 +5691,11 @@ public class InMemoryRelationalStore :
         string harnessId = session.HarnessId;
 
         HashSet<string> sessionSpanIds = new(StringComparer.Ordinal);
+        Dictionary<string, CollectedRecord> recordsBySpanId = new(records.Count, StringComparer.Ordinal);
         foreach (CollectedRecord record in records)
         {
             _ = sessionSpanIds.Add(record.RecordId);
+            recordsBySpanId[record.RecordId] = record;
         }
 
         StoredSessionProjection? projection = GetSessionProjectionFromState(currentState, sessionKey);
@@ -5850,66 +5867,120 @@ public class InMemoryRelationalStore :
             ? cacheCreationTurns
             : null;
 
-        IReadOnlyList<StoredSchemaRankedTool> rankedTools = projection?.Schema?.RankedTools ?? [];
+        int toolCallTotal = 0;
         List<string> toolsInvoked = [];
-        List<string> toolsOffered = [];
         HashSet<string> seenInvokedTools = new(StringComparer.Ordinal);
-        HashSet<string> seenOfferedTools = new(StringComparer.Ordinal);
-        int rankedInvocations = 0;
-        foreach (StoredSchemaRankedTool ranked in rankedTools)
+        Dictionary<string, int> invCounts = new(StringComparer.Ordinal);
+        Dictionary<string, int> errCounts = new(StringComparer.Ordinal);
+        foreach (CollectedRecord record in records)
         {
-            if (seenOfferedTools.Add(ranked.ToolName))
-            {
-                toolsOffered.Add(ranked.ToolName);
-            }
-
-            if (!ranked.Invoked)
+            if (record.Tool is null)
             {
                 continue;
             }
 
-            rankedInvocations++;
-            if (seenInvokedTools.Add(ranked.ToolName))
+            toolCallTotal++;
+            string toolName = record.Tool.ToolName;
+            if (seenInvokedTools.Add(toolName))
             {
-                toolsInvoked.Add(ranked.ToolName);
+                toolsInvoked.Add(toolName);
+            }
+
+            invCounts[toolName] = invCounts.GetValueOrDefault(toolName) + 1;
+            if (record.Status == RecordStatus.Error ||
+                record.Tool.Succeeded == false ||
+                record.Tool.Error is not null)
+            {
+                errCounts[toolName] = errCounts.GetValueOrDefault(toolName) + 1;
             }
         }
 
-        int invocationCount = projection?.Schema?.InvocationCount ?? 0;
-        int? toolCalls = invocationCount > 0 ? invocationCount : rankedInvocations > 0 ? rankedInvocations : null;
+        int? toolCalls = toolCallTotal > 0 ? toolCallTotal : null;
 
-        int requestCount = projection is not null && projection.RequestSpanIds.Count > 0
-            ? projection.RequestSpanIds.Count
-            : rootRecords.Count;
+        List<string> toolsOffered = [];
+        HashSet<string> seenOfferedTools = new(StringComparer.Ordinal);
+        Dictionary<string, (long SchemaTokens, string? Server, HashSet<string> SpanIds)> defStats = new(StringComparer.Ordinal);
+        int toolDefinitionRowCount = 0;
+        foreach (CollectedRecord record in records)
+        {
+            foreach (CollectedToolDefinition def in record.ToolDefinitions)
+            {
+                toolDefinitionRowCount++;
+                if (seenOfferedTools.Add(def.ToolName))
+                {
+                    toolsOffered.Add(def.ToolName);
+                }
+
+                if (!defStats.TryGetValue(def.ToolName, out (long SchemaTokens, string? Server, HashSet<string> SpanIds) existing))
+                {
+                    defStats[def.ToolName] = (
+                        def.SchemaTokens,
+                        def.Server,
+                        new HashSet<string>(StringComparer.Ordinal) { record.RecordId });
+                }
+                else
+                {
+                    _ = existing.SpanIds.Add(record.RecordId);
+                    defStats[def.ToolName] = (existing.SchemaTokens, existing.Server ?? def.Server, existing.SpanIds);
+                }
+            }
+        }
+
+        List<ReadTimeSessionToolSummary> tools = BuildSessionToolSummaries(
+            projection,
+            turnEntries.Count,
+            defStats,
+            toolsInvoked,
+            invCounts,
+            errCounts);
+
+        IReadOnlyList<string> requestSpanIds = projection is not null && projection.RequestSpanIds.Count > 0
+            ? projection.RequestSpanIds
+            : [.. rootRecords.Select(static r => r.RecordId)];
+        int requestCount = requestSpanIds.Count;
+        List<ReadTimeSessionRequestSummary> requests = BuildRequestSummaries(
+            requestSpanIds,
+            records,
+            recordsBySpanId,
+            turnEntries);
 
         List<Problem> problems = CollectSessionProblems(currentState, sessionKey, sessionSpanIds);
         problems.AddRange(extraProblems);
 
-        return new SessionSummaryFigure(
-            SessionKey: sessionKey,
-            HarnessId: harnessId,
-            TurnCount: turnEntries.Count,
-            RequestCount: requestCount,
-            TotalInput: nullableTotalInput,
-            TotalOutput: nullableTotalOutput,
-            TotalCacheRead: nullableTotalCacheRead,
-            TotalCacheCreation: nullableTotalCacheCreation,
-            DurationMs: hasDuration ? totalDuration : null,
-            Models: models,
-            CacheHitRatio: cacheHitRatio,
-            CacheCreationCoverage: cacheCreationCoverage,
-            ToolCalls: toolCalls,
-            ToolsInvoked: toolsInvoked,
-            HasToolDefinitions: rankedTools.Count > 0,
-            ToolsOffered: toolsOffered,
-            ReportedCost: sessionReportedCost,
-            PublishedCost: sessionPublishedCost,
-            CostBasisMismatch: basisMismatch,
-            Coverage: new ReadTimeSessionCoverage(
-                SchemaMeasurable: projection?.Schema is not null,
-                ContextMeasurable: projection?.Context is not null),
-            Problems: problems);
+        return new SessionFigureSet(
+            new SessionSummaryFigure(
+                SessionKey: sessionKey,
+                HarnessId: harnessId,
+                TurnCount: turnEntries.Count,
+                RequestCount: requestCount,
+                TotalInput: nullableTotalInput,
+                TotalOutput: nullableTotalOutput,
+                TotalCacheRead: nullableTotalCacheRead,
+                TotalCacheCreation: nullableTotalCacheCreation,
+                DurationMs: hasDuration ? totalDuration : null,
+                Models: models,
+                CacheHitRatio: cacheHitRatio,
+                CacheCreationCoverage: cacheCreationCoverage,
+                ToolCalls: toolCalls,
+                ToolsInvoked: toolsInvoked,
+                HasToolDefinitions: toolDefinitionRowCount > 0,
+                ToolsOffered: toolsOffered,
+                ReportedCost: sessionReportedCost,
+                PublishedCost: sessionPublishedCost,
+                CostBasisMismatch: basisMismatch,
+                Coverage: new ReadTimeSessionCoverage(
+                    SchemaMeasurable: projection?.Schema is not null,
+                    ContextMeasurable: projection?.Context is not null),
+                Problems: problems),
+            tools,
+            requests);
     }
+
+    /// <summary>One session's content-free figures with the detail page's tool and request rows.</summary>
+    private sealed record SessionFigureSet(
+        SessionSummaryFigure Summary,
+        IReadOnlyList<ReadTimeSessionToolSummary> Tools,
+        IReadOnlyList<ReadTimeSessionRequestSummary> Requests);
 
     private static IReadOnlyList<ReadTimeTurnSummary> BuildSessionTurnFigures(
         StoreState currentState,
@@ -5968,6 +6039,15 @@ public class InMemoryRelationalStore :
         long? reportedInput = ReadOptionalReportedTotal(currentState, spanId, "input");
         long? reportedOutput = ReadOptionalReportedTotal(currentState, spanId, "output");
 
+        TableMetadata defMeta = GetTableMetadata("tool_definition");
+        List<CollectedToolDefinition> toolDefs =
+        [
+            .. currentState.GetRows("tool_definition")
+                .Where(r => string.Equals(GetString(defMeta, r, "span_id"), spanId, StringComparison.Ordinal))
+                .OrderBy(r => (int)GetInt64(defMeta, r, "position"))
+                .Select(r => MaterializeToolDefinition(currentState, r)),
+        ];
+
         return new CollectedRecord(
             spanId,
             harnessId,
@@ -5985,14 +6065,33 @@ public class InMemoryRelationalStore :
             tokens,
             reportedCost,
             Parts: [],
-            Tool: null,
+            Tool: MaterializeToolCallContentFree(currentState, spanId),
             Agent: null,
             SkillsInvoked: [],
             agentInstanceId,
-            ToolDefinitions: [],
+            toolDefs,
             new CollectedRecordSignals(null, null, null, null),
             reportedInput,
             reportedOutput);
+    }
+
+    /// <summary>
+    /// Materializes a tool call's metadata with no input or result text, the shape the
+    /// content-free record read carries.
+    /// </summary>
+    private static CollectedToolCall? MaterializeToolCallContentFree(StoreState currentState, string spanId)
+    {
+        CollectedToolCall? call = MaterializeToolCall(currentState, spanId);
+        if (call is null)
+        {
+            return null;
+        }
+
+        return call with
+        {
+            Input = call.Input is null ? null : call.Input with { PlainText = null },
+            Result = call.Result is null ? null : call.Result with { PlainText = null },
+        };
     }
 
     private static StoredSessionProjection? GetSessionProjectionFromState(StoreState currentState, string sessionId)

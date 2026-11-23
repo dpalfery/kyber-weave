@@ -482,6 +482,9 @@ public class ProjectionReadPathTests
         public ReadTimeTurnSummary? TurnFigures(string sessionKey, int turnIndex, IModelPricingLookup? pricing = null) => inner.TurnFigures(sessionKey, turnIndex, pricing);
 
         /// <inheritdoc />
+        public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey) => inner.SessionRecordsContentFree(sessionKey);
+
+        /// <inheritdoc />
         public IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null) => inner.SessionTurnSummaries(sessionKey, pricing);
     }
 }

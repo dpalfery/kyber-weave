@@ -283,11 +283,12 @@ public class RelationalIngestTests
     }
 
     /// <summary>
-    /// A Factory turn captured with content consent keeps the prompt on the timeline span
-    /// the inspector reads and on the session request the payload publishes.
+    /// A Factory turn captured with content consent keeps the prompt in the store as a content
+    /// part, but the session detail page publishes none: its timeline span and request rows come
+    /// from content-free metadata, so the prompt returns only through a scoped content read.
     /// </summary>
     [Fact]
-    public void IngestBatch_FactoryTurnWithConsent_PublishesPromptOnTimelineAndRequest()
+    public void IngestBatch_FactoryTurnWithConsent_KeepsPromptOutOfTheContentFreeDetailPayload()
     {
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
@@ -323,11 +324,16 @@ public class RelationalIngestTests
         JsonElement node = Assert.Single(
             detail.GetProperty("timeline").EnumerateArray(),
             static row => row.GetProperty("name").GetString() == "factory.turn");
-        Assert.Equal(prompt, node.GetProperty("attributes").GetProperty(FactoryKeys.PromptText).GetString());
+        Assert.False(node.GetProperty("attributes").TryGetProperty(FactoryKeys.PromptText, out _));
         Assert.Contains(
             detail.GetProperty("requests").EnumerateArray(),
-            row => row.GetProperty("prompt").ValueKind == JsonValueKind.String
-                && row.GetProperty("prompt").GetString() == prompt);
+            static row => row.GetProperty("prompt").ValueKind == JsonValueKind.Null);
+
+        // The capture is still stored: a scoped content read, not the detail page, is what
+        // returns the prompt.
+        Assert.Contains(
+            store.ContentParts("aaaaaaaaaaaaaaaa"),
+            part => part.Part.PlainText == prompt);
     }
 
     /// <summary>

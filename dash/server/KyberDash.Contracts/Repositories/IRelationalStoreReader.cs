@@ -430,18 +430,22 @@ public record SessionSummaryFigure(
     IReadOnlyList<Problem> Problems);
 
 /// <summary>
-/// Read-time figures the session detail header renders, with the session's per-turn figures
-/// (<c>DD-13</c>).
+/// Read-time figures the session detail header renders, with the session's per-turn figures,
+/// tool residency rows, and request metadata (<c>DD-13</c>).
 /// </summary>
 /// <param name="Summary">Bounded summary figures the header shows.</param>
 /// <param name="Turns">Per-turn figures in turn order.</param>
+/// <param name="Tools">Per-tool residency and invocation summaries in ranking order.</param>
+/// <param name="Requests">Ordered request summaries. A request's prompt preview is content, so it stays absent here.</param>
 /// <remarks>
-/// Content-free for the same reason as <see cref="SessionSummaryFigure"/>: the detail header and
-/// the turn list price stored token counts, reported costs, models, and timestamps only.
+/// Content-free for the same reason as <see cref="SessionSummaryFigure"/>: the detail header, the
+/// turn list, and the tool and request rows price stored metadata only.
 /// </remarks>
 public record SessionDetailFigure(
     SessionSummaryFigure Summary,
-    IReadOnlyList<ReadTimeTurnSummary> Turns);
+    IReadOnlyList<ReadTimeTurnSummary> Turns,
+    IReadOnlyList<ReadTimeSessionToolSummary> Tools,
+    IReadOnlyList<ReadTimeSessionRequestSummary> Requests);
 
 /// <summary>
 /// Typed read-only query contract over normalized telemetry, session, and record tables in
@@ -618,6 +622,17 @@ public interface IRelationalStoreReader
     /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
     /// <returns>The turn's figures, or <see langword="null"/> when the index is outside the session.</returns>
     ReadTimeTurnSummary? TurnFigures(string sessionKey, int turnIndex, IModelPricingLookup? pricing = null);
+
+    /// <summary>
+    /// Reads one session's record metadata with no content column, the shape the detail
+    /// timeline hydrates from.
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <returns>
+    /// Linked records carrying token counts, models, timestamps, signals, tool-call metadata, and
+    /// tool definitions, with no content part, tool input text, or tool result text.
+    /// </returns>
+    IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey);
 
     /// <summary>Computes read-time per-turn summaries for <paramref name="sessionKey"/> (<c>DD-13</c>).</summary>
     /// <param name="sessionKey">Canonical session key to inspect.</param>

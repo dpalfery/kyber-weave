@@ -131,6 +131,7 @@ public class StoreInterfaceShapeTests
                 nameof(IRelationalStoreReader.SessionSummaryFigures),
                 nameof(IRelationalStoreReader.SessionDetailFigures),
                 nameof(IRelationalStoreReader.TurnFigures),
+                nameof(IRelationalStoreReader.SessionRecordsContentFree),
             ]);
 
         MethodInfo? storedFields = typeof(IRelationalStoreReader).GetMethod(nameof(IRelationalStoreReader.StoredFields));

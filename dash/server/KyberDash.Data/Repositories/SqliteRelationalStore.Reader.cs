@@ -769,13 +769,13 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return null;
         }
 
-        return BuildSessionSummaryFigure(
+        return BuildSessionFigures(
             session,
-            ReadContentFreeSessionRecords(sessionKey),
+            SessionRecordsContentFree(sessionKey),
             GetSessionProjection(sessionKey),
             GetSessionTurns(sessionKey),
             QuerySessionIngestProblems(sessionKey),
-            pricing);
+            pricing).Summary;
     }
 
     /// <inheritdoc />
@@ -789,9 +789,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return null;
         }
 
-        IReadOnlyList<CollectedRecord> records = ReadContentFreeSessionRecords(sessionKey);
+        IReadOnlyList<CollectedRecord> records = SessionRecordsContentFree(sessionKey);
         IReadOnlyList<StoredSessionTurn> projectedTurns = GetSessionTurns(sessionKey);
-        SessionSummaryFigure summary = BuildSessionSummaryFigure(
+        SessionFigureSet figures = BuildSessionFigures(
             session,
             records,
             GetSessionProjection(sessionKey),
@@ -799,8 +799,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             QuerySessionIngestProblems(sessionKey),
             pricing);
         return new SessionDetailFigure(
-            summary,
-            BuildContentFreeTurnSummaries(projectedTurns, records, session.HarnessId, pricing));
+            figures.Summary,
+            BuildContentFreeTurnSummaries(projectedTurns, records, session.HarnessId, pricing),
+            figures.Tools,
+            figures.Requests);
     }
 
     /// <inheritdoc />
@@ -813,7 +815,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         }
 
         CollectedSession? session = GetSession(sessionKey);
-        IReadOnlyList<CollectedRecord> records = ReadContentFreeSessionRecords(sessionKey);
+        IReadOnlyList<CollectedRecord> records = SessionRecordsContentFree(sessionKey);
         if (session is null && records.Count == 0)
         {
             return null;
@@ -825,9 +827,13 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return turnIndex < turns.Count ? turns[turnIndex] : null;
     }
 
-    private IReadOnlyList<CollectedRecord> ReadContentFreeSessionRecords(string sessionKey)
+    /// <inheritdoc />
+    public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey)
     {
-        Dictionary<string, List<CollectedRecord>> recordsBySession = QueryContentFreeRecordsBySession([sessionKey]);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        Dictionary<string, List<CollectedRecord>> recordsBySession =
+            QueryContentFreeRecordsBySession([sessionKey], includeToolMetadata: true);
         return recordsBySession.TryGetValue(sessionKey, out List<CollectedRecord>? records) ? records : [];
     }
 
@@ -848,12 +854,13 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     }
 
     /// <summary>
-    /// Derives one session's bounded summary figures from content-free record scalars, its
-    /// stored projection, and ingest diagnostics: the figures
-    /// <see cref="BuildSessionAggregateView"/> computes from token counts, reported costs,
-    /// models, timestamps, and projection metadata, with no content column read.
+    /// Derives one session's bounded summary figures, tool residency rows, and request metadata
+    /// from content-free record scalars, its stored projection, and ingest diagnostics: the
+    /// figures <see cref="BuildSessionAggregateView"/> computes from token counts, reported
+    /// costs, models, timestamps, projection metadata, and tool metadata, with no content column
+    /// read.
     /// </summary>
-    private static SessionSummaryFigure BuildSessionSummaryFigure(
+    private static SessionFigureSet BuildSessionFigures(
         CollectedSession session,
         IReadOnlyList<CollectedRecord> records,
         StoredSessionProjection? projection,
@@ -865,9 +872,11 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         string harnessId = session.HarnessId;
 
         HashSet<string> sessionSpanIds = new(StringComparer.Ordinal);
+        Dictionary<string, CollectedRecord> recordsBySpanId = new(records.Count, StringComparer.Ordinal);
         foreach (CollectedRecord record in records)
         {
             _ = sessionSpanIds.Add(record.RecordId);
+            recordsBySpanId[record.RecordId] = record;
         }
 
         List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntriesForReader(projectedTurns, records);
@@ -1038,40 +1047,85 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             ? cacheCreationTurns
             : null;
 
-        // The detail header's tool figures come from the projection's ranked schema rather than
-        // the tool-call and tool-definition rows: those tables carry invocation and definition
-        // payloads, and the projection already ranks the same session.
-        IReadOnlyList<StoredSchemaRankedTool> rankedTools = projection?.Schema?.RankedTools ?? [];
+        // Tool figures come from the metadata tables the content-free record read carries:
+        // tool names, servers, definition schema sizes, and outcomes are metadata, while the
+        // tool input and result text tables are never selected.
+        int toolCallTotal = 0;
         List<string> toolsInvoked = [];
-        List<string> toolsOffered = [];
         HashSet<string> seenInvokedTools = new(StringComparer.Ordinal);
-        HashSet<string> seenOfferedTools = new(StringComparer.Ordinal);
-        int rankedInvocations = 0;
-        foreach (StoredSchemaRankedTool ranked in rankedTools)
+        Dictionary<string, int> invCounts = new(StringComparer.Ordinal);
+        Dictionary<string, int> errCounts = new(StringComparer.Ordinal);
+        foreach (CollectedRecord record in records)
         {
-            if (seenOfferedTools.Add(ranked.ToolName))
-            {
-                toolsOffered.Add(ranked.ToolName);
-            }
-
-            if (!ranked.Invoked)
+            if (record.Tool is null)
             {
                 continue;
             }
 
-            rankedInvocations++;
-            if (seenInvokedTools.Add(ranked.ToolName))
+            toolCallTotal++;
+            string toolName = record.Tool.ToolName;
+            if (seenInvokedTools.Add(toolName))
             {
-                toolsInvoked.Add(ranked.ToolName);
+                toolsInvoked.Add(toolName);
+            }
+
+            invCounts[toolName] = invCounts.GetValueOrDefault(toolName) + 1;
+            if (record.Status == RecordStatus.Error ||
+                record.Tool.Succeeded == false ||
+                record.Tool.Error is not null)
+            {
+                errCounts[toolName] = errCounts.GetValueOrDefault(toolName) + 1;
             }
         }
 
-        int invocationCount = projection?.Schema?.InvocationCount ?? 0;
-        int? toolCalls = invocationCount > 0 ? invocationCount : rankedInvocations > 0 ? rankedInvocations : null;
+        int? toolCalls = toolCallTotal > 0 ? toolCallTotal : null;
 
-        int requestCount = projection is not null && projection.RequestSpanIds.Count > 0
-            ? projection.RequestSpanIds.Count
-            : rootRecords.Count;
+        List<string> toolsOffered = [];
+        HashSet<string> seenOfferedTools = new(StringComparer.Ordinal);
+        Dictionary<string, (long SchemaTokens, string? Server, HashSet<string> SpanIds)> defStats = new(StringComparer.Ordinal);
+        int toolDefinitionRowCount = 0;
+        foreach (CollectedRecord record in records)
+        {
+            foreach (CollectedToolDefinition def in record.ToolDefinitions)
+            {
+                toolDefinitionRowCount++;
+                if (seenOfferedTools.Add(def.ToolName))
+                {
+                    toolsOffered.Add(def.ToolName);
+                }
+
+                if (!defStats.TryGetValue(def.ToolName, out (long SchemaTokens, string? Server, HashSet<string> SpanIds) existing))
+                {
+                    defStats[def.ToolName] = (
+                        def.SchemaTokens,
+                        def.Server,
+                        new HashSet<string>(StringComparer.Ordinal) { record.RecordId });
+                }
+                else
+                {
+                    _ = existing.SpanIds.Add(record.RecordId);
+                    defStats[def.ToolName] = (existing.SchemaTokens, existing.Server ?? def.Server, existing.SpanIds);
+                }
+            }
+        }
+
+        List<ReadTimeSessionToolSummary> tools = BuildReaderToolSummaries(
+            projection,
+            turnEntries.Count,
+            defStats,
+            toolsInvoked,
+            invCounts,
+            errCounts);
+
+        IReadOnlyList<string> requestSpanIds = projection is not null && projection.RequestSpanIds.Count > 0
+            ? projection.RequestSpanIds
+            : [.. rootRecords.Select(static r => r.RecordId)];
+        int requestCount = requestSpanIds.Count;
+        List<ReadTimeSessionRequestSummary> requests = BuildReaderRequestSummaries(
+            requestSpanIds,
+            records,
+            recordsBySpanId,
+            turnEntries);
 
         ReadTimeSessionCoverage coverage = new(
             SchemaMeasurable: projection?.Schema is not null,
@@ -1080,29 +1134,38 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         List<Problem> problems = [.. storedProblems];
         problems.AddRange(extraProblems);
 
-        return new SessionSummaryFigure(
-            SessionKey: sessionKey,
-            HarnessId: harnessId,
-            TurnCount: turnEntries.Count,
-            RequestCount: requestCount,
-            TotalInput: nullableTotalInput,
-            TotalOutput: nullableTotalOutput,
-            TotalCacheRead: nullableTotalCacheRead,
-            TotalCacheCreation: nullableTotalCacheCreation,
-            DurationMs: hasDuration ? totalDuration : null,
-            Models: models,
-            CacheHitRatio: cacheHitRatio,
-            CacheCreationCoverage: cacheCreationCoverage,
-            ToolCalls: toolCalls,
-            ToolsInvoked: toolsInvoked,
-            HasToolDefinitions: rankedTools.Count > 0,
-            ToolsOffered: toolsOffered,
-            ReportedCost: sessionReportedCost,
-            PublishedCost: sessionPublishedCost,
-            CostBasisMismatch: basisMismatch,
-            Coverage: coverage,
-            Problems: problems);
+        return new SessionFigureSet(
+            new SessionSummaryFigure(
+                SessionKey: sessionKey,
+                HarnessId: harnessId,
+                TurnCount: turnEntries.Count,
+                RequestCount: requestCount,
+                TotalInput: nullableTotalInput,
+                TotalOutput: nullableTotalOutput,
+                TotalCacheRead: nullableTotalCacheRead,
+                TotalCacheCreation: nullableTotalCacheCreation,
+                DurationMs: hasDuration ? totalDuration : null,
+                Models: models,
+                CacheHitRatio: cacheHitRatio,
+                CacheCreationCoverage: cacheCreationCoverage,
+                ToolCalls: toolCalls,
+                ToolsInvoked: toolsInvoked,
+                HasToolDefinitions: toolDefinitionRowCount > 0,
+                ToolsOffered: toolsOffered,
+                ReportedCost: sessionReportedCost,
+                PublishedCost: sessionPublishedCost,
+                CostBasisMismatch: basisMismatch,
+                Coverage: coverage,
+                Problems: problems),
+            tools,
+            requests);
     }
+
+    /// <summary>One session's content-free figures with the detail page's tool and request rows.</summary>
+    private sealed record SessionFigureSet(
+        SessionSummaryFigure Summary,
+        IReadOnlyList<ReadTimeSessionToolSummary> Tools,
+        IReadOnlyList<ReadTimeSessionRequestSummary> Requests);
 
     /// <inheritdoc />
     public IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null)
@@ -1795,11 +1858,20 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
     /// <summary>
     /// Reads every record linked to <paramref name="sessionKeys"/> in one batched, content-free
-    /// pass: the same <c>REC</c> and <c>TOK</c> selects the broad record read runs, with no
-    /// <c>content_part</c>, tool-call, tool-definition, agent-invocation, or skill select.
+    /// pass: the same <c>REC</c> and <c>TOK</c> selects the broad record read runs, plus the
+    /// tool-definition and tool-call metadata selects when
+    /// <paramref name="includeToolMetadata"/> asks for them, with no <c>content_part</c>, tool
+    /// input text, tool result text, agent-invocation, or skill select.
     /// </summary>
     /// <param name="sessionKeys">Canonical session keys whose records are read.</param>
-    private Dictionary<string, List<CollectedRecord>> QueryContentFreeRecordsBySession(IReadOnlyList<string> sessionKeys)
+    /// <param name="includeToolMetadata">
+    /// Whether to read the tool-definition and tool-call metadata rows. The session detail and
+    /// summary figures need them; the session list does not, and its payload is answered from
+    /// the projection's ranked schema, so its read stays off the tool tables entirely.
+    /// </param>
+    private Dictionary<string, List<CollectedRecord>> QueryContentFreeRecordsBySession(
+        IReadOnlyList<string> sessionKeys,
+        bool includeToolMetadata = false)
     {
         Dictionary<string, List<CollectedRecord>> recordsBySession = new(StringComparer.Ordinal);
         if (sessionKeys.Count == 0)
@@ -1851,9 +1923,41 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             "SELECT 'TOK', hex(CAST(r.span_id AS BLOB)), hex(CAST(r.token_class AS BLOB)), r.token_count " +
             $"FROM record_token_count r{tokenFilter} ORDER BY r.rowid ASC;\n");
 
+        if (includeToolMetadata)
+        {
+            string linkedSpanIds = $"(SELECT rsl.span_id FROM record_session_link rsl WHERE rsl.session_key IN ({keyFilter}))";
+
+            sql.Append(
+                "SELECT 'TDEF', hex(CAST(td.span_id AS BLOB)), td.position, hex(CAST(td.tool_name AS BLOB)), " +
+                "typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), ''), td.schema_tokens " +
+                "FROM tool_definition td " +
+                "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position" +
+                $" WHERE td.span_id IN {linkedSpanIds} ORDER BY td.span_id ASC, td.position ASC;\n");
+
+            // The tool-call metadata joins deliberately omit tool_call_input_text and
+            // tool_call_result_text: sizes, fingerprints, outcomes, errors, and exit codes are
+            // metadata, and those two tables hold the only tool content.
+            sql.Append("SELECT 'TC', hex(CAST(tc.span_id AS BLOB)), ");
+            sql.Append(BuildToolCallMetadataColumns("tc"));
+            sql.Append(" FROM tool_call tc " +
+                       "LEFT JOIN tool_call_mcp tcm ON tcm.span_id = tc.span_id " +
+                       "LEFT JOIN tool_call_input_size tcis ON tcis.span_id = tc.span_id " +
+                       "LEFT JOIN tool_call_input_fingerprint tcif ON tcif.span_id = tc.span_id " +
+                       "LEFT JOIN tool_call_input_truncation tcitrc ON tcitrc.span_id = tc.span_id " +
+                       "LEFT JOIN tool_call_result_size tcrs ON tcrs.span_id = tc.span_id " +
+                       "LEFT JOIN tool_call_result_truncation tcrtrc ON tcrtrc.span_id = tc.span_id " +
+                       "LEFT JOIN tool_call_outcome tco ON tco.span_id = tc.span_id " +
+                       "LEFT JOIN tool_call_error tce ON tce.span_id = tc.span_id " +
+                       "LEFT JOIN tool_call_error_code tcec ON tcec.span_id = tc.span_id " +
+                       "LEFT JOIN tool_call_exit_code tcex ON tcex.span_id = tc.span_id" +
+                       $" WHERE tc.span_id IN {linkedSpanIds} ORDER BY tc.rowid ASC;\n");
+        }
+
         string output = ExecuteSqlite(sql.ToString());
         List<RawRecordHeader> rawRecords = [];
         Dictionary<string, List<CollectedTokenCount>> tokensBySpan = new(StringComparer.Ordinal);
+        Dictionary<string, List<CollectedToolDefinition>> defsBySpan = new(StringComparer.Ordinal);
+        Dictionary<string, CollectedToolCall> toolCallsBySpan = new(StringComparer.Ordinal);
 
         foreach (string line in TabLines(output))
         {
@@ -1883,6 +1987,34 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                         break;
                     }
 
+                case "TDEF":
+                    {
+                        if (cols.Length != 7)
+                        {
+                            throw new InvalidOperationException($"Expected 7 columns for TDEF row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        }
+
+                        string spanId = ParseHexRequired(cols[1], "tool_definition.span_id");
+                        int position = ParseInt32Required(cols[2], "tool_definition.position");
+                        string toolName = ParseHexRequired(cols[3], "tool_definition.tool_name");
+                        string? server = ParseNullableHex(cols[4], cols[5], "tool_definition_server.server_name");
+                        long schemaTokens = ParseInt64Required(cols[6], "tool_definition.schema_tokens");
+                        GetOrCreateList(defsBySpan, spanId).Add(new CollectedToolDefinition(position, toolName, server, schemaTokens));
+                        break;
+                    }
+
+                case "TC":
+                    {
+                        if (cols.Length != 34)
+                        {
+                            throw new InvalidOperationException($"Expected 34 columns for TC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        }
+
+                        string spanId = ParseHexRequired(cols[1], "tool_call.span_id");
+                        toolCallsBySpan[spanId] = ParseToolCallColumns(cols, startIndex: 2);
+                        break;
+                    }
+
                 default:
                     throw new InvalidOperationException($"Unexpected content-free record query row tag '{cols[0]}'.");
             }
@@ -1907,11 +2039,11 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 tokensBySpan.TryGetValue(header.SpanId, out List<CollectedTokenCount>? tokens) ? tokens : [],
                 header.ReportedCost,
                 Parts: [],
-                Tool: null,
+                Tool: toolCallsBySpan.GetValueOrDefault(header.SpanId),
                 Agent: null,
                 SkillsInvoked: [],
                 header.AgentInstanceId,
-                ToolDefinitions: [],
+                defsBySpan.TryGetValue(header.SpanId, out List<CollectedToolDefinition>? defs) ? defs : [],
                 header.Signals,
                 header.ReportedInputTokens,
                 header.ReportedOutputTokens);
@@ -3107,6 +3239,28 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         "typeof(tcrs.utf8_bytes), COALESCE(CAST(tcrs.utf8_bytes AS TEXT), ''), " +
         "typeof(tcrs.characters), COALESCE(CAST(tcrs.characters AS TEXT), ''), " +
         "typeof(tcrt.text), COALESCE(hex(CAST(tcrt.text AS BLOB)), ''), " +
+        "typeof(tcrtrc.original_utf8_bytes), COALESCE(CAST(tcrtrc.original_utf8_bytes AS TEXT), ''), " +
+        "typeof(tco.succeeded), COALESCE(CAST(tco.succeeded AS TEXT), ''), " +
+        "typeof(tce.message), COALESCE(hex(CAST(tce.message AS BLOB)), ''), " +
+        "typeof(tcec.code), COALESCE(hex(CAST(tcec.code AS BLOB)), ''), " +
+        "typeof(tcex.exit_code), COALESCE(CAST(tcex.exit_code AS TEXT), '')";
+
+    /// <summary>
+    /// Tool-call columns without the two content-bearing text expressions, in the same order as
+    /// <see cref="BuildToolCallColumns"/> so both parses share one reader.
+    /// </summary>
+    private static string BuildToolCallMetadataColumns(string alias) =>
+        $"hex(CAST({alias}.call_id AS BLOB)), hex(CAST({alias}.tool_name AS BLOB)), " +
+        "typeof(tcm.server_name), COALESCE(hex(CAST(tcm.server_name AS BLOB)), ''), " +
+        "typeof(tcm.server_tool_name), COALESCE(hex(CAST(tcm.server_tool_name AS BLOB)), ''), " +
+        "typeof(tcis.utf8_bytes), COALESCE(CAST(tcis.utf8_bytes AS TEXT), ''), " +
+        "typeof(tcis.characters), COALESCE(CAST(tcis.characters AS TEXT), ''), " +
+        "'null', '', " +
+        "typeof(tcif.sha256), COALESCE(hex(CAST(tcif.sha256 AS BLOB)), ''), " +
+        "typeof(tcitrc.original_utf8_bytes), COALESCE(CAST(tcitrc.original_utf8_bytes AS TEXT), ''), " +
+        "typeof(tcrs.utf8_bytes), COALESCE(CAST(tcrs.utf8_bytes AS TEXT), ''), " +
+        "typeof(tcrs.characters), COALESCE(CAST(tcrs.characters AS TEXT), ''), " +
+        "'null', '', " +
         "typeof(tcrtrc.original_utf8_bytes), COALESCE(CAST(tcrtrc.original_utf8_bytes AS TEXT), ''), " +
         "typeof(tco.succeeded), COALESCE(CAST(tco.succeeded AS TEXT), ''), " +
         "typeof(tce.message), COALESCE(hex(CAST(tce.message AS BLOB)), ''), " +

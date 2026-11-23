@@ -300,14 +300,15 @@ public class KyberBridgeEngine
 
         CollectedSession? session = reader.GetSession(sessionId);
         IModelPricingLookup lookup = pricing.LoadPricingTables();
-        (SessionDetailFigure? figures, SessionAggregateView? aggregate, string? projectionStatus) =
-            ReadSessionDetailFigures(sessionId, lookup);
+        (SessionDetailFigure? figures, string? projectionStatus) = ReadSessionDetailFigures(sessionId, lookup);
+        (List<TimelineNode> timeline, string? timelineStatus) = ReadSessionTimeline(projection.SessionId);
+        projectionStatus ??= timelineStatus;
 
         Dictionary<string, object?> root = new(StringComparer.Ordinal)
         {
             ["session_id"] = projection.SessionId,
             ["sessionId"] = projection.SessionId,
-            ["harness"] = figures?.Summary.HarnessId ?? ResolveHarness(aggregate, session),
+            ["harness"] = figures?.Summary.HarnessId ?? session?.HarnessId ?? string.Empty,
             ["label"] = projection.Label,
             ["is_subagent"] = projection.IsSubagent,
             ["parent_session"] = projection.ParentSessionId,
@@ -323,9 +324,9 @@ public class KyberBridgeEngine
             ["turns"] = figures is null
                 ? new List<Dictionary<string, object?>>()
                 : [.. figures.Turns.Select(ToTurnDto)],
-            ["tools"] = aggregate is null ? Array.Empty<object>() : ToolRows(aggregate),
-            ["timeline"] = TimelineChildren(projection.SessionId),
-            ["requests"] = aggregate is null ? Array.Empty<object>() : RequestRows(aggregate),
+            ["tools"] = figures is null ? Array.Empty<object>() : ToolRows(figures.Tools),
+            ["timeline"] = timeline,
+            ["requests"] = figures is null ? Array.Empty<object>() : RequestRows(figures.Requests),
         };
 
         if (projectionStatus is not null)
@@ -1506,53 +1507,32 @@ public class KyberBridgeEngine
     }
 
     /// <summary>
-    /// Reads a session's detail figures from the content-free read model, plus the broad
-    /// aggregate the payload's content-bearing sections still need, isolating any fault to that
-    /// session.
+    /// Reads a session's detail figures from the content-free read model, isolating any fault to
+    /// that session.
     /// </summary>
     /// <param name="sessionKey">Canonical session key.</param>
     /// <param name="lookup">Read-time pricing tables.</param>
-    /// <returns>
-    /// The detail figures when readable, the aggregate when readable, and the isolation marker
-    /// when either read failed.
-    /// </returns>
+    /// <returns>The figures when readable, and the isolation marker when the read failed.</returns>
     /// <remarks>
-    /// The header figures and every turn figure come from
-    /// <see cref="IRelationalStoreReader.SessionDetailFigures"/>, which reads no content column.
-    /// The tool rows and request prompt previews stay on
-    /// <see cref="IRelationalStoreReader.GetSessionAggregate"/> because they are derived from tool
-    /// definitions and captured prompt text; the projections carry no prompt, so moving them
-    /// needs a stored prompt preview first.
+    /// The detail page reads no content: the header figures, turn list, tool rows, and request
+    /// metadata all come from
+    /// <see cref="IRelationalStoreReader.SessionDetailFigures"/>, and the timeline hydrates
+    /// <see cref="IRelationalStoreReader.SessionRecordsContentFree"/>. A request's prompt preview
+    /// is content, so it stays absent until a scoped content read restores it.
     /// </remarks>
-    private (SessionDetailFigure? Figures, SessionAggregateView? Aggregate, string? ProjectionStatus) ReadSessionDetailFigures(
+    private (SessionDetailFigure? Figures, string? ProjectionStatus) ReadSessionDetailFigures(
         string sessionKey,
         IModelPricingLookup lookup)
     {
-        SessionDetailFigure? figures = null;
-        SessionAggregateView? aggregate = null;
-        string? status = null;
-
         try
         {
-            figures = reader.SessionDetailFigures(sessionKey, lookup);
+            return (reader.SessionDetailFigures(sessionKey, lookup), null);
         }
         catch (Exception ex)
         {
             RecordProjectionFailure(sessionKey, ex.Message);
-            status = ProjectionFailedStatus;
+            return (null, ProjectionFailedStatus);
         }
-
-        try
-        {
-            aggregate = reader.GetSessionAggregate(sessionKey, lookup);
-        }
-        catch (Exception ex)
-        {
-            RecordProjectionFailure(sessionKey, ex.Message);
-            status = ProjectionFailedStatus;
-        }
-
-        return (figures, aggregate, status);
     }
 
     /// <summary>Reads a session's bounded summary figures, isolating any fault to that session.</summary>
@@ -1609,6 +1589,22 @@ public class KyberBridgeEngine
             Models: aggregate.Models,
             ProblemsCount: aggregate.Problems.Count);
 
+    /// <summary>Reads a session's timeline span tree, isolating any fault to that session.</summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <returns>The timeline children when readable, and the isolation marker when the read failed.</returns>
+    private (List<TimelineNode> Children, string? ProjectionStatus) ReadSessionTimeline(string sessionId)
+    {
+        try
+        {
+            return (TimelineChildren(sessionId), null);
+        }
+        catch (Exception ex)
+        {
+            RecordProjectionFailure(sessionId, ex.Message);
+            return ([], ProjectionFailedStatus);
+        }
+    }
+
     private void RecordProjectionFailure(string sessionKey, string message)
     {
         lock (projectionFailureLock)
@@ -1658,7 +1654,7 @@ public class KyberBridgeEngine
 
     private List<TimelineNode> TimelineChildren(string sessionId)
     {
-        List<CollectedRecord> stored = [.. reader.Records(sessionKey: sessionId)];
+        List<CollectedRecord> stored = [.. reader.SessionRecordsContentFree(sessionId)];
         List<CanonicalRecord> records = new(stored.Count);
         foreach (CollectedRecord storedRecord in stored)
         {
@@ -1718,10 +1714,10 @@ public class KyberBridgeEngine
         return null;
     }
 
-    private static List<Dictionary<string, object?>> RequestRows(SessionAggregateView aggregate)
+    private static List<Dictionary<string, object?>> RequestRows(IReadOnlyList<ReadTimeSessionRequestSummary> requests)
     {
-        List<Dictionary<string, object?>> rows = new(aggregate.Requests.Count);
-        foreach (ReadTimeSessionRequestSummary request in aggregate.Requests)
+        List<Dictionary<string, object?>> rows = new(requests.Count);
+        foreach (ReadTimeSessionRequestSummary request in requests)
         {
             rows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
             {
@@ -1736,10 +1732,10 @@ public class KyberBridgeEngine
         return rows;
     }
 
-    private static List<Dictionary<string, object?>> ToolRows(SessionAggregateView aggregate)
+    private static List<Dictionary<string, object?>> ToolRows(IReadOnlyList<ReadTimeSessionToolSummary> tools)
     {
-        List<Dictionary<string, object?>> rows = new(aggregate.Tools.Count);
-        foreach (ReadTimeSessionToolSummary tool in aggregate.Tools)
+        List<Dictionary<string, object?>> rows = new(tools.Count);
+        foreach (ReadTimeSessionToolSummary tool in tools)
         {
             rows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
             {
