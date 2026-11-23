@@ -1082,8 +1082,9 @@ and validates.
   only the registered `{server}___{tool}` ids listed there, so a droid that names servers
   and no tool ids reaches no MCP tool. Factory reads an omitted `mcpServers` key as "inherit the parent
   session's servers" and an explicit `[]` as "exclude every server", so the renderer derives a
-  per-droid whitelist from the names the squad itself declares in its `mcp.json` — today exactly
-  `kw-docs`, launched `kyber-weave-mcp --repo-root .` — still emits it under `mcpServers` as the
+  per-droid whitelist from the names the squad itself declares in its `mcp.json` — today
+  `kw-docs` (universal) and `codegraph` (orchestrator-excluded; the hook server `kw-arbiter` is
+  always excluded) — still emits the granted names under `mcpServers` as the
   declared intent, and additionally appends one `{server}___{tool}` entry per roster tool of each
   granted server to `tools`, after the semantic tool IDs. It does so for any agent whose
   capability profile allows `filesystem.read`, under the shared entitlement predicate that
