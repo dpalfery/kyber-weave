@@ -159,7 +159,7 @@ public sealed class AnalyticsOperationsDetailTests
     public void StoreFaultReturnsUnavailableContractV1Envelope()
     {
         (Mock<IRelationalStoreReader> reader, Mock<IProjectionStore> projections, Mock<IOperationalStore> operational) = CreateBaseStoreMocks();
-        reader.Setup(store => store.SessionAttributions())
+        reader.Setup(store => store.Sessions(It.IsAny<string?>()))
             .Throws(new SqliteExecutionException("sqlite3 exited with code 1", 1, "database is locked"));
         KyberBridgeEngine engine = CreateEngine(reader.Object, projections.Object, operational.Object);
 

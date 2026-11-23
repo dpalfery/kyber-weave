@@ -2677,11 +2677,20 @@ public partial class CanonSessionProjectorEngine
         if (deferredKeys.Count > 0)
         {
             // Deferred keys stay dirty at the watermark this pass just wrote, so the next pass
-            // (read or maintenance) retries them and a span ingested during the pass is not lost.
+            // (read or maintenance) retries them and a span ingested during the pass is not
+            // lost. When a span arrived mid-pass, the keys dirty at pass start stay dirty too:
+            // a rebuilt session's per-key read cannot have seen a span ingested after it, so
+            // the next pass rebuilds those sessions instead of skipping them clean.
+            HashSet<string> writeBackKeys = new(deferredKeys, StringComparer.Ordinal);
+            if (finalMarker > currentMarker && dirtySet is not null)
+            {
+                writeBackKeys.UnionWith(dirtySet);
+            }
+
             operationalStore.SetProjectionDirtyState(new DirtyProjectionState(
                 FromSeq: finalMarker,
                 ToSeq: finalMarker,
-                Keys: deferredKeys,
+                Keys: [.. writeBackKeys.Order(StringComparer.Ordinal)],
                 IsWildcard: false));
         }
         else

@@ -84,6 +84,7 @@ public class KyberBridgeEngine
     private readonly Lock projectionFailureLock = new();
     private readonly Dictionary<string, string> projectionFailures = new(StringComparer.Ordinal);
     private string? lastProjectionPassFault;
+    private string? lastBatchedReadFault;
 
     /// <summary>
     /// Initializes a new <see cref="KyberBridgeEngine"/>.
@@ -189,13 +190,17 @@ public class KyberBridgeEngine
             {
                 figuresBySession[figure.SessionKey] = figure;
             }
+
+            ClearBatchedReadFault();
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // A faulted batched read degrades to per-session aggregate reads, so one broken
             // session still surfaces as PROJECTION_FAILED while the remaining sessions answer.
-            // The per-session retry is the isolation; when every session answers, the list is
-            // complete and nothing user-visible was lost to the batch fault.
+            // The per-session retry is the isolation; the batch fault itself is recorded in the
+            // coverage payload so a fault recurring on every poll stays visible even when every
+            // retry succeeds.
+            RecordBatchedReadFault(ex.Message);
             figuresBySession = [];
             foreach (StoredSessionProjection row in rows)
             {
@@ -207,9 +212,9 @@ public class KyberBridgeEngine
                         figuresBySession[row.SessionId] = ToSessionListFigure(summary, reader.GetSession(row.SessionId));
                     }
                 }
-                catch (Exception ex)
+                catch (Exception ex2)
                 {
-                    RecordProjectionFailure(row.SessionId, ex.Message);
+                    RecordProjectionFailure(row.SessionId, ex2.Message);
                     faultedSessions.Add(row.SessionId);
                 }
             }
@@ -1451,32 +1456,33 @@ public class KyberBridgeEngine
         }
 
         // The grouped analytics answer names session keys and harnesses only, so it reads the
-        // content-free session attribution index instead of pricing any session's figures.
-        IReadOnlyList<StoredSessionAttribution> attributions = normalizedFilter is null
-            ? reader.SessionAttributions()
-            : [.. reader.SessionAttributions().Where(a => string.Equals(a.HarnessId, normalizedFilter, StringComparison.Ordinal))];
+        // content-free session rows instead of pricing any session's figures: one row per
+        // session key under the session's own harness, so a session whose records span two
+        // harness ids (a harness renamed mid-life) still counts once, matching the
+        // pre-migration per-session aggregate rows.
+        List<CollectedSession> analyticsSessions = [.. reader.Sessions(normalizedFilter)];
 
         if (string.Equals(normalizedOp, "outcomes", StringComparison.Ordinal))
         {
             // The relational schema keeps no outcome rows, so an outcome stays not-measurable
             // rather than being guessed from unrelated telemetry.
-            List<object> outcomes = [.. attributions.Select(a => (object)new
+            List<object> outcomes = [.. analyticsSessions.Select(session => (object)new
             {
-                sessionId = a.SessionKey,
-                harness = a.HarnessId,
+                sessionId = session.SessionKey,
+                harness = session.HarnessId,
                 outcome = "not_measurable",
             })];
             return (200, BuildAnalyticsEnvelope(defaultScope, new { items = outcomes }, new { }, freshness, new { returnedCount = outcomes.Count, nextCursor = (string?)null }, null, null, null));
         }
 
         // operation == "query"
-        List<object> groups = [.. attributions
-            .GroupBy(a => a.HarnessId, StringComparer.Ordinal)
+        List<object> groups = [.. analyticsSessions
+            .GroupBy(session => session.HarnessId, StringComparer.Ordinal)
             .OrderBy(g => g.Key, StringComparer.Ordinal)
             .Select(g => (object)new
             {
                 key = new { harness = g.Key },
-                sessions = g.Select(a => a.SessionKey).Distinct(StringComparer.Ordinal).Count(),
+                sessions = g.Select(session => session.SessionKey).Distinct(StringComparer.Ordinal).Count(),
             })];
         return (200, BuildAnalyticsEnvelope(defaultScope, new { groups }, new { }, freshness, new { returnedCount = groups.Count, nextCursor = (string?)null }, null, null, null));
     }
@@ -1660,13 +1666,38 @@ public class KyberBridgeEngine
         }
     }
 
+    /// <summary>
+    /// Records a faulted batched figures read under the coverage payload's batch slot. Batch
+    /// faults carry no session, so they never enter the per-session failure map: an empty-key
+    /// entry would surface as a failed session no operator can resolve.
+    /// </summary>
+    /// <param name="message">Fault message from the batched read.</param>
+    private void RecordBatchedReadFault(string message)
+    {
+        lock (projectionFailureLock)
+        {
+            lastBatchedReadFault = message;
+        }
+    }
+
+    /// <summary>Clears the batched-read fault once a batched read succeeds again.</summary>
+    private void ClearBatchedReadFault()
+    {
+        lock (projectionFailureLock)
+        {
+            lastBatchedReadFault = null;
+        }
+    }
+
     private object BuildProjectionHealth()
     {
         string? lastError;
+        string? lastBatchReadFault;
         List<string> failedSessions;
         lock (projectionFailureLock)
         {
             lastError = lastProjectionPassFault ?? (projectionFailures.Count > 0 ? projectionFailures.Values.First() : null);
+            lastBatchReadFault = lastBatchedReadFault;
             failedSessions = [.. projectionFailures.Keys.Order(StringComparer.Ordinal)];
         }
 
@@ -1684,6 +1715,7 @@ public class KyberBridgeEngine
             lastError,
             failedSessions,
             deferredSessions,
+            lastBatchReadFault,
         };
     }
 
@@ -1953,10 +1985,15 @@ public class KyberBridgeEngine
             {
                 figures[figure.SessionKey] = figure;
             }
+
+            ClearBatchedReadFault();
         }
         catch (Exception ex)
         {
-            RecordProjectionFailure(string.Empty, ex.Message);
+            // The fault carries no session, so it is recorded in the coverage payload's batch
+            // slot rather than the per-session failure map, where it would surface as a
+            // failed session no operator can resolve.
+            RecordBatchedReadFault(ex.Message);
             return [];
         }
 

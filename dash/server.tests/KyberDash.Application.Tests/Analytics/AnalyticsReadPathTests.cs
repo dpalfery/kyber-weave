@@ -22,6 +22,49 @@ public sealed class AnalyticsReadPathTests
     private static readonly DateTimeOffset TurnBase = new(2026, 11, 19, 10, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset FixedTimestamp = new(2026, 11, 19, 12, 0, 0, TimeSpan.Zero);
 
+    /// <summary>
+    /// A session whose records span two harness ids (a harness renamed mid-life) counts once in
+    /// the grouped query and outcomes, under the session's own harness, matching the
+    /// pre-migration per-session aggregate rows.
+    /// </summary>
+    [Fact]
+    public void AnalyticsQueryCountsAMultiHarnessSessionOnceUnderItsSessionHarness()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        // The codex session is written first so both harness rows exist before the shared
+        // session's claude-code batch links codex records: the record table's harness foreign
+        // key requires the harness row, exactly as a renamed harness already registered would.
+        WriteSession(store, "sess-solo", [Turn("span-solo-1", "sess-solo", 0, harnessId: "codex", inputTokens: 100, outputTokens: 10)], harnessId: "codex");
+        WriteSession(
+            store,
+            "sess-shared",
+            [
+                Turn("span-shared-1", "sess-shared", 0, harnessId: "claude-code", inputTokens: 400, outputTokens: 40),
+                Turn("span-shared-2", "sess-shared", 1, harnessId: "codex", inputTokens: 400, outputTokens: 40),
+            ],
+            harnessId: "claude-code");
+
+        KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
+
+        (int queryStatus, JsonElement queried) = bridge.ExecuteAnalytics("query", null);
+        Assert.Equal(200, queryStatus);
+        List<JsonElement> groups = [.. queried.GetProperty("data").GetProperty("groups").EnumerateArray()];
+        Assert.Equal(2, groups.Count);
+        JsonElement claudeGroup = Assert.Single(groups, static group => group.GetProperty("key").GetProperty("harness").GetString() == "claude-code");
+        JsonElement codexGroup = Assert.Single(groups, static group => group.GetProperty("key").GetProperty("harness").GetString() == "codex");
+        Assert.Equal(1, claudeGroup.GetProperty("sessions").GetInt32());
+        Assert.Equal(1, codexGroup.GetProperty("sessions").GetInt32());
+
+        (int outcomesStatus, JsonElement outcomes) = bridge.ExecuteAnalytics("outcomes", null);
+        Assert.Equal(200, outcomesStatus);
+        List<string> outcomeSessions =
+        [
+            .. outcomes.GetProperty("data").GetProperty("items").EnumerateArray().Select(static item => item.GetProperty("sessionId").GetString() ?? string.Empty),
+        ];
+        Assert.Equal(["sess-shared", "sess-solo"], [.. outcomeSessions.Order(StringComparer.Ordinal)]);
+    }
+
     /// <summary>The analytics status, catalog, and query operations answer over the relational reader.</summary>
     [Fact]
     public void AnalyticsStatusCatalogAndQueryAnswerFromTheRelationalStore()

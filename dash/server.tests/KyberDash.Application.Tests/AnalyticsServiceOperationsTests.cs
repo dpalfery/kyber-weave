@@ -144,10 +144,9 @@ public class AnalyticsServiceOperationsTests
     private static (Mock<IRelationalStoreReader> Reader, InMemoryRelationalStore Projections, InMemoryRelationalStore Operational) CreateFailingReader()
     {
         Mock<IRelationalStoreReader> reader = new();
-        reader.Setup(store => store.Sessions(It.IsAny<string?>())).Returns(Array.Empty<CollectedSession>());
         reader.Setup(store => store.CountRecords(It.IsAny<string?>())).Returns(0);
         reader.Setup(store => store.Harnesses()).Returns(Array.Empty<string>());
-        reader.Setup(store => store.SessionAttributions())
+        reader.Setup(store => store.Sessions(It.IsAny<string?>()))
             .Throws(new InvalidOperationException("the store could not be read"));
 
         return (reader, new InMemoryRelationalStore(), new InMemoryRelationalStore());
