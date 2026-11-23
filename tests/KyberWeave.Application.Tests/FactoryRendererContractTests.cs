@@ -614,6 +614,40 @@ public sealed class FactoryRendererContractTests : IDisposable
     }
 
     /// <summary>
+    ///     A whitelisted server the toolchain roster drops is named in a
+    ///     <c>permission-not-expressible</c> record: the whitelist would otherwise claim a grant
+    ///     that reaches no <c>{server}___</c> tool.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Factory_GrantedButUnrosteredServerIsNamedInDegradation()
+    {
+        McpDeclarationSquadTree fixture = McpDeclarationSquadTree.WithServers("kw-docs", "ghost");
+        SquadSource source = fixture.Tree.Load();
+
+        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+            fixture.ProductRoot,
+            [SquadTarget.Factory],
+            SquadDeploymentScope.Project).Prepared(fixture.Tree));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadAgent specialist = Assert.Single(source.Agents, agent => agent.Name == "architect");
+        YamlMappingNode frontmatter = RenderedAgentFrontmatter(result, specialist.Name);
+        Assert.Contains("ghost", RequireSequence(frontmatter, "mcpServers", specialist.Name), StringComparer.Ordinal);
+        Assert.DoesNotContain(
+            RequireSequence(frontmatter, "tools", specialist.Name),
+            tool => tool.StartsWith("ghost___", StringComparison.Ordinal));
+
+        SquadDegradationRecord dropped = Assert.Single(
+            result.Degradations,
+            record =>
+                string.Equals(record.CanonicalIdentity, specialist.Name, StringComparison.Ordinal) &&
+                string.Equals(record.Code, "permission-not-expressible", StringComparison.Ordinal) &&
+                record.Details is not null &&
+                record.Details.Contains("ghost", StringComparison.Ordinal));
+        Assert.Contains("no ghost___ entries", dropped.Details, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     A primary agent's entry-point caveat names the droid's actual <c>mcpServers</c> value.
     ///     The entry-point skill runs in the main session under the session's permissions, so the
     ///     caveat has to describe what the droid beside it really withholds — a caveat that names an
