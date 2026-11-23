@@ -183,3 +183,31 @@ plan-authoring contract.
 - Expected ADR waiver: `no ADR — ADR waiver: applies the established per-user-override precedence and the ArbiterKeyResolver origin binding to two more surfaces; no new boundary, dependency or contract`. Record the final call in the closeout mapping.
 - Run `kyber-weave docs standards migrate` if the standards warning period (`KW-DOC-SPEC-012`, `KW-DOC-SPEC-013`, `KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`) is flagged, committed with the closeout.
 - Archive per the plan inventory policy: closeout mapping complete, then the archive step moves this file to `docs/archive/plans/`, removes the task file and the Active Plans row, and adds the archived row.
+
+## Closeout mapping
+
+| ID | Destination |
+|---|---|
+| D1 | [Install and uninstall key origin](../kyber-arbiter/runbook.md#setup-doctor-audit) |
+| D2 | [Install and uninstall key origin](../kyber-arbiter/runbook.md#setup-doctor-audit) |
+| D3 | [Environment-key origin binding](../kyber-arbiter/architecture.md#configuration) |
+| D4 | [Install and uninstall key origin](../kyber-arbiter/runbook.md#setup-doctor-audit) |
+| D5 | Documentation waiver — one-task organization was transient execution sequencing with no surviving architectural, operational or behavioral invariant |
+| D6 | Documentation waiver — commit mechanics were transient process with no surviving invariant |
+| AP1 | Documentation waiver — the approval is recorded in the Decisions table above, which the archive preserves; no separate lasting record is needed |
+| KyberArbiter | [Kyber Arbiter runbook](../kyber-arbiter/runbook.md#setup-doctor-audit) and [Kyber Arbiter architecture](../kyber-arbiter/architecture.md#configuration) — the two Design harvest rows land in the sections those links name |
+
+no ADR — ADR waiver: applies the established per-user-override precedence and the ArbiterKeyResolver origin binding to two more surfaces; no new boundary, dependency or contract.
+
+## Completion summary
+
+T1 delivered as commit `02b59e36`: install derives the endpoint, its origin and every key
+lookup from one effective-provider read (`ReadExistingProvider`), uninstall applies the
+per-user override in `RemoveKey`, and both key-resolving call sites delegate to
+`IArbiterKeyService.TryResolveKey` with the un-merged repository configuration so the
+environment key serves only the TypeSafe origin or the override's origin. All eight Test
+contract tests pass in the three filtered runs with non-zero test counts; no sibling in
+the install/uninstall key path reads host configuration alone (`ArbiterSetupCommand` is
+intentionally unchanged: it writes the override and takes its endpoint from argv).
+NOT VERIFIED: none — every acceptance criterion is pinned by an automated test; no live
+environment, browser or person check applies.

@@ -4,7 +4,7 @@ title: Kyber Arbiter runbook
 doc-type: runbook
 component: KyberArbiter
 owner: dpalfery
-last-reviewed: 2026-11-20
+last-reviewed: 2026-11-23
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -522,7 +522,21 @@ repository install. `--path` is valid only with `--project`, and `--global --pro
 writing anything at either scope. A bare install inside a repository that already has a project install prints a migration notice: `Installed at user scope; use --project to manage this repository's install.` A second install is an idempotent no-op. `--arbiter-key` is
 visible in argv and shell history (a one-line warning says so); `--key-stdin` and
 `TYPESAFE_API_KEY` stay the safer paths. A keyed provider with no resolving key surfaces
-`KW-ARB-KEY-001`. Exit `2` for client-input errors, `1` for operational failures, `0` for
+`KW-ARB-KEY-001`.
+
+**Install and uninstall key origin.** Install and uninstall resolve the key against the
+effective provider: the host configuration with the per-user
+`~/.config/kyber-weave/arbiter.yml` override applied. The endpoint — and therefore the
+origin the key is looked up under — comes from that merged provider, so a machine whose
+override names `https://openrouter.ai/api/v1` reads the OpenRouter credential, not the
+TypeSafe one. Whether a key is demanded still follows the requested or existing provider
+kind, not the override's. `uninstall --remove-key` deletes the key for the effective
+origin and still warns when another scope shares it. A malformed override fails closed on
+both commands: install stops with one error, and `--remove-key` prints the error and
+deletes nothing. The install only reads the override, never writes it, so a machine's
+real provider, model and endpoint stay as they are.
+
+Exit `2` for client-input errors, `1` for operational failures, `0` for
 success or no-op.
 
 `arbiter doctor` and `arbiter status` print one line per installed harness that says what gates its dispatches
