@@ -3,13 +3,14 @@
 // queries; these tests pin what a viewer sees and what a press asks the
 // section to load. Synthetic nodes only — no fixture carries a real payload.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import { DurationView, TimelineView, type TimelineLevelState, type TimelineNode } from './TimelineView.js'
 
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 function node(overrides: Partial<TimelineNode> = {}): TimelineNode {
@@ -138,6 +139,42 @@ describe('TimelineView: call tree', () => {
     )
     fireEvent.click(screen.getByTestId('timeline-level-more'))
     expect(onLoadMore).toHaveBeenCalledWith(null)
+  })
+})
+
+describe('TimelineView: selected node attributes', () => {
+  function jsonResponse(body: unknown, status = 200): Response {
+    return { ok: status < 400, status, json: () => Promise.resolve(body) } as unknown as Response
+  }
+
+  it('fetches the attributes of a selected node that also carries some inline, and renders the fetched keys', async () => {
+    // A content-free timeline node still names a few typed attributes inline,
+    // but the consent-allowed prompt text the engine attaches only on the
+    // span-scoped read lives behind the attributes route. The attributes panel
+    // fetches the node it shows even when the node carries something inline;
+    // the inline map stays on screen until the fetch answers.
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/kyber/span/span-1/attributes')) {
+        return Promise.resolve(
+          jsonResponse({
+            spanId: 'span-1',
+            attributes: { 'agent.name': 'coder-bot', 'factory.turn.prompt.text': 'the consent-allowed prompt' },
+          }),
+        )
+      }
+      return Promise.resolve(jsonResponse({}, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<TimelineView root={treeRoot([node({ attributes: { 'agent.name': 'coder-bot' } })])} />)
+
+    fireEvent.click(screen.getByTestId('timeline-node'))
+    const panel = await screen.findByTestId('timeline-attributes')
+    await waitFor(() => expect(panel.textContent).toContain('the consent-allowed prompt'))
+    expect(panel.textContent).toContain('coder-bot')
+    expect(
+      fetchMock.mock.calls.some(([input]) => String(input).includes('/api/kyber/span/span-1/attributes')),
+    ).toBe(true)
   })
 })
 

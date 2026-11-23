@@ -234,11 +234,13 @@ export function TimelineView({
 
   // Session payloads no longer carry each node's attribute map — it is the raw
   // span payload, and embedding it made every session row a second
-  // uncompressed copy of the corpus. A node that still has them inline (an
-  // older payload, or a caller passing them directly) renders them as before;
-  // otherwise the one span on screen is fetched from compressed storage.
+  // uncompressed copy of the corpus. What a node still names inline is the
+  // content-free subset the timeline served — the span's full attribute map,
+  // including the consent-allowed prompt text the engine attaches only on the
+  // span-scoped read, comes from the attributes route. So the panel fetches
+  // the node it shows whenever it has a span id, and keeps the inline map on
+  // screen until the fetch answers.
   const inlineAttributes = shown?.attributes ?? {}
-  const hasInlineAttributes = Object.keys(inlineAttributes).length > 0
   const shownSpanId = shown?.spanId
   const [loadedAttributes, setLoadedAttributes] = React.useState<Record<string, unknown> | null>(null)
   const [attributesError, setAttributesError] = React.useState<string | null>(null)
@@ -247,7 +249,7 @@ export function TimelineView({
   React.useEffect(() => {
     setLoadedAttributes(null)
     setAttributesError(null)
-    if (shownSpanId === undefined || hasInlineAttributes) {
+    if (shownSpanId === undefined) {
       setAttributesLoading(false)
       return
     }
@@ -268,9 +270,9 @@ export function TimelineView({
     return () => {
       cancelled = true
     }
-  }, [shownSpanId, hasInlineAttributes])
+  }, [shownSpanId])
 
-  const attributes = hasInlineAttributes ? inlineAttributes : loadedAttributes
+  const attributes = loadedAttributes ?? inlineAttributes
 
   if (!root) {
     return <div className="py-8 text-center text-sm text-tertiary-foreground">No timeline data.</div>

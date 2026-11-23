@@ -540,8 +540,41 @@ describe('AgentSessionDashboard: inspector drawer', () => {
         `/api/kyber/session/${SESSION_ID}/content?span=root-span-1&full=true`,
       ),
     )
-    // The loaded node carries its attributes inline, so the attributes route stays idle.
-    expect(router.calls).not.toContain('/api/kyber/span/root-span-1/attributes')
+    // The loaded node still names some attributes inline, but the attributes
+    // route answers for it too: the span-scoped read carries keys the
+    // content-free timeline omits (the consent-allowed prompt text among
+    // them), so the inspector fetches the node it opens.
+    expect(router.calls).toContain('/api/kyber/span/root-span-1/attributes')
+  })
+
+  it('fetches the span attributes for a node that also carries some inline, and renders the fetched keys', async () => {
+    const router = stubSectionRoutes()
+    mountDashboard()
+    // A content-free timeline node still names a few typed attributes inline
+    // (the model the span declared, say), but the consent-allowed prompt text
+    // the engine attaches only on the span-scoped read lives behind the
+    // attributes route. The inspector fetches the node it opens even when the
+    // node carries something inline; the inline map stays on screen until the
+    // fetch answers, and the fetched map — a superset — replaces it.
+    respondAll(router)
+    await screen.findByTestId('timeline-node')
+
+    fireEvent.click(screen.getByTestId('timeline-node'))
+    expect((await screen.findByTestId('drawer-title')).textContent).toBe('Span: invoke_agent')
+    await waitFor(() => expect(router.calls).toContain('/api/kyber/span/root-span-1/attributes'))
+    // The fetch is still in flight: the inline map renders meanwhile.
+    expect(screen.getByTestId('span-inspector').textContent).toContain('coder-bot')
+
+    router.respond('/api/kyber/span/root-span-1/attributes', {
+      spanId: 'root-span-1',
+      attributes: {
+        'agent.name': 'coder-bot',
+        'factory.turn.prompt.text': 'the consent-allowed prompt',
+      },
+    })
+    expect(
+      await screen.findByTestId('span-inspector').then((el) => el.textContent),
+    ).toContain('the consent-allowed prompt')
   })
 
   it('fetches a span node attributes from the attributes route when the node carries none', async () => {

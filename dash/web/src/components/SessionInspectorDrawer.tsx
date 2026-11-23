@@ -2068,17 +2068,19 @@ function TurnInspector({
  */
 function SpanInspector({ node }: { node: SessionTimelineNode }) {
   // Timeline nodes carry structure and metadata; their attribute map is the
-  // raw span payload and is no longer copied into every session row. A node
-  // that still has one inline renders it directly, otherwise the span on
-  // screen is fetched from compressed storage.
+  // raw span payload and is no longer copied into every session row. What a
+  // node still names inline is the content-free subset the timeline served —
+  // the span's full attribute map, including the consent-allowed prompt text
+  // the engine attaches only on the span-scoped read, comes from the
+  // attributes route. So the inspector fetches the node it opens whenever it
+  // has a span id, and keeps the inline map on screen until the fetch answers.
   const inlineAttrs = (node.attributes ?? {}) as Record<string, unknown>
-  const hasInlineAttrs = Object.keys(inlineAttrs).length > 0
   const spanId: string | undefined = typeof node.spanId === 'string' ? node.spanId : undefined
   const [loadedAttrs, setLoadedAttrs] = useState<Record<string, unknown> | null>(null)
 
   useEffect(() => {
     setLoadedAttrs(null)
-    if (spanId === undefined || hasInlineAttrs) return
+    if (spanId === undefined) return
     let cancelled = false
     fetchSpanAttributes(spanId)
       .then((result) => {
@@ -2092,9 +2094,9 @@ function SpanInspector({ node }: { node: SessionTimelineNode }) {
     return () => {
       cancelled = true
     }
-  }, [spanId, hasInlineAttrs])
+  }, [spanId])
 
-  const attrs = hasInlineAttrs ? inlineAttrs : (loadedAttrs ?? {})
+  const attrs = loadedAttrs ?? inlineAttrs
   const [filter, setFilter] = useState('')
 
   const filteredAttrs = useMemo(() => {
