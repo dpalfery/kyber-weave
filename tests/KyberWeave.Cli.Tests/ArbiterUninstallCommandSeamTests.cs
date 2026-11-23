@@ -1,6 +1,7 @@
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -103,6 +104,49 @@ public sealed class ArbiterUninstallCommandSeamTests
     }
 
     [Fact]
+    public void Execute_RemoveKey_DeletesTheKeyForTheOverrideEndpointOrigin()
+    {
+        const string overrideOrigin = "https://openrouter.ai";
+        _uninstaller.Deployed = true;
+        _credentials.Seed(ArbiterKeyResolver.TypeSafeOrigin, "typesafe-key");
+        _credentials.Seed(overrideOrigin, "override-key");
+        FakeArbiterUserSettings userSettings = new()
+        {
+            Override = (repository, _) => repository with { Kind = ArbiterProviderKind.Systemone, Endpoint = "https://openrouter.ai/api/v1" },
+        };
+
+        int exit = Run(new ArbiterUninstallSettings { Target = "claude", RemoveKey = true }, userSettings);
+
+        Assert.Equal(0, exit);
+        Assert.Equal([overrideOrigin], _credentials.Deletes);
+        Assert.Contains(overrideOrigin, _console.Output, StringComparison.Ordinal);
+        Assert.Equal("typesafe-key", _credentials.Read(ArbiterKeyResolver.TypeSafeOrigin));
+        Assert.Null(_credentials.Read(overrideOrigin));
+    }
+
+    /// <summary>
+    /// A malformed per-user override stops <c>--remove-key</c> fail-closed: one error line and no
+    /// deletion, so a key the tool cannot attribute to an origin survives.
+    /// </summary>
+    [Fact]
+    public void Execute_RemoveKey_MalformedOverride_DeletesNothing()
+    {
+        _uninstaller.Deployed = true;
+        _credentials.Seed(ArbiterKeyResolver.TypeSafeOrigin, "typesafe-key");
+        FakeArbiterUserSettings userSettings = new()
+        {
+            Override = (_, _) => throw new YamlDotNet.Core.YamlException("the test override is malformed"),
+        };
+
+        int exit = Run(new ArbiterUninstallSettings { Target = "claude", RemoveKey = true }, userSettings);
+
+        Assert.Equal(1, exit);
+        Assert.Empty(_credentials.Deletes);
+        Assert.Contains("malformed", _console.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("typesafe-key", _credentials.Read(ArbiterKeyResolver.TypeSafeOrigin));
+    }
+
+    [Fact]
     public void Execute_APathNamingTheHomeDirectory_IsTheGlobalScope()
     {
         _uninstaller.Deployed = true;
@@ -112,7 +156,7 @@ public sealed class ArbiterUninstallCommandSeamTests
         Assert.Equal(SquadDeploymentScope.Global, Assert.Single(_uninstaller.Uninstalled).Scope);
     }
 
-    private int Run(ArbiterUninstallSettings settings)
+    private int Run(ArbiterUninstallSettings settings, IArbiterUserSettings? userSettings = null)
     {
         FakeProcessEnvironment environment = new(currentDirectory: WorkingDirectory, homeDirectory: Home);
         ArbiterUninstallCommand command = new(
@@ -124,7 +168,8 @@ public sealed class ArbiterUninstallCommandSeamTests
             _credentials,
             _files,
             new FakePathResolver(_files),
-            _console);
+            _console,
+            userSettings ?? new FakeArbiterUserSettings());
         return command.Execute(null!, settings);
     }
 

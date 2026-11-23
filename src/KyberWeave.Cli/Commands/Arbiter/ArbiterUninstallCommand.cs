@@ -3,6 +3,7 @@ using System.Text.Json;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
@@ -27,7 +28,8 @@ public sealed class ArbiterUninstallCommand(
     ICredentialStore credentials,
     IFileSystem files,
     IPathResolver paths,
-    IAnsiConsole console) : Command<ArbiterUninstallSettings>
+    IAnsiConsole console,
+    IArbiterUserSettings userSettings) : Command<ArbiterUninstallSettings>
 {
     /// <inheritdoc />
     public override int Execute(
@@ -216,9 +218,21 @@ public sealed class ArbiterUninstallCommand(
             return false;
         }
 
-        string endpoint = string.IsNullOrWhiteSpace(loaded.Config?.Arbiter.Provider.Endpoint)
+        ArbiterProviderConfig repositoryProvider = loaded.Config?.Arbiter.Provider ?? ArbiterProviderConfig.DefaultNone;
+        ArbiterProviderConfig mergedProvider;
+        try
+        {
+            mergedProvider = userSettings.ApplyTo(repositoryProvider, environment.HomeDirectory);
+        }
+        catch (YamlDotNet.Core.YamlException ex)
+        {
+            console.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(ex.Message)}[/]");
+            return false;
+        }
+
+        string endpoint = string.IsNullOrWhiteSpace(mergedProvider.Endpoint)
             ? ArbiterSetupCommand.TypeSafeEndpoint
-            : loaded.Config.Arbiter.Provider.Endpoint;
+            : mergedProvider.Endpoint.Trim();
 
         string origin = ArbiterKeyResolver.GetOrigin(endpoint) ?? ArbiterKeyResolver.TypeSafeOrigin;
 

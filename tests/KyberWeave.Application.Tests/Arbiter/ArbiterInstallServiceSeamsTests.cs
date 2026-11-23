@@ -24,10 +24,13 @@ public sealed class ArbiterInstallServiceSeamsTests
 {
     private const string WorkingDirectory = "/kw/work";
     private const string Home = "/kw/home";
+    private const string OverrideEndpoint = "https://openrouter.ai/api/v1";
+    private const string OverrideOrigin = "https://openrouter.ai";
 
     private readonly InMemoryFileSystem _files = new();
     private readonly FakePathResolver _paths;
     private readonly FakeProcessEnvironment _environment = new(currentDirectory: WorkingDirectory, homeDirectory: Home);
+    private readonly FakeCredentialStore _store = new();
 
     public ArbiterInstallServiceSeamsTests()
     {
@@ -76,33 +79,161 @@ public sealed class ArbiterInstallServiceSeamsTests
         Assert.Equal(SquadDeploymentScope.Global, prepared.Plan?.Scope);
     }
 
-    private static ArbiterInstallRequest Request(string? pathOption, bool projectScope) =>
+    /// <summary>
+    /// The endpoint, its origin and the key all follow the effective provider: the host config names
+    /// <c>none</c>, the per-user override names <c>systemone</c> at the override endpoint, and the only
+    /// stored key sits under the override origin, so the run completes with no key demand.
+    /// </summary>
+    [Fact]
+    public void Prepare_SystemoneWithOverrideEndpoint_ResolvesTheKeyFromTheOverrideOrigin()
+    {
+        _store.Seed(OverrideOrigin, "override-key");
+        ArbiterInstallService service = Service(OverrideToSystemone());
+
+        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: null, projectScope: true, providerOption: "systemone"));
+
+        Assert.Equal(0, prepared.ExitCode);
+        Assert.NotNull(prepared.Plan);
+        Assert.Equal(OverrideEndpoint, prepared.Plan.Endpoint);
+        Assert.Equal(OverrideOrigin, prepared.Plan.Origin);
+        Assert.False(
+            prepared.Events.OfType<ArbiterInstallError>().Any(error => error.Message.Contains(ArbiterKeyResolver.MissingKeyCode, StringComparison.Ordinal)),
+            "No key error is expected when the override origin holds a key.");
+    }
+
+    /// <summary>
+    /// The environment key serves the override origin only because the key service receives the
+    /// un-merged repository configuration: the merged endpoint differs from the repository's, so the
+    /// override endpoint is the one the environment key is bound to.
+    /// </summary>
+    [Fact]
+    public void Prepare_OverrideEndpoint_ServesTheEnvironmentKeyForTheOverrideOriginOnly()
+    {
+        ArbiterInstallService service = Service(
+            OverrideToSystemone(),
+            readVariable: name => string.Equals(name, ArbiterKeyResolver.EnvVarName, StringComparison.Ordinal) ? "env-key" : null);
+
+        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: null, projectScope: true, providerOption: "systemone"));
+
+        Assert.Equal(0, prepared.ExitCode);
+        Assert.NotNull(prepared.Plan);
+        Assert.Equal(OverrideEndpoint, prepared.Plan.Endpoint);
+        Assert.Equal(OverrideOrigin, prepared.Plan.Origin);
+    }
+
+    /// <summary>
+    /// A repository-configured endpoint never receives the environment key: with no override and the
+    /// host config naming a foreign endpoint, the run stops with the key finding naming that origin.
+    /// </summary>
+    [Fact]
+    public void Prepare_RepositoryEndpoint_NeverServesTheEnvironmentKey()
+    {
+        const string repositoryOrigin = "https://repo.example.net";
+        ArbiterInstallService service = Service(
+            configs: new RepositoryEndpointConfigs("https://repo.example.net/v1"),
+            readVariable: name => string.Equals(name, ArbiterKeyResolver.EnvVarName, StringComparison.Ordinal) ? "env-key" : null);
+
+        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: null, projectScope: true, providerOption: "systemone"));
+
+        Assert.Equal(2, prepared.ExitCode);
+        Assert.Null(prepared.Plan);
+        ArbiterInstallError error = Assert.Single(prepared.Events.OfType<ArbiterInstallError>());
+        Assert.Contains(ArbiterKeyResolver.MissingKeyCode, error.Message, StringComparison.Ordinal);
+        Assert.Contains(repositoryOrigin, error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A malformed per-user override stops the run fail-closed: one error, no plan, before anything
+    /// is read or written.
+    /// </summary>
+    [Fact]
+    public void Prepare_MalformedOverride_StopsWithOneError()
+    {
+        FakeArbiterUserSettings userSettings = new()
+        {
+            Override = (_, _) => throw new YamlDotNet.Core.YamlException("the test override is malformed"),
+        };
+        ArbiterInstallService service = Service(userSettings);
+
+        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: null, projectScope: true, providerOption: "systemone"));
+
+        Assert.Equal(1, prepared.ExitCode);
+        Assert.Null(prepared.Plan);
+        Assert.Single(prepared.Events.OfType<ArbiterInstallError>());
+    }
+
+    /// <summary>
+    /// Omitting <c>--provider</c> keeps the configured kind and demands no key, even with an override
+    /// present: only the endpoint, origin and key resolution become override-aware, never the key demand.
+    /// </summary>
+    [Fact]
+    public void Prepare_OmittedProvider_KeepsNoneAndSkipsTheKey()
+    {
+        ArbiterInstallService service = Service(OverrideToSystemone());
+
+        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: null, projectScope: true));
+
+        Assert.Equal(0, prepared.ExitCode);
+        ArbiterInstallProviderLine provider = Assert.Single(prepared.Events.OfType<ArbiterInstallProviderLine>());
+        Assert.Equal("none", provider.KindName);
+        Assert.True(provider.Kept);
+        Assert.Contains("takes precedence", provider.OverrideNote ?? string.Empty, StringComparison.Ordinal);
+        Assert.Empty(prepared.Events.OfType<ArbiterInstallError>());
+    }
+
+    private static FakeArbiterUserSettings OverrideToSystemone() =>
+        new()
+        {
+            Override = (repository, _) => repository with { Kind = ArbiterProviderKind.Systemone, Endpoint = OverrideEndpoint },
+        };
+
+    private static ArbiterInstallRequest Request(
+        string? pathOption,
+        bool projectScope,
+        string? providerOption = null,
+        string? arbiterKey = null,
+        bool keyStdin = false,
+        bool dryRun = true) =>
         new(
             RepositoryPath: pathOption ?? ".",
             PathOption: pathOption,
             ProjectScope: projectScope,
             TargetToken: "claude",
             ConfigOption: null,
-            ProviderOption: null,
-            ArbiterKey: null,
-            KeyStdin: false,
-            DryRun: true);
+            ProviderOption: providerOption,
+            ArbiterKey: arbiterKey,
+            KeyStdin: keyStdin,
+            DryRun: dryRun);
 
-    private ArbiterInstallService Service() =>
-        new(
-            _environment,
+    private ArbiterInstallService Service(
+        IArbiterUserSettings? userSettings = null,
+        IArbiterKeyService? keys = null,
+        IArbiterConfigResolver? configs = null,
+        Func<string, string?>? readVariable = null)
+    {
+        IArbiterUserSettings effectiveSettings = userSettings ?? new NoOverride();
+        FakeProcessEnvironment environment = readVariable is null
+            ? _environment
+            : new FakeProcessEnvironment(
+                currentDirectory: WorkingDirectory,
+                homeDirectory: Home,
+                readVariable: readVariable);
+        return new ArbiterInstallService(
+            environment,
             _paths,
             new SilentUserConfig(),
-            new ProductConfigs(),
-            new NoOverride(),
+            configs ?? new ProductConfigs(),
+            effectiveSettings,
             new NoKeyInput(),
-            new NoCredentials(),
+            _store,
             _files,
             new FakeSquadStateStore(new FakeSquadUserPaths(Home)),
             new NoLifecycle(),
             new FakeSquadGlobalRootResolver(Home),
             new PresentBinary(),
-            new NoScaffolder());
+            new NoScaffolder(),
+            keys ?? new ArbiterKeyService(_store, environment, effectiveSettings));
+    }
 
     /// <summary>The shipped provider config, with no per-user override over it.</summary>
     private sealed class NoOverride : IArbiterUserSettings
@@ -110,14 +241,36 @@ public sealed class ArbiterInstallServiceSeamsTests
         public ArbiterProviderConfig ApplyTo(ArbiterProviderConfig repository, string homeDirectory) => repository;
     }
 
-    /// <summary>No key is stored and none is needed for the shipped provider, so the store is never asked.</summary>
-    private sealed class NoCredentials : ICredentialStore
+    /// <summary>The host configuration naming a repository endpoint, instead of the shipped default.</summary>
+    private sealed class RepositoryEndpointConfigs(string endpoint) : IArbiterConfigResolver
     {
-        public string? Read(string origin) => throw new InvalidOperationException("The store is not reached for this request.");
+        public bool TryResolve(
+            string path,
+            string? configFile,
+            DiagnosticReport report,
+            out KyberWeaveConfig config,
+            out string? configPath)
+        {
+            config = Load(path, configFile, false).Config!;
+            configPath = null;
+            return true;
+        }
 
-        public void Write(string origin, string secret) => throw new InvalidOperationException("The store is not reached for this request.");
+        public KyberWeaveConfig? TryLoadRepository(string root) => Config();
 
-        public void Delete(string origin) => throw new InvalidOperationException("The store is not reached for this request.");
+        public KyberWeaveConfigLoadResult Load(string root, string? configFile, bool projectScope) =>
+            new(true, Config());
+
+        public KyberWeaveConfig LoadFromYaml(string yaml) => Config();
+
+        private KyberWeaveConfig Config() => new()
+        {
+            Arbiter = new ArbiterConfig
+            {
+                Enabled = true,
+                Provider = new ArbiterProviderConfig(ArbiterProviderKind.None, endpoint, "jev-1.14.0", 3000),
+            },
+        };
     }
 
     /// <summary>The user configuration an install would read; this test never reaches it, so it answers nothing.</summary>

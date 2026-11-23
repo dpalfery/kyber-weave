@@ -37,7 +37,8 @@ public sealed class ArbiterInstallService(
     IArbiterInstallLifecycle lifecycle,
     ISquadGlobalRootResolver globalRoots,
     IArbiterBinaryProbe probe,
-    IDocsScaffoldingService scaffolder) : IArbiterInstallService
+    IDocsScaffoldingService scaffolder,
+    IArbiterKeyService keys) : IArbiterInstallService
 {
     /// <inheritdoc />
     public ArbiterInstallPrepared Prepare(ArbiterInstallRequest request)
@@ -56,9 +57,12 @@ public sealed class ArbiterInstallService(
 
         ArbiterProviderKind existingKind;
         ArbiterProviderKind effectiveKind;
+        KyberWeaveConfig repositoryConfig;
+        ArbiterProviderConfig effectiveProvider;
         try
         {
-            (existingKind, effectiveKind) = ReadExistingProviderKind(root, request.ConfigOption, isProjectScope);
+            (repositoryConfig, existingKind, effectiveProvider) = ReadExistingProvider(root, request.ConfigOption, isProjectScope);
+            effectiveKind = effectiveProvider.Kind;
         }
         catch (YamlDotNet.Core.YamlException ex)
         {
@@ -87,7 +91,9 @@ public sealed class ArbiterInstallService(
             events.Add(new ArbiterInstallArgvKeyWarning());
         }
 
-        string endpoint = ResolveEndpoint(root, request.ConfigOption, isProjectScope);
+        string endpoint = string.IsNullOrWhiteSpace(effectiveProvider.Endpoint)
+            ? ArbiterProviderConfig.DefaultNone.Endpoint
+            : effectiveProvider.Endpoint.Trim();
         string origin = ArbiterKeyResolver.GetOrigin(endpoint) ?? ArbiterKeyResolver.TypeSafeOrigin;
         bool needsKey = providerKind == ArbiterProviderKind.Systemone
                         && !IsLoopbackEndpoint(endpoint);
@@ -98,7 +104,7 @@ public sealed class ArbiterInstallService(
 
         if (needsKey && keyToStore is null)
         {
-            if (!string.IsNullOrEmpty(ResolveStoredKey(endpoint)))
+            if (!string.IsNullOrEmpty(ResolveStoredKey(endpoint, repositoryConfig)))
             {
                 keyToStore = null;
             }
@@ -402,20 +408,25 @@ public sealed class ArbiterInstallService(
         kind == ArbiterProviderKind.Systemone ? "systemone" : "none";
 
     /// <summary>
-    /// The provider kind the host config holds before this run (none when nothing is configured),
-    /// and the kind in effect once the per-user override is applied over it.
+    /// The repository configuration as loaded, the provider kind it configures (none when nothing
+    /// is configured), and the provider in effect once the per-user override is applied over it.
     /// </summary>
+    /// <remarks>
+    /// One read serves all three: the endpoint and its origin come from the effective provider,
+    /// while the un-merged repository configuration is what the key service needs to bind the
+    /// environment key to the override origin.
+    /// </remarks>
     /// <exception cref="YamlDotNet.Core.YamlException">Thrown when the per-user override is malformed.</exception>
-    private (ArbiterProviderKind Configured, ArbiterProviderKind Effective) ReadExistingProviderKind(
+    private (KyberWeaveConfig Repository, ArbiterProviderKind Configured, ArbiterProviderConfig Effective) ReadExistingProvider(
         string root, string? configOption, bool projectScope)
     {
         KyberWeaveConfigLoadResult loaded = configs.Load(root, configOption, projectScope);
-        ArbiterProviderConfig repository = loaded.Success && loaded.Config is not null
-            ? loaded.Config.Arbiter.Provider
-            : KyberWeaveConfigDefaults.Product.Arbiter.Provider;
-        ArbiterProviderKind effective =
-            userSettings.ApplyTo(repository, environment.HomeDirectory).Kind;
-        return (repository.Kind, effective);
+        KyberWeaveConfig repository = loaded.Success && loaded.Config is not null
+            ? loaded.Config
+            : KyberWeaveConfigDefaults.Product;
+        ArbiterProviderConfig effective =
+            userSettings.ApplyTo(repository.Arbiter.Provider, environment.HomeDirectory);
+        return (repository, repository.Arbiter.Provider.Kind, effective);
     }
 
     private static bool ParseProvider(string? raw, out ArbiterProviderKind kind)
@@ -466,17 +477,6 @@ public sealed class ArbiterInstallService(
         }
     }
 
-    private string ResolveEndpoint(string root, string? configOption, bool projectScope)
-    {
-        KyberWeaveConfigLoadResult loaded = configs.Load(root, configOption, projectScope);
-        if (loaded.Success
-            && loaded.Config is not null
-            && !string.IsNullOrWhiteSpace(loaded.Config.Arbiter.Provider.Endpoint))
-            return loaded.Config.Arbiter.Provider.Endpoint.Trim();
-
-        return ArbiterProviderConfig.DefaultNone.Endpoint;
-    }
-
     private static bool IsLoopbackEndpoint(string endpoint)
     {
         try
@@ -489,16 +489,9 @@ public sealed class ArbiterInstallService(
         }
     }
 
-    private string? ResolveStoredKey(string endpoint)
+    private string? ResolveStoredKey(string endpoint, KyberWeaveConfig repository)
     {
-        try
-        {
-            return ArbiterKeyResolver.Resolve(endpoint, credentials, environment.GetVariable);
-        }
-        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
-        {
-            return null;
-        }
+        return keys.TryResolveKey(repository, endpoint);
     }
 
     private string? ReadStoredKey(string origin)
@@ -609,18 +602,7 @@ public sealed class ArbiterInstallService(
 
         if (plan.NeedsKey)
         {
-            string? key = null;
-            try
-            {
-                key = ArbiterKeyResolver.Resolve(
-                    plan.Endpoint,
-                    credentials,
-                    environment.GetVariable);
-            }
-            catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
-            {
-                key = null;
-            }
+            string? key = keys.TryResolveKey(loaded.Config, plan.Endpoint);
 
             if (string.IsNullOrEmpty(key))
             {
