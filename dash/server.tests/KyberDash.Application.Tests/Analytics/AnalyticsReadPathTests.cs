@@ -851,6 +851,8 @@ public sealed class AnalyticsReadPathTests
             ("session reconciliation", () => _ = bridge.GetSessionReconciliation(sessionKey)),
             ("session problems", () => _ = bridge.GetSessionProblems(sessionKey)),
             ("session requests (droid consent withheld)", () => _ = bridge.GetSessionRequests("sess-sweep-droid")),
+            ("session timeline", () => _ = bridge.GetSessionTimeline(sessionKey)),
+            ("session timeline level", () => _ = bridge.GetSessionTimeline(sessionKey, "(auxiliary)")),
             ("turn figures", () => _ = bridge.GetTurnFigures(sessionKey, 0)),
             ("span attributes", () => _ = bridge.GetSpanAttributes("span-sweep-1")),
             ("span attributes (droid consent withheld)", () => _ = bridge.GetSpanAttributes("span-sweep-droid")),
@@ -2088,6 +2090,16 @@ public sealed class AnalyticsReadPathTests
             }
 
             return inner.SessionSkillFigures(sessionKey);
+        }
+
+        public IReadOnlyList<CollectedRecord> SessionTimelineRecords(string sessionKey)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return inner.SessionTimelineRecords(sessionKey);
         }
     }
 }

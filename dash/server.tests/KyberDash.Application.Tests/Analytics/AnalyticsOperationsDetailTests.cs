@@ -500,5 +500,15 @@ public sealed class AnalyticsOperationsDetailTests
 
             return inner.SessionSkillFigures(sessionKey);
         }
+
+        public IReadOnlyList<CollectedRecord> SessionTimelineRecords(string sessionKey)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return inner.SessionTimelineRecords(sessionKey);
+        }
     }
 }

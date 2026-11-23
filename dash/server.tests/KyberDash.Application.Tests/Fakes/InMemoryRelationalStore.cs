@@ -1102,6 +1102,18 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
+    public virtual IReadOnlyList<CollectedRecord> SessionTimelineRecords(string sessionKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionTimelineRecords));
+            return CollectSessionTimelineRecords(state, sessionKey);
+        }
+    }
+
+    /// <inheritdoc />
     public ReadTimeTurnSummary? TurnFigures(string sessionKey, int turnIndex, IModelPricingLookup? pricing = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
@@ -6124,6 +6136,88 @@ public class InMemoryRelationalStore :
         }
 
         return records;
+    }
+
+    /// <summary>
+    /// Collects a session's records from state carrying only the columns the timeline tree's
+    /// nodes read, so <see cref="SessionTimelineRecords"/> never materializes a token count,
+    /// tool row, or content-bearing child row.
+    /// </summary>
+    private static List<CollectedRecord> CollectSessionTimelineRecords(StoreState currentState, string sessionKey)
+    {
+        HashSet<string> sessionSpans = ResolveSessionSpanIds(currentState, sessionKey);
+        if (sessionSpans.Count == 0)
+        {
+            return [];
+        }
+
+        TableMetadata recordMeta = GetTableMetadata("record");
+        List<CollectedRecord> records = [];
+        foreach (object?[] row in currentState.GetRows("record"))
+        {
+            if (sessionSpans.Contains(GetString(recordMeta, row, "span_id")))
+            {
+                records.Add(MaterializeRecordTimeline(currentState, row));
+            }
+        }
+
+        return records;
+    }
+
+    /// <summary>
+    /// Materializes the record-header columns the timeline tree's nodes read — the span, parent,
+    /// harness, timestamp, duration, kind, name, status, cost, model and declared window — with
+    /// every other child row absent, matching the SQLite timeline read row for row.
+    /// </summary>
+    private static CollectedRecord MaterializeRecordTimeline(StoreState currentState, object?[] recordRow)
+    {
+        TableMetadata meta = GetTableMetadata("record");
+        string spanId = GetString(meta, recordRow, "span_id");
+        string harnessId = GetString(meta, recordRow, "harness_id");
+        RecordOp op = ParseRecordOp(GetString(meta, recordRow, "op"));
+        RecordKind kind = ParseRecordKind(GetString(meta, recordRow, "kind"));
+        string name = GetString(meta, recordRow, "name");
+        DateTimeOffset startedAt = ParseTimestamp(GetString(meta, recordRow, "started_at_utc"));
+        RecordStatus status = ParseRecordStatus(GetString(meta, recordRow, "status"));
+
+        string? sessionKey = ReadOptionalSingleString(currentState, "record_session_link", "span_id", spanId, "session_key");
+        string? parentSpanId = ReadOptionalSingleString(currentState, "record_parent", "span_id", spanId, "parent_span_id");
+        string? model = ReadOptionalSingleString(currentState, "record_model", "span_id", spanId, "model_id");
+        long? reportedDurationMs = ReadOptionalSingleInt64(currentState, "record_reported_duration", "span_id", spanId, "duration_ms");
+        long? declaredWindow = ReadOptionalSingleInt64(currentState, "record_declared_context_window", "span_id", spanId, "declared_context_window");
+
+        object?[]? costRow = FindRowByKey(currentState, "record_reported_cost", [("span_id", spanId)]);
+        CollectedCost? reportedCost = costRow is null
+            ? null
+            : new CollectedCost(
+                GetDouble(GetTableMetadata("record_reported_cost"), costRow, "amount"),
+                GetString(GetTableMetadata("record_reported_cost"), costRow, "currency"));
+
+        return new CollectedRecord(
+            spanId,
+            harnessId,
+            op,
+            kind,
+            name,
+            startedAt,
+            status,
+            sessionKey,
+            parentSpanId,
+            TraceId: null,
+            model,
+            EndedAt: null,
+            reportedDurationMs,
+            Tokens: [],
+            reportedCost,
+            Parts: [],
+            Tool: null,
+            Agent: null,
+            SkillsInvoked: [],
+            AgentInstanceId: null,
+            ToolDefinitions: [],
+            new CollectedRecordSignals(ErrorMessage: null, EditFailures: null, CorrectionRule: null, declaredWindow),
+            ReportedInputTokens: null,
+            ReportedOutputTokens: null);
     }
 
     /// <summary>

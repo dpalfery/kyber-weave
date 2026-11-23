@@ -61,6 +61,7 @@ public static class DashEndpointMappings
         kyber.MapGet("/session/{id}/tools", SessionToolsAsync);
         kyber.MapGet("/session/{id}/servers", SessionServersAsync);
         kyber.MapGet("/session/{id}/skills", SessionSkillsAsync);
+        kyber.MapGet("/session/{id}/timeline", SessionTimelineAsync);
         kyber.MapGet("/session/{id}/content", SessionContentAsync);
         kyber.MapGet("/session/{id}/subagents", SessionSubagentsAsync);
         kyber.MapGet("/session/{id}/turn/{index}", TurnFiguresAsync);
@@ -369,6 +370,29 @@ public static class DashEndpointMappings
 
         return await Task.Run<IResult>(
             () => query.GetSessionSkills(id, page, limit) is { } payload
+                ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Serves <c>GET /api/kyber/session/{id}/timeline</c>: one page of one level of the session's
+    /// timeline tree. The <c>parent</c> query value arrives URL-encoded when it names a synthetic
+    /// container (<c>%28auxiliary%29</c>), so it is read through the query collection, which hands
+    /// the decoded id to the service.
+    /// </summary>
+    private static async Task<IResult> SessionTimelineAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(query);
+
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit);
+        if (refusal is not null)
+            return refusal;
+
+        string? parent = DashHttp.OptionalQueryString(request.Query, "parent");
+        return await Task.Run<IResult>(
+            () => query.GetSessionTimeline(id, parent, page, limit) is { } payload
                 ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
                 : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
             cancellationToken).ConfigureAwait(false);

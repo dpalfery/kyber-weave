@@ -910,6 +910,96 @@ public class KyberBridgeEngine
         return JsonSerializer.SerializeToElement(payload, CamelCaseJsonOptions);
     }
 
+    /// <summary>
+    /// Returns one page of one level of the session's timeline tree: the top level when no
+    /// parent is named, or the children of the node whose span id <paramref name="parentNodeId"/>
+    /// names — a synthetic container id such as <c>(auxiliary)</c> or <c>(orphan:...)</c> included.
+    /// </summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="parentNodeId">Span id of the node whose children the page lists; the top level when null or empty.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Nodes on the page; 25 unless given.</param>
+    /// <returns>
+    /// The page's nodes — today's timeline node fields minus <c>children</c>, plus each node's
+    /// <c>childCount</c> — with the level's total and the whole tree's bounds, or
+    /// <see langword="null"/> when the session or the named parent is not in the tree.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// <c>BuildTimeline</c> shapes its tree in memory — synthetic grouping nodes included — so
+    /// the level is located in the tree rather than paged out of the store. The per-request cost
+    /// is the session's metadata tree, read content-free through
+    /// <see cref="IRelationalStoreReader.SessionTimelineRecords"/>, never the session's content
+    /// (decision D17).
+    /// </para>
+    /// <para>
+    /// Siblings keep <c>BuildTimeline</c>'s order across pages, so walking every parent's pages
+    /// yields today's tree with no node lost or duplicated.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
+    public JsonElement? GetSessionTimeline(
+        string sessionId,
+        string? parentNodeId = null,
+        int page = 1,
+        int limit = DefaultSectionPageLimit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        EnsureProjected();
+        // The section 404 check reads the projection header row, not the whole projection the
+        // detail route loads.
+        if (projections.SessionHeadersByKeys([sessionId]).Count == 0)
+        {
+            return null;
+        }
+
+        (TimelineNode? root, string? projectionStatus) = TrySessionTimelineTree(sessionId);
+        IEnumerable<TimelineNode> level = [];
+        if (root is not null)
+        {
+            if (string.IsNullOrEmpty(parentNodeId))
+            {
+                level = root.Children;
+            }
+            else
+            {
+                TimelineNode? parent = FindTimelineNode(root, parentNodeId);
+                if (parent is null)
+                {
+                    // A parent no node names is absent, not empty: an empty level would read as a
+                    // real node with no children, and the caller could not tell the difference.
+                    return null;
+                }
+
+                level = parent.Children;
+            }
+        }
+
+        List<Dictionary<string, object?>> rows = [.. level.Select(TimelineRow)];
+        (long startMs, long endMs) = root is null ? (0, 0) : TimelineTreeBounds(root);
+        Dictionary<string, object?> payload = new(StringComparer.Ordinal)
+        {
+            ["sessionId"] = sessionId,
+            ["parent"] = string.IsNullOrEmpty(parentNodeId) ? null : parentNodeId,
+            ["nodes"] = PageOf(rows, page, limit),
+            ["total"] = rows.Count,
+            ["limit"] = limit,
+            ["offset"] = PageOffset(page, limit),
+            ["page"] = page,
+            ["bounds"] = new { startMs, endMs },
+        };
+
+        if (projectionStatus is not null)
+        {
+            payload["projection_status"] = projectionStatus;
+        }
+
+        return JsonSerializer.SerializeToElement(payload, CamelCaseJsonOptions);
+    }
+
     /// <summary>Slices one page out of rows the section read already carries in memory.</summary>
     private static List<Dictionary<string, object?>> PageOf(IReadOnlyList<Dictionary<string, object?>> rows, int page, int limit)
     {
@@ -2542,6 +2632,93 @@ public class KyberBridgeEngine
         }
     }
 
+    /// <summary>
+    /// Builds the session's timeline tree from the content-free metadata read, isolating any
+    /// fault to that session.
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <returns>The tree when readable, and the isolation marker when the read failed.</returns>
+    private (TimelineNode? Root, string? ProjectionStatus) TrySessionTimelineTree(string sessionKey)
+    {
+        try
+        {
+            List<CanonicalRecord> records =
+                [.. reader.SessionTimelineRecords(sessionKey).Select(CanonRecordHydration.Hydrate)];
+            records.Sort(CompareRecords);
+            return (CanonContextAnalysis.BuildTimeline(records), null);
+        }
+        catch (Exception ex)
+        {
+            RecordProjectionFailure(sessionKey, ex.Message);
+            return (null, ProjectionFailedStatus);
+        }
+    }
+
+    /// <summary>Finds the tree node whose span id <paramref name="spanId"/> names, at any depth.</summary>
+    /// <param name="root">The tree to search.</param>
+    /// <param name="spanId">The exact span id, synthetic container ids included.</param>
+    /// <returns>The node, or <see langword="null"/> when no node carries the id.</returns>
+    private static TimelineNode? FindTimelineNode(TimelineNode root, string spanId)
+    {
+        if (string.Equals(root.SpanId, spanId, StringComparison.Ordinal))
+        {
+            return root;
+        }
+
+        foreach (TimelineNode child in root.Children)
+        {
+            if (FindTimelineNode(child, spanId) is { } match)
+            {
+                return match;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The whole tree's extent: the earliest node start and the latest node end.</summary>
+    /// <param name="root">The tree to measure.</param>
+    /// <returns>The earliest <c>startMs</c> and the latest <c>startMs + durationMs</c> over every node.</returns>
+    private static (long StartMs, long EndMs) TimelineTreeBounds(TimelineNode root)
+    {
+        long start = long.MaxValue;
+        long end = long.MinValue;
+        void Walk(TimelineNode node)
+        {
+            start = Math.Min(start, node.StartMs);
+            end = Math.Max(end, node.StartMs + node.DurationMs);
+            foreach (TimelineNode child in node.Children)
+            {
+                Walk(child);
+            }
+        }
+
+        Walk(root);
+        return (start == long.MaxValue ? 0 : start, end == long.MinValue ? 0 : end);
+    }
+
+    /// <summary>
+    /// Maps one timeline node to the section row: today's node fields minus <c>children</c>, plus
+    /// the count of children the level below it holds.
+    /// </summary>
+    /// <param name="node">The node to map.</param>
+    /// <returns>The section row's fields.</returns>
+    private static Dictionary<string, object?> TimelineRow(TimelineNode node) => new(StringComparer.Ordinal)
+    {
+        ["spanId"] = node.SpanId,
+        ["parentId"] = node.ParentId,
+        ["startMs"] = node.StartMs,
+        ["durationMs"] = node.DurationMs,
+        ["kind"] = node.Kind,
+        ["name"] = node.Name,
+        ["status"] = node.Status,
+        ["attributes"] = node.Attributes,
+        ["isSubagent"] = node.IsSubagent,
+        ["isAuxiliary"] = node.IsAuxiliary,
+        ["cost"] = node.Cost,
+        ["childCount"] = node.Children.Count,
+    };
+
     /// <summary>Reads a session's timeline span tree, isolating any fault to that session.</summary>
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <returns>The timeline children when readable, and the isolation marker when the read failed.</returns>
@@ -2640,9 +2817,7 @@ public class KyberBridgeEngine
         List<CanonicalRecord> records = new(stored.Count);
         foreach (CollectedRecord storedRecord in stored)
         {
-            CanonicalRecord hydrated = CanonRecordHydration.Hydrate(storedRecord);
-            AttachCapturedPrompt(storedRecord, hydrated);
-            records.Add(hydrated);
+            records.Add(CanonRecordHydration.Hydrate(storedRecord));
         }
 
         records.Sort(CompareRecords);
@@ -2652,48 +2827,6 @@ public class KyberBridgeEngine
         }
 
         return [.. CanonContextAnalysis.BuildTimeline(records).Children];
-    }
-
-    /// <summary>
-    /// Puts a captured Factory prompt back on the span attribute the inspector reads.
-    /// The relational row keeps the text as a content part, and content that was withheld
-    /// never becomes a part, so a consent-off turn stays without the prompt.
-    /// </summary>
-    private static void AttachCapturedPrompt(CollectedRecord stored, CanonicalRecord hydrated)
-    {
-        if (!string.Equals(stored.HarnessId, "droid", StringComparison.OrdinalIgnoreCase)
-            || hydrated.Raw is not Dictionary<string, JsonElement> raw)
-        {
-            return;
-        }
-
-        string? prompt = CapturedPromptText(stored);
-        if (prompt is null)
-        {
-            return;
-        }
-
-        raw[FactoryKeys.PromptText] = JsonSerializer.SerializeToElement(prompt);
-    }
-
-    private static string? CapturedPromptText(CollectedRecord stored)
-    {
-        foreach (CollectedContentPart part in stored.Parts)
-        {
-            if (part.Bucket is not (ContentBucket.UserPrompt or ContentBucket.UserMessage or ContentBucket.ConversationHistory))
-            {
-                continue;
-            }
-
-            if (string.IsNullOrWhiteSpace(part.PlainText))
-            {
-                continue;
-            }
-
-            return part.PlainText;
-        }
-
-        return null;
     }
 
     private static List<Dictionary<string, object?>> RequestRows(IReadOnlyList<ReadTimeSessionRequestSummary> requests)

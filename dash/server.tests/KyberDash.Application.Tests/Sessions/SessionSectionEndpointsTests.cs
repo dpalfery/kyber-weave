@@ -16,7 +16,9 @@ namespace KyberDash.Application.Tests.Sessions;
 /// the turn section carries that turn's stored context buckets, the requests, reconciliation and
 /// problems sections page today's rows at 25 with the true total, the tools section pages the
 /// ranked rows with the aggregate priced over every row, the servers and skills sections page
-/// today's rows at 25, and the run page's turn list comes from the same per-session turn figures.
+/// today's rows at 25, the timeline section pages one tree level at a time with the union of all
+/// levels equal to today's <see cref="CanonContextAnalysis.BuildTimeline"/> tree, and the run
+/// page's turn list comes from the same per-session turn figures.
 /// </summary>
 public sealed class SessionSectionEndpointsTests
 {
@@ -586,6 +588,292 @@ public sealed class SessionSectionEndpointsTests
     }
 
     /// <summary>
+    /// The timeline section pages the top level at 25 with today's node fields minus
+    /// <c>children</c> plus each node's <c>childCount</c>, and the bounds of the whole metadata
+    /// tree — from the timeline records read alone.
+    /// </summary>
+    [Fact]
+    public void TheTimelineSectionPagesTheTopLevelAt25WithChildCountAndBounds()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-timeline";
+        WriteTimelineSession(store, sessionKey);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        JsonElement detail = bridge.GetSessionDetail(sessionKey)!.Value;
+        JsonElement[] today = [.. detail.GetProperty("timeline").EnumerateArray()];
+        Assert.Equal(32, today.Length);
+
+        store.ClearReadLog();
+        JsonElement page = bridge.GetSessionTimeline(sessionKey)!.Value;
+
+        Assert.Equal(sessionKey, page.GetProperty("sessionId").GetString());
+        Assert.Equal(JsonValueKind.Null, page.GetProperty("parent").ValueKind);
+        Assert.Equal(1, page.GetProperty("page").GetInt32());
+        Assert.Equal(25, page.GetProperty("limit").GetInt32());
+        Assert.Equal(0, page.GetProperty("offset").GetInt32());
+        Assert.Equal(32, page.GetProperty("total").GetInt32());
+        JsonElement[] rows = [.. page.GetProperty("nodes").EnumerateArray()];
+        Assert.Equal(25, rows.Length);
+        for (int index = 0; index < rows.Length; index++)
+        {
+            AssertTimelineRowCarriesTodaysFields(rows[index], today[index]);
+        }
+
+        // The bounds are the whole tree's extent, not the page's: the last root ends 29 minutes
+        // after the session start, a page that carries none of it still carries its end.
+        (long startMs, long endMs) = TimelineTreeExtent(today);
+        Assert.Equal((0, 1_741_000), (startMs, endMs));
+        Assert.Equal(startMs, page.GetProperty("bounds").GetProperty("startMs").GetInt64());
+        Assert.Equal(endMs, page.GetProperty("bounds").GetProperty("endMs").GetInt64());
+
+        // The section answers from the timeline records read alone.
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.Equal(
+            (IReadOnlyList<string>)[nameof(InMemoryRelationalStore.SessionTimelineRecords)],
+            store.ReadLog.Where(static read => read != "CountRecords").ToList());
+        Assert.Equal(
+            (IReadOnlyList<string>)[nameof(InMemoryRelationalStore.SessionHeadersByKeys)],
+            store.SessionProjectionReadLog
+                .Where(static read => read is not ("ListSessionProjections" or "ListHarnessRollups"))
+                .ToList());
+        Assert.DoesNotContain(store.ReadLog, static read => ContentBearingReads.Contains(read));
+
+        // Page 2 carries the remaining seven top-level nodes; a page past the end answers empty
+        // with the true total.
+        store.ClearReadLog();
+        JsonElement second = bridge.GetSessionTimeline(sessionKey, page: 2)!.Value;
+        JsonElement[] secondRows = [.. second.GetProperty("nodes").EnumerateArray()];
+        Assert.Equal(7, secondRows.Length);
+        Assert.Equal(32, second.GetProperty("total").GetInt32());
+        for (int index = 0; index < secondRows.Length; index++)
+        {
+            AssertTimelineRowCarriesTodaysFields(secondRows[index], today[25 + index]);
+        }
+
+        JsonElement past = bridge.GetSessionTimeline(sessionKey, page: 3)!.Value;
+        Assert.Empty(past.GetProperty("nodes").EnumerateArray().ToList());
+        Assert.Equal(32, past.GetProperty("total").GetInt32());
+    }
+
+    /// <summary>
+    /// A <c>?parent=</c> request — including one naming a synthetic container — answers that
+    /// node's children paged at 25 in <c>BuildTimeline</c>'s sibling order, from the same
+    /// timeline records read; a parent no node names answers nothing rather than an empty level.
+    /// </summary>
+    [Fact]
+    public void TheTimelineSectionPagesASyntheticParentsChildrenAt25()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-timeline";
+        WriteTimelineSession(store, sessionKey);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        JsonElement detail = bridge.GetSessionDetail(sessionKey)!.Value;
+        JsonElement[] today = [.. detail.GetProperty("timeline").EnumerateArray()];
+        JsonElement todayAuxiliary = Assert.Single(
+            today,
+            static node => node.GetProperty("spanId").GetString() == "(auxiliary)");
+        JsonElement[] todayAuxiliaryChildren = [.. todayAuxiliary.GetProperty("children").EnumerateArray()];
+        Assert.Equal(30, todayAuxiliaryChildren.Length);
+
+        store.ClearReadLog();
+        JsonElement auxiliary = bridge.GetSessionTimeline(sessionKey, parentNodeId: "(auxiliary)")!.Value;
+
+        Assert.Equal("(auxiliary)", auxiliary.GetProperty("parent").GetString());
+        Assert.Equal(30, auxiliary.GetProperty("total").GetInt32());
+        JsonElement[] rows = [.. auxiliary.GetProperty("nodes").EnumerateArray()];
+        Assert.Equal(25, rows.Length);
+        for (int index = 0; index < rows.Length; index++)
+        {
+            AssertTimelineRowCarriesTodaysFields(rows[index], todayAuxiliaryChildren[index]);
+            Assert.True(rows[index].GetProperty("isAuxiliary").GetBoolean());
+        }
+
+        Assert.Equal(
+            (IReadOnlyList<string>)[nameof(InMemoryRelationalStore.SessionTimelineRecords)],
+            store.ReadLog.Where(static read => read != "CountRecords").ToList());
+
+        JsonElement second = bridge.GetSessionTimeline(sessionKey, parentNodeId: "(auxiliary)", page: 2)!.Value;
+        JsonElement[] secondRows = [.. second.GetProperty("nodes").EnumerateArray()];
+        Assert.Equal(5, secondRows.Length);
+        Assert.Equal(30, second.GetProperty("total").GetInt32());
+        AssertTimelineRowCarriesTodaysFields(secondRows[0], todayAuxiliaryChildren[25]);
+
+        // The orphan container's id names a level too: its children's declared parent is
+        // missing, so the group is the only place they hang.
+        JsonElement todayOrphan = Assert.Single(
+            today,
+            static node => node.GetProperty("spanId").GetString()?.StartsWith("(orphan:", StringComparison.Ordinal) == true);
+        JsonElement orphan = bridge.GetSessionTimeline(sessionKey, parentNodeId: todayOrphan.GetProperty("spanId").GetString())!.Value;
+        Assert.Equal(2, orphan.GetProperty("total").GetInt32());
+        Assert.Equal(2, orphan.GetProperty("nodes").EnumerateArray().Count());
+
+        // A real span parent and the synthetic session root both name levels.
+        JsonElement firstRoot = bridge.GetSessionTimeline(sessionKey, parentNodeId: "turn-tl-000")!.Value;
+        Assert.Equal(3, firstRoot.GetProperty("total").GetInt32());
+        JsonElement sessionRoot = bridge.GetSessionTimeline(sessionKey, parentNodeId: "(session)")!.Value;
+        Assert.Equal(32, sessionRoot.GetProperty("total").GetInt32());
+
+        // A parent no node names answers nothing: an empty level would read as a real node with
+        // no children, and the caller could not tell the difference.
+        Assert.Null(bridge.GetSessionTimeline(sessionKey, parentNodeId: "(no-such-node)"));
+    }
+
+    /// <summary>
+    /// The union of every level the timeline section pages — every page of every parent,
+    /// synthetic containers included — equals today's <c>BuildTimeline</c> tree over the
+    /// session's content-free records: no node lost, none duplicated, and each level keeps the
+    /// tree's sibling order.
+    /// </summary>
+    [Fact]
+    public void TheUnionOfTimelineLevelsEqualsTodaysBuildTimelineTree()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-timeline";
+        WriteTimelineSession(store, sessionKey);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        // Today's tree: BuildTimeline over the records the detail timeline hydrates.
+        List<CanonicalRecord> todayRecords =
+            [.. store.SessionRecordsContentFree(sessionKey).Select(CanonRecordHydration.Hydrate)];
+        todayRecords.Sort(static (left, right) =>
+        {
+            int byTimestamp = string.CompareOrdinal(left.Timestamp, right.Timestamp);
+            return byTimestamp != 0 ? byTimestamp : string.CompareOrdinal(left.SpanId, right.SpanId);
+        });
+
+        TimelineNode todayRoot = CanonContextAnalysis.BuildTimeline(todayRecords);
+        // The top level groups under the empty key: no span id is empty, so it cannot collide.
+        Dictionary<string, List<(string SpanId, int ChildCount)>> expectedLevels = [];
+        void Walk(string parent, TimelineNode node)
+        {
+            if (!expectedLevels.TryGetValue(parent, out List<(string SpanId, int ChildCount)>? level))
+            {
+                level = [];
+                expectedLevels[parent] = level;
+            }
+
+            level.Add((node.SpanId, node.Children.Count));
+            foreach (TimelineNode child in node.Children)
+            {
+                Walk(node.SpanId, child);
+            }
+        }
+
+        foreach (TimelineNode child in todayRoot.Children)
+        {
+            Walk(string.Empty, child);
+        }
+
+        // The pages: every level through the section route, descending only into parents the
+        // pages themselves name, so the walk cannot invent a node the route never answered.
+        List<(string? Parent, JsonElement Row)> paged = [];
+        Queue<string?> pending = new();
+        pending.Enqueue(null);
+        while (pending.Count > 0)
+        {
+            string? parent = pending.Dequeue();
+            for (int page = 1; ; page++)
+            {
+                JsonElement payload = bridge.GetSessionTimeline(sessionKey, parent, page: page)!.Value;
+                JsonElement[] pageRows = [.. payload.GetProperty("nodes").EnumerateArray()];
+                foreach (JsonElement row in pageRows)
+                {
+                    paged.Add((parent, row));
+                    if (row.GetProperty("childCount").GetInt32() > 0)
+                    {
+                        pending.Enqueue(row.GetProperty("spanId").GetString());
+                    }
+                }
+
+                if (pageRows.Length < 25)
+                {
+                    break;
+                }
+            }
+        }
+
+        Dictionary<string, List<(string SpanId, int ChildCount)>> pagedLevels = [];
+        foreach ((string? parent, JsonElement row) in paged)
+        {
+            string key = parent ?? string.Empty;
+            if (!pagedLevels.TryGetValue(key, out List<(string SpanId, int ChildCount)>? level))
+            {
+                level = [];
+                pagedLevels[key] = level;
+            }
+
+            level.Add((row.GetProperty("spanId").GetString() ?? string.Empty, row.GetProperty("childCount").GetInt32()));
+        }
+
+        Assert.Equal(expectedLevels.Count, pagedLevels.Count);
+        foreach (KeyValuePair<string, List<(string SpanId, int ChildCount)>> expected in expectedLevels)
+        {
+            Assert.True(
+                pagedLevels.TryGetValue(expected.Key, out List<(string SpanId, int ChildCount)>? level),
+                $"no page answered the level under '{(expected.Key.Length == 0 ? "(top level)" : expected.Key)}'");
+            Assert.Equal(expected.Value.Count, level!.Count);
+            for (int index = 0; index < expected.Value.Count; index++)
+            {
+                Assert.Equal(expected.Value[index].SpanId, level[index].SpanId);
+                Assert.Equal(expected.Value[index].ChildCount, level[index].ChildCount);
+            }
+        }
+
+        // No node appears twice: every span id the pages answered is distinct.
+        Assert.Equal(
+            paged.Count,
+            paged
+                .DistinctBy(static entry => entry.Row.GetProperty("spanId").GetString(), StringComparer.Ordinal)
+                .Count());
+    }
+
+    /// <summary>
+    /// A timeline records read that fails is isolated to its session: the section answers the
+    /// projection-failed marker with no nodes, the coverage payload names the session, and the
+    /// remaining sessions answer normally.
+    /// </summary>
+    [Fact]
+    public void AFailingTimelineReadIsIsolatedAsProjectionFailed()
+    {
+        TimelineFaultingStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-timeline-broken";
+        WriteTimelineSession(store, sessionKey);
+        WriteSession(store, "sess-timeline-healthy", [Turn("turn-healthy", "sess-timeline-healthy", 0, inputTokens: 100)]);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        store.ClearReadLog();
+        JsonElement broken = bridge.GetSessionTimeline(sessionKey)!.Value;
+        Assert.Equal("PROJECTION_FAILED", broken.GetProperty("projection_status").GetString());
+        Assert.Empty(broken.GetProperty("nodes").EnumerateArray().ToList());
+        Assert.Equal(0, broken.GetProperty("total").GetInt32());
+
+        JsonElement healthy = bridge.GetSessionTimeline("sess-timeline-healthy")!.Value;
+        Assert.False(healthy.TryGetProperty("projection_status", out _));
+        Assert.Equal(1, healthy.GetProperty("total").GetInt32());
+
+        JsonElement projectionHealth = bridge.GetCoverage().GetProperty("projection");
+        Assert.Equal("PROJECTION_FAILED", projectionHealth.GetProperty("status").GetString());
+        Assert.Contains(
+            sessionKey,
+            [.. projectionHealth.GetProperty("failedSessions").EnumerateArray().Select(static session => session.GetString())],
+            StringComparer.Ordinal);
+    }
+
+    /// <summary>
     /// An unknown session's section routes answer nothing through the header read: the 404 check
     /// is <see cref="InMemoryRelationalStore.SessionHeadersByKeys"/>, never the full projection
     /// read, and no content-free read runs either.
@@ -609,10 +897,126 @@ public sealed class SessionSectionEndpointsTests
         Assert.Null(bridge.GetSessionTools("sess-absent"));
         Assert.Null(bridge.GetSessionServers("sess-absent"));
         Assert.Null(bridge.GetSessionSkills("sess-absent"));
+        Assert.Null(bridge.GetSessionTimeline("sess-absent"));
 
         Assert.Contains(nameof(InMemoryRelationalStore.SessionHeadersByKeys), store.SessionProjectionReadLog);
         Assert.DoesNotContain(nameof(InMemoryRelationalStore.GetSessionProjection), store.SessionProjectionReadLog);
         Assert.DoesNotContain(store.ReadLog, static read => ContentBearingReads.Contains(read));
+    }
+
+    /// <summary>
+    /// Seeds the nested timeline session: thirty parentless turns at the top level, three child
+    /// spans and a subagent under the first roots, thirty auxiliary spans that group under
+    /// <c>(auxiliary)</c>, and two spans whose declared parent is missing so they group under one
+    /// <c>(orphan:...)</c> container — more than a page of nodes at two levels.
+    /// </summary>
+    private static void WriteTimelineSession(InMemoryRelationalStore store, string sessionKey)
+    {
+        List<CollectedRecord> records =
+        [
+            .. Enumerable.Range(0, 30).Select(i => Turn(
+                $"turn-tl-{i:D3}",
+                sessionKey,
+                i,
+                inputTokens: 1_000,
+                outputTokens: 100,
+                declaredContextWindow: 2_000)),
+        ];
+
+        for (int index = 0; index < 3; index++)
+        {
+            records.Add(TimelineSpan($"child-a-{index}", sessionKey, "turn-tl-000", 0, $"agent step {index}"));
+        }
+
+        records.Add(TimelineSpan("child-sub-agent", sessionKey, "turn-tl-001", 1, "invoke_agent subagent"));
+        for (int index = 0; index < 30; index++)
+        {
+            records.Add(TimelineSpan($"aux-{index:D3}", sessionKey, null, 0, $"chat.title {index}"));
+        }
+
+        records.Add(TimelineSpan("orphan-1", sessionKey, "missing-parent", 0, "orphan.tool"));
+        records.Add(TimelineSpan("orphan-2", sessionKey, "missing-parent", 0, "orphan.tool"));
+        WriteSession(store, sessionKey, records, repo: "kyber-weave", branch: "kw-task/T7", title: "timeline session");
+    }
+
+    /// <summary>Builds one non-turn record for the timeline seed: a child, auxiliary, or orphan span.</summary>
+    private static CollectedRecord TimelineSpan(
+        string spanId,
+        string sessionKey,
+        string? parentSpanId,
+        int minuteOffset,
+        string name) =>
+        new(
+            RecordId: spanId,
+            HarnessId: "claude-code",
+            Op: RecordOp.Unspecified,
+            Kind: RecordKind.Internal,
+            Name: name,
+            StartedAt: TurnBase.AddMinutes(minuteOffset),
+            Status: RecordStatus.Ok,
+            SessionKey: sessionKey,
+            ParentRecordId: parentSpanId,
+            TraceId: null,
+            Model: null,
+            EndedAt: null,
+            ReportedDurationMs: 500,
+            Tokens: [],
+            ReportedCost: null,
+            Parts: [],
+            Tool: null,
+            Agent: null,
+            SkillsInvoked: [],
+            AgentInstanceId: null,
+            ToolDefinitions: [],
+            Signals: new CollectedRecordSignals(ErrorMessage: null, EditFailures: null, CorrectionRule: null, DeclaredContextWindow: null),
+            ReportedInputTokens: null,
+            ReportedOutputTokens: null);
+
+    /// <summary>
+    /// Asserts one timeline section row carries today's node fields minus <c>children</c> plus its
+    /// <c>childCount</c>, against the same node in the detail payload's timeline tree.
+    /// </summary>
+    private static void AssertTimelineRowCarriesTodaysFields(JsonElement row, JsonElement today)
+    {
+        Assert.Equal(today.GetProperty("spanId").GetString(), row.GetProperty("spanId").GetString());
+        Assert.Equal(today.GetProperty("parentId").GetRawText(), row.GetProperty("parentId").GetRawText());
+        Assert.Equal(today.GetProperty("startMs").GetInt64(), row.GetProperty("startMs").GetInt64());
+        Assert.Equal(today.GetProperty("durationMs").GetInt64(), row.GetProperty("durationMs").GetInt64());
+        Assert.Equal(today.GetProperty("kind").GetString(), row.GetProperty("kind").GetString());
+        Assert.Equal(today.GetProperty("name").GetString(), row.GetProperty("name").GetString());
+        Assert.Equal(today.GetProperty("status").GetRawText(), row.GetProperty("status").GetRawText());
+        Assert.Equal(today.GetProperty("attributes").GetRawText(), row.GetProperty("attributes").GetRawText());
+        Assert.Equal(today.GetProperty("isSubagent").GetBoolean(), row.GetProperty("isSubagent").GetBoolean());
+        Assert.Equal(today.GetProperty("isAuxiliary").GetBoolean(), row.GetProperty("isAuxiliary").GetBoolean());
+        Assert.Equal(today.GetProperty("cost").GetRawText(), row.GetProperty("cost").GetRawText());
+        Assert.Equal(today.GetProperty("children").GetArrayLength(), row.GetProperty("childCount").GetInt32());
+        Assert.False(row.TryGetProperty("children", out _));
+    }
+
+    /// <summary>The whole tree's extent: the earliest node start and the latest node end.</summary>
+    private static (long StartMs, long EndMs) TimelineTreeExtent(JsonElement[] topLevel)
+    {
+        long start = long.MaxValue;
+        long end = long.MinValue;
+        void Walk(JsonElement node)
+        {
+            start = Math.Min(start, node.GetProperty("startMs").GetInt64());
+            end = Math.Max(end, node.GetProperty("startMs").GetInt64() + node.GetProperty("durationMs").GetInt64());
+            if (node.TryGetProperty("children", out JsonElement children))
+            {
+                foreach (JsonElement child in children.EnumerateArray())
+                {
+                    Walk(child);
+                }
+            }
+        }
+
+        foreach (JsonElement node in topLevel)
+        {
+            Walk(node);
+        }
+
+        return (start == long.MaxValue ? 0 : start, end == long.MinValue ? 0 : end);
     }
 
     /// <summary>Seeds one batch of ingest problems attached to <paramref name="sessionKey"/>.</summary>
@@ -840,6 +1244,23 @@ public sealed class SessionSectionEndpointsTests
             "tool_result_content" => ContentBucket.ToolResultContent,
             _ => throw new ArgumentException($"Unexpected bucket '{bucket}'.", nameof(bucket)),
         };
+
+    /// <summary>
+    /// In-memory store whose timeline records read fails for one session, so a test can pin that
+    /// the timeline section isolates a faulted read to its session.
+    /// </summary>
+    private sealed class TimelineFaultingStore : InMemoryRelationalStore
+    {
+        public override IReadOnlyList<CollectedRecord> SessionTimelineRecords(string sessionKey)
+        {
+            if (string.Equals(sessionKey, "sess-timeline-broken", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return base.SessionTimelineRecords(sessionKey);
+        }
+    }
 
     /// <summary>
     /// In-memory store recording every scoped prompt-preview read's span ids, so a test can pin

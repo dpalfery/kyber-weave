@@ -71,6 +71,10 @@ public class DashboardQueryService : IDashboardQueryService
         bridge.GetSessionSkills(sessionId, page, limit);
 
     /// <inheritdoc />
+    public JsonElement? GetSessionTimeline(string sessionId, string? parentNodeId = null, int page = 1, int limit = 25) =>
+        bridge.GetSessionTimeline(sessionId, parentNodeId, page, limit);
+
+    /// <inheritdoc />
     public JsonElement? GetTurnFigures(string sessionId, int turnIndex) => bridge.GetTurnFigures(sessionId, turnIndex);
 
     /// <inheritdoc />
