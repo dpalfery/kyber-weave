@@ -17,7 +17,6 @@ import {
   FACTORY_CONTENT_ON_SESSION_ID,
   FACTORY_REPLAY_MODEL,
   FACTORY_REPLAY_PROMPT,
-  FACTORY_REPLAY_TOOL,
 } from './factory-replay-world.js'
 
 /**
@@ -437,7 +436,15 @@ test.describe('the Factory (Droid) replay', () => {
 
     // The tool the recorded tool payload named: one invocation of it.
     await expect(page.getByTestId('metric-tool-calls')).toContainText('1')
-    await expect(page.getByTestId('schema-cost-ranking')).toContainText(FACTORY_REPLAY_TOOL)
+
+    // The recorded hook events name the invocation but export no tool definitions,
+    // so there is nothing to rank: the section says so instead of ranking one row.
+    // This is the same contract the Web dashboard specs pin (schemas-not-exported
+    // banner plus the not-measurable box), and ranking here would read as if the
+    // harness had offered definitions it never exported.
+    const toolSchemaSection = page.getByTestId('tool-schema-section')
+    await expect(toolSchemaSection.getByTestId('schemas-not-exported-banner')).toBeVisible()
+    await expect(toolSchemaSection.getByTestId('schema-cost-not-measurable')).toBeVisible()
 
     // The token state is honest: the input figure is the em dash, never a zero and
     // never a number borrowed from another session.
