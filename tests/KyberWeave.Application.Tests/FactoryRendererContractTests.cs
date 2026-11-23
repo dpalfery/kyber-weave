@@ -514,6 +514,9 @@ public sealed class FactoryRendererContractTests : IDisposable
             Assert.DoesNotContain(
                 RequireSequence(frontmatter, "tools", agent.Name),
                 tool => tool.Contains("___", StringComparison.Ordinal));
+            Assert.Equal(
+                ExpectedFactoryTools(source.CapabilityProfiles.Profiles[agent.CapabilityProfile]),
+                RequireSequence(frontmatter, "tools", agent.Name));
         }
     }
 
