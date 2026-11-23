@@ -447,23 +447,41 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             return 0;
         }
 
-        ledger.AppendAsync(
-            new ArbiterLedgerEvent(
-                _ids.NewSortableId(now),
-                now,
-                ArbiterSources.Hook,
-                pre.Harness,
-                pre.Session,
-                ArbiterLedgerPhases.Post)
-            {
-                PreId = pre.Id,
-                Caller = pre.Caller,
-                CallerSource = pre.CallerSource,
-                Target = pre.Target,
-                Headers = pre.Headers,
-                Recovered = stopEvent,
-            })
-            .GetAwaiter().GetResult();
+        // The recovery runs on the stop hook, which the harness kills at its timeout: the row it exists to write
+        // must not be what pushes the hook past it. The hook path is synchronous end to end (the adapters are, so
+        // the engine is), and making it async would change the recovery interface, every adapter and the host for
+        // one append. The wait is bounded to the headroom the rendered hook keeps past the provider budget instead,
+        // and a wait that runs out of it closes nothing loudly rather than throwing out of the hook.
+        try
+        {
+            using CancellationTokenSource remaining = new();
+            remaining.CancelAfter(TimeSpan.FromSeconds(ArbiterHookTimeout.HeadroomSeconds));
+            ledger.AppendAsync(
+                new ArbiterLedgerEvent(
+                    _ids.NewSortableId(now),
+                    now,
+                    ArbiterSources.Hook,
+                    pre.Harness,
+                    pre.Session,
+                    ArbiterLedgerPhases.Post)
+                {
+                    PreId = pre.Id,
+                    Caller = pre.Caller,
+                    CallerSource = pre.CallerSource,
+                    Target = pre.Target,
+                    Headers = pre.Headers,
+                    Recovered = stopEvent,
+                },
+                remaining.Token)
+                .GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException)
+        {
+            context.Log.WriteLine(
+                $"Arbiter: the {stopEvent} of '{agent}' closed nothing: the recovery row was not written within " +
+                $"the hook's remaining time, so dispatch '{pre.Target ?? "unknown"}' ({pre.Id}) still looks in flight.");
+            return 0;
+        }
         context.Log.WriteLine(
             $"Arbiter: closed dispatch '{pre.Target ?? "unknown"}' ({pre.Id}) from the {stopEvent} of '{agent}'; " +
             "it no longer holds its files. A report that arrives later still pairs with it, and this row marks no task complete.");
