@@ -336,6 +336,46 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
+    public IReadOnlyList<StoredSourceCount> SourceRecordCounts()
+    {
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SourceRecordCounts));
+            TableMetadata meta = GetTableMetadata("record");
+            Dictionary<string, int> counts = new(StringComparer.Ordinal);
+            foreach (object?[] row in state.GetRows("record"))
+            {
+                if (row[meta.ColumnIndices["source_id"]] is not string sourceId)
+                {
+                    continue;
+                }
+
+                counts[sourceId] = counts.TryGetValue(sourceId, out int current) ? current + 1 : 1;
+            }
+
+            return
+            [
+                .. counts
+                    .OrderBy(static pair => pair.Key, StringComparer.Ordinal)
+                    .Select(static pair => new StoredSourceCount(pair.Key, pair.Value)),
+            ];
+        }
+    }
+
+    /// <inheritdoc />
+    public CollectedRecord? RecordContentFree(string spanId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(spanId);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(RecordContentFree));
+            object?[]? row = FindRowByKey(state, "record", [("span_id", spanId)]);
+            return row is null ? null : MaterializeRecordContentFree(state, row);
+        }
+    }
+
+    /// <inheritdoc />
     public IReadOnlyList<StoredSessionAttribution> SessionAttributions()
     {
         lock (syncRoot)
@@ -630,6 +670,110 @@ public class InMemoryRelationalStore :
 
             return results;
         }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<StoredContentPart> TurnContentParts(
+        string sessionKey,
+        int? turnIndex = null,
+        string? spanId = null,
+        string? part = null,
+        int budget = 0,
+        bool full = false)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(TurnContentParts));
+
+            string? scopedSpan = spanId;
+            if (string.IsNullOrEmpty(scopedSpan) && turnIndex.HasValue)
+            {
+                scopedSpan = ResolveTurnContentSpan(state, sessionKey, turnIndex.Value);
+                if (scopedSpan is null)
+                {
+                    return [];
+                }
+            }
+
+            HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, scopedSpan, sessionKey);
+            TableMetadata meta = GetTableMetadata("content_part");
+            List<StoredContentPart> results = [];
+
+            foreach (object?[] row in state.GetRows("content_part")
+                .OrderBy(r => GetString(meta, r, "span_id"), StringComparer.Ordinal)
+                .ThenBy(r => (int)GetInt64(meta, r, "position")))
+            {
+                string rowSpan = GetString(meta, row, "span_id");
+                if (allowedSpans is not null && !allowedSpans.Contains(rowSpan))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(part) && !string.Equals(GetString(meta, row, "bucket"), part, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                results.Add(new StoredContentPart(rowSpan, MaterializeContentPart(state, row)));
+            }
+
+            if (full || budget <= 0)
+            {
+                foreach (StoredContentPart scoped in results)
+                {
+                    materializedContentBytes += ContentBytesOf(scoped.Part);
+                }
+
+                return results;
+            }
+
+            List<StoredContentPart> capped = new(results.Count);
+            long bytes = 0;
+            foreach (StoredContentPart scoped in results)
+            {
+                capped.Add(scoped);
+                long partBytes = ContentBytesOf(scoped.Part);
+                bytes += partBytes;
+                materializedContentBytes += partBytes;
+                if (bytes >= budget)
+                {
+                    break;
+                }
+            }
+
+            return capped;
+        }
+    }
+
+    /// <summary>
+    /// Resolves a turn index to the span the turn figures answer for that index, so the content
+    /// read is scoped to the same turn the summary already priced.
+    /// </summary>
+    /// <param name="currentState">Store snapshot to read.</param>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="turnIndex">Zero-based turn index.</param>
+    /// <returns>The turn's span identifier, or <see langword="null"/> when the index is outside the session.</returns>
+    private static string? ResolveTurnContentSpan(StoreState currentState, string sessionKey, int turnIndex)
+    {
+        if (turnIndex < 0)
+        {
+            return null;
+        }
+
+        object?[]? sessionRow = FindRowByKey(currentState, "session", [("session_id", sessionKey)]);
+        List<CollectedRecord> records = CollectSessionRecordsContentFree(currentState, sessionKey);
+        if (sessionRow is null && records.Count == 0)
+        {
+            return null;
+        }
+
+        string harnessId = sessionRow is not null
+            ? GetString(GetTableMetadata("session"), sessionRow, "harness_id")
+            : records[0].HarnessId;
+        IReadOnlyList<ReadTimeTurnSummary> turns = BuildSessionTurnFigures(currentState, sessionKey, records, harnessId, pricing: null);
+        return turnIndex < turns.Count ? turns[turnIndex].SpanId : null;
     }
 
     /// <inheritdoc />
@@ -6070,7 +6214,7 @@ public class InMemoryRelationalStore :
             SkillsInvoked: [],
             agentInstanceId,
             toolDefs,
-            new CollectedRecordSignals(null, null, null, null),
+            MaterializeRecordSignals(currentState, spanId),
             reportedInput,
             reportedOutput);
     }

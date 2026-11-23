@@ -338,6 +338,11 @@ public record SessionAggregateView(
     ReadTimeContextBucketSummary? LastContextBucket,
     UnusedSchemaRange? UnusedRange);
 
+/// <summary>Count of persisted records attributed to one telemetry source.</summary>
+/// <param name="SourceId">Registered source identifier (<c>record.source_id</c>).</param>
+/// <param name="Count">Number of records that source contributed.</param>
+public record StoredSourceCount(string SourceId, int Count);
+
 /// <summary>
 /// Read-time figures the sessions list renders, derived in one content-free pass over the
 /// same scalar columns the broad <see cref="SessionAggregateView"/> read prices (<c>DD-13</c>).
@@ -464,9 +469,30 @@ public interface IRelationalStoreReader
     /// <param name="harnessId">Optional harness filter.</param>
     int CountRecords(string? harnessId = null);
 
+    /// <summary>
+    /// Counts persisted telemetry records per source (<c>record</c>).
+    /// </summary>
+    /// <remarks>
+    /// The coverage page shows a record count per source. Counting must never materialize the
+    /// records, so this answers the count in the store rather than reading them back.
+    /// </remarks>
+    IReadOnlyList<StoredSourceCount> SourceRecordCounts();
+
     /// <summary>Gets one normalized telemetry record by <paramref name="spanId"/>.</summary>
     /// <param name="spanId">Record span identifier.</param>
     CollectedRecord? GetRecord(string spanId);
+
+    /// <summary>
+    /// Gets one record's metadata with no content-text column, the shape the span inspector reads.
+    /// </summary>
+    /// <param name="spanId">Record span identifier.</param>
+    /// <returns>The record's content-free metadata, or <see langword="null"/> when absent.</returns>
+    /// <remarks>
+    /// The inspector prices attributes, tokens, cost, and signals, none of which is content. A
+    /// captured prompt the inspector shows comes from <see cref="TurnContentParts"/>, so reading
+    /// a span attribute never materializes a conversation.
+    /// </remarks>
+    CollectedRecord? RecordContentFree(string spanId);
 
     /// <summary>Queries normalized telemetry records (<c>record</c> and child tables).</summary>
     /// <param name="sessionKey">Optional session key filter.</param>
@@ -536,6 +562,38 @@ public interface IRelationalStoreReader
     /// <param name="spanId">Optional record span identifier filter.</param>
     /// <param name="sessionKey">Optional session key filter.</param>
     IReadOnlyList<StoredContentPart> ContentParts(string? spanId = null, string? sessionKey = null);
+
+    /// <summary>
+    /// Reads the captured content parts of one turn or one request — the content view's single
+    /// scoped read, and the only <c>content_part_text</c> read allowed on a request path.
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key the turn belongs to.</param>
+    /// <param name="turnIndex">
+    /// Zero-based turn index to scope to, resolved exactly as <see cref="TurnFigures"/> resolves it;
+    /// <see langword="null"/> reads every turn in the session.
+    /// </param>
+    /// <param name="spanId">Span identifier to scope to; it wins over <paramref name="turnIndex"/> when both are given.</param>
+    /// <param name="part">Canonical part key to scope to — the stored bucket name — or <see langword="null"/> for every part.</param>
+    /// <param name="budget">
+    /// Maximum UTF-8 bytes of part text to materialize when <paramref name="full"/> is
+    /// <see langword="false"/>; zero or less reads the whole scope.
+    /// </param>
+    /// <param name="full">Whether to read every part of the scope untruncated, ignoring <paramref name="budget"/>.</param>
+    /// <returns>The scoped parts in span then position order.</returns>
+    /// <remarks>
+    /// Scoped by <c>(session_key, span, position)</c>, so the content view pays for the parts it
+    /// renders and never for the session's whole conversation. Every other read model in this
+    /// contract is content-free: list, detail, summary, turn figures, timeline, coverage,
+    /// findings, problems, quarantine, harnesses, runs, report, and analytics must not reach a
+    /// content-text column, and none of them calls this member.
+    /// </remarks>
+    IReadOnlyList<StoredContentPart> TurnContentParts(
+        string sessionKey,
+        int? turnIndex = null,
+        string? spanId = null,
+        string? part = null,
+        int budget = 0,
+        bool full = false);
 
     /// <summary>Queries advertised tool definitions (<c>tool_definition</c> and <c>tool_definition_server</c>).</summary>
     /// <param name="spanId">Optional record span identifier filter.</param>

@@ -216,6 +216,16 @@ public class ApplicationParityTests
         JsonElement partFiltered = bridge.GetSessionContent("sess-content", spanId: "span-parts", part: "user_prompt", full: true)!.Value;
         JsonElement filteredEntry = Assert.Single(partFiltered.GetProperty("parts").EnumerateArray().ToList());
         Assert.Equal("hello", filteredEntry.GetProperty("text").GetString());
+
+        // The content view reads only the span it answers for: five bytes of text, through the
+        // scoped content read, with no broad record or part read on the way.
+        store.ClearReadLog();
+        JsonElement scoped = bridge.GetSessionContent("sess-content", spanId: "span-parts", full: true)!.Value;
+        Assert.Single(scoped.GetProperty("parts").EnumerateArray());
+        Assert.Equal(5, store.MaterializedContentBytes);
+        Assert.Contains(nameof(InMemoryRelationalStore.TurnContentParts), store.ReadLog);
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.Records), store.ReadLog);
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.ContentParts), store.ReadLog);
     }
 
     [Fact]

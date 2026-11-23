@@ -699,6 +699,179 @@ public sealed class AnalyticsReadPathTests
         Assert.Null(bridge.GetSessionContent("missing", full: true));
     }
 
+    /// <summary>
+    /// The content view is the one request path that reads content text, and it reads only the
+    /// turn, span, and part it was asked for: the scoped read answers that scope, honours the
+    /// budget and the full flag, and both content routes reach it without falling back to a broad
+    /// record or part read.
+    /// </summary>
+    [Fact]
+    public void TurnContentReadsOnlyTheRequestedTurnsParts()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-content-scope";
+        WriteSession(
+            store,
+            sessionKey,
+            [
+                Turn("span-one", sessionKey, 0, inputTokens: 100, parts: [TextPart(0, "user_prompt", "first turn prompt")]),
+                Turn(
+                    "span-two",
+                    sessionKey,
+                    1,
+                    inputTokens: 200,
+                    parts:
+                    [
+                        TextPart(0, "user_prompt", "second turn prompt"),
+                        TextPart(1, "tool_result_content", "second turn tool result"),
+                    ]),
+                Turn("span-three", sessionKey, 2, inputTokens: 300, parts: [TextPart(0, "user_prompt", "third turn prompt")]),
+            ]);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
+        bridge.EnsureProjected();
+
+        store.ClearReadLog();
+        IReadOnlyList<StoredContentPart> secondTurn = store.TurnContentParts(sessionKey, turnIndex: 1);
+        Assert.Equal(
+            ["second turn prompt", "second turn tool result"],
+            secondTurn.Select(static part => part.Part.PlainText).ToList());
+        Assert.All(secondTurn, part => Assert.Equal("span-two", part.SpanId));
+        Assert.Equal(41, store.MaterializedContentBytes);
+
+        store.ClearReadLog();
+        StoredContentPart resultPart = Assert.Single(store.TurnContentParts(sessionKey, spanId: "span-two", part: "tool_result_content"));
+        Assert.Equal("span-two", resultPart.SpanId);
+        Assert.Equal("second turn tool result", resultPart.Part.PlainText);
+        Assert.Equal(23, store.MaterializedContentBytes);
+
+        store.ClearReadLog();
+        StoredContentPart bounded = Assert.Single(store.TurnContentParts(sessionKey, turnIndex: 1, budget: 10));
+        Assert.Equal("second turn prompt", bounded.Part.PlainText);
+        Assert.Equal(18, store.MaterializedContentBytes);
+
+        store.ClearReadLog();
+        Assert.Equal(2, store.TurnContentParts(sessionKey, turnIndex: 1, budget: 10, full: true).Count);
+        Assert.Equal(41, store.MaterializedContentBytes);
+
+        Assert.Empty(store.TurnContentParts(sessionKey, turnIndex: 9));
+        Assert.Empty(store.TurnContentParts("sess-absent", turnIndex: 0));
+
+        store.ClearReadLog();
+        JsonElement scoped = bridge.GetSessionContent(sessionKey, spanId: "span-two", full: true)!.Value;
+        Assert.Equal(
+            ["span-two", "span-two"],
+            scoped.GetProperty("parts").EnumerateArray().Select(static part => part.GetProperty("spanId").GetString()).ToList());
+        Assert.Equal(41, store.MaterializedContentBytes);
+        Assert.Contains(nameof(InMemoryRelationalStore.TurnContentParts), store.ReadLog);
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.ContentParts), store.ReadLog);
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.Records), store.ReadLog);
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.GetRecord), store.ReadLog);
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.SessionRecordsForRebuild), store.ReadLog);
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.AllSessionRecordsForMaintenance), store.ReadLog);
+
+        store.ClearReadLog();
+        JsonElement turnContent = bridge.GetTurnContent(sessionKey, 1, full: true)!.Value;
+        Assert.Equal(
+            ["user_prompt", "tool_result_content"],
+            turnContent.GetProperty("parts").EnumerateArray().Select(static part => part.GetProperty("part").GetString()).ToList());
+        Assert.Equal(41, store.MaterializedContentBytes);
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.Records), store.ReadLog);
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.ContentParts), store.ReadLog);
+    }
+
+    /// <summary>
+    /// Every request path except the content view leaves content unread. The sweep calls the
+    /// list, detail, summary, turn-figure, span-attribute, timeline, coverage, findings,
+    /// problems, quarantine, harness, run, report, and analytics paths over the instrumented
+    /// fake against a session whose turns carry four kilobytes of text each, and each path
+    /// records zero materialized content bytes and no content-bearing read.
+    /// </summary>
+    [Fact]
+    public void EveryOtherPathLeavesContentUnread()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-sweep";
+        WriteSession(
+            store,
+            sessionKey,
+            [
+                Turn(
+                    "span-sweep-1",
+                    sessionKey,
+                    0,
+                    inputTokens: 400,
+                    cacheRead: 100,
+                    outputTokens: 60,
+                    reportedCostUsd: 0.01,
+                    parts: [TextPart(0, "user_prompt", new string('p', 4_096))],
+                    declaredContextWindow: 2_000),
+                Turn(
+                    "span-sweep-2",
+                    sessionKey,
+                    1,
+                    inputTokens: 1_800,
+                    outputTokens: 120,
+                    parts: [TextPart(0, "tool_result_content", new string('r', 4_096))],
+                    declaredContextWindow: 2_000),
+            ],
+            repo: "kyber-weave",
+            branch: "kw-task/T4",
+            title: "sweep session");
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
+        bridge.EnsureProjected();
+
+        string[] contentBearingReads =
+        [
+            nameof(InMemoryRelationalStore.Records),
+            nameof(InMemoryRelationalStore.SessionRecordsForRebuild),
+            nameof(InMemoryRelationalStore.AllSessionRecordsForMaintenance),
+            nameof(InMemoryRelationalStore.GetRecord),
+            nameof(InMemoryRelationalStore.GetSessionAggregate),
+            nameof(InMemoryRelationalStore.ListSessionAggregates),
+            nameof(InMemoryRelationalStore.SessionTurnSummaries),
+            nameof(InMemoryRelationalStore.ContentParts),
+            nameof(InMemoryRelationalStore.ToolCalls),
+            nameof(InMemoryRelationalStore.ToolDefinitions),
+            nameof(InMemoryRelationalStore.AgentInvocations),
+            nameof(InMemoryRelationalStore.SkillsInvoked),
+        ];
+
+        (string Path, Action Call)[] paths =
+        [
+            ("sessions list", () => _ = bridge.GetSessions()),
+            ("sessions list filtered", () => _ = bridge.GetSessions(harness: "claude-code")),
+            ("session detail", () => _ = bridge.GetSessionDetail(sessionKey)),
+            ("session summary", () => _ = bridge.GetSessionSummary(sessionKey)),
+            ("turn figures", () => _ = bridge.GetTurnFigures(sessionKey, 0)),
+            ("span attributes", () => _ = bridge.GetSpanAttributes("span-sweep-1")),
+            ("timeline", () => _ = bridge.GetTimeline(sessionKey)),
+            ("coverage", () => _ = bridge.GetCoverage()),
+            ("findings", () => _ = bridge.GetFindings(sessionId: sessionKey)),
+            ("problems", () => _ = bridge.GetProblemsPage(null, 10, 0, 1)),
+            ("quarantine", () => _ = bridge.GetQuarantinePage(null, 10, 0, 1)),
+            ("harnesses", () => _ = bridge.GetHarnesses()),
+            ("runs", () => _ = bridge.GetRuns()),
+            ("report", () => _ = bridge.GetReport()),
+            ("analytics status", () => _ = bridge.ExecuteAnalytics("status", null)),
+            ("analytics query", () => _ = bridge.ExecuteAnalytics("query", null)),
+            ("analytics findings", () => _ = bridge.ExecuteAnalytics("findings", null)),
+        ];
+
+        foreach ((string path, Action call) in paths)
+        {
+            store.ClearReadLog();
+            call();
+            Assert.True(
+                store.MaterializedContentBytes == 0,
+                $"the {path} path materialized {store.MaterializedContentBytes} content bytes");
+            Assert.DoesNotContain(store.ReadLog, read => contentBearingReads.Contains(read));
+        }
+    }
+
     /// <summary>Runs, harnesses, findings, report, compare, and timeline answer from the projection store.</summary>
     [Fact]
     public void RunsHarnessesFindingsReportAndTimelineAnswerFromTheProjectionStore()
@@ -1121,7 +1294,12 @@ public sealed class AnalyticsReadPathTests
 
         public int CountRecords(string? harnessId = null) => inner.CountRecords(harnessId);
 
+        /// <inheritdoc />
+        public IReadOnlyList<StoredSourceCount> SourceRecordCounts() => inner.SourceRecordCounts();
+
         public CollectedRecord? GetRecord(string spanId) => inner.GetRecord(spanId);
+
+        public CollectedRecord? RecordContentFree(string spanId) => inner.RecordContentFree(spanId);
 
         public IReadOnlyList<CollectedRecord> Records(string? sessionKey = null, string? harnessId = null, string? sourceId = null) =>
             inner.Records(sessionKey, harnessId, sourceId);
@@ -1143,6 +1321,15 @@ public sealed class AnalyticsReadPathTests
         public IReadOnlyList<StoredToolCall> ToolCalls(string? spanId = null, string? sessionKey = null) => inner.ToolCalls(spanId, sessionKey);
 
         public IReadOnlyList<StoredContentPart> ContentParts(string? spanId = null, string? sessionKey = null) => inner.ContentParts(spanId, sessionKey);
+
+        public IReadOnlyList<StoredContentPart> TurnContentParts(
+            string sessionKey,
+            int? turnIndex = null,
+            string? spanId = null,
+            string? part = null,
+            int budget = 0,
+            bool full = false) =>
+            inner.TurnContentParts(sessionKey, turnIndex, spanId, part, budget, full);
 
         public IReadOnlyList<StoredToolDefinition> ToolDefinitions(string? spanId = null, string? sessionKey = null) => inner.ToolDefinitions(spanId, sessionKey);
 

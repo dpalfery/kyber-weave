@@ -414,10 +414,13 @@ public class KyberBridgeEngine
             return null;
         }
 
+        int effectiveBudget = budget > 0 ? budget : ContentResponseBudget;
+        List<Dictionary<string, object?>> parts = [.. reader
+            .TurnContentParts(sessionId, turnIndex: turnIndex, budget: effectiveBudget, full: full)
+            .Select(ToTurnContentEntry)];
         Dictionary<string, object?> turn = ToTurnDto(figures);
         string serialized = JsonSerializer.Serialize(turn, CamelCaseJsonOptions);
         int totalBytes = Encoding.UTF8.GetByteCount(serialized);
-        int effectiveBudget = budget > 0 ? budget : ContentResponseBudget;
         bool truncated = !full && totalBytes > effectiveBudget;
         string slice = truncated ? TruncateUtf8(serialized, effectiveBudget) : serialized;
 
@@ -430,6 +433,7 @@ public class KyberBridgeEngine
             truncated,
             budget = effectiveBudget,
             totalBytes,
+            parts,
         }, CamelCaseJsonOptions);
     }
 
@@ -440,6 +444,12 @@ public class KyberBridgeEngine
     /// <param name="part">Optional canonical content part key.</param>
     /// <param name="full">Whether to omit truncation preview slicing.</param>
     /// <returns>Session content JSON element, or <see langword="null"/> when the session is absent.</returns>
+    /// <remarks>
+    /// The one request path that materializes conversation text, and it pays only for the turn or
+    /// request it was asked for: the parts come from the scoped content read, while the span
+    /// order, the emitted index, and the advertised tool names come from the session's
+    /// content-free record metadata.
+    /// </remarks>
     public JsonElement? GetSessionContent(
         string sessionId,
         int? turnIndex = null,
@@ -454,54 +464,87 @@ public class KyberBridgeEngine
             return null;
         }
 
-        List<CanonicalRecord> records = [.. reader.Records(sessionKey: sessionId).Select(CanonRecordHydration.Hydrate)];
-        records.Sort(CompareRecords);
-        IEnumerable<CanonicalRecord> filtered = records;
-        if (!string.IsNullOrEmpty(spanId))
+        List<CanonicalRecord> metadata = [.. reader.SessionRecordsContentFree(sessionId).Select(CanonRecordHydration.Hydrate)];
+        metadata.Sort(CompareRecords);
+
+        // A span filter narrows the record sequence first, so the turn filter then counts inside
+        // it — the shape the content reader has always used. Without a span filter the turn index
+        // resolves against the session's turn figures, the same turn the summary priced.
+        string? scopedSpan = spanId;
+        if (string.IsNullOrEmpty(scopedSpan) && turnIndex.HasValue)
         {
-            filtered = filtered.Where(r => string.Equals(r.SpanId, spanId, StringComparison.Ordinal));
+            scopedSpan = TryTurnFigures(sessionId, turnIndex.Value)?.SpanId;
+        }
+
+        List<CanonicalRecord> selected = string.IsNullOrEmpty(scopedSpan)
+            ? metadata
+            : [.. metadata.Where(record => string.Equals(record.SpanId, scopedSpan, StringComparison.Ordinal))];
+        bool turnFilterApplies = turnIndex.HasValue && (!string.IsNullOrEmpty(spanId) || string.IsNullOrEmpty(scopedSpan));
+
+        IReadOnlyList<StoredContentPart> scopedParts = selected.Count == 0
+            ? []
+            : reader.TurnContentParts(
+                sessionId,
+                spanId: string.IsNullOrEmpty(scopedSpan) ? null : scopedSpan,
+                part: string.IsNullOrEmpty(part) ? null : part,
+                budget: ContentResponseBudget,
+                full: full);
+
+        Dictionary<string, List<CollectedContentPart>> partsBySpan = new(StringComparer.Ordinal);
+        foreach (StoredContentPart scopedPart in scopedParts)
+        {
+            if (!partsBySpan.TryGetValue(scopedPart.SpanId, out List<CollectedContentPart>? spanParts))
+            {
+                spanParts = [];
+                partsBySpan[scopedPart.SpanId] = spanParts;
+            }
+
+            spanParts.Add(scopedPart.Part);
         }
 
         List<object> chunks = [];
         int index = 0;
-        foreach (CanonicalRecord record in filtered)
+        foreach (CanonicalRecord record in selected)
         {
-            if (turnIndex.HasValue && index != turnIndex.Value)
+            if (turnFilterApplies && index != turnIndex!.Value)
             {
                 index++;
                 continue;
             }
 
+            partsBySpan.TryGetValue(record.SpanId, out List<CollectedContentPart>? captured);
             if (!string.IsNullOrEmpty(part))
             {
-                string? partVal = record.Parts is not null
-                    ? string.Join("\n", record.Parts.Where(p => string.Equals(p.Part, part, StringComparison.Ordinal)).Select(p => p.Text))
-                    : record.Content.TryGetValue(part, out string? v)
-                        ? v
-                        : null;
-                chunks.Add(new { spanId = record.SpanId, index, part, text = partVal ?? string.Empty });
+                // A part the capture did not record still answers an empty entry, and a part the
+                // content-free metadata carries — the advertised tool names — answers from it.
+                string partVal = captured is not null
+                    ? string.Join("\n", captured.Select(static p => p.PlainText))
+                    : string.Join("\n", (record.Parts ?? []).Where(p => string.Equals(p.Part, part, StringComparison.Ordinal)).Select(p => p.Text));
+                chunks.Add(new { spanId = record.SpanId, index, part, text = partVal });
             }
             else
             {
                 // One flat entry per captured part, the shape the part-filtered branch and the
                 // dashboard's content reader both use. A span that captured nothing contributes
                 // no entry, rather than a part-less wrapper the reader cannot render.
-                IEnumerable<(string Name, string Text, ContentPart? Source)> captured = record.Parts is not null
-                    ? record.Parts.Select(p => (p.Part, p.Text, (ContentPart?)p))
-                    : record.Content.Select(c => (c.Key, c.Value, (ContentPart?)null));
-                foreach ((string name, string text, ContentPart? source) in captured)
+                foreach (CollectedContentPart source in captured ?? [])
+                {
+                    chunks.Add(ToContentEntry(record.SpanId, index, source));
+                }
+
+                // Hydration of a content-free record leaves its advertised tool names as parts,
+                // ordered after the captured parts, so the payload keeps the entries it had.
+                foreach (ContentPart advertised in record.Parts ?? [])
                 {
                     Dictionary<string, object> entry = new(StringComparer.Ordinal)
                     {
                         ["spanId"] = record.SpanId,
                         ["index"] = index,
-                        ["part"] = name,
-                        ["text"] = text ?? string.Empty,
+                        ["part"] = advertised.Part,
+                        ["text"] = advertised.Text,
                     };
-                    if (source?.Tokens is long tokens) entry["tokens"] = tokens;
-                    if (source?.Server is string server) entry["server"] = server;
-                    if (source?.Resident is bool resident) entry["resident"] = resident;
-                    if (source?.Truncated is bool clipped) entry["truncated"] = clipped;
+                    if (advertised.Tokens is long schemaTokens) entry["tokens"] = schemaTokens;
+                    if (advertised.Server is string server) entry["server"] = server;
                     chunks.Add(entry);
                 }
             }
@@ -545,18 +588,18 @@ public class KyberBridgeEngine
     /// <returns>Span attributes JSON element, or <see langword="null"/> when absent.</returns>
     /// <remarks>
     /// The relational store keeps no raw attribute bag; <c>attributes</c> carries the typed
-    /// attributes a hydrated record still names (declared context window, model, agent).
+    /// attributes a hydrated record still names (declared context window, model, agent). The read
+    /// is content-free: a captured prompt is conversation text, so the content view serves it.
     /// </remarks>
     public JsonElement? GetSpanAttributes(string spanId)
     {
-        CollectedRecord? record = reader.GetRecord(spanId);
+        CollectedRecord? record = reader.RecordContentFree(spanId);
         if (record is null)
         {
             return null;
         }
 
         CanonicalRecord hydrated = CanonRecordHydration.Hydrate(record);
-        AttachCapturedPrompt(record, hydrated);
         return JsonSerializer.SerializeToElement(new
         {
             spanId = hydrated.SpanId,
@@ -703,13 +746,13 @@ public class KyberBridgeEngine
         IReadOnlyList<StoredRun> runRows = projections.ListRuns(normalizedHarness);
         Dictionary<string, string> runBySession = BuildRunBySessionIndex(runRows);
         Dictionary<string, int> findingCounts = CountFindingsByRun(runBySession);
-        Dictionary<string, SessionAggregateView> aggregatesById = BuildAggregateIndex(lookup);
+        Dictionary<string, SessionListFigure> figuresById = BuildFigureIndex(lookup);
 
         List<object> mappedRuns = new(runRows.Count);
         foreach (StoredRun run in runRows)
         {
             IReadOnlyList<StoredExecution> execs = projections.ListExecutionsForRun(run.RunId);
-            RunSessionFigures figures = SummarizeRunSessions(execs, aggregatesById);
+            RunSessionFigures figures = SummarizeRunSessions(execs, figuresById);
             mappedRuns.Add(new
             {
                 runId = run.RunId,
@@ -756,13 +799,13 @@ public class KyberBridgeEngine
             .Where(f => string.Equals(f.RunId, runId, StringComparison.Ordinal)
                 || (f.SessionId is not null && runSessionIds.Contains(f.SessionId)))];
         JsonElement scorecard = rollups.BuildScorecard(runId);
-        Dictionary<string, SessionAggregateView> aggregatesById = BuildAggregateIndex(lookup);
+        Dictionary<string, SessionListFigure> figuresById = BuildFigureIndex(lookup);
 
-        RunSessionFigures figures = SummarizeRunSessions(executions, aggregatesById);
+        RunSessionFigures figures = SummarizeRunSessions(executions, figuresById);
         List<object> enrichedExecutions = new(executions.Count);
         foreach (StoredExecution exec in executions)
         {
-            (int? TurnCount, double? CostUsd) sessionFigures = SessionFiguresOf(exec, aggregatesById);
+            (int? TurnCount, double? CostUsd) sessionFigures = SessionFiguresOf(exec, figuresById);
             enrichedExecutions.Add(new
             {
                 executionId = exec.ExecutionId,
@@ -781,7 +824,7 @@ public class KyberBridgeEngine
             });
         }
 
-        List<object> executionTree = BuildExecutionTree(executions, aggregatesById);
+        List<object> executionTree = BuildExecutionTree(executions, figuresById);
         List<Dictionary<string, object?>> turns = ExtractRunTurns(executions, lookup);
 
         return JsonSerializer.SerializeToElement(new
@@ -1087,7 +1130,7 @@ public class KyberBridgeEngine
         List<object> trees = [];
         foreach (CollectedSession session in sessions)
         {
-            List<CanonicalRecord> records = [.. reader.Records(sessionKey: session.SessionKey).Select(CanonRecordHydration.Hydrate)];
+            List<CanonicalRecord> records = [.. reader.SessionRecordsContentFree(session.SessionKey).Select(CanonRecordHydration.Hydrate)];
             records.Sort(CompareRecords);
             TimelineNode timeline = CanonContextAnalysis.BuildTimeline(records);
             trees.Add(new { sessionId = session.SessionKey, harness = session.HarnessId, timeline });
@@ -1407,14 +1450,17 @@ public class KyberBridgeEngine
             return (200, BuildAnalyticsEnvelope(defaultScope, new { deltas = rollups.CompareHarnesses() }, new { }, freshness, new { }, null, null, null));
         }
 
-        IModelPricingLookup lookup = pricing.LoadPricingTables();
-        IReadOnlyList<SessionAggregateView> aggregates = reader.ListSessionAggregates(normalizedFilter, lookup);
+        // The grouped analytics answer names session keys and harnesses only, so it reads the
+        // content-free session attribution index instead of pricing any session's figures.
+        IReadOnlyList<StoredSessionAttribution> attributions = normalizedFilter is null
+            ? reader.SessionAttributions()
+            : [.. reader.SessionAttributions().Where(a => string.Equals(a.HarnessId, normalizedFilter, StringComparison.Ordinal))];
 
         if (string.Equals(normalizedOp, "outcomes", StringComparison.Ordinal))
         {
             // The relational schema keeps no outcome rows, so an outcome stays not-measurable
             // rather than being guessed from unrelated telemetry.
-            List<object> outcomes = [.. aggregates.Select(a => (object)new
+            List<object> outcomes = [.. attributions.Select(a => (object)new
             {
                 sessionId = a.SessionKey,
                 harness = a.HarnessId,
@@ -1424,13 +1470,13 @@ public class KyberBridgeEngine
         }
 
         // operation == "query"
-        List<object> groups = [.. aggregates
+        List<object> groups = [.. attributions
             .GroupBy(a => a.HarnessId, StringComparer.Ordinal)
             .OrderBy(g => g.Key, StringComparer.Ordinal)
             .Select(g => (object)new
             {
                 key = new { harness = g.Key },
-                sessions = g.Count(),
+                sessions = g.Select(a => a.SessionKey).Distinct(StringComparer.Ordinal).Count(),
             })];
         return (200, BuildAnalyticsEnvelope(defaultScope, new { groups }, new { }, freshness, new { returnedCount = groups.Count, nextCursor = (string?)null }, null, null, null));
     }
@@ -1780,6 +1826,48 @@ public class KyberBridgeEngine
             problems = summary.Problems,
         };
 
+    /// <summary>Projects one scoped content part onto the flat entry the content view renders.</summary>
+    /// <param name="spanId">Span the part belongs to.</param>
+    /// <param name="index">Position of that span in the answered sequence.</param>
+    /// <param name="source">Content part read through the scoped content read.</param>
+    private static Dictionary<string, object?> ToContentEntry(string spanId, int index, CollectedContentPart source)
+    {
+        Dictionary<string, object?> entry = new(StringComparer.Ordinal)
+        {
+            ["spanId"] = spanId,
+            ["index"] = index,
+            ["part"] = CanonRecordHydration.PartKeyOf(source.Bucket),
+            ["text"] = source.PlainText ?? string.Empty,
+        };
+        AddPartDetail(entry, source);
+        return entry;
+    }
+
+    /// <summary>Projects one scoped content part onto the turn content payload's part entry.</summary>
+    /// <param name="scoped">Content part read through the scoped content read.</param>
+    private static Dictionary<string, object?> ToTurnContentEntry(StoredContentPart scoped)
+    {
+        Dictionary<string, object?> entry = new(StringComparer.Ordinal)
+        {
+            ["spanId"] = scoped.SpanId,
+            ["part"] = CanonRecordHydration.PartKeyOf(scoped.Part.Bucket),
+            ["text"] = scoped.Part.PlainText ?? string.Empty,
+        };
+        AddPartDetail(entry, scoped.Part);
+        return entry;
+    }
+
+    /// <summary>Adds the measured detail a part carries — tokens, server, residency, truncation — when present.</summary>
+    /// <param name="entry">Entry being built.</param>
+    /// <param name="part">Content part the entry describes.</param>
+    private static void AddPartDetail(Dictionary<string, object?> entry, CollectedContentPart part)
+    {
+        if ((part.ReportedTokens ?? part.Withheld?.MeasuredTokens) is long tokens) entry["tokens"] = tokens;
+        if (part.Server is string server) entry["server"] = server;
+        if (part.Resident is bool resident) entry["resident"] = resident;
+        if (part.OriginalUtf8BytesWhenTruncated.HasValue) entry["truncated"] = true;
+    }
+
     private static Dictionary<string, object?> ToTurnDto(ReadTimeTurnSummary turn) => new(StringComparer.Ordinal)
     {
         ["turnIndex"] = turn.Position,
@@ -1852,44 +1940,47 @@ public class KyberBridgeEngine
             ? value
             : null;
 
-    private Dictionary<string, SessionAggregateView> BuildAggregateIndex(IModelPricingLookup lookup)
+    /// <summary>
+    /// Reads the content-free session figures the run and comparison pages price, in one batched
+    /// pass. A faulted batch leaves the figures absent rather than materializing every session's
+    /// records to recover them, which is the stall this read model exists to remove.
+    /// </summary>
+    /// <param name="lookup">Read-time pricing tables.</param>
+    private Dictionary<string, SessionListFigure> BuildFigureIndex(IModelPricingLookup lookup)
     {
-        Dictionary<string, SessionAggregateView> aggregates = new(StringComparer.Ordinal);
-        foreach (StoredSessionProjection projection in projections.ListSessionProjections())
+        Dictionary<string, SessionListFigure> figures = new(StringComparer.Ordinal);
+        try
         {
-            try
+            foreach (SessionListFigure figure in reader.SessionListFigures(pricing: lookup))
             {
-                SessionAggregateView? aggregate = reader.GetSessionAggregate(projection.SessionId, lookup);
-                if (aggregate is not null)
-                {
-                    aggregates[projection.SessionId] = aggregate;
-                }
-            }
-            catch (Exception ex)
-            {
-                RecordProjectionFailure(projection.SessionId, ex.Message);
+                figures[figure.SessionKey] = figure;
             }
         }
+        catch (Exception ex)
+        {
+            RecordProjectionFailure(string.Empty, ex.Message);
+            return [];
+        }
 
-        return aggregates;
+        return figures;
     }
 
     private static (int? TurnCount, double? CostUsd) SessionFiguresOf(
         StoredExecution execution,
-        Dictionary<string, SessionAggregateView> aggregatesById)
+        Dictionary<string, SessionListFigure> figuresById)
     {
         if (string.IsNullOrEmpty(execution.SessionId)
-            || !aggregatesById.TryGetValue(execution.SessionId, out SessionAggregateView? aggregate))
+            || !figuresById.TryGetValue(execution.SessionId, out SessionListFigure? figure))
         {
             return (null, null);
         }
 
-        return (aggregate.TurnCount, ExtractUsdCost(aggregate.PublishedCost));
+        return (figure.TurnCount, ExtractUsdCost(figure.PublishedCost));
     }
 
     private static RunSessionFigures SummarizeRunSessions(
         IReadOnlyList<StoredExecution> executions,
-        Dictionary<string, SessionAggregateView> aggregatesById)
+        Dictionary<string, SessionListFigure> figuresById)
     {
         HashSet<string> seenSessions = new(StringComparer.Ordinal);
         int turnCount = 0;
@@ -1908,27 +1999,27 @@ public class KyberBridgeEngine
                 continue;
             }
 
-            if (!aggregatesById.TryGetValue(exec.SessionId, out SessionAggregateView? aggregate))
+            if (!figuresById.TryGetValue(exec.SessionId, out SessionListFigure? figure))
             {
                 continue;
             }
 
-            turnCount += aggregate.TurnCount;
+            turnCount += figure.TurnCount;
             hasTurns = true;
 
-            if (aggregate.TotalInput.HasValue)
+            if (figure.TotalInput.HasValue)
             {
-                totalInput += aggregate.TotalInput.Value;
+                totalInput += figure.TotalInput.Value;
                 hasInput = true;
             }
 
-            if (aggregate.TotalOutput.HasValue)
+            if (figure.TotalOutput.HasValue)
             {
-                totalOutput += aggregate.TotalOutput.Value;
+                totalOutput += figure.TotalOutput.Value;
                 hasOutput = true;
             }
 
-            if (ExtractUsdCost(aggregate.PublishedCost) is double sessionCost)
+            if (ExtractUsdCost(figure.PublishedCost) is double sessionCost)
             {
                 costUsd += sessionCost;
                 hasCost = true;
@@ -2173,13 +2264,13 @@ public class KyberBridgeEngine
 
     private List<object> BuildExecutionTree(
         IReadOnlyList<StoredExecution> executions,
-        Dictionary<string, SessionAggregateView> aggregatesById)
+        Dictionary<string, SessionListFigure> figuresById)
     {
         Dictionary<string, ExecutionTreeNode> nodesById = new(StringComparer.Ordinal);
         List<ExecutionTreeNode> ordered = new(executions.Count);
         foreach (StoredExecution exec in executions)
         {
-            (int? TurnCount, double? CostUsd) sessionFigures = SessionFiguresOf(exec, aggregatesById);
+            (int? TurnCount, double? CostUsd) sessionFigures = SessionFiguresOf(exec, figuresById);
             ExecutionTreeNode node = new(exec, sessionFigures.TurnCount, sessionFigures.CostUsd, []);
             nodesById[exec.ExecutionId] = node;
             ordered.Add(node);
@@ -2340,13 +2431,19 @@ public class KyberBridgeEngine
     private object BuildIngestCoverage()
     {
         Dictionary<string, int> recordCounts = new(StringComparer.Ordinal);
+        Dictionary<string, int> countsBySource = new(StringComparer.Ordinal);
+        foreach (StoredSourceCount count in reader.SourceRecordCounts())
+        {
+            countsBySource[count.SourceId] = count.Count;
+        }
+
         foreach (IGrouping<string, StoredSource> group in reader.Sources()
                      .GroupBy(static s => s.Source.Locator, StringComparer.Ordinal))
         {
             int count = 0;
             foreach (StoredSource source in group)
             {
-                count += reader.Records(sourceId: source.SourceId).Count;
+                count += countsBySource.GetValueOrDefault(source.SourceId);
             }
 
             recordCounts[group.Key] = count;

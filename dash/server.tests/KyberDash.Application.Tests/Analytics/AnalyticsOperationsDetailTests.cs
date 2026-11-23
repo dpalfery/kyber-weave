@@ -159,7 +159,7 @@ public sealed class AnalyticsOperationsDetailTests
     public void StoreFaultReturnsUnavailableContractV1Envelope()
     {
         (Mock<IRelationalStoreReader> reader, Mock<IProjectionStore> projections, Mock<IOperationalStore> operational) = CreateBaseStoreMocks();
-        reader.Setup(store => store.ListSessionAggregates(It.IsAny<string?>(), It.IsAny<IModelPricingLookup?>()))
+        reader.Setup(store => store.SessionAttributions())
             .Throws(new SqliteExecutionException("sqlite3 exited with code 1", 1, "database is locked"));
         KyberBridgeEngine engine = CreateEngine(reader.Object, projections.Object, operational.Object);
 
@@ -334,7 +334,12 @@ public sealed class AnalyticsOperationsDetailTests
 
         public int CountRecords(string? harnessId = null) => inner.CountRecords(harnessId);
 
+        /// <inheritdoc />
+        public IReadOnlyList<StoredSourceCount> SourceRecordCounts() => inner.SourceRecordCounts();
+
         public CollectedRecord? GetRecord(string spanId) => inner.GetRecord(spanId);
+
+        public CollectedRecord? RecordContentFree(string spanId) => inner.RecordContentFree(spanId);
 
         public IReadOnlyList<CollectedRecord> Records(string? sessionKey = null, string? harnessId = null, string? sourceId = null) =>
             inner.Records(sessionKey, harnessId, sourceId);
@@ -356,6 +361,15 @@ public sealed class AnalyticsOperationsDetailTests
         public IReadOnlyList<StoredToolCall> ToolCalls(string? spanId = null, string? sessionKey = null) => inner.ToolCalls(spanId, sessionKey);
 
         public IReadOnlyList<StoredContentPart> ContentParts(string? spanId = null, string? sessionKey = null) => inner.ContentParts(spanId, sessionKey);
+
+        public IReadOnlyList<StoredContentPart> TurnContentParts(
+            string sessionKey,
+            int? turnIndex = null,
+            string? spanId = null,
+            string? part = null,
+            int budget = 0,
+            bool full = false) =>
+            inner.TurnContentParts(sessionKey, turnIndex, spanId, part, budget, full);
 
         public IReadOnlyList<StoredToolDefinition> ToolDefinitions(string? spanId = null, string? sessionKey = null) => inner.ToolDefinitions(spanId, sessionKey);
 

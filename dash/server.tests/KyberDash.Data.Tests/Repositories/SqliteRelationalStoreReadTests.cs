@@ -610,6 +610,8 @@ public class SqliteRelationalStoreReadTests : IDisposable
             }
         }
 
+        Assert.Equivalent(memoryReader.SourceRecordCounts(), sqliteReader.SourceRecordCounts(), strict: true);
+
         foreach (string sourceId in sourceIds)
         {
             Assert.Equivalent(memoryReader.Records(sourceId: sourceId), sqliteReader.Records(sourceId: sourceId), strict: true);
@@ -618,6 +620,7 @@ public class SqliteRelationalStoreReadTests : IDisposable
         foreach (string spanId in spanIds)
         {
             Assert.Equivalent(memoryReader.GetRecord(spanId), sqliteReader.GetRecord(spanId), strict: true);
+            Assert.Equivalent(memoryReader.RecordContentFree(spanId), sqliteReader.RecordContentFree(spanId), strict: true);
             AssertPairFilterParity(memoryReader, sqliteReader, spanId, null);
         }
 
@@ -634,6 +637,16 @@ public class SqliteRelationalStoreReadTests : IDisposable
             Assert.Equivalent(memoryReader.SessionDetailFigures(sessionKey), sqliteReader.SessionDetailFigures(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.TurnFigures(sessionKey, 0), sqliteReader.TurnFigures(sessionKey, 0), strict: true);
             Assert.Equivalent(memoryReader.TurnFigures(sessionKey, int.MaxValue), sqliteReader.TurnFigures(sessionKey, int.MaxValue), strict: true);
+            Assert.Equivalent(memoryReader.TurnContentParts(sessionKey), sqliteReader.TurnContentParts(sessionKey), strict: true);
+            Assert.Equivalent(memoryReader.TurnContentParts(sessionKey, turnIndex: 0), sqliteReader.TurnContentParts(sessionKey, turnIndex: 0), strict: true);
+            Assert.Equivalent(
+                memoryReader.TurnContentParts(sessionKey, turnIndex: 0, budget: 8),
+                sqliteReader.TurnContentParts(sessionKey, turnIndex: 0, budget: 8),
+                strict: true);
+            Assert.Equivalent(
+                memoryReader.TurnContentParts(sessionKey, turnIndex: 0, budget: 8, full: true),
+                sqliteReader.TurnContentParts(sessionKey, turnIndex: 0, budget: 8, full: true),
+                strict: true);
 
             AssertPairFilterParity(memoryReader, sqliteReader, null, sessionKey);
             foreach (string spanId in spanIds.Take(2))
@@ -686,6 +699,13 @@ public class SqliteRelationalStoreReadTests : IDisposable
         Assert.Equivalent(memoryReader.SkillsInvoked(spanId, sessionKey), sqliteReader.SkillsInvoked(spanId, sessionKey), strict: true);
         Assert.Equivalent(memoryReader.ToolCalls(spanId, sessionKey), sqliteReader.ToolCalls(spanId, sessionKey), strict: true);
         Assert.Equivalent(memoryReader.ContentParts(spanId, sessionKey), sqliteReader.ContentParts(spanId, sessionKey), strict: true);
+        if (spanId is not null && sessionKey is not null)
+        {
+            Assert.Equivalent(
+                memoryReader.TurnContentParts(sessionKey, spanId: spanId),
+                sqliteReader.TurnContentParts(sessionKey, spanId: spanId),
+                strict: true);
+        }
         Assert.Equivalent(memoryReader.ToolDefinitions(spanId, sessionKey), sqliteReader.ToolDefinitions(spanId, sessionKey), strict: true);
         Assert.Equivalent(memoryReader.AgentInvocations(spanId, sessionKey), sqliteReader.AgentInvocations(spanId, sessionKey), strict: true);
         Assert.Equivalent(memoryReader.RecordSignals(spanId, sessionKey), sqliteReader.RecordSignals(spanId, sessionKey), strict: true);

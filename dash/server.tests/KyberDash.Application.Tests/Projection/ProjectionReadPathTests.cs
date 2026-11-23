@@ -416,7 +416,13 @@ public class ProjectionReadPathTests
         public int CountRecords(string? harnessId = null) => inner.CountRecords(harnessId);
 
         /// <inheritdoc />
+        public IReadOnlyList<StoredSourceCount> SourceRecordCounts() => inner.SourceRecordCounts();
+
+        /// <inheritdoc />
         public CollectedRecord? GetRecord(string spanId) => inner.GetRecord(spanId);
+
+        /// <inheritdoc />
+        public CollectedRecord? RecordContentFree(string spanId) => inner.RecordContentFree(spanId);
 
         /// <inheritdoc />
         public IReadOnlyList<CollectedRecord> Records(
@@ -441,6 +447,16 @@ public class ProjectionReadPathTests
 
         /// <inheritdoc />
         public IReadOnlyList<StoredContentPart> ContentParts(string? spanId = null, string? sessionKey = null) => inner.ContentParts(spanId, sessionKey);
+
+        /// <inheritdoc />
+        public IReadOnlyList<StoredContentPart> TurnContentParts(
+            string sessionKey,
+            int? turnIndex = null,
+            string? spanId = null,
+            string? part = null,
+            int budget = 0,
+            bool full = false) =>
+            inner.TurnContentParts(sessionKey, turnIndex, spanId, part, budget, full);
 
         /// <inheritdoc />
         public IReadOnlyList<StoredToolDefinition> ToolDefinitions(string? spanId = null, string? sessionKey = null) => inner.ToolDefinitions(spanId, sessionKey);

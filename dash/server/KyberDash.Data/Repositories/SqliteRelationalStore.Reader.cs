@@ -82,6 +82,25 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     }
 
     /// <inheritdoc />
+    public IReadOnlyList<StoredSourceCount> SourceRecordCounts()
+    {
+        string sql = TabReadScriptHeader +
+                     "SELECT hex(CAST(source_id AS BLOB)), COUNT(*) FROM record " +
+                     "WHERE source_id IS NOT NULL GROUP BY source_id ORDER BY source_id ASC;\n";
+
+        List<StoredSourceCount> results = [];
+        foreach (string line in TabLines(ExecuteSqlite(sql)))
+        {
+            string[] cols = SplitTabLine(line, 2, "record source count");
+            results.Add(new StoredSourceCount(
+                ParseHexRequired(cols[0], "record.source_id"),
+                ParseInt32Required(cols[1], "record source count")));
+        }
+
+        return results;
+    }
+
+    /// <inheritdoc />
     public CollectedRecord? GetRecord(string spanId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(spanId);
@@ -113,6 +132,28 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
         string? whereClause = predicates.Count > 0 ? string.Join(" AND ", predicates) : null;
         return QueryRecords(whereClause);
+    }
+
+    /// <inheritdoc />
+    public CollectedRecord? RecordContentFree(string spanId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(spanId);
+
+        string sql = TabReadScriptHeader +
+                     $"SELECT hex(CAST(session_key AS BLOB)) FROM record_session_link WHERE span_id = {TextExpr(spanId)} LIMIT 1;\n";
+        foreach (string line in TabLines(ExecuteSqlite(sql)))
+        {
+            string sessionKey = ParseHexRequired(line, "record_session_link.session_key");
+            foreach (CollectedRecord record in SessionRecordsContentFree(sessionKey))
+            {
+                if (string.Equals(record.RecordId, spanId, StringComparison.Ordinal))
+                {
+                    return record;
+                }
+            }
+        }
+
+        return null;
     }
 
     /// <inheritdoc />
@@ -278,6 +319,106 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         }
 
         return results;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<StoredContentPart> TurnContentParts(
+        string sessionKey,
+        int? turnIndex = null,
+        string? spanId = null,
+        string? part = null,
+        int budget = 0,
+        bool full = false)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        string? scopedSpan = spanId;
+        if (string.IsNullOrEmpty(scopedSpan) && turnIndex.HasValue)
+        {
+            scopedSpan = ResolveTurnContentSpan(sessionKey, turnIndex.Value);
+            if (scopedSpan is null)
+            {
+                return [];
+            }
+        }
+
+        List<string> predicates =
+        [
+            $"EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = cp.span_id AND rsl.session_key = {TextExpr(sessionKey)})",
+        ];
+        if (!string.IsNullOrEmpty(scopedSpan))
+        {
+            predicates.Add($"cp.span_id = {TextExpr(scopedSpan)}");
+        }
+
+        if (!string.IsNullOrEmpty(part))
+        {
+            predicates.Add($"cp.bucket = {TextExpr(part)}");
+        }
+
+        string sql = TabReadScriptHeader +
+                     BuildContentPartSelect("cp", " WHERE " + string.Join(" AND ", predicates), "ORDER BY cp.span_id ASC, cp.position ASC");
+
+        string output = ExecuteSqlite(sql);
+        List<StoredContentPart> results = [];
+        foreach (string line in TabLines(output))
+        {
+            string[] cols = SplitTabLine(line, 21, "content_part");
+            string rowSpan = ParseHexRequired(cols[0], "content_part.span_id");
+            CollectedContentPart scopedPart = ParseContentPartColumns(cols, startIndex: 1);
+            results.Add(new StoredContentPart(rowSpan, scopedPart));
+        }
+
+        return CapToBudget(results, budget, full);
+    }
+
+    /// <summary>
+    /// Resolves a turn index to the span the turn figures answer for that index, so the content
+    /// read is scoped to the same turn the summary already priced.
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="turnIndex">Zero-based turn index.</param>
+    /// <returns>The turn's span identifier, or <see langword="null"/> when the index is outside the session.</returns>
+    private string? ResolveTurnContentSpan(string sessionKey, int turnIndex)
+    {
+        if (turnIndex < 0)
+        {
+            return null;
+        }
+
+        IReadOnlyList<(int Position, CollectedRecord Record)> turns = ResolveSessionTurnEntriesForReader(
+            GetSessionTurns(sessionKey),
+            SessionRecordsContentFree(sessionKey));
+        return turnIndex < turns.Count ? turns[turnIndex].Record.RecordId : null;
+    }
+
+    /// <summary>
+    /// Stops the scoped read at the response budget so it materializes no more text than the
+    /// content view will render; <paramref name="full"/> and a non-positive budget read it whole.
+    /// </summary>
+    /// <param name="parts">Scoped parts in span then position order.</param>
+    /// <param name="budget">Maximum UTF-8 bytes of part text to keep.</param>
+    /// <param name="full">Whether to keep every part regardless of size.</param>
+    private static List<StoredContentPart> CapToBudget(List<StoredContentPart> parts, int budget, bool full)
+    {
+        if (full || budget <= 0)
+        {
+            return parts;
+        }
+
+        List<StoredContentPart> capped = new(parts.Count);
+        long bytes = 0;
+        foreach (StoredContentPart part in parts)
+        {
+            capped.Add(part);
+            bytes += part.Part.PlainText is null ? 0 : Encoding.UTF8.GetByteCount(part.Part.PlainText);
+            if (bytes >= budget)
+            {
+                break;
+            }
+        }
+
+        return capped;
     }
 
     /// <inheritdoc />
