@@ -199,15 +199,24 @@ plan-authoring contract.
 
 no ADR — ADR waiver: applies the established per-user-override precedence and the ArbiterKeyResolver origin binding to two more surfaces; no new boundary, dependency or contract.
 
-## Completion summary
+## Completion summary (closeout evidence — archive pending)
 
-T1 delivered as commit `02b59e36`: install derives the endpoint, its origin and every key
-lookup from one effective-provider read (`ReadExistingProvider`), uninstall applies the
-per-user override in `RemoveKey`, and both key-resolving call sites delegate to
-`IArbiterKeyService.TryResolveKey` with the un-merged repository configuration so the
-environment key serves only the TypeSafe origin or the override's origin. All eight Test
-contract tests pass in the three filtered runs with non-zero test counts; no sibling in
-the install/uninstall key path reads host configuration alone (`ArbiterSetupCommand` is
+This plan stays Active/Ready in the inventory until the conductor's archive step moves
+it to `docs/archive/plans/`; what follows is the evidence that closeout verified, not a
+claim that archival has happened.
+
+T1's change is on this branch as commits `02b59e36` and `abaa9fa`: install derives the
+endpoint, its origin and every key lookup from one effective-provider read
+(`ReadExistingProvider`), uninstall applies the per-user override in `RemoveKey` and
+deletes the credential-store entry for the effective origin directly, and install's key
+lookups delegate to `IArbiterKeyService.TryResolveKey` with the un-merged repository
+configuration so the environment key serves only the TypeSafe origin or the override's
+origin. `Verify` additionally validates the override first, so a file that broke between
+planning and verification fails closed with an error naming the override file instead of
+surfacing as a missing key. The three filtered Test contract runs report 10, 19 and 9
+passing tests with zero failures and non-zero counts; no sibling in the
+install/uninstall key path reads host configuration alone (`ArbiterSetupCommand` is
 intentionally unchanged: it writes the override and takes its endpoint from argv).
 NOT VERIFIED: none — every acceptance criterion is pinned by an automated test; no live
-environment, browser or person check applies.
+environment, browser or person check applies. The Closeout mapping above is complete and
+no further plan edit is expected; the conductor archives next.
