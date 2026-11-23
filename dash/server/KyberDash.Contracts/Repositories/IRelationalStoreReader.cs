@@ -96,34 +96,58 @@ public record StoredFieldCell(
     long? IntegerValue = null,
     double? RealValue = null);
 
-/// <summary>One row of typed cells returned in <see cref="StoredTableFields"/>.</summary>
-/// <param name="Cells">Ordered cells matching the owning table's <see cref="StoredTableFields.ColumnNames"/>.</param>
+/// <summary>One row of typed cells returned in <see cref="StoredTableRows"/>.</summary>
+/// <param name="Cells">Ordered cells matching the owning table's <see cref="StoredTableRows.ColumnNames"/>.</param>
 public record StoredFieldRow(IReadOnlyList<StoredFieldCell> Cells);
 
 /// <summary>
-/// Catalog-driven inspection entry for a single relational table scoped to a session, including
-/// column names, persisted rows, and parent keys absent from an optional child table.
+/// Content-free inventory entry for one catalog table scoped to a session: the table's name, its
+/// catalog columns, the count of the session's scoped rows, and the parent keys absent from an
+/// optional child table — never a row value (decision D15).
 /// </summary>
 /// <param name="TableName">Exact table name from <see cref="RelationalSchemaCatalog"/>.</param>
 /// <param name="ColumnNames">Ordered column names declared by the catalog table.</param>
-/// <param name="Rows">Rows belonging to the inspected session.</param>
+/// <param name="RowCount">Rows belonging to the inspected session.</param>
 /// <param name="MissingParentKeys">
 /// Parent primary keys present in the session that have no row in this optional child table.
 /// </param>
-public record StoredTableFields(
+public record StoredTableInventory(
     string TableName,
     IReadOnlyList<string> ColumnNames,
-    IReadOnlyList<StoredFieldRow> Rows,
+    long RowCount,
     IReadOnlyList<string> MissingParentKeys);
 
 /// <summary>
-/// Catalog-driven relational field view across every applicable table for a single session.
+/// Content-free stored-fields inventory across every catalog table for a single session. The
+/// stored-fields section loads it at mount; a table's rows load through
+/// <see cref="IRelationalStoreReader.StoredFieldsRows"/> when the viewer opens that table
+/// (decision D15).
 /// </summary>
 /// <param name="SessionKey">Inspected session key.</param>
-/// <param name="Tables">Per-table field entries in catalog order.</param>
-public record StoredFieldsView(
+/// <param name="Tables">Per-table inventory entries in catalog order.</param>
+public record StoredFieldsInventoryView(
     string SessionKey,
-    IReadOnlyList<StoredTableFields> Tables);
+    IReadOnlyList<StoredTableInventory> Tables);
+
+/// <summary>
+/// One page of a single catalog table's stored rows for a session, loaded when the viewer opens
+/// that table and limited in SQL (decision D15).
+/// </summary>
+/// <param name="TableName">Exact table name from <see cref="RelationalSchemaCatalog"/>.</param>
+/// <param name="ColumnNames">Ordered column names declared by the catalog table.</param>
+/// <param name="TotalRows">Rows belonging to the inspected session, across every page.</param>
+/// <param name="Page">One-based page number.</param>
+/// <param name="Limit">Rows on the page.</param>
+/// <param name="Offset">Zero-based row offset of this page.</param>
+/// <param name="Rows">The page's rows, each carrying the table's typed cells in catalog order.</param>
+public record StoredTableRows(
+    string TableName,
+    IReadOnlyList<string> ColumnNames,
+    long TotalRows,
+    int Page,
+    int Limit,
+    int Offset,
+    IReadOnlyList<StoredFieldRow> Rows);
 
 /// <summary>Per-model monetary subtotal inside a <see cref="ReadTimeCostSummary"/>.</summary>
 /// <param name="Model">Canonical or reported model identifier.</param>
@@ -719,11 +743,34 @@ public interface IRelationalStoreReader
     IReadOnlyList<StoredSessionModelUsage> SessionModelUsages(string? sessionKey = null);
 
     /// <summary>
-    /// Returns a catalog-driven view of all persisted table columns, rows, and missing parent keys
-    /// for <paramref name="sessionKey"/>.
+    /// Reads the content-free stored-fields inventory for a session: every catalog table's name,
+    /// columns, scoped row count and missing parent keys, and never a row value (decision D15).
     /// </summary>
     /// <param name="sessionKey">Canonical session key to inspect.</param>
-    StoredFieldsView StoredFields(string sessionKey);
+    /// <remarks>
+    /// The stored-fields section loads this inventory at mount. Rows hold stored column values,
+    /// including content text, so they load through <see cref="StoredFieldsRows"/> only when the
+    /// viewer opens a table — the inventory itself reads counts and key columns alone.
+    /// </remarks>
+    StoredFieldsInventoryView StoredFieldsInventory(string sessionKey);
+
+    /// <summary>
+    /// Reads one page of a single catalog table's stored rows for a session, limited in SQL
+    /// (decision D15).
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key to inspect.</param>
+    /// <param name="table">Exact catalog table name; the allowlist is the catalog itself.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page.</param>
+    /// <returns>The page, or <see langword="null"/> when <paramref name="table"/> names no catalog table.</returns>
+    /// <remarks>
+    /// Rows hold stored column values, including content text, so this read answers only the
+    /// named table's page — the cost is the page, never the session's store.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="page"/> or <paramref name="limit"/> is less than 1.
+    /// </exception>
+    StoredTableRows? StoredFieldsRows(string sessionKey, string table, int page, int limit);
 
     /// <summary>
     /// Lists the sessions-list read model, optionally filtered by <paramref name="harnessId"/>,

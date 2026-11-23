@@ -1141,11 +1141,13 @@ public sealed class AnalyticsReadPathTests
     }
 
     /// <summary>
-    /// Stored fields is the read model's sanctioned exception: the raw persisted rows are the view,
-    /// content text included, and it answers only for the named session.
+    /// The stored-fields inventory is the section's mount read and it is content-free: it answers
+    /// every catalog table's name, columns, scoped row count and missing parent keys for the named
+    /// session, and never a row value — the rows load per table only when the viewer opens one
+    /// (decision D15).
     /// </summary>
     [Fact]
-    public void StoredFieldsStaysScopedToTheNamedSession()
+    public void StoredFieldsInventoryStaysScopedToTheNamedSessionAndCarriesNoRowValues()
     {
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
@@ -1164,22 +1166,121 @@ public sealed class AnalyticsReadPathTests
         bridge.EnsureProjected();
 
         store.ClearReadLog();
-        JsonElement view = bridge.GetStoredFields("sess-fields-a")!.Value;
+        JsonElement view = bridge.GetStoredFieldsInventory("sess-fields-a")!.Value;
 
         Assert.Equal(
             [
                 nameof(InMemoryRelationalStore.CountRecords),
                 nameof(InMemoryRelationalStore.GetSession),
-                nameof(InMemoryRelationalStore.StoredFields),
+                nameof(InMemoryRelationalStore.StoredFieldsInventory),
             ],
             store.ReadLog);
         Assert.Equal("sess-fields-a", view.GetProperty("sessionKey").GetString());
+
+        // No row values: neither the part text nor the session title row value appears. The
+        // missing parent keys are parent key identifiers, not content.
         string raw = view.GetRawText();
-        Assert.Contains("alpha conversation text", raw, StringComparison.Ordinal);
-        Assert.Contains("alpha session", raw, StringComparison.Ordinal);
+        Assert.DoesNotContain("alpha conversation text", raw, StringComparison.Ordinal);
+        Assert.DoesNotContain("alpha session", raw, StringComparison.Ordinal);
         Assert.DoesNotContain("beta conversation text", raw, StringComparison.Ordinal);
         Assert.DoesNotContain("sess-fields-b", raw, StringComparison.Ordinal);
-        Assert.Null(bridge.GetStoredFields("no-such-session"));
+
+        JsonElement sessionEntry = Assert.Single(
+            view.GetProperty("tables").EnumerateArray(),
+            static entry => string.Equals(entry.GetProperty("tableName").GetString(), "session", StringComparison.Ordinal));
+        Assert.Equal(1, sessionEntry.GetProperty("rowCount").GetInt64());
+
+        // An optional child whose row is absent reports it through the missing parent key.
+        JsonElement withheldEntry = Assert.Single(
+            view.GetProperty("tables").EnumerateArray(),
+            static entry => string.Equals(entry.GetProperty("tableName").GetString(), "content_part_withheld", StringComparison.Ordinal));
+        Assert.Equal(0, withheldEntry.GetProperty("rowCount").GetInt64());
+        // The part tables' foreign key is (span_id, position), so a missing parent key is the
+        // composite the parent content_part row carries.
+        Assert.Equal("span-fa:0", withheldEntry.GetProperty("missingParentKeys")[0].GetString());
+
+        Assert.Null(bridge.GetStoredFieldsInventory("no-such-session"));
+    }
+
+    /// <summary>
+    /// A table's rows load on demand over the rows route, scoped to the named session: the page
+    /// carries that table's row values and no other session's, and an unknown or non-catalog
+    /// table reads as absent (decision D15).
+    /// </summary>
+    [Fact]
+    public void StoredFieldsRowsReturnOnePageOfTheNamedTableScopedToTheSession()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        WriteSession(
+            store,
+            "sess-fields-a",
+            [Turn("span-fa", "sess-fields-a", 0, parts: [TextPart(0, "user_prompt", "alpha conversation text")])],
+            title: "alpha session");
+        WriteSession(
+            store,
+            "sess-fields-b",
+            [Turn("span-fb", "sess-fields-b", 0, parts: [TextPart(0, "user_prompt", "beta conversation text")])],
+            title: "beta session");
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
+        bridge.EnsureProjected();
+
+        store.ClearReadLog();
+        JsonElement page = bridge.GetStoredFieldRows("sess-fields-a", "content_part_text", 1, 25)!.Value;
+
+        Assert.Equal(
+            [
+                nameof(InMemoryRelationalStore.CountRecords),
+                nameof(InMemoryRelationalStore.GetSession),
+                nameof(InMemoryRelationalStore.StoredFieldsRows),
+            ],
+            store.ReadLog);
+        Assert.Equal("content_part_text", page.GetProperty("tableName").GetString());
+        Assert.Equal(1, page.GetProperty("totalRows").GetInt64());
+        Assert.Equal(1, page.GetProperty("page").GetInt32());
+        Assert.Equal(25, page.GetProperty("limit").GetInt32());
+        Assert.Equal(0, page.GetProperty("offset").GetInt32());
+
+        string raw = page.GetRawText();
+        Assert.Contains("alpha conversation text", raw, StringComparison.Ordinal);
+        Assert.DoesNotContain("beta conversation text", raw, StringComparison.Ordinal);
+        Assert.DoesNotContain("sess-fields-b", raw, StringComparison.Ordinal);
+
+        Assert.Null(bridge.GetStoredFieldRows("sess-fields-a", "not_a_catalog_table", 1, 25));
+        Assert.Null(bridge.GetStoredFieldRows("no-such-session", "content_part_text", 1, 25));
+    }
+
+    /// <summary>A table's rows answer one page of 25 at a time, whatever the table holds.</summary>
+    [Fact]
+    public void StoredFieldsRowsPageTwentyFiveRowsAtATime()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-fields-pages";
+        WriteSession(
+            store,
+            sessionKey,
+            [.. Enumerable.Range(0, 30).Select(static i => Turn(
+                $"span-page-{i:D2}",
+                "sess-fields-pages",
+                i,
+                parts: [TextPart(0, "user_prompt", $"page text {i}")]))]);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
+        bridge.EnsureProjected();
+
+        JsonElement firstPage = bridge.GetStoredFieldRows(sessionKey, "content_part", 1, 25)!.Value;
+
+        Assert.Equal(30, firstPage.GetProperty("totalRows").GetInt64());
+        Assert.Equal(25, firstPage.GetProperty("rows").GetArrayLength());
+        Assert.Equal(0, firstPage.GetProperty("offset").GetInt32());
+
+        JsonElement lastPage = bridge.GetStoredFieldRows(sessionKey, "content_part", 2, 25)!.Value;
+
+        Assert.Equal(30, lastPage.GetProperty("totalRows").GetInt64());
+        Assert.Equal(5, lastPage.GetProperty("rows").GetArrayLength());
+        Assert.Equal(25, lastPage.GetProperty("offset").GetInt32());
     }
 
     /// <summary>Runs, harnesses, findings, report, compare, and timeline answer from the projection store.</summary>
@@ -1965,7 +2066,9 @@ public sealed class AnalyticsReadPathTests
 
         public IReadOnlyList<StoredSessionModelUsage> SessionModelUsages(string? sessionKey = null) => inner.SessionModelUsages(sessionKey);
 
-        public StoredFieldsView StoredFields(string sessionKey) => inner.StoredFields(sessionKey);
+        public StoredFieldsInventoryView StoredFieldsInventory(string sessionKey) => inner.StoredFieldsInventory(sessionKey);
+
+        public StoredTableRows? StoredFieldsRows(string sessionKey, string table, int page, int limit) => inner.StoredFieldsRows(sessionKey, table, page, limit);
 
         public IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null)
         {

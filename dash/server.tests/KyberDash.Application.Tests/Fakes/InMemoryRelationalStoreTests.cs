@@ -264,22 +264,36 @@ public class InMemoryRelationalStoreTests
         Assert.Equal(1, store.CountRows("record_session_link"));
         Assert.Empty(store.RecordSignals(spanId: "span-min-1"));
 
-        StoredFieldsView fields = store.StoredFields("sess-min");
+        StoredFieldsInventoryView fields = store.StoredFieldsInventory("sess-min");
         Assert.Equal("sess-min", fields.SessionKey);
         Assert.Equal(RelationalSchemaCatalog.Tables.Count, fields.Tables.Count);
 
-        StoredTableFields recordModelEntry = Assert.Single(
+        StoredTableInventory recordModelEntry = Assert.Single(
             fields.Tables,
             static table => string.Equals(table.TableName, "record_model", StringComparison.Ordinal));
         Assert.Equal(["span_id", "model_id"], recordModelEntry.ColumnNames);
-        Assert.Empty(recordModelEntry.Rows);
+        Assert.Equal(0, recordModelEntry.RowCount);
         Assert.Equal(["span-min-1"], recordModelEntry.MissingParentKeys);
 
-        StoredTableFields sessionTitleEntry = Assert.Single(
+        StoredTableInventory sessionTitleEntry = Assert.Single(
             fields.Tables,
             static table => string.Equals(table.TableName, "session_title", StringComparison.Ordinal));
-        Assert.Empty(sessionTitleEntry.Rows);
+        Assert.Equal(0, sessionTitleEntry.RowCount);
         Assert.Equal(["sess-min"], sessionTitleEntry.MissingParentKeys);
+
+        StoredTableInventory sessionEntry = Assert.Single(
+            fields.Tables,
+            static table => string.Equals(table.TableName, "session", StringComparison.Ordinal));
+        Assert.Equal(1, sessionEntry.RowCount);
+
+        StoredTableRows? recordRows = store.StoredFieldsRows("sess-min", "record", 1, 25);
+        Assert.NotNull(recordRows);
+        Assert.Equal("record", recordRows.TableName);
+        Assert.Equal(1, recordRows.TotalRows);
+        Assert.Single(recordRows.Rows);
+
+        Assert.Null(store.StoredFieldsRows("sess-min", "not_a_catalog_table", 1, 25));
+        Assert.Throws<ArgumentOutOfRangeException>(() => store.StoredFieldsRows("sess-min", "session", 0, 25));
     }
 
     [Fact]

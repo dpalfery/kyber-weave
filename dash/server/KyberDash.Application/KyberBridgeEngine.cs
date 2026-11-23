@@ -2172,10 +2172,18 @@ public class KyberBridgeEngine
     /// <returns>Model catalog snapshot payload.</returns>
     public JsonElement GetModelCatalog() => pricing.GetModelCatalogSnapshot();
 
-    /// <summary>Returns the catalog-driven stored-fields view for a session, or <see langword="null"/> if missing.</summary>
+    /// <summary>
+    /// Returns the content-free stored-fields inventory for a session, or <see langword="null"/>
+    /// if missing.
+    /// </summary>
     /// <param name="sessionKey">Canonical session identifier.</param>
-    /// <returns>Stored-fields JSON element, or <see langword="null"/>.</returns>
-    public JsonElement? GetStoredFields(string sessionKey)
+    /// <returns>Stored-fields inventory JSON element, or <see langword="null"/>.</returns>
+    /// <remarks>
+    /// The stored-fields section loads this inventory at mount, and it carries no row value: rows
+    /// hold stored column values, including content text, so they load per table through
+    /// <see cref="GetStoredFieldRows"/> only when the viewer opens one (decision D15).
+    /// </remarks>
+    public JsonElement? GetStoredFieldsInventory(string sessionKey)
     {
         EnsureProjected();
         if (reader.GetSession(sessionKey) is null)
@@ -2183,8 +2191,32 @@ public class KyberBridgeEngine
             return null;
         }
 
-        StoredFieldsView view = reader.StoredFields(sessionKey);
+        StoredFieldsInventoryView view = reader.StoredFieldsInventory(sessionKey);
         return JsonSerializer.SerializeToElement(view, CamelCaseJsonOptions);
+    }
+
+    /// <summary>
+    /// Returns one page of a single catalog table's stored rows for a session, or
+    /// <see langword="null"/> when the session or the table is missing.
+    /// </summary>
+    /// <param name="sessionKey">Canonical session identifier.</param>
+    /// <param name="table">Exact catalog table name; the allowlist is the catalog.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page.</param>
+    public JsonElement? GetStoredFieldRows(string sessionKey, string table, int page = 1, int limit = DefaultSectionPageLimit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(table);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        EnsureProjected();
+        if (reader.GetSession(sessionKey) is null)
+        {
+            return null;
+        }
+
+        StoredTableRows? rows = reader.StoredFieldsRows(sessionKey, table, page, limit);
+        return rows is null ? null : JsonSerializer.SerializeToElement(rows, CamelCaseJsonOptions);
     }
 
     /// <summary>Executes an <c>/api/kyber/analytics/*</c> operation returning the versioned <c>AnalyticsEnvelope</c>.</summary>

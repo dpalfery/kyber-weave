@@ -122,7 +122,8 @@ public class StoreInterfaceShapeTests
                 nameof(IRelationalStoreReader.AgentInvocations),
                 nameof(IRelationalStoreReader.RecordSignals),
                 nameof(IRelationalStoreReader.Sessions),
-                nameof(IRelationalStoreReader.StoredFields),
+                nameof(IRelationalStoreReader.StoredFieldsInventory),
+                nameof(IRelationalStoreReader.StoredFieldsRows),
                 nameof(IRelationalStoreReader.SessionListFigures),
                 nameof(IRelationalStoreReader.SessionSummaryFigures),
                 nameof(IRelationalStoreReader.SessionDetailFigures),
@@ -141,10 +142,17 @@ public class StoreInterfaceShapeTests
         Assert.Equal(typeof(IReadOnlyList<CollectedRecord>), sessionRecordsContentFree.ReturnType);
         Assert.Equal([typeof(string)], sessionRecordsContentFree.GetParameters().Select(static p => p.ParameterType).ToArray());
 
-        MethodInfo? storedFields = typeof(IRelationalStoreReader).GetMethod(nameof(IRelationalStoreReader.StoredFields));
-        Assert.NotNull(storedFields);
-        Assert.Equal(typeof(StoredFieldsView), storedFields.ReturnType);
-        Assert.Equal([typeof(string)], storedFields.GetParameters().Select(static p => p.ParameterType).ToArray());
+        MethodInfo? storedFieldsInventory = typeof(IRelationalStoreReader).GetMethod(nameof(IRelationalStoreReader.StoredFieldsInventory));
+        Assert.NotNull(storedFieldsInventory);
+        Assert.Equal(typeof(StoredFieldsInventoryView), storedFieldsInventory.ReturnType);
+        Assert.Equal([typeof(string)], storedFieldsInventory.GetParameters().Select(static p => p.ParameterType).ToArray());
+
+        MethodInfo? storedFieldsRows = typeof(IRelationalStoreReader).GetMethod(nameof(IRelationalStoreReader.StoredFieldsRows));
+        Assert.NotNull(storedFieldsRows);
+        Assert.Equal(typeof(StoredTableRows), storedFieldsRows.ReturnType);
+        Assert.Equal(
+            [typeof(string), typeof(string), typeof(int), typeof(int)],
+            storedFieldsRows.GetParameters().Select(static p => p.ParameterType).ToArray());
 
         Assert.True(typeof(IModelPricingLookup).IsInterface);
         Assert.True(typeof(IModelPricingLookup).IsPublic);
@@ -323,29 +331,51 @@ public class StoreInterfaceShapeTests
     }
 
     [Fact]
-    public void StoredFieldsView_ModelsCatalogTableEntriesColumnsRowsAndMissingParentKeys()
+    public void StoredFieldsInventoryView_ModelsCatalogTableEntriesCountsAndMissingParentKeys()
     {
-        StoredTableFields table = new(
+        StoredTableInventory table = new(
             TableName: "record_model",
             ColumnNames: ["span_id", "model_id"],
-            Rows:
-            [
-                new StoredFieldRow(
-                    [
-                        new StoredFieldCell("span_id", SqliteColumnType.SqliteText, TextValue: "span-1"),
-                        new StoredFieldCell("model_id", SqliteColumnType.SqliteText, TextValue: "claude-sonnet-4-5"),
-                    ]),
-            ],
+            RowCount: 0,
             MissingParentKeys: ["span-2"]);
 
-        StoredFieldsView view = new("session-1", [table]);
+        StoredFieldsInventoryView view = new("session-1", [table]);
 
         Assert.Equal("session-1", view.SessionKey);
         Assert.Single(view.Tables);
         Assert.Equal("record_model", view.Tables[0].TableName);
         Assert.Equal(["span_id", "model_id"], view.Tables[0].ColumnNames);
-        Assert.Single(view.Tables[0].Rows);
+        Assert.Equal(0, view.Tables[0].RowCount);
         Assert.Equal(["span-2"], view.Tables[0].MissingParentKeys);
+    }
+
+    [Fact]
+    public void StoredTableRows_ModelsOnePagedTableOfRowValues()
+    {
+        StoredTableRows rows = new(
+            TableName: "content_part_text",
+            ColumnNames: ["span_id", "position", "part_text"],
+            TotalRows: 30,
+            Page: 1,
+            Limit: 25,
+            Offset: 0,
+            Rows:
+            [
+                new StoredFieldRow(
+                    [
+                        new StoredFieldCell("span_id", SqliteColumnType.SqliteText, TextValue: "span-1"),
+                        new StoredFieldCell("position", SqliteColumnType.SqliteInteger, IntegerValue: 0),
+                        new StoredFieldCell("part_text", SqliteColumnType.SqliteText, TextValue: "hello"),
+                    ]),
+            ]);
+
+        Assert.Equal("content_part_text", rows.TableName);
+        Assert.Equal(30, rows.TotalRows);
+        Assert.Equal(1, rows.Page);
+        Assert.Equal(25, rows.Limit);
+        Assert.Equal(0, rows.Offset);
+        Assert.Single(rows.Rows);
+        Assert.Equal("hello", rows.Rows[0].Cells[2].TextValue);
     }
 
     private static void AssertHasMethods(Type interfaceType, string[] expectedMethodNames)

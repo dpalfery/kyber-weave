@@ -374,7 +374,9 @@ public sealed class AnalyticsOperationsDetailTests
 
         public IReadOnlyList<StoredSessionModelUsage> SessionModelUsages(string? sessionKey = null) => inner.SessionModelUsages(sessionKey);
 
-        public StoredFieldsView StoredFields(string sessionKey) => inner.StoredFields(sessionKey);
+        public StoredFieldsInventoryView StoredFieldsInventory(string sessionKey) => inner.StoredFieldsInventory(sessionKey);
+
+        public StoredTableRows? StoredFieldsRows(string sessionKey, string table, int page, int limit) => inner.StoredFieldsRows(sessionKey, table, page, limit);
 
         public IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null)
         {

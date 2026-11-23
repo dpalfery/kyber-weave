@@ -316,8 +316,23 @@ public interface IDashboardQueryService
     /// <summary>Returns model context-window catalog payload.</summary>
     JsonElement GetModelCatalog();
 
-    /// <summary>Returns the catalog-driven stored-fields view for a session, or <see langword="null"/> when unknown.</summary>
-    JsonElement? GetStoredFields(string sessionKey);
+    /// <summary>
+    /// Returns the content-free stored-fields inventory for a session — every catalog table's
+    /// name, columns, scoped row count and missing parent keys, never a row value (decision D15)
+    /// — or <see langword="null"/> when the session is unknown.
+    /// </summary>
+    /// <param name="sessionKey">Canonical session identifier.</param>
+    JsonElement? GetStoredFieldsInventory(string sessionKey);
+
+    /// <summary>
+    /// Returns one page of a single catalog table's stored rows for a session, limited in SQL, or
+    /// <see langword="null"/> when the session or the table is unknown (decision D15).
+    /// </summary>
+    /// <param name="sessionKey">Canonical session identifier.</param>
+    /// <param name="table">Exact catalog table name; the allowlist is the catalog.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page; 25 unless given.</param>
+    JsonElement? GetStoredFieldRows(string sessionKey, string table, int page = 1, int limit = 25);
 }
 
 /// <summary>Shared contract-v1 analytics service powering both HTTP analytics endpoints and <c>kyberdash-mcp</c>.</summary>

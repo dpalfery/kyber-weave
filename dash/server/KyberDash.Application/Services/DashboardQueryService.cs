@@ -173,5 +173,9 @@ public class DashboardQueryService : IDashboardQueryService
     public JsonElement GetModelCatalog() => bridge.GetModelCatalog();
 
     /// <inheritdoc />
-    public JsonElement? GetStoredFields(string sessionKey) => bridge.GetStoredFields(sessionKey);
+    public JsonElement? GetStoredFieldsInventory(string sessionKey) => bridge.GetStoredFieldsInventory(sessionKey);
+
+    /// <inheritdoc />
+    public JsonElement? GetStoredFieldRows(string sessionKey, string table, int page = 1, int limit = 25) =>
+        bridge.GetStoredFieldRows(sessionKey, table, page, limit);
 }

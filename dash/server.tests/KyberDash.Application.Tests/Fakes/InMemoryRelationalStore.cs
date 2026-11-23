@@ -983,14 +983,52 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
-    public StoredFieldsView StoredFields(string sessionKey)
+    public StoredFieldsInventoryView StoredFieldsInventory(string sessionKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
 
         lock (syncRoot)
         {
-            NoteRead(nameof(StoredFields));
-            return BuildStoredFieldsView(state, sessionKey);
+            NoteRead(nameof(StoredFieldsInventory));
+            return BuildStoredFieldsInventory(state, sessionKey);
+        }
+    }
+
+    /// <inheritdoc />
+    public StoredTableRows? StoredFieldsRows(string sessionKey, string table, int page, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(table);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        lock (syncRoot)
+        {
+            // The route's table name is an allowlist key, never SQL: only a name the catalog
+            // lists reaches the row builder below, so an unknown table issues no read at all.
+            if (!RelationalSchemaCatalog.TryGetTable(table, out TableDefinition? definition) || definition is null)
+            {
+                return null;
+            }
+
+            NoteRead(nameof(StoredFieldsRows));
+            SessionScope scope = ResolveSessionScope(state, sessionKey);
+            List<object?[]> scopedRows = FilterRowsForSessionScope(state, definition, scope);
+            int offset = (int)Math.Clamp((long)(page - 1) * limit, 0L, int.MaxValue);
+            List<StoredFieldRow> rows = [];
+            for (int index = offset; index < Math.Min(offset + limit, scopedRows.Count); index++)
+            {
+                rows.Add(ToStoredFieldRow(definition, scopedRows[index]));
+            }
+
+            return new StoredTableRows(
+                definition.Name,
+                [.. definition.Columns.Select(static c => c.Name)],
+                scopedRows.Count,
+                page,
+                limit,
+                offset,
+                rows);
         }
     }
 
@@ -5930,25 +5968,28 @@ public class InMemoryRelationalStore :
             ReadOptionalSingleString(currentState, "metric_point_source", "point_id", pointId, "source"));
     }
 
-    private static StoredFieldsView BuildStoredFieldsView(StoreState currentState, string sessionKey)
+    private static StoredFieldsInventoryView BuildStoredFieldsInventory(StoreState currentState, string sessionKey)
     {
         SessionScope scope = ResolveSessionScope(currentState, sessionKey);
         Dictionary<string, List<object?[]>> scopedRowsByTable = new(RelationalSchemaCatalog.Tables.Count, StringComparer.Ordinal);
-        List<StoredTableFields> tableEntries = new(RelationalSchemaCatalog.Tables.Count);
-
         foreach (TableDefinition table in RelationalSchemaCatalog.Tables)
         {
-            List<object?[]> scopedRows = FilterRowsForSessionScope(currentState, table, scope);
-            scopedRowsByTable[table.Name] = scopedRows;
-
-            List<string> columnNames = [.. table.Columns.Select(static c => c.Name)];
-            List<StoredFieldRow> renderedRows = [.. scopedRows.Select(r => ToStoredFieldRow(table, r))];
-            List<string> missingParentKeys = ComputeMissingParentKeys(table, scopedRows, scopedRowsByTable);
-
-            tableEntries.Add(new StoredTableFields(table.Name, columnNames, renderedRows, missingParentKeys));
+            scopedRowsByTable[table.Name] = FilterRowsForSessionScope(currentState, table, scope);
         }
 
-        return new StoredFieldsView(sessionKey, tableEntries);
+        List<StoredTableInventory> tableEntries = new(RelationalSchemaCatalog.Tables.Count);
+        foreach (TableDefinition table in RelationalSchemaCatalog.Tables)
+        {
+            List<object?[]> scopedRows = scopedRowsByTable[table.Name];
+            List<string> missingParentKeys = ComputeMissingParentKeys(table, scopedRows, scopedRowsByTable);
+            tableEntries.Add(new StoredTableInventory(
+                table.Name,
+                [.. table.Columns.Select(static c => c.Name)],
+                scopedRows.Count,
+                missingParentKeys));
+        }
+
+        return new StoredFieldsInventoryView(sessionKey, tableEntries);
     }
 
     /// <summary>

@@ -67,7 +67,8 @@ public static class DashEndpointMappings
         kyber.MapGet("/session/{id}/turn/{index}", TurnFiguresAsync);
         kyber.MapGet("/session/{id}/turn/{index}/content", TurnContentAsync);
         kyber.MapGet("/span/{id}/attributes", SpanAttributesAsync);
-        kyber.MapGet("/session/{sessionKey}/stored-fields", StoredFieldsAsync);
+        kyber.MapGet("/session/{sessionKey}/stored-fields", StoredFieldsInventoryAsync);
+        kyber.MapGet("/session/{sessionKey}/stored-fields/{table}", StoredFieldRowsAsync);
 
         kyber.MapGet("/compare", CompareAsync);
         kyber.MapGet("/compare/runs", CompareRunsAsync);
@@ -458,11 +459,27 @@ public static class DashEndpointMappings
             cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task<IResult> StoredFieldsAsync(string sessionKey, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static async Task<IResult> StoredFieldsInventoryAsync(string sessionKey, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
         return await Task.Run<IResult>(
-            () => DashHttp.FromNullableJson(query.GetStoredFields(sessionKey), "Session not found"),
+            () => DashHttp.FromNullableJson(query.GetStoredFieldsInventory(sessionKey), "Session not found"),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> StoredFieldRowsAsync(HttpRequest request, string sessionKey, string table, IDashboardQueryService query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(query);
+
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit);
+        if (refusal is not null)
+            return refusal;
+
+        return await Task.Run<IResult>(
+            () => query.GetStoredFieldRows(sessionKey, table, page, limit) is { } payload
+                ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session or table not found"),
             cancellationToken).ConfigureAwait(false);
     }
 

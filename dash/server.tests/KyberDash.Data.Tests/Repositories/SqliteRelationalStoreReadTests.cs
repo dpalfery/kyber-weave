@@ -44,8 +44,8 @@ public class SqliteRelationalStoreReadTests : IDisposable
     /// <summary>
     /// Verifies an empty <see cref="SqliteRelationalStore"/> matches an empty
     /// <see cref="InMemoryRelationalStore"/> across all 14 <see cref="IProjectionStore"/> reads,
-    /// all 18 <see cref="IRelationalStoreReader"/> row queries, <c>StoredFields</c>, and
-    /// <c>DD-13</c> read-time aggregates.
+    /// all 18 <see cref="IRelationalStoreReader"/> row queries, the stored-fields inventory and
+    /// per-table rows, and <c>DD-13</c> read-time aggregates.
     /// </summary>
     [Fact]
     public void EmptyStore_MatchesInMemoryRelationalStoreAcrossAllQueries()
@@ -346,8 +346,8 @@ public class SqliteRelationalStoreReadTests : IDisposable
     /// <summary>
     /// Verifies complete parity between <see cref="SqliteRelationalStore"/> and
     /// <see cref="InMemoryRelationalStore"/> across multi-harness batches, special characters,
-    /// filtered and unfiltered queries, <c>StoredFields</c> parent-key diagnostics, and all
-    /// <c>DD-13</c> / <c>OD-3</c> aggregate scenarios.
+    /// filtered and unfiltered queries, stored-fields inventory and per-table rows with parent-key
+    /// diagnostics, and all <c>DD-13</c> / <c>OD-3</c> aggregate scenarios.
     /// </summary>
     [Fact]
     public void PopulatedStore_MatchesInMemoryRelationalStoreAcrossFilteredAndUnfilteredQueries()
@@ -597,6 +597,69 @@ public class SqliteRelationalStoreReadTests : IDisposable
             AssertScriptsTouchOnlyTables(sqlite.ExecutedSql, SessionTimelineRecordTables);
             Assert.Equivalent(memory.SessionTimelineRecords(sessionKey), records, strict: true);
         }
+    }
+
+    /// <summary>
+    /// The stored-fields inventory reads no row values: its script answers every catalog table's
+    /// count with <c>COUNT(*)</c> and touches only key columns — never the content-text column a
+    /// part carries — and its entries match <see cref="InMemoryRelationalStore"/> (decision D15).
+    /// </summary>
+    [Fact]
+    public void StoredFieldsInventory_CountsWithoutReadingRowValues()
+    {
+        string dbPath = Path.Combine(directory.Path, "stored-fields-inventory", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+        SeedPopulatedStores(sqlite, memory);
+
+        sqlite.ClearRecordedSql();
+        StoredFieldsInventoryView inventory = sqlite.StoredFieldsInventory("sess-proj");
+
+        Assert.NotEmpty(sqlite.ExecutedSql);
+        Assert.All(sqlite.ExecutedSql, static sql =>
+        {
+            Assert.Contains("COUNT(*)", sql, StringComparison.Ordinal);
+            // The one column a content part's text lives in: the inventory's key-column selects
+            // never read it. The match anchors on the CAST form so the table name
+            // content_part_text cannot satisfy it.
+            Assert.DoesNotContain("CAST(part_text", sql, StringComparison.Ordinal);
+        });
+        Assert.Equivalent(memory.StoredFieldsInventory("sess-proj"), inventory, strict: true);
+    }
+
+    /// <summary>
+    /// A table's rows are limited in SQL: the page statement carries the <c>LIMIT</c> the caller
+    /// asked for, and the page matches <see cref="InMemoryRelationalStore">the in-memory
+    /// store's</see> page for the same table (decision D15).
+    /// </summary>
+    [Fact]
+    public void StoredFieldsRows_LimitsThePageInSql()
+    {
+        string dbPath = Path.Combine(directory.Path, "stored-fields-rows", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+        SeedPopulatedStores(sqlite, memory);
+
+        sqlite.ClearRecordedSql();
+        StoredTableRows? page = sqlite.StoredFieldsRows("sess-proj", "record", 2, 25);
+
+        Assert.NotNull(page);
+        Assert.NotEmpty(sqlite.ExecutedSql);
+        Assert.All(sqlite.ExecutedSql, static sql => Assert.Contains("LIMIT 25 OFFSET 25", sql, StringComparison.Ordinal));
+        Assert.Equivalent(memory.StoredFieldsRows("sess-proj", "record", 2, 25), page, strict: true);
+        Assert.Equal(25, page.Limit);
+    }
+
+    /// <summary>A table name outside the catalog reads as absent — the allowlist is the catalog.</summary>
+    [Fact]
+    public void StoredFieldsRows_ReturnsNullForATableOutsideTheCatalog()
+    {
+        string dbPath = Path.Combine(directory.Path, "stored-fields-unknown-table", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        sqlite.ClearRecordedSql();
+
+        Assert.Null(sqlite.StoredFieldsRows("sess-proj", "sqlite_master", 1, 25));
+        Assert.Empty(sqlite.ExecutedSql);
     }
 
     /// <summary>
@@ -1082,7 +1145,15 @@ public class SqliteRelationalStoreReadTests : IDisposable
             Assert.Equivalent(memoryReader.GetSession(sessionKey), sqliteReader.GetSession(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.SessionRecordsForRebuild(sessionKey), sqliteReader.SessionRecordsForRebuild(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.SessionModelUsages(sessionKey), sqliteReader.SessionModelUsages(sessionKey), strict: true);
-            Assert.Equivalent(memoryReader.StoredFields(sessionKey), sqliteReader.StoredFields(sessionKey), strict: true);
+            Assert.Equivalent(memoryReader.StoredFieldsInventory(sessionKey), sqliteReader.StoredFieldsInventory(sessionKey), strict: true);
+            foreach (TableDefinition catalogTable in RelationalSchemaCatalog.Tables)
+            {
+                Assert.Equivalent(
+                    memoryReader.StoredFieldsRows(sessionKey, catalogTable.Name, 1, 25),
+                    sqliteReader.StoredFieldsRows(sessionKey, catalogTable.Name, 1, 25),
+                    strict: true);
+            }
+
             Assert.Equivalent(memoryReader.SessionSummaryFigures(sessionKey), sqliteReader.SessionSummaryFigures(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.SessionDetailFigures(sessionKey), sqliteReader.SessionDetailFigures(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.TurnFigures(sessionKey, 0), sqliteReader.TurnFigures(sessionKey, 0), strict: true);

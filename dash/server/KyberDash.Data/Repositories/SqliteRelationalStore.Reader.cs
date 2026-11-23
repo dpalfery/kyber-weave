@@ -571,14 +571,25 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     }
 
     /// <inheritdoc />
-    public StoredFieldsView StoredFields(string sessionKey)
+    public StoredFieldsInventoryView StoredFieldsInventory(string sessionKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
 
-        StringBuilder sql = new(TabReadScriptHeader);
         string sessionExpr = TextExpr(sessionKey);
         IReadOnlyList<TableDefinition> tables = RelationalSchemaCatalog.Tables;
 
+        // The inventory's missing-parent-key computation reads key columns alone: a qualifying
+        // child's own key columns and the parent keys such children reference. Key columns are
+        // identifiers, so the inventory never reads a row value (decision D15).
+        Dictionary<string, List<ColumnDefinition>> keyColumnsByTable = StoredFieldsKeyColumns(tables);
+        Dictionary<string, int[]> keyCellIndicesByTable = new(tables.Count, StringComparer.Ordinal);
+        foreach (TableDefinition table in tables)
+        {
+            keyCellIndicesByTable[table.Name] =
+                ResolveColumnIndices(table, [.. keyColumnsByTable[table.Name].Select(static c => c.Name)]);
+        }
+
+        StringBuilder sql = new(TabReadScriptHeader);
         for (int tableIndex = 0; tableIndex < tables.Count; tableIndex++)
         {
             TableDefinition table = tables[tableIndex];
@@ -588,77 +599,163 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 continue;
             }
 
-            sql.Append(CultureInfo.InvariantCulture, $"SELECT {tableIndex.ToString(CultureInfo.InvariantCulture)}");
-            foreach (ColumnDefinition column in table.Columns)
+            sql.Append(CultureInfo.InvariantCulture, $"SELECT {tableIndex.ToString(CultureInfo.InvariantCulture)}, 'c', COUNT(*) FROM {table.Name} WHERE {whereClause};\n");
+            List<ColumnDefinition> keyColumns = keyColumnsByTable[table.Name];
+            if (keyColumns.Count == 0)
             {
-                switch (column.Type)
-                {
-                    case SqliteColumnType.SqliteText:
-                        sql.Append(CultureInfo.InvariantCulture, $", typeof({column.Name}), COALESCE(hex(CAST({column.Name} AS BLOB)), '')");
-                        break;
-                    case SqliteColumnType.SqliteInteger:
-                    case SqliteColumnType.SqliteReal:
-                        sql.Append(CultureInfo.InvariantCulture, $", typeof({column.Name}), COALESCE(CAST({column.Name} AS TEXT), '')");
-                        break;
-                    default:
-                        throw new InvalidOperationException($"Unsupported catalog column type '{column.Type}' on '{table.Name}.{column.Name}'.");
-                }
+                continue;
+            }
+
+            sql.Append(CultureInfo.InvariantCulture, $"SELECT {tableIndex.ToString(CultureInfo.InvariantCulture)}, 'k'");
+            foreach (ColumnDefinition column in keyColumns)
+            {
+                AppendStoredFieldValueSelect(sql, table, column);
             }
 
             sql.Append(CultureInfo.InvariantCulture, $" FROM {table.Name} WHERE {whereClause} ORDER BY rowid ASC;\n");
         }
 
         string output = ExecuteSqlite(sql.ToString());
-        Dictionary<string, List<StoredFieldRow>> rowsByTable = new(tables.Count, StringComparer.Ordinal);
-        for (int index = 0; index < tables.Count; index++)
+        long[] counts = new long[tables.Count];
+        Dictionary<string, List<StoredFieldRow>> keyRowsByTable = new(tables.Count, StringComparer.Ordinal);
+        foreach (TableDefinition table in tables)
         {
-            rowsByTable[tables[index].Name] = [];
+            keyRowsByTable[table.Name] = [];
         }
 
         foreach (string line in TabLines(output))
         {
             string[] cols = line.Split('\t');
-            if (cols.Length < 1)
+            if (cols.Length < 3)
             {
-                throw new InvalidOperationException("Empty row returned from StoredFields query.");
+                throw new InvalidOperationException("Empty row returned from the stored-fields inventory query.");
             }
 
             int tableIndex = ParseInt32Required(cols[0], "table_index");
             if (tableIndex < 0 || tableIndex >= tables.Count)
             {
-                throw new InvalidOperationException($"Out-of-range table index '{tableIndex.ToString(CultureInfo.InvariantCulture)}' returned from StoredFields query.");
+                throw new InvalidOperationException($"Out-of-range table index '{tableIndex.ToString(CultureInfo.InvariantCulture)}' returned from the stored-fields inventory query.");
             }
 
             TableDefinition table = tables[tableIndex];
-            int expectedColumns = 1 + (table.Columns.Count * 2);
-            if (cols.Length != expectedColumns)
+            switch (cols[1])
             {
-                throw new InvalidOperationException(
-                    $"Expected {expectedColumns.ToString(CultureInfo.InvariantCulture)} columns for StoredFields table '{table.Name}', got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-            }
+                case "c":
+                    if (cols.Length != 3)
+                    {
+                        throw new InvalidOperationException($"Expected 3 columns for the {table.Name} count, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                    }
 
-            List<StoredFieldCell> cells = new(table.Columns.Count);
-            for (int colIndex = 0; colIndex < table.Columns.Count; colIndex++)
-            {
-                ColumnDefinition column = table.Columns[colIndex];
-                string typeCell = cols[1 + (colIndex * 2)];
-                string valCell = cols[2 + (colIndex * 2)];
-                cells.Add(ParseStoredFieldCell(table.Name, column, typeCell, valCell));
-            }
+                    counts[tableIndex] = ParseInt64Required(cols[2], $"{table.Name}.row_count");
+                    break;
+                case "k":
+                    List<ColumnDefinition> keyColumns = keyColumnsByTable[table.Name];
+                    if (cols.Length != 2 + (keyColumns.Count * 2))
+                    {
+                        throw new InvalidOperationException($"Expected {2 + (keyColumns.Count * 2)} columns for the {table.Name} key rows, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                    }
 
-            rowsByTable[table.Name].Add(new StoredFieldRow(cells));
+                    StoredFieldCell[] cells = new StoredFieldCell[table.Columns.Count];
+                    for (int columnIndex = 0; columnIndex < table.Columns.Count; columnIndex++)
+                    {
+                        ColumnDefinition every = table.Columns[columnIndex];
+                        cells[columnIndex] = new StoredFieldCell(every.Name, every.Type);
+                    }
+
+                    int[] keyCellIndices = keyCellIndicesByTable[table.Name];
+                    for (int keyIndex = 0; keyIndex < keyColumns.Count; keyIndex++)
+                    {
+                        cells[keyCellIndices[keyIndex]] = ParseStoredFieldCell(
+                            table.Name,
+                            keyColumns[keyIndex],
+                            cols[2 + (keyIndex * 2)],
+                            cols[3 + (keyIndex * 2)]);
+                    }
+
+                    keyRowsByTable[table.Name].Add(new StoredFieldRow(cells));
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unexpected inventory row tag '{cols[1]}' for '{table.Name}'.");
+            }
         }
 
-        List<StoredTableFields> tableEntries = new(tables.Count);
-        foreach (TableDefinition table in tables)
+        List<StoredTableInventory> tableEntries = new(tables.Count);
+        for (int tableIndex = 0; tableIndex < tables.Count; tableIndex++)
         {
+            TableDefinition table = tables[tableIndex];
             List<string> columnNames = [.. table.Columns.Select(static c => c.Name)];
-            List<StoredFieldRow> rows = rowsByTable[table.Name];
-            List<string> missingParentKeys = ComputeStoredFieldsMissingParentKeys(table, rows, rowsByTable);
-            tableEntries.Add(new StoredTableFields(table.Name, columnNames, rows, missingParentKeys));
+            List<string> missingParentKeys = ComputeStoredFieldsMissingParentKeys(table, keyRowsByTable[table.Name], keyRowsByTable);
+            tableEntries.Add(new StoredTableInventory(table.Name, columnNames, counts[tableIndex], missingParentKeys));
         }
 
-        return new StoredFieldsView(sessionKey, tableEntries);
+        return new StoredFieldsInventoryView(sessionKey, tableEntries);
+    }
+
+    /// <inheritdoc />
+    public StoredTableRows? StoredFieldsRows(string sessionKey, string table, int page, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(table);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        // The route's table name is an allowlist key, never SQL: only a name the catalog lists
+        // reaches the statement builder below.
+        if (!RelationalSchemaCatalog.TryGetTable(table, out TableDefinition? definition) || definition is null)
+        {
+            return null;
+        }
+
+        List<string> columnNames = [.. definition.Columns.Select(static c => c.Name)];
+        int offset = (int)Math.Clamp((long)(page - 1) * limit, 0L, int.MaxValue);
+        string? whereClause = BuildStoredFieldsScopeWhere(definition, TextExpr(sessionKey));
+        if (whereClause is null)
+        {
+            // A table the session scope cannot bind answers an empty page, as the inventory's
+            // zero count does for the same table.
+            return new StoredTableRows(definition.Name, columnNames, 0, page, limit, offset, []);
+        }
+
+        StringBuilder sql = new(TabReadScriptHeader);
+        sql.Append(CultureInfo.InvariantCulture, $"SELECT 0, 'c', COUNT(*) FROM {definition.Name} WHERE {whereClause};\n");
+        sql.Append("SELECT 0, 'k'");
+        foreach (ColumnDefinition column in definition.Columns)
+        {
+            AppendStoredFieldValueSelect(sql, definition, column);
+        }
+
+        sql.Append(CultureInfo.InvariantCulture, $" FROM {definition.Name} WHERE {whereClause} ORDER BY rowid ASC LIMIT {limit.ToString(CultureInfo.InvariantCulture)} OFFSET {offset.ToString(CultureInfo.InvariantCulture)};\n");
+
+        string output = ExecuteSqlite(sql.ToString());
+        long totalRows = 0;
+        List<StoredFieldRow> rows = [];
+        foreach (string line in TabLines(output))
+        {
+            string[] cols = line.Split('\t');
+            if (cols.Length < 3)
+            {
+                throw new InvalidOperationException("Empty row returned from the stored-fields rows query.");
+            }
+
+            switch (cols[1])
+            {
+                case "c":
+                    if (cols.Length != 3)
+                    {
+                        throw new InvalidOperationException($"Expected 3 columns for the {definition.Name} count, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                    }
+
+                    totalRows = ParseInt64Required(cols[2], $"{definition.Name}.row_count");
+                    break;
+                case "k":
+                    rows.Add(ParseStoredFieldRow(definition, cols[2..]));
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unexpected row tag '{cols[1]}' for '{definition.Name}'.");
+            }
+        }
+
+        return new StoredTableRows(definition.Name, columnNames, totalRows, page, limit, offset, rows);
     }
 
     /// <inheritdoc />
@@ -4303,6 +4400,87 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         }
 
         return null;
+    }
+
+    /// <summary>Appends the <c>typeof</c> tag and value expression pair one stored column is read with.</summary>
+    private static void AppendStoredFieldValueSelect(StringBuilder sql, TableDefinition table, ColumnDefinition column)
+    {
+        switch (column.Type)
+        {
+            case SqliteColumnType.SqliteText:
+                sql.Append(CultureInfo.InvariantCulture, $", typeof({column.Name}), COALESCE(hex(CAST({column.Name} AS BLOB)), '')");
+                break;
+            case SqliteColumnType.SqliteInteger:
+            case SqliteColumnType.SqliteReal:
+                sql.Append(CultureInfo.InvariantCulture, $", typeof({column.Name}), COALESCE(CAST({column.Name} AS TEXT), '')");
+                break;
+            default:
+                throw new InvalidOperationException($"Unsupported catalog column type '{column.Type}' on '{table.Name}.{column.Name}'.");
+        }
+    }
+
+    /// <summary>
+    /// The key columns each table's missing-parent-key computation reads: a qualifying child (one
+    /// foreign key whose columns are its primary key) reads its own key columns, and the parent
+    /// such a child references reads the referenced columns. Every other column stays unread.
+    /// </summary>
+    private static Dictionary<string, List<ColumnDefinition>> StoredFieldsKeyColumns(IReadOnlyList<TableDefinition> tables)
+    {
+        Dictionary<string, HashSet<string>> keyNamesByTable = new(tables.Count, StringComparer.Ordinal);
+        foreach (TableDefinition table in tables)
+        {
+            keyNamesByTable[table.Name] = new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        foreach (TableDefinition child in tables)
+        {
+            if (child.ForeignKeys.Count != 1 ||
+                !child.ForeignKeys[0].Columns.SequenceEqual(child.PrimaryKeyColumns, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            ForeignKeyDefinition foreignKey = child.ForeignKeys[0];
+            HashSet<string> childKeys = keyNamesByTable[child.Name];
+            foreach (string column in foreignKey.Columns)
+            {
+                childKeys.Add(column);
+            }
+
+            HashSet<string> parentKeys = keyNamesByTable[RelationalSchemaCatalog.GetTable(foreignKey.ReferencedTable).Name];
+            foreach (string column in foreignKey.ReferencedColumns)
+            {
+                parentKeys.Add(column);
+            }
+        }
+
+        Dictionary<string, List<ColumnDefinition>> keyColumnsByTable = new(tables.Count, StringComparer.Ordinal);
+        foreach (TableDefinition table in tables)
+        {
+            keyColumnsByTable[table.Name] =
+                [.. table.Columns.Where(column => keyNamesByTable[table.Name].Contains(column.Name))];
+        }
+
+        return keyColumnsByTable;
+    }
+
+    /// <summary>Parses one row's <c>typeof</c>/value pairs, in catalog column order, into a row.</summary>
+    private static StoredFieldRow ParseStoredFieldRow(TableDefinition table, string[] pairs)
+    {
+        if (pairs.Length != table.Columns.Count * 2)
+        {
+            throw new InvalidOperationException(
+                $"Expected {(table.Columns.Count * 2).ToString(CultureInfo.InvariantCulture)} value columns for stored-fields table '{table.Name}', got {pairs.Length.ToString(CultureInfo.InvariantCulture)}.");
+        }
+
+        List<StoredFieldCell> cells = new(table.Columns.Count);
+        for (int colIndex = 0; colIndex < table.Columns.Count; colIndex++)
+        {
+            ColumnDefinition column = table.Columns[colIndex];
+            cells.Add(ParseStoredFieldCell(table.Name, column, pairs[colIndex * 2], pairs[(colIndex * 2) + 1]));
+        }
+
+        return new StoredFieldRow(cells);
     }
 
     private static StoredFieldCell ParseStoredFieldCell(
