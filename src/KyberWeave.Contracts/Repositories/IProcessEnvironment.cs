@@ -28,6 +28,9 @@ public interface IProcessEnvironment
     /// <summary>Gets the name of the machine running the process.</summary>
     string MachineName { get; }
 
+    /// <summary>Gets the identifier the operating system gave this process.</summary>
+    int ProcessId { get; }
+
     /// <summary>Whether the file system compares names without regard to case.</summary>
     bool IsFileSystemCaseInsensitive { get; }
 

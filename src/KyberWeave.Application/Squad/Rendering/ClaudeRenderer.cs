@@ -268,6 +268,20 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
                                 ["command"] = ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, context.Scope),
                                 ["timeout"] = arbiter.HookTimeoutSeconds
                             })
+                    }),
+                // Claude Code fires SubagentStop with no matcher. The entry closes a dispatch whose return
+                // hook timed out, so its worker does not keep holding its task's files for the rest of the run.
+                new SquadRenderedBlockEntry(
+                    "SubagentStop",
+                    new JsonObject
+                    {
+                        ["hooks"] = new JsonArray(
+                            new JsonObject
+                            {
+                                ["type"] = "command",
+                                ["command"] = ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, context.Scope),
+                                ["timeout"] = arbiter.HookTimeoutSeconds
+                            })
                     })
             ]));
     }

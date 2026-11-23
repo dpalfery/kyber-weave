@@ -37,6 +37,47 @@ public sealed class ArbiterStateStoreTests
     }
 
     [Fact]
+    public async Task ATruncatedLedgerPairsNoPost_RatherThanClaimingTheWrongPre()
+    {
+        // The read keeps only the newest bytes, so the oldest same-digest pre can fall outside it. Matching the
+        // newest same-digest pre instead would attribute the return to the wrong dispatch; no match is the
+        // fail-closed answer, the way a missing pre reads.
+        InFlightLedger ledger = new("/repo/artifacts/arbiter", _log);
+        string? digest = ArbiterLedgerQueries.PairDigest("dev-easy", "Work on T2");
+        await ledger.AppendAsync(Event("pre-old", ArbiterLedgerPhases.Pre, pairDigest: digest));
+        await PushOldestPreOutOfTheReadWindow();
+        await ledger.AppendAsync(Event("pre-new", ArbiterLedgerPhases.Pre, pairDigest: digest));
+
+        Assert.Null(ledger.MatchPre(Event("post-1", ArbiterLedgerPhases.Post, pairDigest: digest)));
+    }
+
+    [Fact]
+    public async Task ATruncatedLedgerStoresAPostUnpaired_RatherThanClaimingTheWrongPre()
+    {
+        InFlightLedger ledger = new("/repo/artifacts/arbiter", _log);
+        string? digest = ArbiterLedgerQueries.PairDigest("dev-easy", "Work on T2");
+        await ledger.AppendAsync(Event("pre-old", ArbiterLedgerPhases.Pre, pairDigest: digest));
+        await PushOldestPreOutOfTheReadWindow();
+        await ledger.AppendAsync(Event("pre-new", ArbiterLedgerPhases.Pre, pairDigest: digest));
+
+        await ledger.AppendAsync(Event("post-1", ArbiterLedgerPhases.Post, pairDigest: digest));
+
+        ArbiterLedgerEvent stored = Assert.Single(ledger.ReadAll(), e => e.Id == "post-1");
+        Assert.Null(stored.PreId);
+    }
+
+    [Fact]
+    public void AnUnreadableLedgerPairsNoPost()
+    {
+        // A log that exists but cannot be read is no evidence about any dispatch: the pairing reads as no match,
+        // the way an empty log reads.
+        _log.UnreadablePaths.Add(Path.Combine("/repo/artifacts/arbiter", InFlightLedger.FileName));
+        InFlightLedger ledger = new("/repo/artifacts/arbiter", _log);
+
+        Assert.Null(ledger.MatchPre(Event("post-1", ArbiterLedgerPhases.Post, pairDigest: "digest-1")));
+    }
+
+    [Fact]
     public async Task APostEventResolvesItsPreEventFromWhatTheLogStoreAlreadyHolds()
     {
         InFlightLedger ledger = new("/repo/artifacts/arbiter", _log);
@@ -159,10 +200,25 @@ public sealed class ArbiterStateStoreTests
         string id,
         string phase,
         string? callId = null,
-        string? task = null) =>
+        string? task = null,
+        string? pairDigest = null) =>
         new(id, Now, ArbiterSources.Hook, "test-harness", "session-1", phase)
         {
             CallId = callId,
+            PairDigest = pairDigest,
             TaskFiles = task is null ? null : [task],
         };
+
+    /// <summary>
+    /// Fills the log past the adapter's 8 MiB read window, the way the existing window test does, so the earliest
+    /// pre event falls outside what the next read returns. The filler lines are not records and are skipped on read.
+    /// </summary>
+    private async Task PushOldestPreOutOfTheReadWindow()
+    {
+        string filler = new('x', 1024 * 1024);
+        for (int index = 0; index < 9; index++)
+        {
+            await _log.AppendLineAsync("/repo/artifacts/arbiter", InFlightLedger.FileName, $"{index}{filler}", CancellationToken.None);
+        }
+    }
 }

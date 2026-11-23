@@ -224,6 +224,13 @@ kyber-weave run start --harness claude --type fix --slug arbiter-global-block-id
 kyber-weave run start --harness claude --type feat --slug new-gate --resume <branch>
 ```
 
+**Integrate a finished task** ([`run integrate`](#run--run-integrate)):
+
+```bash
+kyber-weave run integrate --task T3
+kyber-weave run integrate --task T3 --run-worktree ../run --path ../task
+```
+
 The sections that document these sequences in full are
 [Canonical flows](#canonical-flows), [`kyber-weave` reference](#kyber-weave-reference),
 [`kyberdash` reference](#kyberdash-reference), [Exit codes](#exit-codes), and
@@ -310,7 +317,7 @@ Owned by [Documentation governance gates](docgraph/governance.md), with analysis
 | [`docs validate`](docgraph/governance.md#schema-conformance--docs-validate) | validate flags + `--docs-root`, `--merge-ready`, `--base <REF>` (default `origin/HEAD`) | Check frontmatter against the ontology schema (`KW-DOC-SPEC-*`); with `--merge-ready` also fail on open work (`KW-DOC-LIFECYCLE-003`) and missing archive closeout (`KW-DOC-LIFECYCLE-004`, scoped to the diff against `--base`). |
 | [`docs standards migrate`](docgraph/governance.md#schema-conformance--docs-validate) | validate flags + `--docs-root`, `--dry-run` | Rename each declared technology's or role's legacy `standards/<name>/README.md` to `<name>.standards.md`, add the `<name>.rules.md`, `<name>.skills.md` and `<name>.arbiter-rules.yml` files the folder lacks, and repair an existing rules or skills file whose frontmatter does not declare the folder: it sets `doc-type: rule` / `doc-type: skill` and the folder's `technology` or `role` line, printing `repaired <path>`, and leaves every other frontmatter line and the whole body byte for byte (`KW-DOC-SPEC-015` is what it clears). A standard whose own `##` headings are not the six the ontology requires is reshaped, never shortened: each authored section stays, in order, as a `###` section under the required heading it best fits (or under `Coding standards` when nothing fits), and the command prints every move as `moved '<heading>' under '## <heading>'`. The six headings already in order are left byte-for-byte alone. The rename moves the path each `<technology>-coding-standard` registry property names, so the root `AGENTS.md` generated Config Reg block is re-rendered in the same run, printing `refreshed AGENTS.md`; everything outside its markers, and `.kyber-weave/kyber-weave.yml` itself, is left alone, and a repository with no such block gains none. `--dry-run` prints every rename, addition, repair, move and refresh and writes nothing. A second run finds nothing to change. A stub's frontmatter copies the folder standard's `owner`, so the corpus stays within its catalog vocabulary. |
 | [`docs standards diff`](docgraph/governance.md#schema-conformance--docs-validate) | validate flags + `--docs-root`, `[name]` (the second positional, after the path) | Compare each installed standards folder with the current shipped template and write nothing. Reports the template files the host lacks, the files only the host has, and the files present in both whose content differs. `owner`, `status` and `last-reviewed` are host choices and are ignored. With no name every declared folder that is installed is covered. Exits `0` even when the folders differ; exits `1` only when the named folder is not declared. |
-| [`docs closeout`](ci-pipelines/rule-reference.md#plan-closeout--docs-closeout) | `<plan>`, `--archive`, `--dry-run`, `--date <DATE>`, `--docs-root` | Check a finished plan's closeout evidence with the archive gate (`KW-DOC-LIFECYCLE-004`, run on the plan as it would be archived) and report what `--archive` would do; one run reports every missing condition as its own finding with an example fix, and `--dry-run` with `--archive` previews every change (including a missing archived plan inventory that `--archive` creates with the required table header) without making any; with `--archive`, set the plan's status to archived, move it to `<docs-root>/archive/plans/`, remove its `<plan>.tasks.yml`, take its row out of the plan index, add its line at the top of the archived plan inventory (destinations from its Closeout mapping), and stage the touched files. The plan may be written any natural way (see *Naming a plan* below). Nothing changes unless the evidence is complete. Exits `0` when the evidence is complete (and the plan archived under `--archive`); exits `1` naming each missing condition, on a slug that matches several plans (`KW-DOC-PLANREF-001`), on a plan that is not an active plan (`KW-DOC-CLOSEOUT-001`), an existing archive file (`-002`), a missing plan index (`-003`), a `--date` that is not `yyyy-MM-dd` (`-005`), a plan whose task list still has unchecked tasks (`-006`), or on a usage or I/O error. |
+| [`docs closeout`](ci-pipelines/rule-reference.md#plan-closeout--docs-closeout) | `<plan>`, `--archive`, `--dry-run`, `--date <DATE>`, `--docs-root` | Check a finished plan's closeout evidence with the archive gate (`KW-DOC-LIFECYCLE-004`, run on the plan as it would be archived) and report what `--archive` would do; one run reports every missing condition as its own finding with an example fix, and `--dry-run` with `--archive` previews every change (including a missing archived plan inventory that `--archive` creates with the required table header) without making any; with `--archive`, set the plan's status to archived, move it to `<docs-root>/archive/plans/` (rewriting its relative links for the archive folder, which is one folder deeper), remove its `<plan>.tasks.yml`, take its row out of the plan index, add its line at the top of the archived plan inventory (destinations from its Closeout mapping), and stage the touched files. The plan may be written any natural way (see *Naming a plan* below). Nothing changes unless the evidence is complete. Exits `0` when the evidence is complete (and the plan archived under `--archive`); exits `1` naming each missing condition, on a slug that matches several plans (`KW-DOC-PLANREF-001`), on a plan that is not an active plan (`KW-DOC-CLOSEOUT-001`), an existing archive file (`-002`), a missing plan index (`-003`), a `--date` that is not `yyyy-MM-dd` (`-005`), a plan whose task list still has unchecked tasks (`-006`), or on a usage or I/O error. |
 | [`docs finalize`](ci-pipelines/rule-reference.md#plan-finalize--docs-finalize-and-docs_finalize_approved_plan_and_write_task_file) | `<plan>`, `--approval-mode <autonomous\|supervised>`, `--approval <TEXT>`, `--date <DATE>`, `--docs-root` | Finalize an approved Draft plan: record the approval in its Decisions table, set the plan and its index row to Ready, and write its task file. Refuses, changing nothing, on a plan that is not Draft, an open decision, a missing approval, or a plan the task file cannot be written from (`KW-DOC-FINALIZE-*`). The docs server tool `docs_finalize_approved_plan_and_write_task_file` runs the same step. |
 | [`docs tasks`](ci-pipelines/rule-reference.md#plan-task-files--docs-validate-and-the-docs-mcp-validate-tool) | `<plan>`, `--write`, `--check`, `--convert`, `--list`, `--docs-root` | Derive a plan's task file `<plan>.tasks.yml` (a specification's `tasks.yml` from its `tasks.md`) and its execution digest from the plan; nobody writes either by hand. Each task prompt carries, verbatim under sub-headings, the plan's Test contract row for the task, every Decisions row it cites and any plan section it names (about 6,000 characters at most; anything left out is named in the prompt), because a worker cannot open the plan. Warnings `KW-DOC-TASKS-008`/`-009` report unresolved or vague references; `--check` also asks the Arbiter model (when a key is configured) whether each packet is self-contained (`-011`). None of these three changes the exit code. With a decision model configured, `--write` also asks, in the same request as each agent pick, whether the architect's difficulty fits the task by the rubric in `products/kyber-squad/shared/difficulty-rubric.md`; a confident `not-agreed` is `KW-DOC-TASKS-020`, which says to re-rate the task or add a Decisions row `<task id> difficulty` that says why, and that row stops it being raised again. The model never changes the rating or its source, and `--write` prints one info line per task, `<task id> difficulty <value>: agreed\|not-agreed (confidence x)\|unchecked`. `--list` prints one line per task (id, `needs=` capabilities, `role=` only when the plan assigned one, depends-on, session, file count) and nothing else. Entries in a task's file list that are not repository paths (URLs, routes, calls) are left out and reported at info level (`-012`); the entry's text alone decides, never whether the path exists yet. No other flag prints the derived file; `--write` writes it beside the plan as YAML and leaves it untouched when already current; `--check` writes nothing and says what differs; `--convert` rewrites the JSON task file an older release wrote as `<plan>.tasks.yml` and removes the JSON file. A JSON task file with no YAML beside it is still read, with one warning that names `--convert`. Exits `0` when written, current or previewed; exits `1` when the plan lacks a command, acceptance criteria, or both capabilities and an explicit role for a task (`KW-DOC-TASKS-004`, naming the task and the line to add), a task's files name a path under the scratch folder `.agent_scratchpad/` (`-013`), a dependency names no task, `--check` finds a difference (`-001`/`-002`/`-003`/`-006`), or on a usage or I/O error. |
 | [`docs packet`](ci-pipelines/rule-reference.md#plan-task-files--docs-validate-and-the-docs-mcp-validate-tool) | `<task>`, `--agent <name>`, `--plan <plan>`, `--prior-results <file>`, `--config` | The worker's own first action: print one task's packet and nothing else. The task id may be written `T1`, `t1`, `task 1` or `1`. Without `--plan` the one Ready or In progress plan under the planning folders is used (several are listed, `KW-DOC-TASKS-CLI-002`). When this checkout has no active plan, the repository's other git worktrees are searched: the one with an active plan containing the task id supplies the packet (its `Worktree:` line names where to work); several matches fail with `-002` listing each `cd <worktree> && kyber-weave docs packet <id>`, and none names the directory searched. The task file is checked against the plan first and a stale one is refused with the fix (`-004`). `{worktree}` is filled in; `{prior_results}` is filled from `--prior-results` or says none were supplied. The packet is the task prompt exactly as `docs_build_task_prompt_for_agent_dispatch` describes it and the dispatch hook inserts it, nothing added at print time and nothing written into the task file: the task's own prompt inside `<task>`, with `{worktree}` filled in and the prior-results slot filled from `--prior-results` (or labelled as empty), then `<host-facts>` (the task's scratchpad, the Config Reg paths, the task gates resolved for the task's technology, and every root `AGENTS.md` section whose heading names rules, up to 6,000 characters), then `<shared-rules>`, the parent technology's `<parent-rules>` when the standard names one, and the task technology's `<technology-rules>`, `<skills>` and `<standard>`, each inside its own tag, then `<left-out>` naming what the prompt budget cut. A technology with no standards folder says so in its part and the rest is still built. Nothing a matched `AGENTS.md` rules section lists is dropped silently: a section over the budget is cut to its first-level bullets when those fit, and the rest are named in the host-facts line that points at them. It reads the plan itself, so a worker that may not open a plan can run it, and the Read guard allows the command even with a `--plan` path. Exits `0` after printing; exits `1` with the finding otherwise (`-002` to `-005`). |
@@ -357,6 +364,7 @@ with the settings it reads in [Configuration § Onboarding](configuration.md#onb
 |---|---|---|
 | [`run start`](kyber-squad/architecture.md#run-start-fetch-and-branch-first) | `--harness <TOKEN>` (required), `--type <TYPE>` (required), `--slug <SLUG>` (required), `--resume <BRANCH>`, `--failing-version <VERSION>`, `--json`, `--brief`, `--path <PATH>`, `--autonomy <MODE>` | The step before anyone investigates or plans: fetch `origin`, resolve the base, compare the failing build's version against `HEAD` and the base, and put the work on the branch it belongs on — in the checkout or in a worktree of its own. |
 | [`run deliver`](docgraph/mcp-runbook.md#docs_push_run_branch_and_open_draft_pull_requestprojectpath-summary-notes-title-draft-documentationimpact-planfile) | `[path]`, `--summary <TEXT>` (required), `--notes <TEXT>`, `--title <TEXT>`, `--no-draft`, `--documentation-impact <TEXT>`, `--plan <FILE>`, `--docs-root` | The last step of a finished run: commit a still-staged plan archive, push the run branch (never forced), and create or update its draft pull request on GitHub with a description assembled from the run's records. Refuses, changing nothing, off a run branch, with uncommitted changes it does not own, with the plan not archived, or when `gh` is missing or signed out (`KW-DELIVER-*`). The docs server tool `docs_push_run_branch_and_open_draft_pull_request` runs the same step. |
+| [`run integrate`](#run--run-integrate) | `--task <ID>` (required), `--run-worktree <PATH>`, `--path <PATH>` | The last step of a developer task: fast-forward the run branch when it is an ancestor of the task branch, otherwise cherry-pick the task's commits onto it, copy `.agent_scratchpad/<task-id>/` into the run worktree, remove the task worktree and delete its branch, and print `INTEGRATED: <sha>` for the worker's digest. Holds the run worktree's lock as an exclusive operating-system open, so parallel tasks integrate one at a time. |
 
 ```bash
 kyber-weave run start --harness <token> --type <type> --slug <slug> \
@@ -466,6 +474,81 @@ which would refuse the very route the marker exists for: the Arbiter's `TriggerC
 classifies `RUN-START: true` as `investigate`, never `delegate`, so the roster check and
 `KW-ARB-READONLY-001` still apply to the dispatch. See
 [the three-step decision gates](adr/0053-kyber-arbiter-three-step-decision-gates.md).
+
+### `run` — run integrate
+
+A developer task works in its own git worktree, cut from the run worktree, and commits there. Nothing
+carries that commit back to the run branch. `kyber-weave run integrate` is the deterministic last step
+of a developer task: it moves the task's commits onto the run branch, keeps the task's gate report, and
+disposes of the task worktree, so the conductor never spends a dispatch cherry-picking a commit.
+
+| Verb | Flags | What it does |
+|---|---|---|
+| `run integrate` | `--task <ID>` (required), `--run-worktree <PATH>`, `--path <PATH>` | Integrate one task worktree into the run branch. `--task` names `.agent_scratchpad/<ID>/`, the folder copied into the run worktree. `--path` is the task worktree (default: the current directory). `--run-worktree` is the run's worktree (default: the live run record `run start` wrote for this repository). |
+
+```bash
+kyber-weave run integrate --task <id> [--run-worktree <run-worktree>] [--path <task-worktree>]
+```
+
+**What it does, in order.**
+
+1. Resolves the task worktree from `--path` or the current directory, and the run worktree from
+   `--run-worktree` or the live run record for this repository. The canonical check comes first in each
+   worktree, before any other git command runs there: a worktree whose `git rev-parse --absolute-git-dir`
+   equals its `git rev-parse --git-common-dir` (resolved to an absolute path) is the repository's
+   canonical checkout, and a task never commits there and a run never integrates there. Both are refused
+   (exit `2`). A linked worktree's own git directory differs from the common one, so the check never
+   depends on how the folders are named.
+2. When no `--run-worktree` is given and several live runs work in their own worktrees, the one whose run
+   branch is an ancestor of the task branch is used — the branch the task was cut from. When none, or
+   more than one, is an ancestor, it refuses (exit `2`), names every live run's branch and worktree, and
+   says to pass `--run-worktree`. It never falls back to the most recent run.
+3. Refuses (exit `2`) when the task worktree has uncommitted tracked changes, naming the paths, and when it has
+   the run branch itself checked out rather than a task branch, so the cleanup below can never delete the run
+   branch. When the task branch has no commit the run branch lacks, it exits `0` with
+   `INTEGRATED: <run head sha> (nothing to integrate)` — but still finishes the cleanup: the scratchpad is
+   copied, the task worktree removed and its branch deleted, so a retry after a partial first attempt
+   leaves nothing behind.
+4. Takes an exclusive lock for the run worktree: it opens a reused lock file in that worktree's git
+   directory as an exclusive operating-system lock, and holds the open handle for the whole integration.
+   The operating system releases the lock when the process exits or crashes, so there is no stale lock to
+   detect or take over. It waits up to 120 seconds, retrying every 500 ms, then exits `1` naming the lock
+   file. While the lock is held, the file holds the holder's process id, task id and open time for
+   diagnosis only; nothing reads it to decide anything, and the file itself is never deleted.
+5. Under the lock, before anything is applied, refuses (exit `2`) when the run worktree has uncommitted
+   tracked changes, naming the paths. Then fast-forwards the run branch when it is an ancestor of the
+   task branch. Otherwise it cherry-picks the task branch's commits that are not on the run branch, in
+   order, with `--empty=drop`, so a commit the run branch already has under another sha is dropped
+   instead of failing the step. Every git command runs against the task or run worktree, never the
+   canonical checkout.
+6. Copies `.agent_scratchpad/<task-id>/` from the task worktree into the same path in the run worktree,
+   so the task gate report the conductor checks survives the cleanup.
+7. After a successful integration, removes the task worktree and deletes the task branch.
+8. Prints `INTEGRATED: <new run head sha>` as its last line; the worker copies that sha into its
+   completion digest as `COMMIT`.
+
+On a conflict it runs `git cherry-pick --abort` in the run worktree and exits `3` with
+`CONFLICT: <files>`, leaving the task worktree and branch untouched. Every failed cherry-pick is ended
+this way, not only a conflicting one — an untracked file the commit would overwrite fails the pick with
+no conflict at all, yet still leaves `CHERRY_PICK_HEAD` or a `sequencer` directory that would refuse the
+next integration as "already in progress". If `--abort` itself fails, `git cherry-pick --quit` ends the
+sequence. The conductor then dispatches a conflict-reconciliation rework instead of losing the task's
+work.
+
+When the commits are applied but copying the scratchpad fails, the task's work is already on the run
+branch, so the command prints `INTEGRATED: <sha>`, then an error line naming the copy failure, and exits
+`4`. The task worktree is left in place, because removing it would lose the evidence the copy could not
+keep; the conductor saves that folder and removes the worktree itself.
+
+**Exit codes.**
+
+| Exit | Meaning |
+|---|---|
+| `0` | The run branch holds the task's commits, already held them, or the task worktree is the run worktree. |
+| `1` | The lock was still held after 120 seconds, or git failed in a way that is not a conflict. |
+| `2` | Refused input: an unresolvable or ambiguous worktree, the canonical checkout as either worktree, a different repository, no branch checked out, or uncommitted tracked changes in either worktree. |
+| `3` | A conflict. The cherry-pick was aborted, the run branch is unchanged, and the task worktree survives. |
+| `4` | The commits are on the run branch, but the scratchpad could not be copied. `INTEGRATED: <sha>` is printed first; the task worktree is left for the caller to remove. |
 
 ### `arbiter` — Kyber Arbiter decision gates
 
@@ -735,6 +818,7 @@ risk. The three rules below mirror the contract in
 | `doctor` | `0` all checks pass; `1` a check failed; `2` a client-input error or a refused root; `3` the `codegraph` prerequisite is missing and installing it needs user approval. Exit `3` is checked before `1`. See [`doctor`](#doctor--repository-documentation-tooling). |
 | [`run start`](#run--run-start) | `0` the branch is in place; `1` a configuration failure, an unanswered onboarding setting, or a tool failure while `stop-on-tool-failure` is on; `2` refused input (harness token, type, slug, or a `--resume` naming no local or `origin` branch); `3` the `codegraph` prerequisite is missing. Initial argument validation runs before the configuration is loaded, configuration before the onboarding check, and onboarding before the binary is probed, so initial bad input (`2`) outranks configuration and onboarding (`1`), which outrank missing codegraph (`3`); `--resume` validation runs after fetch on the branch resolution path. |
 | `run deliver` | `0` the pull request was created or updated; `1` a refusal (`KW-DELIVER-*`) or a configuration failure. |
+| [`run integrate`](#run--run-integrate) | `0` the run branch holds the task's commits, already held them, or the task worktree is the run worktree; `1` the lock was held for longer than 120 seconds or git failed without a conflict; `2` refused input (an unresolvable or ambiguous worktree, the canonical checkout as either worktree, different repositories, no branch checked out, or uncommitted tracked changes in either worktree); `3` a conflict, aborted so the run branch is unchanged; `4` the commits are integrated but the scratchpad could not be copied, so `INTEGRATED: <sha>` is printed and the task worktree is left for the caller to remove. |
 | `docs onboarding` | `0` the answer is recorded (an answer already holding that value is a no-op at `0`); `2` an answer that is neither `done` nor `declined`, with nothing written; `1` no configuration to edit, or a file that could not be read or written |
 | any command with a config failure | `KW-CONFIG-001`, never an unhandled exception |
 

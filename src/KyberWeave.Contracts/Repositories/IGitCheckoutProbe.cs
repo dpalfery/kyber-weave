@@ -4,8 +4,10 @@ namespace KyberWeave.Contracts.Repositories;
 public interface IGitCheckoutProbe
 {
     /// <summary>
-    /// A fingerprint of the local git tip and index, so a commit or checkout that leaves the documents untouched still
-    /// moves it. Zero when the root is not a checkout.
+    /// A fingerprint of the local git tip and index, so a commit, merge or checkout that leaves the documents untouched
+    /// still moves it. It covers <c>HEAD</c>, the <c>index</c>, the loose ref file a symbolic <c>HEAD</c> names and
+    /// <c>packed-refs</c> in the git directory the repository's worktrees share, because a branch tip can move with
+    /// <c>HEAD</c> unchanged. Zero when the root is not a checkout.
     /// </summary>
     /// <param name="root">The checkout root.</param>
     long Fingerprint(string root);

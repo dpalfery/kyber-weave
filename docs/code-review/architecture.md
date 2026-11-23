@@ -32,6 +32,7 @@ code-refs:
   - SeatOutputParser
   - CitedLineCheck
   - ReviewEvidence
+  - FixPacketWriter
 sections:
   "#":
     keywords:
@@ -407,6 +408,15 @@ would otherwise bind whichever came last: names match ignoring case, and a seat'
 `failure_scenario` and the document's `failureScenario` count as one name. Objects inside
 properties the command does not know are not walked.
 
+A finding may also write `kind:` and `basis:`. The kind is exactly `defect`, `hardening` or
+`plan-objection` (in any letter case), or the seat is refused (`KW-REVIEW-040`): a defect breaks a
+stated acceptance criterion, a plan contract or base behaviour (any security, data-loss or
+corruption risk is always a defect), hardening meets the request, the plan and base behaviour and
+only makes the code sturdier, and a plan objection disagrees with an approved plan decision. The
+basis is what the finding breaks, quoted: the acceptance criterion, the plan line or the base
+behaviour. Both are optional, are recorded in `findings.json` under the same names for a finding
+the verdict keeps, and a findings.json written before them still reads.
+
 A findings or `NO FINDINGS` seat that wrote no `Discovery:` line, read files directly with no index lookup and no
 `Index fallback:` line, wrote an `Index fallback:` value outside the three modes, or wrote two
 different `Index fallback:` lines (the first is kept), draws a
@@ -528,7 +538,7 @@ through the main session.
 
 Read-only council seats (`review-lens` and `review-triage`) have `process.execute: deny` and cannot execute `git diff`. Rather than granting git execution permissions across seventeen seats, the council's gate run (`ReviewEvidence`) writes `review-diff.patch`, the diff from the merge base to the files on disk, and `evidence.md` into the cycle folder, and prints `evidence: <path>`. Untracked files are not in the patch; `evidence.md` lists them as untracked, and a seat reads them whole. Each seat's packet names `evidence.md`, and seats read it and the diff via `view_file` (`filesystem.read: allow`) without executing git commands or mutating files. The files stay with the cycle folder until the run ends. This preserves the strict capability lattice, prevents `index.lock` contention, and avoids redundant diff subprocess invocations across parallel seats.
 
-The evidence is written twice. `review seats` (`ReviewSeatsCommand`, seating in `CouncilSeating`) writes the diff and `evidence.md` with the gates marked as running, each changed file with its diff line range, and one packet per seat with the lens charter inside, so most seats start while the gates run ([ADR 0079](../adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch.md), decisions 6 to 9). The council's gate run then replaces `evidence.md` in one rename with every gate's result, the coverage and the `review.coverage` floor, and writes `duplicates.json`. `test-adequacy`, `static-analysis-triage` and `duplicate-implementation` read a gate's output, so they are seated after the gate run, which prints the gate-proven skips.
+The evidence is written twice. `review seats` (`ReviewSeatsCommand`, seating in `CouncilSeating`) writes the diff and `evidence.md` with the gates marked as running, each changed file with its diff line range, and one packet per seat with the lens charter inside, so most seats start while the gates run ([ADR 0079](../adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch.md), decisions 6 to 9). Each packet also names the plan of the change under review: the changed Markdown file directly under the plan folder whose frontmatter declares `doc-type: plan`, found among the whole change's paths rather than the plan's status, because closeout marks a plan Completed before the review cycle runs. It says so when the change touches none or several, and the seat then classifies each finding's kind from the diff and the evidence; against one plan it classifies them against that plan's Request and Decisions. The council's gate run then replaces `evidence.md` in one rename with every gate's result, the coverage and the `review.coverage` floor, and writes `duplicates.json`. `test-adequacy`, `static-analysis-triage` and `duplicate-implementation` read a gate's output, so they are seated after the gate run, which prints the gate-proven skips.
 
 ## Configuration
 
@@ -831,6 +841,12 @@ reviewer installs what the hint names and re-runs that one gate with `--gate`. T
 refuses an empty list, an empty entry, an absolute path, and a `..` escape where the operator
 wrote them, so an entry that could never name something inside the repository never reaches a run.
 
+A failed gate's summary says what failed rather than ending with the last lines the command
+printed: the test totals and each failing test with the first line of its error, or the compile
+errors, in the same short form a task gate prints (`TaskTestDigest`), capped at 10 items of 200
+characters each. It reads the command's standard output and standard error together, so a test
+host's logging cannot hide the runner's own summary. A passing gate's summary stays `passed`.
+
 The changed set is `--paths` when given, else the diff from the merge base of `--base`
 to the working tree. `--base` and `--paths` scope the council gates too — they are
 accepted without `--agent` (the default ref is `origin/HEAD`). The set is only computed
@@ -1115,6 +1131,29 @@ least three other inputs of that class that the original failure scenario did no
 traces each through the fix. A fix that refuses only the input the finding named leaves the
 finding open.
 
+**Fix packets.** When a round continues, `review verdict` writes one packet per owning group into the
+cycle's `fix-packets/` folder through the file-system seam and prints one dispatch block for each, after
+the `fix:` lines. The groups are the plan's tasks: a finding goes to the task whose `files` scope names
+its file, by exact path or by a listed directory prefix, and when two tasks list it the first in plan
+order keeps it while that packet names the other; a finding on a `*.md` file goes to `docs`; a file no
+task lists, and every failed blocking gate, go to `unassigned`. Each packet is named for its group,
+sanitized to letters, digits, dot, underscore and dash, with `task-` before a plan task's group so a task
+called `docs` cannot take the documentation packet's name and a `-2`, `-3` suffix when two names still
+collide; packet files this round does not write are deleted first. Each packet carries, in one place,
+the rules a fix worker follows, the full record of its findings, every earlier cycle's finding on the
+same files (`## Earlier cycles' findings on these files (line numbers are from that cycle's commit; not
+necessarily still open)`) and the commits already made there since the first cycle it could read
+(`git --literal-pathspecs log --oneline <that cycle's head>..HEAD -- <files>`). The block
+names the plan, the task, the `docs-dev` agent for `docs`, or who must assign `unassigned`, and the
+packet's absolute path. The `docs` block is printed last and, when the round has other blocks, carries
+`After: every other fix block of this round is integrated`, so the documentation fix describes the
+fixed code; the packet's rules include that a test the fix adds or changes is deterministic. The conductor sends that block unchanged, so a fix worker reads the findings
+themselves rather than a paraphrase of the `fix:` lines; `FixPacketWriter` is the one writer. When the
+round continues but no cycle folder can be named, it writes no packet and warns instead, so the
+conductor dispatches from the `fix:` lines and `findings.json`; every degraded path — a change git could
+not list, no plan or several, a missing or unreadable task file, an unreadable earlier cycle, a packet
+that could not be written — is a warning beside the packets that were written.
+
 The loop has a hard stop: 5 review cycles, or 3 cycles in a row in which the count of
 findings to fix (the `fix:` lines, whatever the fix level makes fixable) does not fall; `review verdict` applies it and prints
 the rest as `open:`. The findings still open are then listed in
@@ -1126,6 +1165,22 @@ request: ready stays decided by required CI alone.
 Each cycle keeps its record in `.agent_scratchpad/<task-id>/review/cycle-<n>/` — the `seats`
 folder, `gates.json`, the `findings.json` the verdict command writes, and `cycle.json` — until the run
 ends.
+
+**Kind routing.** Before any kind is read, a finding whose `claim` starts `Pre-existing debt:` is
+dropped as pre-existing debt (`pre-existing debt: <the rest of the claim's first line>`), in every
+cycle, so it reaches the pull request notes even when the reviewer passed no `--drop` for it.
+The verdict then routes each finding by its `kind:` as well as its severity. A
+`defect`, and a finding whose seat wrote no kind (read as a defect, with a `KW-REVIEW-063` warning
+per finding), follows the severity and fix-level rules above; a finding from the `security` lens is
+always a defect whatever kind it carries. A `plan-objection` never takes a fix round: it is dropped
+with the reason `pr note: plan objection: <basis or "no basis quoted">`. A `hardening` survives only
+inside the cycle schedule: cycle 1 keeps a major or critical one the fix level would take, cycle 2
+keeps only a critical one, and cycle 3 and later keep none; every other hardening is dropped with
+`pr note: hardening outside the cycle <n> schedule`. Such a dropped finding is follow-up work, never
+a `fix:` line or a fix count, and it is not written to `findings.json`, so the next cycle's recheck
+never re-checks it. The cycle number is the `cycle-<n>` folder the `--out` or `--gates` path sits in,
+else the cycle after the `--prior` folder; when none names one, the verdict routes as cycle 1 and
+reports that (`KW-REVIEW-063`).
 
 **A recorded cycle is prior only when it belongs to this change.** The scratchpad is git-ignored, so
 a reset or clean leaves the folders of an earlier run behind, and a brand-new change could otherwise read

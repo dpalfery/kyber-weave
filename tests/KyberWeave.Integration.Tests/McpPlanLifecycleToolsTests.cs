@@ -224,7 +224,7 @@ public sealed class McpPlanLifecycleToolsTests
     {
         using DocFixture fixture = GitRepository(DocFixture.Create().WithCatalog()
             .Write("6-Docs/reference/widget.md", CloseoutCorpus.TargetDocument())
-            .Write(ClosedPlan, CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready"))
+            .Write(ClosedPlan, CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", linkPrefix: ".."))
             .Write("6-Docs/plans/README.md", """
                 ---
                 id: plans/index
@@ -260,7 +260,7 @@ public sealed class McpPlanLifecycleToolsTests
     public void ArchiveRefusesAPlanWithAnUncheckedNumberedTaskAndMovesNothing()
     {
         string sections = CloseoutCorpus.DecisionsSection("D1")
-            + CloseoutCorpus.CloseoutMappingSection(("D1, H1", "[Widget architecture](../../reference/widget.md)"))
+            + CloseoutCorpus.CloseoutMappingSection(("D1, H1", "[Widget architecture](../reference/widget.md)"))
             + CloseoutCorpus.DesignHarvestSection("H1")
             + """
 

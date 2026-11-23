@@ -59,7 +59,7 @@ public sealed partial class ReviewVerdictService(
     TimeProvider clock) : IReviewVerdictService
 {
     /// <summary>The drop reason that marks a finding about pre-existing code the change did not touch.</summary>
-    public const string PreExistingDebt = "pre-existing debt";
+    public const string PreExistingDebt = FindingKindRouting.PreExistingDebt;
 
     /// <summary>The drop reason that marks a finding the reviewer leaves for the pull request's own review notes.</summary>
     public const string PullRequestNote = "pr note";
@@ -140,6 +140,10 @@ public sealed partial class ReviewVerdictService(
         if (report.HasErrors)
             return Failed(report);
 
+        // A seat that says its finding is about code this change did not cause cannot send it to a fix round by
+        // forgetting --drop: it is dropped here, after the reviewer's own --drop above so that one still wins.
+        findings = DropPreExistingDebtClaims(findings, dropped, report);
+
         findings = CheckCitedLines(root, findings, report, dropped);
 
         // A host severity override sets the severity everything after this reads: the nitpick drop, the verdict rules,
@@ -154,6 +158,8 @@ public sealed partial class ReviewVerdictService(
         List<string> modelEffects = [];
         findings = MatchOverrides(model, overrides, findings, report, modelEffects, cancellationToken);
         findings = DropNitpicksBelowTheFixLevel(findings, config.Review.Policy, report, dropped);
+        findings = DropByKindForTheCycle(
+            findings, config.Review.Policy, CurrentCycleNumber(request, report), dropped, report);
 
         findings = ApplyDecisionModel(
             model, findings, request.Candidates, config.Review.Policy.FixLevel == ReviewFixLevel.Nitpick, report, dropped, modelEffects, cancellationToken);
@@ -188,7 +194,7 @@ public sealed partial class ReviewVerdictService(
             $"{outcome.Accepted.Count} finding(s) accepted, {outcome.Dropped.Count} dropped.",
             Subject));
 
-        ReportFixRound(outcome, gateResults, config.Review.Policy, PriorFixCounts(root, request, config), report);
+        ReportFixRound(root, request, config, outcome, gateResults, PriorFixCounts(root, request, config), report);
 
         report.AddMetric("verdict", outcome.Verdict.ToString());
         report.AddMetric("risk", outcome.Risk.ToString());
@@ -210,13 +216,24 @@ public sealed partial class ReviewVerdictService(
     /// finding at or above <c>review.policy.fix-level</c>. Any <c>fix:</c> line gets a fix round and then a
     /// verifier cycle, an APPROVE included, until a cycle prints none or a cap in <see cref="ReviewLoop"/> stops the
     /// loop; the findings still to fix are then <c>open:</c> lines for human review. <c>follow-up:</c> lines are the
-    /// findings below the level and each finding dropped as pre-existing debt or a pull request note.
+    /// findings below the level and each finding dropped as pre-existing debt, a pull request note, or by the kind
+    /// schedule (a plan objection, or a hardening outside its cycle). A continuing round also writes one ready fix
+    /// packet per owning group and prints its dispatch block after the <c>fix:</c> lines.
     /// </summary>
-    private static void ReportFixRound(
-        ReviewOutcome outcome, IReadOnlyList<GateResult> gates, ReviewPolicy policy, List<int> priorCounts, DiagnosticReport report)
+    private void ReportFixRound(
+        string root,
+        ReviewVerdictRequest request,
+        KyberWeaveConfig config,
+        ReviewOutcome outcome,
+        IReadOnlyList<GateResult> gates,
+        List<int> priorCounts,
+        DiagnosticReport report)
     {
-        List<string> fix = [.. FailedGates(gates).Select(gate => $"gate {gate.Id}")];
-        fix.AddRange(outcome.Accepted.Where(policy.FixRoundTakes).Select(Line));
+        ReviewPolicy policy = config.Review.Policy;
+        IReadOnlyList<GateResult> failedGates = [.. FailedGates(gates)];
+        List<string> fix = [.. failedGates.Select(gate => $"gate {gate.Id}")];
+        ReviewFinding[] fixFindings = [.. outcome.Accepted.Where(policy.FixRoundTakes)];
+        fix.AddRange(fixFindings.Select(Line));
         List<string> followUp = [.. outcome.Accepted.Where(finding => !policy.FixRoundTakes(finding)).Select(Line)];
         followUp.AddRange(outcome.Dropped
             .Select(drop => (Drop: drop, Reason: FollowUpReason(drop.Reason)))
@@ -228,6 +245,8 @@ public sealed partial class ReviewVerdictService(
         bool stopped = state is ReviewLoopState.CycleCap or ReviewLoopState.NoProgress;
         foreach (string line in fix)
             report.Add(new Diagnostic(FixRoundCode, Severity.Info, $"{(stopped ? "open" : "fix")}: {line}", Subject));
+        if (state == ReviewLoopState.Continue)
+            ReportFixPackets(root, request, config, fixFindings, failedGates, report);
         foreach (string line in followUp)
             report.Add(new Diagnostic(FixRoundCode, Severity.Info, $"follow-up: {line}", Subject));
         report.Add(new Diagnostic(
@@ -258,6 +277,49 @@ public sealed partial class ReviewVerdictService(
 
         static string? FollowUpReason(string dropReason) =>
             FollowUpReasons.FirstOrDefault(reason => dropReason.StartsWith(reason, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Writes one ready fix packet per owning group into the cycle folder and prints its dispatch block, so the
+    /// conductor sends the findings themselves instead of paraphrasing the <c>fix:</c> lines. Everything the writer
+    /// could not read or write is a warning line, including a cycle folder it could not name at all.
+    /// </summary>
+    private void ReportFixPackets(
+        string root,
+        ReviewVerdictRequest request,
+        KyberWeaveConfig config,
+        IReadOnlyList<ReviewFinding> findings,
+        IReadOnlyList<GateResult> gates,
+        DiagnosticReport report)
+    {
+        if (CurrentCycleFolder(request) is not { } folder)
+        {
+            report.Add(new Diagnostic(
+                FixRoundCode,
+                Severity.Warning,
+                "fix packets: not written — the cycle folder could not be named (pass --out inside the cycle " +
+                "folder); dispatch from the fix: lines and findings.json",
+                Subject));
+            return;
+        }
+
+        FixPacketOutcome outcome = FixPacketWriter.Write(
+            new FixPacketInput(
+                trees.Containing(root),
+                folder,
+                request.Prior,
+                request.BaseRef,
+                ChangePlanLookup.PlanFolder(config),
+                findings,
+                gates),
+            cycles,
+            git,
+            files);
+        foreach (string note in outcome.Notes)
+            report.Add(new Diagnostic(FixRoundCode, Severity.Warning, note, Subject));
+
+        foreach (string block in outcome.DispatchBlocks)
+            report.Add(new Diagnostic(FixRoundCode, Severity.Info, block, Subject));
     }
 
     /// <summary>The blocking gates that failed and are not just stopped for time or not applicable.</summary>
@@ -389,13 +451,24 @@ public sealed partial class ReviewVerdictService(
         return false;
     }
 
-    /// <summary>The folder of the cycle this verdict belongs to: the one <c>--out</c> or <c>--gates</c> sits in, when it records its change.</summary>
+    /// <summary>
+    /// The folder of the cycle this verdict belongs to: the one <c>--out</c> or <c>--gates</c> sits in, when it records
+    /// its change. A cycle's first verdict runs before <see cref="RecordCycleIdentity"/> records the change, so
+    /// <c>--out</c> in a <c>cycle-&lt;n&gt;</c> folder names the folder without that record.
+    /// </summary>
     private string? CurrentCycleFolder(ReviewVerdictRequest request)
     {
         foreach (string? path in new[] { request.Out, request.Gates })
         {
             if (path is not null && Path.GetDirectoryName(FullPath(path)) is { } folder && cycles.HasIdentity(folder))
                 return folder;
+        }
+
+        if (request.Out is not null
+            && ReviewCycleView.TryFromOutPath(paths, environment, request.Out, out _, out _)
+            && Path.GetDirectoryName(FullPath(request.Out)) is { } fromOut)
+        {
+            return fromOut;
         }
 
         return null;
@@ -1024,6 +1097,122 @@ public sealed partial class ReviewVerdictService(
 
         return kept;
     }
+
+    /// <summary>
+    /// Drops each finding whose claim states that the code it is about predates the change, before any kind or cycle
+    /// is read, with the reason a reviewer's own <c>--drop</c> would have recorded. Its drops are pull request
+    /// follow-up work, so they reach no <c>fix:</c> line, no fix count and no recheck.
+    /// </summary>
+    /// <param name="findings">The findings the verdict would otherwise decide.</param>
+    /// <param name="dropped">The dropped findings the report and the follow-up lines read.</param>
+    /// <param name="report">The report the drop lines are written to.</param>
+    private static List<ReviewFinding> DropPreExistingDebtClaims(
+        List<ReviewFinding> findings,
+        List<DroppedFinding> dropped,
+        DiagnosticReport report)
+    {
+        List<ReviewFinding> kept = [];
+        foreach (ReviewFinding finding in findings)
+        {
+            if (FindingKindRouting.PreExistingDebtDropReason(finding) is not { } reason)
+            {
+                kept.Add(finding);
+                continue;
+            }
+
+            dropped.Add(new DroppedFinding(finding, FindingKindRouting.Code, reason));
+            report.Add(new Diagnostic(
+                FindingKindRouting.Code,
+                Severity.Info,
+                $"Dropped '{finding.Id}': {reason}.",
+                finding.Lens,
+                finding.File,
+                StartLine: finding.Line));
+        }
+
+        return kept;
+    }
+
+    /// <summary>
+    /// Drops each finding the cycle's kind schedule does not keep, with a reported reason: a plan objection is never
+    /// fixed, and a hardening survives only in the early cycles. Its drops are pull request follow-up work, so they
+    /// reach no <c>fix:</c> line, no fix count and no recheck; a finding a seat left without a kind is read as a
+    /// defect and reported.
+    /// </summary>
+    /// <param name="findings">The findings the verdict would otherwise decide.</param>
+    /// <param name="policy">The policy whose fix level decides whether cycle 1 takes a hardening.</param>
+    /// <param name="cycle">The one-based number of the cycle being decided.</param>
+    /// <param name="dropped">The dropped findings the report and the follow-up lines read.</param>
+    /// <param name="report">The report the drop and missing-kind lines are written to.</param>
+    private static List<ReviewFinding> DropByKindForTheCycle(
+        List<ReviewFinding> findings,
+        ReviewPolicy policy,
+        int cycle,
+        List<DroppedFinding> dropped,
+        DiagnosticReport report)
+    {
+        List<ReviewFinding> kept = [];
+        foreach (ReviewFinding finding in findings)
+        {
+            if (finding.Kind is null)
+            {
+                report.Add(new Diagnostic(
+                    FindingKindRouting.Code,
+                    Severity.Warning,
+                    $"'{finding.Id}': the seat wrote no kind; read as a defect.",
+                    finding.Lens,
+                    finding.File,
+                    StartLine: finding.Line));
+            }
+
+            if (FindingKindRouting.DropReason(finding, policy, cycle) is not { } reason)
+            {
+                kept.Add(finding);
+                continue;
+            }
+
+            dropped.Add(new DroppedFinding(finding, FindingKindRouting.Code, reason));
+            report.Add(new Diagnostic(
+                FindingKindRouting.Code,
+                Severity.Info,
+                $"Dropped '{finding.Id}': {reason}.",
+                finding.Lens,
+                finding.File,
+                StartLine: finding.Line));
+        }
+
+        return kept;
+    }
+
+    /// <summary>
+    /// The cycle the verdict belongs to: the <c>cycle-&lt;n&gt;</c> folder its <c>--out</c> or <c>--gates</c> path
+    /// sits in, else the cycle after the <c>--prior</c> one; 1 with a reported note when no path names a cycle.
+    /// </summary>
+    private int CurrentCycleNumber(ReviewVerdictRequest request, DiagnosticReport report)
+    {
+        foreach (string? path in new[] { request.Out, request.Gates })
+        {
+            if (path is not null
+                && ReviewCycleView.TryFromOutPath(paths, environment, path, out _, out int cycle))
+            {
+                return cycle;
+            }
+        }
+
+        if (request.Prior is not null && ReviewCyclePlanning.TryNumber(PriorFolderName(request.Prior)) is { } prior)
+            return prior + 1;
+
+        report.Add(new Diagnostic(
+            FindingKindRouting.Code,
+            Severity.Info,
+            "The review cycle number could not be read from --out, --gates or --prior, so findings are routed as cycle 1.",
+            Subject));
+        return 1;
+    }
+
+    /// <summary>The last segment of a <c>--prior</c> folder, with any trailing separator removed.</summary>
+    private string PriorFolderName(string prior) =>
+        Path.GetFileName(FullPath(prior).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
 
     /// <summary>
     /// Grades each finding that cites no host severity override at the row the decision model confidently finds it

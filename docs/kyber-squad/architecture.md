@@ -260,7 +260,8 @@ accepted widening where it is made, not folded into the taxonomy.
 The shared `architect` capability profile holds `process.execute: allow` on every target
 (changed 2026-11-09; it was `deny`). The shell exists because the MCP servers stay bound to the
 canonical checkout and cannot see a plan written into a run's worktree. In the worktree the
-architect runs `kyber-weave docs validate . --merge-ready`, `kyber-weave docs drift .` and
+architect runs `kyber-weave docs validate .` (without `--merge-ready`, which is the
+pull-request gate and fails while the plan is an open Draft), `kyber-weave docs drift .` and
 `codegraph explore "…"` itself, and reads `git` state. It is not permission to implement:
 `filesystem.write` stays instruction-scoped to the plan, spec and todo directories, the agent
 body enumerates the only commands it may run and forbids edits to code, tests, configuration and
@@ -554,10 +555,10 @@ document, and an existing user file at a block path is not an unmanaged collisio
 
 | Target | File | Owned containers | An entry is Squad's when | Written fields |
 |---|---|---|---|---|
-| `claude` | `~/.claude/settings.json` (global scope only; at project scope Claude's hooks sit in agent and skill frontmatter) | `/hooks/PreToolUse`, `/hooks/PostToolUse` (always PascalCase; a legacy `preToolUse` or `postToolUse` Squad entry is removed when the block is next rendered, and a lower-case container left empty by that removal is deleted) | its `command` starts with `kyber-weave-arbiter hook --harness claude` | `command`, `matcher`, `timeout`; drift is re-anchored across both spellings of each container, so a receipt recorded before the migration reads as moved, not missing |
+| `claude` | `~/.claude/settings.json` (global scope only; at project scope Claude's hooks sit in agent and skill frontmatter) | `/hooks/PreToolUse`, `/hooks/PostToolUse`, and `/hooks/SubagentStop` (matcher-less; the stop hook closes a dispatch whose return hook timed out) — always PascalCase, and a legacy `preToolUse` or `postToolUse` Squad entry is removed when the block is next rendered, and a lower-case container left empty by that removal is deleted | its `command` starts with `kyber-weave-arbiter hook --harness claude` | `command`, `matcher`, `timeout`; drift is re-anchored across both spellings of each container, so a receipt recorded before the migration reads as moved, not missing |
 | `cursor` | `.cursor/hooks.json` | `/hooks/preToolUse`, `/hooks/postToolUse` (a new file starts `{"version":1,"hooks":{}}`) | its `command` starts with `kyber-weave-arbiter hook --harness cursor` | `command`, `matcher`, `timeout`, `failClosed` |
 | `codex` | `.codex/hooks.json` | `/hooks/PreToolUse`, `/hooks/PostToolUse` | every `hooks[].command` in the matcher group starts with `kyber-weave-arbiter hook --harness codex` — a group mixing Squad and user hooks stays user content | `matcher`, `hooks:[{type, command, timeout}]` |
-| `factory` | `.factory/hooks.json` | `/PreToolUse`, `/PostToolUse`, and `/SubagentStop` (matcher-less group, Factory only) — the groups sit at the top level of the file, with no `hooks` wrapper | every `hooks[].command` in the matcher group starts with `kyber-weave-arbiter hook --harness factory` | `matcher`, `hooks:[{type, command, timeout}]` |
+| `factory` | `.factory/hooks.json` | `/PreToolUse`, `/PostToolUse`, and `/SubagentStop` (matcher-less group) — the groups sit at the top level of the file, with no `hooks` wrapper | every `hooks[].command` in the matcher group starts with `kyber-weave-arbiter hook --harness factory` | `matcher`, `hooks:[{type, command, timeout}]` |
 | `devin` | `.devin/hooks.v1.json` | `/PreToolUse`, `/PostToolUse` — the whole file is the hooks object in the Claude Code format | every `hooks[].command` in the matcher group starts with `kyber-weave-arbiter hook --harness devin` | `matcher`, `hooks:[{type, command, timeout}]` |
 | `antigravity` | `.agents/hooks.json` | the top-level `kyber-arbiter` group, owned by key — top-level keys there are group names, so any unknown key would be read as another group | the whole group: ownership is by key, not by signature | matcher groups matching `^invoke_subagent$`, each holding `{type, command, timeout}` hooks |
 

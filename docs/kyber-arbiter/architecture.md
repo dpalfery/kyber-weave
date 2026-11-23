@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberArbiter
 source-root: src/KyberWeave.Domain/Arbiter
 owner: dpalfery
-last-reviewed: 2026-11-18
+last-reviewed: 2026-11-20
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -48,6 +48,8 @@ code-refs:
   - ArbiterRuleAdvisory
   - TextExcerpts
   - ArbiterHookTimeout
+  - ILostReturnRecovery
+  - ArbiterLogFiles
 ---
 
 # Kyber Arbiter architecture
@@ -212,7 +214,13 @@ Limits on those facts:
 `InFlightLedger` and `DecisionLog` persist `artifacts/arbiter/ledger.jsonl`
 (`kyber-arbiter.ledger/v1`) and `artifacts/arbiter/decisions.jsonl`
 (`kyber-arbiter.decision/v1`) as append-only lines under one lock file. Only the hook
-appends; the CLI only reads. A pre event's `headers` carry the dispatch's `plan-file`, `task`,
+appends; the CLI only reads. The lock is held for the append alone: each line is one write on an
+`O_APPEND` descriptor, and a post's pairing is resolved from a lock-free read, then reconciled under
+the lock against the lines that landed meanwhile. A fan-out of concurrent hooks therefore queues for
+milliseconds per row rather than for one whole-ledger read each; while that read was under the lock,
+twenty hooks in the same second exhausted the 500 ms wait budget and lost their rows. An append now
+makes three 500 ms attempts, 100 ms apart, before it fails closed. A pre event's
+`headers` carry the dispatch's `plan-file`, `task`,
 `lens`, `refute` and `technology` values, which the worker guard reads to scope a read-only
 dispatch's command allow-list. Prompts and code are logged as digests, never in full.
 Each step-1 rule entry records what the model scored, so thresholds can be tuned from the log:
@@ -1127,7 +1135,9 @@ Every dispatch has one **pair key**:
 
 Pairing takes the first unpaired pre event of the same harness with the same call id; failing that, the
 first unpaired pre event with the same digest, oldest first. Both keys are recorded on the pre event, so a
-harness that gives an id on one side and not the other still pairs by digest.
+harness that gives an id on one side and not the other still pairs by digest. A pre event claimed only by
+a recovered row (a stop event's close, see [Recovered returns](#recovered-returns)) still counts as
+unpaired for a real return, because Copilot CLI's stop precedes a synchronous dispatch's own post.
 
 The digest tier exists for the harnesses whose hook cannot see an id (Factory, Devin, Kilo) and for a
 ledger written before the id was read. It is why the digest is computed over the *delivered* prompt and
@@ -1160,6 +1170,9 @@ The sites that pair, all through `ArbiterLedgerQueries`:
   stores it with the agent id; it reads the same two tiers.
 - `ArbiterHookDecisionEngine.DecideBackgroundReturn` — looks the stored pre event up by session and agent
   id, then records the turn's response as its return with that `pre-id`.
+- `ArbiterHookDecisionEngine.RecoverLostReturn` — a stop event's fallback when the return hook was lost:
+  it takes the one still-open pre event of that agent in the session by id and writes a post row marked
+  `recovered` (see [Recovered returns](#recovered-returns)).
 - `ArbiterLedgerQueries.ConcurrentWriters`, `InFlightPaths` and `DispatchTechnology` — read the pair to
   know what is still in flight.
 
@@ -1167,6 +1180,45 @@ When no pre event matches, the hook logs one line naming the key it tried: the a
 id, the digest, and how many pre events were already paired. An unpaired return is still recorded as its
 own post event, so `arbiter audit` shows it; it is never attributed to another dispatch, and it never
 marks a task complete.
+
+### Recovered returns
+
+A return hook can be lost: the harness kills it at its timeout, or never delivers it. The dispatch then
+stays in flight for the rest of the run, and `KW-ARB-READY-001` refuses every later attempt at the same
+task with `overlaps-in-flight`. Nothing in the run can close that pre event, so the run blocks.
+
+The harness's stop event is the evidence that the agent's work is over: `subagentStop` on Copilot CLI,
+`SubagentStop` on Claude and Factory. Each adapter's existing stop path (`HandleSubagentStop`) calls
+`ILostReturnRecovery.RecoverLostReturn` after it has recorded any background turn, so a real return
+always wins. The recovery writes one post row for the one still-open pre event of that agent in the same
+session, and marks it:
+
+- The match is on the dispatch's **target** agent, never its caller, and only a pre row carrying the
+  stop event's own session id. A pre row written before the session was recorded names none, and is
+  never recovered: the stop event cannot say which session's agent it belonged to.
+- The pre must be older than the stop event. A same-target post in the same session that claims a pre
+  and was written after the pre is a dispatch that already finished, so a stop arriving then is that
+  finished dispatch's late signal and nothing is closed — the dispatches still open may be different
+  workers still running. A post that claims no pre is not that evidence: it can be the unpaired return
+  the stop handler itself just recorded, which is the case recovery exists for.
+- `recovered` names the stop event (`subagentStop` or `SubagentStop`), so nothing reads the row as a
+  worker's report.
+- It carries the pre event's caller, target and headers, pairs by its `pre-id`, and has no
+  `returns` markers and no changed paths. The dispatch stops holding its task's files; no task is
+  marked complete, because no report was read.
+- A real return that arrives after the stop still pairs with the same dispatch, so the row does not
+  steal it. Copilot CLI fires `subagentStop` at the end of a synchronous agent's turn **before** the
+  parent's `postToolUse`, so every healthy synchronous dispatch takes this order: the recovered row
+  marks the end, and the report that follows is the row that carries the markers and the changed
+  paths. Pairing counts a post as claiming a pre unless that post is a recovered one.
+- A dispatch the rules refused wrote a pre row but never ran a worker, so it is not a candidate. The
+  same set keeps it out of `ledger.in-flight.paths`.
+- When several dispatches of the agent are still open the stop event cannot say which one ended: none
+  is closed, and one line names how many matched. Closing the wrong one would report work as finished
+  that never ran.
+- Factory's `SubagentStop` names the dispatch only by `task_name`, which is a description rather than
+  an agent. The target comes from the transcript's `Task` call, the same place the dispatch path reads
+  it, so recovery matches the agent the dispatch actually named.
 
 ### Attestation scope
 
@@ -1388,7 +1440,9 @@ skills outrank project skills). Two points are not documented and are the design
 invoked. The claim keeps one evaluation whichever way those points fall. The rationale and rejected
 alternatives are in [ADR 0070](../adr/0070-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md).
 
-Claude's user-level block is written only under `hooks.PreToolUse` and `hooks.PostToolUse`. See
+Claude's user-level block is written under `hooks.PreToolUse`, `hooks.PostToolUse` and the
+matcher-less `hooks.SubagentStop`. The stop entry runs the same Arbiter command with the same
+timeout, and is what lets a dispatch whose return hook timed out stop holding its task's files. See
 [Squad architecture](../kyber-squad/architecture.md) for the owned-block rule.
 
 The architect's shell guard is not in this block. It is a `PreToolUse` entry with matcher `^(Bash|PowerShell)$`

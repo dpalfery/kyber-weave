@@ -20,7 +20,7 @@ public sealed class ArbiterCursorRenderingTests : IDisposable
 {
     private const string BlockPath = ".cursor/hooks.json";
     private const string ExpectedCommand = "kyber-weave-arbiter hook --harness cursor";
-    private const int HookTimeoutSeconds = 5;
+    private const int HookTimeoutSeconds = 30;
 
     private readonly InMemoryFileSystem _files = new();
     private readonly ArbiterSquadFixture _fixture;

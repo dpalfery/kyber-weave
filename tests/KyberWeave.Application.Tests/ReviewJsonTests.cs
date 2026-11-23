@@ -39,9 +39,61 @@ public sealed class ReviewJsonTests
         Assert.Single(ReviewJson.ReadFindings(Report(line)).Findings);
     }
 
+    [Theory]
+    [InlineData("99")]
+    [InlineData("3")]
+    [InlineData("-1")]
+    public void AFindingWhoseKindIsANumberIsRejected(string kind)
+    {
+        JsonException error = Assert.Throws<JsonException>(() => ReviewJson.ReadFindings(KindReport(kind)));
+
+        Assert.Contains("kind", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string KindReport(string kind) =>
+        "{\"schema\":\"kyber-weave.review-findings/v1\",\"findings\":[{\"id\":\"correctness/a\",\"lens\":\"correctness\"," +
+        "\"severity\":\"minor\",\"confidence\":5,\"file\":\"a.cs\",\"line\":12,\"kind\":" + kind + "}],\"changedPaths\":[],\"changedLines\":0}";
+
     private static string Report(string line) =>
         "{\"schema\":\"kyber-weave.review-findings/v1\",\"findings\":[{\"id\":\"correctness/a\",\"lens\":\"correctness\"," +
         "\"severity\":\"minor\",\"confidence\":5,\"file\":\"a.cs\",\"line\":" + line + "}],\"changedPaths\":[],\"changedLines\":0}";
+
+    /// <summary>
+    /// Each kind is written as the name a seat writes and a reader of findings.json expects, including
+    /// <c>plan-objection</c>, which the camelCase enum converter would otherwise write as <c>planObjection</c>.
+    /// </summary>
+    [Theory]
+    [InlineData(FindingKind.Defect, "defect")]
+    [InlineData(FindingKind.Hardening, "hardening")]
+    [InlineData(FindingKind.PlanObjection, "plan-objection")]
+    public void AFindingKindIsWrittenAsItsNameAndReadsBack(FindingKind kind, string written)
+    {
+        FindingsReport report = new(FindingsReport.CurrentSchema, [Finding(kind)], [], 0);
+
+        string json = ReviewJson.Write(report);
+        using (JsonDocument document = JsonDocument.Parse(json))
+        {
+            Assert.Equal(written, document.RootElement.GetProperty("findings")[0].GetProperty("kind").GetString());
+        }
+
+        ReviewFinding read = Assert.Single(ReviewJson.ReadFindings(json).Findings);
+        Assert.Equal(kind, read.Kind);
+        Assert.Equal("Acceptance criterion 2.", read.Basis);
+    }
+
+    /// <summary>A findings.json written before kind and basis existed still reads: both arrive absent.</summary>
+    [Fact]
+    public void AFindingsDocumentWrittenBeforeKindAndBasisStillReads()
+    {
+        ReviewFinding finding = Assert.Single(ReviewJson.ReadFindings(Report("12")).Findings);
+
+        Assert.Null(finding.Kind);
+        Assert.Null(finding.Basis);
+    }
+
+    private static ReviewFinding Finding(FindingKind kind) =>
+        new("correctness/a", "correctness", ReviewSeverity.Minor, 5, "a.cs", 1,
+            Kind: kind, Basis: "Acceptance criterion 2.");
 
     [Fact]
     public void AnEmptyGatesObjectIsRejected()
