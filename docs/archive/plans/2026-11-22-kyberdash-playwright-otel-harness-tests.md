@@ -2,7 +2,7 @@
 id: plans/2026-11-22-kyberdash-playwright-otel-harness-tests
 title: Multi-Harness OTLP Telemetry Playwright Tests for KyberDash Web and Tray
 doc-type: plan
-status: current
+status: archived
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-11-22
@@ -15,7 +15,7 @@ impact-components:
 
 # Multi-Harness OTLP Telemetry Playwright Tests for KyberDash Web and Tray
 
-**Status: Ready, 2026-11-22.**
+**Status: Archived, 2026-11-23.**
 
 ## Request
 
@@ -267,20 +267,20 @@ All four implementation tasks (`T1`–`T4`) are committed on branch `antigravity
 
 ## Closeout mapping
 
-`documentation-impact`: `extends-component` · `impact-components`: `KyberDash` · `last-reviewed`: `2026-11-22` · `status`: pending archival after final review council (will flip to `Archived` at archive step).
+`documentation-impact`: `extends-component` · `impact-components`: `KyberDash` · `last-reviewed`: `2026-11-22` · `status`: `Archived` (2026-11-23).
 
 | ID | Destination | ADR or waiver |
 |---|---|---|
-| D1 | [KyberDash runbook — Running tests safely](../dash/runbook.md#running-tests-safely) | no ADR — ADR waiver: applies established isolated temp-store Playwright boot pattern under ADR 0047 without a new architectural boundary |
-| D2 | [KyberDash runbook — Isolated Playwright OTLP suites](../dash/runbook.md#isolated-playwright-otlp-suites-web-dashboard-and-tray-ui) | no ADR — ADR waiver: test-harness same-origin HTTP/IPC bridge in `dash/e2e/otel-tray-bridge.ts` complying with `DashHttp.IsAllowedMutation` and ADR 0033 without changing shipped Rust or server architecture |
-| D3 | [KyberDash harness collection standard — Per-harness OTLP telemetry collection matrix](../rules/kyberdash-harness-collection.md#per-harness-otlp-telemetry-collection-matrix) | no ADR — ADR waiver: codifies existing `CanonAdapters.DefaultAdapters`, `CanonPricing`, and honest-unobservability rules across multi-turn OTLP assertions |
-| D4 | [KyberDash architecture — Collector attribution and read-side API projection](../dash/architecture.md#collector-attribution-and-read-side-api-projection); [KyberDash harness collection standard](../rules/kyberdash-harness-collection.md#per-harness-ground-truth) | no ADR — ADR waiver: completes `pi.session.id` fallback attribution in `PiAdapter` and `PiSpanMapper` within existing adapter and mapper contracts |
-| D5 | [KyberDash architecture — Collector attribution and read-side API projection](../dash/architecture.md#collector-attribution-and-read-side-api-projection); [Skills view contract](../dash/architecture.md#skills-view-contract); [Backend REST API Contract](../dash/architecture.md#backend-rest-api-contract-dashserverkyberdashapiendpointsdashendpointmappingscs) | no ADR — ADR waiver: completes existing `GET /api/kyber/session/:id` projection blocks and `SkillsInvoked` population per ADR 0011 and ADR 0090 without schema changes |
-| D6 | [KyberDash architecture — Collector attribution and read-side API projection](../dash/architecture.md#collector-attribution-and-read-side-api-projection); [Backend REST API Contract](../dash/architecture.md#backend-rest-api-contract-dashserverkyberdashapiendpointsdashendpointmappingscs) | no ADR — ADR waiver: aligns `GET /api/kyber/report` with the existing Tray `ContextReport` contract (ADR 0023, ADR 0033) while preserving the 4-argument overload for existing callers |
-| D7 | [KyberDash runbook — Running tests safely](../dash/runbook.md#running-tests-safely); [KyberDash harness collection standard — Running the conformance spec](../rules/kyberdash-harness-collection.md#running-the-conformance-spec) | no ADR — ADR waiver: registers new isolated specs in existing `dash/playwright.isolated.config.ts` (`workers: 1`) |
+| D1 | [KyberDash runbook — Running tests safely](../../dash/runbook.md#running-tests-safely) | no ADR — ADR waiver: applies established isolated temp-store Playwright boot pattern under ADR 0047 without a new architectural boundary |
+| D2 | [KyberDash runbook — Isolated Playwright OTLP suites](../../dash/runbook.md#isolated-playwright-otlp-suites-web-dashboard-and-tray-ui) | no ADR — ADR waiver: test-harness same-origin HTTP/IPC bridge in `dash/e2e/otel-tray-bridge.ts` complying with `DashHttp.IsAllowedMutation` and ADR 0033 without changing shipped Rust or server architecture |
+| D3 | [KyberDash harness collection standard — Per-harness OTLP telemetry collection matrix](../../rules/kyberdash-harness-collection.md#per-harness-otlp-telemetry-collection-matrix) | no ADR — ADR waiver: codifies existing `CanonAdapters.DefaultAdapters`, `CanonPricing`, and honest-unobservability rules across multi-turn OTLP assertions |
+| D4 | [KyberDash architecture — Collector attribution and read-side API projection](../../dash/architecture.md#collector-attribution-and-read-side-api-projection); [KyberDash harness collection standard](../../rules/kyberdash-harness-collection.md#per-harness-ground-truth) | no ADR — ADR waiver: completes `pi.session.id` fallback attribution in `PiAdapter` and `PiSpanMapper` within existing adapter and mapper contracts |
+| D5 | [KyberDash architecture — Collector attribution and read-side API projection](../../dash/architecture.md#collector-attribution-and-read-side-api-projection); [Skills view contract](../../dash/architecture.md#skills-view-contract); [Backend REST API Contract](../../dash/architecture.md#backend-rest-api-contract-dashserverkyberdashapiendpointsdashendpointmappingscs) | no ADR — ADR waiver: completes existing `GET /api/kyber/session/:id` projection blocks and `SkillsInvoked` population per ADR 0011 and ADR 0090 without schema changes |
+| D6 | [KyberDash architecture — Collector attribution and read-side API projection](../../dash/architecture.md#collector-attribution-and-read-side-api-projection); [Backend REST API Contract](../../dash/architecture.md#backend-rest-api-contract-dashserverkyberdashapiendpointsdashendpointmappingscs) | no ADR — ADR waiver: aligns `GET /api/kyber/report` with the existing Tray `ContextReport` contract (ADR 0023, ADR 0033) while preserving the 4-argument overload for existing callers |
+| D7 | [KyberDash runbook — Running tests safely](../../dash/runbook.md#running-tests-safely); [KyberDash harness collection standard — Running the conformance spec](../../rules/kyberdash-harness-collection.md#running-the-conformance-spec) | no ADR — ADR waiver: registers new isolated specs in existing `dash/playwright.isolated.config.ts` (`workers: 1`) |
 | D8 | Documentation waiver — execution-time task decomposition, technology labels, and difficulty/agent tiering with no surviving runtime or operator invariant | no ADR — ADR waiver: Squad task-planning metadata governed by existing `plan-authoring` and ADR 0080 rules |
 | D9 | Documentation waiver — execution-time test-first `--red` exemption (`T1`–`T4` ran test-contract commands directly under `KW-ARB-MODE-002`) with no surviving product invariant | no ADR — ADR waiver: execution-gate routing within existing `.kyber-weave/kyber-weave.yml` and Arbiter rules |
 | D10 | Documentation waiver — execution-time scope renegotiation removing `T5` (`.github/workflows/ci.yml`) into `## Out-of-scope boundaries` due to missing local `actionlint` | no ADR — ADR waiver: scope-cut process decision with no lasting product or CI contract change |
 | AP1 | Documentation waiver — initial autonomous plan finalization approval record with no surviving behavioral invariant | no ADR — ADR waiver: lifecycle approval provenance |
 | AP2 | Documentation waiver — D10 scope-renegotiation finalization approval record with no surviving behavioral invariant | no ADR — ADR waiver: lifecycle approval provenance |
-| KyberDash | [KyberDash architecture — Collector attribution and read-side API projection](../dash/architecture.md#collector-attribution-and-read-side-api-projection); [KyberDash runbook — Running tests safely](../dash/runbook.md#running-tests-safely); [KyberDash harness collection standard — Per-harness OTLP telemetry collection matrix](../rules/kyberdash-harness-collection.md#per-harness-otlp-telemetry-collection-matrix) | no ADR — ADR waiver: harvests all three Design harvest rows (`architecture`, `runbook`, `rules`) into canonical KyberDash documentation |
+| KyberDash | [KyberDash architecture — Collector attribution and read-side API projection](../../dash/architecture.md#collector-attribution-and-read-side-api-projection); [KyberDash runbook — Running tests safely](../../dash/runbook.md#running-tests-safely); [KyberDash harness collection standard — Per-harness OTLP telemetry collection matrix](../../rules/kyberdash-harness-collection.md#per-harness-otlp-telemetry-collection-matrix) | no ADR — ADR waiver: harvests all three Design harvest rows (`architecture`, `runbook`, `rules`) into canonical KyberDash documentation |
