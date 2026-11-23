@@ -17,21 +17,25 @@ public sealed class SquadHookJsonFile(
 {
     /// <summary>
     /// Replaces Squad's entries in <paramref name="filePath"/> with <paramref name="preToolUse"/>,
-    /// <paramref name="postToolUse"/> and, for Factory, <paramref name="subagentStop"/>, appending
-    /// them at the end of each owned container (or setting the Antigravity group key). A missing
-    /// or blank file starts from the minimal document. Returns the owned entries written.
+    /// <paramref name="postToolUse"/> and, for Factory, the <paramref name="subagentStop"/>,
+    /// <paramref name="sessionStart"/> and <paramref name="sessionEnd"/> entries, appending them at the end of each
+    /// owned container (or setting the Antigravity group key). A missing or blank file starts from the minimal
+    /// document. Returns the owned entries written.
     /// </summary>
     public IReadOnlyList<SquadHookOwnedEntry> SpliceFile(
         SquadHookBlockFormat format,
         string filePath,
         IReadOnlyList<JsonNode> preToolUse,
         IReadOnlyList<JsonNode> postToolUse,
-        IReadOnlyList<JsonNode>? subagentStop = null)
+        IReadOnlyList<JsonNode>? subagentStop = null,
+        IReadOnlyList<JsonNode>? sessionStart = null,
+        IReadOnlyList<JsonNode>? sessionEnd = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
         ArgumentNullException.ThrowIfNull(preToolUse);
         ArgumentNullException.ThrowIfNull(postToolUse);
         SquadHookJsonBlock.RefuseForeignSubagentStop(format, subagentStop);
+        SquadHookJsonBlock.RefuseForeignSessionEvents(format, sessionStart, sessionEnd);
 
         string fullPath = FullPath(filePath);
         string? existing = files.FileExists(fullPath) ? files.ReadAllText(fullPath) : null;
@@ -39,7 +43,8 @@ public sealed class SquadHookJsonFile(
         IReadOnlyList<SquadHookOwnedEntry> owned;
         try
         {
-            (content, owned) = SquadHookJsonBlock.SpliceContent(format, existing, preToolUse, postToolUse, subagentStop);
+            (content, owned) = SquadHookJsonBlock.SpliceContent(
+                format, existing, preToolUse, postToolUse, subagentStop, sessionStart, sessionEnd);
         }
         catch (Exception ex) when (ex is JsonException || ex is InvalidOperationException)
         {

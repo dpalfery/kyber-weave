@@ -39,9 +39,11 @@ not permission to implement. `architect-devin` and `product-planning-devin` stil
 editing; `architect-copilot` is unchanged.
 
 Amended 2026-11-09: the shared `architect` profile now holds `process.execute: allow` on every
-target, so the architect can run `kyber-weave docs validate . --merge-ready`, `kyber-weave docs
+target, so the architect can run `kyber-weave docs validate .`, `kyber-weave docs
 drift .` and `codegraph explore "…"` in a run's worktree, where the MCP servers (bound to the
-canonical checkout) cannot see its plan. The planning-only boundary is unchanged: writes stay
+canonical checkout) cannot see its plan. `docs validate` runs without `--merge-ready`: that flag
+is the pull-request gate and fails while the plan is an open Draft, and the Arbiter's shell guard
+refuses it for the architect. The planning-only boundary is unchanged: writes stay
 scoped to the plan, spec and todo directories and the Arbiter classification is untouched.
 `architect-devin` and `architect-copilot` now equal the shared profile. Decision 2, the
 Alternatives and the Consequences are updated to match; the earlier 2026-10-28 amendment text

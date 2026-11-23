@@ -43,8 +43,16 @@ public static partial class SeatOutputParser
     /// <summary>The fields the parser reads as text.</summary>
     private static readonly HashSet<string> TextFields = new(StringComparer.Ordinal)
     {
-        "id", "lens", "severity", "confidence", "file", "line", "excerpt", "claim", "evidence",
-        "failure_scenario", "failureScenario", "suggestion", "override"
+        "id", "lens", "severity", "kind", "confidence", "file", "line", "excerpt", "claim", "evidence",
+        "failure_scenario", "failureScenario", "suggestion", "basis", "override"
+    };
+
+    /// <summary>How a seat writes each kind: the same names findings.json uses.</summary>
+    private static readonly Dictionary<string, FindingKind> KindsByName = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["defect"] = FindingKind.Defect,
+        ["hardening"] = FindingKind.Hardening,
+        ["plan-objection"] = FindingKind.PlanObjection
     };
 
     /// <summary>
@@ -462,7 +470,25 @@ public static partial class SeatOutputParser
             Optional(item, "evidence", where),
             Optional(item, "failure_scenario", where) ?? Optional(item, "failureScenario", where),
             Optional(item, "suggestion", where),
-            Optional(item, "override", where));
+            Optional(item, "override", where),
+            Kind: ReadKind(item, where),
+            Basis: Optional(item, "basis", where));
+    }
+
+    /// <summary>The kind the seat wrote, or null when it wrote none.</summary>
+    /// <remarks>
+    /// Exactly one kind name. The text is matched against the three names themselves, as severity is, so a number
+    /// or a comma list is refused rather than read as one kind.
+    /// </remarks>
+    private static FindingKind? ReadKind(SeatItem item, string where)
+    {
+        if (Optional(item, "kind", where) is not { } written)
+            return null;
+
+        return KindsByName.TryGetValue(written, out FindingKind kind)
+            ? kind
+            : throw new SeatOutputException(
+                $"{where} has kind '{Clip(written)}'; use defect, hardening or plan-objection.");
     }
 
     private static string LensFromId(string id, string seatLens)

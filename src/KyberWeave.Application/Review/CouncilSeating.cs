@@ -194,6 +194,7 @@ public static class CouncilSeating
         text.AppendLine(context.GuidancePath is null
             ? "- Review guidance: none declared, or the file is missing. Say so in your output."
             : $"- Review guidance: {context.GuidancePath}. Apply its ground rules and what-not-to-flag, and the sections its lens and technology maps name for your lens and the changed files.");
+        text.AppendLine(PlanLine(context));
         AppendSeverityOverrides(text, context, lens);
         if (string.Equals(lens, "duplicate-implementation", StringComparison.Ordinal) && context.DuplicatesPath is not null)
             text.AppendLine(CultureInfo.InvariantCulture, $"- Duplicates report: {context.DuplicatesPath}");
@@ -204,6 +205,19 @@ public static class CouncilSeating
                         ?? $"(No embedded charter for {lens}: read `references/lenses/{lens}.md` in the code-review skill.)");
         return text.ToString();
     }
+
+    /// <summary>
+    ///     The plan of the change under review, so the seat can judge each finding against the request's acceptance
+    ///     criteria and the plan's approved decisions; when the change touches none or several, it says so instead.
+    /// </summary>
+    private static string PlanLine(CouncilSeatContext context) => context switch
+    {
+        { PlanPath: { Length: > 0 } plan } =>
+            $"- Request and plan: {plan}. Its Request section holds the acceptance criteria; its Decisions are approved choices. Classify each finding's kind against them.",
+        { PlanCandidates: { Count: > 1 } candidates } =>
+            $"- Request and plan: several: {string.Join(", ", candidates)}. Classify each finding's kind from the diff and the evidence, and say so.",
+        _ => "- Request and plan: none found in the change. Classify each finding's kind from the diff and the evidence, and say so."
+    };
 
     /// <summary>
     ///     The host's severity overrides this seat is given: rows with no scope, rows for its lens, and rows for a
@@ -281,6 +295,8 @@ public sealed record CouncilSeatPlan(
 /// <param name="DuplicatesPath">The duplicates report the gate run writes.</param>
 /// <param name="Overrides">The host's severity overrides from the review guidance; null for none.</param>
 /// <param name="ChangedPaths">The changed paths that decide which technology rows apply; null when git could not name them.</param>
+/// <param name="PlanPath">The one plan the change touches, repository-relative; null when it touches none or several.</param>
+/// <param name="PlanCandidates">The plans the change touches when there is more than one; null or empty otherwise.</param>
 public sealed record CouncilSeatContext(
     string Tree,
     string EvidencePath,
@@ -291,4 +307,6 @@ public sealed record CouncilSeatContext(
     string? GuidancePath,
     string? DuplicatesPath,
     SeverityOverrides? Overrides = null,
-    IReadOnlyList<string>? ChangedPaths = null);
+    IReadOnlyList<string>? ChangedPaths = null,
+    string? PlanPath = null,
+    IReadOnlyList<string>? PlanCandidates = null);

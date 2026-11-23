@@ -25,7 +25,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
 {
     private const string BlockPath = ".factory/hooks.json";
     private const string ExpectedCommand = "kyber-weave-arbiter hook --harness factory";
-    private const int HookTimeoutSeconds = 5;
+    private const int HookTimeoutSeconds = 30;
 
     private static readonly FactoryHooksShadowing HooksShadowing = new(new PhysicalFileSystem());
 
@@ -47,7 +47,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     }
 
     [Fact]
-    public async Task RenderAsync_EnabledAtProjectScope_HoldsTopLevelPreAndPostTaskGroupsAndAStopGroup()
+    public async Task RenderAsync_EnabledAtProjectScope_HoldsTheDispatchAndWorkerGuardGroups()
     {
         SquadRenderResult result = await RenderAsync(
             new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds),
@@ -57,28 +57,39 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
 
         // F11: the event names are the top-level keys of .factory/hooks.json (no `hooks`
         // wrapper), so each block entry is one matcher group keyed by its event container.
+        // The worker guard's session groups sit beside the dispatch groups.
         Assert.Equal(
-            ["PreToolUse", "PostToolUse", "SubagentStop"],
+            ["PreToolUse", "PostToolUse", "SubagentStop", "PreToolUse", "PostToolUse", "SessionStart", "SessionEnd"],
             block.Entries.Select(entry => entry.Container).ToArray());
 
-        foreach (SquadRenderedBlockEntry entry in block.Entries)
+        string workerGuardCommand = "kyber-weave-arbiter worker-guard --harness factory";
+        for (int index = 0; index < block.Entries.Count; index++)
         {
+            SquadRenderedBlockEntry entry = block.Entries[index];
             JsonObject group = Assert.IsType<JsonObject>(entry.Entry);
-
-            // SubagentStop is the one group with no matcher: Factory fires it on every stop, not
-            // on a named tool. The key is omitted, not set to an empty string.
-            bool isStop = entry.Container == "SubagentStop";
-            string[] expectedKeys = isStop ? ["hooks"] : ["matcher", "hooks"];
-            Assert.Equal(expectedKeys, group.Select(property => property.Key).ToArray());
-            if (!isStop)
+            string expectedCommand = index < 3 ? ExpectedCommand : workerGuardCommand;
+            string? expectedMatcher = entry.Container switch
             {
-                Assert.Equal("Task", group["matcher"]!.GetValue<string>());
+                "SubagentStop" or "SessionStart" or "SessionEnd" => null,
+                _ when index == 3 => "*",
+                _ => "Task",
+            };
+
+            // A matcher-less group omits the key rather than setting an empty string.
+            if (expectedMatcher is null)
+            {
+                Assert.Equal(["hooks"], group.Select(property => property.Key).ToArray());
+            }
+            else
+            {
+                Assert.Equal(["matcher", "hooks"], group.Select(property => property.Key).ToArray());
+                Assert.Equal(expectedMatcher, group["matcher"]!.GetValue<string>());
             }
 
             JsonArray hooks = Assert.IsType<JsonArray>(group["hooks"]);
             JsonObject hook = Assert.IsType<JsonObject>(Assert.Single(hooks));
             Assert.Equal("command", hook["type"]!.GetValue<string>());
-            Assert.Equal(ExpectedCommand, hook["command"]!.GetValue<string>());
+            Assert.Equal(expectedCommand, hook["command"]!.GetValue<string>());
             Assert.Equal(HookTimeoutSeconds, hook["timeout"]!.GetValue<int>());
         }
     }
@@ -201,12 +212,11 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     [InlineData(SquadHookBlockFormat.Devin)]
     [InlineData(SquadHookBlockFormat.Cursor)]
     [InlineData(SquadHookBlockFormat.Codex)]
-    [InlineData(SquadHookBlockFormat.Claude)]
     [InlineData(SquadHookBlockFormat.Antigravity)]
-    public void SpliceContent_NonFactoryFormat_RefusesASubagentStopEntry(SquadHookBlockFormat format)
+    public void SpliceContent_FormatWithoutASubagentStopContainer_RefusesOne(SquadHookBlockFormat format)
     {
-        // Only Factory's file has this container. Any other shape receiving one is a caller bug,
-        // refused rather than written under a key that harness never reads.
+        // Only the Factory and Claude files hold this container. Any of these shapes receiving one is a
+        // caller bug, refused rather than written under a key that harness never reads.
         Assert.Throws<InvalidOperationException>(() => SquadHookJsonBlock.SpliceContent(
             format,
             null,
@@ -675,6 +685,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
         Assert.True(removed.Success, string.Join("; ", removed.Errors ?? []));
         string remaining = await File.ReadAllTextAsync(hooksPath);
         Assert.DoesNotContain(ExpectedCommand, remaining, StringComparison.Ordinal);
+        Assert.DoesNotContain("kyber-weave-arbiter worker-guard --harness factory", remaining, StringComparison.Ordinal);
         Assert.Contains("user-own-stop-notifier", remaining, StringComparison.Ordinal);
     }
 
@@ -791,6 +802,11 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
         if (includeSubagentStop)
         {
             entries.Add(new SquadRenderedBlockEntry("SubagentStop", SquadGroup(null)));
+            const string workerGuard = "kyber-weave-arbiter worker-guard --harness factory";
+            entries.Add(new SquadRenderedBlockEntry("PreToolUse", SquadGroup("*", workerGuard)));
+            entries.Add(new SquadRenderedBlockEntry("PostToolUse", SquadGroup("Task", workerGuard)));
+            entries.Add(new SquadRenderedBlockEntry("SessionStart", SquadGroup(null, workerGuard)));
+            entries.Add(new SquadRenderedBlockEntry("SessionEnd", SquadGroup(null, workerGuard)));
         }
 
         return new("factory", BlockPath, SquadHookBlockFormat.Factory, entries);

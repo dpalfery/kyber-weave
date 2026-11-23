@@ -91,6 +91,34 @@ public sealed class TaskGateResolverTests
         Assert.Equal("csharp-dev", resolved.EntryKey);
     }
 
+    /// <summary>
+    /// A developer tier is a difficulty, not a technology. Every tier resolves the same gates the task's
+    /// technology declares through the technology agent, never its own name.
+    /// </summary>
+    [Theory]
+    [InlineData("dev-easy")]
+    [InlineData("dev-medium")]
+    [InlineData("dev-hard")]
+    public void EveryDeveloperTierResolvesTheSameGatesThroughTheTasksTechnology(string agent)
+    {
+        ReviewConfig review = Config("""
+            review:
+              task-gates:
+                react-dev:
+                  - id: dashboard-lint
+                    run: [npm, run, lint]
+                  - id: dashboard-typecheck
+                    run: [npx, tsc, --noEmit]
+            """).Review;
+
+        TaskGateResolution resolved = TaskGateResolver.Resolve(review, agent, "react");
+
+        Assert.Equal(["dashboard-lint", "dashboard-typecheck"], resolved.Gates.Select(gate => gate.Id));
+        Assert.Equal(TaskGateSource.MappedAgent, resolved.Source);
+        Assert.Equal("react-dev", resolved.EntryKey);
+        Assert.Null(resolved.Refusal);
+    }
+
     [Fact]
     public void WithNeitherTheParentsGatesAreUsed()
     {

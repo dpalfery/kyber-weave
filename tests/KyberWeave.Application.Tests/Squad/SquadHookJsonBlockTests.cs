@@ -74,9 +74,43 @@ public sealed class SquadHookJsonBlockTests
         InvalidOperationException failure = Assert.Throws<InvalidOperationException>(
             () => Hooks.SpliceFile(SquadHookBlockFormat.Cursor, path, pre, post, pre));
 
-        Assert.Contains("Only the Factory", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("SubagentStop entries", failure.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("does not parse", failure.Message, StringComparison.Ordinal);
         Assert.False(_files.FileExists(path));
+    }
+
+    /// <summary>
+    /// Claude Code fires <c>SubagentStop</c> with no matcher. Squad owns that container in the user's settings file,
+    /// so a splice adds it and a removal takes it away again without touching the user's own hooks.
+    /// </summary>
+    [Fact]
+    public void SpliceFile_ClaudeSubagentStop_LandsUnderHooksAndRemovalRestoresTheUserFile()
+    {
+        string path = Path.Combine(Base, "settings.json");
+        (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = ManagedEntries(SquadHookBlockFormat.Claude);
+        string command = "kyber-weave-arbiter hook --harness claude";
+        JsonObject stop = new()
+        {
+            ["hooks"] = new JsonArray(
+                new JsonObject { ["type"] = "command", ["command"] = command, ["timeout"] = 5 }),
+        };
+        _files.CreateDirectory(Base);
+        _files.WriteAllText(path, UserFileContent(SquadHookBlockFormat.Claude));
+
+        IReadOnlyList<SquadHookOwnedEntry> owned = Hooks.SpliceFile(
+            SquadHookBlockFormat.Claude, path, pre, post, [stop]);
+
+        JsonObject hooks = Assert.IsType<JsonObject>(JsonNode.Parse(_files.ReadAllText(path))!["hooks"]);
+        JsonArray stops = Assert.IsType<JsonArray>(hooks["SubagentStop"]);
+        JsonObject written = Assert.IsType<JsonObject>(Assert.Single(stops));
+        Assert.False(written.ContainsKey("matcher"));
+        Assert.Contains(owned, entry => entry.Location == "/hooks/SubagentStop/0");
+
+        Hooks.RemoveFile(SquadHookBlockFormat.Claude, path);
+
+        JsonObject remaining = Assert.IsType<JsonObject>(JsonNode.Parse(_files.ReadAllText(path))!["hooks"]);
+        Assert.False(remaining.ContainsKey("SubagentStop"));
+        Assert.Contains("\"user-pre\"", _files.ReadAllText(path), StringComparison.Ordinal);
     }
 
     private static (IReadOnlyList<JsonNode> Pre, IReadOnlyList<JsonNode> Post) UserEntries(SquadHookBlockFormat format) =>

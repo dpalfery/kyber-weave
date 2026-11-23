@@ -547,6 +547,59 @@ public sealed class ReviewGatesService(
 
     private string FullPath(string path) => pathResolver.GetFullPath(path, environment.CurrentDirectory);
 
+    /// <summary>
+    ///     Whether two report paths name the same file, so a run that writes both the file <c>--out</c> names and the
+    ///     task's own report writes each one once. A path that cannot be resolved is compared as spelled.
+    /// </summary>
+    /// <param name="left">One report path, or null.</param>
+    /// <param name="right">The other report path.</param>
+    private bool SamePath(string? left, string right)
+    {
+        if (left is null)
+            return false;
+
+        StringComparison comparison = environment.IsFileSystemCaseInsensitive
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        try
+        {
+            return string.Equals(
+                pathResolver.GetFullPath(left, environment.CurrentDirectory),
+                pathResolver.GetFullPath(right, environment.CurrentDirectory),
+                comparison);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return string.Equals(left, right, comparison);
+        }
+    }
+
+    /// <summary>
+    ///     The content of every changed file, read before and after a <c>--fix</c> run to tell whether a fix command
+    ///     changed one. A missing file, and one this process cannot read, is recorded as null.
+    /// </summary>
+    /// <param name="root">The repository root the paths are relative to.</param>
+    /// <param name="paths">The changed files, repository-relative.</param>
+    /// <returns>Each path's content, keyed by the path as given.</returns>
+    private Dictionary<string, string?> Snapshot(string root, IReadOnlyList<string> paths)
+    {
+        Dictionary<string, string?> snapshot = new(StringComparer.Ordinal);
+        foreach (string path in paths)
+        {
+            try
+            {
+                string full = pathResolver.GetFullPath(path, root);
+                snapshot[path] = files.FileExists(full) ? files.ReadAllText(full) : null;
+            }
+            catch (Exception ex) when (FileFailure.Is(ex))
+            {
+                snapshot[path] = null;
+            }
+        }
+
+        return snapshot;
+    }
+
     private static string? BaseRef(string? baseRef) =>
         string.IsNullOrWhiteSpace(baseRef) ? null : baseRef.Trim();
 
@@ -580,13 +633,17 @@ public sealed class ReviewGatesService(
         if (target is not null)
             paths = [.. targets.Files(root, target.Entry, target.Row)];
 
-        // The report goes where the Arbiter reads the evidence; a --fix run never counts, so it writes none by default.
-        string? outPath = request.Out;
-        if (outPath is null && taskSlug is not null && !request.Fix)
-            outPath = Path.Combine(root, request.Red ? TaskGateNextStep.FailingReportPath(taskSlug) : TaskGateNextStep.PassingReportPath(taskSlug));
-
-        if (taskGates.ValidateTask(taskSlug) is { } taskProblem)
+        // The report goes where the Arbiter reads the evidence. A --fix run that changes a task file never counts,
+        // so it writes none by default; one that changes nothing counts, and writes the passing report below.
+        // The task is validated before its report path is built: a punctuation-only id normalises to nothing,
+        // so building the path first would throw instead of refusing the run with the bad --task message.
+        string? taskProblem = taskGates.ValidateTask(taskSlug);
+        if (taskProblem is not null)
             refusals.Add(taskProblem);
+
+        string? outPath = request.Out;
+        if (outPath is null && taskSlug is not null && !request.Fix && taskProblem is null)
+            outPath = Path.Combine(root, request.Red ? TaskGateNextStep.FailingReportPath(taskSlug) : TaskGateNextStep.PassingReportPath(taskSlug));
 
         foreach (string path in paths)
             if (taskGates.ValidatePath(root, path) is { } pathProblem)
@@ -697,8 +754,21 @@ public sealed class ReviewGatesService(
                 ? RedClassifier.BuildSkipReason(brokenBuildSymbols)
                 : null,
         };
+
+        // A --fix run whose fix commands changed no task file is the verification run, so it is judged as one: the
+        // content of each changed file is taken before the gates run and compared after.
+        Dictionary<string, string?> before = request.Fix ? Snapshot(root, changed) : new(StringComparer.Ordinal);
         TaskGateRun run = gateRunner.RunTaskGates(
             plan.Gates, root, request.Fix, request.StopOnFailure && !request.Red, observer);
+        bool fixChangedFiles = request.Fix && Snapshot(root, changed).Any(file => file.Value != before[file.Key]);
+
+        // The counting --fix run writes the report a plain run writes, because the report reader finds the task's
+        // evidence there. An explicit --out names an extra file, not a replacement, so the rule holds either way.
+        string? countingReport = !fixChangedFiles && taskSlug is not null && !request.Red
+            ? Path.Combine(root, TaskGateNextStep.PassingReportPath(taskSlug))
+            : null;
+        if (outPath is null)
+            outPath = countingReport;
 
         GateReport finalReport = run.Report;
         RedOutcome? redOutcome = null;
@@ -726,8 +796,20 @@ public sealed class ReviewGatesService(
         report.AddMetric("gates", finalReport.Gates.Count);
         report.AddMetric("failed", finalReport.Gates.Count(g => !g.Passed && !g.NotApplicable));
 
-        ReviewReportWriter.TryWrite(
-            files, pathResolver, environment, outPath, ReviewJson.Write(finalReport), ReviewGateReporting.ReportWriteFailed, report);
+        // A --fix run whose fixes changed a task file is not the verification run, so its report must not land where a
+        // plain run's report is read as the task's evidence, even when --out names that path.
+        string? evidenceReport = taskSlug is not null && !request.Red
+            ? Path.Combine(root, TaskGateNextStep.PassingReportPath(taskSlug))
+            : null;
+        bool withheldEvidence = fixChangedFiles && evidenceReport is not null && SamePath(outPath, evidenceReport);
+
+        string content = ReviewJson.Write(finalReport);
+        if (!withheldEvidence)
+            ReviewReportWriter.TryWrite(
+                files, pathResolver, environment, outPath, content, ReviewGateReporting.ReportWriteFailed, report);
+        if (countingReport is not null && !SamePath(outPath, countingReport))
+            ReviewReportWriter.TryWrite(
+                files, pathResolver, environment, countingReport, content, ReviewGateReporting.ReportWriteFailed, report);
 
         // The run as it happened, not as --red re-judged it: an accepted compile failure is still a failed build to read.
         IReadOnlyList<string> digest = TestDigest(root, taskSlug, request.Red, plan.Gates, run.Report, outputs);
@@ -740,6 +822,8 @@ public sealed class ReviewGatesService(
                 : targetMissing is not null
                     ? $"task: not found in a plan ({targetMissing}), so the files git reports changed were gated; pass --paths to name them"
                     : $"files: {string.Join(", ", changed)}");
+            if (withheldEvidence)
+                epilogue.Add($"the fix run's report was not written to {evidenceReport} because a plain run must verify");
             epilogue.AddRange(digest);
             if (redOutcome is not null)
             {
@@ -753,7 +837,7 @@ public sealed class ReviewGatesService(
                     .. agentGates.Select(gate => new ReviewTaskGateView(
                         gate.Id, !gate.Run.Any(arg => arg.Contains("{changed}", StringComparison.Ordinal) || arg.Contains("{tests}", StringComparison.Ordinal)))),
                 ];
-                epilogue.AddRange(TaskGateNextStep.AfterRun(finalReport, views, request.Fix, request.Agent!, changed, outPath));
+                epilogue.AddRange(TaskGateNextStep.AfterRun(finalReport, views, fixChangedFiles, request.Agent!, changed, outPath));
             }
         }
 

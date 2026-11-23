@@ -612,7 +612,16 @@ function serveStaticAsset(res: ServerResponse, distDir: string, pathname: string
     return
   }
 
-  const contents = readFileSync(resolved.filePath)
+  // Single syscall: read directly and map a missing path (or a directory,
+  // which readFileSync rejects) to 404.
+  let contents: Buffer
+  try {
+    contents = readFileSync(resolved.filePath)
+  } catch {
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+    res.end('Not found')
+    return
+  }
   res.writeHead(200, {
     'content-type': resolved.contentType,
     'cache-control': 'no-store',
@@ -765,7 +774,10 @@ export async function startTrayBridge(options: {
       reportFetchedAt = new Date().toISOString()
       lastError = null
     } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error)
+      // viewState.error feeds the snapshot served over HTTP, so it carries a static
+      // reason while the caught text stays in the bridge log for debugging.
+      console.error('tray report refresh failed:', error instanceof Error ? error.message : String(error))
+      lastError = 'report refresh failed'
       jobs = null
       sharedSettings = null
       coverage = null
@@ -973,7 +985,7 @@ export async function startTrayBridge(options: {
           refreshParam !== 'true' &&
           refreshParam !== 'false'
         ) {
-          sendJson(res, 400, { ok: false, error: { kind: 'runtime', message: `Invalid refresh query value: ${refreshParam}` } })
+          sendJson(res, 400, { ok: false, error: { kind: 'runtime', message: 'Invalid refresh query value' } })
           return
         }
         if (refreshParam === '1' || refreshParam === 'true') {
@@ -1000,7 +1012,7 @@ export async function startTrayBridge(options: {
 
         const cmd = parsed['cmd']
         if (!TRAY_COMMANDS.has(cmd)) {
-          sendJson(res, 400, { ok: false, error: { kind: 'runtime', message: `Unknown tray command: ${cmd}` } })
+          sendJson(res, 400, { ok: false, error: { kind: 'runtime', message: 'Unknown tray command' } })
           return
         }
 
@@ -1015,8 +1027,13 @@ export async function startTrayBridge(options: {
           const outcome = await handleInvokeCommand(cmd, args)
           invocations.push({ cmd, args, ok: true, at: new Date().toISOString() })
           sendJson(res, 200, { ok: true, result: outcome.result, emittedEvents: outcome.emittedEvents })
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
+        } catch {
+          // Both the response and the log line stay static: the caught error's
+          // text can embed request-controlled values (the unknown-command error
+          // names the command), so it must reach neither. The failing command
+          // is already recorded structurally in invocations below.
+          console.error('tray invoke failed')
+          const message = 'tray command failed'
           invocations.push({ cmd, args, ok: false, error: message, at: new Date().toISOString() })
           sendJson(res, 400, { ok: false, error: { kind: 'runtime', message } })
         }
@@ -1049,9 +1066,9 @@ export async function startTrayBridge(options: {
             ...(bodyText !== undefined ? { body: bodyText } : {}),
             signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
           })
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          sendJson(res, 502, { error: `Upstream request failed: ${message}` })
+        } catch {
+          console.error('tray proxy upstream request failed')
+          sendJson(res, 502, { error: 'Upstream Gateway Error' })
           return
         }
         let upstreamBody: Buffer
@@ -1059,11 +1076,11 @@ export async function startTrayBridge(options: {
           upstreamBody = await readBoundedResponseBuffer(upstreamRes, maxProxyBytes)
         } catch (error) {
           if (error instanceof UpstreamResponseTooLargeError) {
-            sendJson(res, 502, { error: error.message })
+            sendJson(res, 502, { error: 'Upstream response exceeded size limit' })
             return
           }
-          const message = error instanceof Error ? error.message : String(error)
-          sendJson(res, 502, { error: `Upstream response failed: ${message}` })
+          console.error('tray proxy upstream response failed')
+          sendJson(res, 502, { error: 'Upstream Gateway Error' })
           return
         }
         res.writeHead(upstreamRes.status, {
@@ -1083,11 +1100,13 @@ export async function startTrayBridge(options: {
       res.end('Method not allowed')
     } catch (error) {
       if (error instanceof RequestBodyTooLargeError) {
-        sendJson(res, 413, { ok: false, error: { kind: 'runtime', message: error.message } })
+        sendJson(res, 413, { ok: false, error: { kind: 'runtime', message: 'Request body too large' } })
         return
       }
-      const message = error instanceof Error ? error.message : String(error)
-      sendJson(res, 500, { ok: false, error: { kind: 'runtime', message } })
+      // The response carries a static reason, never the caught error's text; the
+      // detail stays in the bridge log for debugging.
+      console.error('tray bridge request failed:', error instanceof Error ? error.message : String(error))
+      sendJson(res, 500, { ok: false, error: { kind: 'runtime', message: 'Internal Server Error' } })
     }
   })
 

@@ -13,6 +13,14 @@ public interface IReviewCycleStore
     /// <param name="priorFolder">The newest cycle folder to include.</param>
     IReadOnlyList<ReviewCycleRecord> ReadThrough(string priorFolder);
 
+    /// <summary>
+    /// Reads one cycle folder, so a caller can read the cycles one at a time and keep the ones that can be read when
+    /// another cannot.
+    /// </summary>
+    /// <param name="cycleFolder">The <c>cycle-&lt;n&gt;</c> folder.</param>
+    /// <returns>The cycle's record, or null when the folder is not a numbered cycle folder.</returns>
+    ReviewCycleRecord? ReadCycle(string cycleFolder);
+
     /// <summary>Records which change a cycle reviewed in <c>cycle.json</c>, replacing an earlier record.</summary>
     /// <param name="cycleFolder">The <c>cycle-&lt;n&gt;</c> folder; created when missing.</param>
     /// <param name="identity">The change being reviewed.</param>

@@ -118,7 +118,7 @@ public sealed class ReviewSeatsService(
         {
             evidence = evidenceWriter.Write(
                 folder, root, baseRef, null, gatesPath, plan.Prior?.Head, config.Review.Coverage);
-            WritePackets(folder, seats, new CouncilSeatContext(
+            CouncilSeatContext context = new(
                 tree,
                 evidence,
                 indexReady,
@@ -128,7 +128,12 @@ public sealed class ReviewSeatsService(
                 severityOverrides.GuidancePath(root, config.ConfigReg),
                 Path.Combine(folder, "duplicates.json"),
                 severityOverrides.Load(root, config.ConfigReg),
-                changed));
+                changed);
+            IReadOnlyList<string> plans = ChangePlanLookup.Find(
+                changed,
+                ChangePlanLookup.PlanFolder(config),
+                relative => ReadPlanText(tree, relative));
+            WritePackets(folder, seats, ChangePlanLookup.WithPlan(context, plans));
             notSeatedStore.Replace(folder, ReviewLensCatalogue.Names, seats.NotSeated);
         }
         catch (Exception ex) when (FileFailure.Is(ex))
@@ -287,6 +292,22 @@ public sealed class ReviewSeatsService(
             return [.. git.ResolveSinceMergeBase(root, baseRef).Select(change => change.Path)];
         }
         catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The changed file's text through the file seam, or null when it cannot be read.</summary>
+    /// <param name="tree">The work tree the changed paths are relative to.</param>
+    /// <param name="relative">The changed path, repository-relative.</param>
+    private string? ReadPlanText(string tree, string relative)
+    {
+        try
+        {
+            string path = Path.Combine(tree, relative.Replace('/', Path.DirectorySeparatorChar));
+            return files.FileExists(path) ? files.ReadAllText(path) : null;
+        }
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
         {
             return null;
         }

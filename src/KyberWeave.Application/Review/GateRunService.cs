@@ -353,7 +353,8 @@ public sealed class GateRunService(
     {
         string gateDirectory = ResolveWorkingDirectory(workingDirectory, gate.WorkingDirectory);
         return RunArgv(
-            gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput, budget, stop: stop);
+            gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput, budget,
+            nameFailingTests: true, stop: stop);
     }
 
     /// <summary>The run deadline and the time left on it when a gate starts.</summary>
@@ -385,6 +386,7 @@ public sealed class GateRunService(
         bool failOnOutput,
         RunBudget? budget = null,
         Action<string, string>? captureOutput = null,
+        bool nameFailingTests = false,
         CancellationToken stop = default)
     {
         if (!fileSystem.DirectoryExists(workingDirectory))
@@ -416,7 +418,7 @@ public sealed class GateRunService(
                 id,
                 blocking,
                 printed ? 1 : process.ExitCode,
-                printed ? SummarizeOutput(process.StandardOutput) : Summarize(process),
+                printed ? SummarizeOutput(process.StandardOutput) : Summarize(process, nameFailingTests),
                 (long)clock.GetElapsedTime(start).TotalMilliseconds,
                 Outcome: GateOutcome.Completed);
         }
@@ -464,10 +466,15 @@ public sealed class GateRunService(
         return "exited 0 but printed output (fail-on-output): " + string.Join(" | ", lines.Take(3));
     }
 
-    private static string Summarize(ProcessResult process)
+    private static string Summarize(ProcessResult process, bool nameFailingTests)
     {
         if (process.ExitCode == 0)
             return "passed";
+
+        // A failing test run names its failing tests and their errors in its own output, so the summary reports them and
+        // not the last lines: a test host's logging can fill the tail while the runner's summary sits elsewhere in it.
+        if (nameFailingTests && TaskTestDigest.FailingSummary(process.StandardOutput + "\n" + process.StandardError) is { } digest)
+            return digest;
 
         // The tail, not the head: build and test runners put the summary at the end, and a
         // truncated head is almost always the banner nobody needs.

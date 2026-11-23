@@ -293,6 +293,11 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
         FactoryBackgroundDispatch? dispatch = FactoryTranscript.FindBackgroundDispatch(_transcripts, transcriptPath, description);
         if (dispatch is null)
         {
+            // The description names no dispatch on its own; the transcript's Task call names the agent it ran.
+            RecoverLostReturn(
+                payload,
+                FactoryTranscript.DispatchTargets(_transcripts, transcriptPath, description),
+                context);
             return string.Empty;
         }
 
@@ -303,7 +308,26 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
         string? result = GetString(payload, "task_result");
         string output = string.IsNullOrWhiteSpace(result) ? GetString(payload, "task_error") ?? string.Empty : result;
         _ = DecidePost(payload, caller, dispatch.Target, prompt, output, config, context);
+
+        // A return the rules could not pair leaves the dispatch looking in flight; the stop event itself is the
+        // evidence that the agent's work is over, so close the one dispatch it left open.
+        RecoverLostReturn(payload, [dispatch.Target], context);
         return string.Empty;
+    }
+
+    /// <summary>Closes the one dispatch the stopped agent left open when its return hook never reached the ledger.</summary>
+    private void RecoverLostReturn(JsonElement payload, IReadOnlyList<string> agents, HookContext context)
+    {
+        if (_engine is not ILostReturnRecovery recovery)
+        {
+            return;
+        }
+
+        recovery.RecoverLostReturn(
+            Token,
+            GetString(payload, "session_id"),
+            agents,
+            context);
     }
 
     private HookOutcome DecidePre(
@@ -403,16 +427,7 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
         return updated;
     }
 
-    private static string RenderPreDeny(string reason) =>
-        new JsonObject
-        {
-            ["hookSpecificOutput"] = new JsonObject
-            {
-                ["hookEventName"] = "PreToolUse",
-                ["permissionDecision"] = "deny",
-                ["permissionDecisionReason"] = reason,
-            },
-        }.ToJsonString();
+    private static string RenderPreDeny(string reason) => HookDecisionDocuments.PreToolUsePermissionDeny(reason);
 
     private static string RenderPreAllowStrip(JsonElement toolInput, string prompt) =>
         RenderPreAllow(JsonNode.Parse(toolInput.GetRawText()) as JsonObject

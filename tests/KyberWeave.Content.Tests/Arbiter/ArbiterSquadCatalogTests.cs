@@ -26,7 +26,7 @@ public sealed class ArbiterSquadCatalogTests
         string[] expected =
         [
             "architect", "bug-crusher", "bug-crusher-investigator", "code-reviewer", "conductor",
-            "dev-easy", "dev-hard", "dev-medium", "devops", "docs-dev", "platform-researcher",
+            "dev-easy", "dev-hard", "dev-medium", "devops", "docs-dev", "plan-reviewer", "platform-researcher",
             "product-owner", "research-agent", "review-lens", "review-triage",
         ];
 

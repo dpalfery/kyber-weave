@@ -17,12 +17,18 @@ public enum StandardsFolderChangeKind
     Add,
 
     /// <summary>The standard's own sections are placed under the six required headings.</summary>
-    Reshape
+    Reshape,
+
+    /// <summary>
+    /// An existing rules or skills file gains the folder's <c>doc-type</c> and scope line,
+    /// keeping every other line and the whole body.
+    /// </summary>
+    Frontmatter
 }
 
 /// <summary>One planned or written change inside a standards folder.</summary>
-/// <param name="Kind">Rename or add.</param>
-/// <param name="From">The existing path for a rename; empty for an add.</param>
+/// <param name="Kind">Rename, add, reshape or frontmatter repair.</param>
+/// <param name="From">The existing path for a rename or repair; empty for an add.</param>
 /// <param name="To">The path the change produces.</param>
 public sealed record StandardsFolderChange(StandardsFolderChangeKind Kind, string From, string To);
 
@@ -57,7 +63,9 @@ public sealed record StandardsFolderMigrationResult(
 /// with every authored section kept beneath the heading it fits, and each move is reported.
 /// A missing file is written as a stub whose frontmatter states which scope it belongs to and
 /// whose frontmatter's owner is copied from the folder's standard, so the corpus stays within
-/// its catalog vocabulary. Running it twice changes nothing.
+/// its catalog vocabulary. A rules or skills file that already exists but does not declare the
+/// folder's <c>doc-type</c> and scope has those two frontmatter lines repaired in place, and
+/// every other line and the whole body are kept byte for byte. Running it twice changes nothing.
 ///
 /// The rename also moves what each <c>&lt;technology&gt;-coding-standard</c> registry property
 /// names, so the same run re-renders the generated block in the root <c>AGENTS.md</c>. Without
@@ -179,15 +187,28 @@ public sealed partial class StandardsFolderMigration
 
                 string? owner = OwnerOf(standardText);
 
-                foreach ((string path, string _) in new[]
+                Dictionary<string, string> repairs = new(StringComparer.Ordinal);
+                foreach ((string path, string docType) in new[]
                          {
-                             (DocsLayout.RulesFile(docsRoot, scope), "rules"),
-                             (DocsLayout.SkillsFile(docsRoot, scope), "skills")
+                             (DocsLayout.RulesFile(docsRoot, scope), "rule"),
+                             (DocsLayout.SkillsFile(docsRoot, scope), "skill")
                          })
                 {
-                    if (_files.FileExists(Absolute(path))) continue;
-                    planned.Add(new StandardsFolderChange(
-                        StandardsFolderChangeKind.Add, string.Empty, path));
+                    if (!_files.FileExists(Absolute(path)))
+                    {
+                        planned.Add(new StandardsFolderChange(
+                            StandardsFolderChangeKind.Add, string.Empty, path));
+                        continue;
+                    }
+
+                    // A file the folder already holds is still repairable: without the folder's
+                    // doc-type and scope line it exists but never reaches a task prompt.
+                    if (RepairFrontmatter(path, scope, docType) is { } repaired)
+                    {
+                        repairs[path] = repaired;
+                        planned.Add(new StandardsFolderChange(
+                            StandardsFolderChangeKind.Frontmatter, path, path));
+                    }
                 }
 
                 string arbiter = DocsLayout.ArbiterRulesFile(docsRoot, scope);
@@ -209,7 +230,7 @@ public sealed partial class StandardsFolderMigration
                         new StandardSectionMove(standard, move.Heading, move.Under)));
                 }
 
-                work.Add(new FolderWork(scope, owner, reshapedText, planned, plannedMoves));
+                work.Add(new FolderWork(scope, owner, reshapedText, repairs, planned, plannedMoves));
             }
         }
 
@@ -232,7 +253,7 @@ public sealed partial class StandardsFolderMigration
                 // tell the operator about a write that never happened.
                 List<StandardsFolderChange> applied = dryRun
                     ? [.. item.Planned]
-                    : Apply(item.Planned, item.Scope, item.Owner, item.ReshapedText, undo);
+                    : Apply(item.Planned, item.Scope, item.Owner, item.ReshapedText, undo, item.Repairs);
 
                 changes.AddRange(applied);
                 if (applied.Any(change => change.Kind == StandardsFolderChangeKind.Reshape))
@@ -295,12 +316,14 @@ public sealed partial class StandardsFolderMigration
     /// <param name="Scope">The technology or role scope.</param>
     /// <param name="Owner">The owner the stubs copy, or null.</param>
     /// <param name="ReshapedText">The reshaped standard, or null when it needs no reshape.</param>
+    /// <param name="Repairs">Each rules or skills file's repaired frontmatter, keyed by its path.</param>
     /// <param name="Planned">The changes the folder needs.</param>
     /// <param name="Moves">The sections a reshape places under required headings.</param>
     private sealed record FolderWork(
         string Scope,
         string? Owner,
         string? ReshapedText,
+        IReadOnlyDictionary<string, string> Repairs,
         List<StandardsFolderChange> Planned,
         List<StandardSectionMove> Moves);
 
@@ -325,6 +348,9 @@ public sealed partial class StandardsFolderMigration
                 case StandardsFolderChangeKind.Reshape when reshapedText is not null:
                     RequireWritable(change.To);
                     break;
+                case StandardsFolderChangeKind.Frontmatter:
+                    RequireWritable(change.To);
+                    break;
             }
         }
     }
@@ -339,13 +365,15 @@ public sealed partial class StandardsFolderMigration
     /// <param name="owner">The owner the stubs copy, or null.</param>
     /// <param name="reshapedText">The reshaped standard, or null when the plan has no reshape.</param>
     /// <param name="undo">Receives each write's inverse, for the caller to run if a later folder fails.</param>
+    /// <param name="repairs">Each rules or skills file's repaired frontmatter, keyed by its path.</param>
     /// <returns>The changes actually made.</returns>
     internal List<StandardsFolderChange> Apply(
         IReadOnlyList<StandardsFolderChange> planned,
         string scope,
         string? owner,
         string? reshapedText,
-        List<Action>? undo = null)
+        List<Action>? undo = null,
+        IReadOnlyDictionary<string, string>? repairs = null)
     {
         List<StandardsFolderChange> applied = [];
         HashSet<string> skippedRenames = new(StringComparer.Ordinal);
@@ -403,6 +431,22 @@ public sealed partial class StandardsFolderMigration
                         VerifyStillWritable(undoPath);
                     });
                     VerifyStillWritable(reshapeTarget);
+                    applied.Add(change);
+                    break;
+
+                case StandardsFolderChangeKind.Frontmatter:
+                    if (repairs is null || !repairs.TryGetValue(change.To, out string? repairedText)) break;
+
+                    string repairTarget = RequireWritable(change.To);
+                    string repairBefore = _files.ReadAllText(repairTarget);
+                    _files.WriteAllTextAtomic(repairTarget, repairedText);
+                    undo?.Add(() =>
+                    {
+                        string undoPath = RequireWritable(change.To);
+                        _files.WriteAllTextAtomic(undoPath, repairBefore);
+                        VerifyStillWritable(undoPath);
+                    });
+                    VerifyStillWritable(repairTarget);
                     applied.Add(change);
                     break;
             }
@@ -580,9 +624,7 @@ public sealed partial class StandardsFolderMigration
             "rules" => "rule",
             _ => "skill"
         };
-        string scopeKey = _ontology.Roles.Contains(scope, StringComparer.Ordinal)
-            ? "role"
-            : "technology";
+        string scopeKey = DocsLayout.ScopeKey(_ontology.Roles, scope);
         string title = kind == "standard" ? $"{scope} standard" : $"{scope} {kind}";
 
         StringBuilder builder = new();
@@ -608,6 +650,84 @@ public sealed partial class StandardsFolderMigration
         }
 
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// The file's text with its frontmatter's <c>doc-type</c> and scope line set to what the
+    /// folder requires, or null when both already say it.
+    /// </summary>
+    /// <remarks>
+    /// Only those two lines change. A missing line is inserted at the end of the frontmatter, and
+    /// every other line — the frontmatter's and the whole body's — is kept byte for byte, including
+    /// the file's own line endings. A file with no closed frontmatter block is left alone: there is
+    /// no block this method could safely edit, and the validator's frontmatter finding owns it.
+    /// </remarks>
+    /// <param name="relativePath">The file's repository-relative path, used only to read it.</param>
+    /// <param name="scope">The technology or role whose folder holds it.</param>
+    /// <param name="docType">The file's required <c>doc-type</c>.</param>
+    private string? RepairFrontmatter(string relativePath, string scope, string docType)
+    {
+        string? text = ReadOrNull(relativePath);
+        if (string.IsNullOrEmpty(text)) return null;
+
+        string[] lines = text.Split('\n');
+        if (lines.Length < 2 || lines[0].TrimEnd('\r') != "---") return null;
+
+        int close = -1;
+        for (int index = 1; index < lines.Length; index++)
+        {
+            if (lines[index].TrimEnd('\r') == "---")
+            {
+                close = index;
+                break;
+            }
+        }
+
+        if (close < 0) return null;
+
+        string scopeKey = DocsLayout.ScopeKey(_ontology.Roles, scope);
+        string carriageReturn = text.Contains("\r\n", StringComparison.Ordinal) ? "\r" : string.Empty;
+        string expectedDocType = $"doc-type: {docType}";
+        string expectedScope = $"{scopeKey}: {scope}";
+
+        int docTypeLine = -1;
+        int scopeLine = -1;
+        for (int index = 1; index < close; index++)
+        {
+            string bare = lines[index].TrimEnd('\r');
+            if (bare.StartsWith("doc-type:", StringComparison.Ordinal)) docTypeLine = index;
+            else if (bare.StartsWith(scopeKey + ":", StringComparison.Ordinal)) scopeLine = index;
+        }
+
+        bool changed = false;
+        List<string> missing = [];
+        if (docTypeLine < 0)
+        {
+            missing.Add(expectedDocType + carriageReturn);
+            changed = true;
+        }
+        else if (!string.Equals(lines[docTypeLine].TrimEnd(), expectedDocType, StringComparison.Ordinal))
+        {
+            lines[docTypeLine] = expectedDocType + carriageReturn;
+            changed = true;
+        }
+
+        if (scopeLine < 0)
+        {
+            missing.Add(expectedScope + carriageReturn);
+            changed = true;
+        }
+        else if (!string.Equals(lines[scopeLine].TrimEnd(), expectedScope, StringComparison.Ordinal))
+        {
+            lines[scopeLine] = expectedScope + carriageReturn;
+            changed = true;
+        }
+
+        if (!changed) return null;
+        if (missing.Count == 0) return string.Join('\n', lines);
+
+        List<string> rebuilt = [.. lines[..close], .. missing, .. lines[close..]];
+        return string.Join('\n', rebuilt);
     }
 
     private static string ArbiterRulesStub(string scope) =>

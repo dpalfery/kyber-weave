@@ -1355,7 +1355,7 @@ internal sealed class PiOverlayOnlyFixture
         string mutated = original
             .Replace("capability-profile: review-seat", "capability-profile: pi-overlay-only", StringComparison.Ordinal)
             .Replace(
-                "copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, \"codegraph/*\", \"kw-docs/*\", \"context7/resolve-library-id\", \"context7/query-docs\", search, web]",
+                "copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, \"codegraph/*\", \"kw-docs/*\", \"context7/resolve-library-id\", \"context7/query-docs\", search, web, skill]",
                 "copilot-tools: [vscode/toolSearch, vscode/askQuestions, todo]\n" +
                 "pi-extensions: [pi-mcp-adapter]\n" +
                 "pi-tools: [ext:pi-mcp-adapter/mcp, ext:pi-mcp-adapter/mcp__context7__resolve_library_id]",
@@ -1419,7 +1419,7 @@ internal sealed class PiFileReadDeniedFixture
         string mutated = original
             .Replace("capability-profile: review-seat", $"capability-profile: {DeniedProfileName}", StringComparison.Ordinal)
             .Replace(
-                "copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, \"codegraph/*\", \"kw-docs/*\", \"context7/resolve-library-id\", \"context7/query-docs\", search, web]",
+                "copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, \"codegraph/*\", \"kw-docs/*\", \"context7/resolve-library-id\", \"context7/query-docs\", search, web, skill]",
                 "copilot-tools: [vscode/toolSearch, vscode/askQuestions, todo]",
                 StringComparison.Ordinal);
 

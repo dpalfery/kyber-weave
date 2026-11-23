@@ -713,19 +713,25 @@ public sealed class SquadHarnessRenderContext
     /// <param name="matcher">The tool-name matcher for the <c>PreToolUse</c> and <c>PostToolUse</c> groups.</param>
     /// <param name="includeSubagentStop">
     /// Adds a <c>SubagentStop</c> entry: a matcher-less group with the same command and timeout.
-    /// Only Factory asks for it, because only Factory fires a hook when a background subagent
-    /// stops.
+    /// Factory asks for it because it fires a hook when a background subagent stops; Claude
+    /// renders its own global block with the same entry, because it fires the event too.
     /// </param>
     /// <param name="installWhenDisabled">
     /// Installs the block even with the Arbiter off, for the harness whose adapter also inserts a dispatch prompt.
     /// A harness whose adapter cannot rewrite the dispatch keeps its disabled render unchanged and takes the prompt
     /// file instead.
     /// </param>
+    /// <param name="includeWorkerGuardHooks">
+    /// Adds the worker guard's own groups: a <c>PreToolUse</c> group matching every tool, a <c>SessionStart</c> and
+    /// <c>SessionEnd</c> with no matcher, and a second <c>PostToolUse</c> group on the dispatch matcher. Factory needs
+    /// the session events because its tool-call payload names no calling sub-agent.
+    /// </param>
     public void AddArbiterMatcherGroupBlock(
         SquadHookBlockFormat format,
         string matcher,
         bool includeSubagentStop = false,
-        bool installWhenDisabled = false)
+        bool installWhenDisabled = false,
+        bool includeWorkerGuardHooks = false)
     {
         if (EnabledArbiter is null && !(installWhenDisabled && DispatchHooks))
         {
@@ -746,6 +752,23 @@ public sealed class SquadHarnessRenderContext
             entries.Add(new SquadRenderedBlockEntry(
                 "SubagentStop",
                 MatcherGroup(matcher: null, commandLine, timeoutSeconds)));
+        }
+
+        if (includeWorkerGuardHooks)
+        {
+            string workerGuard = ArbiterHookWiring.WorkerGuardCommandLine(Token);
+            entries.Add(new SquadRenderedBlockEntry(
+                "PreToolUse",
+                MatcherGroup(matcher: "*", workerGuard, timeoutSeconds)));
+            entries.Add(new SquadRenderedBlockEntry(
+                "PostToolUse",
+                MatcherGroup(matcher, workerGuard, timeoutSeconds)));
+            entries.Add(new SquadRenderedBlockEntry(
+                "SessionStart",
+                MatcherGroup(matcher: null, workerGuard, timeoutSeconds)));
+            entries.Add(new SquadRenderedBlockEntry(
+                "SessionEnd",
+                MatcherGroup(matcher: null, workerGuard, timeoutSeconds)));
         }
 
         Blocks.Add(new SquadRenderedBlock(Token, relativePath, format, entries));

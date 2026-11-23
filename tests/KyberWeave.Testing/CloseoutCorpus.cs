@@ -103,7 +103,9 @@ internal static class CloseoutCorpus
 
     /// <summary>
     /// An archived plan. Defaults are the fully passing shape; each condition test overrides
-    /// exactly one parameter. Empty lines for the impact keys mean the keys are absent.
+    /// exactly one parameter. Empty lines for the impact keys mean the keys are absent. Default
+    /// section links are written for the archive folder, one level deeper than the plans folder;
+    /// pass <c>linkPrefix: ".."</c> for a plan still sitting in the plans folder.
     /// </summary>
     public static string PlanDocument(
         string id = "plans/2026-10-20-widget",
@@ -111,7 +113,8 @@ internal static class CloseoutCorpus
         string bodyStatus = "Complete",
         string impactLine = "documentation-impact: extends-component",
         string componentsLine = "impact-components:\n  - MotorcycleRAG API",
-        string? sections = null)
+        string? sections = null,
+        string linkPrefix = "../..")
     {
         return $"""
                 ---
@@ -130,7 +133,7 @@ internal static class CloseoutCorpus
 
                 **Status:** {bodyStatus}
 
-                {sections ?? DefaultSections()}
+                {sections ?? DefaultSections(linkPrefix)}
                 """;
     }
 
@@ -140,10 +143,10 @@ internal static class CloseoutCorpus
         return PlanDocument("plans/2026-10-21-control", "draft", "Draft", string.Empty, string.Empty, string.Empty);
     }
 
-    private static string DefaultSections()
+    private static string DefaultSections(string linkPrefix)
     {
         return DecisionsSection("D1")
-               + CloseoutMappingSection(("D1, H1", "[Widget architecture](../../reference/widget.md)"))
+               + CloseoutMappingSection(("D1, H1", $"[Widget architecture]({linkPrefix}/reference/widget.md)"))
                + DesignHarvestSection("H1");
     }
 }

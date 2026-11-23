@@ -8,13 +8,15 @@
     "name",
     "description",
     "invocation",
-    "model-profile",
     "capability-profile",
     "copilot-tools",
     "delegates-to",
     "fallback",
     "aliases"
   ],
+  "$comment": "model-profile is required for a subagent. A primary agent may leave it out to run on the model the user picked for the session.",
+  "if": { "properties": { "invocation": { "const": "subagent" } } },
+  "then": { "required": ["model-profile"] },
   "properties": {
     "schema": { "const": "kyber-squad.agent/v1" },
     "name": { "type": "string", "minLength": 1 },
@@ -58,7 +60,8 @@
           "edit/createFile",
           "edit/editFiles",
           "edit/rename",
-          "vscodeGeneral/rename"
+          "vscodeGeneral/rename",
+          "skill"
         ]
       }
     },

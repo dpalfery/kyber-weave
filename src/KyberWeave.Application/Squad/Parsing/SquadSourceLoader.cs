@@ -642,9 +642,10 @@ public sealed class SquadSourceLoader(IFileSystem files, IPathResolver paths, IP
     /// <summary>
     /// The character set a qualified <c>mcp__server__tool</c> name survives. A harness that
     /// sanitizes other characters would rewrite the name, and an allow-list that matches by
-    /// exact name would then never match what it rewrote.
+    /// exact name would then never match what it rewrote. Shared with the renderers, which
+    /// validate the squad's own <c>mcp.json</c> server names against the same set.
     /// </summary>
-    private static bool IsPortableMcpNamePart(string value)
+    internal static bool IsPortableMcpNamePart(string value)
     {
         return !string.IsNullOrEmpty(value) &&
                value.All(character =>
