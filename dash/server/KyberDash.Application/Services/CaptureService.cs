@@ -133,9 +133,9 @@ public class CaptureService : ICaptureService
     /// <param name="home">Home directory the probe is rooted at.</param>
     /// <returns>Absolute path of the VS Code user settings file.</returns>
     /// <remarks>
-    /// VS Code keeps user settings under <c>Library/Application Support</c> on macOS and under
-    /// <c>.config</c> elsewhere, so the probe and the test proving it ask this one rule rather
-    /// than each hard-coding a layout and disagreeing on macOS.
+    /// VS Code keeps user settings under <c>Library/Application Support</c> on macOS, the roaming
+    /// AppData profile on Windows, and <c>.config</c> on Linux, so the probe and the test proving
+    /// it ask this one rule rather than each hard-coding a layout and disagreeing on macOS.
     /// </remarks>
     public static string CopilotSettingsFile(string home)
     {
