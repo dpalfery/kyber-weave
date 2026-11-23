@@ -201,10 +201,10 @@ public class KyberBridgeEngine
             {
                 try
                 {
-                    SessionAggregateView? aggregate = reader.GetSessionAggregate(row.SessionId, lookup);
-                    if (aggregate is not null)
+                    SessionSummaryFigure? summary = reader.SessionSummaryFigures(row.SessionId, lookup);
+                    if (summary is not null)
                     {
-                        figuresBySession[row.SessionId] = ToSessionListFigure(aggregate, reader.GetSession(row.SessionId));
+                        figuresBySession[row.SessionId] = ToSessionListFigure(summary, reader.GetSession(row.SessionId));
                     }
                 }
                 catch (Exception ex)
@@ -1614,26 +1614,27 @@ public class KyberBridgeEngine
     }
 
     /// <summary>
-    /// Projects one broad <see cref="SessionAggregateView"/> onto the sessions-list read model,
-    /// so the degraded per-session path answers the same figures the batched read carries.
+    /// Projects one session's content-free summary figures onto the sessions-list read model, so
+    /// the degraded per-session path answers the same figures the batched read carries without
+    /// reading a content column.
     /// </summary>
-    /// <param name="aggregate">Broad aggregate of one session.</param>
+    /// <param name="summary">Content-free figures of one session.</param>
     /// <param name="session">Session row carrying workspace metadata.</param>
-    private static SessionListFigure ToSessionListFigure(SessionAggregateView aggregate, CollectedSession? session) =>
+    private static SessionListFigure ToSessionListFigure(SessionSummaryFigure summary, CollectedSession? session) =>
         new(
-            SessionKey: aggregate.SessionKey,
-            HarnessId: aggregate.HarnessId,
+            SessionKey: summary.SessionKey,
+            HarnessId: summary.HarnessId,
             Repo: session?.Workspace?.Repository,
             Branch: session?.Workspace?.Branch,
-            TurnCount: aggregate.TurnCount,
-            RequestCount: aggregate.RequestCount,
-            TotalInput: aggregate.TotalInput,
-            TotalOutput: aggregate.TotalOutput,
-            ReportedCost: aggregate.ReportedCost,
-            PublishedCost: aggregate.PublishedCost,
-            CostBasisMismatch: aggregate.CostBasisMismatch,
-            Models: aggregate.Models,
-            ProblemsCount: aggregate.Problems.Count);
+            TurnCount: summary.TurnCount,
+            RequestCount: summary.RequestCount,
+            TotalInput: summary.TotalInput,
+            TotalOutput: summary.TotalOutput,
+            ReportedCost: summary.ReportedCost,
+            PublishedCost: summary.PublishedCost,
+            CostBasisMismatch: summary.CostBasisMismatch,
+            Models: summary.Models,
+            ProblemsCount: summary.Problems.Count);
 
     /// <summary>Reads a session's timeline span tree, isolating any fault to that session.</summary>
     /// <param name="sessionId">Canonical session identifier.</param>
@@ -1691,9 +1692,6 @@ public class KyberBridgeEngine
 
     private static string? NormalizeHarnessFilter(string? harness) =>
         string.IsNullOrWhiteSpace(harness) ? null : CanonPricing.NormalizeHarnessName(harness.Trim());
-
-    private static string ResolveHarness(SessionAggregateView? aggregate, CollectedSession? session) =>
-        aggregate?.HarnessId ?? session?.HarnessId ?? string.Empty;
 
     private static string? ResolveContextLimitSource(StoredSessionProjection projection) =>
         projection.Context?.ContextLimitSource ?? projection.ContextUnmeasurableReason;
@@ -2357,7 +2355,10 @@ public class KyberBridgeEngine
             IReadOnlyList<ReadTimeTurnSummary> sessionTurns;
             try
             {
-                sessionTurns = reader.SessionTurnSummaries(exec.SessionId, lookup);
+                // The run page lists every turn of the run, so it pays one content-free detail
+                // read per session rather than the broad per-session record read that read model
+                // exists to replace.
+                sessionTurns = reader.SessionDetailFigures(exec.SessionId, lookup)?.Turns ?? [];
             }
             catch (Exception ex)
             {

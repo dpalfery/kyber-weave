@@ -305,11 +305,14 @@ public class CanonRollupsEngine
 
     /// <summary>Typed per-session inputs for harness metric aggregation.</summary>
     /// <param name="Projection">Projected session summary, when the session projector ran.</param>
-    /// <param name="Aggregate">Read-time session aggregate, when the session has turns.</param>
-    private sealed record SessionDatum(StoredSessionProjection? Projection, SessionAggregateView? Aggregate);
+    /// <param name="Figures">
+    /// Content-free session figures. The run scorecard and the run comparison price totals, cache
+    /// reads, and tool names only, so the read answers them without materializing a conversation.
+    /// </param>
+    private sealed record SessionDatum(StoredSessionProjection? Projection, SessionSummaryFigure? Figures);
 
     private SessionDatum ReadSessionDatum(string sessionKey) =>
-        new(projections!.GetSessionProjection(sessionKey), reader!.GetSessionAggregate(sessionKey));
+        new(projections!.GetSessionProjection(sessionKey), reader!.SessionSummaryFigures(sessionKey));
 
     /// <summary>
     /// Aggregates measurable harness metrics from typed session projections and read-time
@@ -372,13 +375,13 @@ public class CanonRollupsEngine
                 unknownWindowSessions++;
             }
 
-            if (datum.Aggregate is not SessionAggregateView aggregate)
+            if (datum.Figures is not SessionSummaryFigure figures)
             {
                 continue;
             }
 
-            long input = aggregate.TotalInput ?? 0;
-            long cacheRead = aggregate.TotalCacheRead ?? 0;
+            long input = figures.TotalInput ?? 0;
+            long cacheRead = figures.TotalCacheRead ?? 0;
             totalInput += input;
             totalCacheRead += cacheRead;
 
@@ -387,9 +390,9 @@ public class CanonRollupsEngine
                 hasCacheRead = true;
             }
 
-            HashSet<string> offered = new(aggregate.ToolsOffered, StringComparer.Ordinal);
+            HashSet<string> offered = new(figures.ToolsOffered, StringComparer.Ordinal);
             totalDefinedTools += offered.Count;
-            foreach (string tool in aggregate.ToolsInvoked)
+            foreach (string tool in figures.ToolsInvoked)
             {
                 if (offered.Contains(tool))
                 {
@@ -827,21 +830,21 @@ public class CanonRollupsEngine
             }
 
             SessionDatum datum = ReadSessionDatum(execution.SessionId);
-            if (datum.Aggregate is SessionAggregateView aggregate)
+            if (datum.Figures is SessionSummaryFigure figures)
             {
-                if (aggregate.TotalInput is long input)
+                if (figures.TotalInput is long input)
                 {
                     totalInput += input;
                     hasInput = true;
                 }
 
-                if (aggregate.TotalOutput is long output)
+                if (figures.TotalOutput is long output)
                 {
                     totalOutput += output;
                     hasOutput = true;
                 }
 
-                turns += aggregate.TurnCount;
+                turns += figures.TurnCount;
             }
 
             if (datum.Projection?.Context is StoredSessionContext context)

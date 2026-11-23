@@ -855,8 +855,10 @@ public sealed class AnalyticsReadPathTests
             ("quarantine", () => _ = bridge.GetQuarantinePage(null, 10, 0, 1)),
             ("harnesses", () => _ = bridge.GetHarnesses()),
             ("runs", () => _ = bridge.GetRuns()),
+            ("run detail", () => _ = bridge.GetRunById("derived:claude-code:sess-sweep")),
             ("harness detail", () => _ = bridge.GetHarnessById("claude-code")),
             ("compare", () => _ = bridge.GetCompare()),
+            ("compare runs", () => _ = bridge.GetCompareRuns("derived:claude-code:sess-sweep", "derived:claude-code:sess-sweep")),
             ("report", () => _ = bridge.GetReport()),
             ("analytics status", () => _ = bridge.ExecuteAnalytics("status", null)),
             ("analytics catalog", () => _ = bridge.ExecuteAnalytics("catalog", null)),
@@ -874,6 +876,77 @@ public sealed class AnalyticsReadPathTests
                 $"the {path} path materialized {store.MaterializedContentBytes} content bytes");
             Assert.DoesNotContain(store.ReadLog, read => contentBearingReads.Contains(read));
         }
+    }
+
+    /// <summary>
+    /// The run scorecard and the run comparison price session totals and tool names only, so both
+    /// answer from the content-free summary figures: the run detail page and the compare view
+    /// materialize no conversation text for a session whose turns carry kilobytes each, and the
+    /// scorecard still reports the session's tool yield and cache efficiency.
+    /// </summary>
+    [Fact]
+    public void RunDetailAndCompareAnswerWithoutContentReads()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        List<CollectedRecord> runTurns =
+        [
+            Turn(
+                "span-run-a1",
+                "sess-run-a",
+                0,
+                inputTokens: 400,
+                cacheRead: 100,
+                outputTokens: 60,
+                parts: [TextPart(0, "user_prompt", new string('a', 4_096))],
+                declaredContextWindow: 2_000),
+        ];
+        runTurns[0] = WithToolCall(runTurns[0]);
+        WriteSession(store, "sess-run-a", runTurns, repo: "kyber-weave", branch: "kw-task/T6");
+        WriteSession(
+            store,
+            "sess-run-b",
+            [
+                Turn(
+                    "span-run-b1",
+                    "sess-run-b",
+                    1,
+                    inputTokens: 1_800,
+                    outputTokens: 120,
+                    parts: [TextPart(0, "tool_result_content", new string('b', 4_096))],
+                    declaredContextWindow: 2_000),
+            ]);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
+        bridge.EnsureProjected();
+
+        const string RunA = "derived:claude-code:sess-run-a";
+        const string RunB = "derived:claude-code:sess-run-b";
+
+        store.ClearReadLog();
+        JsonElement detail = bridge.GetRunById(RunA)!.Value;
+        Assert.True(
+            store.MaterializedContentBytes == 0,
+            $"the run detail path materialized {store.MaterializedContentBytes} content bytes");
+        Assert.DoesNotContain(store.ReadLog, read => ContentBearingReads.Contains(read));
+        JsonElement run = detail.GetProperty("run");
+        Assert.Equal(500, run.GetProperty("totalInput").GetInt64());
+        Assert.Equal(60, run.GetProperty("totalOutput").GetInt64());
+        Assert.Equal(1, run.GetProperty("turnCount").GetInt32());
+        JsonElement scorecard = detail.GetProperty("scorecard");
+        Assert.Equal("1.0x", scorecard.GetProperty("toolYield").GetProperty("display").GetString());
+        Assert.Equal("20%", scorecard.GetProperty("cacheEfficiency").GetProperty("display").GetString());
+
+        store.ClearReadLog();
+        JsonElement comparison = bridge.GetCompareRuns(RunA, RunB)!.Value;
+        Assert.True(
+            store.MaterializedContentBytes == 0,
+            $"the compare path materialized {store.MaterializedContentBytes} content bytes");
+        Assert.DoesNotContain(store.ReadLog, read => ContentBearingReads.Contains(read));
+        Assert.Equal(500, comparison.GetProperty("runA").GetProperty("totalInput").GetInt64());
+        Assert.Equal(60, comparison.GetProperty("runA").GetProperty("totalOutput").GetInt64());
+        Assert.Equal(1_800, comparison.GetProperty("runB").GetProperty("totalInput").GetInt64());
+        Assert.Equal(120, comparison.GetProperty("runB").GetProperty("totalOutput").GetInt64());
     }
 
     /// <summary>
