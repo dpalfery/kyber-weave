@@ -167,6 +167,7 @@ answers empty `entries` with the true `total`. Every section payload also carrie
 | D16 | Request prompts and the span inspector's prompt are content | Both are fetched only for what is on screen: `/requests` reads prompt previews for the 25 requests of the page it returns, through `RequestPromptPreviews(sessionKey, requestSpanIds)` (a scoped read of those spans' prompt parts, preview-truncated); `/span/:id/attributes` restores the consent-allowed Droid prompt through `SpanPromptText(spanId)` (that one span's designated prompt part). The register and the content sweep record both as sanctioned scoped content reads. | Restores the behaviour the stall fix lost (CI's harness-collection e2e) without reading content on any other path. The archived plan's register already allowed the single-span prompt read for the inspector. | autonomous: from verified regression |
 | D17 | Timeline paging | `BuildTimeline` creates synthetic grouping nodes (`(auxiliary)`, `(orphan:…)`, `CanonContextAnalysis.cs`), so SQL paging by parent span is not possible. `SessionTimelineLevel` builds the tree from the session's content-free record metadata (only the columns `BuildTimeline` reads), finds the requested level, and pages it with `childCount` per node. `AttachCapturedPrompt` is removed from the timeline path: it is a no-op on content-free records (no parts), and the prompt now reaches the inspector through D16. | The per-request cost is the session's metadata tree, not its content; it is recorded in the read-model register and measured in the PR notes. | autonomous: from plan review |
 | D18 | How are the end-to-end specs verified? | Playwright does not run in a worker gate (it needs Chromium and a self-booted engine). T16's gate is `npm --prefix dash run typecheck`; the specs run in CI's `Dash harness-collection e2e` job, whose verdict the end-of-run council reports. Request order and content laziness are pinned in Vitest (T10, T12, T13), not in a new Playwright spec. | Plan-authoring rule: verification gates use what the host already runs. A new browser spec would be unverifiable inside the run. | autonomous: from plan review |
+| D19 | Can the web chain start before the server chain finishes? | Yes. T9 depends on T3 only, so T9–T12 run beside T7–T8; T13 depends on T7, T8 and T12. | T9–T12 edit only `dash/web` files and mock every route; the API contract fixes each route's shape, so they do not need the server tasks merged first. Saves roughly one server task's duration. | **Owner decision 2026-11-23** ("any opportunity to run some of these in parallel?" — approved) |
 | AP1 | Approve and execute | Approved for execution as planned. | Recorded by the finalize step, which changed no task, file scope, test row or command. | ANSWERED: autonomous: recommendation accepted, AUTONOMOUS_APPROVAL: approve-and-execute — owner chose the recommended lazy-load design, 25-row section pages, 100-row sessions page, parallel section loading in page order, PR 666, opencode execution (2026-11-23); plan reviewed adversarially twice (22 findings closed), 2026-11-23 |
 
 ## Design harvest
@@ -424,7 +425,7 @@ Failure modes this task must not allow:
 - **Difficulty:** easy
 - **Technology:** react
 - **Session:** `dash-sections-ui`
-- **Depends on:** T3, T8
+- **Depends on:** T3
 - **Files:**
   - `dash/web/src/lib/kyberApi.ts`: fetchers and validators for summary, charts, tools, servers, skills, timeline level, requests, reconciliation, problems, stored-fields inventory and rows, and the widened turn route; query-key helpers `['kyber-session', id, section, page]`. Validators build on the T3 envelope validator.
   - `kyberApi` tests (one per fetcher: valid envelope parses; malformed envelope is an error, never a crash or a default).
@@ -496,7 +497,7 @@ Failure modes this task must not allow:
 - **Difficulty:** medium
 - **Technology:** react
 - **Session:** `dash-sections-ui`
-- **Depends on:** T12
+- **Depends on:** T7, T8, T12
 - **Files:**
   - `dash/web/src/components/analysis/TimelineView.tsx` and the timeline section component; `dash/web/src/components/StoredFieldsPanel.tsx` and its section component.
   - Tests per the Test contract.
@@ -582,19 +583,15 @@ T4 summary, charts, turn, run turns              |
  |                                               |
 T5 requests, reconciliation, problems            |
  |                                               |
-T6 tools, servers, skills                        |
+T6 tools, servers, skills                       T9 session view API client (after T3)
  |                                               |
-T7 timeline by level                             |
+T7 timeline by level                            T10 session view layout
  |                                               |
-T8 stored fields inventory/rows ---------------> T9 session view API client
- |                                               |
- |                                              T10 session view layout
- |                                               |
- |                                              T11 charts, ranking, skills, cost
+T8 stored fields inventory/rows                 T11 charts, ranking, skills, cost
  |                                               |
  |                                              T12 drawer by key
  |                                               |
- |                                              T13 timeline + stored-fields UI
+ +---------------------------------------------> T13 timeline + stored-fields UI (after T7, T8, T12)
  |                                               |
 T14 retire route, report <-----------------------+
  |
@@ -608,7 +605,7 @@ T14 retire route, report <-----------------------+
 The server chain is serial because every server task edits `IRelationalStoreReader.cs`,
 `SqliteRelationalStore.Reader.cs`, `InMemoryRelationalStore.cs`, `KyberBridgeEngine.cs` and
 `DashEndpointMappings.cs`. The UI chain touches only `dash/web` and `dash/e2e`; every `dash/web` edit
-stays on it, so no two concurrent tasks edit the same file. T3 runs beside T4–T8.
+stays on it, so no two concurrent tasks edit the same file. T3 runs beside T4–T8, and T9–T12 run beside T7–T8: their tests mock the routes, whose shapes the API contract fixes (D19). T13 renders the timeline and stored-fields routes, so it waits for T7 and T8.
 
 ## Risks
 
