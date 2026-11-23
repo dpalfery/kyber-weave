@@ -1641,6 +1641,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         sql.Append(CultureInfo.InvariantCulture, $"SELECT 'CALL', hex(CAST(tc.span_id AS BLOB)), hex(CAST(tc.tool_name AS BLOB)), typeof(oco.succeeded), COALESCE(CAST(oco.succeeded AS TEXT), ''), typeof(terr.message), COALESCE(hex(CAST(terr.message AS BLOB)), '') FROM tool_call tc JOIN record_session_link rsl ON rsl.span_id = tc.span_id AND rsl.session_key = {key} LEFT JOIN tool_call_outcome oco ON oco.span_id = tc.span_id LEFT JOIN tool_call_error terr ON terr.span_id = tc.span_id ORDER BY tc.rowid ASC;\n");
         sql.Append(CultureInfo.InvariantCulture, $"SELECT 'DEF', hex(CAST(td.span_id AS BLOB)), td.position, hex(CAST(td.tool_name AS BLOB)), td.schema_tokens, typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), '') FROM tool_definition td JOIN record_session_link rsl ON rsl.span_id = td.span_id AND rsl.session_key = {key} JOIN record r ON r.span_id = td.span_id LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position ORDER BY r.rowid ASC, td.position ASC;\n");
         sql.Append(CultureInfo.InvariantCulture, $"SELECT 'SCH', t.invocation_count, t.turn_count, typeof(u.token_residencies), COALESCE(CAST(u.token_residencies AS TEXT), '') FROM session_schema t LEFT JOIN session_schema_unused u ON u.session_id = t.session_id WHERE t.session_id = {key};\n");
+        sql.Append(CultureInfo.InvariantCulture, $"SELECT 'SCH_REASON', typeof(r.reason), COALESCE(hex(CAST(r.reason AS BLOB)), '') FROM session_schema_unmeasurable r WHERE r.session_id = {key};\n");
         sql.Append(CultureInfo.InvariantCulture, $"SELECT 'SCH_TOOL', t.position, hex(CAST(t.tool_name AS BLOB)), t.cost_tokens, t.invoked, typeof(s.server_name), COALESCE(hex(CAST(s.server_name AS BLOB)), '') FROM session_schema_ranked_tool t LEFT JOIN session_schema_ranked_tool_server s ON s.session_id = t.session_id AND s.position = t.position WHERE t.session_id = {key} ORDER BY t.position ASC;\n");
         sql.Append(CultureInfo.InvariantCulture, $"SELECT 'SCH_SRV', hex(CAST(t.server_name AS BLOB)), t.tokens FROM session_schema_server t WHERE t.session_id = {key} ORDER BY t.rowid ASC;\n");
 
@@ -1659,6 +1660,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         List<StoredSchemaRankedTool> rankedTools = [];
         List<StoredSchemaServerTokens> schemaServers = [];
         string? definitionsSpanId = null;
+        string? schemaUnmeasurableReason = null;
 
         foreach (string line in TabLines(output))
         {
@@ -1751,6 +1753,15 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                         RankedTools: rankedTools,
                         Servers: schemaServers,
                         UnusedTokenResidencies: ParseNullableInt64(cols[3], cols[4], "session_schema_unused.token_residencies"));
+                    break;
+
+                case "SCH_REASON":
+                    if (cols.Length != 3)
+                    {
+                        throw new InvalidOperationException($"Expected 3 columns for SCH_REASON row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                    }
+
+                    schemaUnmeasurableReason = ParseNullableHex(cols[1], cols[2], "session_schema_unmeasurable.reason");
                     break;
 
                 case "SCH_TOOL":
@@ -1872,7 +1883,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             ResidentCostTotal: residentCostTotal,
             InvocationCount: toolCallTotal,
             UnusedCount: unusedCount,
-            DefinitionsSpanId: definitionsSpanId);
+            DefinitionsSpanId: definitionsSpanId,
+            SchemaMeasurable: schema is not null,
+            SchemaUnmeasurableReason: schemaUnmeasurableReason);
     }
 
     /// <inheritdoc />

@@ -1067,10 +1067,10 @@ public class SqliteRelationalStoreReadTests : IDisposable
 
     /// <summary>
     /// The tables the tool figures read may touch: the tool-call and tool-definition metadata, the
-    /// stored schema projection, and — because the unused-range pricing resolves the session's
-    /// harness and first turn model — the session and model identity rows. The list is closed: a
-    /// content-text table, the timeline, the context projection, the turn tables, or the session's
-    /// whole projection would fail it.
+    /// stored schema projection and its unmeasurable-reason child, and — because the unused-range
+    /// pricing resolves the session's harness and first turn model — the session and model
+    /// identity rows. The list is closed: a content-text table, the timeline, the context
+    /// projection, the turn tables, or the session's whole projection would fail it.
     /// </summary>
     private static readonly string[] SessionToolFigureTables =
     [
@@ -1084,6 +1084,7 @@ public class SqliteRelationalStoreReadTests : IDisposable
         "tool_definition",
         "tool_definition_server",
         "session_schema",
+        "session_schema_unmeasurable",
         "session_schema_ranked_tool",
         "session_schema_ranked_tool_server",
         "session_schema_server",

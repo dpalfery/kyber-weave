@@ -216,6 +216,8 @@ const TOOLS_BODY = {
     unusedRange: { tokenResidencies: 4500, floor: 0.0, ceiling: 0.45, currency: 'USD' },
     byServer: { git: 4500 },
     definitionsSpanId: 'turn-span-1',
+    measurable: true,
+    reason: null,
   },
 }
 

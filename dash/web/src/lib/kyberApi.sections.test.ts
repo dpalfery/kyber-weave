@@ -113,6 +113,8 @@ const TOOLS_BODY = {
     unusedRange: { tokenResidencies: 4, floor: 10, ceiling: 40, currency: 'USD' },
     byServer: { 'mcp-a': 300 },
     definitionsSpanId: 'span-defs',
+    measurable: true,
+    reason: null,
   },
 }
 

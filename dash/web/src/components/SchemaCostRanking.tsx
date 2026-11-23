@@ -41,7 +41,8 @@ export type SchemaCostAnalysis =
   | {
       measurable: false
       invocationCount: number
-      reason?: 'declared_not_measurable'
+      /** The historic union marker, or the engine's own stored reason for the verdict. */
+      reason?: 'declared_not_measurable' | string
     }
 
 /**

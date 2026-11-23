@@ -685,8 +685,8 @@ public class KyberBridgeEngine
     /// <remarks>
     /// The aggregate is priced over every row the tool figures read returns, before paging, so a
     /// page never changes it: the largest resident cost, the resident cost total, the invocation
-    /// count, the unused count, the unused range, the per-server rollup, and the span that carries
-    /// the session's tool definitions.
+    /// count, the unused count, the unused range, the per-server rollup, the span that carries
+    /// the session's tool definitions, and the schema measurability verdict with its reason.
     /// </remarks>
     /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
@@ -734,6 +734,18 @@ public class KyberBridgeEngine
             ["byServer"] = byServer,
             ["definitionsSpanId"] = figures?.DefinitionsSpanId,
         };
+
+        // The measurability verdict is the engine's, not the page's: measurable exactly when the
+        // stored projection carries a schema — the verdict the summary payload states — with the
+        // stored reason, or the honest fallback when none was stored. Invocation rows alone do
+        // not make a ranking measurable.
+        bool schemaMeasurable = figures?.SchemaMeasurable ?? false;
+        aggregate["measurable"] = schemaMeasurable;
+        aggregate["reason"] = schemaMeasurable
+            ? null
+            : !string.IsNullOrWhiteSpace(figures?.SchemaUnmeasurableReason)
+                ? figures.SchemaUnmeasurableReason
+                : "Schema residency is not measurable because tool definitions were not exported.";
 
         Dictionary<string, object?> payload = PagingEnvelope(
             "tools",
