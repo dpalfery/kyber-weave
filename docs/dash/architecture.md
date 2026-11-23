@@ -2051,22 +2051,17 @@ already follow — not join a derived execution's persisted `sessionId` directly
 `records.session_id` when a split native key stores rows under their native id while the
 derived row carries a qualified id such as `cursor:<native-key>`.
 
-`KyberBridgeEngine` (`dash/server/KyberDash.Application/KyberBridgeEngine.cs`) resolves each execution's session
-key through the store's `SessionIdentities.shareOf`; when a share resolves it reads
-`recordsForShare`, otherwise it retains the legitimate unsplit-session lookup. Within each
-share it applies the existing `dedupeTwinTurns` rule, keeps only `op === 'llm.invoke'` model
-turns (auxiliary and tool records do not inflate turn counts), and deduplicates by span id
-when repeated execution keys appear in one run. Phase alignment and token totals operate on
-that deduped turn set only.
-
-The share-miss fallback goes through the same `recordsForShare` harness predicate as a share
-hit. When that predicate drops every record under a key (an excluded identity such as Gemini,
-or a sibling harness), the side's `metricsReason` names the drop and the bridge warns once per
-key and harness rather than on every Compare request. `SessionIdentities` is memoized on the
-bridge per database handle and store generation — `PRAGMA data_version` (commits from other
-connections, such as ingest or backfill) plus `total_changes()` (any write through the bridge's
-own connection, including in-place `UPDATE`s like `setSessionId`) — so the
-`SELECT DISTINCT … FROM records` scan reruns only after the store changes. Per-phase
+`KyberBridgeEngine` (`dash/server/KyberDash.Application/KyberBridgeEngine.cs`) resolves each
+execution's session once per run and reads its turns through the content-free read models:
+`SessionTurnFigures` for the per-turn token and cost figures, and `SessionRecordsContentFree`
+for the reported totals and the tool names each turn invoked. It hands the turns to
+`CanonRunComparison.Compare` (`dash/server/KyberDash.Application/CanonRunComparison.cs`), which
+infers each turn's phase from its tool names (verification, resolution, implementation,
+exploration, then turn position), aligns the two runs phase by phase, and answers every figure
+the page renders: each turn's canonical total `tokens.all` (measured input plus measured output,
+or withheld with a not-measurable reason, never a zero), per-pair deltas, signals and readings,
+per-phase summaries and run totals. The web page and `TurnAlignedDiff` render those values and
+compute none of them. Per-phase
 `phaseSummaries` token fields follow the totals rule: a phase with any unmeasurable turn omits
 `tokensA`/`tokensB`/`tokenDelta` and carries the first coverage gap as `tokensUnavailableReason`.
 
