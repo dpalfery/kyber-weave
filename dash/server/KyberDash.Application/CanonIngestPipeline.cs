@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector;
+using KyberDash.Data.Harnesses.Otlp;
 using KyberDash.Domain;
 
 namespace KyberDash.Application;
@@ -16,7 +17,6 @@ public static class CanonIngestPipeline
     private const string UnnamedSource = "otlp";
 
     private static readonly string[] ModelKeys = ["gen_ai.response.model", "gen_ai.request.model", "model"];
-    private static readonly string[] CostUsdKeys = ["gen_ai.usage.cost", "cost_usd", "costUsd"];
 
     private static readonly JsonSerializerOptions RawSpanJsonOptions = new()
     {
@@ -508,7 +508,7 @@ public static class CanonIngestPipeline
             }
         }
 
-        CollectedCost? cost = ExtractReportedCost(record.Cost, record.Raw);
+        CollectedCost? cost = OtlpLogMapper.ExtractReportedCost(record.Cost, record.Raw);
 
         string? model = ExtractSafeAttributeString(record.Raw, ModelKeys);
         string? errorMessage = ExtractSafeAttributeString(record.Raw, ["error.message"]);
@@ -1089,39 +1089,6 @@ public static class CanonIngestPipeline
                 {
                     return text;
                 }
-            }
-        }
-
-        return null;
-    }
-
-    private static CollectedCost? ExtractReportedCost(
-        CostBlock normalizedCost,
-        IReadOnlyDictionary<string, JsonElement>? attributes)
-    {
-        if (normalizedCost.Value is double costValue
-            && double.IsFinite(costValue)
-            && costValue >= 0
-            && !string.IsNullOrWhiteSpace(normalizedCost.Currency)
-            && !JsonDocumentText.IsDocument(normalizedCost.Currency))
-        {
-            return new CollectedCost(costValue, normalizedCost.Currency);
-        }
-
-        if (attributes is null)
-        {
-            return null;
-        }
-
-        foreach (string key in CostUsdKeys)
-        {
-            if (attributes.TryGetValue(key, out JsonElement el)
-                && el.ValueKind == JsonValueKind.Number
-                && el.TryGetDouble(out double usd)
-                && double.IsFinite(usd)
-                && usd >= 0)
-            {
-                return new CollectedCost(usd, "USD");
             }
         }
 

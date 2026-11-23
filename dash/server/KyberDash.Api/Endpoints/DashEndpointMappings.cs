@@ -391,10 +391,11 @@ public static class DashEndpointMappings
             return DashHttp.Error(StatusCodes.Status400BadRequest, "limit must be a positive whole number");
 
         int limit = Math.Clamp(parsedLimit ?? 50, 1, 200);
-        string? rawDays = DashHttp.OptionalQueryString(request.Query, "days")?.Trim();
-        int days = 7;
-        if (rawDays is not null && (!int.TryParse(rawDays, NumberStyles.None, CultureInfo.InvariantCulture, out days) || days <= 0))
+        int? parsedDays = DashHttp.OptionalPositiveInt(request.Query, "days", out bool invalidDays);
+        if (invalidDays)
             return DashHttp.Error(StatusCodes.Status400BadRequest, "days must be a positive whole number");
+
+        int days = parsedDays ?? 7;
 
         return await Task.Run<IResult>(
             () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetReport(harness, sessionId, runId, limit, days)),

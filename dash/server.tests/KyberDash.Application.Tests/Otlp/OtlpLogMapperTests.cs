@@ -354,4 +354,39 @@ public class OtlpLogMapperTests
         CollectedRecord second = Assert.Single(batch.Records, static r => r.RecordId == "log-skill-tool");
         Assert.Equal(["triage"], second.SkillsInvoked);
     }
+
+    [Fact]
+    public void Map_LogWithGenAiUsageCostAttribute_ExtractsReportedCost()
+    {
+        OtlpLog log = new(
+            LogId: "log-genai-cost-1",
+            TraceId: "1234567890abcdef1234567890abcdef",
+            SpanId: null,
+            SessionId: "sess-genai-cost",
+            Timestamp: "2026-11-19T12:35:00.000Z",
+            Body: "api request",
+            Attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["claude_code.event"] = JsonSerializer.SerializeToElement("api_request"),
+                ["event.name"] = JsonSerializer.SerializeToElement("claude_code.api_request"),
+                ["gen_ai.request.model"] = JsonSerializer.SerializeToElement("claude-sonnet-4-5"),
+                ["gen_ai.usage.input_tokens"] = JsonSerializer.SerializeToElement(100),
+                ["gen_ai.usage.output_tokens"] = JsonSerializer.SerializeToElement(25),
+                ["gen_ai.usage.cost"] = JsonSerializer.SerializeToElement(0.0425),
+            },
+            Resource: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["service.name"] = JsonSerializer.SerializeToElement("claude-code"),
+            },
+            Scope: new OtlpScope("claude_code", "1.0.0"));
+
+        OtlpLogMapResult result = OtlpLogMapper.Map([log]);
+
+        Assert.Equal(new IngestOutcome(1, 0, 0), result.Outcome);
+        CollectedBatch batch = Assert.Single(result.Batches);
+        CollectedRecord record = Assert.Single(batch.Records);
+        Assert.NotNull(record.ReportedCost);
+        Assert.Equal(0.0425, record.ReportedCost.Amount, 6);
+        Assert.Equal("USD", record.ReportedCost.Currency);
+    }
 }

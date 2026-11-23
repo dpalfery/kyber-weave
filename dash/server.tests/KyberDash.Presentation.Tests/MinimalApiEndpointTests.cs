@@ -467,12 +467,11 @@ public class MinimalApiEndpointTests
 
     [Theory]
     [InlineData("/api/kyber/report", null, null, null, 50, 7)]
-    [InlineData("/api/kyber/report?days=", null, null, null, 50, 7)]
-    [InlineData("/api/kyber/report?days=%20%20&harness=%20%20&session=%20&run=%20%20", null, null, null, 50, 7)]
+    [InlineData("/api/kyber/report?harness=%20%20&session=%20&run=%20%20", null, null, null, 50, 7)]
     [InlineData("/api/kyber/report?days=1&harness=all", null, null, null, 50, 1)]
     [InlineData("/api/kyber/report?days=1&harness=%20GEMINI%20", "GEMINI", null, null, 50, 1)]
     [InlineData("/api/kyber/report?days=30&limit=10&harness=codex", "codex", null, null, 10, 30)]
-    [InlineData("/api/kyber/report?days=%2014%20&limit=500", null, null, null, 200, 14)]
+    [InlineData("/api/kyber/report?days=14&limit=500", null, null, null, 200, 14)]
     public async Task ReportNormalizesDaysLimitAndScopeParameters(
         string requestPath,
         string? expectedHarness,
@@ -509,8 +508,11 @@ public class MinimalApiEndpointTests
     }
 
     [Theory]
+    [InlineData("/api/kyber/report?days=")]
+    [InlineData("/api/kyber/report?days=%20")]
     [InlineData("/api/kyber/report?days=0")]
     [InlineData("/api/kyber/report?days=-1")]
+    [InlineData("/api/kyber/report?days=-5")]
     [InlineData("/api/kyber/report?days=abc")]
     [InlineData("/api/kyber/report?days=1.5")]
     public async Task ReportRejectsInvalidDaysWithBadRequest(string requestPath)
