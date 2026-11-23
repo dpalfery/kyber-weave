@@ -64,7 +64,9 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plans are open.
+| Plan | Status | Scope |
+|---|---|---|
+| [Run worktrees inside the repository, and a council gate step that fails fast](2026-11-23-agent-worktrees-inside-repo.md) | Ready | Run worktrees under a git-ignored `.agent_worktrees/`; doctor check; worker stop rule; `review gates` requires-paths preflight and `--council` needs `--out` |
 
 ## Archived Plans
 
