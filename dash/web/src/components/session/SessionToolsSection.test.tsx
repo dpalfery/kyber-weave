@@ -116,6 +116,8 @@ const AGGREGATE = {
   unusedRange: { tokenResidencies: 4500, floor: 0.0, ceiling: 0.45, currency: 'USD' },
   byServer: { git: 4500 },
   definitionsSpanId: 'turn-span-1',
+  measurable: true,
+  reason: null,
 }
 
 describe('SessionToolsSection states', () => {
@@ -162,16 +164,22 @@ describe('SessionToolsSection states', () => {
     )
   })
 
-  it('lists invocation-only rows when no definitions were captured, with the honest banner', async () => {
+  it('shows both honest banners for an invocation-only session the engine marked not measurable', async () => {
     const invocationOnlyRow = { name: 'read', server: null, invocations: 4, invoked: true, in_definitions: false, is_mcp: false }
     stubFetch(() =>
       jsonResponse(
         toolsPage([invocationOnlyRow], {
-          ...AGGREGATE,
-          maxCost: null,
+          // The engine prices an invocation-only ranking at zero — not null — so the
+          // section must read the verdict the aggregate carries, never derive one.
+          maxCost: 0,
+          residentCostTotal: 0,
+          invocationCount: 4,
+          unusedCount: 0,
           unusedRange: null,
           byServer: {},
           definitionsSpanId: null,
+          measurable: false,
+          reason: 'Schema residency is not measurable because tool definitions were not exported.',
         }),
       ),
     )
@@ -180,10 +188,9 @@ describe('SessionToolsSection states', () => {
     expect(within(section).getByTestId('schemas-not-exported-banner').textContent).toContain(
       'copilot does not export tool definitions',
     )
-    expect(within(section).getByTestId('tool-row-read').textContent).toContain('4')
-    // The ranking still lists the calls it measured; the not-measurable card
-    // is reserved for the engine's own verdict, which this page is not.
-    expect(within(section).queryByTestId('schema-cost-not-measurable')).toBeNull()
+    // The engine's own verdict renders even though invocation rows exist: an
+    // unrankable ranking must not read as a ranking.
+    expect(within(section).getByTestId('schema-cost-not-measurable').textContent).toContain('(4)')
   })
 
   it('states the engine verdict when the tools route answers no rows and no definitions span', async () => {
@@ -197,6 +204,8 @@ describe('SessionToolsSection states', () => {
           unusedRange: null,
           byServer: {},
           definitionsSpanId: null,
+          measurable: false,
+          reason: 'Schema residency is not measurable because tool definitions were not exported.',
         }),
       ),
     )
@@ -209,7 +218,7 @@ describe('SessionToolsSection states', () => {
   })
 
   it('states the empty ranking honestly when definitions existed but no tool was recorded', async () => {
-    stubFetch(() => jsonResponse(toolsPage([], { ...AGGREGATE, byServer: {} })))
+    stubFetch(() => jsonResponse(toolsPage([], { ...AGGREGATE, byServer: {}, measurable: true, reason: null })))
     mount(() => {})
     const section = await screen.findByTestId('tool-schema-section')
     expect(within(section).getByTestId('tools-ranking-table').textContent).toContain(
@@ -255,7 +264,14 @@ describe('SessionToolsSection inspector wiring', () => {
   it('states the harness reason and issues no content request when no definitions exist', async () => {
     stubFetch(() =>
       jsonResponse(
-        toolsPage([READ_ROW], { ...AGGREGATE, byServer: {}, unusedRange: null, definitionsSpanId: null }),
+        toolsPage([READ_ROW], {
+          ...AGGREGATE,
+          byServer: {},
+          unusedRange: null,
+          definitionsSpanId: null,
+          measurable: true,
+          reason: null,
+        }),
       ),
     )
     const openInspector = vi.fn()
@@ -273,7 +289,14 @@ describe('SessionToolsSection inspector wiring', () => {
   it('keeps the Copilot CLI reason verbatim', async () => {
     stubFetch(() =>
       jsonResponse(
-        toolsPage([READ_ROW], { ...AGGREGATE, byServer: {}, unusedRange: null, definitionsSpanId: null }),
+        toolsPage([READ_ROW], {
+          ...AGGREGATE,
+          byServer: {},
+          unusedRange: null,
+          definitionsSpanId: null,
+          measurable: true,
+          reason: null,
+        }),
       ),
     )
     const openInspector = vi.fn()

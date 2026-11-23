@@ -565,6 +565,15 @@ public record SessionProblemPageResult(IReadOnlyList<Problem> Items, int Total);
 /// inspector opens its definition content at — or <see langword="null"/> when the session
 /// exported none.
 /// </param>
+/// <param name="SchemaMeasurable">
+/// Whether the stored session projection carries a schema — the measurability verdict the
+/// summary payload states. A session can hold invocation rows and still not be measurable when
+/// the harness exported no tool definitions.
+/// </param>
+/// <param name="SchemaUnmeasurableReason">
+/// The stored projection's reason schema could not be measured, or <see langword="null"/> when
+/// the schema is measurable.
+/// </param>
 /// <remarks>
 /// Prices tool-call and tool-definition metadata and the stored schema projection only: no
 /// content part, no content text, no timeline, and no context read. The session harness and the
@@ -580,7 +589,9 @@ public record SessionToolFigureSet(
     long ResidentCostTotal,
     int InvocationCount,
     int UnusedCount,
-    string? DefinitionsSpanId);
+    string? DefinitionsSpanId,
+    bool SchemaMeasurable = false,
+    string? SchemaUnmeasurableReason = null);
 
 /// <summary>
 /// Typed read-only query contract over normalized telemetry, session, and record tables in

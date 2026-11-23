@@ -68,15 +68,19 @@ export function SessionToolsSection({
   const aggregate = data.aggregate
   const u = summaryRecord ?? {}
 
-  // The engine's verdicts, read from the aggregate it priced over every row
-  // before paging — never from which rows happen to be on the page. An empty
-  // page whose aggregate names no definitions span is the engine's own "not
-  // measurable" verdict — the route answers no rows at all when no tool
-  // figures exist. Invocation-only rows (calls measured, no definitions)
-  // render as the plain ranking, exactly as they always have.
-  const measurable = aggregate.maxCost != null || aggregate.definitionsSpanId != null
-  const schema: SchemaCostAnalysis | undefined =
-    !measurable && rows.length === 0 ? { measurable: false, invocationCount: aggregate.invocationCount } : undefined
+  // The engine's verdict, read from the aggregate it priced over every row
+  // before paging — never derived from which rows happen to be on the page or
+  // from the cost figures: an invocation-only ranking prices at zero, not
+  // null. A not-measurable verdict renders both honest banners, rows or not —
+  // an unrankable ranking must not read as a ranking.
+  const measurable = aggregate.measurable
+  const schema: SchemaCostAnalysis | undefined = !measurable
+    ? {
+        measurable: false,
+        invocationCount: aggregate.invocationCount,
+        reason: aggregate.reason ?? 'declared_not_measurable',
+      }
+    : undefined
 
   const offeredList = Array.isArray(u.tools_offered) ? u.tools_offered : undefined
   const invokedList = Array.isArray(u.tools_invoked) ? u.tools_invoked : undefined

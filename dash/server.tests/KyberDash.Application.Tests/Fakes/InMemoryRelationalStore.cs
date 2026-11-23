@@ -1356,8 +1356,11 @@ public class InMemoryRelationalStore :
             }
 
             // The residency helpers price the stored schema only, so the read carries the schema
-            // in a minimal projection shape instead of the session's whole projection.
-            StoredSessionSchema? schema = GetSessionProjectionFromState(currentState, sessionKey)?.Schema;
+            // in a minimal projection shape instead of the session's whole projection. The
+            // measurability verdict reads the stored projection's own schema fields, the same
+            // verdict the summary payload states.
+            StoredSessionProjection? storedProjection = GetSessionProjectionFromState(currentState, sessionKey);
+            StoredSessionSchema? schema = storedProjection?.Schema;
             StoredSessionProjection? projection = schema is null
                 ? null
                 : new StoredSessionProjection(
@@ -1445,7 +1448,9 @@ public class InMemoryRelationalStore :
                 ResidentCostTotal: residentCostTotal,
                 InvocationCount: toolCallTotal,
                 UnusedCount: unusedCount,
-                DefinitionsSpanId: definitionsSpanId);
+                DefinitionsSpanId: definitionsSpanId,
+                SchemaMeasurable: schema is not null,
+                SchemaUnmeasurableReason: storedProjection?.SchemaUnmeasurableReason);
         }
     }
 

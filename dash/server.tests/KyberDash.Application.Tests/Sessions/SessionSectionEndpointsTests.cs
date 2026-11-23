@@ -523,6 +523,97 @@ public sealed class SessionSectionEndpointsTests
     }
 
     /// <summary>
+    /// The tools section carries the engine's measurability verdict: a session whose harness
+    /// recorded tool invocations but exported no definitions answers <c>measurable</c> false with
+    /// the stored projection's unmeasurable reason, and still lists the invocation row it
+    /// measured.
+    /// </summary>
+    [Fact]
+    public void TheToolsSectionMarksAnInvocationOnlySessionNotMeasurableAndStillListsItsRow()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-invocation-only";
+        List<CollectedRecord> turns =
+        [
+            Turn("turn-invoked-000", sessionKey, 0, inputTokens: 1_000, outputTokens: 100),
+            Turn("turn-invoked-001", sessionKey, 1, inputTokens: 1_000, outputTokens: 100),
+        ];
+        CollectedRecord invocation = new(
+            RecordId: "span-invoked-0",
+            HarnessId: "claude-code",
+            Op: RecordOp.ToolInvoke,
+            Kind: RecordKind.Client,
+            Name: "read_file",
+            StartedAt: TurnBase.AddMinutes(2),
+            Status: RecordStatus.Ok,
+            SessionKey: sessionKey,
+            ParentRecordId: "turn-invoked-001",
+            TraceId: null,
+            Model: null,
+            EndedAt: null,
+            ReportedDurationMs: 1_000,
+            Tokens: [],
+            ReportedCost: null,
+            Parts: [],
+            Tool: ToolCall("call-invoked-0", "read_file"),
+            Agent: null,
+            SkillsInvoked: [],
+            AgentInstanceId: null,
+            ToolDefinitions: [],
+            Signals: new CollectedRecordSignals(ErrorMessage: null, EditFailures: null, CorrectionRule: null, DeclaredContextWindow: null),
+            ReportedInputTokens: 0,
+            ReportedOutputTokens: 0);
+        WriteSession(store, sessionKey, [.. turns, invocation], repo: "kyber-weave", branch: "kw-task/T6", title: "invocation-only session");
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        // The stored projection holds no schema — the harness exported no definitions — so the
+        // verdict the summary payload used is measurability false.
+        Assert.Null(store.GetSessionProjection(sessionKey)!.Schema);
+
+        JsonElement page = bridge.GetSessionTools(sessionKey)!.Value;
+
+        JsonElement aggregate = page.GetProperty("aggregate");
+        Assert.False(aggregate.GetProperty("measurable").GetBoolean());
+        string reason = aggregate.GetProperty("reason").GetString() ?? string.Empty;
+        Assert.False(string.IsNullOrWhiteSpace(reason));
+        Assert.Equal(store.GetSessionProjection(sessionKey)!.SchemaUnmeasurableReason, reason);
+
+        // The invocation row is still listed: the section keeps the calls it measured.
+        Assert.Equal(1, page.GetProperty("total").GetInt32());
+        JsonElement row = Assert.Single(page.GetProperty("tools").EnumerateArray());
+        Assert.Equal("read_file", row.GetProperty("name").GetString());
+        Assert.Equal(1, row.GetProperty("invocations").GetInt32());
+        Assert.False(row.GetProperty("in_definitions").GetBoolean());
+    }
+
+    /// <summary>
+    /// The tools section marks a session whose harness exported tool definitions measurable, with
+    /// no reason — the same verdict the stored schema's presence carries.
+    /// </summary>
+    [Fact]
+    public void TheToolsSectionMarksASessionWithDefinitionsMeasurable()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-tools";
+        WriteManyToolSession(store, sessionKey);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        Assert.NotNull(store.GetSessionProjection(sessionKey)!.Schema);
+
+        JsonElement page = bridge.GetSessionTools(sessionKey)!.Value;
+
+        JsonElement aggregate = page.GetProperty("aggregate");
+        Assert.True(aggregate.GetProperty("measurable").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, aggregate.GetProperty("reason").ValueKind);
+    }
+
+    /// <summary>
     /// The servers section pages the tool figures' per-server rollup rows at 25 with the true
     /// total, from the same tool figures read the tools section pays.
     /// </summary>

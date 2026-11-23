@@ -2667,6 +2667,10 @@ export interface KyberSessionToolsAggregate {
   unusedRange: KyberUnusedRange | null
   byServer: Record<string, number>
   definitionsSpanId: string | null
+  /** The engine's measurability verdict: true only when the session stored a schema. */
+  measurable: boolean
+  /** Why the schema is not measurable; null when it is. */
+  reason: string | null
 }
 
 /** One page of the tools section with the aggregate over the whole ranking. */
@@ -2696,6 +2700,8 @@ function readToolsAggregate(value: unknown, path: string): KyberSessionToolsAggr
     unusedRange: readUnusedRange(value.unusedRange, path),
     byServer: readNumberMap(value.byServer, path, 'aggregate.byServer'),
     definitionsSpanId: readNullableString(value.definitionsSpanId, path, 'aggregate.definitionsSpanId'),
+    measurable: requireBooleanField(value, 'measurable', path),
+    reason: readNullableString(value.reason, path, 'aggregate.reason'),
   }
 }
 
