@@ -809,9 +809,10 @@ export async function startTrayBridge(options: {
           invocations.push({ cmd, args, ok: true, at: new Date().toISOString() })
           sendJson(res, 200, { ok: true, result: outcome.result, emittedEvents: outcome.emittedEvents })
         } catch (error) {
-          // Never reflect backend error internals in an HTTP response; the detail
-          // stays in the bridge log for debugging.
-          console.error(`tray invoke ${cmd} failed:`, error instanceof Error ? error.message : String(error))
+          // Never reflect backend error internals in an HTTP response, and never
+          // interpolate request-controlled values into the log line; the failing
+          // command is already recorded structurally in invocations below.
+          console.error('tray invoke failed:', error instanceof Error ? error.message : String(error))
           const message = 'tray command failed'
           invocations.push({ cmd, args, ok: false, error: message, at: new Date().toISOString() })
           sendJson(res, 400, { ok: false, error: { kind: 'runtime', message } })
