@@ -733,6 +733,201 @@ public class KyberBridgeEngine
 
         return JsonSerializer.SerializeToElement(payload, CamelCaseJsonOptions);
     }
+
+    /// <summary>
+    /// Returns the tools section payload — one page of the session's ranked tool rows,
+    /// never-invoked rows included, with the aggregate priced over every row — or
+    /// <see langword="null"/> when the session has no projection.
+    /// </summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page.</param>
+    /// <returns>Paging envelope JSON element with the section's <c>aggregate</c>, or <see langword="null"/>.</returns>
+    /// <remarks>
+    /// The aggregate is priced over every row the tool figures read returns, before paging, so a
+    /// page never changes it: the largest resident cost, the resident cost total, the invocation
+    /// count, the unused count, the unused range, the per-server rollup, and the span that carries
+    /// the session's tool definitions.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
+    public JsonElement? GetSessionTools(string sessionId, int page = 1, int limit = DefaultSectionPageLimit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        EnsureProjected();
+        // The section 404 check reads the projection header row, not the whole projection the
+        // detail route loads.
+        if (projections.SessionHeadersByKeys([sessionId]).Count == 0)
+        {
+            return null;
+        }
+
+        (SessionToolFigureSet? figures, string? projectionStatus) = TrySessionToolFigures(sessionId, pricing.LoadPricingTables());
+        List<Dictionary<string, object?>> rows = figures is null
+            ? []
+            : ToolRows(figures.Tools, figures.ToolsOffered);
+        Dictionary<string, long> byServer = new(StringComparer.Ordinal);
+        if (figures is not null)
+        {
+            foreach (StoredSchemaServerTokens server in figures.ByServer)
+            {
+                byServer[server.ServerName] = server.Tokens;
+            }
+        }
+
+        Dictionary<string, object?> aggregate = new(StringComparer.Ordinal)
+        {
+            ["maxCost"] = figures?.MaxCost,
+            ["residentCostTotal"] = figures?.ResidentCostTotal ?? 0L,
+            ["invocationCount"] = figures?.InvocationCount ?? 0,
+            ["unusedCount"] = figures?.UnusedCount ?? 0,
+            ["unusedRange"] = figures?.UnusedRange is UnusedSchemaRange range
+                ? new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["tokenResidencies"] = range.TokenResidencies,
+                    ["floor"] = range.Floor,
+                    ["ceiling"] = range.Ceiling,
+                    ["currency"] = range.Currency,
+                }
+                : null,
+            ["byServer"] = byServer,
+            ["definitionsSpanId"] = figures?.DefinitionsSpanId,
+        };
+
+        Dictionary<string, object?> payload = PagingEnvelope(
+            "tools",
+            PageOf(rows, page, limit),
+            rows.Count,
+            limit,
+            PageOffset(page, limit),
+            page);
+        payload["aggregate"] = aggregate;
+        if (projectionStatus is not null)
+        {
+            payload["projection_status"] = projectionStatus;
+        }
+
+        return JsonSerializer.SerializeToElement(payload, CamelCaseJsonOptions);
+    }
+
+    /// <summary>
+    /// Returns the servers section payload — one page of the session's per-server schema rollup
+    /// rows — or <see langword="null"/> when the session has no projection.
+    /// </summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page.</param>
+    /// <returns>Paging envelope JSON element, or <see langword="null"/>.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
+    public JsonElement? GetSessionServers(string sessionId, int page = 1, int limit = DefaultSectionPageLimit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        EnsureProjected();
+        // The section 404 check reads the projection header row, not the whole projection the
+        // detail route loads.
+        if (projections.SessionHeadersByKeys([sessionId]).Count == 0)
+        {
+            return null;
+        }
+
+        (SessionToolFigureSet? figures, string? projectionStatus) = TrySessionToolFigures(sessionId, pricing.LoadPricingTables());
+        List<Dictionary<string, object?>> rows = figures is null
+            ? []
+            : ServerRows(figures.Tools, figures.Servers);
+
+        Dictionary<string, object?> payload = PagingEnvelope(
+            "servers",
+            PageOf(rows, page, limit),
+            rows.Count,
+            limit,
+            PageOffset(page, limit),
+            page);
+        if (projectionStatus is not null)
+        {
+            payload["projection_status"] = projectionStatus;
+        }
+
+        return JsonSerializer.SerializeToElement(payload, CamelCaseJsonOptions);
+    }
+
+    /// <summary>
+    /// Returns the skills section payload — one page of the session's distinct skill rows — or
+    /// <see langword="null"/> when the session has no projection.
+    /// </summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page.</param>
+    /// <returns>The skills payload the detail route carries, with its rows paged, or <see langword="null"/>.</returns>
+    /// <remarks>
+    /// The rows answer from the stored skill invocations alone; the session's harness identity
+    /// names the not-measurable block the rows carry, the one read past the skill table the
+    /// section pays.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
+    public JsonElement? GetSessionSkills(string sessionId, int page = 1, int limit = DefaultSectionPageLimit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        EnsureProjected();
+        // The section 404 check reads the projection header row, not the whole projection the
+        // detail route loads.
+        if (projections.SessionHeadersByKeys([sessionId]).Count == 0)
+        {
+            return null;
+        }
+
+        (IReadOnlyList<StoredSkillInvocation> skillRows, string? projectionStatus) = TrySessionSkillFigures(sessionId);
+        (IReadOnlyList<string> distinctSkills, IReadOnlyDictionary<string, int> skillCounts) = CollectSkillCounts(skillRows);
+        CollectedSession? session = reader.GetSession(sessionId);
+        string harness = session?.HarnessId ?? string.Empty;
+        Dictionary<string, object?> payload = BuildSkillsPayload(distinctSkills, skillCounts, harness);
+        if (payload.TryGetValue("rows", out object? rowsValue) && rowsValue is List<Dictionary<string, object?>> allRows)
+        {
+            payload["rows"] = PageOf(allRows, page, limit);
+            payload["total"] = allRows.Count;
+        }
+        else
+        {
+            payload["rows"] = new List<Dictionary<string, object?>>();
+            payload["total"] = 0;
+        }
+
+        payload["limit"] = limit;
+        payload["offset"] = PageOffset(page, limit);
+        payload["page"] = page;
+        if (projectionStatus is not null)
+        {
+            payload["projection_status"] = projectionStatus;
+        }
+
+        return JsonSerializer.SerializeToElement(payload, CamelCaseJsonOptions);
+    }
+
+    /// <summary>Slices one page out of rows the section read already carries in memory.</summary>
+    private static List<Dictionary<string, object?>> PageOf(IReadOnlyList<Dictionary<string, object?>> rows, int page, int limit)
+    {
+        int offset = PageOffset(page, limit);
+        if (offset >= rows.Count)
+        {
+            return [];
+        }
+
+        List<Dictionary<string, object?>> pageRows = new(Math.Min(limit, rows.Count - offset));
+        for (int index = offset; index < Math.Min(offset + limit, rows.Count); index++)
+        {
+            pageRows.Add(rows[index]);
+        }
+
+        return pageRows;
+    }
+
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="turnIndex">Zero-based turn index.</param>
     /// <returns>Turn figures JSON element, or <see langword="null"/>.</returns>
@@ -2309,6 +2504,41 @@ public class KyberBridgeEngine
         {
             RecordProjectionFailure(sessionKey, ex.Message);
             return (null, ProjectionFailedStatus);
+        }
+    }
+
+    /// <summary>Reads a session's tool and server figures, isolating any fault to that session.</summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="lookup">Read-time pricing tables.</param>
+    /// <returns>The figures when readable, and the isolation marker when the read failed.</returns>
+    private (SessionToolFigureSet? Figures, string? ProjectionStatus) TrySessionToolFigures(
+        string sessionKey,
+        IModelPricingLookup lookup)
+    {
+        try
+        {
+            return (reader.SessionToolFigures(sessionKey, lookup), null);
+        }
+        catch (Exception ex)
+        {
+            RecordProjectionFailure(sessionKey, ex.Message);
+            return (null, ProjectionFailedStatus);
+        }
+    }
+
+    /// <summary>Reads a session's stored skill invocations, isolating any fault to that session.</summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <returns>The skill rows when readable, empty with the isolation marker when the read failed.</returns>
+    private (IReadOnlyList<StoredSkillInvocation> Rows, string? ProjectionStatus) TrySessionSkillFigures(string sessionKey)
+    {
+        try
+        {
+            return (reader.SessionSkillFigures(sessionKey), null);
+        }
+        catch (Exception ex)
+        {
+            RecordProjectionFailure(sessionKey, ex.Message);
+            return ([], ProjectionFailedStatus);
         }
     }
 

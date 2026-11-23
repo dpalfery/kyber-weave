@@ -608,6 +608,12 @@ public class ProjectionReadPathTests
 
         /// <inheritdoc />
         public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey) => inner.SessionRecordsContentFree(sessionKey);
+
+        /// <inheritdoc />
+        public SessionToolFigureSet SessionToolFigures(string sessionKey, IModelPricingLookup? pricing = null) => inner.SessionToolFigures(sessionKey, pricing);
+
+        /// <inheritdoc />
+        public IReadOnlyList<StoredSkillInvocation> SessionSkillFigures(string sessionKey) => inner.SessionSkillFigures(sessionKey);
     }
 
     /// <summary>

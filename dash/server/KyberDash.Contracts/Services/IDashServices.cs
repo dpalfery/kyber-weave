@@ -201,6 +201,24 @@ public interface IDashboardQueryService
     /// <param name="limit">Rows on the page; 25 unless given.</param>
     JsonElement? GetSessionProblems(string sessionId, int page = 1, int limit = 25);
 
+    /// <summary>Returns one page of the session's ranked tool rows with the section's page-independent aggregate.</summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page; 25 unless given.</param>
+    JsonElement? GetSessionTools(string sessionId, int page = 1, int limit = 25);
+
+    /// <summary>Returns one page of the session's per-server schema rollup rows.</summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page; 25 unless given.</param>
+    JsonElement? GetSessionServers(string sessionId, int page = 1, int limit = 25);
+
+    /// <summary>Returns one page of the session's distinct skill rows.</summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page; 25 unless given.</param>
+    JsonElement? GetSessionSkills(string sessionId, int page = 1, int limit = 25);
+
     /// <summary>Returns metrics and bucket figures for a specific turn.</summary>
     JsonElement? GetTurnFigures(string sessionId, int turnIndex);
 

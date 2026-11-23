@@ -1217,6 +1217,211 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
+    public virtual SessionToolFigureSet SessionToolFigures(string sessionKey, IModelPricingLookup? pricing = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionToolFigures));
+            StoreState currentState = state;
+
+            // The session harness and the session's first turn model in record-start order are
+            // the two identity columns the unused-range pricing resolves — the same rows the
+            // adapter's statement reads.
+            object?[]? sessionRow = FindRowByKey(currentState, "session", [("session_id", sessionKey)]);
+            string? harnessId = sessionRow is null
+                ? null
+                : GetString(GetTableMetadata("session"), sessionRow, "harness_id");
+            List<CollectedRecord> records = CollectSessionRecordsContentFree(currentState, sessionKey);
+            string? primaryModel = records
+                .Where(static record => record.Op == RecordOp.LlmInvoke)
+                .OrderBy(static record => record.StartedAt)
+                .ThenBy(static record => record.RecordId, StringComparer.Ordinal)
+                .Select(static record => record.Model)
+                .FirstOrDefault(static model => !string.IsNullOrEmpty(model));
+
+            // Tool-call metadata only, with the adapter's error rule: a call failed when its
+            // stored outcome says so or it carries an error message; the record's own status is
+            // the wide figures' input, not this read's.
+            int toolCallTotal = 0;
+            List<string> toolsInvoked = [];
+            HashSet<string> seenInvokedTools = new(StringComparer.Ordinal);
+            Dictionary<string, int> invCounts = new(StringComparer.Ordinal);
+            Dictionary<string, int> errCounts = new(StringComparer.Ordinal);
+            foreach (CollectedRecord record in records)
+            {
+                if (record.Tool is null)
+                {
+                    continue;
+                }
+
+                toolCallTotal++;
+                string toolName = record.Tool.ToolName;
+                if (seenInvokedTools.Add(toolName))
+                {
+                    toolsInvoked.Add(toolName);
+                }
+
+                invCounts[toolName] = invCounts.GetValueOrDefault(toolName) + 1;
+                if (record.Tool.Succeeded == false || record.Tool.Error is not null)
+                {
+                    errCounts[toolName] = errCounts.GetValueOrDefault(toolName) + 1;
+                }
+            }
+
+            List<string> toolsOffered = [];
+            HashSet<string> seenOfferedTools = new(StringComparer.Ordinal);
+            Dictionary<string, (long SchemaTokens, string? Server, HashSet<string> SpanIds)> defStats = new(StringComparer.Ordinal);
+            string? definitionsSpanId = null;
+            foreach (CollectedRecord record in records)
+            {
+                if (record.ToolDefinitions.Count > 0)
+                {
+                    definitionsSpanId ??= record.RecordId;
+                }
+
+                foreach (CollectedToolDefinition def in record.ToolDefinitions)
+                {
+                    if (seenOfferedTools.Add(def.ToolName))
+                    {
+                        toolsOffered.Add(def.ToolName);
+                    }
+
+                    if (!defStats.TryGetValue(def.ToolName, out (long SchemaTokens, string? Server, HashSet<string> SpanIds) existing))
+                    {
+                        defStats[def.ToolName] = (
+                            def.SchemaTokens,
+                            def.Server,
+                            new HashSet<string>(StringComparer.Ordinal) { record.RecordId });
+                    }
+                    else
+                    {
+                        _ = existing.SpanIds.Add(record.RecordId);
+                        defStats[def.ToolName] = (existing.SchemaTokens, existing.Server ?? def.Server, existing.SpanIds);
+                    }
+                }
+            }
+
+            // The residency helpers price the stored schema only, so the read carries the schema
+            // in a minimal projection shape instead of the session's whole projection.
+            StoredSessionSchema? schema = GetSessionProjectionFromState(currentState, sessionKey)?.Schema;
+            StoredSessionProjection? projection = schema is null
+                ? null
+                : new StoredSessionProjection(
+                    SessionId: sessionKey,
+                    Label: string.Empty,
+                    IsSubagent: false,
+                    SpanCount: 0,
+                    StartedAtUtc: string.Empty,
+                    EndedAtUtc: string.Empty,
+                    ParentSessionId: null,
+                    AgentName: null,
+                    IncludedInParent: false,
+                    RequestSpanIds: [],
+                    Turns: [],
+                    Schema: schema);
+
+            List<ReadTimeSessionToolSummary> tools = BuildSessionToolSummaries(
+                projection,
+                schema?.TurnCount ?? 0,
+                defStats,
+                toolsInvoked,
+                invCounts,
+                errCounts);
+            List<ReadTimeSessionServerSummary> servers = BuildSessionServerSummaries(projection, tools);
+            UnusedSchemaRange? unusedRange = ResolveUnusedRange(
+                projection,
+                harnessId ?? string.Empty,
+                primaryModel is null ? [] : [primaryModel],
+                pricing);
+
+            List<StoredSchemaServerTokens> byServer = [];
+            if (schema is not null)
+            {
+                foreach (StoredSchemaServerTokens server in schema.Servers)
+                {
+                    byServer.Add(new StoredSchemaServerTokens(server.ServerName, server.Tokens));
+                }
+            }
+            else
+            {
+                // The unmeasured ranking's rollup, priced from the tool rows themselves the way
+                // the display layer derives it today: rows carrying a server and a measured cost,
+                // largest cost first.
+                Dictionary<string, long> totals = new(StringComparer.Ordinal);
+                foreach (ReadTimeSessionToolSummary tool in tools)
+                {
+                    if (tool.Server is null || tool.TotalSchemaCost <= 0)
+                    {
+                        continue;
+                    }
+
+                    totals[tool.Server] = totals.GetValueOrDefault(tool.Server) + tool.TotalSchemaCost;
+                }
+
+                byServer.AddRange(totals
+                    .OrderByDescending(static kv => kv.Value)
+                    .ThenBy(static kv => kv.Key, StringComparer.Ordinal)
+                    .Select(static kv => new StoredSchemaServerTokens(kv.Key, kv.Value)));
+            }
+
+            long? maxCost = null;
+            long residentCostTotal = 0;
+            int unusedCount = 0;
+            foreach (ReadTimeSessionToolSummary tool in tools)
+            {
+                if (!maxCost.HasValue || tool.TotalSchemaCost > maxCost.Value)
+                {
+                    maxCost = tool.TotalSchemaCost;
+                }
+
+                residentCostTotal += tool.TotalSchemaCost;
+                if (!tool.Invoked)
+                {
+                    unusedCount++;
+                }
+            }
+
+            return new SessionToolFigureSet(
+                Tools: tools,
+                Servers: servers,
+                ToolsOffered: toolsOffered,
+                UnusedRange: unusedRange,
+                ByServer: byServer,
+                MaxCost: maxCost,
+                ResidentCostTotal: residentCostTotal,
+                InvocationCount: toolCallTotal,
+                UnusedCount: unusedCount,
+                DefinitionsSpanId: definitionsSpanId);
+        }
+    }
+
+    /// <inheritdoc />
+    public virtual IReadOnlyList<StoredSkillInvocation> SessionSkillFigures(string sessionKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionSkillFigures));
+            HashSet<string> sessionSpans = ResolveSessionSpanIds(state, sessionKey);
+            TableMetadata meta = GetTableMetadata("record_skill_invocation");
+            List<StoredSkillInvocation> rows = [];
+            foreach (object?[] row in state.GetRows("record_skill_invocation"))
+            {
+                string spanId = GetString(meta, row, "span_id");
+                if (sessionSpans.Contains(spanId))
+                {
+                    rows.Add(new StoredSkillInvocation(spanId, GetString(meta, row, "skill_name")));
+                }
+            }
+
+            return rows;
+        }
+    }
+
+    /// <inheritdoc />
     public virtual IReadOnlyList<StoredRequestPromptPreview> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds)
     {
         ArgumentNullException.ThrowIfNull(requestSpanIds);

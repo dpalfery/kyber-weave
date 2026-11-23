@@ -480,5 +480,25 @@ public sealed class AnalyticsOperationsDetailTests
 
             return inner.SessionRecordsContentFree(sessionKey);
         }
+
+        public SessionToolFigureSet SessionToolFigures(string sessionKey, IModelPricingLookup? pricing = null)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return inner.SessionToolFigures(sessionKey, pricing);
+        }
+
+        public IReadOnlyList<StoredSkillInvocation> SessionSkillFigures(string sessionKey)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return inner.SessionSkillFigures(sessionKey);
+        }
     }
 }
