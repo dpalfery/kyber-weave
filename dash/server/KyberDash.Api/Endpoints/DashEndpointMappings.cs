@@ -29,6 +29,9 @@ public static class DashEndpointMappings
     private const string PagingInvalidMessage =
         "limit and page must be positive whole numbers and offset a non-negative whole number";
 
+    private const string OffsetNotPageStartMessage =
+        "offset must fall on the start of a page (a multiple of limit); these routes page by page and limit";
+
     private static readonly string[] PostAnalyticsOperations =
     [
         "query",
@@ -52,6 +55,7 @@ public static class DashEndpointMappings
         kyber.MapGet("/session/{id}", SessionDetailAsync);
         kyber.MapGet("/session/{id}/summary", SessionSummaryAsync);
         kyber.MapGet("/session/{id}/content", SessionContentAsync);
+        kyber.MapGet("/session/{id}/subagents", SessionSubagentsAsync);
         kyber.MapGet("/session/{id}/turn/{index}", TurnFiguresAsync);
         kyber.MapGet("/session/{id}/turn/{index}/content", TurnContentAsync);
         kyber.MapGet("/span/{id}/attributes", SpanAttributesAsync);
@@ -183,15 +187,63 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
 
-        int? limit = DashHttp.OptionalPositiveInt(request.Query, "limit", out bool invalidLimit);
-        if (invalidLimit)
-            return DashHttp.Error(StatusCodes.Status400BadRequest, "limit must be a positive whole number");
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSessionPageLimit);
+        if (refusal is not null)
+            return refusal;
 
-        string? harness = request.Query.TryGetValue("harness", out Microsoft.Extensions.Primitives.StringValues h) ? h.ToString() : null;
+        string? harness = DashHttp.OptionalQueryString(request.Query, "harness");
+        string? search = DashHttp.OptionalQueryString(request.Query, "q");
         return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, new { sessions = query.GetSessions(limit, harness) }),
+            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetSessionPage(page, limit, harness, search)),
             cancellationToken).ConfigureAwait(false);
     }
+
+    private static async Task<IResult> SessionSubagentsAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(query);
+
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSubagentPageLimit);
+        if (refusal is not null)
+            return refusal;
+
+        return await Task.Run<IResult>(
+            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetSubagentPage(id, page, limit)),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reads the page window the sessions routes share — <c>limit</c> and <c>page</c>, with
+    /// <c>offset</c> accepted only where it starts a page — or the 400 that refuses it.
+    /// </summary>
+    /// <param name="request">Incoming request carrying the query string.</param>
+    /// <param name="defaultLimit">Rows per page when the request names no limit.</param>
+    /// <returns>The clamped limit, the one-based page, and the refusal to answer, or <see langword="null"/> when the window is valid.</returns>
+    private static (int Limit, int Page, IResult? Refusal) ReadPageWindow(HttpRequest request, int defaultLimit)
+    {
+        (int limit, int _, int page) = DashHttp.Pagination(request.Query, defaultLimit, out bool invalid);
+        if (invalid)
+            return (limit, page, DashHttp.Error(StatusCodes.Status400BadRequest, PagingInvalidMessage));
+
+        if (!OffsetStartsThePage(request.Query, limit, page))
+            return (limit, page, DashHttp.Error(StatusCodes.Status400BadRequest, OffsetNotPageStartMessage));
+
+        return (limit, page, null);
+    }
+
+    /// <summary>
+    /// Whether a request's <c>offset</c>, when it carries one, is the first row of the page
+    /// <paramref name="page"/> names. The sessions routes page by <c>page</c> and <c>limit</c>:
+    /// any other offset would be snapped to a page start and answer a window the caller did not
+    /// ask for, so it is refused instead.
+    /// </summary>
+    /// <param name="query">The request's query string.</param>
+    /// <param name="limit">Rows per page, after clamping.</param>
+    /// <param name="page">The one-based page the request resolves to.</param>
+    /// <returns><see langword="true"/> when the request carries no offset or its offset starts that page.</returns>
+    private static bool OffsetStartsThePage(IQueryCollection query, int limit, int page) =>
+        DashHttp.OptionalNonNegativeInt(query, "offset") is not int rawOffset
+        || rawOffset == (long)(page - 1) * limit;
 
     private static async Task<IResult> SessionDetailAsync(string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {

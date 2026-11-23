@@ -270,7 +270,7 @@ public class RelationalIngestTests
         Assert.Equal(JsonValueKind.Null, summary.GetProperty("total_input").ValueKind);
 
         JsonElement listed = Assert.Single(
-            bridge.GetSessions().EnumerateArray(),
+            bridge.GetSessionPage().GetProperty("sessions").EnumerateArray(),
             row => row.GetProperty("session_id").GetString() == sessionId);
         JsonElement declared = listed.GetProperty("total_input");
         Assert.Equal("not_measurable", declared.GetProperty("availability").GetString());

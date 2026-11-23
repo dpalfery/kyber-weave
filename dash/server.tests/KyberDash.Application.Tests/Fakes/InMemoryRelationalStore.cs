@@ -38,6 +38,8 @@ public class InMemoryRelationalStore :
     private readonly Lock syncRoot = new();
     private StoreState state = StoreState.CreateEmpty();
     private readonly List<string> readLog = [];
+    private readonly List<string> sessionProjectionReadLog = [];
+    private readonly List<IReadOnlyList<string>> keyedSessionFigureReads = [];
     private long materializedContentBytes;
 
     /// <summary>
@@ -51,6 +53,40 @@ public class InMemoryRelationalStore :
             lock (syncRoot)
             {
                 return [.. readLog];
+            }
+        }
+    }
+
+    /// <summary>
+    /// Names of the session-projection read methods invoked since the read log was last cleared,
+    /// in call order: <see cref="ListSessionProjections"/>, <see cref="GetSessionProjection"/>,
+    /// and the paged header reads. The read log keeps a path that pages honest about never
+    /// falling back to the unfiltered projection list.
+    /// </summary>
+    public IReadOnlyList<string> SessionProjectionReadLog
+    {
+        get
+        {
+            lock (syncRoot)
+            {
+                return [.. sessionProjectionReadLog];
+            }
+        }
+    }
+
+    /// <summary>
+    /// The session keys of every keyed
+    /// <see cref="SessionListFigures(IReadOnlyCollection{string}, IModelPricingLookup?)"/> read
+    /// since the read log was last cleared, in call order, so a test can assert that a page
+    /// priced exactly its own keys.
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<string>> KeyedSessionFigureReads
+    {
+        get
+        {
+            lock (syncRoot)
+            {
+                return [.. keyedSessionFigureReads];
             }
         }
     }
@@ -71,12 +107,14 @@ public class InMemoryRelationalStore :
         }
     }
 
-    /// <summary>Clears the instrumented read log and the materialized content byte counter.</summary>
+    /// <summary>Clears the instrumented read logs and the materialized content byte counter.</summary>
     public void ClearReadLog()
     {
         lock (syncRoot)
         {
             readLog.Clear();
+            sessionProjectionReadLog.Clear();
+            keyedSessionFigureReads.Clear();
             materializedContentBytes = 0;
         }
     }
@@ -84,6 +122,10 @@ public class InMemoryRelationalStore :
     /// <summary>Records that one <see cref="IRelationalStoreReader"/> method ran. Caller holds <see cref="syncRoot"/>.</summary>
     /// <param name="methodName">Name of the reader method invoked.</param>
     private void NoteRead(string methodName) => readLog.Add(methodName);
+
+    /// <summary>Records that one session-projection read ran. Caller holds <see cref="syncRoot"/>.</summary>
+    /// <param name="methodName">Name of the projection-store method invoked.</param>
+    private void NoteSessionProjectionRead(string methodName) => sessionProjectionReadLog.Add(methodName);
 
     /// <summary>
     /// Finds the stored record with <paramref name="spanId"/> together with its content: the
@@ -958,22 +1000,50 @@ public class InMemoryRelationalStore :
         lock (syncRoot)
         {
             NoteRead(nameof(SessionListFigures));
-            TableMetadata sessionMeta = GetTableMetadata("session");
-            List<SessionListFigure> results = [];
-            foreach (object?[] row in state.GetRows("session"))
-            {
-                if (harnessId is not null && !string.Equals(GetString(sessionMeta, row, "harness_id"), harnessId, StringComparison.Ordinal))
-                {
-                    continue;
-                }
+            return BuildSessionListFigures((_, rowHarness) => harnessId is null || string.Equals(rowHarness, harnessId, StringComparison.Ordinal), pricing);
+        }
+    }
 
-                CollectedSession session = MaterializeSession(state, row);
-                List<CollectedRecord> records = CollectSessionRecordsContentFree(state, session.SessionKey);
-                results.Add(BuildSessionListFigure(state, session, records, pricing));
+    /// <inheritdoc />
+    public IReadOnlyList<SessionListFigure> SessionListFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null)
+    {
+        ArgumentNullException.ThrowIfNull(sessionKeys);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionListFigures));
+            keyedSessionFigureReads.Add([.. sessionKeys]);
+            HashSet<string> keys = new(sessionKeys, StringComparer.Ordinal);
+            return BuildSessionListFigures((rowKey, _) => keys.Contains(rowKey), pricing);
+        }
+    }
+
+    /// <summary>
+    /// Builds the sessions-list figures of the session rows <paramref name="include"/> selects, in
+    /// session-row order, from each row's content-free records. Caller holds
+    /// <see cref="syncRoot"/>.
+    /// </summary>
+    /// <param name="include">Predicate over a session row's key and harness id.</param>
+    /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
+    /// <returns>One figure per selected session row.</returns>
+    private List<SessionListFigure> BuildSessionListFigures(Func<string, string, bool> include, IModelPricingLookup? pricing)
+    {
+        TableMetadata sessionMeta = GetTableMetadata("session");
+        List<SessionListFigure> results = [];
+        foreach (object?[] row in state.GetRows("session"))
+        {
+            string sessionKey = GetString(sessionMeta, row, "session_id");
+            if (!include(sessionKey, GetString(sessionMeta, row, "harness_id")))
+            {
+                continue;
             }
 
-            return results;
+            CollectedSession session = MaterializeSession(state, row);
+            List<CollectedRecord> records = CollectSessionRecordsContentFree(state, sessionKey);
+            results.Add(BuildSessionListFigure(state, session, records, pricing));
         }
+
+        return results;
     }
 
     /// <inheritdoc />
@@ -1065,8 +1135,8 @@ public class InMemoryRelationalStore :
 
         lock (syncRoot)
         {
-            object?[]? row = FindRowByKey(state, "session_projection", [("session_id", sessionId)]);
-            return row is null ? null : MaterializeSessionProjection(state, row);
+            NoteSessionProjectionRead(nameof(GetSessionProjection));
+            return GetSessionProjectionFromState(state, sessionId);
         }
     }
 
@@ -1075,6 +1145,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteSessionProjectionRead(nameof(ListSessionProjections));
             TableMetadata projMeta = GetTableMetadata("session_projection");
             TableMetadata sessionMeta = GetTableMetadata("session");
             List<StoredSessionProjection> results = [];
@@ -1097,6 +1168,258 @@ public class InMemoryRelationalStore :
 
             return results;
         }
+    }
+
+    /// <inheritdoc />
+    public SessionHeaderPageResult SessionHeaderPage(string? harnessId, string? search, int page, int limit)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        lock (syncRoot)
+        {
+            NoteSessionProjectionRead(nameof(SessionHeaderPage));
+            List<StoredSessionHeader> scope = SessionProjectionHeadersInScope(state, harnessId);
+            Dictionary<string, string?> parentById = ParentLinksOf(scope);
+            List<StoredSessionHeader> roots =
+            [
+                .. scope.Where(header => IsSessionRoot(header, parentById) && SessionHeaderMatches(header, search)),
+            ];
+            return PageSessionHeaders(roots, page, limit);
+        }
+    }
+
+    /// <inheritdoc />
+    public SessionHeaderPageResult SessionChildHeaderPage(string parentSessionId, int page, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(parentSessionId);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        lock (syncRoot)
+        {
+            NoteSessionProjectionRead(nameof(SessionChildHeaderPage));
+            return PageSessionHeaders(AttachableChildren(SessionProjectionHeadersInScope(state, null), parentSessionId), page, limit);
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<SessionChildPreviewEntry> SessionChildPreview(IReadOnlyCollection<string> parentSessionIds, int perParent)
+    {
+        ArgumentNullException.ThrowIfNull(parentSessionIds);
+        ArgumentOutOfRangeException.ThrowIfLessThan(perParent, 1);
+
+        lock (syncRoot)
+        {
+            NoteSessionProjectionRead(nameof(SessionChildPreview));
+            List<StoredSessionHeader> scope = SessionProjectionHeadersInScope(state, null);
+            Dictionary<string, string?> parentById = ParentLinksOf(scope);
+            HashSet<string> requested = new(parentSessionIds, StringComparer.Ordinal);
+            Dictionary<string, List<StoredSessionHeader>> childrenByParent = new(StringComparer.Ordinal);
+            foreach (StoredSessionHeader header in scope)
+            {
+                if (header.ParentSessionId is not null
+                    && requested.Contains(header.ParentSessionId)
+                    && !IsSessionRoot(header, parentById))
+                {
+                    if (!childrenByParent.TryGetValue(header.ParentSessionId, out List<StoredSessionHeader>? children))
+                    {
+                        children = [];
+                        childrenByParent[header.ParentSessionId] = children;
+                    }
+
+                    children.Add(header);
+                }
+            }
+
+            // The scope is ordered newest start first and then by session id, so walking it
+            // answers the previews in that order.
+            List<SessionChildPreviewEntry> entries = [];
+            foreach (StoredSessionHeader parent in scope)
+            {
+                if (!childrenByParent.TryGetValue(parent.SessionId, out List<StoredSessionHeader>? attachable))
+                {
+                    continue;
+                }
+
+                entries.Add(new SessionChildPreviewEntry(
+                    parent.SessionId,
+                    attachable.Count,
+                    [.. attachable
+                        .OrderBy(static child => child.StartedAtUtc, StringComparer.Ordinal)
+                        .ThenBy(static child => child.SessionId, StringComparer.Ordinal)
+                        .Select(static child => child.SessionId)
+                        .Take(perParent)]));
+            }
+
+            return entries;
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<StoredSessionHeader> SessionHeadersByKeys(IReadOnlyCollection<string> sessionIds)
+    {
+        ArgumentNullException.ThrowIfNull(sessionIds);
+
+        lock (syncRoot)
+        {
+            NoteSessionProjectionRead(nameof(SessionHeadersByKeys));
+            HashSet<string> keys = new(sessionIds, StringComparer.Ordinal);
+            return [.. SessionProjectionHeadersInScope(state, null).Where(header => keys.Contains(header.SessionId))];
+        }
+    }
+
+    /// <summary>
+    /// Reads the projection headers of every session in <paramref name="harnessId"/>'s scope —
+    /// every projected session, or those whose session row carries that harness — newest start
+    /// first and then by session id, reading no child collection. Caller holds
+    /// <see cref="syncRoot"/>.
+    /// </summary>
+    /// <param name="currentState">Store state to read.</param>
+    /// <param name="harnessId">Optional harness filter over the session rows.</param>
+    /// <returns>The scoped projection headers, in page order.</returns>
+    private static List<StoredSessionHeader> SessionProjectionHeadersInScope(StoreState currentState, string? harnessId)
+    {
+        TableMetadata projMeta = GetTableMetadata("session_projection");
+        TableMetadata sessionMeta = GetTableMetadata("session");
+        List<StoredSessionHeader> headers = [];
+        foreach (object?[] row in currentState.GetRows("session_projection"))
+        {
+            if (harnessId is not null)
+            {
+                object?[]? sessionRow = FindRowByKey(currentState, "session", [("session_id", GetString(projMeta, row, "session_id"))]);
+                if (sessionRow is null || !string.Equals(GetString(sessionMeta, sessionRow, "harness_id"), harnessId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+            }
+
+            headers.Add(MaterializeSessionHeader(currentState, row));
+        }
+
+        return [.. headers
+            .OrderByDescending(static header => header.StartedAtUtc, StringComparer.Ordinal)
+            .ThenBy(static header => header.SessionId, StringComparer.Ordinal)];
+    }
+
+    /// <summary>
+    /// Reads one projection's header — its columns and single-row satellites, and no child
+    /// collection.
+    /// </summary>
+    /// <param name="currentState">Store state to read.</param>
+    /// <param name="row">The <c>session_projection</c> row.</param>
+    /// <returns>The projection header.</returns>
+    private static StoredSessionHeader MaterializeSessionHeader(StoreState currentState, object?[] row)
+    {
+        TableMetadata meta = GetTableMetadata("session_projection");
+        string sessionId = GetString(meta, row, "session_id");
+        return new StoredSessionHeader(
+            sessionId,
+            GetString(meta, row, "label"),
+            GetInt64(meta, row, "is_subagent") == 1L,
+            (int)GetInt64(meta, row, "span_count"),
+            GetString(meta, row, "started_at_utc"),
+            GetString(meta, row, "ended_at_utc"),
+            ReadOptionalSingleString(currentState, "session_projection_parent", "session_id", sessionId, "parent_session_id"),
+            ReadOptionalSingleString(currentState, "session_projection_agent", "session_id", sessionId, "agent_name"),
+            FindRowByKey(currentState, "session_projection_included_in_parent", [("session_id", sessionId)]) is not null,
+            ReadOptionalSingleString(currentState, "session_context_unmeasurable", "session_id", sessionId, "reason"),
+            ReadOptionalSingleString(currentState, "session_schema_unmeasurable", "session_id", sessionId, "reason"));
+    }
+
+    /// <summary>Maps every session in a scope to its parent link. A parent that is not in the scope stays named, and the root rule treats it as absent.</summary>
+    /// <param name="scope">The scoped projection headers.</param>
+    /// <returns>Each scoped session id and its parent session id, or <see langword="null"/>.</returns>
+    private static Dictionary<string, string?> ParentLinksOf(IReadOnlyList<StoredSessionHeader> scope) =>
+        scope.ToDictionary(static header => header.SessionId, static header => header.ParentSessionId, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The root rule: a session is a root unless its parent is a projected session in the scope
+    /// and attaching it would form no cycle. Attaching would complete a cycle when the parent's
+    /// own chain leads back to this session.
+    /// </summary>
+    /// <param name="header">The session to classify.</param>
+    /// <param name="parentById">Each session in the scope and its parent link.</param>
+    /// <returns><see langword="true"/> when the session is a root.</returns>
+    private static bool IsSessionRoot(StoredSessionHeader header, IReadOnlyDictionary<string, string?> parentById)
+    {
+        if (string.IsNullOrEmpty(header.ParentSessionId) || !parentById.ContainsKey(header.ParentSessionId))
+        {
+            return true;
+        }
+
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        for (string? cursor = header.ParentSessionId; cursor is not null && seen.Add(cursor); cursor = parentById.TryGetValue(cursor, out string? parent) ? parent : null)
+        {
+            if (string.Equals(cursor, header.SessionId, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The sessions in a scope that attach to <paramref name="parentSessionId"/> — every projected
+    /// session's children that are not roots — oldest start first and then by session id.
+    /// </summary>
+    /// <param name="scope">The scoped projection headers.</param>
+    /// <param name="parentSessionId">The parent session.</param>
+    /// <returns>The parent's attachable children.</returns>
+    private static List<StoredSessionHeader> AttachableChildren(List<StoredSessionHeader> scope, string parentSessionId)
+    {
+        Dictionary<string, string?> parentById = ParentLinksOf(scope);
+        return
+        [
+            .. scope
+                .Where(header => string.Equals(header.ParentSessionId, parentSessionId, StringComparison.Ordinal) && !IsSessionRoot(header, parentById))
+                .OrderBy(static header => header.StartedAtUtc, StringComparer.Ordinal)
+                .ThenBy(static header => header.SessionId, StringComparer.Ordinal),
+        ];
+    }
+
+    /// <summary>
+    /// Whether a session's label or session id contains the search text: ASCII letters match
+    /// either case and every other character matches itself, which is what the adapter's
+    /// <c>LIKE</c> answers.
+    /// </summary>
+    /// <param name="header">The session to match.</param>
+    /// <param name="search">Search text, or <see langword="null"/> for no filter.</param>
+    /// <returns><see langword="true"/> when the session matches.</returns>
+    private static bool SessionHeaderMatches(StoredSessionHeader header, string? search) =>
+        search is null || ContainsAsciiIgnoreCase(header.Label, search) || ContainsAsciiIgnoreCase(header.SessionId, search);
+
+    private static bool ContainsAsciiIgnoreCase(string text, string search)
+    {
+        for (int start = 0; start + search.Length <= text.Length; start++)
+        {
+            int matched = 0;
+            while (matched < search.Length && FoldAscii(text[start + matched]) == FoldAscii(search[matched]))
+            {
+                matched++;
+            }
+
+            if (matched == search.Length)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static char FoldAscii(char value) => value is >= 'A' and <= 'Z' ? (char)(value + ('a' - 'A')) : value;
+
+    /// <summary>Cuts a page from an ordered header list and reports the list's size.</summary>
+    /// <param name="ordered">Headers in page order.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on a page.</param>
+    /// <returns>The page's headers and the size of <paramref name="ordered"/>.</returns>
+    private static SessionHeaderPageResult PageSessionHeaders(List<StoredSessionHeader> ordered, int page, int limit)
+    {
+        long skip = ((long)page - 1) * limit;
+        return new SessionHeaderPageResult([.. ordered.Skip(skip >= ordered.Count ? ordered.Count : (int)skip).Take(limit)], ordered.Count);
     }
 
     /// <inheritdoc />

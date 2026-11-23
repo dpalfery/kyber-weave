@@ -67,7 +67,44 @@ public class MinimalApiEndpointTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("sessions").ValueKind);
-        host.Builder.Query.Verify(q => q.GetSessions(10, "claude-code"), Times.Once);
+        Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("data").ValueKind);
+        Assert.Equal(0, body.RootElement.GetProperty("total").GetInt32());
+        host.Builder.Query.Verify(q => q.GetSessionPage(1, 10, "claude-code", null), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("/api/kyber/sessions?page=abc")]
+    [InlineData("/api/kyber/sessions?page=0")]
+    [InlineData("/api/kyber/sessions?limit=0")]
+    [InlineData("/api/kyber/sessions?limit=-3")]
+    [InlineData("/api/kyber/sessions?offset=-5")]
+    public async Task MalformedPagingIs400(string requestPath)
+    {
+        await using Host host = await Host.StartAsync();
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri(requestPath, UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Contains("positive whole number", body.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
+        host.Builder.Query.Verify(
+            q => q.GetSessionPage(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string?>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task SessionSubagentsPageThroughTheQueryService()
+    {
+        await using Host host = await Host.StartAsync();
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/session/sess-1/subagents", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("subagents").ValueKind);
+        Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("data").ValueKind);
+        Assert.Equal(0, body.RootElement.GetProperty("total").GetInt32());
+        host.Builder.Query.Verify(q => q.GetSubagentPage("sess-1", 1, 25), Times.Once);
     }
 
     [Fact]

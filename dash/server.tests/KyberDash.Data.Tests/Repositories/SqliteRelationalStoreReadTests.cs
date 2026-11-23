@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -523,6 +524,317 @@ public class SqliteRelationalStoreReadTests : IDisposable
     }
 
     /// <summary>
+    /// The SQL root rule keeps today's tree semantics: a session is a root unless its parent is a
+    /// projected session in the same harness-filtered set and attaching it would not form a
+    /// cycle. An orphaned child (its parent has no projection), a child whose parent sits
+    /// outside the harness filter, and a cycle whose members land on different pages all keep
+    /// their root membership, page by page, on both stores.
+    /// </summary>
+    [Fact]
+    public void SessionHeaderPageMatchesTheTreeRule()
+    {
+        string dbPath = Path.Combine(directory.Path, "header-page-tree", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+
+        WriteAttributionTurn(sqlite, memory, "span-orphan", "sess-orphan", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-pc", "sess-pc", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-px", "sess-px", "codex");
+        WriteAttributionTurn(sqlite, memory, "span-cycle-a", "sess-cycle-a", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-cycle-b", "sess-cycle-b", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-cycle-c", "sess-cycle-c", "claude-code");
+
+        WriteProjection(sqlite, memory, "sess-orphan", "orphan child", parentSessionId: "sess-ghost", isSubagent: true, minute: 10);
+        WriteProjection(sqlite, memory, "sess-pc", "child of a codex parent", parentSessionId: "sess-px", isSubagent: true, minute: 20);
+        WriteProjection(sqlite, memory, "sess-px", "codex root", parentSessionId: null, isSubagent: false, minute: 30);
+        WriteProjection(sqlite, memory, "sess-cycle-a", "cycle a", parentSessionId: "sess-cycle-b", isSubagent: false, minute: 40);
+        WriteProjection(sqlite, memory, "sess-cycle-b", "cycle b", parentSessionId: "sess-cycle-c", isSubagent: false, minute: 50);
+        WriteProjection(sqlite, memory, "sess-cycle-c", "cycle c", parentSessionId: "sess-cycle-a", isSubagent: false, minute: 60);
+
+        // Unfiltered, limit 2: the cycle members land on different pages and every one stays a
+        // root; the child of the codex parent folds under it and leaves the root set.
+        AssertHeaderPage(sqlite, memory, null, null, 1, 2, ["sess-cycle-c", "sess-cycle-b"], 5);
+        AssertHeaderPage(sqlite, memory, null, null, 2, 2, ["sess-cycle-a", "sess-px"], 5);
+        AssertHeaderPage(sqlite, memory, null, null, 3, 2, ["sess-orphan"], 5);
+        AssertHeaderPage(sqlite, memory, null, null, 4, 2, [], 5);
+
+        // The harness filter scopes the root rule: the codex parent leaves the set, so its
+        // claude-code child becomes a root, while the in-filter cycle stays a cycle.
+        AssertHeaderPage(sqlite, memory, "claude-code", null, 1, 2, ["sess-cycle-c", "sess-cycle-b"], 5);
+        AssertHeaderPage(sqlite, memory, "claude-code", null, 2, 2, ["sess-cycle-a", "sess-pc"], 5);
+        AssertHeaderPage(sqlite, memory, "claude-code", null, 3, 2, ["sess-orphan"], 5);
+        AssertHeaderPage(sqlite, memory, "codex", null, 1, 10, ["sess-px"], 1);
+
+        // The subagent preview and the child page answer the attachable children of a parent —
+        // never a cycle member that would loop back — and skip parents with no children.
+        IReadOnlyList<string> parents = ["sess-px", "sess-cycle-a", "sess-orphan", "sess-missing"];
+        Assert.Equivalent(memory.SessionChildPreview(parents, 25), sqlite.SessionChildPreview(parents, 25), strict: true);
+        SessionChildPreviewEntry preview = Assert.Single(sqlite.SessionChildPreview(parents, 25));
+        Assert.Equal("sess-px", preview.ParentSessionId);
+        Assert.Equal(1, preview.TotalChildren);
+        Assert.Equal(["sess-pc"], preview.ChildSessionIds);
+
+        SessionHeaderPageResult children = sqlite.SessionChildHeaderPage("sess-px", 1, 25);
+        Assert.Equal(["sess-pc"], [.. children.Items.Select(static header => header.SessionId)]);
+        Assert.Equal(1, children.Total);
+        Assert.Equivalent(memory.SessionChildHeaderPage("sess-px", 1, 25), children, strict: true);
+        Assert.Empty(sqlite.SessionChildHeaderPage("sess-cycle-a", 1, 25).Items);
+        Assert.Equal(0, sqlite.SessionChildHeaderPage("sess-cycle-a", 1, 25).Total);
+    }
+
+    /// <summary>
+    /// The header-page search matches its text literally on both stores: <c>%</c>, <c>_</c>, a
+    /// backslash, and a quote in the search text are data, never wildcard or escape syntax, and
+    /// the search covers the label and the session id.
+    /// </summary>
+    [Fact]
+    public void SessionHeaderPageSearchMatchesLiteralText()
+    {
+        string dbPath = Path.Combine(directory.Path, "header-page-search", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+
+        WriteAttributionTurn(sqlite, memory, "span-pct", "sess-pct", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-trap", "sess-trap", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-score", "sess-score", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-back", "sess-back", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-quote", "sess-quote", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-plain", "sess-plain", "claude-code");
+
+        WriteProjection(sqlite, memory, "sess-pct", "rate 100% done", null, false, 10);
+        WriteProjection(sqlite, memory, "sess-trap", "underXscore trap", null, false, 20);
+        WriteProjection(sqlite, memory, "sess-score", "under_score fix", null, false, 30);
+        WriteProjection(sqlite, memory, "sess-back", "log C:\\temp path", null, false, 40);
+        WriteProjection(sqlite, memory, "sess-quote", "it's quoted", null, false, 50);
+        WriteProjection(sqlite, memory, "sess-plain", "ordinary work", null, false, 60);
+
+        AssertHeaderPage(sqlite, memory, null, "100% d", 1, 10, ["sess-pct"], 1);
+        // The unescaped wildcard reading would also admit sess-trap; the literal reading does not.
+        AssertHeaderPage(sqlite, memory, null, "under_score", 1, 10, ["sess-score"], 1);
+        AssertHeaderPage(sqlite, memory, null, "C:\\te", 1, 10, ["sess-back"], 1);
+        AssertHeaderPage(sqlite, memory, null, "t's qu", 1, 10, ["sess-quote"], 1);
+        AssertHeaderPage(sqlite, memory, null, "sess-pl", 1, 10, ["sess-plain"], 1);
+        AssertHeaderPage(sqlite, memory, null, "nothing matches", 1, 10, [], 0);
+    }
+
+    /// <summary>
+    /// The sessions page path issues only scoped statements over the recording seam. The header
+    /// page query is the one statement that carries no keys — it is the page query. Every other
+    /// statement is bound to the whole key list of its pass: the subagent preview to the page's
+    /// roots, the keyed header fetch to the preview's children, and the figures pass to every key
+    /// on the page. The preview is exactly one statement for every root on the page, never one
+    /// query per root, and the figures pass issues as many statements for five keys as for one.
+    /// </summary>
+    [Fact]
+    public void TheSessionsPageIssuesNoUnkeyedStatement()
+    {
+        string dbPath = Path.Combine(directory.Path, "header-page-keyed", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+
+        WriteAttributionTurn(sqlite, memory, "span-r1", "sess-r1", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-r2", "sess-r2", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-r3", "sess-r3", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-r2-a", "sess-r2-a", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-r2-b", "sess-r2-b", "claude-code");
+
+        WriteProjection(sqlite, memory, "sess-r1", "root one", null, false, 10);
+        WriteProjection(sqlite, memory, "sess-r2", "root two", null, false, 20);
+        WriteProjection(sqlite, memory, "sess-r3", "root three", null, false, 30);
+        WriteProjection(sqlite, memory, "sess-r2-a", "child a", "sess-r2", true, 21);
+        WriteProjection(sqlite, memory, "sess-r2-b", "child b", "sess-r2", true, 22);
+
+        (SessionHeaderPageResult Page, string[] Scripts) headerRead = Recorded(sqlite, () => sqlite.SessionHeaderPage(null, null, 1, 100));
+        string[] rootIds = [.. headerRead.Page.Items.Select(static header => header.SessionId)];
+        (IReadOnlyList<SessionChildPreviewEntry> Preview, string[] Scripts) previewRead = Recorded(sqlite, () => sqlite.SessionChildPreview(rootIds, 25));
+        string[] childIds = [.. previewRead.Preview.SelectMany(static entry => entry.ChildSessionIds)];
+        (IReadOnlyList<StoredSessionHeader> Headers, string[] Scripts) childHeaderRead = Recorded(sqlite, () => sqlite.SessionHeadersByKeys(childIds));
+        string[] pageKeys = [.. rootIds.Concat(childIds)];
+        (IReadOnlyList<SessionListFigure> Figures, string[] Scripts) figureRead = Recorded(sqlite, () => sqlite.SessionListFigures(pageKeys));
+
+        Assert.Equal(["sess-r3", "sess-r2", "sess-r1"], rootIds.ToList());
+        Assert.Equal(["sess-r2-a", "sess-r2-b"], childIds.ToList());
+        Assert.Equal(2, childHeaderRead.Headers.Count);
+        Assert.Equal(5, figureRead.Figures.Count);
+
+        // The page query is one statement: the root rule and its window, with no key to carry.
+        string pageScript = Assert.Single(headerRead.Scripts);
+        Assert.Contains("WITH RECURSIVE scope", pageScript, StringComparison.Ordinal);
+
+        // One window-function statement covers every root's preview — no per-root child query —
+        // and it names the roots only: the children are found by the join, not asked for.
+        string previewScript = Assert.Single(previewRead.Scripts);
+        Assert.Contains("row_number() OVER", previewScript, StringComparison.Ordinal);
+        Assert.All(rootIds, id => Assert.Contains(KeyLiteral(id), previewScript, StringComparison.Ordinal));
+        Assert.All(childIds, id => Assert.DoesNotContain(KeyLiteral(id), previewScript, StringComparison.Ordinal));
+
+        // The keyed header fetch names the preview's children and nothing else.
+        string childHeaderScript = Assert.Single(childHeaderRead.Scripts);
+        Assert.All(childIds, id => Assert.Contains(KeyLiteral(id), childHeaderScript, StringComparison.Ordinal));
+        Assert.All(rootIds, id => Assert.DoesNotContain(KeyLiteral(id), childHeaderScript, StringComparison.Ordinal));
+
+        // Every statement of the figures pass is bound to the whole page, and the pass issues the
+        // same number of statements however many keys it prices.
+        Assert.NotEmpty(figureRead.Scripts);
+        Assert.All(
+            figureRead.Scripts,
+            sql => Assert.All(pageKeys, id => Assert.Contains(KeyLiteral(id), sql, StringComparison.Ordinal)));
+        (IReadOnlyList<SessionListFigure> _, string[] SingleKeyScripts) singleKeyRead = Recorded(sqlite, () => sqlite.SessionListFigures(["sess-r1"]));
+        Assert.Equal(singleKeyRead.SingleKeyScripts.Length, figureRead.Scripts.Length);
+
+        string[] scripts = [.. headerRead.Scripts, .. previewRead.Scripts, .. childHeaderRead.Scripts, .. figureRead.Scripts];
+        Assert.NotEmpty(scripts);
+        Assert.All(scripts, static sql => Assert.Contains(".mode tabs", sql, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The child reads follow the root rule under a cycle: a session whose parent sits on a
+    /// cycle is not on that cycle itself, so it attaches to its parent while every cycle member
+    /// stays a root with no subagents of its own.
+    /// </summary>
+    [Fact]
+    public void AChildOfACycleMemberAttachesWhileTheCycleMembersStayRoots()
+    {
+        string dbPath = Path.Combine(directory.Path, "header-page-cycle-child", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+
+        WriteAttributionTurn(sqlite, memory, "span-cycle-x", "sess-cycle-x", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-cycle-y", "sess-cycle-y", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-under-x", "sess-under-x", "claude-code");
+        WriteAttributionTurn(sqlite, memory, "span-under-under", "sess-under-under", "claude-code");
+
+        WriteProjection(sqlite, memory, "sess-cycle-x", "cycle x", "sess-cycle-y", false, 10);
+        WriteProjection(sqlite, memory, "sess-cycle-y", "cycle y", "sess-cycle-x", false, 20);
+        WriteProjection(sqlite, memory, "sess-under-x", "child of cycle x", "sess-cycle-x", true, 30);
+        WriteProjection(sqlite, memory, "sess-under-under", "grandchild", "sess-under-x", true, 40);
+
+        // Both cycle members are roots; the child under the cycle, and the grandchild under it,
+        // attach. The second page is past the end and still reports both roots.
+        AssertHeaderPage(sqlite, memory, null, null, 1, 10, ["sess-cycle-y", "sess-cycle-x"], 2);
+        AssertHeaderPage(sqlite, memory, null, null, 2, 10, [], 2);
+
+        // The preview answers in root-page order — the newest parent first — with one child under
+        // the cycle member and one under that child.
+        string[] parents = ["sess-cycle-x", "sess-cycle-y", "sess-under-x"];
+        IReadOnlyList<SessionChildPreviewEntry> previews = sqlite.SessionChildPreview(parents, 25);
+        Assert.Equivalent(memory.SessionChildPreview(parents, 25), previews, strict: true);
+        Assert.Equal(["sess-under-x", "sess-cycle-x"], previews.Select(static entry => entry.ParentSessionId).ToList());
+        Assert.All(previews, static entry => Assert.Equal(1, entry.TotalChildren));
+        Assert.Equal(["sess-under-under"], previews[0].ChildSessionIds);
+        Assert.Equal(["sess-under-x"], previews[1].ChildSessionIds);
+
+        SessionHeaderPageResult children = sqlite.SessionChildHeaderPage("sess-cycle-x", 1, 25);
+        Assert.Equivalent(memory.SessionChildHeaderPage("sess-cycle-x", 1, 25), children, strict: true);
+        Assert.Equal(1, children.Total);
+        Assert.Equal("sess-under-x", Assert.Single(children.Items).SessionId);
+    }
+
+    /// <summary>
+    /// The paged header reads refuse a page or a limit below 1 on both stores, instead of
+    /// answering a window the caller did not ask for.
+    /// </summary>
+    [Theory]
+    [InlineData(0, 25)]
+    [InlineData(1, 0)]
+    [InlineData(-1, 25)]
+    public void PagedHeaderReadsRefuseAPageOrLimitBelowOne(int page, int limit)
+    {
+        string dbPath = Path.Combine(directory.Path, "header-page-arguments", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => sqlite.SessionHeaderPage(null, null, page, limit));
+        Assert.Throws<ArgumentOutOfRangeException>(() => memory.SessionHeaderPage(null, null, page, limit));
+        Assert.Throws<ArgumentOutOfRangeException>(() => sqlite.SessionChildHeaderPage("sess-missing", page, limit));
+        Assert.Throws<ArgumentOutOfRangeException>(() => memory.SessionChildHeaderPage("sess-missing", page, limit));
+    }
+
+    /// <summary>Runs one read over the recording seam and answers its result with the scripts it issued.</summary>
+    private static (T Result, string[] Scripts) Recorded<T>(SeamSqliteRelationalStore sqlite, Func<T> read)
+    {
+        sqlite.ClearRecordedSql();
+        return (read(), [.. sqlite.ExecutedSql]);
+    }
+
+    /// <summary>The injection-proof literal the data layer binds a text key as.</summary>
+    private static string KeyLiteral(string key) => "CAST(X'" + ToHex(key) + "' AS TEXT)";
+
+    /// <summary>
+    /// The keyed figures read answers exactly the unkeyed sessions-list read for the same keys on
+    /// the named parity seeds — token-less, multi-harness, empty, and content-bearing — so paging
+    /// changes where the figures are read, never what they say.
+    /// </summary>
+    [Fact]
+    public void KeyedSessionListFiguresMatchTheUnkeyedReadOnTheNamedSeeds()
+    {
+        string dbPath = Path.Combine(directory.Path, "keyed-figures", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+        SeedPopulatedStores(sqlite, memory);
+
+        IReadOnlyList<SessionListFigure> unkeyed = sqlite.SessionListFigures();
+        string[] keys = [.. unkeyed.Select(static figure => figure.SessionKey)];
+
+        Assert.Equivalent(unkeyed, sqlite.SessionListFigures(keys), strict: true);
+        Assert.Equivalent(memory.SessionListFigures(keys), sqlite.SessionListFigures(keys), strict: true);
+        Assert.Empty(sqlite.SessionListFigures([]));
+
+        // A subset answers that subset, so a page prices only its own keys.
+        string[] pageKeys = [.. keys.Take(3)];
+        HashSet<string> priced = [.. sqlite.SessionListFigures(pageKeys).Select(static figure => figure.SessionKey)];
+        Assert.Equal(new HashSet<string>(pageKeys, StringComparer.Ordinal), priced);
+    }
+
+    /// <summary>Writes one projection row with a controlled tree shape onto both stores.</summary>
+    private static void WriteProjection(
+        SqliteRelationalStore sqlite,
+        InMemoryRelationalStore memory,
+        string sessionKey,
+        string label,
+        string? parentSessionId,
+        bool isSubagent,
+        int minute)
+    {
+        StoredSessionProjection projection = new(
+            SessionId: sessionKey,
+            Label: label,
+            IsSubagent: isSubagent,
+            SpanCount: 1,
+            StartedAtUtc: ProjectionMinute(minute),
+            EndedAtUtc: ProjectionMinute(minute + 1),
+            ParentSessionId: parentSessionId,
+            AgentName: isSubagent ? "worker" : null,
+            IncludedInParent: false,
+            RequestSpanIds: [],
+            Turns: []);
+        sqlite.ReplaceSessionProjection(projection);
+        memory.ReplaceSessionProjection(projection);
+    }
+
+    private static string ProjectionMinute(int minute) =>
+        new DateTimeOffset(2026, 11, 19, 10, 0, 0, TimeSpan.Zero)
+            .AddMinutes(minute)
+            .ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+
+    /// <summary>Asserts both stores answer the same header page, ids in order, with the total.</summary>
+    private static void AssertHeaderPage(
+        SqliteRelationalStore sqlite,
+        InMemoryRelationalStore memory,
+        string? harnessId,
+        string? search,
+        int page,
+        int limit,
+        string[] expectedIds,
+        int total)
+    {
+        SessionHeaderPageResult sqlitePage = sqlite.SessionHeaderPage(harnessId, search, page, limit);
+        Assert.Equal(expectedIds, sqlitePage.Items.Select(static header => header.SessionId));
+        Assert.Equal(total, sqlitePage.Total);
+        Assert.Equivalent(memory.SessionHeaderPage(harnessId, search, page, limit), sqlitePage, strict: true);
+    }
+
+    /// <summary>
     /// Verifies <see cref="SqliteRelationalStore"/> reader parsing fails closed with
     /// <see cref="InvalidOperationException"/> when SQLite returns invalid hex, wrong column
     /// counts, unrecognized enum wire tokens, or non-numeric scalar columns.
@@ -595,6 +907,7 @@ public class SqliteRelationalStoreReadTests : IDisposable
         Assert.Equivalent(memoryReader.Sessions(), sqliteReader.Sessions(), strict: true);
         Assert.Equivalent(memoryReader.SessionModelUsages(), sqliteReader.SessionModelUsages(), strict: true);
         Assert.Equivalent(memoryReader.SessionListFigures(), sqliteReader.SessionListFigures(), strict: true);
+        AssertHeaderReadParity(memoryReader, sqliteReader, sessionKeys, harnessIds);
 
         foreach (string? harnessId in harnessIds)
         {
@@ -679,6 +992,59 @@ public class SqliteRelationalStoreReadTests : IDisposable
         Assert.Equivalent(memoryProj.GetExecution("exec-missing"), sqliteProj.GetExecution("exec-missing"), strict: true);
         Assert.Equivalent(memoryProj.GetPrediction("pred-1"), sqliteProj.GetPrediction("pred-1"), strict: true);
         Assert.Equivalent(memoryProj.GetPrediction("pred-missing"), sqliteProj.GetPrediction("pred-missing"), strict: true);
+    }
+
+    /// <summary>
+    /// Parity for the paged header reads, each on both stores: the header page across pages,
+    /// harness scopes and a search; the keyed header fetch; the child page; the subagent
+    /// preview; and the keyed figures read.
+    /// </summary>
+    private static void AssertHeaderReadParity(
+        IRelationalStoreReader memoryReader,
+        IRelationalStoreReader sqliteReader,
+        IReadOnlyList<string> sessionKeys,
+        IReadOnlyList<string?> harnessIds)
+    {
+        IProjectionStore memoryProj = (IProjectionStore)memoryReader;
+        IProjectionStore sqliteProj = (IProjectionStore)sqliteReader;
+
+        string?[] scopes = [null, .. harnessIds];
+        int[] pages = [1, 2];
+        foreach (string? harnessId in scopes)
+        {
+            foreach (int page in pages)
+            {
+                Assert.Equivalent(
+                    memoryProj.SessionHeaderPage(harnessId, null, page, 3),
+                    sqliteProj.SessionHeaderPage(harnessId, null, page, 3),
+                    strict: true);
+                Assert.Equivalent(
+                    memoryProj.SessionHeaderPage(harnessId, "sess", page, 3),
+                    sqliteProj.SessionHeaderPage(harnessId, "sess", page, 3),
+                    strict: true);
+            }
+        }
+
+        Assert.Equivalent(memoryProj.SessionHeadersByKeys(sessionKeys), sqliteProj.SessionHeadersByKeys(sessionKeys), strict: true);
+        Assert.Empty(sqliteProj.SessionHeadersByKeys([]));
+
+        foreach (string sessionKey in sessionKeys)
+        {
+            Assert.Equivalent(
+                memoryProj.SessionChildHeaderPage(sessionKey, 1, 25),
+                sqliteProj.SessionChildHeaderPage(sessionKey, 1, 25),
+                strict: true);
+        }
+
+        IReadOnlyList<string> previewParents = [.. sessionKeys.Take(3), "sess-missing"];
+        Assert.Equivalent(
+            memoryProj.SessionChildPreview(previewParents, 25),
+            sqliteProj.SessionChildPreview(previewParents, 25),
+            strict: true);
+
+        IReadOnlyList<SessionListFigure> memoryFigures = memoryReader.SessionListFigures();
+        string[] keys = [.. memoryFigures.Select(static figure => figure.SessionKey)];
+        Assert.Equivalent(memoryFigures, sqliteReader.SessionListFigures(keys), strict: true);
     }
 
     private static void AssertPairFilterParity(
@@ -1451,26 +1817,6 @@ public class SqliteRelationalStoreReadTests : IDisposable
     }
 
     private static string ToHex(string text) => Convert.ToHexString(System.Text.Encoding.UTF8.GetBytes(text));
-
-    private class SeamSqliteRelationalStore : SqliteRelationalStore
-    {
-        private readonly List<string> executedSql = [];
-
-        public SeamSqliteRelationalStore(string databasePath, ICircuitBreaker circuitBreaker)
-            : base(databasePath, circuitBreaker)
-        {
-        }
-
-        public IReadOnlyList<string> ExecutedSql => executedSql;
-
-        public void ClearRecordedSql() => executedSql.Clear();
-
-        protected override string ExecuteSqliteCore(string sql)
-        {
-            executedSql.Add(sql);
-            return base.ExecuteSqliteCore(sql);
-        }
-    }
 
     private class ScriptedSqliteRelationalStore : SqliteRelationalStore
     {

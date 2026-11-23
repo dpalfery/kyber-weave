@@ -30,7 +30,12 @@ public class DashboardQueryService : IDashboardQueryService
     public void EnsureProjected() => bridge.EnsureProjected();
 
     /// <inheritdoc />
-    public JsonElement GetSessions(int? limit = null, string? harness = null) => bridge.GetSessions(limit, harness);
+    public JsonElement GetSessionPage(int page = 1, int limit = KyberBridgeEngine.DefaultSessionPageLimit, string? harness = null, string? search = null) =>
+        bridge.GetSessionPage(page, limit, harness, search);
+
+    /// <inheritdoc />
+    public JsonElement GetSubagentPage(string parentId, int page = 1, int limit = KyberBridgeEngine.DefaultSubagentPageLimit) =>
+        bridge.GetSubagentPage(parentId, page, limit);
 
     /// <inheritdoc />
     public JsonElement? GetSessionDetail(string sessionId) => bridge.GetSessionDetail(sessionId);

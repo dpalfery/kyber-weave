@@ -657,6 +657,24 @@ public interface IRelationalStoreReader
     IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null);
 
     /// <summary>
+    /// Reads the sessions-list figures for exactly <paramref name="sessionKeys"/>: the figures
+    /// <see cref="SessionListFigures(string?, IModelPricingLookup?)"/> answers for those sessions,
+    /// reading no content column (<c>DD-13</c>).
+    /// </summary>
+    /// <param name="sessionKeys">
+    /// Canonical session keys to price. Order and duplicates are ignored; a key with no session row
+    /// answers no figure.
+    /// </param>
+    /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
+    /// <returns>One figure per named session that has a session row, in session-row order.</returns>
+    /// <remarks>
+    /// A paged list prices only the keys on its page. Every statement this read issues filters by
+    /// those keys — it never lists the store's sessions or projections — so its cost follows the
+    /// page, not the store.
+    /// </remarks>
+    IReadOnlyList<SessionListFigure> SessionListFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null);
+
+    /// <summary>
     /// Reads the bounded summary figures for one session over content-free record scalars only
     /// (<c>DD-13</c>).
     /// </summary>

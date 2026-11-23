@@ -160,7 +160,7 @@ public class ApplicationParityTests
         Assert.Single(rollups);
         Assert.Contains(rollups, static r => r.Harness == "copilot" && r.SampleCount == 1);
 
-        Assert.Contains("sess-copilot", query.GetSessions().GetRawText(), StringComparison.Ordinal);
+        Assert.Contains("sess-copilot", query.GetSessionPage().GetRawText(), StringComparison.Ordinal);
         Assert.NotNull(query.GetSessionSummary("sess-copilot"));
         Assert.NotNull(query.GetSessionDetail("sess-copilot"));
         Assert.Null(query.GetSessionDetail("missing"));

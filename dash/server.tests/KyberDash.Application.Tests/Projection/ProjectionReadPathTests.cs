@@ -380,19 +380,23 @@ public class ProjectionReadPathTests
             new CanonSessionProjectorEngine(reader, store, store, pricing),
             new CanonRollupsEngine(reader, store, pricing));
 
-        JsonElement firstList = bridge.GetSessions();
-        List<string> answeredSessions = [.. firstList.EnumerateArray().Select(static node => node.GetProperty("sessionId").GetString() ?? string.Empty)];
+        JsonElement firstPage = bridge.GetSessionPage().GetProperty("sessions");
+        List<string> answeredSessions = [.. firstPage.EnumerateArray().Select(static node => node.GetProperty("sessionId").GetString() ?? string.Empty)];
         Assert.Equal(["sess-a"], answeredSessions);
+        string degradedRow = Assert.Single(firstPage.EnumerateArray()).GetRawText();
 
         JsonElement faultedCoverage = bridge.GetCoverage();
         JsonElement faultedHealth = faultedCoverage.GetProperty("projection");
         Assert.NotNull(faultedHealth.GetProperty("lastBatchReadFault").GetString());
         Assert.Empty(faultedHealth.GetProperty("failedSessions").EnumerateArray());
 
-        _ = bridge.GetSessions();
+        JsonElement recoveredPage = bridge.GetSessionPage().GetProperty("sessions");
 
         JsonElement recoveredCoverage = bridge.GetCoverage();
         Assert.Null(recoveredCoverage.GetProperty("projection").GetProperty("lastBatchReadFault").GetString());
+        // A degraded page answers the same row a healthy one does: its per-session reads price
+        // the page's own keys.
+        Assert.Equal(degradedRow, Assert.Single(recoveredPage.EnumerateArray()).GetRawText());
     }
 
     private static CanonSessionProjectorEngine NewEngine(InMemoryRelationalStore store) =>
@@ -576,6 +580,9 @@ public class ProjectionReadPathTests
         public virtual IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null) => inner.SessionListFigures(harnessId, pricing);
 
         /// <inheritdoc />
+        public virtual IReadOnlyList<SessionListFigure> SessionListFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null) => inner.SessionListFigures(sessionKeys, pricing);
+
+        /// <inheritdoc />
         public SessionSummaryFigure? SessionSummaryFigures(string sessionKey, IModelPricingLookup? pricing = null) => inner.SessionSummaryFigures(sessionKey, pricing);
 
         /// <inheritdoc />
@@ -667,7 +674,7 @@ public class ProjectionReadPathTests
         private bool hasFaulted;
 
         /// <inheritdoc />
-        public override IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null)
+        public override IReadOnlyList<SessionListFigure> SessionListFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null)
         {
             if (!hasFaulted)
             {
@@ -675,7 +682,7 @@ public class ProjectionReadPathTests
                 throw new IOException("batched figures read exploded");
             }
 
-            return inner.SessionListFigures(harnessId, pricing);
+            return inner.SessionListFigures(sessionKeys, pricing);
         }
     }
 }

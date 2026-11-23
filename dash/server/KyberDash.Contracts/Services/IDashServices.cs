@@ -158,8 +158,21 @@ public interface IDashboardQueryService
     /// <summary>Ensures projections and rollups are up to date before reads.</summary>
     void EnsureProjected();
 
-    /// <summary>Returns hierarchical root-first sessions with nested subagents.</summary>
-    JsonElement GetSessions(int? limit = null, string? harness = null);
+    /// <summary>
+    /// Returns one page of root sessions, each with its first 25 subagents inline and its subagent
+    /// total.
+    /// </summary>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Roots on the page; 100 unless given.</param>
+    /// <param name="harness">Optional harness filter, which also scopes the root rule.</param>
+    /// <param name="search">Optional text a root's label or session id must contain, matched literally.</param>
+    JsonElement GetSessionPage(int page = 1, int limit = 100, string? harness = null, string? search = null);
+
+    /// <summary>Returns one page of a session's subagents: the sessions that attach to it, oldest start first.</summary>
+    /// <param name="parentId">Session whose subagents are paged.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Subagents on the page; 25 unless given.</param>
+    JsonElement GetSubagentPage(string parentId, int page = 1, int limit = 25);
 
     /// <summary>Returns full session detail payload.</summary>
     JsonElement? GetSessionDetail(string sessionId);

@@ -14,6 +14,36 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 {
     private const string TabReadScriptHeader = ".headers off\n.mode tabs\n";
 
+    /// <summary>
+    /// The projection header: every <c>session_projection</c> column and its five single-row
+    /// satellites, with no child collection. The full projection read and the paged header reads
+    /// select the same fifteen columns, so both parse one row shape.
+    /// </summary>
+    private const string SessionProjectionHeaderColumns =
+        "hex(CAST(sp.session_id AS BLOB)), hex(CAST(sp.label AS BLOB)), sp.is_subagent, sp.span_count, " +
+        "hex(CAST(sp.started_at_utc AS BLOB)), hex(CAST(sp.ended_at_utc AS BLOB)), " +
+        "typeof(spp.parent_session_id), COALESCE(hex(CAST(spp.parent_session_id AS BLOB)), ''), " +
+        "typeof(spa.agent_name), COALESCE(hex(CAST(spa.agent_name AS BLOB)), ''), " +
+        "CASE WHEN spip.session_id IS NOT NULL THEN 1 ELSE 0 END, " +
+        "typeof(scu.reason), COALESCE(hex(CAST(scu.reason AS BLOB)), ''), " +
+        "typeof(ssu.reason), COALESCE(hex(CAST(ssu.reason AS BLOB)), '')";
+
+    /// <summary>The single-row satellites <see cref="SessionProjectionHeaderColumns"/> reads, joined on <c>sp.session_id</c>.</summary>
+    private const string SessionProjectionHeaderJoins =
+        "LEFT JOIN session_projection_parent spp ON spp.session_id = sp.session_id " +
+        "LEFT JOIN session_projection_agent spa ON spa.session_id = sp.session_id " +
+        "LEFT JOIN session_projection_included_in_parent spip ON spip.session_id = sp.session_id " +
+        "LEFT JOIN session_context_unmeasurable scu ON scu.session_id = sp.session_id " +
+        "LEFT JOIN session_schema_unmeasurable ssu ON ssu.session_id = sp.session_id";
+
+    /// <summary>
+    /// The sessions still standing after the root rule's last round: exactly the sessions on a
+    /// parent chain that loops back to itself. No acyclic session outlives as many rounds as the
+    /// store has projections.
+    /// </summary>
+    private const string CyclicSessionSet =
+        "(SELECT session_id FROM keep WHERE round = (SELECT COUNT(*) FROM session_projection) + 1)";
+
     /// <inheritdoc />
     public IReadOnlyList<string> Harnesses()
     {
@@ -651,6 +681,270 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     }
 
     /// <inheritdoc />
+    public SessionHeaderPageResult SessionHeaderPage(string? harnessId, string? search, int page, int limit)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        StringBuilder sql = new(TabReadScriptHeader);
+        AppendSessionRootRule(sql, harnessId);
+        sql.Append("page_set AS (SELECT sc.session_id, sp.started_at_utc FROM scope sc JOIN session_projection sp ON sp.session_id = sc.session_id WHERE (");
+        sql.Append("sc.parent_session_id IS NULL OR sc.parent_session_id = '' OR NOT EXISTS (SELECT 1 FROM scope p WHERE p.session_id = sc.parent_session_id) OR sc.session_id IN ");
+        sql.Append(CyclicSessionSet);
+        sql.Append(')');
+        if (!string.IsNullOrEmpty(search))
+        {
+            // The search text is bound as one hex literal, so a quote in it is data, and the ESCAPE
+            // clause makes a %, _ or backslash in it match itself.
+            string pattern = TextExpr("%" + EscapeLikePattern(search) + "%");
+            sql.Append(CultureInfo.InvariantCulture, $" AND (sp.label LIKE {pattern} ESCAPE '\\' OR sp.session_id LIKE {pattern} ESCAPE '\\')");
+        }
+
+        sql.Append(')');
+        return ReadSessionHeaderPage(sql, "DESC", page, limit);
+    }
+
+    /// <inheritdoc />
+    public SessionHeaderPageResult SessionChildHeaderPage(string parentSessionId, int page, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(parentSessionId);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        StringBuilder sql = new(TabReadScriptHeader);
+        AppendSessionRootRule(sql, harnessId: null);
+        sql.Append("page_set AS (SELECT sp.session_id, sp.started_at_utc FROM session_projection_parent spp JOIN session_projection sp ON sp.session_id = spp.session_id WHERE ");
+        AppendSessionAttachPredicate(sql, $"spp.parent_session_id = {TextExpr(parentSessionId)}");
+        sql.Append(')');
+        return ReadSessionHeaderPage(sql, "ASC", page, limit);
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<SessionChildPreviewEntry> SessionChildPreview(IReadOnlyCollection<string> parentSessionIds, int perParent)
+    {
+        ArgumentNullException.ThrowIfNull(parentSessionIds);
+        ArgumentOutOfRangeException.ThrowIfLessThan(perParent, 1);
+        string[] parents = [.. parentSessionIds.Distinct(StringComparer.Ordinal)];
+        if (parents.Length == 0)
+        {
+            return [];
+        }
+
+        StringBuilder sql = new(TabReadScriptHeader);
+        AppendSessionRootRule(sql, harnessId: null);
+        sql.Append("ranked AS (SELECT spp.parent_session_id, sp.session_id, sp.started_at_utc, ");
+        sql.Append("row_number() OVER (PARTITION BY spp.parent_session_id ORDER BY sp.started_at_utc ASC, sp.session_id ASC) AS child_rank, ");
+        sql.Append("COUNT(*) OVER (PARTITION BY spp.parent_session_id) AS child_total ");
+        sql.Append("FROM session_projection_parent spp JOIN session_projection sp ON sp.session_id = spp.session_id WHERE ");
+        AppendSessionAttachPredicate(sql, $"spp.parent_session_id IN ({SessionKeyListFilter(parents)})");
+        sql.Append(CultureInfo.InvariantCulture, $"), preview AS (SELECT * FROM ranked WHERE child_rank <= {IntSql(perParent)}) ");
+        sql.Append("SELECT 'PREVIEW', hex(CAST(r.parent_session_id AS BLOB)), r.child_total, r.child_rank, hex(CAST(r.session_id AS BLOB)) ");
+        sql.Append("FROM preview r JOIN session_projection p ON p.session_id = r.parent_session_id ");
+        sql.Append("ORDER BY p.started_at_utc DESC, r.parent_session_id ASC, r.child_rank ASC;\n");
+
+        string output = ExecuteSqlite(sql.ToString());
+        List<(string ParentSessionId, int TotalChildren, List<string> Children)> previews = [];
+        foreach (string line in TabLines(output))
+        {
+            string[] cols = SplitTabLine(line, 5, "session child preview");
+            if (cols[0] != "PREVIEW")
+            {
+                throw new InvalidOperationException($"Unexpected session child preview row tag '{cols[0]}'.");
+            }
+
+            string parentSessionId = ParseHexRequired(cols[1], "session_projection_parent.parent_session_id");
+            int totalChildren = ParseInt32Required(cols[2], "session child preview total");
+            int childRank = ParseInt32Required(cols[3], "session child preview rank");
+            string childSessionId = ParseHexRequired(cols[4], "session_projection.session_id");
+            if (previews.Count == 0 || !string.Equals(previews[^1].ParentSessionId, parentSessionId, StringComparison.Ordinal))
+            {
+                previews.Add((parentSessionId, totalChildren, []));
+            }
+
+            // Rows arrive ranked 1, 2, … within a parent; a rank out of step means the order the
+            // preview promises was not the order the store answered.
+            if (childRank != previews[^1].Children.Count + 1 || totalChildren != previews[^1].TotalChildren)
+            {
+                throw new InvalidOperationException($"Session child preview rows arrived out of rank order for parent '{parentSessionId}'.");
+            }
+
+            previews[^1].Children.Add(childSessionId);
+        }
+
+        return [.. previews.Select(static preview => new SessionChildPreviewEntry(preview.ParentSessionId, preview.TotalChildren, preview.Children))];
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<StoredSessionHeader> SessionHeadersByKeys(IReadOnlyCollection<string> sessionIds)
+    {
+        ArgumentNullException.ThrowIfNull(sessionIds);
+        string[] keys = [.. sessionIds.Distinct(StringComparer.Ordinal)];
+        if (keys.Length == 0)
+        {
+            return [];
+        }
+
+        string sql = TabReadScriptHeader +
+                     "SELECT 'HEADER', COUNT(*) OVER (), " + SessionProjectionHeaderColumns + " " +
+                     "FROM session_projection sp " + SessionProjectionHeaderJoins + " " +
+                     $"WHERE sp.session_id IN ({SessionKeyListFilter(keys)}) ORDER BY sp.started_at_utc DESC, sp.session_id ASC;\n";
+
+        string output = ExecuteSqlite(sql);
+        List<StoredSessionHeader> headers = [];
+        foreach (string line in TabLines(output))
+        {
+            headers.Add(ParseSessionHeaderPageRow(line.Split('\t')).Header);
+        }
+
+        return headers;
+    }
+
+    /// <summary>
+    /// Appends the root rule's common table expressions, ending in a comma so the caller adds
+    /// <c>page_set</c>, the set its page is cut from.
+    /// </summary>
+    /// <param name="sql">Script the expressions are appended to.</param>
+    /// <param name="harnessId">Optional harness filter over the session rows, which also scopes the rule.</param>
+    /// <remarks>
+    /// <para>
+    /// <c>scope</c> is every projected session in the harness scope, with its parent link.
+    /// <c>keep</c> then drops, round by round, every session that no longer has a candidate child:
+    /// a session stands at one round only when it is the parent of a session that stood at the round
+    /// before. A session on an acyclic chain loses its last standing child within as many rounds as
+    /// its longest descendant chain, which cannot exceed the store's projection count, so the round
+    /// after that count holds exactly the sessions on a cycle — those whose parent chain loops
+    /// back to them.
+    /// </para>
+    /// <para>
+    /// Parent links are followed across the whole scope, not just the page being read, so a cycle
+    /// is recognised even when its members fall on different pages.
+    /// </para>
+    /// </remarks>
+    private static void AppendSessionRootRule(StringBuilder sql, string? harnessId)
+    {
+        sql.Append("WITH RECURSIVE scope(session_id, parent_session_id) AS (SELECT sp.session_id, spp.parent_session_id FROM session_projection sp LEFT JOIN session_projection_parent spp ON spp.session_id = sp.session_id");
+        if (harnessId is not null)
+        {
+            sql.Append(CultureInfo.InvariantCulture, $" WHERE EXISTS (SELECT 1 FROM session s WHERE s.session_id = sp.session_id AND s.harness_id = {TextExpr(harnessId)})");
+        }
+
+        sql.Append("), keep(session_id, round) AS (SELECT session_id, 0 FROM scope UNION ALL SELECT spp.parent_session_id, k.round + 1 FROM keep k JOIN session_projection_parent spp ON spp.session_id = k.session_id WHERE spp.parent_session_id IN (SELECT session_id FROM scope) AND k.round < (SELECT COUNT(*) FROM session_projection) + 1), ");
+    }
+
+    /// <summary>
+    /// Appends the condition under which the session in <c>sp</c> attaches to a parent: the parent
+    /// is a projected session in the scope, and the session is not on a cycle, which attaching
+    /// would complete.
+    /// </summary>
+    /// <param name="sql">Script the condition is appended to.</param>
+    /// <param name="parentCondition">Predicate naming the parent, over alias <c>spp</c>.</param>
+    private static void AppendSessionAttachPredicate(StringBuilder sql, string parentCondition)
+    {
+        sql.Append('(');
+        sql.Append(parentCondition);
+        sql.Append(" AND spp.parent_session_id IN (SELECT session_id FROM scope) AND sp.session_id NOT IN ");
+        sql.Append(CyclicSessionSet);
+        sql.Append(')');
+    }
+
+    /// <summary>
+    /// Pages a header read whose common table expressions end in <c>page_set</c>. The total rides
+    /// on every row the page returns, so one evaluation of the root rule answers a page that has
+    /// rows; a page past the end returns none and asks for the count on its own.
+    /// </summary>
+    /// <param name="cte">The read's common table expressions, ending in <c>page_set</c>.</param>
+    /// <param name="order"><c>ASC</c> for oldest start first, <c>DESC</c> for newest start first; session id breaks ties ascending.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on a page.</param>
+    /// <returns>The page's headers and the size of <c>page_set</c>.</returns>
+    private SessionHeaderPageResult ReadSessionHeaderPage(StringBuilder cte, string order, int page, int limit)
+    {
+        long offset = ((long)page - 1) * limit;
+        string sql = cte +
+                     "SELECT 'HEADER', (SELECT COUNT(*) FROM page_set), " + SessionProjectionHeaderColumns + " " +
+                     "FROM (SELECT session_id FROM page_set ORDER BY started_at_utc " + order + ", session_id ASC" +
+                     $" LIMIT {IntSql(limit)} OFFSET {LongSql(offset)}) page " +
+                     "JOIN session_projection sp ON sp.session_id = page.session_id " + SessionProjectionHeaderJoins + " " +
+                     "ORDER BY sp.started_at_utc " + order + ", sp.session_id ASC;\n";
+
+        string output = ExecuteSqlite(sql);
+        List<StoredSessionHeader> headers = [];
+        int total = 0;
+        foreach (string line in TabLines(output))
+        {
+            (StoredSessionHeader header, int rowTotal) = ParseSessionHeaderPageRow(line.Split('\t'));
+            headers.Add(header);
+            total = rowTotal;
+        }
+
+        if (headers.Count == 0)
+        {
+            string[] countLines = [.. TabLines(ExecuteSqlite(cte + "SELECT 'HEADER', COUNT(*) FROM page_set;\n"))];
+            if (countLines.Length != 1)
+            {
+                throw new InvalidOperationException($"Expected 1 count row for the session header page, got {countLines.Length.ToString(CultureInfo.InvariantCulture)}.");
+            }
+
+            total = ParseInt32Required(SplitTabLine(countLines[0], 2, "session header page count")[1], "session header page total");
+        }
+
+        return new SessionHeaderPageResult(headers, total);
+    }
+
+    /// <summary>
+    /// Parses one row of a paged header read: the <c>HEADER</c> tag, the row set's total, then the
+    /// fifteen header columns.
+    /// </summary>
+    /// <param name="cols">Tab-split columns of the row.</param>
+    /// <returns>The header and the total.</returns>
+    private static (StoredSessionHeader Header, int Total) ParseSessionHeaderPageRow(string[] cols)
+    {
+        if (cols.Length != 17 || cols[0] != "HEADER")
+        {
+            throw new InvalidOperationException($"Expected 17 columns for HEADER row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+        }
+
+        return (ParseSessionHeader(cols, 2), ParseInt32Required(cols[1], "session header page total"));
+    }
+
+    /// <summary>
+    /// Parses the fifteen projection header columns <see cref="SessionProjectionHeaderColumns"/>
+    /// selects, starting at <paramref name="startIndex"/>.
+    /// </summary>
+    /// <param name="cols">Tab-split columns of the row.</param>
+    /// <param name="startIndex">Index of the session id column.</param>
+    /// <returns>The projection header.</returns>
+    private static StoredSessionHeader ParseSessionHeader(string[] cols, int startIndex) => new(
+        ParseHexRequired(cols[startIndex], "session_projection.session_id"),
+        ParseHexRequired(cols[startIndex + 1], "session_projection.label"),
+        ParseBoolFlag(cols[startIndex + 2], "session_projection.is_subagent"),
+        ParseInt32Required(cols[startIndex + 3], "session_projection.span_count"),
+        ParseHexRequired(cols[startIndex + 4], "session_projection.started_at_utc"),
+        ParseHexRequired(cols[startIndex + 5], "session_projection.ended_at_utc"),
+        ParseNullableHex(cols[startIndex + 6], cols[startIndex + 7], "session_projection_parent.parent_session_id"),
+        ParseNullableHex(cols[startIndex + 8], cols[startIndex + 9], "session_projection_agent.agent_name"),
+        ParseBoolFlag(cols[startIndex + 10], "session_projection_included_in_parent"),
+        ParseNullableHex(cols[startIndex + 11], cols[startIndex + 12], "session_context_unmeasurable.reason"),
+        ParseNullableHex(cols[startIndex + 13], cols[startIndex + 14], "session_schema_unmeasurable.reason"));
+
+    /// <summary>
+    /// Escapes search text for a SQLite <c>LIKE</c> pattern read with <c>ESCAPE '\'</c>, so a
+    /// <c>%</c>, <c>_</c> or backslash in the text matches itself.
+    /// </summary>
+    /// <param name="search">Search text as typed.</param>
+    /// <returns>The text with its wildcard and escape characters escaped.</returns>
+    private static string EscapeLikePattern(string search) => search
+        .Replace("\\", "\\\\", StringComparison.Ordinal)
+        .Replace("%", "\\%", StringComparison.Ordinal)
+        .Replace("_", "\\_", StringComparison.Ordinal);
+
+    /// <summary>Builds the <c>IN (…)</c> list that binds <paramref name="keys"/> as hex literals.</summary>
+    /// <param name="keys">Text keys to bind; never empty.</param>
+    /// <returns>The comma-separated key literals.</returns>
+    private static string SessionKeyListFilter(IReadOnlyCollection<string> keys) =>
+        string.Join(", ", keys.Select(static key => TextExpr(key)));
+
+    /// <inheritdoc />
     public IReadOnlyList<StoredSessionTurn> GetSessionTurns(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -780,15 +1074,56 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         // content-free record scalars, the projections, the fallback turns of sessions without
         // a projection, and the stored ingest problems. The record batch reads no
         // content-bearing table, so a sessions list never materializes conversation text.
-        List<string> sessionKeys = [.. sessions.Select(static s => s.SessionKey)];
-        Dictionary<string, List<CollectedRecord>> recordsBySession = QueryContentFreeRecordsBySession(sessionKeys);
-        Dictionary<string, StoredSessionProjection> projectionsBySession = new(StringComparer.Ordinal);
+        Dictionary<string, SessionListProjectionShape> shapesBySession = new(StringComparer.Ordinal);
         foreach (StoredSessionProjection projection in ListSessionProjections(harnessId))
         {
-            projectionsBySession.TryAdd(projection.SessionId, projection);
+            shapesBySession.TryAdd(projection.SessionId, new SessionListProjectionShape(projection.RequestSpanIds.Count, projection.Turns));
         }
 
-        List<string> missingProjectionKeys = [.. sessionKeys.Where(key => !projectionsBySession.ContainsKey(key))];
+        return BuildSessionListFigures(sessions, shapesBySession, pricing);
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<SessionListFigure> SessionListFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null)
+    {
+        ArgumentNullException.ThrowIfNull(sessionKeys);
+        string[] keys = [.. sessionKeys.Distinct(StringComparer.Ordinal)];
+        if (keys.Length == 0)
+        {
+            return [];
+        }
+
+        // The same batches as the harness-scoped read, each bound to the named keys by its own
+        // statement: the session rows, the content-free record scalars, what the figures take
+        // from the projections, the fallback turns of sessions without a projection, and the
+        // stored ingest problems. No statement lists the store's sessions or projections.
+        string filter = SessionKeyListFilter(keys);
+        IReadOnlyList<CollectedSession> sessions = QuerySessions($"s.session_id IN ({filter})", $"u.session_id IN ({filter})");
+        if (sessions.Count == 0)
+        {
+            return [];
+        }
+
+        return BuildSessionListFigures(sessions, QuerySessionListProjectionShapes(filter), pricing);
+    }
+
+    /// <summary>
+    /// Builds one sessions-list figure per session from the batched reads both figures passes
+    /// share: content-free record scalars, the stored turns a session without a projection falls
+    /// back to, and the stored ingest problems.
+    /// </summary>
+    /// <param name="sessions">Session rows to build figures for, with their workspace and usage.</param>
+    /// <param name="shapesBySession">What each projected session's figure takes from its projection, by session id.</param>
+    /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
+    /// <returns>One figure per session, in the order the sessions were read.</returns>
+    private IReadOnlyList<SessionListFigure> BuildSessionListFigures(
+        IReadOnlyList<CollectedSession> sessions,
+        IReadOnlyDictionary<string, SessionListProjectionShape> shapesBySession,
+        IModelPricingLookup? pricing)
+    {
+        List<string> sessionKeys = [.. sessions.Select(static s => s.SessionKey)];
+        Dictionary<string, List<CollectedRecord>> recordsBySession = QueryContentFreeRecordsBySession(sessionKeys);
+        List<string> missingProjectionKeys = [.. sessionKeys.Where(key => !shapesBySession.ContainsKey(key))];
         Dictionary<string, IReadOnlyList<StoredSessionTurn>> fallbackTurnsBySession = QuerySessionTurnsBySession(missingProjectionKeys);
         Dictionary<string, List<Problem>> problemsBySession = QuerySessionIngestProblemsBySession(sessionKeys);
 
@@ -798,14 +1133,74 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             IReadOnlyList<CollectedRecord> records = recordsBySession.TryGetValue(session.SessionKey, out List<CollectedRecord>? sessionRecords)
                 ? sessionRecords
                 : [];
-            projectionsBySession.TryGetValue(session.SessionKey, out StoredSessionProjection? projection);
-            IReadOnlyList<StoredSessionTurn> projectedTurns = projection?.Turns
+            shapesBySession.TryGetValue(session.SessionKey, out SessionListProjectionShape? shape);
+            IReadOnlyList<StoredSessionTurn> projectedTurns = shape?.Turns
                 ?? (fallbackTurnsBySession.TryGetValue(session.SessionKey, out IReadOnlyList<StoredSessionTurn>? fallbackTurns) ? fallbackTurns : []);
             IReadOnlyList<Problem> storedProblems = problemsBySession.TryGetValue(session.SessionKey, out List<Problem>? stored) ? stored : [];
-            figures.Add(BuildSessionListFigure(session, records, projection, projectedTurns, storedProblems, pricing));
+            figures.Add(BuildSessionListFigure(session, records, shape?.RequestSpanCount, projectedTurns, storedProblems, pricing));
         }
 
         return figures;
+    }
+
+    /// <summary>
+    /// Reads what a session's list figure takes from its projection, for the keyed figures pass:
+    /// whether the projection exists, its request span ids, and its turn entries. No context,
+    /// schema or timeline row is read.
+    /// </summary>
+    /// <param name="filter">The <c>IN (…)</c> list binding the session keys.</param>
+    /// <returns>Each named session that has a projection, by session id.</returns>
+    private Dictionary<string, SessionListProjectionShape> QuerySessionListProjectionShapes(string filter)
+    {
+        string sql = TabReadScriptHeader +
+                     $"SELECT 'PROJ', hex(CAST(sp.session_id AS BLOB)) FROM session_projection sp WHERE sp.session_id IN ({filter});\n" +
+                     $"SELECT 'REQ', hex(CAST(session_id AS BLOB)), hex(CAST(request_span_id AS BLOB)) FROM session_request WHERE session_id IN ({filter}) ORDER BY session_id ASC, position ASC;\n" +
+                     $"SELECT 'TURN', hex(CAST(session_id AS BLOB)), position, hex(CAST(span_id AS BLOB)) FROM session_turn WHERE session_id IN ({filter}) ORDER BY session_id ASC, position ASC;\n";
+
+        string output = ExecuteSqlite(sql);
+        HashSet<string> projectedSessionIds = [];
+        Dictionary<string, List<string>> requestsBySession = new(StringComparer.Ordinal);
+        Dictionary<string, List<StoredSessionTurn>> turnsBySession = new(StringComparer.Ordinal);
+        foreach (string line in TabLines(output))
+        {
+            string tag = line.Split('\t')[0];
+            switch (tag)
+            {
+                case "PROJ":
+                    _ = projectedSessionIds.Add(ParseHexRequired(SplitTabLine(line, 2, "session projection shape")[1], "session_projection.session_id"));
+                    break;
+
+                case "REQ":
+                    {
+                        string[] cols = SplitTabLine(line, 3, "session_request");
+                        GetOrCreateList(requestsBySession, ParseHexRequired(cols[1], "session_request.session_id"))
+                            .Add(ParseHexRequired(cols[2], "session_request.request_span_id"));
+                        break;
+                    }
+
+                case "TURN":
+                    {
+                        string[] cols = SplitTabLine(line, 4, "session_turn");
+                        string sessionId = ParseHexRequired(cols[1], "session_turn.session_id");
+                        GetOrCreateList(turnsBySession, sessionId)
+                            .Add(new StoredSessionTurn(sessionId, ParseInt32Required(cols[2], "session_turn.position"), ParseHexRequired(cols[3], "session_turn.span_id")));
+                        break;
+                    }
+
+                default:
+                    throw new InvalidOperationException($"Unexpected session projection shape row tag '{tag}'.");
+            }
+        }
+
+        Dictionary<string, SessionListProjectionShape> shapes = new(projectedSessionIds.Count, StringComparer.Ordinal);
+        foreach (string sessionId in projectedSessionIds)
+        {
+            shapes[sessionId] = new SessionListProjectionShape(
+                requestsBySession.TryGetValue(sessionId, out List<string>? requests) ? requests.Count : 0,
+                turnsBySession.TryGetValue(sessionId, out List<StoredSessionTurn>? turns) ? turns : []);
+        }
+
+        return shapes;
     }
 
     /// <inheritdoc />
@@ -1272,7 +1667,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     private static SessionListFigure BuildSessionListFigure(
         CollectedSession session,
         IReadOnlyList<CollectedRecord> records,
-        StoredSessionProjection? projection,
+        int? projectionRequestCount,
         IReadOnlyList<StoredSessionTurn> projectedTurns,
         IReadOnlyList<Problem> storedProblems,
         IModelPricingLookup? pricing)
@@ -1403,9 +1798,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             }
         }
 
-        int requestCount = projection is not null && projection.RequestSpanIds.Count > 0
-            ? projection.RequestSpanIds.Count
-            : rootRecords.Count;
+        int requestCount = projectionRequestCount is > 0 ? projectionRequestCount.Value : rootRecords.Count;
 
         return new SessionListFigure(
             SessionKey: sessionKey,
@@ -1437,7 +1830,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return turnsBySession;
         }
 
-        string filter = string.Join(", ", sessionKeys.Select(static key => TextExpr(key)));
+        string filter = SessionKeyListFilter(sessionKeys);
         string sql = TabReadScriptHeader +
                      "SELECT hex(CAST(session_id AS BLOB)), position, hex(CAST(span_id AS BLOB)) FROM session_turn " +
                      $"WHERE session_id IN ({filter}) ORDER BY session_id ASC, position ASC;\n";
@@ -1475,7 +1868,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return problemsBySession;
         }
 
-        string filter = string.Join(", ", sessionKeys.Select(static key => TextExpr(key)));
+        string filter = SessionKeyListFilter(sessionKeys);
         string sql = TabReadScriptHeader +
                      "SELECT hex(CAST(att.session_key AS BLOB)), " +
                      "hex(CAST(ip.severity AS BLOB)), hex(CAST(ip.code AS BLOB)), hex(CAST(ip.message AS BLOB)), " +
@@ -1605,7 +1998,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         // A span-scoped read filters the record tables by that span alone, so the span inspector
         // pays for one record rather than its session's whole conversation metadata.
         string? spanExpr = scopedSpanId is null ? null : TextExpr(scopedSpanId);
-        string keyFilter = string.Join(", ", sessionKeys.Select(static key => TextExpr(key)));
+        string keyFilter = SessionKeyListFilter(sessionKeys);
         string recordFilter = spanExpr is null
             ? $" WHERE rsl.session_key IN ({keyFilter})"
             : $" WHERE r.span_id = {spanExpr}";
@@ -2146,19 +2539,8 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
         StringBuilder sql = new(TabReadScriptHeader);
         sql.Append(
-            "SELECT 'PROJ', hex(CAST(sp.session_id AS BLOB)), hex(CAST(sp.label AS BLOB)), sp.is_subagent, sp.span_count, " +
-            "hex(CAST(sp.started_at_utc AS BLOB)), hex(CAST(sp.ended_at_utc AS BLOB)), " +
-            "typeof(spp.parent_session_id), COALESCE(hex(CAST(spp.parent_session_id AS BLOB)), ''), " +
-            "typeof(spa.agent_name), COALESCE(hex(CAST(spa.agent_name AS BLOB)), ''), " +
-            "CASE WHEN spip.session_id IS NOT NULL THEN 1 ELSE 0 END, " +
-            "typeof(scu.reason), COALESCE(hex(CAST(scu.reason AS BLOB)), ''), " +
-            "typeof(ssu.reason), COALESCE(hex(CAST(ssu.reason AS BLOB)), '') " +
-            "FROM session_projection sp " +
-            "LEFT JOIN session_projection_parent spp ON spp.session_id = sp.session_id " +
-            "LEFT JOIN session_projection_agent spa ON spa.session_id = sp.session_id " +
-            "LEFT JOIN session_projection_included_in_parent spip ON spip.session_id = sp.session_id " +
-            "LEFT JOIN session_context_unmeasurable scu ON scu.session_id = sp.session_id " +
-            "LEFT JOIN session_schema_unmeasurable ssu ON ssu.session_id = sp.session_id" +
+            "SELECT 'PROJ', " + SessionProjectionHeaderColumns + " " +
+            "FROM session_projection sp " + SessionProjectionHeaderJoins +
             $"{projWhere} ORDER BY sp.started_at_utc DESC, sp.rowid ASC;\n");
 
         sql.Append(
@@ -2237,7 +2619,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             $"SELECT 'TL_AUX', hex(CAST(session_id AS BLOB)), hex(CAST(span_id AS BLOB)) FROM session_timeline_auxiliary{childWhere} ORDER BY session_id ASC, rowid ASC;\n");
 
         string output = ExecuteSqlite(sql.ToString());
-        List<RawProjectionHeader> projHeaders = [];
+        List<StoredSessionHeader> projHeaders = [];
         Dictionary<string, List<string>> requestsBySess = new(StringComparer.Ordinal);
         Dictionary<string, List<StoredSessionTurn>> turnsBySess = new(StringComparer.Ordinal);
         Dictionary<string, RawContextHeader> ctxHeadersBySess = new(StringComparer.Ordinal);
@@ -2269,18 +2651,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                         throw new InvalidOperationException($"Expected 16 columns for PROJ row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
                     }
 
-                    projHeaders.Add(new RawProjectionHeader(
-                        ParseHexRequired(cols[1], "session_projection.session_id"),
-                        ParseHexRequired(cols[2], "session_projection.label"),
-                        ParseBoolFlag(cols[3], "session_projection.is_subagent"),
-                        ParseInt32Required(cols[4], "session_projection.span_count"),
-                        ParseHexRequired(cols[5], "session_projection.started_at_utc"),
-                        ParseHexRequired(cols[6], "session_projection.ended_at_utc"),
-                        ParseNullableHex(cols[7], cols[8], "session_projection_parent.parent_session_id"),
-                        ParseNullableHex(cols[9], cols[10], "session_projection_agent.agent_name"),
-                        ParseBoolFlag(cols[11], "session_projection_included_in_parent"),
-                        ParseNullableHex(cols[12], cols[13], "session_context_unmeasurable.reason"),
-                        ParseNullableHex(cols[14], cols[15], "session_schema_unmeasurable.reason")));
+                    projHeaders.Add(ParseSessionHeader(cols, 1));
                     break;
 
                 case "REQ":
@@ -2474,7 +2845,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         }
 
         List<StoredSessionProjection> projections = new(projHeaders.Count);
-        foreach (RawProjectionHeader header in projHeaders)
+        foreach (StoredSessionHeader header in projHeaders)
         {
             StoredSessionContext? context = null;
             if (ctxHeadersBySess.TryGetValue(header.SessionId, out RawContextHeader? ctxHeader))
@@ -4237,18 +4608,13 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         CollectedWorkspace? Workspace,
         string? Title);
 
-    private record RawProjectionHeader(
-        string SessionId,
-        string Label,
-        bool IsSubagent,
-        int SpanCount,
-        string StartedAtUtc,
-        string EndedAtUtc,
-        string? ParentSessionId,
-        string? AgentName,
-        bool IncludedInParent,
-        string? ContextUnmeasurableReason,
-        string? SchemaUnmeasurableReason);
+    /// <summary>
+    /// What a session's list figure takes from its projection: the number of request spans, which
+    /// a figure prefers over its record-derived request count, and the stored turn entries.
+    /// </summary>
+    private record SessionListProjectionShape(
+        int RequestSpanCount,
+        IReadOnlyList<StoredSessionTurn> Turns);
 
     private record RawContextHeader(
         long ContextLimit,

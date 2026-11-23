@@ -126,7 +126,7 @@ public sealed class AnalyticsReadPathTests
 
     /// <summary>Session figures come from typed aggregates and reported/published costs stay separate.</summary>
     [Fact]
-    public void GetSessionsAnswersTypedFiguresAndNeverBlendsReportedAndPublishedCosts()
+    public void GetSessionPageAnswersTypedFiguresAndNeverBlendsReportedAndPublishedCosts()
     {
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new(snapshot: new Dictionary<string, ModelCosts>(StringComparer.Ordinal)
@@ -149,7 +149,7 @@ public sealed class AnalyticsReadPathTests
         _ = CreateProjection(store, pricing).ProjectAll();
         KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
 
-        JsonElement node = Assert.Single(bridge.GetSessions().EnumerateArray());
+        JsonElement node = Assert.Single(bridge.GetSessionPage().GetProperty("sessions").EnumerateArray());
 
         Assert.Equal("sess-cost", node.GetProperty("session_id").GetString());
         Assert.Equal("claude-code", node.GetProperty("harness").GetString());
@@ -193,7 +193,7 @@ public sealed class AnalyticsReadPathTests
 
     /// <summary>
     /// The sessions-list read model agrees, field for field, with the per-session summary read
-    /// model: <see cref="InMemoryRelationalStore.SessionListFigures"/> equals
+    /// model: <see cref="InMemoryRelationalStore.SessionListFigures(string?, IModelPricingLookup?)"/> equals
     /// <see cref="InMemoryRelationalStore.SessionSummaryFigures"/> per session, on a token-less
     /// session (token totals stay absent, never zero), a zero-token session (zero stays zero), a
     /// multi-harness session (every attributed harness's turns count), an empty session, and a
@@ -278,7 +278,7 @@ public sealed class AnalyticsReadPathTests
 
     /// <summary>
     /// The sessions list answers from the content-free read model: during
-    /// <see cref="KyberBridgeEngine.GetSessions"/> the instrumented fake records zero
+    /// <see cref="KyberBridgeEngine.GetSessionPage"/> the instrumented fake records zero
     /// content-bearing reads and zero materialized content bytes, and the harness filter (set
     /// and unset), the empty store, and the limit keep answering the same session rows.
     /// </summary>
@@ -314,7 +314,7 @@ public sealed class AnalyticsReadPathTests
         ];
 
         store.ClearReadLog();
-        JsonElement unfiltered = bridge.GetSessions();
+        JsonElement unfiltered = bridge.GetSessionPage().GetProperty("sessions");
         Assert.Equal(0, store.MaterializedContentBytes);
         Assert.DoesNotContain(store.ReadLog, read => contentBearingReads.Contains(read));
         Assert.Equal(
@@ -330,7 +330,7 @@ public sealed class AnalyticsReadPathTests
         Assert.False(ccNode.TryGetProperty("projection_status", out _));
 
         store.ClearReadLog();
-        JsonElement filtered = bridge.GetSessions(harness: "codex");
+        JsonElement filtered = bridge.GetSessionPage(harness: "codex").GetProperty("sessions");
         Assert.Equal(0, store.MaterializedContentBytes);
         Assert.DoesNotContain(store.ReadLog, read => contentBearingReads.Contains(read));
         Assert.Equal(
@@ -338,7 +338,7 @@ public sealed class AnalyticsReadPathTests
             filtered.EnumerateArray().Select(static node => node.GetProperty("session_id").GetString()).ToList());
 
         store.ClearReadLog();
-        JsonElement limited = bridge.GetSessions(limit: 1);
+        JsonElement limited = bridge.GetSessionPage(limit: 1).GetProperty("sessions");
         Assert.Equal(0, store.MaterializedContentBytes);
         Assert.DoesNotContain(store.ReadLog, read => contentBearingReads.Contains(read));
         Assert.Equal(
@@ -348,7 +348,7 @@ public sealed class AnalyticsReadPathTests
         InMemoryRelationalStore emptyStore = new();
         KyberBridgeEngine emptyBridge = CreateBridge(emptyStore, pricing: new FakePricingRepository());
         emptyStore.ClearReadLog();
-        JsonElement none = emptyBridge.GetSessions();
+        JsonElement none = emptyBridge.GetSessionPage().GetProperty("sessions");
         Assert.Equal(0, emptyStore.MaterializedContentBytes);
         Assert.DoesNotContain(emptyStore.ReadLog, read => contentBearingReads.Contains(read));
         Assert.Equal(0, none.GetArrayLength());
@@ -843,8 +843,8 @@ public sealed class AnalyticsReadPathTests
 
         (string Path, Action Call)[] paths =
         [
-            ("sessions list", () => _ = bridge.GetSessions()),
-            ("sessions list filtered", () => _ = bridge.GetSessions(harness: "claude-code")),
+            ("sessions list", () => _ = bridge.GetSessionPage()),
+            ("sessions list filtered", () => _ = bridge.GetSessionPage(harness: "claude-code")),
             ("session detail", () => _ = bridge.GetSessionDetail(sessionKey)),
             ("session summary", () => _ = bridge.GetSessionSummary(sessionKey)),
             ("turn figures", () => _ = bridge.GetTurnFigures(sessionKey, 0)),
@@ -1421,7 +1421,7 @@ public sealed class AnalyticsReadPathTests
         FaultingSessionReader faultingReader = new(store, "sess-broken");
         KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing, readerOverride: faultingReader);
 
-        List<JsonElement> nodes = [.. bridge.GetSessions().EnumerateArray()];
+        List<JsonElement> nodes = [.. bridge.GetSessionPage().GetProperty("sessions").EnumerateArray()];
         Assert.Equal(2, nodes.Count);
         JsonElement healthy = Assert.Single(nodes, static n => n.GetProperty("session_id").GetString() == "sess-healthy");
         Assert.Equal(1, healthy.GetProperty("turn_count").GetInt32());
@@ -1962,6 +1962,17 @@ public sealed class AnalyticsReadPathTests
         public IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null)
         {
             IReadOnlyList<SessionListFigure> figures = inner.SessionListFigures(harnessId, pricing);
+            if (figures.Any(figure => string.Equals(figure.SessionKey, failingSessionKey, StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return figures;
+        }
+
+        public IReadOnlyList<SessionListFigure> SessionListFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null)
+        {
+            IReadOnlyList<SessionListFigure> figures = inner.SessionListFigures(sessionKeys, pricing);
             if (figures.Any(figure => string.Equals(figure.SessionKey, failingSessionKey, StringComparison.Ordinal)))
             {
                 throw new InvalidOperationException("projection exploded");

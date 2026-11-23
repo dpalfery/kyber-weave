@@ -387,6 +387,17 @@ public sealed class AnalyticsOperationsDetailTests
             return figures;
         }
 
+        public IReadOnlyList<SessionListFigure> SessionListFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null)
+        {
+            IReadOnlyList<SessionListFigure> figures = inner.SessionListFigures(sessionKeys, pricing);
+            if (figures.Any(figure => string.Equals(figure.SessionKey, failingSessionKey, StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return figures;
+        }
+
         public SessionSummaryFigure? SessionSummaryFigures(string sessionKey, IModelPricingLookup? pricing = null)
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))

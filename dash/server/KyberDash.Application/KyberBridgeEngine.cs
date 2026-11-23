@@ -18,9 +18,13 @@ namespace KyberDash.Application;
 /// <remarks>
 /// <para>
 /// Every route answers from typed store rows: the engine reads only the relational store
-/// contracts and parses no persisted store JSON. The sessions list answers from the
-/// content-free <see cref="IRelationalStoreReader.SessionListFigures"/> read model, and the
-/// session detail, summary, and turn pages answer their figures from the content-free
+/// contracts and parses no persisted store JSON. The sessions pages — the roots page and a
+/// session's subagent page — place and order their rows with paged projection-header reads and
+/// price only the keys on the page through the keyed, content-free
+/// <see cref="IRelationalStoreReader.SessionListFigures(IReadOnlyCollection{string}, IModelPricingLookup?)"/>
+/// read model; the run, harness, and comparison pages price whole harnesses through the
+/// harness-scoped <see cref="IRelationalStoreReader.SessionListFigures(string?, IModelPricingLookup?)"/>.
+/// The session detail, summary, and turn pages answer their figures from the content-free
 /// <see cref="IRelationalStoreReader.SessionDetailFigures"/>,
 /// <see cref="IRelationalStoreReader.SessionSummaryFigures"/>, and
 /// <see cref="IRelationalStoreReader.TurnFigures"/> read models priced at read time through
@@ -46,6 +50,15 @@ public class KyberBridgeEngine
 
     /// <summary>Default KyberDash engine version reported by <c>/api/kyber/version</c> and <c>/api/kyber/meta</c>.</summary>
     public const string DefaultVersion = "0.21.0";
+
+    /// <summary>Default number of root sessions on a sessions page.</summary>
+    public const int DefaultSessionPageLimit = 100;
+
+    /// <summary>Subagents a sessions page shows inline under each root; the rest are paged by <see cref="GetSubagentPage"/>.</summary>
+    public const int SubagentPreviewLimit = 25;
+
+    /// <summary>Default number of subagents on a session's subagent page.</summary>
+    public const int DefaultSubagentPageLimit = 25;
 
     /// <summary>Session marker answered when a single session's projection read fails.</summary>
     private const string ProjectionFailedStatus = "PROJECTION_FAILED";
@@ -187,21 +200,147 @@ public class KyberBridgeEngine
         }
     }
 
-    /// <summary>Returns hierarchical root-first sessions with nested subagents and optional <paramref name="limit"/>.</summary>
-    /// <param name="limit">Maximum root sessions returned when positive.</param>
-    /// <param name="harness">Optional harness filter.</param>
-    /// <returns>Serialized session tree array.</returns>
-    public JsonElement GetSessions(int? limit = null, string? harness = null)
+    /// <summary>Returns one page of root sessions, each with its first subagents and its subagent total.</summary>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Roots on the page.</param>
+    /// <param name="harness">
+    /// Optional harness filter. It also scopes the root rule, so a session whose parent belongs to
+    /// another harness is a root here.
+    /// </param>
+    /// <param name="search">
+    /// Optional text a root's label or session id must contain, matched literally and without
+    /// regard to ASCII case.
+    /// </param>
+    /// <returns>Paging envelope JSON element.</returns>
+    /// <remarks>
+    /// <para>
+    /// The store chooses the page — root resolution, harness filter, search, order and window —
+    /// and only the keys the page shows are priced, so a page costs what it shows and not what
+    /// the store holds.
+    /// </para>
+    /// <para>
+    /// A root carries its first <see cref="SubagentPreviewLimit"/> subagents inline under
+    /// <c>subagents</c> and its full subagent count under <c>subagent_total</c>; the rest are paged
+    /// by <see cref="GetSubagentPage"/>.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
+    public JsonElement GetSessionPage(int page = 1, int limit = DefaultSessionPageLimit, string? harness = null, string? search = null)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
         EnsureProjected();
         IModelPricingLookup lookup = pricing.LoadPricingTables();
-        string? normalizedHarness = NormalizeHarnessFilter(harness);
-        IReadOnlyList<StoredSessionProjection> rows = projections.ListSessionProjections(normalizedHarness);
-        Dictionary<string, SessionListFigure> figuresBySession = [];
+        SessionHeaderPageResult headerPage = projections.SessionHeaderPage(NormalizeHarnessFilter(harness), NormalizeSessionSearch(search), page, limit);
+
+        Dictionary<string, StoredSessionHeader> headersById = new(headerPage.Items.Count, StringComparer.Ordinal);
+        foreach (StoredSessionHeader root in headerPage.Items)
+        {
+            headersById[root.SessionId] = root;
+        }
+
+        Dictionary<string, SessionChildPreviewEntry> previewsByRoot = new(headerPage.Items.Count, StringComparer.Ordinal);
+        if (headerPage.Items.Count > 0)
+        {
+            // One read answers every root's subagent total and first subagents, whatever the
+            // number of roots: never a child read per root.
+            List<string> previewChildIds = [];
+            foreach (SessionChildPreviewEntry preview in projections.SessionChildPreview(headersById.Keys, SubagentPreviewLimit))
+            {
+                previewsByRoot[preview.ParentSessionId] = preview;
+                previewChildIds.AddRange(preview.ChildSessionIds);
+            }
+
+            if (previewChildIds.Count > 0)
+            {
+                foreach (StoredSessionHeader child in projections.SessionHeadersByKeys(previewChildIds))
+                {
+                    headersById[child.SessionId] = child;
+                }
+            }
+        }
+
+        (Dictionary<string, SessionListFigure> figuresBySession, HashSet<string> faultedSessions) =
+            ReadSessionPageFigures([.. headersById.Keys], lookup);
+
+        List<Dictionary<string, object?>> rows = new(headerPage.Items.Count);
+        foreach (StoredSessionHeader root in headerPage.Items)
+        {
+            SessionNode node = ToSessionNode(root, figuresBySession, faultedSessions);
+            int subagentTotal = 0;
+            if (previewsByRoot.TryGetValue(root.SessionId, out SessionChildPreviewEntry? preview))
+            {
+                subagentTotal = preview.TotalChildren;
+                foreach (string childId in preview.ChildSessionIds)
+                {
+                    if (headersById.TryGetValue(childId, out StoredSessionHeader? child))
+                    {
+                        node.Subagents.Add(ToSessionNode(child, figuresBySession, faultedSessions));
+                    }
+                }
+            }
+
+            Dictionary<string, object?> dto = ToSessionDto(node);
+            dto["subagent_total"] = subagentTotal;
+            rows.Add(dto);
+        }
+
+        return JsonSerializer.SerializeToElement(PagingEnvelope("sessions", rows, headerPage.Total, limit, PageOffset(page, limit), page), CamelCaseJsonOptions);
+    }
+
+    /// <summary>Returns one page of a session's subagents.</summary>
+    /// <param name="parentId">Session whose subagents are paged.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Subagents on the page.</param>
+    /// <returns>Paging envelope JSON element.</returns>
+    /// <remarks>
+    /// The subagents of <paramref name="parentId"/> are the sessions that attach to it, oldest
+    /// start first, over every harness — the same set <see cref="GetSessionPage"/> previews inline,
+    /// so a root's <c>subagent_total</c> is what this route pages. Only the page's keys are priced.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="parentId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
+    public JsonElement GetSubagentPage(string parentId, int page = 1, int limit = DefaultSubagentPageLimit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(parentId);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        EnsureProjected();
+        SessionHeaderPageResult childPage = projections.SessionChildHeaderPage(parentId, page, limit);
+        (Dictionary<string, SessionListFigure> figuresBySession, HashSet<string> faultedSessions) = ReadSessionPageFigures(
+            [.. childPage.Items.Select(static header => header.SessionId)],
+            pricing.LoadPricingTables());
+
+        List<Dictionary<string, object?>> rows = new(childPage.Items.Count);
+        foreach (StoredSessionHeader child in childPage.Items)
+        {
+            rows.Add(ToSessionDto(ToSessionNode(child, figuresBySession, faultedSessions)));
+        }
+
+        return JsonSerializer.SerializeToElement(PagingEnvelope("subagents", rows, childPage.Total, limit, PageOffset(page, limit), page), CamelCaseJsonOptions);
+    }
+
+    /// <summary>
+    /// Reads the figures of exactly the keys a page shows, in one keyed pass. A faulted pass is
+    /// isolated: the fault is recorded in the coverage payload's batch slot, and each key on the
+    /// page is then read on its own, so one broken session still surfaces as
+    /// <c>PROJECTION_FAILED</c> while the rest of the page answers.
+    /// </summary>
+    /// <param name="sessionKeys">The page's session keys: its rows and, on the sessions page, the subagents shown inline.</param>
+    /// <param name="lookup">Read-time pricing tables.</param>
+    /// <returns>The figures by session key, and the keys whose figures could not be read.</returns>
+    private (Dictionary<string, SessionListFigure> Figures, HashSet<string> FaultedSessions) ReadSessionPageFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup lookup)
+    {
+        Dictionary<string, SessionListFigure> figuresBySession = new(sessionKeys.Count, StringComparer.Ordinal);
         HashSet<string> faultedSessions = new(StringComparer.Ordinal);
+        if (sessionKeys.Count == 0)
+        {
+            return (figuresBySession, faultedSessions);
+        }
+
         try
         {
-            foreach (SessionListFigure figure in reader.SessionListFigures(normalizedHarness, lookup))
+            foreach (SessionListFigure figure in reader.SessionListFigures(sessionKeys, lookup))
             {
                 figuresBySession[figure.SessionKey] = figure;
             }
@@ -217,93 +356,67 @@ public class KyberBridgeEngine
             // retry succeeds.
             RecordBatchedReadFault(ex.Message);
             figuresBySession = [];
-            foreach (StoredSessionProjection row in rows)
+            foreach (string sessionKey in sessionKeys)
             {
                 try
                 {
-                    SessionSummaryFigure? summary = reader.SessionSummaryFigures(row.SessionId, lookup);
-                    if (summary is not null)
+                    foreach (SessionListFigure figure in reader.SessionListFigures([sessionKey], lookup))
                     {
-                        figuresBySession[row.SessionId] = ToSessionListFigure(summary, reader.GetSession(row.SessionId));
+                        figuresBySession[figure.SessionKey] = figure;
                     }
                 }
                 catch (Exception ex2)
                 {
-                    RecordProjectionFailure(row.SessionId, ex2.Message);
-                    faultedSessions.Add(row.SessionId);
+                    RecordProjectionFailure(sessionKey, ex2.Message);
+                    faultedSessions.Add(sessionKey);
                 }
             }
         }
 
-        Dictionary<string, SessionNode> byId = new(StringComparer.Ordinal);
-        List<SessionNode> orderedNodes = new(rows.Count);
+        return (figuresBySession, faultedSessions);
+    }
 
-        foreach (StoredSessionProjection row in rows)
-        {
-            CollectedSession? session = reader.GetSession(row.SessionId);
-            figuresBySession.TryGetValue(row.SessionId, out SessionListFigure? figure);
-            string harnessId = figure?.HarnessId ?? session?.HarnessId ?? string.Empty;
-            string label = !string.IsNullOrWhiteSpace(row.Label)
-                ? row.Label
-                : CanonPricing.FormatSessionTitle(new SessionTitleInput(row.SessionId, row.AgentName, harnessId, row.Label));
+    /// <summary>
+    /// Shapes one row of a sessions page from its projection header and its figures: identity,
+    /// place in the tree and timestamps come from the header, and everything priced from the
+    /// figures. A row whose figures could not be read keeps its header and is marked
+    /// <c>PROJECTION_FAILED</c>.
+    /// </summary>
+    /// <param name="header">The session's projection header.</param>
+    /// <param name="figuresBySession">The page's figures by session key.</param>
+    /// <param name="faultedSessions">Keys whose figures could not be read.</param>
+    /// <returns>The session node.</returns>
+    private static SessionNode ToSessionNode(StoredSessionHeader header, IReadOnlyDictionary<string, SessionListFigure> figuresBySession, HashSet<string> faultedSessions)
+    {
+        figuresBySession.TryGetValue(header.SessionId, out SessionListFigure? figure);
+        string harnessId = figure?.HarnessId ?? string.Empty;
+        string label = !string.IsNullOrWhiteSpace(header.Label)
+            ? header.Label
+            : CanonPricing.FormatSessionTitle(new SessionTitleInput(header.SessionId, header.AgentName, harnessId, header.Label));
 
-            SessionNode node = new(
-                SessionId: row.SessionId,
-                Harness: harnessId,
-                Label: label,
-                IsSubagent: row.IsSubagent,
-                ParentSession: row.ParentSessionId,
-                AgentName: row.AgentName,
-                Repo: figure?.Repo ?? session?.Workspace?.Repository,
-                Branch: figure?.Branch ?? session?.Workspace?.Branch,
-                Started: row.StartedAtUtc,
-                Ended: row.EndedAtUtc,
-                TurnCount: figure?.TurnCount,
-                RequestCount: figure?.RequestCount,
-                TotalInput: figure?.TotalInput,
-                TotalOutput: figure?.TotalOutput,
-                CostUsd: ExtractUsdCost(figure?.PublishedCost),
-                Cost: figure?.PublishedCost,
-                CostReported: figure?.ReportedCost,
-                CostBasisMismatch: figure?.CostBasisMismatch,
-                Models: figure?.Models ?? [],
-                Problems: figure?.ProblemsCount ?? 0,
-                ProjectionStatus: faultedSessions.Contains(row.SessionId) ? ProjectionFailedStatus : null,
-                Subagents: []);
-
-            byId[row.SessionId] = node;
-            orderedNodes.Add(node);
-        }
-
-        HashSet<string> attachedChildren = new(StringComparer.Ordinal);
-        foreach (SessionNode node in orderedNodes)
-        {
-            if ((!node.IsSubagent && string.IsNullOrEmpty(node.ParentSession))
-                || string.IsNullOrEmpty(node.ParentSession)
-                || !byId.TryGetValue(node.ParentSession, out SessionNode? parent)
-                || IsAncestorOrSelf(node.SessionId, parent.SessionId, byId))
-            {
-                continue;
-            }
-
-            parent.Subagents.Add(node);
-            attachedChildren.Add(node.SessionId);
-        }
-
-        List<SessionNode> roots = [.. orderedNodes.Where(n => !attachedChildren.Contains(n.SessionId))];
-        foreach (SessionNode node in orderedNodes)
-        {
-            node.Subagents.Sort((a, b) => string.Compare(a.Started, b.Started, StringComparison.Ordinal));
-        }
-
-        roots.Sort((a, b) => string.Compare(b.Started, a.Started, StringComparison.Ordinal));
-
-        if (limit.HasValue && limit.Value > 0 && roots.Count > limit.Value)
-        {
-            roots = roots.GetRange(0, limit.Value);
-        }
-
-        return JsonSerializer.SerializeToElement(roots.Select(ToSessionDto).ToList(), CamelCaseJsonOptions);
+        return new SessionNode(
+            SessionId: header.SessionId,
+            Harness: harnessId,
+            Label: label,
+            IsSubagent: header.IsSubagent,
+            ParentSession: header.ParentSessionId,
+            AgentName: header.AgentName,
+            Repo: figure?.Repo,
+            Branch: figure?.Branch,
+            Started: header.StartedAtUtc,
+            Ended: header.EndedAtUtc,
+            TurnCount: figure?.TurnCount,
+            RequestCount: figure?.RequestCount,
+            TotalInput: figure?.TotalInput,
+            TotalOutput: figure?.TotalOutput,
+            CostUsd: ExtractUsdCost(figure?.PublishedCost),
+            Cost: figure?.PublishedCost,
+            CostReported: figure?.ReportedCost,
+            CostBasisMismatch: figure?.CostBasisMismatch,
+            Models: figure?.Models ?? [],
+            Problems: figure?.ProblemsCount ?? 0,
+            ProjectionStatus: faultedSessions.Contains(header.SessionId) ? ProjectionFailedStatus : null,
+            Subagents: []);
     }
 
     /// <summary>Returns the hydrated full session payload (with materialized turns), or <see langword="null"/> if missing.</summary>
@@ -720,18 +833,48 @@ public class KyberBridgeEngine
         int safeOffset = Math.Max(0, offset);
         List<Finding> pageItems = [.. list.Skip(safeOffset).Take(safeLimit).Select(ToFindingRow)];
 
-        return JsonSerializer.SerializeToElement(new
-        {
-            findings = pageItems,
-            data = pageItems,
-            total,
-            limit = safeLimit,
-            offset = safeOffset,
-            page,
-            detectorCounts,
-            unknownWindowSessions = 0,
-        }, CamelCaseJsonOptions);
+        Dictionary<string, object?> envelope = PagingEnvelope("findings", pageItems, total, safeLimit, safeOffset, page);
+        envelope["detectorCounts"] = detectorCounts;
+        envelope["unknownWindowSessions"] = 0;
+        return JsonSerializer.SerializeToElement(envelope, CamelCaseJsonOptions);
     }
+
+    /// <summary>
+    /// The envelope every paged read answers: the page's rows under their own key and again
+    /// under <c>data</c>, then the number of rows the filters match before paging and the window
+    /// that was read.
+    /// </summary>
+    /// <param name="itemsKey">Name of the member the rows are published under.</param>
+    /// <param name="items">The page's rows, in page order.</param>
+    /// <param name="total">Number of rows the filters match, before paging.</param>
+    /// <param name="limit">Rows per page.</param>
+    /// <param name="offset">Zero-based offset of the page's first row.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <returns>The envelope's members, in serialization order.</returns>
+    private static Dictionary<string, object?> PagingEnvelope(string itemsKey, IReadOnlyList<object> items, int total, int limit, int offset, int page)
+    {
+        ArgumentNullException.ThrowIfNull(itemsKey);
+        ArgumentNullException.ThrowIfNull(items);
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            [itemsKey] = items,
+            ["data"] = items,
+            ["total"] = total,
+            ["limit"] = limit,
+            ["offset"] = offset,
+            ["page"] = page,
+        };
+    }
+
+    /// <summary>
+    /// The zero-based offset of a page's first row. The product is taken in 64 bits: page ×
+    /// limit overflows a 32-bit integer for an absurd page number, which then reads as a page
+    /// past the end instead of wrapping onto a different page.
+    /// </summary>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows per page.</param>
+    /// <returns>The offset, clamped to the largest 32-bit integer.</returns>
+    private static int PageOffset(int page, int limit) => (int)Math.Clamp(((long)page - 1) * limit, 0L, int.MaxValue);
 
     /// <summary>Returns a single finding by <paramref name="findingId"/>, or <see langword="null"/> if absent.</summary>
     /// <param name="findingId">Finding identifier.</param>
@@ -939,14 +1082,7 @@ public class KyberBridgeEngine
             evidenceAvailable = false,
         })];
 
-        return JsonSerializer.SerializeToElement(new
-        {
-            entries,
-            data = entries,
-            total,
-            page,
-            limit,
-        });
+        return JsonSerializer.SerializeToElement(PagingEnvelope("entries", entries, total, limit, offset, page), CamelCaseJsonOptions);
     }
 
     /// <summary>Returns full detail for one quarantined span, or <see langword="null"/> if absent.</summary>
@@ -986,14 +1122,7 @@ public class KyberBridgeEngine
         IReadOnlyList<StoredIngestProblem> rows = operationalStore.ListIngestProblems(harness, limit: limit, offset: offset);
         List<object> problems = [.. rows.Select(p => (object)ToProblemDto(p))];
 
-        return JsonSerializer.SerializeToElement(new
-        {
-            problems,
-            data = problems,
-            total,
-            page,
-            limit,
-        });
+        return JsonSerializer.SerializeToElement(PagingEnvelope("problems", problems, total, limit, offset, page), CamelCaseJsonOptions);
     }
 
     /// <summary>Returns full detail (including stored stack) for one problem by numeric ID.</summary>
@@ -1881,29 +2010,6 @@ public class KyberBridgeEngine
         }
     }
 
-    /// <summary>
-    /// Projects one session's content-free summary figures onto the sessions-list read model, so
-    /// the degraded per-session path answers the same figures the batched read carries without
-    /// reading a content column.
-    /// </summary>
-    /// <param name="summary">Content-free figures of one session.</param>
-    /// <param name="session">Session row carrying workspace metadata.</param>
-    private static SessionListFigure ToSessionListFigure(SessionSummaryFigure summary, CollectedSession? session) =>
-        new(
-            SessionKey: summary.SessionKey,
-            HarnessId: summary.HarnessId,
-            Repo: session?.Workspace?.Repository,
-            Branch: session?.Workspace?.Branch,
-            TurnCount: summary.TurnCount,
-            RequestCount: summary.RequestCount,
-            TotalInput: summary.TotalInput,
-            TotalOutput: summary.TotalOutput,
-            ReportedCost: summary.ReportedCost,
-            PublishedCost: summary.PublishedCost,
-            CostBasisMismatch: summary.CostBasisMismatch,
-            Models: summary.Models,
-            ProblemsCount: summary.Problems.Count);
-
     /// <summary>Reads a session's timeline span tree, isolating any fault to that session.</summary>
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <returns>The timeline children when readable, and the isolation marker when the read failed.</returns>
@@ -1986,6 +2092,12 @@ public class KyberBridgeEngine
 
     private static string? NormalizeHarnessFilter(string? harness) =>
         string.IsNullOrWhiteSpace(harness) ? null : CanonPricing.NormalizeHarnessName(harness.Trim());
+
+    /// <summary>Trims a sessions search to the text to match, or answers <see langword="null"/> when none was given.</summary>
+    /// <param name="search">Search text as typed.</param>
+    /// <returns>The trimmed search text, or <see langword="null"/>.</returns>
+    private static string? NormalizeSessionSearch(string? search) =>
+        string.IsNullOrWhiteSpace(search) ? null : search.Trim();
 
     private static string? ResolveContextLimitSource(StoredSessionProjection projection) =>
         projection.Context?.ContextLimitSource ?? projection.ContextUnmeasurableReason;
@@ -2740,7 +2852,7 @@ public class KyberBridgeEngine
         Dictionary<string, SessionListFigure> figures = new(StringComparer.Ordinal);
         try
         {
-            foreach (SessionListFigure figure in reader.SessionListFigures(pricing: lookup))
+            foreach (SessionListFigure figure in reader.SessionListFigures((string?)null, lookup))
             {
                 figures[figure.SessionKey] = figure;
             }
@@ -3323,23 +3435,6 @@ public class KyberBridgeEngine
     {
         int byTimestamp = string.Compare(left.Timestamp, right.Timestamp, StringComparison.Ordinal);
         return byTimestamp != 0 ? byTimestamp : string.Compare(left.SpanId, right.SpanId, StringComparison.Ordinal);
-    }
-
-    private static bool IsAncestorOrSelf(string candidateId, string parentId, Dictionary<string, SessionNode> byId)
-    {
-        HashSet<string> seen = new(StringComparer.Ordinal);
-        string? cursor = parentId;
-        while (!string.IsNullOrEmpty(cursor) && seen.Add(cursor))
-        {
-            if (string.Equals(cursor, candidateId, StringComparison.Ordinal))
-            {
-                return true;
-            }
-
-            cursor = byId.TryGetValue(cursor, out SessionNode? node) ? node.ParentSession : null;
-        }
-
-        return false;
     }
 
     /// <summary>
