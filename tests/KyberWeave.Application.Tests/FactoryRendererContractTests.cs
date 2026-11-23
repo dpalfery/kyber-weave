@@ -1297,11 +1297,12 @@ public sealed class FactoryRendererContractTests : IDisposable
     /// <summary>
     ///     The <c>{server}___{tool}</c> entries a droid's <c>tools</c> list must carry for its
     ///     granted servers: one per roster tool of each granted server, in granted-server then
-    ///     roster order. A granted server the roster does not name contributes nothing.
+    ///     ordinal-tool order with duplicates removed, matching the renderer's discipline.
     /// </summary>
     /// <remarks>
     ///     The expectation is derived from the loaded toolchain roster rather than from the
     ///     renderer, so a renamed roster tool fails here instead of silently dropping the grant.
+    ///     The rendered shape itself is pinned independently, by regex and golden entries.
     /// </remarks>
     private static IReadOnlyList<string> ExpectedFactoryMcpToolIds(
         SquadSource source,
@@ -1310,10 +1311,10 @@ public sealed class FactoryRendererContractTests : IDisposable
         List<string> toolIds = [];
         foreach (string server in grantedServers)
             if (source.Toolchain.RequiredMcpTools.TryGetValue(server, out IReadOnlyList<string>? tools))
-                foreach (string tool in tools)
+                foreach (string tool in tools.OrderBy(t => t, StringComparer.Ordinal))
                     toolIds.Add($"{server}___{tool}");
 
-        return toolIds;
+        return [.. toolIds.Distinct(StringComparer.Ordinal)];
     }
 
     /// <summary>The rendered droid's frontmatter, located by the identity the agent names.</summary>
