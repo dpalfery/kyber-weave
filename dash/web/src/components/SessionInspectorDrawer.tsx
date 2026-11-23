@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { formatDuration } from '../lib/labels.js'
 import { cn, usd, fmtNum, fmtTokens } from '../lib/utils.js'
-import { fetchKyberSessionContent, fetchSpanAttributes, fetchTurnContentFull } from '../lib/kyberApi.js'
+import { fetchKyberSessionContent, fetchKyberSessionTurn, fetchSpanAttributes, fetchTurnContentFull } from '../lib/kyberApi.js'
 import type {
   KyberMessageLike,
   KyberSkillRow,
@@ -14,6 +14,7 @@ import type {
 } from '../lib/kyberApi.js'
 import type { DrawerContent, SessionTimelineNode, ToolRow } from './AgentSessionDashboard.js'
 import { reasonOf, skillTurnLabel, unmeasured } from './SkillsPanel.js'
+import { CONTEXT_BUCKET_LABELS } from './SessionSpendCharts.js'
 import { Skeleton } from './ui/skeleton.js'
 import { SlideOutDrawer } from './ui/SlideOutDrawer.js'
 import { CopyExactButton, SearchableContentView, type ContentViewMode } from './ContentViewToolbar.js'
@@ -2204,8 +2205,9 @@ function SpanInspector({ node }: { node: SessionTimelineNode }) {
 }
 
 /**
- * One context-bucket drill-down as the dashboard's `openDrawerForTurn`
- * assembles it.
+ * The figures one context-bucket drill-down renders: built from the fetched
+ * turn's own context by `TurnBucketPanel` (D9), or read off a legacy payload
+ * record by `InspectorContent`'s shape dispatch.
  */
 interface ContextBucketItem {
   bucket?: string
@@ -2430,15 +2432,40 @@ export interface TurnFullContentRequest {
   full?: boolean
 }
 
-export type DrawerContentRequest = SessionContentRequest | TurnFullContentRequest
+/**
+ * One bucket drill-down's keyed request (D9): the turn resolves by its
+ * zero-based transport index, the bucket by name. The drawer fetches the
+ * turn — widened with that turn's context — and derives the span-scoped
+ * content request from the row it answered.
+ */
+export interface TurnBucketContentRequest {
+  sessionId: string
+  turnIndex: number
+  bucket: string
+}
+
+export type DrawerContentRequest = SessionContentRequest | TurnFullContentRequest | TurnBucketContentRequest
 
 /**
- * Narrowing helper: a whole-turn request carries a numeric `turnIndex`; a
- * span/bucket request never does.
+ * Narrowing helper: a whole-turn request carries a numeric `turnIndex` and no
+ * `bucket`; a span request never carries the index and a bucket drill-down
+ * names its bucket (checked with `isTurnBucketContentRequest`).
  */
 export function isTurnFullContentRequest(request: unknown): request is TurnFullContentRequest {
   if (request === null || typeof request !== 'object') return false
-  return typeof (request as { turnIndex?: unknown }).turnIndex === 'number'
+  const r = request as { turnIndex?: unknown; bucket?: unknown }
+  return typeof r.turnIndex === 'number' && r.bucket === undefined
+}
+
+/**
+ * Narrowing helper: a bucket drill-down carries a numeric `turnIndex` and a
+ * string `bucket` name. Checked before `isTurnFullContentRequest`, whose
+ * numeric-`turnIndex` shape a bucket request would otherwise also satisfy.
+ */
+export function isTurnBucketContentRequest(request: unknown): request is TurnBucketContentRequest {
+  if (request === null || typeof request !== 'object') return false
+  const r = request as { turnIndex?: unknown; bucket?: unknown }
+  return typeof r.turnIndex === 'number' && typeof r.bucket === 'string'
 }
 
 /**
@@ -2876,20 +2903,37 @@ export function TurnFullContentPanel({
   defaultView = 'formatted',
 }: {
   request: TurnFullContentRequest
+  /** A row the caller already holds; when absent the drawer resolves it by key (D9). */
   turn?: TurnFullContentTurn | null
   defaultView?: TurnContentViewMode
 }) {
+  // D9: the drawer fetches what it opens. Without a caller-held row, the
+  // widened per-turn route answers this turn's row first; the content request
+  // below stays idle until it does.
+  const sectionQuery = useQuery({
+    queryKey: ['kyber-session-turn', request.sessionId, request.turnIndex],
+    queryFn: () => fetchKyberSessionTurn(request.sessionId, request.turnIndex),
+    enabled: turn === undefined,
+    // A turn index past the end is an answer, not a transient failure.
+    retry: false,
+  })
+  const measuredTurn: TurnFullContentTurn | null | undefined =
+    turn !== undefined ? turn : (sectionQuery.data?.turn ?? undefined)
+
   const turnQuery = useQuery({
     queryKey: ['kyber-turn-content-full', request.sessionId, request.turnIndex],
     queryFn: () => fetchTurnContentFull(request.sessionId, request.turnIndex),
+    // Content is requested only once the row it describes is in hand: a
+    // caller-held row counts, otherwise the per-turn route answers first (D9).
+    enabled: turn !== undefined || sectionQuery.isSuccess,
   })
 
   const data: KyberTurnContentResult | undefined = turnQuery.data
   const isTurnError = turnQuery.isError
 
-  const fresh = readMeasuredFigure(turn?.fresh ?? turn?.fresh_input ?? turn?.tokens?.fresh ?? turn?.tokens?.fresh_input)
-  const cacheRead = readMeasuredFigure(turn?.cache_read ?? turn?.tokens?.cache_read)
-  const cacheCreation = readMeasuredFigure(turn?.cache_creation ?? turn?.tokens?.cache_creation)
+  const fresh = readMeasuredFigure(measuredTurn?.fresh ?? measuredTurn?.fresh_input ?? measuredTurn?.tokens?.fresh ?? measuredTurn?.tokens?.fresh_input)
+  const cacheRead = readMeasuredFigure(measuredTurn?.cache_read ?? measuredTurn?.tokens?.cache_read)
+  const cacheCreation = readMeasuredFigure(measuredTurn?.cache_creation ?? measuredTurn?.tokens?.cache_creation)
   const hasTotals = fresh !== undefined || cacheRead !== undefined || cacheCreation !== undefined
 
   const orphanParts: KyberTurnContentPart[] = useMemo(() => {
@@ -2917,6 +2961,31 @@ export function TurnFullContentPanel({
       sharedDisplay ? sharedDisplay.parts.map((p) => p.text) : [],
     )
   }, [data, sharedDisplay])
+
+  // The keyed row's own states, ahead of the content states below (D9): the
+  // drawer opened on a key, so the per-turn route is this panel's first wait.
+  if (turn === undefined && sectionQuery.isError) {
+    return (
+      <div
+        className="rounded border border-red-500/30 bg-red-500/10 p-4 text-xs text-red-600 dark:text-red-400 space-y-1.5"
+        data-testid="turn-section-error"
+      >
+        <p className="font-semibold">Unable to load this turn.</p>
+        <p className="text-muted-foreground">
+          {sectionQuery.error instanceof Error ? sectionQuery.error.message : 'Turn not found.'}
+        </p>
+      </div>
+    )
+  }
+  if (turn === undefined && sectionQuery.data === undefined) {
+    return (
+      <div className="space-y-2" data-testid="turn-section-loading">
+        <Skeleton className="h-4 w-40" />
+        <Skeleton className="h-24 w-full" />
+        <p className="text-xs text-tertiary-foreground">Loading turn…</p>
+      </div>
+    )
+  }
 
   const renderFigure = (label: string, value: number | undefined, testId: string) => (
     <div className="flex justify-between py-0.5" data-testid={testId}>
@@ -3083,14 +3152,87 @@ export function TurnFullContentPanel({
   )
 }
 
+/**
+ * One context-bucket drill-down (D9): the opener hands over the key pair
+ * only. The per-turn route answers the turn widened with its own context;
+ * the bucket's figures and span-scoped content request derive from that
+ * answer, so the drawer never reads a session-wide turns/context payload.
+ */
+function TurnBucketPanel({ request }: { request: TurnBucketContentRequest }) {
+  const sectionQuery = useQuery({
+    queryKey: ['kyber-session-turn', request.sessionId, request.turnIndex],
+    queryFn: () => fetchKyberSessionTurn(request.sessionId, request.turnIndex),
+    // A turn index past the end is an answer, not a transient failure.
+    retry: false,
+  })
+
+  if (sectionQuery.isError) {
+    return (
+      <div
+        className="rounded border border-red-500/30 bg-red-500/10 p-4 text-xs text-red-600 dark:text-red-400 space-y-1.5"
+        data-testid="turn-section-error"
+      >
+        <p className="font-semibold">Unable to load this turn.</p>
+        <p className="text-muted-foreground">
+          {sectionQuery.error instanceof Error ? sectionQuery.error.message : 'Turn not found.'}
+        </p>
+      </div>
+    )
+  }
+  if (sectionQuery.data === undefined) {
+    return (
+      <div className="space-y-2" data-testid="turn-section-loading">
+        <Skeleton className="h-4 w-40" />
+        <Skeleton className="h-24 w-full" />
+        <p className="text-xs text-tertiary-foreground">Loading turn…</p>
+      </div>
+    )
+  }
+
+  const { turn, context } = sectionQuery.data
+  // Figures read this turn's own context first; the row's own buckets and
+  // measured counters are the fallbacks, exactly as the retired opener read
+  // them. An unmeasurable figure renders as the formatter's dash.
+  const rawBuckets = context?.buckets ?? turn.buckets ?? {}
+  const tokens = Number(rawBuckets[request.bucket] ?? turn[request.bucket] ?? 0)
+  const bucketSum = Object.values(rawBuckets).reduce(
+    (sum: number, v) => sum + (typeof v === 'number' ? v : 0),
+    0,
+  )
+  const reported = Number(
+    context?.reported_input ?? turn.cumulative_input ?? turn.input ?? turn.fresh ?? bucketSum ?? 0,
+  )
+  const total = Math.max(reported, bucketSum)
+  const label = (CONTEXT_BUCKET_LABELS as Record<string, string>)[request.bucket] || request.bucket
+  const content =
+    turn.content && typeof turn.content === 'object' && request.bucket in turn.content
+      ? turn.content[request.bucket]
+      : (turn[request.bucket] ?? (typeof turn.content === 'string' ? turn.content : turn))
+
+  // The session-level system prompt lives on the session content route, not
+  // on any single turn span (the first turn span carries none, so a
+  // span-scoped request 404s). Every other bucket keeps its turn span.
+  const contentRequest: SessionContentRequest = request.bucket === 'system_prompt'
+    ? { sessionId: request.sessionId, part: request.bucket }
+    : { sessionId: request.sessionId, span: turn.spanId, part: request.bucket }
+
+  return (
+    <div className="space-y-4">
+      <ContextBucketInspector
+        item={{ bucket: request.bucket, key: request.bucket, label, tokens, value: tokens, total, content }}
+      />
+      <FullContentPanel request={contentRequest} fallback={content} />
+    </div>
+  )
+}
+
 function FullContentPanel({
   request,
   fallback,
 }: {
   request: SessionContentRequest
   fallback: unknown
-}) {
-  const { data, isError } = useQuery({
+}) {  const { data, isError } = useQuery({
     queryKey: ['kyber-session-content', request.sessionId, request.span, request.part, 'full'],
     queryFn: () =>
       fetchKyberSessionContent(request.sessionId, {
@@ -3504,16 +3646,16 @@ export function SessionInspectorDrawer({
   // A skill row carries its own pane: the served row and the first listed
   // turn's `skills` entry. It never shows the raw row or the whole-turn panel.
   const skillRow = rawRecord !== null && 'skill' in rawRecord ? (rawRecord as { skill: KyberSkillRow }).skill : null
-  const turnRequest = skillRow === null && isTurnFullContentRequest(contentRequest) ? contentRequest : null
-  // A whole-turn request carries its own panel (with the turn row as the
-  // measured-totals source); the clipped payload row must not render
-  // alongside the lossless content.
-  const turnFallback =
-    turnRequest !== null && rawRecord !== null && 'turn' in rawRecord
-      ? (rawRecord as { turn?: TurnFullContentTurn }).turn ?? undefined
-      : undefined
+  // A bucket drill-down resolves its turn by key inside TurnBucketPanel; the
+  // payload row and the session-wide context never reach the drawer (D9).
+  const bucketRequest =
+    skillRow === null && isTurnBucketContentRequest(contentRequest) ? contentRequest : null
+  const turnRequest =
+    skillRow === null && bucketRequest === null && isTurnFullContentRequest(contentRequest)
+      ? contentRequest
+      : null
   const inspectorData =
-    skillRow !== null || turnRequest !== null
+    skillRow !== null || turnRequest !== null || bucketRequest !== null
       ? null
       : contentRequest && rawRecord
         ? { ...rawRecord, content: undefined }
@@ -3554,9 +3696,10 @@ export function SessionInspectorDrawer({
           <InspectorContent data={inspectorData} />
         )}
         {turnRequest !== null ? (
-          <TurnFullContentPanel request={turnRequest} turn={turnFallback} />
+          <TurnFullContentPanel request={turnRequest} />
         ) : null}
-        {skillRow === null && contentRequest && !isTurnFullContentRequest(contentRequest) && (
+        {bucketRequest !== null ? <TurnBucketPanel request={bucketRequest} /> : null}
+        {skillRow === null && contentRequest && turnRequest === null && bucketRequest === null && (
           <FullContentPanel request={contentRequest} fallback={fallbackContent} />
         )}
         {!children && (rawContent === undefined || rawContent === null) && !contentRequest && (

@@ -319,18 +319,21 @@ const STORED_FIELDS_BODY = {
   ],
 }
 
-/** Answers every held route with its data body. */
-function respondAll(router: ReturnType<typeof stubSectionRoutes>): void {
-  router.respond(SUMMARY_ROUTE, SUMMARY_BODY)
-  router.respond(CHARTS_ROUTE, CHARTS_BODY)
-  router.respond(TOOLS_ROUTE, TOOLS_BODY)
-  router.respond(SERVERS_ROUTE, SERVERS_BODY)
-  router.respond(SKILLS_ROUTE, SKILLS_BODY)
-  router.respond(TIMELINE_ROUTE, TIMELINE_BODY)
-  router.respond(REQUESTS_ROUTE, REQUESTS_BODY)
-  router.respond(RECONCILIATION_ROUTE, RECONCILIATION_BODY)
-  router.respond(PROBLEMS_ROUTE, PROBLEMS_BODY)
-  router.respond(STORED_FIELDS_ROUTE, STORED_FIELDS_BODY)
+/** Answers every held route with its data body, or the override's body where one is given. */
+function respondAll(
+  router: ReturnType<typeof stubSectionRoutes>,
+  overrides: Record<string, unknown> = {},
+): void {
+  router.respond(SUMMARY_ROUTE, (overrides[SUMMARY_ROUTE] as typeof SUMMARY_BODY) ?? SUMMARY_BODY)
+  router.respond(CHARTS_ROUTE, (overrides[CHARTS_ROUTE] as typeof CHARTS_BODY) ?? CHARTS_BODY)
+  router.respond(TOOLS_ROUTE, (overrides[TOOLS_ROUTE] as typeof TOOLS_BODY) ?? TOOLS_BODY)
+  router.respond(SERVERS_ROUTE, (overrides[SERVERS_ROUTE] as typeof SERVERS_BODY) ?? SERVERS_BODY)
+  router.respond(SKILLS_ROUTE, (overrides[SKILLS_ROUTE] as typeof SKILLS_BODY) ?? SKILLS_BODY)
+  router.respond(TIMELINE_ROUTE, (overrides[TIMELINE_ROUTE] as typeof TIMELINE_BODY) ?? TIMELINE_BODY)
+  router.respond(REQUESTS_ROUTE, (overrides[REQUESTS_ROUTE] as typeof REQUESTS_BODY) ?? REQUESTS_BODY)
+  router.respond(RECONCILIATION_ROUTE, (overrides[RECONCILIATION_ROUTE] as typeof RECONCILIATION_BODY) ?? RECONCILIATION_BODY)
+  router.respond(PROBLEMS_ROUTE, (overrides[PROBLEMS_ROUTE] as typeof PROBLEMS_BODY) ?? PROBLEMS_BODY)
+  router.respond(STORED_FIELDS_ROUTE, (overrides[STORED_FIELDS_ROUTE] as typeof STORED_FIELDS_BODY) ?? STORED_FIELDS_BODY)
 }
 
 // ---------------------------------------------------------------------------
@@ -503,9 +506,30 @@ describe('AgentSessionDashboard: inspector drawer', () => {
 
     fireEvent.click(screen.getByTestId('turn-bar-1'))
     expect((await screen.findByTestId('drawer-title')).textContent).toBe('Turn 2 · Full context')
+    // D9: the drawer resolves the turn by key first, and requests its content
+    // only once that row answers.
+    await waitFor(() => expect(router.calls).toContain(`/api/kyber/session/${SESSION_ID}/turn/1`))
+    expect(router.calls.filter((url) => url.includes('/turn/1/content'))).toEqual([])
+
+    router.respond(`/api/kyber/session/${SESSION_ID}/turn/1`, {
+      sessionId: SESSION_ID,
+      turnIndex: 1,
+      turn: { index: 1, spanId: 'turn-span-2', fresh: 5000, cache_read: 42000 },
+      context: null,
+    })
     await waitFor(() =>
       expect(router.calls).toContain(`/api/kyber/session/${SESSION_ID}/turn/1/content?full=true`),
     )
+    router.respond(`/api/kyber/session/${SESSION_ID}/turn/1/content?full=true`, {
+      sessionId: SESSION_ID,
+      turnIndex: 1,
+      blocks: [],
+      parts: [],
+      assembledText: '',
+    })
+    expect(await screen.findByTestId('turn-content-full')).toBeTruthy()
+    // The measured totals come from the fetched row.
+    expect(screen.getByTestId('turn-total-cache-read').textContent).toContain('42.0K')
   })
 
   it('opens the span inspector for a clicked timeline node', async () => {
@@ -521,6 +545,28 @@ describe('AgentSessionDashboard: inspector drawer', () => {
         `/api/kyber/session/${SESSION_ID}/content?span=root-span-1&full=true`,
       ),
     )
+    // The loaded node carries its attributes inline, so the attributes route stays idle.
+    expect(router.calls).not.toContain('/api/kyber/span/root-span-1/attributes')
+  })
+
+  it('fetches a span node attributes from the attributes route when the node carries none', async () => {
+    const router = stubSectionRoutes()
+    mountDashboard()
+    // The served node may carry no inline attribute map — the raw payload is
+    // the span's attributes, and the inspector fetches the node it shows.
+    respondAll(router, {
+      [TIMELINE_ROUTE]: { ...TIMELINE_BODY, nodes: [{ ...TIMELINE_BODY.nodes[0], attributes: {} }] },
+    })
+    await screen.findByTestId('timeline-node')
+
+    fireEvent.click(screen.getByTestId('timeline-node'))
+    expect((await screen.findByTestId('drawer-title')).textContent).toBe('Span: invoke_agent')
+    await waitFor(() => expect(router.calls).toContain('/api/kyber/span/root-span-1/attributes'))
+    router.respond('/api/kyber/span/root-span-1/attributes', {
+      spanId: 'root-span-1',
+      attributes: { 'agent.name': 'coder-bot' },
+    })
+    expect(await screen.findByTestId('span-inspector').then((el) => el.textContent)).toContain('coder-bot')
   })
 
   it('opens the first listed turn for a clicked skill row', async () => {
@@ -534,6 +580,43 @@ describe('AgentSessionDashboard: inspector drawer', () => {
     await waitFor(() =>
       expect(router.calls).toContain(`/api/kyber/session/${SESSION_ID}/turn/0/content?full=true`),
     )
+  })
+
+  it('opens a bucket drill-down from the fetched turn context when a context segment is clicked', async () => {
+    const router = stubSectionRoutes()
+    mountDashboard()
+    respondAll(router)
+    await screen.findByTestId('context-composition-chart')
+
+    fireEvent.click(screen.getByTestId('context-segment-tool_definitions'))
+    expect((await screen.findByTestId('drawer-title')).textContent).toBe('Turn 1 · tool_definitions')
+    // D9: the drill-down carries the key pair; the drawer fetches the turn and
+    // reads that turn's own context — no content request before it answers.
+    await waitFor(() => expect(router.calls).toContain(`/api/kyber/session/${SESSION_ID}/turn/0`))
+    expect(router.calls.filter((url) => url.includes('/content'))).toEqual([])
+
+    // The per-turn route answers with figures of its own, distinct from the
+    // session-wide composition the charts rendered.
+    router.respond(`/api/kyber/session/${SESSION_ID}/turn/0`, {
+      sessionId: SESSION_ID,
+      turnIndex: 0,
+      turn: { index: 0, spanId: 'turn-span-1' },
+      context: { index: 1, buckets: { tool_definitions: 321, residual: 44 }, reported_input: 1234 },
+    })
+    const inspector = await screen.findByTestId('context-bucket-inspector')
+    expect(inspector.textContent).toContain('321')
+    expect(inspector.textContent).toContain('1.2K')
+    await waitFor(() =>
+      expect(router.calls).toContain(
+        `/api/kyber/session/${SESSION_ID}/content?span=turn-span-1&part=tool_definitions&full=true`,
+      ),
+    )
+    router.respond(`/api/kyber/session/${SESSION_ID}/content?span=turn-span-1&part=tool_definitions&full=true`, {
+      sessionId: SESSION_ID,
+      spanId: 'turn-span-1',
+      parts: [{ spanId: 'turn-span-1', part: 'tool_definitions', text: 'BUCKET_DEFINITIONS_FULL_TEXT' }],
+    })
+    expect(await screen.findByText('BUCKET_DEFINITIONS_FULL_TEXT')).toBeTruthy()
   })
 
   it('states the harness notice and issues no content request when no definitions exist', async () => {

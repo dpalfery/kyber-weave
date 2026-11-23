@@ -2699,13 +2699,21 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
   it('routes a whole-turn drawer request to the full panel without clipped content', () => {
     const qc = createTestQueryClient()
     seedTurn(qc, buildTurnFixture())
+    // The drawer resolves the row it opens by key (D9): the measured totals
+    // come from the per-turn route, never from an opener-carried row.
+    qc.setQueryData(['kyber-session-turn', TURN_SESSION_ID, TURN_INDEX], {
+      sessionId: TURN_SESSION_ID,
+      turnIndex: TURN_INDEX,
+      turn: { index: TURN_INDEX, fresh: 250, cache_read: 200, cache_creation: 50 },
+      context: null,
+    })
     const html = renderHtml(
       <QueryClientProvider client={qc}>
         <SessionInspectorDrawer
           open={true}
           onClose={() => {}}
           title="Turn 2 · Full context"
-          rawContent={{ turnIndex: TURN_INDEX, turn: { fresh: 250, cache_read: 200, cache_creation: 50 } } as unknown as Parameters<typeof SessionInspectorDrawer>[0]['rawContent']}
+          rawContent={{ turnIndex: TURN_INDEX } as unknown as Parameters<typeof SessionInspectorDrawer>[0]['rawContent']}
           contentRequest={{ sessionId: TURN_SESSION_ID, turnIndex: TURN_INDEX, full: true }}
         />
       </QueryClientProvider>
@@ -2714,6 +2722,9 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
     expect(html).toContain('data-testid="turn-content-full"')
     expect(text).toContain(OWN_SYSTEM_PROMPT)
     expect(text).toContain(SHARED_PROMPT)
+    // The measured totals come from the fetched row.
+    expect(html).toContain('data-testid="turn-total-cache-read"')
+    expect(text).toContain('200')
     // The clipped payload-row inspector stays out of the lossless view.
     expect(html).not.toContain('data-testid="turn-inspector"')
     expect(html).not.toContain('data-testid="drawer-content-loading"')

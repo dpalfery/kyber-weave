@@ -205,21 +205,16 @@ export type DrawerContent =
     }
   | { skill: KyberSkillRow }
   | string
+  // One context-bucket drill-down's key pair (D9): the drawer fetches the
+  // turn widened with its context and derives figures and content itself.
   | {
       turnIndex: number
       bucket: string
-      key: string
-      tokens: number
-      value: number
-      total: number
-      label: string
-      content: unknown
-      turn: KyberSessionTurnRow
-      context: KyberSessionContext
     }
+  // A whole-turn open's key: the drawer fetches the row and its lossless
+  // content itself (D9); no turn row rides the payload.
   | {
       turnIndex: number
-      turn: KyberSessionTurnRow
     }
   // Anything else InspectorContent's shape dispatch can render — tests hand
   // the drawer bare records, and the runtime dispatch is the contract.

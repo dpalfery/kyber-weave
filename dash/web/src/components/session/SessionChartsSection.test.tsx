@@ -144,9 +144,11 @@ describe('SessionChartsSection inspector wiring', () => {
     const request = openInspector.mock.calls[0][0] as OpenInspectorRequest
     expect(request.title).toBe('Turn 1 · Full context')
     expect(request.contentRequest).toEqual({ sessionId: SESSION_ID, turnIndex: 0, full: true })
+    // D9: the opener passes the turn's key only — no row rides the payload.
+    expect(request.content).toEqual({ turnIndex: 0 })
   })
 
-  it('opens the bucket drill-down on the turn span when a context segment is clicked', async () => {
+  it('opens the keyed bucket request when a context segment is clicked', async () => {
     stubFetch(() => jsonResponse(CHARTS_BODY))
     const openInspector = vi.fn()
     mount(openInspector)
@@ -155,14 +157,17 @@ describe('SessionChartsSection inspector wiring', () => {
     expect(openInspector).toHaveBeenCalledTimes(1)
     const request = openInspector.mock.calls[0][0] as OpenInspectorRequest
     expect(request.title).toBe('Turn 1 · tool_definitions')
+    // D9: the drill-down carries the key pair; the drawer fetches the turn
+    // (widened with its context) and derives the span-scoped content request.
     expect(request.contentRequest).toEqual({
       sessionId: SESSION_ID,
-      span: 'turn-span-1',
-      part: 'tool_definitions',
+      turnIndex: 0,
+      bucket: 'tool_definitions',
     })
+    expect(request.content).toEqual({ turnIndex: 0, bucket: 'tool_definitions' })
   })
 
-  it('keeps the session-level system prompt off any turn span', async () => {
+  it('keys the system-prompt bucket to its turn, for the drawer to keep off any span', async () => {
     stubFetch(() => jsonResponse(CHARTS_BODY))
     const openInspector = vi.fn()
     mount(openInspector)
@@ -170,7 +175,6 @@ describe('SessionChartsSection inspector wiring', () => {
     fireEvent.click(within(section).getByTestId('context-segment-system_prompt'))
     const request = openInspector.mock.calls[0][0] as OpenInspectorRequest
     expect(request.title).toBe('Turn 1 · system_prompt')
-    expect(request.contentRequest).toEqual({ sessionId: SESSION_ID, part: 'system_prompt' })
-    expect(request.contentRequest).not.toHaveProperty('span')
+    expect(request.contentRequest).toEqual({ sessionId: SESSION_ID, turnIndex: 0, bucket: 'system_prompt' })
   })
 })
