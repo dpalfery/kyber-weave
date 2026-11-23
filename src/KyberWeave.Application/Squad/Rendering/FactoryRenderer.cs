@@ -303,9 +303,9 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
     ///     one <c>{server}___{tool}</c> entry per roster tool of each granted server.
     /// </summary>
     /// <remarks>
-    ///     Server order is the granted-servers order (already ordinal); tool order is the roster
-    ///     order, so a rename in <c>toolchain.yml</c> moves the entry without a renderer edit. A
-    ///     granted server the roster does not name contributes no entry, so the grant fails closed
+    ///     Server order is the granted-servers order (already ordinal); tool order is ordinal
+    ///     within each server with duplicates removed, so a roster reorder changes no droid bytes.
+    ///     A granted server the roster does not name contributes no entry, so the grant fails closed
     ///     rather than naming a tool the server never registered.
     /// </remarks>
     private static IReadOnlyList<string> ResolveGrantedMcpToolIds(
@@ -318,10 +318,10 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
         List<string> toolIds = [];
         foreach (string server in grantedServers)
             if (requiredMcpTools.TryGetValue(server, out IReadOnlyList<string>? tools))
-                foreach (string tool in tools)
+                foreach (string tool in tools.OrderBy(t => t, StringComparer.Ordinal))
                     toolIds.Add($"{server}___{tool}");
 
-        return toolIds;
+        return [.. toolIds.Distinct(StringComparer.Ordinal)];
     }
 
     /// <summary>
