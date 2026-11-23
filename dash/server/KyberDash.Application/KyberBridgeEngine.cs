@@ -1508,11 +1508,29 @@ public class KyberBridgeEngine
     /// <summary>Compares two runs by ID, or returns <see langword="null"/> if either is missing.</summary>
     /// <param name="runA">Baseline run identifier.</param>
     /// <param name="runB">Comparison run identifier.</param>
-    /// <returns>Comparison JSON element, or <see langword="null"/>.</returns>
+    /// <returns>The phase-aligned comparison payload, or <see langword="null"/>.</returns>
+    /// <remarks>
+    /// The payload is <see cref="CanonRunComparison"/> over each run's resolved turns, so the
+    /// token totals, phase alignment, deltas, and verdict a surface renders are engine decisions.
+    /// </remarks>
     public JsonElement? GetCompareRuns(string runA, string runB)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(runA);
+        ArgumentException.ThrowIfNullOrWhiteSpace(runB);
+
         EnsureProjected();
-        return rollups.CompareRuns(runA, runB);
+        StoredRun? runARow = projections.GetRun(runA);
+        StoredRun? runBRow = projections.GetRun(runB);
+        if (runARow is null || runBRow is null)
+        {
+            return null;
+        }
+
+        IModelPricingLookup lookup = pricing.LoadPricingTables();
+        RunComparisonRun sideA = ResolveComparisonRun(runARow, lookup);
+        RunComparisonRun sideB = ResolveComparisonRun(runBRow, lookup);
+
+        return CanonRunComparison.Compare(sideA, sideB);
     }
 
     /// <summary>Returns paginated metadata-only quarantine entries.</summary>
@@ -3803,6 +3821,112 @@ public class KyberBridgeEngine
         }
 
         return turns;
+    }
+
+    /// <summary>
+    /// Resolves one run's turns for comparison: the canonical content-free turn figures, joined to
+    /// the tool names and harness-reported token totals the content-free record read carries. A
+    /// faulted session is isolated the way <see cref="ExtractRunTurns"/> isolates it — recorded,
+    /// skipped, and the remaining sessions answer.
+    /// </summary>
+    /// <param name="run">The run being resolved.</param>
+    /// <param name="lookup">Read-time pricing tables.</param>
+    /// <returns>The run's comparison turns, in execution order.</returns>
+    private RunComparisonRun ResolveComparisonRun(StoredRun run, IModelPricingLookup lookup)
+    {
+        IReadOnlyList<StoredExecution> executions = projections.ListExecutionsForRun(run.RunId);
+        List<RunComparisonTurn> turns = [];
+        HashSet<string> seenSessions = new(StringComparer.Ordinal);
+        foreach (StoredExecution exec in executions)
+        {
+            if (string.IsNullOrEmpty(exec.SessionId) || !seenSessions.Add(exec.SessionId))
+            {
+                continue;
+            }
+
+            IReadOnlyList<ReadTimeTurnSummary> sessionTurns;
+            IReadOnlyList<CollectedRecord> sessionRecords;
+            try
+            {
+                sessionTurns = reader.SessionTurnFigures(exec.SessionId, lookup)?.Turns ?? [];
+                sessionRecords = reader.SessionRecordsContentFree(exec.SessionId);
+            }
+            catch (Exception ex)
+            {
+                RecordProjectionFailure(exec.SessionId, ex.Message);
+                continue;
+            }
+
+            Dictionary<string, CollectedRecord> recordsBySpan = new(sessionRecords.Count, StringComparer.Ordinal);
+            foreach (CollectedRecord record in sessionRecords)
+            {
+                recordsBySpan[record.RecordId] = record;
+            }
+
+            Dictionary<string, List<string>> toolsBySpan = CollectTurnTools(sessionRecords);
+            foreach (ReadTimeTurnSummary turn in sessionTurns)
+            {
+                // The canonical per-turn total follows the read model's own rule: measured input
+                // plus measured output, withheld with a reason when either side went unmeasured.
+                CollectedRecord? record = recordsBySpan.GetValueOrDefault(turn.SpanId);
+                long? all = turn.InputTokens.HasValue && turn.OutputTokens.HasValue
+                    ? turn.InputTokens.Value + turn.OutputTokens.Value
+                    : null;
+                turns.Add(new RunComparisonTurn(
+                    TurnIndex: turns.Count,
+                    SpanId: turn.SpanId,
+                    FreshInput: turn.FreshInputTokens,
+                    CacheRead: turn.CacheReadTokens,
+                    CacheCreation: turn.CacheCreationTokens,
+                    Output: turn.OutputTokens,
+                    ReportedInput: record?.ReportedInputTokens,
+                    ReportedOutput: record?.ReportedOutputTokens,
+                    All: all,
+                    AllReason: all.HasValue ? null : CanonRunComparison.TurnTokensNotMeasurableReason,
+                    Cost: turn.PublishedCost,
+                    Tools: toolsBySpan.GetValueOrDefault(turn.SpanId) ?? []));
+            }
+        }
+
+        return new RunComparisonRun(run.RunId, run.HarnessId, run.Label, turns);
+    }
+
+    /// <summary>
+    /// Attributes each tool invocation to the model turn that issued it: walking a session's
+    /// records in start order, a <c>tool.invoke</c> record names the turn whose <c>llm.invoke</c>
+    /// record precedes it.
+    /// </summary>
+    /// <param name="records">The session's content-free records.</param>
+    /// <returns>Tool names keyed by the issuing turn's span identifier.</returns>
+    private static Dictionary<string, List<string>> CollectTurnTools(IReadOnlyList<CollectedRecord> records)
+    {
+        Dictionary<string, List<string>> toolsBySpan = new(StringComparer.Ordinal);
+        string? currentTurnSpan = null;
+        IOrderedEnumerable<CollectedRecord> ordered = records
+            .OrderBy(static record => record.StartedAt)
+            .ThenBy(static record => record.RecordId, StringComparer.Ordinal);
+        foreach (CollectedRecord record in ordered)
+        {
+            if (record.Op == RecordOp.LlmInvoke)
+            {
+                currentTurnSpan = record.RecordId;
+            }
+            else if (record.Op == RecordOp.ToolInvoke
+                && currentTurnSpan is not null
+                && record.Tool is CollectedToolCall tool
+                && !string.IsNullOrWhiteSpace(tool.ToolName))
+            {
+                if (!toolsBySpan.TryGetValue(currentTurnSpan, out List<string>? names))
+                {
+                    names = [];
+                    toolsBySpan[currentTurnSpan] = names;
+                }
+
+                names.Add(tool.ToolName);
+            }
+        }
+
+        return toolsBySpan;
     }
 
     private object BuildRefreshCoverage() => BuildRefreshCoverageState().Payload;

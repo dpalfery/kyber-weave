@@ -713,3 +713,164 @@ describe('CompareRuns: measured history below threshold preserves the server ref
     expect(text).not.toContain('Recommendation promotion refused')
   })
 })
+
+describe('CompareRuns: engine-served comparison values (display layer)', () => {
+  afterEach(() => {
+    cleanup()
+  })
+
+  /**
+   * Measured comparison whose engine values deliberately differ from anything the browser
+   * could derive: `tokens.all` is 999 while freshInput+cacheRead+output is 150, and the
+   * engine's `tokenDelta` is 77 while tokensB - tokensA is 100. Rendering the engine's
+   * numbers proves the page computes nothing; rendering the sums would prove it does.
+   */
+  function engineComparison(): KyberRunComparison {
+    return {
+      runA: {
+        runId: 'cursor-run-latest',
+        harness: 'cursor',
+        label: 'Issue 190 baseline',
+        availability: 'measured',
+        totalTokens: 100,
+        turnCount: 2,
+      },
+      runB: {
+        runId: 'claude-run-older',
+        harness: 'claude-code',
+        label: 'Claude candidate',
+        availability: 'measured',
+        totalTokens: 200,
+        turnCount: 1,
+      },
+      pairs: [
+        {
+          phase: 'exploration',
+          phaseIndex: 0,
+          runATurn: {
+            turnIndex: 0,
+            phase: 'exploration',
+            tokens: { freshInput: 100, cacheRead: 20, output: 30, all: 999 },
+            tools: ['grep_search'],
+          },
+          runBTurn: {
+            turnIndex: 0,
+            phase: 'exploration',
+            tokens: { freshInput: 700, cacheRead: 100, output: 200, all: 1_000 },
+            tools: ['find_by_name'],
+          },
+          signals: [
+            {
+              name: 'total_tokens',
+              label: 'Total tokens',
+              unit: 'tokens',
+              runAValue: 999,
+              runBValue: 1_000,
+              delta: 1,
+              status: 'compared',
+            },
+          ],
+          reading:
+            'Phase exploration (turn 1 vs turn 1): Run A used 999 tokens; Run B used 1,000 tokens. Delta: +1 tokens.',
+        },
+        {
+          phase: 'implementation',
+          phaseIndex: 0,
+          runATurn: {
+            turnIndex: 1,
+            phase: 'implementation',
+            tokens: {
+              freshInput: 5,
+              cacheRead: 1,
+              output: 2,
+              allReason: 'token telemetry unavailable for this turn',
+            },
+            tools: ['write_to_file'],
+          },
+          runBTurn: null,
+          signals: [
+            {
+              name: 'total_tokens',
+              label: 'Total tokens',
+              unit: 'tokens',
+              status: 'missing_in_b',
+              reason: 'Turn missing in Run B for this phase slot',
+            },
+          ],
+          reading:
+            'Phase implementation (turn 2): Run A executed tokens unavailable; Run B required no turns in this phase slot.',
+        },
+      ],
+      phaseSummaries: emptyPhaseSummaries,
+      totals: {
+        availability: 'measured',
+        tokensA: 100,
+        tokensB: 200,
+        tokenDelta: 77,
+        turnCountA: 2,
+        turnCountB: 1,
+        turnDelta: -1,
+        costComparable: true,
+      },
+      verdict: {
+        status: 'insufficient_history',
+        pairCount: 2,
+        historyAvailability: 'unavailable',
+        meetsSufficiencyThreshold: false,
+        outcomeRegression: false,
+        canPromote: false,
+        recommendation:
+          'Pairing is manual-only until recommendation history is measured.',
+        refusalReason:
+          'Recommendation history is not measured for this comparison; promotion requires an explicitly recorded completed-pair count of at least 5.',
+        summary: '',
+      },
+    }
+  }
+
+  it('renders the engine token delta and turn totals verbatim, never a recomputed one', () => {
+    renderCompare(
+      <CompareRuns
+        runs={[
+          runCandidate({ runId: 'cursor-run-latest', harness: 'cursor', label: 'Issue 190 baseline' }),
+          runCandidate({ runId: 'claude-run-older', harness: 'claude-code', label: 'Claude candidate' }),
+        ]}
+        selectedAId="cursor-run-latest"
+        selectedBId="claude-run-older"
+        comparison={engineComparison()}
+      />,
+    )
+
+    const page = screen.getByTestId('page-compare').textContent ?? ''
+    // The engine decided the delta is 77; tokensB - tokensA would say 100.
+    expect(page).toContain('Token Delta: +77')
+    expect(page).not.toContain('Token Delta: +100')
+    // The engine decided each turn's total; fresh+cacheRead+output would say 150.
+    expect(page).toContain('999 tokens')
+    expect(page).toContain('1,000 tokens')
+    expect(page).not.toContain('150 tokens')
+    // The reading is engine-authored prose, rendered as served.
+    expect(page).toContain('Run A used 999 tokens; Run B used 1,000 tokens')
+  })
+
+  it('renders the not-measurable turn state the engine marks, not a fabricated total', () => {
+    renderCompare(
+      <CompareRuns
+        runs={[
+          runCandidate({ runId: 'cursor-run-latest', harness: 'cursor', label: 'Issue 190 baseline' }),
+          runCandidate({ runId: 'claude-run-older', harness: 'claude-code', label: 'Claude candidate' }),
+        ]}
+        selectedAId="cursor-run-latest"
+        selectedBId="claude-run-older"
+        comparison={engineComparison()}
+      />,
+    )
+
+    const page = screen.getByTestId('page-compare').textContent ?? ''
+    expect(page).toContain('not measurable')
+    expect(page).toContain('token telemetry unavailable for this turn')
+    // freshInput 5 + cacheRead 1 + output 2 must never become a turn total.
+    expect(page).not.toContain('8 tokens')
+    expect(page).not.toContain('5 tokens')
+  })
+})

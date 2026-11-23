@@ -984,10 +984,17 @@ public sealed class AnalyticsReadPathTests
             store.MaterializedContentBytes == 0,
             $"the compare path materialized {store.MaterializedContentBytes} content bytes");
         Assert.DoesNotContain(store.ReadLog, read => ContentBearingReads.Contains(read));
-        Assert.Equal(500, comparison.GetProperty("runA").GetProperty("totalInput").GetInt64());
-        Assert.Equal(60, comparison.GetProperty("runA").GetProperty("totalOutput").GetInt64());
-        Assert.Equal(1_800, comparison.GetProperty("runB").GetProperty("totalInput").GetInt64());
-        Assert.Equal(120, comparison.GetProperty("runB").GetProperty("totalOutput").GetInt64());
+        // The comparison's run sides are the documented contract (issue #190): measured sides
+        // carry the canonical token total, never a per-class split the page would have to sum.
+        Assert.Equal("measured", comparison.GetProperty("runA").GetProperty("availability").GetString());
+        Assert.Equal(560, comparison.GetProperty("runA").GetProperty("totalTokens").GetInt64());
+        Assert.Equal(1, comparison.GetProperty("runA").GetProperty("turnCount").GetInt32());
+        Assert.Equal("measured", comparison.GetProperty("runB").GetProperty("availability").GetString());
+        Assert.Equal(1_920, comparison.GetProperty("runB").GetProperty("totalTokens").GetInt64());
+        Assert.Equal(1_360, comparison.GetProperty("totals").GetProperty("tokenDelta").GetInt64());
+        JsonElement pair = Assert.Single(comparison.GetProperty("pairs").EnumerateArray());
+        Assert.Equal(560, pair.GetProperty("runATurn").GetProperty("tokens").GetProperty("all").GetInt64());
+        Assert.Equal(1_920, pair.GetProperty("runBTurn").GetProperty("tokens").GetProperty("all").GetInt64());
     }
 
     /// <summary>
