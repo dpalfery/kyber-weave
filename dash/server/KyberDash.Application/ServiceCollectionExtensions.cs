@@ -87,6 +87,7 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<CanonSessionProjectorEngine>(),
             provider.GetRequiredService<CanonRollupsEngine>(),
             string.IsNullOrWhiteSpace(options.Version) ? KyberBridgeEngine.DefaultVersion : options.Version,
+            storePath: options.DatabasePath,
             options: provider.GetRequiredService<DashOptions>(),
             collector: provider.GetService<IOtlpCollectorService>(),
             listener: provider.GetService<IOtlpListenerState>()));

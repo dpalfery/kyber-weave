@@ -787,7 +787,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             GetSessionProjection(sessionKey),
             GetSessionTurns(sessionKey),
             QuerySessionIngestProblems(sessionKey),
-            pricing).Summary;
+            pricing).Summary with { SkillInvocations = SkillsInvoked(sessionKey: sessionKey) };
     }
 
     /// <inheritdoc />
@@ -811,10 +811,15 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             QuerySessionIngestProblems(sessionKey),
             pricing);
         return new SessionDetailFigure(
-            figures.Summary,
+            figures.Summary with { SkillInvocations = SkillsInvoked(sessionKey: sessionKey) },
             BuildContentFreeTurnSummaries(projectedTurns, records, session.HarnessId, pricing),
             figures.Tools,
-            figures.Requests);
+            figures.Requests,
+            figures.Servers,
+            figures.Reconciliation,
+            figures.FirstContextBucket,
+            figures.LastContextBucket,
+            figures.UnusedRange);
     }
 
     /// <inheritdoc />
@@ -906,6 +911,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         long totalCacheCreation = 0;
         bool hasCacheCreation = false;
         int cacheCreationTurns = 0;
+        List<ReadTimeTurnReconciliation> reconciliation = new(turnEntries.Count);
 
         foreach ((int position, CollectedRecord turnRecord) in turnEntries)
         {
@@ -960,6 +966,21 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                     cacheCreationTurns++;
                 }
             }
+
+            bool? inputMatch = turnRecord.ReportedInputTokens.HasValue && turnSummary.InputTokens.HasValue
+                ? turnRecord.ReportedInputTokens.Value == turnSummary.InputTokens.Value
+                : null;
+            bool? outputMatch = turnRecord.ReportedOutputTokens.HasValue && turnSummary.OutputTokens.HasValue
+                ? turnRecord.ReportedOutputTokens.Value == turnSummary.OutputTokens.Value
+                : null;
+            reconciliation.Add(new ReadTimeTurnReconciliation(
+                turnRecord.RecordId,
+                turnRecord.ReportedInputTokens,
+                turnSummary.InputTokens,
+                inputMatch,
+                turnRecord.ReportedOutputTokens,
+                turnSummary.OutputTokens,
+                outputMatch));
         }
 
         List<CollectedRecord> rootRecords =
@@ -1142,6 +1163,20 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             SchemaMeasurable: projection?.Schema is not null,
             ContextMeasurable: projection?.Context is not null);
 
+        // Server rows, context buckets, and the unused-schema range all price the stored
+        // projection and the content-free tool metadata above, so no content column is read.
+        List<ReadTimeSessionServerSummary> servers = BuildReaderServerSummaries(projection, tools);
+        ReadTimeContextBucketSummary? firstContextBucket = null;
+        ReadTimeContextBucketSummary? lastContextBucket = null;
+        if (projection?.Context?.Turns is { Count: > 0 } contextTurns)
+        {
+            List<StoredSessionContextTurn> orderedContext = [.. contextTurns.OrderBy(static t => t.Position)];
+            firstContextBucket = BuildReaderContextBucketSummary(orderedContext[0], turnEntries);
+            lastContextBucket = BuildReaderContextBucketSummary(orderedContext[^1], turnEntries);
+        }
+
+        UnusedSchemaRange? unusedRange = ResolveReaderUnusedRange(projection, harnessId, models, pricing);
+
         List<Problem> problems = [.. storedProblems];
         problems.AddRange(extraProblems);
 
@@ -1167,16 +1202,27 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 PublishedCost: sessionPublishedCost,
                 CostBasisMismatch: basisMismatch,
                 Coverage: coverage,
-                Problems: problems),
+                Problems: problems,
+                SkillInvocations: []),
             tools,
-            requests);
+            requests,
+            servers,
+            reconciliation,
+            firstContextBucket,
+            lastContextBucket,
+            unusedRange);
     }
 
     /// <summary>One session's content-free figures with the detail page's tool and request rows.</summary>
     private sealed record SessionFigureSet(
         SessionSummaryFigure Summary,
         IReadOnlyList<ReadTimeSessionToolSummary> Tools,
-        IReadOnlyList<ReadTimeSessionRequestSummary> Requests);
+        IReadOnlyList<ReadTimeSessionRequestSummary> Requests,
+        IReadOnlyList<ReadTimeSessionServerSummary> Servers,
+        IReadOnlyList<ReadTimeTurnReconciliation> Reconciliation,
+        ReadTimeContextBucketSummary? FirstContextBucket,
+        ReadTimeContextBucketSummary? LastContextBucket,
+        UnusedSchemaRange? UnusedRange);
 
     /// <summary>
     /// Derives one session's sessions-list figures from its session row, content-free records,

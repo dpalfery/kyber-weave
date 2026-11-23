@@ -1532,8 +1532,11 @@ curl -s "http://127.0.0.1:3000/api/kyber/compare/runs?runA=run-a&runB=run-b" | j
 curl -s "http://127.0.0.1:3000/api/kyber/quarantine?limit=50&offset=0" | jq .
 curl -s "http://127.0.0.1:3000/api/kyber/problems?limit=50&page=1" | jq .
 
-# Coverage route (refresh window, ingest activity, checkpoints)
+# Coverage route: refresh window, ingest activity, checkpoints
 curl -s http://127.0.0.1:3000/api/kyber/coverage | jq .
+
+# ContextReport for Tray / CLI parity (optional ?harness=, ?session=, ?run=, ?days=, ?limit=)
+curl -s "http://127.0.0.1:3000/api/kyber/report?days=7" | jq .
 
 # Shared settings (read all, or change one)
 curl -s http://127.0.0.1:3000/api/kyber/settings | jq .
@@ -1558,9 +1561,9 @@ recursive Node children. Three independent layers guard against a repeat:
   receiver. `JobSchedulerService` (under `JobsLease`) and `OtlpCollectorService` run in the
   `kyberdash web` process, and `EngineOwner` bounds the engine to one instance per state directory.
 - **Process bounds and allow-list** (ADR 0047). Every C# process launch goes through bounded `ProcessRunner` / allow-listed sites (`ProcessSpawnSitesTests` against `tests/KyberWeave.RepoPolicy.Tests/Fixtures/spawn-sites-allowlist.json`); single-instance ownership uses `EngineOwner` and `JobsLease`.
-- **Isolated e2e boots.** The self-booting Playwright spec boots its own isolated C# `kyberdash`
-  engine under a temp state dir (`dash/playwright.isolated.config.ts`,
-  `dash/e2e/harness-collection-boot.ts`), and tears it down itself.
+- **Isolated e2e boots.** The self-booting Playwright specs (`dash/playwright.isolated.config.ts`) boot an isolated C# `kyberdash`
+  engine under a temp state dir (`dash/e2e/harness-collection-boot.ts` or `startIsolatedServer` in
+  `dash/e2e/harness-collection-world.ts`), never touching `:4747` or `~/.kyberdash/canon.db`, and tear down the process group deterministically.
 
 A fourth, separate concern is load rather than runaway processes: several harnesses on one machine
 can each start a full `dotnet test` run at the same moment. That is why full runs belong to the
@@ -1585,12 +1588,30 @@ on every invocation, from the repository root:
 npx --prefix dash playwright test --config dash/playwright.isolated.config.ts
 ```
 
-That config runs the two self-booting specs (`harness-collection.spec.ts` and
-`refresh-filters.spec.ts`) with one worker. The only Playwright configs in `dash/` are
+That config runs the three isolated self-booting specs (`harness-collection.spec.ts`,
+`otel-web-dashboard.spec.ts`, and `otel-tray-dashboard.spec.ts`) with one worker. The only Playwright configs in `dash/` are
 `playwright.config.ts` and `playwright.isolated.config.ts`: a test pins that set. Do not run
 `dash/playwright.config.ts` by hand. Its `webServer` starts a dashboard on port 4747, the port the
 tray uses, and it is not the isolated path. Which specs have no sanctioned invocation is tracked in
 [the Playwright webServer specs todo](../todo/kyberdash-playwright-webserver-specs.md).
+
+#### Isolated Playwright OTLP suites (Web Dashboard and Tray UI)
+
+Two isolated OTLP end-to-end suites verify live `/v1/traces` ingestion across all 7 stored harnesses (`claude-code`, `opencode`, `droid`, `codex`, `copilot`, `pi`, and `antigravity`, plus `gemini` exclusion, up to 12 turns per harness from `dash/e2e/otel-harness-payloads.ts`) and `/v1/logs` ingestion for the 2 harnesses with native OTLP log payloads (`claude-code` and `codex`; the remaining 5 stored fixtures and `gemini` have `logPayload: null` and are never posted to `/v1/logs`), against an ephemeral `kyberdash web --no-open --port 0 --db <temp> --state-dir <temp>` instance (`startIsolatedServer` and `waitForOtlpIngest` in `dash/e2e/harness-collection-world.ts`):
+
+- **Web Dashboard OTLP suite (`dash/e2e/otel-web-dashboard.spec.ts`):**
+  ```bash
+  npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/otel-web-dashboard.spec.ts
+  ```
+  Posts multi-turn OTLP trace payloads to `/v1/traces` (and log payloads to `/v1/logs` for `claude-code` and `codex`), drains `/healthz` (`pendingCount == 0`) and `/api/kyber/{sessions,harnesses,coverage}`, and validates Context Doctor, Harness Detail, Sessions, and every Agent Session Dashboard section plus explicit `not_measurable` / `—` gaps.
+- **Tray UI OTLP suite (`dash/e2e/otel-tray-dashboard.spec.ts`):**
+  Requires `dash/tray/ui/node_modules` (`npm --prefix dash/tray/ui ci`). The bridge (`dash/e2e/otel-tray-bridge.ts`) serves `dash/tray/ui/dist` (building it with `npm --prefix dash/tray/ui run build` under a 120 s `SIGKILL` bound if absent), proxies `/tray/invoke` and `/api/kyber/*` over loopback HTTP **without** an `Origin` header (complying with `DashHttp.IsAllowedMutation`), and injects a `window.__TAURI_INTERNALS__` + `window.__TAURI_EVENT_PLUGIN_INTERNALS__` bridge supporting all 9 Tauri IPC commands and `view-state-changed` events:
+  ```bash
+  npm --prefix dash/tray/ui ci
+  npm --prefix dash/tray/ui run build
+  npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/otel-tray-dashboard.spec.ts
+  ```
+  Validates `HarnessSelector`, `SessionPanel`, `FindingsList`, `HealthFooter`, `SettingsView` (`?days=` window and shared settings), `Maintenance` (`jobsPaused`, `refresh_now`, `import_folder_history`), `CleanDatabase`, and `open_view` / `hide_popover` / `quit` IPC commands.
 
 **Leftovers from an earlier run.** With no watchdog and no ledger, a process a killed run left behind
 is yours to find and stop:

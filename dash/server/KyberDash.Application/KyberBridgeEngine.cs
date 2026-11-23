@@ -69,6 +69,15 @@ public class KyberBridgeEngine
         "outcomes",
     ];
 
+    private static readonly string[] ReportBucketKeys =
+    [
+        "system_prompt",
+        "tool_definitions",
+        "instruction_context",
+        "conversation_history",
+        "tool_result_content",
+    ];
+
     private readonly IRelationalStoreReader reader;
     private readonly IProjectionStore projections;
     private readonly IOperationalStore operationalStore;
@@ -78,6 +87,7 @@ public class KyberBridgeEngine
     private readonly Func<DateTimeOffset> clock;
     private readonly string version;
     private readonly string instanceId;
+    private readonly string storePath;
     private readonly DashOptions? dashOptions;
     private readonly IOtlpCollectorService? collector;
     private readonly IOtlpListenerState? listener;
@@ -98,6 +108,7 @@ public class KyberBridgeEngine
     /// <param name="version">Engine build version string.</param>
     /// <param name="clock">Optional UTC clock override for deterministic timestamps.</param>
     /// <param name="instanceId">Optional process instance identifier for analytics freshness metadata.</param>
+    /// <param name="storePath">Optional backing store path surfaced in report coverage metadata.</param>
     /// <param name="options">Composition options carrying the configured collector port, when the host has one.</param>
     /// <param name="collector">Live collector, when this process hosts one. Absent means admission failures are unknown.</param>
     /// <param name="listener">Bind record for this process's collector socket. Absent means the listener was not observed.</param>
@@ -111,6 +122,7 @@ public class KyberBridgeEngine
         string version = DefaultVersion,
         Func<DateTimeOffset>? clock = null,
         string? instanceId = null,
+        string? storePath = null,
         DashOptions? options = null,
         IOtlpCollectorService? collector = null,
         IOtlpListenerState? listener = null)
@@ -134,6 +146,9 @@ public class KyberBridgeEngine
         this.instanceId = string.IsNullOrWhiteSpace(instanceId)
             ? string.Create(CultureInfo.InvariantCulture, $"kyberdash-{Environment.ProcessId}")
             : instanceId;
+        this.storePath = string.IsNullOrWhiteSpace(storePath)
+            ? CanonDbPath.Resolve()
+            : storePath.Trim();
         dashOptions = options;
         this.collector = collector;
         this.listener = listener;
@@ -308,12 +323,16 @@ public class KyberBridgeEngine
         (SessionDetailFigure? figures, string? projectionStatus) = ReadSessionDetailFigures(sessionId, lookup);
         (List<TimelineNode> timeline, string? timelineStatus) = ReadSessionTimeline(projection.SessionId);
         projectionStatus ??= timelineStatus;
+        string harness = figures?.Summary.HarnessId ?? session?.HarnessId ?? string.Empty;
+        IReadOnlyList<ReadTimeTurnSummary> turns = figures?.Turns ?? [];
+        (IReadOnlyList<string> distinctSkills, IReadOnlyDictionary<string, int> skillCounts) =
+            CollectSkillCounts(figures?.Summary.SkillInvocations ?? []);
 
         Dictionary<string, object?> root = new(StringComparer.Ordinal)
         {
             ["session_id"] = projection.SessionId,
             ["sessionId"] = projection.SessionId,
-            ["harness"] = figures?.Summary.HarnessId ?? session?.HarnessId ?? string.Empty,
+            ["harness"] = harness,
             ["label"] = projection.Label,
             ["is_subagent"] = projection.IsSubagent,
             ["parent_session"] = projection.ParentSessionId,
@@ -322,14 +341,20 @@ public class KyberBridgeEngine
             ["branch"] = session?.Workspace?.Branch,
             ["started"] = projection.StartedAtUtc,
             ["ended"] = projection.EndedAtUtc,
+            ["span_count"] = projection.SpanCount,
             ["problems_count"] = figures?.Summary.Problems.Count ?? 0,
             ["context_limit_source"] = ResolveContextLimitSource(projection),
-            ["summary"] = figures is null ? null : BuildSessionSummary(figures.Summary),
+            ["costBasisMismatch"] = BuildCostBasisMismatchObject(figures?.Summary.CostBasisMismatch),
+            ["summary"] = figures is null ? null : BuildSessionSummary(figures.Summary, projection, harness, distinctSkills),
             ["problems"] = figures?.Summary.Problems ?? Array.Empty<Problem>(),
-            ["turns"] = figures is null
-                ? new List<Dictionary<string, object?>>()
-                : [.. figures.Turns.Select(ToTurnDto)],
-            ["tools"] = figures is null ? Array.Empty<object>() : ToolRows(figures.Tools),
+            ["turns"] = turns.Select(ToTurnDto).ToList(),
+            ["tools"] = figures is null ? Array.Empty<object>() : ToolRows(figures.Tools, figures.Summary.ToolsOffered),
+            ["servers"] = figures is null ? Array.Empty<object>() : ServerRows(figures.Tools, figures.Servers),
+            ["skills"] = BuildSkillsPayload(distinctSkills, skillCounts, harness),
+            ["reconciliation"] = figures is null ? Array.Empty<object>() : ReconciliationRows(figures.Reconciliation),
+            ["context"] = BuildContextPayload(projection, figures, turns),
+            ["schema"] = BuildSchemaPayload(projection, figures),
+            ["notes"] = BuildNotes(projection, figures, turns, distinctSkills),
             ["timeline"] = timeline,
             ["requests"] = figures is null ? Array.Empty<object>() : RequestRows(figures.Requests),
         };
@@ -357,11 +382,14 @@ public class KyberBridgeEngine
         CollectedSession? session = reader.GetSession(sessionId);
         IModelPricingLookup lookup = pricing.LoadPricingTables();
         (SessionSummaryFigure? figures, string? projectionStatus) = ReadSessionSummaryFigures(sessionId, lookup);
+        string harness = figures?.HarnessId ?? session?.HarnessId ?? string.Empty;
+        (IReadOnlyList<string> distinctSkills, _) =
+            CollectSkillCounts(figures?.SkillInvocations ?? []);
 
         Dictionary<string, object?> payload = new(StringComparer.Ordinal)
         {
             ["session_id"] = projection.SessionId,
-            ["harness"] = figures?.HarnessId ?? session?.HarnessId ?? string.Empty,
+            ["harness"] = harness,
             ["label"] = projection.Label,
             ["is_subagent"] = projection.IsSubagent,
             ["parent_session"] = projection.ParentSessionId,
@@ -370,9 +398,11 @@ public class KyberBridgeEngine
             ["branch"] = session?.Workspace?.Branch,
             ["started"] = projection.StartedAtUtc,
             ["ended"] = projection.EndedAtUtc,
+            ["span_count"] = projection.SpanCount,
             ["problems"] = figures?.Problems.Count ?? 0,
             ["context_limit_source"] = ResolveContextLimitSource(projection),
-            ["summary"] = figures is null ? null : BuildSessionSummary(figures),
+            ["costBasisMismatch"] = BuildCostBasisMismatchObject(figures?.CostBasisMismatch),
+            ["summary"] = figures is null ? null : BuildSessionSummary(figures, projection, harness, distinctSkills),
         };
 
         if (projectionStatus is not null)
@@ -1087,36 +1117,260 @@ public class KyberBridgeEngine
         }, CamelCaseJsonOptions);
     }
 
-    /// <summary>Builds a bounded diagnostic report for <c>/api/kyber/report</c>.</summary>
+    /// <summary>Builds a bounded diagnostic report for <c>/api/kyber/report</c> using the default 7-day window.</summary>
     /// <param name="harness">Optional harness filter.</param>
     /// <param name="sessionId">Optional session filter.</param>
     /// <param name="runId">Optional run filter.</param>
     /// <param name="limit">Maximum findings included (clamped to 1..200).</param>
     /// <returns>Diagnostic report JSON element.</returns>
-    public JsonElement GetReport(string? harness = null, string? sessionId = null, string? runId = null, int limit = 50)
-    {
-        EnsureProjected();
-        string? normalizedHarness = NormalizeHarnessFilter(harness);
-        List<CollectedSession> sessions = [.. reader.Sessions(normalizedHarness)];
-        if (!string.IsNullOrEmpty(sessionId))
-        {
-            sessions = [.. sessions.Where(s => string.Equals(s.SessionKey, sessionId, StringComparison.Ordinal))];
-        }
+    public JsonElement GetReport(string? harness = null, string? sessionId = null, string? runId = null, int limit = 50) =>
+        GetReport(harness, sessionId, runId, limit, days: 7);
 
-        IReadOnlyList<StoredFinding> findings = projections.ListFindings(sessionId: sessionId, runId: runId);
-        List<HarnessRollupRow> harnesses = [.. projections.ListHarnessRollups().Select(ToHarnessRollupRow)];
+    /// <summary>Builds a bounded <c>ContextReport</c> diagnostic payload scoped to <paramref name="days"/>.</summary>
+    /// <param name="harness">Optional harness filter.</param>
+    /// <param name="sessionId">Optional session filter.</param>
+    /// <param name="runId">Optional run filter.</param>
+    /// <param name="limit">Maximum findings included (clamped to 1..200).</param>
+    /// <param name="days">Positive lookback window in whole days.</param>
+    /// <returns>Diagnostic report JSON element.</returns>
+    public JsonElement GetReport(string? harness, string? sessionId, string? runId, int limit, int days)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(days);
+        EnsureProjected();
 
         int boundedLimit = Math.Clamp(limit, 1, 200);
+        string? normalizedHarness = NormalizeHarnessFilter(harness);
+        string? normalizedSessionId = string.IsNullOrWhiteSpace(sessionId) ? null : sessionId.Trim();
+        string? normalizedRunId = string.IsNullOrWhiteSpace(runId) ? null : runId.Trim();
+
+        DateTimeOffset now = clock();
+        string generatedAt = now.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture);
+        DateTimeOffset cutoff = days >= (now - DateTimeOffset.MinValue).TotalDays
+            ? DateTimeOffset.MinValue
+            : now - TimeSpan.FromDays(days);
+
+        IReadOnlyList<CollectedSession> storeSessions = reader.Sessions();
+        IReadOnlyList<StoredSessionProjection> allProjections = projections.ListSessionProjections();
+        IReadOnlyList<StoredRun> allRuns = projections.ListRuns();
+        IReadOnlyList<StoredHarnessRollup> storedRollups = projections.ListHarnessRollups();
+
+        Dictionary<string, StoredSessionProjection> projectionById = new(allProjections.Count, StringComparer.Ordinal);
+        foreach (StoredSessionProjection projection in allProjections)
+        {
+            projectionById[projection.SessionId] = projection;
+        }
+
+        Dictionary<string, string> sessionHarnessById = new(storeSessions.Count, StringComparer.Ordinal);
+        Dictionary<string, int> totalHarnessCounts = new(StringComparer.Ordinal);
+        List<(CollectedSession Session, StoredSessionProjection Projection, string Harness)> projectedSessions =
+            new(storeSessions.Count);
+        foreach (CollectedSession session in storeSessions)
+        {
+            string? canonicalHarness = CanonPricing.CanonicalHarnessId(session.HarnessId);
+            if (canonicalHarness is null)
+            {
+                continue;
+            }
+
+            if (!projectionById.TryGetValue(session.SessionKey, out StoredSessionProjection? projection))
+            {
+                continue;
+            }
+
+            sessionHarnessById[session.SessionKey] = canonicalHarness;
+            totalHarnessCounts[canonicalHarness] = totalHarnessCounts.GetValueOrDefault(canonicalHarness) + 1;
+            projectedSessions.Add((session, projection, canonicalHarness));
+        }
+
+        Dictionary<string, string> runHarnessById = new(allRuns.Count, StringComparer.Ordinal);
+        HashSet<string> inWindowRunIds = new(StringComparer.Ordinal);
+        foreach (StoredRun run in allRuns)
+        {
+            string? canonicalRunHarness = CanonPricing.CanonicalHarnessId(run.HarnessId);
+            if (canonicalRunHarness is null)
+            {
+                continue;
+            }
+
+            runHarnessById[run.RunId] = canonicalRunHarness;
+            if (IsRunInWindow(run, cutoff))
+            {
+                _ = inWindowRunIds.Add(run.RunId);
+            }
+        }
+
+        HashSet<string>? runSessionIds = null;
+        if (normalizedRunId is not null)
+        {
+            runSessionIds = new HashSet<string>(StringComparer.Ordinal);
+            foreach (StoredExecution execution in projections.ListExecutionsForRun(normalizedRunId))
+            {
+                if (!string.IsNullOrEmpty(execution.SessionId))
+                {
+                    _ = runSessionIds.Add(execution.SessionId);
+                }
+            }
+        }
+
+        List<ReportSessionEntry> scopedSessions = [];
+        Dictionary<string, int> inWindowHarnessCounts = new(StringComparer.Ordinal);
+        HashSet<string> inWindowSessionIds = new(StringComparer.Ordinal);
+
+        foreach ((CollectedSession session, StoredSessionProjection projection, string sessionHarness) in projectedSessions)
+        {
+            if (!IsSessionInWindow(projection, cutoff, out DateTimeOffset? activityTime))
+            {
+                continue;
+            }
+
+            ReportSessionEntry entry = new(session, projection, sessionHarness, activityTime);
+            _ = inWindowSessionIds.Add(session.SessionKey);
+            inWindowHarnessCounts[sessionHarness] = inWindowHarnessCounts.GetValueOrDefault(sessionHarness) + 1;
+
+            if (normalizedHarness is not null
+                && !string.Equals(sessionHarness, normalizedHarness, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (normalizedSessionId is not null
+                && !string.Equals(session.SessionKey, normalizedSessionId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (runSessionIds is not null && !runSessionIds.Contains(session.SessionKey))
+            {
+                continue;
+            }
+
+            scopedSessions.Add(entry);
+        }
+
+        IModelPricingLookup pricingLookup = pricing.LoadPricingTables();
+        // The report prices only its scoped sessions, each through the content-free summary read
+        // model, so a report over a large store never materializes conversation text.
+        Dictionary<string, SessionSummaryFigure> aggregatesById = new(StringComparer.Ordinal);
+        foreach (ReportSessionEntry entry in scopedSessions)
+        {
+            (SessionSummaryFigure? figures, _) = ReadSessionSummaryFigures(entry.Session.SessionKey, pricingLookup);
+            if (figures is not null)
+            {
+                aggregatesById[entry.Session.SessionKey] = figures;
+            }
+        }
+
+        Dictionary<string, StoredHarnessRollup> storedRollupsByHarness = new(StringComparer.Ordinal);
+        foreach (StoredHarnessRollup rollup in storedRollups)
+        {
+            string? canonicalHarness = CanonPricing.CanonicalHarnessId(rollup.HarnessId);
+            if (canonicalHarness is null || !totalHarnessCounts.ContainsKey(canonicalHarness))
+            {
+                continue;
+            }
+
+            storedRollupsByHarness[canonicalHarness] = rollup;
+        }
+
+        List<StoredFinding> candidateFindings =
+            [.. projections.ListFindings(sessionId: normalizedSessionId, runId: normalizedRunId)];
+        List<(StoredFinding Finding, string? Harness)> scopedFindings = [];
+        foreach (StoredFinding finding in candidateFindings)
+        {
+            string? resolvedHarness = ResolveFindingHarness(finding, sessionHarnessById, runHarnessById);
+            if (normalizedHarness is not null
+                && !string.Equals(resolvedHarness, normalizedHarness, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            bool findingInWindow = finding.SessionId is not null
+                ? inWindowSessionIds.Contains(finding.SessionId)
+                : finding.RunId is null || inWindowRunIds.Contains(finding.RunId);
+            if (!findingInWindow)
+            {
+                continue;
+            }
+
+            scopedFindings.Add((finding, resolvedHarness));
+        }
+
+        scopedFindings.Sort(static (left, right) =>
+        {
+            int rankComparison = right.Finding.RankScore.CompareTo(left.Finding.RankScore);
+            return rankComparison != 0
+                ? rankComparison
+                : string.Compare(left.Finding.FindingId, right.Finding.FindingId, StringComparison.Ordinal);
+        });
+
+        List<object> projectedFindings = new(Math.Min(boundedLimit, scopedFindings.Count));
+        foreach ((StoredFinding finding, string? resolvedHarness) in scopedFindings.Take(boundedLimit))
+        {
+            projectedFindings.Add(BuildReportFindingDto(finding, resolvedHarness));
+        }
+
+        List<object> reportHarnesses = BuildReportHarnesses(
+            scopedSessions,
+            totalHarnessCounts,
+            inWindowHarnessCounts,
+            storedRollupsByHarness,
+            aggregatesById,
+            allRuns,
+            cutoff,
+            normalizedSessionId is null && normalizedRunId is null);
+
+        object? latestSession = BuildReportLatestSession(scopedSessions, generatedAt, pricingLookup);
+        List<object> reportCost = BuildReportCost(scopedSessions, aggregatesById);
+
+        RefreshCoverageState refreshState = BuildRefreshCoverageState();
+        List<object> coverageHarnesses = BuildReportCoverageHarnesses(
+            storedRollupsByHarness,
+            totalHarnessCounts,
+            inWindowHarnessCounts);
+        List<string> coverageHints = BuildReportCoverageHints(scopedSessions.Count, refreshState);
+
+        Dictionary<string, object?> scopePayload = new(StringComparer.Ordinal)
+        {
+            ["days"] = days,
+        };
+        if (normalizedHarness is not null)
+        {
+            scopePayload["harness"] = normalizedHarness;
+        }
+
+        if (normalizedSessionId is not null)
+        {
+            scopePayload["sessionId"] = normalizedSessionId;
+        }
+
+        if (normalizedRunId is not null)
+        {
+            scopePayload["runId"] = normalizedRunId;
+        }
+
         return JsonSerializer.SerializeToElement(new
         {
             schemaVersion = ApiContractVersion,
-            generatedAt = clock().UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture),
+            generatedAt,
+            kyberdashVersion = version,
             storeGeneration = operationalStore.GetWriteMarker(),
-            sessionCount = sessions.Count,
-            findingCount = findings.Count,
-            harnessCount = harnesses.Count,
-            harnesses,
-            findings = findings.Take(boundedLimit).Select(ToFindingRow),
+            sessionCount = scopedSessions.Count,
+            findingCount = scopedFindings.Count,
+            harnessCount = reportHarnesses.Count,
+            scope = scopePayload,
+            coverage = new
+            {
+                storePath,
+                refresh = refreshState.Payload,
+                harnesses = coverageHarnesses,
+                quarantineCount = operationalStore.CountQuarantinedSpans(normalizedHarness),
+                problemCount = operationalStore.CountIngestProblems(normalizedHarness),
+                hints = coverageHints,
+            },
+            findings = projectedFindings,
+            harnesses = reportHarnesses,
+            latestSession,
+            cost = reportCost,
         }, CamelCaseJsonOptions);
     }
 
@@ -1808,53 +2062,542 @@ public class KyberBridgeEngine
         return rows;
     }
 
-    private static List<Dictionary<string, object?>> ToolRows(IReadOnlyList<ReadTimeSessionToolSummary> tools)
+    private static List<Dictionary<string, object?>> ToolRows(
+        IReadOnlyList<ReadTimeSessionToolSummary> tools,
+        IReadOnlyList<string> toolsOffered)
     {
+        HashSet<string> offeredTools = new(toolsOffered, StringComparer.Ordinal);
         List<Dictionary<string, object?>> rows = new(tools.Count);
         foreach (ReadTimeSessionToolSummary tool in tools)
         {
+            bool inDefinitions = offeredTools.Contains(tool.Name)
+                || tool.TurnsResident > 0
+                || tool.SchemaTokens > 0
+                || tool.TotalSchemaCost > 0;
+            bool isMcp = !string.IsNullOrWhiteSpace(tool.Server);
+
             rows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
             {
                 ["name"] = tool.Name,
                 ["server"] = tool.Server,
                 ["invocations"] = tool.Invocations,
-                ["schema_tokens"] = tool.SchemaTokens,
-                ["turns_resident"] = tool.TurnsResident,
-                ["total_schema_cost"] = tool.TotalSchemaCost,
+                ["schema_tokens"] = inDefinitions ? tool.SchemaTokens : null,
+                ["turns_resident"] = inDefinitions ? tool.TurnsResident : null,
+                ["total_schema_cost"] = inDefinitions ? tool.TotalSchemaCost : null,
                 ["invoked"] = tool.Invoked,
+                ["in_definitions"] = inDefinitions,
+                ["is_mcp"] = isMcp,
             });
         }
 
         return rows;
     }
 
-    private static object BuildSessionSummary(SessionSummaryFigure summary) =>
-        new
+    private static List<Dictionary<string, object?>> ServerRows(
+        IReadOnlyList<ReadTimeSessionToolSummary> tools,
+        IReadOnlyList<ReadTimeSessionServerSummary> servers)
+    {
+        Dictionary<string, long> schemaCostByServer = new(StringComparer.Ordinal);
+        foreach (ReadTimeSessionToolSummary tool in tools)
         {
-            turn_count = summary.TurnCount,
-            request_count = summary.RequestCount,
-            total_input = summary.TotalInput,
-            total_output = summary.TotalOutput,
-            total_cache_read = summary.TotalCacheRead,
-            total_cache_creation = summary.TotalCacheCreation,
-            duration_ms = summary.DurationMs,
-            models = summary.Models,
-            cache_hit_ratio = summary.CacheHitRatio,
-            cache_creation_coverage = summary.CacheCreationCoverage,
-            tool_calls = summary.ToolCalls,
-            tools_invoked = summary.ToolsInvoked,
-            tools_offered = summary.ToolsOffered,
-            has_tool_definitions = summary.HasToolDefinitions,
-            cost = summary.PublishedCost,
-            cost_reported = summary.ReportedCost,
-            cost_basis_mismatch = summary.CostBasisMismatch,
-            coverage = new
+            if (string.IsNullOrWhiteSpace(tool.Server))
             {
-                schema_measurable = summary.Coverage.SchemaMeasurable,
-                context_measurable = summary.Coverage.ContextMeasurable,
-            },
-            problems = summary.Problems,
+                continue;
+            }
+
+            schemaCostByServer[tool.Server] = schemaCostByServer.GetValueOrDefault(tool.Server) + tool.TotalSchemaCost;
+        }
+
+        List<Dictionary<string, object?>> rows = new(servers.Count);
+        foreach (ReadTimeSessionServerSummary server in servers)
+        {
+            long totalSchemaCost = schemaCostByServer.TryGetValue(server.Server, out long sum)
+                ? sum
+                : server.UnusedCost;
+
+            rows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["server"] = server.Server,
+                ["is_mcp"] = server.IsMcp,
+                ["tools"] = server.Tools,
+                ["schema_tokens"] = server.SchemaTokens,
+                ["total_schema_cost"] = totalSchemaCost,
+                ["invocations"] = server.Invocations,
+                ["unused_tools"] = server.UnusedTools,
+                ["unused_cost"] = server.UnusedCost,
+            });
+        }
+
+        return rows;
+    }
+
+    private static List<Dictionary<string, object?>> ReconciliationRows(IReadOnlyList<ReadTimeTurnReconciliation> reconciliation)
+    {
+        List<Dictionary<string, object?>> rows = [];
+        foreach (ReadTimeTurnReconciliation row in reconciliation)
+        {
+            if (!row.InputMatch.HasValue || !row.OutputMatch.HasValue)
+            {
+                continue;
+            }
+
+            rows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["request"] = row.RequestSpanId,
+                ["root_input"] = row.RootInput,
+                ["sum_chat_input"] = row.SumChatInput,
+                ["input_match"] = row.InputMatch.Value,
+                ["root_output"] = row.RootOutput,
+                ["sum_chat_output"] = row.SumChatOutput,
+                ["output_match"] = row.OutputMatch.Value,
+            });
+        }
+
+        return rows;
+    }
+
+    private static Dictionary<string, object?>? BuildCostBasisMismatchObject(ReadTimeCostBasisMismatch? mismatch)
+    {
+        if (mismatch is null)
+        {
+            return null;
+        }
+
+        Dictionary<string, double?> totalsByBasis = new(StringComparer.Ordinal);
+        foreach (ReadTimeBasisTotal entry in mismatch.TotalsByBasis)
+        {
+            totalsByBasis[entry.Basis] = entry.Total;
+        }
+
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["code"] = mismatch.Code,
+            ["message"] = mismatch.Message,
+            ["bases"] = mismatch.Bases,
+            ["totalsByBasis"] = totalsByBasis,
         };
+    }
+
+    private static (IReadOnlyList<string> DistinctSkills, IReadOnlyDictionary<string, int> Counts) CollectSkillCounts(
+        IReadOnlyList<StoredSkillInvocation> rows)
+    {
+        List<string> distinct = [];
+        Dictionary<string, int> counts = new(StringComparer.Ordinal);
+        foreach (StoredSkillInvocation row in rows)
+        {
+            if (string.IsNullOrWhiteSpace(row.SkillName))
+            {
+                continue;
+            }
+
+            if (counts.TryGetValue(row.SkillName, out int existing))
+            {
+                counts[row.SkillName] = existing + 1;
+            }
+            else
+            {
+                counts[row.SkillName] = 1;
+                distinct.Add(row.SkillName);
+            }
+        }
+
+        return (distinct, counts);
+    }
+
+    private static Dictionary<string, object?> BuildSkillsPayload(
+        IReadOnlyList<string> distinctSkills,
+        IReadOnlyDictionary<string, int> skillCounts,
+        string harness)
+    {
+        if (distinctSkills.Count == 0)
+        {
+            return NotMeasurableBlock($"{harness} did not record skill invocations or listed skills for this session.");
+        }
+
+        List<Dictionary<string, object?>> rows = new(distinctSkills.Count);
+        foreach (string skillName in distinctSkills)
+        {
+            rows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["name"] = skillName,
+                ["listed"] = NotMeasurableBlock($"{harness} did not export the session's listed skills."),
+                ["invocations"] = skillCounts[skillName],
+                ["turns_listed"] = Array.Empty<int>(),
+            });
+        }
+
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["measurable"] = true,
+            ["rows"] = rows,
+        };
+    }
+
+    private static Dictionary<string, object?> BuildContextPayload(
+        StoredSessionProjection projection,
+        SessionDetailFigure? figures,
+        IReadOnlyList<ReadTimeTurnSummary> turns)
+    {
+        int unmeasuredTurns = turns.Count(static t => !t.InputTokens.HasValue);
+
+        if (projection.Context is not StoredSessionContext ctx)
+        {
+            string reason = !string.IsNullOrWhiteSpace(projection.ContextUnmeasurableReason)
+                ? projection.ContextUnmeasurableReason
+                : "Session turns did not carry message parts or context token measurements.";
+
+            return new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["measurable"] = false,
+                ["reason"] = reason,
+                ["turns"] = turns.Count,
+                ["contextLimit"] = 0L,
+                ["first"] = figures?.FirstContextBucket is ReadTimeContextBucketSummary firstOnly
+                    ? BuildContextEdge(firstOnly, storedTurn: null)
+                    : null,
+                ["last"] = figures?.LastContextBucket is ReadTimeContextBucketSummary lastOnly
+                    ? BuildContextEdge(lastOnly, storedTurn: null)
+                    : null,
+                ["unmeasuredTurns"] = unmeasuredTurns,
+            };
+        }
+
+        Dictionary<string, long> derivedCounts = new(StringComparer.Ordinal);
+        foreach (StoredSessionContextDerivedCount counter in ctx.DerivedCounts)
+        {
+            derivedCounts[counter.Counter] = counter.Count;
+        }
+
+        List<int> flaggedTurns = new(ctx.FlaggedTurnIndexes.Count);
+        foreach (int zeroBasedIdx in ctx.FlaggedTurnIndexes)
+        {
+            flaggedTurns.Add(zeroBasedIdx + 1);
+        }
+
+        List<Dictionary<string, object?>> contextTurns = new(ctx.Turns.Count);
+        foreach (StoredSessionContextTurn turn in ctx.Turns)
+        {
+            Dictionary<string, long> buckets = new(StringComparer.Ordinal);
+            foreach (StoredTurnBucketTokens bucket in turn.Buckets)
+            {
+                buckets[bucket.Bucket] = bucket.Tokens;
+            }
+
+            Dictionary<string, long> toolDefsByServer = new(StringComparer.Ordinal);
+            foreach (StoredTurnServerDefinitionTokens serverDef in turn.ServerDefinitions)
+            {
+                toolDefsByServer[serverDef.Server] = serverDef.Tokens;
+            }
+
+            contextTurns.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["index"] = turn.Position + 1,
+                ["inputTokens"] = turn.InputTokens,
+                ["reported_input"] = turn.InputTokens,
+                ["buckets"] = buckets,
+                ["toolDefinitionsByServer"] = toolDefsByServer,
+                ["builtinToolDefinitionTokens"] = turn.BuiltinToolDefinitionTokens,
+                ["strippedInstructionBlocks"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["count"] = turn.StrippedBlockCount ?? 0L,
+                    ["tokens"] = turn.StrippedTokens ?? 0L,
+                },
+                ["bucketedTokens"] = turn.BucketedTokens,
+                ["residual"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["tokens"] = turn.ResidualTokens,
+                    ["attribution"] = turn.ResidualAttribution,
+                },
+                ["headroom"] = turn.Headroom,
+                ["pressure"] = turn.Pressure,
+                ["accumulationRate"] = turn.AccumulationRate,
+                ["freshInput"] = turn.FreshInput,
+                ["previousFreshInput"] = turn.PreviousFreshInput,
+                ["freshJumpFactor"] = turn.FreshJumpFactor,
+                ["nonResidentTokens"] = turn.NonResidentTokens,
+            });
+        }
+
+        StoredSessionContextTurn? firstStored = ctx.Turns.Count > 0 ? ctx.Turns[0] : null;
+        StoredSessionContextTurn? lastStored = ctx.Turns.Count > 0 ? ctx.Turns[^1] : null;
+
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["measurable"] = true,
+            ["contextLimit"] = ctx.ContextLimit,
+            ["contextLimitSource"] = ctx.ContextLimitSource,
+            ["residualTotal"] = ctx.ResidualTotal,
+            ["freshJumpFactor"] = ctx.FreshJumpFactor,
+            ["accumulationRate"] = ctx.AccumulationRate,
+            ["observedBuckets"] = ctx.ObservedBuckets,
+            ["derivedCounts"] = derivedCounts,
+            ["flaggedTurns"] = flaggedTurns,
+            ["unmeasuredTurns"] = unmeasuredTurns,
+            ["turns"] = contextTurns,
+            ["first"] = BuildContextEdge(figures?.FirstContextBucket, firstStored),
+            ["last"] = BuildContextEdge(figures?.LastContextBucket, lastStored),
+        };
+    }
+
+    private static Dictionary<string, object?>? BuildContextEdge(
+        ReadTimeContextBucketSummary? edge,
+        StoredSessionContextTurn? storedTurn)
+    {
+        if (edge is not null)
+        {
+            Dictionary<string, long> buckets = new(StringComparer.Ordinal);
+            foreach (ReadTimeContextBucketTokens bucket in edge.Buckets)
+            {
+                buckets[bucket.Bucket] = bucket.Tokens;
+            }
+
+            return new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["turn"] = storedTurn is not null ? storedTurn.Position + 1 : 1,
+                ["buckets"] = buckets,
+                ["reported_input"] = edge.ReportedInput,
+            };
+        }
+
+        if (storedTurn is not null)
+        {
+            Dictionary<string, long> buckets = new(StringComparer.Ordinal);
+            foreach (StoredTurnBucketTokens bucket in storedTurn.Buckets)
+            {
+                buckets[bucket.Bucket] = bucket.Tokens;
+            }
+
+            return new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["turn"] = storedTurn.Position + 1,
+                ["buckets"] = buckets,
+                ["reported_input"] = storedTurn.InputTokens,
+            };
+        }
+
+        return null;
+    }
+
+    private static Dictionary<string, object?> BuildSchemaPayload(
+        StoredSessionProjection projection,
+        SessionDetailFigure? figures)
+    {
+        if (projection.Schema is not StoredSessionSchema schema)
+        {
+            string reason = !string.IsNullOrWhiteSpace(projection.SchemaUnmeasurableReason)
+                ? projection.SchemaUnmeasurableReason
+                : "Session did not export tool schema definitions.";
+
+            return new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["measurable"] = false,
+                ["invocationCount"] = figures?.Summary.ToolCalls ?? 0,
+                ["reason"] = reason,
+            };
+        }
+
+        List<Dictionary<string, object?>> ranked = [];
+        List<Dictionary<string, object?>> neverInvoked = [];
+        foreach (StoredSchemaRankedTool tool in schema.RankedTools.OrderBy(static t => t.Position))
+        {
+            Dictionary<string, object?> dto = ToRankedToolDto(tool);
+            ranked.Add(dto);
+            if (!tool.Invoked)
+            {
+                neverInvoked.Add(dto);
+            }
+        }
+
+        Dictionary<string, long> byServer = new(StringComparer.Ordinal);
+        foreach (StoredSchemaServerTokens server in schema.Servers)
+        {
+            byServer[server.ServerName] = byServer.GetValueOrDefault(server.ServerName) + server.Tokens;
+        }
+
+        Dictionary<string, object?> unusedRange;
+        if (figures?.UnusedRange is UnusedSchemaRange range)
+        {
+            unusedRange = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["tokenResidencies"] = range.TokenResidencies,
+                ["floor"] = range.Floor,
+                ["ceiling"] = range.Ceiling,
+                ["currency"] = range.Currency,
+            };
+        }
+        else
+        {
+            long residencies = schema.UnusedTokenResidencies
+                ?? schema.RankedTools.Where(static t => !t.Invoked).Sum(static t => t.CostTokens);
+            unusedRange = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["tokenResidencies"] = residencies,
+                ["floor"] = 0.0,
+                ["ceiling"] = (double)residencies,
+                ["currency"] = null,
+            };
+        }
+
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["measurable"] = true,
+            ["invocationCount"] = schema.InvocationCount,
+            ["turns"] = schema.TurnCount,
+            ["ranked"] = ranked,
+            ["neverInvoked"] = neverInvoked,
+            ["byServer"] = byServer,
+            ["unusedRange"] = unusedRange,
+        };
+    }
+
+    private static Dictionary<string, object?> ToRankedToolDto(StoredSchemaRankedTool tool)
+    {
+        Dictionary<string, object?> dto = new(StringComparer.Ordinal)
+        {
+            ["name"] = tool.ToolName,
+            ["cost"] = tool.CostTokens,
+            ["invoked"] = tool.Invoked,
+        };
+
+        if (!string.IsNullOrWhiteSpace(tool.ServerName))
+        {
+            dto["server"] = tool.ServerName;
+        }
+
+        return dto;
+    }
+
+    private static List<string> BuildNotes(
+        StoredSessionProjection projection,
+        SessionDetailFigure? figures,
+        IReadOnlyList<ReadTimeTurnSummary> turns,
+        IReadOnlyList<string> distinctSkills)
+    {
+        List<string> notes = [];
+        HashSet<string> seen = new(StringComparer.Ordinal);
+
+        void AddNote(string? note)
+        {
+            if (!string.IsNullOrWhiteSpace(note) && seen.Add(note))
+            {
+                notes.Add(note);
+            }
+        }
+
+        if (projection.Context is null)
+        {
+            AddNote(!string.IsNullOrWhiteSpace(projection.ContextUnmeasurableReason)
+                ? projection.ContextUnmeasurableReason
+                : "Context breakdown is not measurable because turns did not export message parts.");
+        }
+
+        if (projection.Schema is null)
+        {
+            AddNote(!string.IsNullOrWhiteSpace(projection.SchemaUnmeasurableReason)
+                ? projection.SchemaUnmeasurableReason
+                : "Schema residency is not measurable because tool definitions were not exported.");
+        }
+
+        if (figures is not null)
+        {
+            if (!figures.Summary.HasToolDefinitions && figures.Tools.Count > 0)
+            {
+                AddNote("Tool definitions were not exported; tool residency and schema costs are marked unmeasured.");
+            }
+
+            if (figures.Summary.ReportedCost is null && figures.Summary.TurnCount > 0)
+            {
+                AddNote("Harness-reported cost was not exported; published pricing estimates are shown separately.");
+            }
+
+            if (figures.Summary.CostBasisMismatch is not null)
+            {
+                AddNote(figures.Summary.CostBasisMismatch.Message);
+            }
+
+            if (!figures.Summary.TotalCacheCreation.HasValue && figures.Summary.TurnCount > 0)
+            {
+                AddNote("Cache creation tokens were not reported for this session.");
+            }
+
+            if (turns.Any(static t => !t.InputTokens.HasValue))
+            {
+                AddNote("One or more turns lack input token counts.");
+            }
+        }
+
+        AddNote(distinctSkills.Count > 0
+            ? "Skill listings were not exported; only invoked skills are shown."
+            : "No skill listings or skill invocations were recorded for this session.");
+
+        return notes;
+    }
+
+    private static Dictionary<string, object?> NotMeasurableBlock(string reason) => new(StringComparer.Ordinal)
+    {
+        ["availability"] = "not_measurable",
+        ["reason"] = reason,
+    };
+
+    private static Dictionary<string, object?> BuildSessionSummary(
+        SessionSummaryFigure figures,
+        StoredSessionProjection projection,
+        string harness,
+        IReadOnlyList<string> distinctSkills)
+    {
+        bool hasToolDefinitions = figures.HasToolDefinitions || projection.Schema is not null;
+        object toolsOffered;
+        if (figures.HasToolDefinitions)
+        {
+            toolsOffered = figures.ToolsOffered;
+        }
+        else if (projection.Schema is StoredSessionSchema schema)
+        {
+            toolsOffered = schema.RankedTools
+                .OrderBy(static t => t.Position)
+                .Select(static t => t.ToolName)
+                .ToList();
+        }
+        else
+        {
+            toolsOffered = NotMeasurableBlock($"{harness} did not export tool definitions for this session.");
+        }
+
+        Dictionary<string, object?> summary = new(StringComparer.Ordinal)
+        {
+            ["turn_count"] = figures.TurnCount,
+            ["request_count"] = figures.RequestCount,
+            ["span_count"] = projection.SpanCount,
+            ["total_input"] = figures.TotalInput,
+            ["total_output"] = figures.TotalOutput,
+            ["total_cache_read"] = figures.TotalCacheRead,
+            ["total_cache_creation"] = figures.TotalCacheCreation,
+            ["duration_ms"] = figures.DurationMs,
+            ["models"] = figures.Models,
+            ["cache_hit_ratio"] = figures.CacheHitRatio,
+            ["cache_creation_coverage"] = figures.CacheCreationCoverage,
+            ["tool_calls"] = figures.ToolCalls,
+            ["tools_invoked"] = figures.ToolsInvoked,
+            ["tools_offered"] = toolsOffered,
+            ["has_tool_definitions"] = hasToolDefinitions,
+            ["cost"] = figures.PublishedCost,
+            ["cost_reported"] = figures.ReportedCost,
+            ["cost_basis_mismatch"] = figures.CostBasisMismatch,
+            ["coverage"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["schema_measurable"] = figures.Coverage.SchemaMeasurable,
+                ["context_measurable"] = figures.Coverage.ContextMeasurable,
+            },
+            ["problems"] = figures.Problems,
+        };
+
+        if (distinctSkills.Count > 0)
+        {
+            summary["skills_invoked"] = distinctSkills;
+        }
+
+        return summary;
+    }
 
     /// <summary>Projects one scoped content part onto the flat entry the content view renders.</summary>
     /// <param name="spanId">Span the part belongs to.</param>
@@ -1901,18 +2644,26 @@ public class KyberBridgeEngine
     private static Dictionary<string, object?> ToTurnDto(ReadTimeTurnSummary turn) => new(StringComparer.Ordinal)
     {
         ["turnIndex"] = turn.Position,
+        ["index"] = turn.Position,
         ["spanId"] = turn.SpanId,
         ["timestamp"] = turn.TimestampUtc,
         ["model"] = turn.Model,
         ["inputTokens"] = turn.InputTokens,
+        ["input"] = turn.InputTokens,
         ["outputTokens"] = turn.OutputTokens,
+        ["output"] = turn.OutputTokens,
         ["tokens"] = turn.InputTokens.HasValue && turn.OutputTokens.HasValue
             ? turn.InputTokens.Value + turn.OutputTokens.Value
             : null,
         ["freshInputTokens"] = turn.FreshInputTokens,
+        ["fresh"] = turn.FreshInputTokens,
+        ["fresh_input"] = turn.FreshInputTokens,
         ["cacheReadTokens"] = turn.CacheReadTokens,
+        ["cache_read"] = turn.CacheReadTokens,
         ["cacheCreationTokens"] = turn.CacheCreationTokens,
+        ["cache_creation"] = turn.CacheCreationTokens,
         ["reasoningTokens"] = turn.ReasoningTokens,
+        ["reasoning"] = turn.ReasoningTokens,
         ["durationMs"] = turn.DurationMs,
         ["cost"] = turn.PublishedCost,
         ["costUsd"] = ExtractUsdCost(turn.PublishedCost),
@@ -2415,7 +3166,9 @@ public class KyberBridgeEngine
         return turns;
     }
 
-    private object BuildRefreshCoverage()
+    private object BuildRefreshCoverage() => BuildRefreshCoverageState().Payload;
+
+    private RefreshCoverageState BuildRefreshCoverageState()
     {
         IReadOnlyList<RefreshRunRow> runs = operationalStore.ListRefreshRuns(50);
         RefreshRunRow? success = runs.Where(static r => string.Equals(r.Status, "success", StringComparison.Ordinal))
@@ -2451,12 +3204,14 @@ public class KyberBridgeEngine
                 .UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture);
         }
 
-        return new
+        string? lastSuccessAt = success is null ? null : (success.CompletedAt ?? success.StartedAt);
+        string? lastFailureAt = failure is null ? null : (failure.CompletedAt ?? failure.StartedAt);
+        object payload = new
         {
-            lastSuccessAt = success is null ? null : (success.CompletedAt ?? success.StartedAt),
+            lastSuccessAt,
             lastFailure = failure is null
                 ? null
-                : new { at = failure.CompletedAt ?? failure.StartedAt, summary = failure.Summary ?? "refresh failed" },
+                : new { at = lastFailureAt, summary = failure.Summary ?? "refresh failed" },
             inProgress = running is null
                 ? null
                 : new { pid = running.Pid, since = running.StartedAt },
@@ -2464,6 +3219,8 @@ public class KyberBridgeEngine
             coveredFrom,
             coveredThrough,
         };
+
+        return new RefreshCoverageState(payload, lastSuccessAt, lastFailureAt);
     }
 
     private object BuildIngestCoverage()
@@ -2648,6 +3405,616 @@ public class KyberBridgeEngine
 
         return Encoding.UTF8.GetString(utf8, 0, end);
     }
+
+    private static bool TryParseReportTimestamp(string? raw, out DateTimeOffset timestamp)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            timestamp = default;
+            return false;
+        }
+
+        return DateTimeOffset.TryParse(
+            raw,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out timestamp);
+    }
+
+    private static bool TryGetProjectionActivityTime(StoredSessionProjection? projection, out DateTimeOffset timestamp)
+    {
+        if (projection is null)
+        {
+            timestamp = default;
+            return false;
+        }
+
+        return TryParseReportTimestamp(projection.EndedAtUtc, out timestamp)
+            || TryParseReportTimestamp(projection.StartedAtUtc, out timestamp);
+    }
+
+    private static bool IsSessionInWindow(
+        StoredSessionProjection? projection,
+        DateTimeOffset cutoff,
+        out DateTimeOffset? activityTime)
+    {
+        if (TryGetProjectionActivityTime(projection, out DateTimeOffset parsed))
+        {
+            activityTime = parsed;
+            return parsed >= cutoff;
+        }
+
+        activityTime = null;
+        return false;
+    }
+
+    private static bool IsRunInWindow(StoredRun run, DateTimeOffset cutoff)
+    {
+        if (TryParseReportTimestamp(run.EndedAtUtc, out DateTimeOffset ended)
+            || TryParseReportTimestamp(run.StartedAtUtc, out ended))
+        {
+            return ended >= cutoff;
+        }
+
+        return cutoff == DateTimeOffset.MinValue;
+    }
+
+    private static string? ResolveFindingHarness(
+        StoredFinding finding,
+        IReadOnlyDictionary<string, string> sessionHarnessById,
+        IReadOnlyDictionary<string, string> runHarnessById)
+    {
+        if (finding.SessionId is not null && sessionHarnessById.TryGetValue(finding.SessionId, out string? sessionHarness))
+        {
+            return sessionHarness;
+        }
+
+        if (finding.RunId is not null && runHarnessById.TryGetValue(finding.RunId, out string? runHarness))
+        {
+            return runHarness;
+        }
+
+        return null;
+    }
+
+    private static object BuildReportFindingDto(StoredFinding finding, string? harness)
+    {
+        string measurementClass = string.IsNullOrWhiteSpace(finding.MeasurementClass)
+            ? "inferred"
+            : finding.MeasurementClass;
+        object recoverableTokens = finding.EstimatedWasteTokens is long waste
+            ? new { value = waste, unit = "tokens" }
+            : new { value = (long?)null, reason = "Estimated recoverable tokens not measured for this finding." };
+        object? errorBar = finding.ErrorBar is FindingErrorBar eb
+            ? new { low = eb.Lower, high = eb.Upper }
+            : null;
+        List<string> evidenceIds = [.. finding.EvidenceLinks.Select(static link => link.SpanId)];
+
+        return new
+        {
+            id = finding.FindingId,
+            title = finding.Title,
+            measurementClass,
+            confidence = finding.Confidence,
+            confidenceBasis = finding.ConfidenceBasis,
+            mechanism = finding.Mechanism,
+            evidenceIds,
+            recommendation = finding.Recommendation,
+            recoverableTokens,
+            errorBar,
+            outcomeRiskCaveat = finding.OutcomeRiskCaveat,
+            rankScore = finding.RankScore,
+            sessionId = finding.SessionId,
+            runId = finding.RunId,
+            harness,
+            view = string.Create(CultureInfo.InvariantCulture, $"finding/{finding.FindingId}"),
+        };
+    }
+
+    private static List<object> BuildReportCoverageHarnesses(
+        IReadOnlyDictionary<string, StoredHarnessRollup> storedRollupsByHarness,
+        IReadOnlyDictionary<string, int> totalHarnessCounts,
+        IReadOnlyDictionary<string, int> inWindowHarnessCounts)
+    {
+        List<string> allHarnesses = [.. totalHarnessCounts.Keys.OrderBy(static harnessId => harnessId, StringComparer.Ordinal)];
+        List<object> entries = new(allHarnesses.Count);
+        foreach (string harnessId in allHarnesses)
+        {
+            Dictionary<string, object> measurability = storedRollupsByHarness.TryGetValue(harnessId, out StoredHarnessRollup? rollup)
+                ? ConvertCoverageMeasurability(ToHarnessRollupRow(rollup).Measurability)
+                : new Dictionary<string, object>(StringComparer.Ordinal);
+            entries.Add(new
+            {
+                harness = harnessId,
+                name = harnessId,
+                sessionsInWindow = inWindowHarnessCounts.GetValueOrDefault(harnessId, 0),
+                measurability,
+            });
+        }
+
+        return entries;
+    }
+
+    private static Dictionary<string, object> ConvertCoverageMeasurability(IReadOnlyDictionary<string, JsonElement> source)
+    {
+        Dictionary<string, object> result = new(source.Count, StringComparer.Ordinal);
+        foreach (KeyValuePair<string, JsonElement> pair in source)
+        {
+            if (pair.Value.ValueKind == JsonValueKind.String)
+            {
+                result[pair.Key] = "measurable";
+            }
+            else if (pair.Value.ValueKind == JsonValueKind.Object
+                && pair.Value.TryGetProperty("reason", out JsonElement reasonElement)
+                && reasonElement.ValueKind == JsonValueKind.String)
+            {
+                result[pair.Key] = new { reason = reasonElement.GetString() ?? "Not measurable." };
+            }
+        }
+
+        return result;
+    }
+
+    private static List<string> BuildReportCoverageHints(int sessionsInScope, RefreshCoverageState refreshState)
+    {
+        List<string> hints = [];
+        if (sessionsInScope == 0)
+        {
+            hints.Add("No session in the window. Run `kyberdash dash refresh --history-weeks <n>` to widen the coverage window.");
+        }
+
+        if (string.IsNullOrWhiteSpace(refreshState.LastSuccessAt))
+        {
+            hints.Add("No successful refresh recorded. Run `kyberdash dash refresh`.");
+        }
+        else if (TryParseReportTimestamp(refreshState.LastFailureAt, out DateTimeOffset failureTime)
+            && TryParseReportTimestamp(refreshState.LastSuccessAt, out DateTimeOffset successTime)
+            && failureTime > successTime)
+        {
+            hints.Add(string.Create(
+                CultureInfo.InvariantCulture,
+                $"Last successful refresh was {refreshState.LastSuccessAt}. Run `kyberdash dash refresh`."));
+        }
+
+        return hints;
+    }
+
+    private List<object> BuildReportHarnesses(
+        IReadOnlyList<ReportSessionEntry> scopedSessions,
+        IReadOnlyDictionary<string, int> totalHarnessCounts,
+        IReadOnlyDictionary<string, int> inWindowHarnessCounts,
+        IReadOnlyDictionary<string, StoredHarnessRollup> storedRollupsByHarness,
+        IReadOnlyDictionary<string, SessionSummaryFigure> aggregatesById,
+        IReadOnlyList<StoredRun> allRuns,
+        DateTimeOffset cutoff,
+        bool unfilteredSessionsAndRuns)
+    {
+        Dictionary<string, List<ReportSessionEntry>> sessionsByHarness = new(StringComparer.Ordinal);
+        foreach (ReportSessionEntry entry in scopedSessions)
+        {
+            if (!sessionsByHarness.TryGetValue(entry.Harness, out List<ReportSessionEntry>? bucket))
+            {
+                bucket = [];
+                sessionsByHarness[entry.Harness] = bucket;
+            }
+
+            bucket.Add(entry);
+        }
+
+        List<string> orderedHarnesses = [.. sessionsByHarness.Keys.OrderBy(static k => k, StringComparer.Ordinal)];
+        List<object> result = new(orderedHarnesses.Count);
+        foreach (string harnessId in orderedHarnesses)
+        {
+            List<ReportSessionEntry> harnessSessions = sessionsByHarness[harnessId];
+            StoredHarnessRollup? fullRollup = null;
+            bool matchesStoredAllTime = unfilteredSessionsAndRuns
+                && storedRollupsByHarness.TryGetValue(harnessId, out fullRollup)
+                && fullRollup.SessionCount == harnessSessions.Count
+                && inWindowHarnessCounts.GetValueOrDefault(harnessId, 0) == totalHarnessCounts.GetValueOrDefault(harnessId, 0)
+                && harnessSessions.Count == totalHarnessCounts.GetValueOrDefault(harnessId, 0);
+
+            HarnessRollupRow row = matchesStoredAllTime && fullRollup is not null
+                ? ToHarnessRollupRow(fullRollup)
+                : BuildWindowHarnessRollupRow(harnessId, harnessSessions, aggregatesById, allRuns, cutoff, unfilteredSessionsAndRuns);
+
+            result.Add(new
+            {
+                harness = harnessId,
+                name = harnessId,
+                dimensions = CanonRollupsEngine.BuildHarnessScorecard(row),
+            });
+        }
+
+        return result;
+    }
+
+    private HarnessRollupRow BuildWindowHarnessRollupRow(
+        string harnessId,
+        IReadOnlyList<ReportSessionEntry> harnessSessions,
+        IReadOnlyDictionary<string, SessionSummaryFigure> aggregatesById,
+        IReadOnlyList<StoredRun> allRuns,
+        DateTimeOffset cutoff,
+        bool allowExecutionFallback)
+    {
+        List<double> peakPressures = [];
+        bool anyDerivedPressure = false;
+        int unknownWindowSessions = 0;
+        long totalCacheRead = 0;
+        long totalInput = 0;
+        bool hasCacheRead = false;
+        int totalDefinedTools = 0;
+        int totalInvokedTools = 0;
+        int subagentSessions = 0;
+
+        foreach (ReportSessionEntry entry in harnessSessions)
+        {
+            if (entry.Projection is not null && entry.Projection.IsSubagent)
+            {
+                subagentSessions++;
+            }
+
+            if (entry.Projection?.Context is StoredSessionContext context
+                && !IsUnnamedReportWindowSource(context.ContextLimitSource))
+            {
+                double peak = 0;
+                bool found = false;
+                foreach (StoredSessionContextTurn turn in context.Turns)
+                {
+                    if (turn.Pressure is double pressure
+                        && double.IsFinite(pressure)
+                        && (!found || pressure > peak))
+                    {
+                        peak = pressure;
+                        found = true;
+                    }
+                }
+
+                if (found)
+                {
+                    peakPressures.Add(peak);
+                    if (string.Equals(context.ContextLimitSource, "declared", StringComparison.Ordinal)
+                        || context.DerivedCounts.Count > 0)
+                    {
+                        anyDerivedPressure = true;
+                    }
+                }
+                else
+                {
+                    unknownWindowSessions++;
+                }
+            }
+            else
+            {
+                unknownWindowSessions++;
+            }
+
+            if (!aggregatesById.TryGetValue(entry.Session.SessionKey, out SessionSummaryFigure? aggregate))
+            {
+                continue;
+            }
+
+            long input = aggregate.TotalInput ?? 0;
+            long cacheRead = aggregate.TotalCacheRead ?? 0;
+            totalInput += input;
+            totalCacheRead += cacheRead;
+            if (cacheRead > 0)
+            {
+                hasCacheRead = true;
+            }
+
+            HashSet<string> offered = new(aggregate.ToolsOffered, StringComparer.Ordinal);
+            totalDefinedTools += offered.Count;
+            foreach (string tool in aggregate.ToolsInvoked)
+            {
+                if (offered.Contains(tool))
+                {
+                    totalInvokedTools++;
+                }
+            }
+        }
+
+        List<StoredHarnessRollupMetric> metrics = [];
+        if (peakPressures.Count > 0)
+        {
+            peakPressures.Sort();
+            double medianPressure = Math.Round(CanonRollupsEngine.ComputeMedian(peakPressures), 4);
+            double p95Pressure = Math.Round(CanonRollupsEngine.ComputeP95(peakPressures), 4);
+            string basis = anyDerivedPressure ? "derived" : "measured";
+            metrics.Add(new StoredHarnessRollupMetric("context_pressure_median", medianPressure, basis));
+            metrics.Add(new StoredHarnessRollupMetric("context_pressure_p95", p95Pressure, basis));
+        }
+
+        if (hasCacheRead && totalInput > 0)
+        {
+            metrics.Add(new StoredHarnessRollupMetric("cache_hit_rate", Math.Round((double)totalCacheRead / totalInput, 4), "measured"));
+        }
+
+        if (totalDefinedTools > 0)
+        {
+            metrics.Add(new StoredHarnessRollupMetric("tool_yield", Math.Round((double)totalInvokedTools / totalDefinedTools, 4), "measured"));
+        }
+
+        int executionCount = 0;
+        int childExecutions = 0;
+        int runCount = 0;
+        foreach (StoredRun run in allRuns)
+        {
+            if (!string.Equals(CanonPricing.NormalizeHarnessName(run.HarnessId), harnessId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (TryParseReportTimestamp(run.EndedAtUtc ?? run.StartedAtUtc, out DateTimeOffset runTime) && runTime < cutoff)
+            {
+                continue;
+            }
+
+            runCount++;
+            if (allowExecutionFallback && subagentSessions == 0)
+            {
+                IReadOnlyList<StoredExecution> execs = projections.ListExecutionsForRun(run.RunId);
+                executionCount += execs.Count;
+                foreach (StoredExecution exec in execs)
+                {
+                    if (!exec.IsRoot)
+                    {
+                        childExecutions++;
+                    }
+                }
+            }
+        }
+
+        if (harnessSessions.Count > 0 && subagentSessions > 0)
+        {
+            metrics.Add(new StoredHarnessRollupMetric(
+                "delegation_overhead",
+                Math.Round((double)subagentSessions / harnessSessions.Count, 4),
+                "measured"));
+        }
+        else if (executionCount > 1 && childExecutions > 0)
+        {
+            metrics.Add(new StoredHarnessRollupMetric(
+                "delegation_overhead",
+                Math.Round((double)childExecutions / executionCount, 4),
+                "measured"));
+        }
+
+        return ToHarnessRollupRow(new StoredHarnessRollup(
+            harnessId,
+            harnessSessions.Count,
+            runCount,
+            executionCount,
+            unknownWindowSessions,
+            harnessSessions.Count,
+            metrics));
+    }
+
+    private static bool IsUnnamedReportWindowSource(string? source) =>
+        string.IsNullOrEmpty(source) || string.Equals(source, "default", StringComparison.Ordinal);
+
+    private object? BuildReportLatestSession(
+        IReadOnlyList<ReportSessionEntry> scopedSessions,
+        string generatedAt,
+        IModelPricingLookup pricingLookup)
+    {
+        if (scopedSessions.Count == 0)
+        {
+            return null;
+        }
+
+        ReportSessionEntry newest = scopedSessions[0];
+        for (int index = 1; index < scopedSessions.Count; index++)
+        {
+            ReportSessionEntry candidate = scopedSessions[index];
+            DateTimeOffset candidateTime = candidate.ActivityTime ?? DateTimeOffset.MinValue;
+            DateTimeOffset newestTime = newest.ActivityTime ?? DateTimeOffset.MinValue;
+            int timeCompare = candidateTime.CompareTo(newestTime);
+            if (timeCompare > 0
+                || (timeCompare == 0 && string.Compare(candidate.Session.SessionKey, newest.Session.SessionKey, StringComparison.Ordinal) > 0))
+            {
+                newest = candidate;
+            }
+        }
+
+        (SessionDetailFigure? latestFigures, _) = ReadSessionDetailFigures(newest.Session.SessionKey, pricingLookup);
+        IReadOnlyList<ReadTimeTurnSummary> turns = latestFigures?.Turns ?? [];
+
+        StoredSessionProjection? projection = newest.Projection;
+        string harness = newest.Harness;
+        string lastActivityAt = !string.IsNullOrWhiteSpace(projection?.EndedAtUtc)
+            ? projection.EndedAtUtc
+            : !string.IsNullOrWhiteSpace(projection?.StartedAtUtc)
+                ? projection.StartedAtUtc
+                : generatedAt;
+        int turnCount = latestFigures?.Summary.TurnCount ?? Math.Max(turns.Count, projection?.Context?.Turns.Count ?? 0);
+
+        object latestTurn;
+        List<object> toolDefinitionSources = [];
+        List<int> cacheInvalidationTurns = [];
+
+        if (projection?.Context is StoredSessionContext context && context.Turns.Count > 0)
+        {
+            latestTurn = BuildMeasuredLatestTurn(context);
+            foreach (int zeroBasedIndex in context.FlaggedTurnIndexes)
+            {
+                cacheInvalidationTurns.Add(zeroBasedIndex + 1);
+            }
+        }
+        else
+        {
+            string unmeasurableReason = !string.IsNullOrWhiteSpace(projection?.ContextUnmeasurableReason)
+                ? projection.ContextUnmeasurableReason
+                : "harness exported no message structure for this session";
+            latestTurn = BuildUnmeasurableLatestTurn(unmeasurableReason);
+        }
+
+        if (projection?.Schema?.Servers is { Count: > 0 } servers)
+        {
+            foreach (StoredSchemaServerTokens server in servers)
+            {
+                toolDefinitionSources.Add(new
+                {
+                    source = server.ServerName,
+                    tokens = new { value = server.Tokens, unit = "tokens" },
+                });
+            }
+        }
+
+        return new
+        {
+            sessionId = newest.Session.SessionKey,
+            harness,
+            project = ResolveReportProject(newest.Session),
+            lastActivityAt,
+            turnCount,
+            view = string.Create(CultureInfo.InvariantCulture, $"session/{newest.Session.SessionKey}"),
+            latestTurn,
+            toolDefinitionSources,
+            cacheInvalidationTurns,
+        };
+    }
+
+    private static object BuildMeasuredLatestTurn(StoredSessionContext context)
+    {
+        StoredSessionContextTurn lastTurn = context.Turns[^1];
+        bool windowKnown = !IsUnnamedReportWindowSource(context.ContextLimitSource) && context.ContextLimit > 0;
+        object pressure = windowKnown && lastTurn.Pressure is double pressureValue && double.IsFinite(pressureValue)
+            ? new { value = pressureValue }
+            : new { value = (double?)null, reason = "harness did not report model context window" };
+        object contextWindow = windowKnown
+            ? new { value = context.ContextLimit, unit = "tokens" }
+            : new { value = (long?)null, reason = "harness did not report model context window" };
+
+        Dictionary<string, long> rawBuckets = new(lastTurn.Buckets.Count, StringComparer.Ordinal);
+        foreach (StoredTurnBucketTokens bucket in lastTurn.Buckets)
+        {
+            rawBuckets[bucket.Bucket] = bucket.Tokens;
+        }
+
+        Dictionary<string, object> buckets = new(ReportBucketKeys.Length, StringComparer.Ordinal);
+        foreach (string key in ReportBucketKeys)
+        {
+            buckets[key] = new { value = rawBuckets.GetValueOrDefault(key, 0L), unit = "tokens" };
+        }
+
+        return new
+        {
+            index = lastTurn.Position + 1,
+            pressure,
+            contextWindow,
+            buckets,
+            residual = new { value = lastTurn.ResidualTokens, unit = "tokens" },
+            cacheInvalidation = context.FlaggedTurnIndexes.Contains(lastTurn.Position),
+        };
+    }
+
+    private static object BuildUnmeasurableLatestTurn(string reason)
+    {
+        object absent = new { value = (long?)null, reason };
+        Dictionary<string, object> buckets = new(ReportBucketKeys.Length, StringComparer.Ordinal);
+        foreach (string key in ReportBucketKeys)
+        {
+            buckets[key] = absent;
+        }
+
+        return new
+        {
+            index = 0,
+            pressure = absent,
+            contextWindow = absent,
+            buckets,
+            residual = absent,
+            cacheInvalidation = false,
+        };
+    }
+
+    private static string? ResolveReportProject(CollectedSession session)
+    {
+        if (!string.IsNullOrWhiteSpace(session.Workspace?.Repository))
+        {
+            return session.Workspace.Repository;
+        }
+
+        if (string.IsNullOrWhiteSpace(session.Workspace?.WorkingDirectory))
+        {
+            return null;
+        }
+
+        string trimmed = session.Workspace.WorkingDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string name = Path.GetFileName(trimmed);
+        return string.IsNullOrWhiteSpace(name) ? null : name;
+    }
+
+    private static List<object> BuildReportCost(
+        IReadOnlyList<ReportSessionEntry> scopedSessions,
+        IReadOnlyDictionary<string, SessionSummaryFigure> aggregatesById)
+    {
+        double harnessUsd = 0;
+        bool hasHarness = false;
+        double publishedUsd = 0;
+        bool hasPublished = false;
+
+        foreach (ReportSessionEntry entry in scopedSessions)
+        {
+            if (!aggregatesById.TryGetValue(entry.Session.SessionKey, out SessionSummaryFigure? aggregate))
+            {
+                continue;
+            }
+
+            if (ExtractUsdCost(aggregate.ReportedCost) is double reported)
+            {
+                harnessUsd += reported;
+                hasHarness = true;
+            }
+
+            if (ExtractUsdCost(aggregate.PublishedCost) is double published)
+            {
+                publishedUsd += published;
+                hasPublished = true;
+            }
+        }
+
+        List<object> costRows = [];
+        if (hasHarness)
+        {
+            costRows.Add(new
+            {
+                basis = "harness",
+                amountUsd = new { value = Math.Round(harnessUsd, 6), unit = "USD" },
+            });
+        }
+
+        if (hasPublished)
+        {
+            costRows.Add(new
+            {
+                basis = "published",
+                amountUsd = new { value = Math.Round(publishedUsd, 6), unit = "USD" },
+            });
+        }
+
+        if (costRows.Count == 0)
+        {
+            costRows.Add(new
+            {
+                basis = "unknown",
+                amountUsd = new { value = (double?)null, reason = "no session in scope carried a cost" },
+            });
+        }
+
+        return costRows;
+    }
+
+    private sealed record ReportSessionEntry(
+        CollectedSession Session,
+        StoredSessionProjection? Projection,
+        string Harness,
+        DateTimeOffset? ActivityTime);
+
+    private sealed record RefreshCoverageState(
+        object Payload,
+        string? LastSuccessAt,
+        string? LastFailureAt);
 
     private sealed record HarnessAggregationContext(
         Dictionary<string, int> SessionCounts,

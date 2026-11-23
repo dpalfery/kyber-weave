@@ -595,23 +595,29 @@ public class InMemoryRelationalStore :
         lock (syncRoot)
         {
             NoteRead(nameof(SkillsInvoked));
-            HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, spanId, sessionKey);
-            TableMetadata meta = GetTableMetadata("record_skill_invocation");
-            List<StoredSkillInvocation> results = [];
+            return CollectSkillInvocations(state, spanId, sessionKey);
+        }
+    }
 
-            foreach (object?[] row in state.GetRows("record_skill_invocation"))
+    /// <summary>Reads skill invocation rows without logging a reader call. Caller holds <see cref="syncRoot"/>.</summary>
+    private static List<StoredSkillInvocation> CollectSkillInvocations(StoreState currentState, string? spanId, string? sessionKey)
+    {
+        HashSet<string>? allowedSpans = ResolveFilteredSpanIds(currentState, spanId, sessionKey);
+        TableMetadata meta = GetTableMetadata("record_skill_invocation");
+        List<StoredSkillInvocation> results = [];
+
+        foreach (object?[] row in currentState.GetRows("record_skill_invocation"))
+        {
+            string rowSpan = GetString(meta, row, "span_id");
+            if (allowedSpans is not null && !allowedSpans.Contains(rowSpan))
             {
-                string rowSpan = GetString(meta, row, "span_id");
-                if (allowedSpans is not null && !allowedSpans.Contains(rowSpan))
-                {
-                    continue;
-                }
-
-                results.Add(new StoredSkillInvocation(rowSpan, GetString(meta, row, "skill_name")));
+                continue;
             }
 
-            return results;
+            results.Add(new StoredSkillInvocation(rowSpan, GetString(meta, row, "skill_name")));
         }
+
+        return results;
     }
 
     /// <inheritdoc />
@@ -946,7 +952,10 @@ public class InMemoryRelationalStore :
         lock (syncRoot)
         {
             NoteRead(nameof(SessionSummaryFigures));
-            return BuildSessionFigures(state, sessionKey, CollectSessionRecordsContentFree(state, sessionKey), pricing)?.Summary;
+            SessionSummaryFigure? summary = BuildSessionFigures(state, sessionKey, CollectSessionRecordsContentFree(state, sessionKey), pricing)?.Summary;
+            return summary is null
+                ? null
+                : summary with { SkillInvocations = CollectSkillInvocations(state, spanId: null, sessionKey) };
         }
     }
 
@@ -966,10 +975,15 @@ public class InMemoryRelationalStore :
             }
 
             return new SessionDetailFigure(
-                figures.Summary,
+                figures.Summary with { SkillInvocations = CollectSkillInvocations(state, spanId: null, sessionKey) },
                 BuildSessionTurnFigures(state, sessionKey, records, figures.Summary.HarnessId, pricing),
                 figures.Tools,
-                figures.Requests);
+                figures.Requests,
+                figures.Servers,
+                figures.Reconciliation,
+                figures.FirstContextBucket,
+                figures.LastContextBucket,
+                figures.UnusedRange);
         }
     }
 
@@ -5413,6 +5427,7 @@ public class InMemoryRelationalStore :
         long totalCacheCreation = 0;
         bool hasCacheCreation = false;
         int cacheCreationTurns = 0;
+        List<ReadTimeTurnReconciliation> reconciliation = new(turnEntries.Count);
 
         foreach ((int position, CollectedRecord turnRecord) in turnEntries)
         {
@@ -5467,6 +5482,21 @@ public class InMemoryRelationalStore :
                     cacheCreationTurns++;
                 }
             }
+
+            bool? inputMatch = turnRecord.ReportedInputTokens.HasValue && turnSummary.InputTokens.HasValue
+                ? turnRecord.ReportedInputTokens.Value == turnSummary.InputTokens.Value
+                : null;
+            bool? outputMatch = turnRecord.ReportedOutputTokens.HasValue && turnSummary.OutputTokens.HasValue
+                ? turnRecord.ReportedOutputTokens.Value == turnSummary.OutputTokens.Value
+                : null;
+            reconciliation.Add(new ReadTimeTurnReconciliation(
+                turnRecord.RecordId,
+                turnRecord.ReportedInputTokens,
+                turnSummary.InputTokens,
+                inputMatch,
+                turnRecord.ReportedOutputTokens,
+                turnSummary.OutputTokens,
+                outputMatch));
         }
 
         List<CollectedRecord> rootRecords =
@@ -5645,6 +5675,18 @@ public class InMemoryRelationalStore :
         List<Problem> problems = CollectSessionProblems(currentState, sessionKey, sessionSpanIds);
         problems.AddRange(extraProblems);
 
+        List<ReadTimeSessionServerSummary> servers = BuildSessionServerSummaries(projection, tools);
+        ReadTimeContextBucketSummary? firstContextBucket = null;
+        ReadTimeContextBucketSummary? lastContextBucket = null;
+        if (projection?.Context?.Turns is { Count: > 0 } contextTurns)
+        {
+            List<StoredSessionContextTurn> orderedContext = [.. contextTurns.OrderBy(static t => t.Position)];
+            firstContextBucket = BuildContextBucketSummary(orderedContext[0], turnEntries);
+            lastContextBucket = BuildContextBucketSummary(orderedContext[^1], turnEntries);
+        }
+
+        UnusedSchemaRange? unusedRange = ResolveUnusedRange(projection, harnessId, models, pricing);
+
         return new SessionFigureSet(
             new SessionSummaryFigure(
                 SessionKey: sessionKey,
@@ -5669,16 +5711,27 @@ public class InMemoryRelationalStore :
                 Coverage: new ReadTimeSessionCoverage(
                     SchemaMeasurable: projection?.Schema is not null,
                     ContextMeasurable: projection?.Context is not null),
-                Problems: problems),
+                Problems: problems,
+                SkillInvocations: []),
             tools,
-            requests);
+            requests,
+            servers,
+            reconciliation,
+            firstContextBucket,
+            lastContextBucket,
+            unusedRange);
     }
 
     /// <summary>One session's content-free figures with the detail page's tool and request rows.</summary>
     private sealed record SessionFigureSet(
         SessionSummaryFigure Summary,
         IReadOnlyList<ReadTimeSessionToolSummary> Tools,
-        IReadOnlyList<ReadTimeSessionRequestSummary> Requests);
+        IReadOnlyList<ReadTimeSessionRequestSummary> Requests,
+        IReadOnlyList<ReadTimeSessionServerSummary> Servers,
+        IReadOnlyList<ReadTimeTurnReconciliation> Reconciliation,
+        ReadTimeContextBucketSummary? FirstContextBucket,
+        ReadTimeContextBucketSummary? LastContextBucket,
+        UnusedSchemaRange? UnusedRange);
 
     private static IReadOnlyList<ReadTimeTurnSummary> BuildSessionTurnFigures(
         StoreState currentState,

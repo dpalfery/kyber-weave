@@ -423,6 +423,132 @@ public class MinimalApiEndpointTests
     }
 
     [Fact]
+    public async Task ReportPassesTrimmedFiltersDefaultDaysAndLimitAndAllowsLoopbackReadWithoutOrigin()
+    {
+        JsonElement reportPayload = JsonSerializer.SerializeToElement(new
+        {
+            schemaVersion = 1,
+            generatedAt = "2026-11-20T12:00:00.000Z",
+            kyberdashVersion = "0.21.0",
+            scope = new { days = 7, harness = "claude-code", sessionId = "sess-1", runId = "run-1" },
+            coverage = new
+            {
+                storePath = "canon.db",
+                harnesses = Array.Empty<object>(),
+                quarantineCount = 0,
+                problemCount = 0,
+                hints = Array.Empty<string>(),
+            },
+            findings = Array.Empty<object>(),
+            harnesses = Array.Empty<object>(),
+            latestSession = (object?)null,
+            cost = Array.Empty<object>(),
+        });
+        await using Host host = await Host.StartAsync(b =>
+            b.Query
+                .Setup(q => q.GetReport("claude-code", "sess-1", "run-1", 50, 7))
+                .Returns(reportPayload));
+
+        HttpResponseMessage response = await host.Client.GetAsync(
+            new Uri("/api/kyber/report?harness=%20claude-code%20&session=%20sess-1%20&run=%20run-1%20", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(1, body.RunProperty("schemaVersion").GetInt32());
+        Assert.Equal("0.21.0", body.RunProperty("kyberdashVersion").GetString());
+        Assert.Equal(7, body.RunProperty("scope").GetProperty("days").GetInt32());
+        Assert.Equal("canon.db", body.RunProperty("coverage").GetProperty("storePath").GetString());
+        Assert.Equal(JsonValueKind.Array, body.RunProperty("harnesses").ValueKind);
+        Assert.Equal(JsonValueKind.Array, body.RunProperty("findings").ValueKind);
+        Assert.Equal(JsonValueKind.Array, body.RunProperty("cost").ValueKind);
+        host.Builder.Query.Verify(q => q.GetReport("claude-code", "sess-1", "run-1", 50, 7), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("/api/kyber/report", null, null, null, 50, 7)]
+    [InlineData("/api/kyber/report?harness=%20%20&session=%20&run=%20%20", null, null, null, 50, 7)]
+    [InlineData("/api/kyber/report?days=1&harness=all", null, null, null, 50, 1)]
+    [InlineData("/api/kyber/report?days=1&harness=%20GEMINI%20", "GEMINI", null, null, 50, 1)]
+    [InlineData("/api/kyber/report?days=30&limit=10&harness=codex", "codex", null, null, 10, 30)]
+    [InlineData("/api/kyber/report?days=14&limit=500", null, null, null, 200, 14)]
+    public async Task ReportNormalizesDaysLimitAndScopeParameters(
+        string requestPath,
+        string? expectedHarness,
+        string? expectedSession,
+        string? expectedRun,
+        int expectedLimit,
+        int expectedDays)
+    {
+        JsonElement reportPayload = JsonSerializer.SerializeToElement(new
+        {
+            schemaVersion = 1,
+            generatedAt = "2026-11-20T12:00:00.000Z",
+            kyberdashVersion = "0.21.0",
+            scope = new { days = expectedDays, harness = expectedHarness },
+            coverage = new { storePath = "canon.db", harnesses = Array.Empty<object>() },
+            findings = Array.Empty<object>(),
+            harnesses = Array.Empty<object>(),
+            latestSession = (object?)null,
+            cost = Array.Empty<object>(),
+        });
+        await using Host host = await Host.StartAsync(b =>
+            b.Query
+                .Setup(q => q.GetReport(expectedHarness, expectedSession, expectedRun, expectedLimit, expectedDays))
+                .Returns(reportPayload));
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri(requestPath, UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(expectedDays, body.RunProperty("scope").GetProperty("days").GetInt32());
+        host.Builder.Query.Verify(
+            q => q.GetReport(expectedHarness, expectedSession, expectedRun, expectedLimit, expectedDays),
+            Times.Once);
+    }
+
+    [Theory]
+    [InlineData("/api/kyber/report?days=")]
+    [InlineData("/api/kyber/report?days=%20")]
+    [InlineData("/api/kyber/report?days=0")]
+    [InlineData("/api/kyber/report?days=-1")]
+    [InlineData("/api/kyber/report?days=-5")]
+    [InlineData("/api/kyber/report?days=abc")]
+    [InlineData("/api/kyber/report?days=1.5")]
+    public async Task ReportRejectsInvalidDaysWithBadRequest(string requestPath)
+    {
+        await using Host host = await Host.StartAsync();
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri(requestPath, UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("days must be a positive whole number", body.RunProperty("error").GetString());
+        host.Builder.Query.Verify(
+            q => q.GetReport(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData("/api/kyber/report?limit=0")]
+    [InlineData("/api/kyber/report?limit=-3")]
+    [InlineData("/api/kyber/report?limit=abc")]
+    [InlineData("/api/kyber/report?limit=")]
+    public async Task ReportRejectsInvalidLimitWithBadRequest(string requestPath)
+    {
+        await using Host host = await Host.StartAsync();
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri(requestPath, UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("limit must be a positive whole number", body.RunProperty("error").GetString());
+        host.Builder.Query.Verify(
+            q => q.GetReport(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task UnknownApiPathReturnsNotFound()
     {
         await using Host host = await Host.StartAsync();

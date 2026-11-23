@@ -405,6 +405,7 @@ public record SessionListFigure(
 /// <param name="CostBasisMismatch">Structured basis mismatch verdict when both valued harness and published costs occur.</param>
 /// <param name="Coverage">Schema and context projection measurability flags.</param>
 /// <param name="Problems">Ingest and pricing diagnostics associated with the session.</param>
+/// <param name="SkillInvocations">Skill names the session's records invoked, in record order — names only, never conversation text.</param>
 /// <remarks>
 /// Carries no content: no <c>content_part</c>, tool-call text, tool-definition, or
 /// agent-invocation column is read to build it. The figures that would need those columns —
@@ -432,7 +433,8 @@ public record SessionSummaryFigure(
     ReadTimeCostSummary PublishedCost,
     ReadTimeCostBasisMismatch? CostBasisMismatch,
     ReadTimeSessionCoverage Coverage,
-    IReadOnlyList<Problem> Problems);
+    IReadOnlyList<Problem> Problems,
+    IReadOnlyList<StoredSkillInvocation> SkillInvocations);
 
 /// <summary>
 /// Read-time figures the session detail header renders, with the session's per-turn figures,
@@ -442,6 +444,11 @@ public record SessionSummaryFigure(
 /// <param name="Turns">Per-turn figures in turn order.</param>
 /// <param name="Tools">Per-tool residency and invocation summaries in ranking order.</param>
 /// <param name="Requests">Ordered request summaries. A request's prompt preview is content, so it stays absent here.</param>
+/// <param name="Servers">Per-server schema and invocation rollups in projection order.</param>
+/// <param name="Reconciliation">Per-turn reported vs. tokenized input/output reconciliation entries.</param>
+/// <param name="FirstContextBucket">First projected context turn bucket summary when present.</param>
+/// <param name="LastContextBucket">Last projected context turn bucket summary when present.</param>
+/// <param name="UnusedRange">Cost or residency bounds for uninvoked schemas when measurable, or <see langword="null"/>.</param>
 /// <remarks>
 /// Content-free for the same reason as <see cref="SessionSummaryFigure"/>: the detail header, the
 /// turn list, and the tool and request rows price stored metadata only.
@@ -450,7 +457,12 @@ public record SessionDetailFigure(
     SessionSummaryFigure Summary,
     IReadOnlyList<ReadTimeTurnSummary> Turns,
     IReadOnlyList<ReadTimeSessionToolSummary> Tools,
-    IReadOnlyList<ReadTimeSessionRequestSummary> Requests);
+    IReadOnlyList<ReadTimeSessionRequestSummary> Requests,
+    IReadOnlyList<ReadTimeSessionServerSummary> Servers,
+    IReadOnlyList<ReadTimeTurnReconciliation> Reconciliation,
+    ReadTimeContextBucketSummary? FirstContextBucket,
+    ReadTimeContextBucketSummary? LastContextBucket,
+    UnusedSchemaRange? UnusedRange);
 
 /// <summary>
 /// Typed read-only query contract over normalized telemetry, session, and record tables in
