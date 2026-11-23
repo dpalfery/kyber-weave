@@ -250,7 +250,7 @@ public sealed class TaskPromptService(
             ? null
             : hostFacts.Render(root, config, agent, taskId, null, technology);
 
-        PromptContent content = ContentOf(taskText, hostText, technology);
+        PromptContent content = ContentOf(taskText, hostText, technology, config.Ontology, root);
         int budget = config.TaskPromptBudget > 0 ? config.TaskPromptBudget : KyberWeaveConfig.DefaultTaskPromptBudget;
         // The retry's failure report is delivered in the same dispatch, after this prompt, so the budget reserves
         // room for it: cutting the prompt to the budget alone would overshoot by the report's length.
@@ -391,14 +391,26 @@ public sealed class TaskPromptService(
         }
     }
 
-    private PromptContent ContentOf(string? taskText, string? hostText, string? technology)
+    private PromptContent ContentOf(
+        string? taskText,
+        string? hostText,
+        string? technology,
+        OntologyConfig ontology,
+        string root)
     {
         if (technology is null)
-            return new PromptContent(taskText, hostText, null, null, false, null, null, null, null, null, null, []);
+        {
+            return new PromptContent(
+                taskText, hostText, null, null, false, null, null, null, null, null, null, [], null, null, null);
+        }
 
         StandardsBundle? bundle = standardsFor(technology);
         if (bundle is null)
-            return new PromptContent(taskText, hostText, technology, null, false, null, null, null, null, null, null, []);
+        {
+            return new PromptContent(
+                taskText, hostText, technology, null, false, null, null, null, null, null, null, [],
+                null, null, null);
+        }
 
         string? parent = Clean(bundle.Standard?.Frontmatter.BuildsOn);
         return new PromptContent(
@@ -413,7 +425,61 @@ public sealed class TaskPromptService(
             BodyOf(bundle.Rules),
             BodyOf(bundle.Skills),
             StandardLeadOf(bundle.Standard),
-            bundle.Standard?.Sections ?? []);
+            bundle.Standard?.Sections ?? [],
+            bundle.Rules is null ? UncarriedFileNote(root, ontology, technology, "rules", parent: false) : null,
+            bundle.Skills is null ? UncarriedFileNote(root, ontology, technology, "skills", parent: false) : null,
+            parent is not null && bundle.ParentRules is null
+                ? UncarriedFileNote(root, ontology, parent, "rules", parent: true)
+                : null);
+    }
+
+    /// <summary>
+    /// The part's text when a rules or skills document is missing from the bundle but its file
+    /// exists on disk: it names the file and why the prompt cannot carry it. Null when the file
+    /// really is absent, so the caller keeps its plain "no ... file" text.
+    /// </summary>
+    /// <remarks>
+    /// Existence is asked of the file-system seam rather than the corpus. The corpus holds a
+    /// document whose frontmatter parsed, so the file that is silently missing from a bundle is
+    /// exactly the one whose frontmatter does not mark it as its folder's file.
+    /// </remarks>
+    /// <param name="root">The repository root.</param>
+    /// <param name="ontology">The docs roots a folder's files may sit under.</param>
+    /// <param name="scope">The technology whose folder holds the file.</param>
+    /// <param name="kind">The file's kind: <c>rules</c> or <c>skills</c>.</param>
+    /// <param name="parent">True for a parent technology's folder, so the text says whose it is.</param>
+    private string? UncarriedFileNote(
+        string root,
+        OntologyConfig ontology,
+        string scope,
+        string kind,
+        bool parent)
+    {
+        string? path = null;
+        foreach (string docsRoot in ontology.DocsRoots)
+        {
+            string relative = kind == "rules"
+                ? DocsLayout.RulesFile(docsRoot, scope)
+                : DocsLayout.SkillsFile(docsRoot, scope);
+            string full = Path.GetFullPath(relative.Replace('/', Path.DirectorySeparatorChar), root);
+            if (!files.FileExists(full)) continue;
+
+            path = relative;
+            break;
+        }
+
+        if (path is null) return null;
+
+        string scopeKey = DocsLayout.ScopeKey(ontology.Roles, scope);
+        string docType = kind == "rules" ? "rule" : "skill";
+        string subject = parent
+            ? $"The parent technology '{scope}' folder"
+            : "This technology's folder";
+        string owner = parent ? "that technology's" : "this technology's";
+
+        return $"{subject} has a {kind} file, {path}, but its frontmatter does not mark it as " +
+               $"{owner} {kind} (doc-type {docType}, {scopeKey} {scope}), so this prompt cannot " +
+               "carry it; run kyber-weave docs validate.";
     }
 
     /// <summary>
@@ -511,7 +577,9 @@ public sealed class TaskPromptService(
                 parts.Add(new Part("shared-rules", content.SharedRules ?? NoSharedRules));
                 if (content.Parent is not null)
                     parts.Add(new Part("parent-rules", ParentPart(content, cut)));
-                parts.Add(new Part("technology-rules", content.TechnologyRules ?? NoRulesFile));
+                parts.Add(new Part(
+                    "technology-rules",
+                    content.TechnologyRules ?? content.RulesNote ?? NoRulesFile));
                 parts.Add(new Part("skills", SkillsPart(content, cut)));
                 parts.Add(new Part("standard", StandardPart(content, cut)));
             }
@@ -533,7 +601,7 @@ public sealed class TaskPromptService(
     private static string ParentPart(PromptContent content, IReadOnlySet<string> cut)
     {
         StringBuilder text = new();
-        text.Append(content.ParentRules ?? string.Create(
+        text.Append(content.ParentRules ?? content.ParentRulesNote ?? string.Create(
             CultureInfo.InvariantCulture, $"The parent technology '{content.Parent}' has no rules file."));
 
         if (content.ParentSkills is not null && !cut.Contains(ParentSkillsUnit))
@@ -545,7 +613,7 @@ public sealed class TaskPromptService(
     }
 
     private static string SkillsPart(PromptContent content, IReadOnlySet<string> cut) => content.Skills is null
-        ? "This technology's folder has no skills file."
+        ? content.SkillsNote ?? NoSkillsFile
         : cut.Contains(SkillsUnit)
             ? "The skills for this technology were left out: the prompt budget did not fit them. The last part names what was cut."
             : content.Skills;
@@ -629,6 +697,9 @@ public sealed class TaskPromptService(
     private const string NoRulesFile =
         "This technology's folder has no rules file, so this prompt carries none for it.";
 
+    private const string NoSkillsFile =
+        "This technology's folder has no skills file.";
+
     /// <summary>One part of the prompt, written between a tag that opens it and the same tag closing it.</summary>
     private sealed record Part(string Tag, string Body);
 
@@ -636,6 +707,11 @@ public sealed class TaskPromptService(
     private sealed record CutUnit(string Id, string Label, int Kind, int Index, string Text);
 
     /// <summary>Every part of one prompt before the budget is applied, and which of them may be cut.</summary>
+    /// <remarks>
+    /// <c>RulesNote</c>, <c>SkillsNote</c> and <c>ParentRulesNote</c> explain a folder file that
+    /// exists on disk but whose frontmatter kept it out of the bundle; each is null when the file
+    /// is genuinely absent, so the part keeps its plain "no ... file" text.
+    /// </remarks>
     private sealed record PromptContent(
         string? Task,
         string? HostFacts,
@@ -648,5 +724,8 @@ public sealed class TaskPromptService(
         string? TechnologyRules,
         string? Skills,
         string? StandardLead,
-        IReadOnlyList<DocumentSection> StandardSections);
+        IReadOnlyList<DocumentSection> StandardSections,
+        string? RulesNote,
+        string? SkillsNote,
+        string? ParentRulesNote);
 }

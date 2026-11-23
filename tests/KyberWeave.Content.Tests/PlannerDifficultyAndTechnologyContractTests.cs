@@ -34,21 +34,32 @@ public sealed class PlannerDifficultyAndTechnologyContractTests
 
     [Theory]
     [MemberData(nameof(PlannerFiles))]
-    public void EveryPlannerGivesOneLineOfGuidanceForEachDifficulty(string relativePath)
+    public void EveryPlannerCarriesTheSharedDifficultyRubric(string relativePath)
     {
-        string text = Corpus.ReadText(relativePath);
+        // The architect body sits near the Copilot agent-file cap, so it points at the rubric in its plan-authoring
+        // reference instead of carrying a second copy.
+        if (relativePath == "products/kyber-squad/agents/architect.md")
+        {
+            string architect = Corpus.ReadText(relativePath);
+            Assert.Contains("**Difficulty** rubric in the [plan authoring](architect/references/plan-authoring.md)", architect, StringComparison.Ordinal);
+            Assert.DoesNotContain("pick the higher", architect, StringComparison.OrdinalIgnoreCase);
+            return;
+        }
 
-        Assert.Contains("an existing pattern covers it", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("the plan leaves open", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("no pattern to copy", text, StringComparison.OrdinalIgnoreCase);
-        // Size is not difficulty: a rating that rose with the file count sent routine work to the dearest tier.
+        // One rubric, products/kyber-squad/shared/difficulty-rubric.md, rates every task: the planners carry it word for
+        // word and the decision model's agreement check reads the same file, so the two judge by the same text.
+        string rubric = Collapse(Corpus.ReadText("products/kyber-squad/shared/difficulty-rubric.md").Split("-->", 2)[1]);
+        string text = Collapse(Corpus.ReadText(relativePath));
+
+        Assert.Contains(rubric, text, StringComparison.Ordinal);
         Assert.Contains("does not by itself raise the rating", text, StringComparison.OrdinalIgnoreCase);
-        // The tie-break and its exception: guess low in general, and high for plausibly hard security, concurrency,
-        // migration or caller-breaking work, without predicting gate coverage.
         Assert.Contains("pick the lower", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("moves the task one tier up", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("may plausibly be `hard` for security, concurrency, a data migration or a choice that can break other callers: pick the higher, without predicting", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("pick the higher", text, StringComparison.OrdinalIgnoreCase);
     }
+
+    private static string Collapse(string text) =>
+        string.Join(' ', text.Split((char[])[' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries));
 
     [Theory]
     [MemberData(nameof(PlannerFiles))]

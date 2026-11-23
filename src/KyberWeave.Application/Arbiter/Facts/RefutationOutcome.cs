@@ -2,12 +2,14 @@ namespace KyberWeave.Core.Arbiter.Facts;
 
 /// <summary>Reads the verdict a refuter returns, as the review-lens agent states it.</summary>
 /// <remarks>
-/// A refuter returns one outcome line: <c>REFUTED: &lt;evidence&gt;</c> or <c>SUPPORTED: &lt;evidence&gt;</c>.
-/// Anything else is <see cref="RefutationVerdict.Unknown"/>, so an unexpected return never removes a finding.
+/// A refuter returns one outcome line: <c>REFUTED: &lt;evidence&gt;</c>, <c>UNVERIFIED: &lt;what the code could not
+/// establish&gt;</c> or <c>SUPPORTED: &lt;evidence&gt;</c>. Anything else is <see cref="RefutationVerdict.Unknown"/>,
+/// so an unexpected return never removes a finding.
 /// </remarks>
 public static class RefutationOutcome
 {
     private const string RefutedPrefix = "REFUTED:";
+    private const string UnverifiedPrefix = "UNVERIFIED:";
     private const string SupportedPrefix = "SUPPORTED:";
 
     /// <summary>Reads the verdict from the first non-blank line of a refuter's return.</summary>
@@ -26,6 +28,8 @@ public static class RefutationOutcome
 
         if (firstLine.StartsWith(RefutedPrefix, StringComparison.Ordinal))
             return RefutationVerdict.Refuted;
+        if (firstLine.StartsWith(UnverifiedPrefix, StringComparison.Ordinal))
+            return RefutationVerdict.Unverified;
         if (firstLine.StartsWith(SupportedPrefix, StringComparison.Ordinal))
             return RefutationVerdict.Confirmed;
         return RefutationVerdict.Unknown;
@@ -37,6 +41,7 @@ public static class RefutationOutcome
     {
         RefutationVerdict.Confirmed => "confirmed",
         RefutationVerdict.Refuted => "refuted",
+        RefutationVerdict.Unverified => "unverified",
         _ => "unknown",
     };
 }

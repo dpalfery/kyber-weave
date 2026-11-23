@@ -1,3 +1,4 @@
+using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
 
 namespace KyberWeave.Cli.Commands.Review;
@@ -18,10 +19,14 @@ public static class TaskGateNextStep
     public const string NextPrefix = "next: ";
 
     /// <summary>The scratch path a task's passing report is written to.</summary>
-    public static string PassingReportPath(string task) => $".agent_scratchpad/{task}/task-gate.json";
+    /// <param name="task">The task id, normalised so a path-like or multi-line value cannot name another folder.</param>
+    /// <exception cref="ArgumentException">The task id leaves nothing a folder can be named with.</exception>
+    public static string PassingReportPath(string task) => $".agent_scratchpad/{Slug(task)}/task-gate.json";
 
     /// <summary>The scratch path a task's failing-run (<c>--red</c>) report is written to.</summary>
-    public static string FailingReportPath(string task) => $".agent_scratchpad/{task}/task-gate-red.json";
+    /// <param name="task">The task id, normalised so a path-like or multi-line value cannot name another folder.</param>
+    /// <exception cref="ArgumentException">The task id leaves nothing a folder can be named with.</exception>
+    public static string FailingReportPath(string task) => $".agent_scratchpad/{Slug(task)}/task-gate-red.json";
 
     /// <summary>The lines after a <c>--red</c> run.</summary>
     /// <param name="accepted">Whether the run was accepted as the failing run.</param>
@@ -35,7 +40,7 @@ public static class TaskGateNextStep
                 NextPrefix + "the failing run is recorded; do not paste its lines into the digest. Implement the task, " +
                 "then run the passing run:",
                 "  " + (fromPlan && task is not null
-                    ? $"kyber-weave review gates . --agent {agent} --task {task}"
+                    ? $"kyber-weave review gates . --agent {Quoted(agent)} --task {Slug(task)}"
                     : Command(agent, paths, task, PassingReportPath(task ?? "<task-id>"))),
             ]
             : [
@@ -46,7 +51,7 @@ public static class TaskGateNextStep
     /// <summary>The lines after a run without <c>--red</c>.</summary>
     /// <param name="report">The gate report the run wrote.</param>
     /// <param name="declared">The agent's declared gates, to tell a whole-project gate from a scoped one.</param>
-    /// <param name="fixRun">Whether the run applied fixes, which never counts as the verification run.</param>
+    /// <param name="fixRun">Whether the run's fix commands changed a task file, which then does not count as the verification run.</param>
     /// <param name="agent">The agent the gates belong to.</param>
     /// <param name="paths">The files the task changed, as given with <c>--paths</c>.</param>
     /// <param name="reportPath">Where the report was written, or null.</param>
@@ -66,7 +71,8 @@ public static class TaskGateNextStep
         {
             List<string> lines =
             [
-                NextPrefix + "fix what the failing gate names, then run this command with --fix and again without it. " +
+                NextPrefix + "fix what the failing gate names, then run this command with --fix; run it once more " +
+                "without --fix only when that run says its fixes changed a task file. " +
                 "Stop after 2 such cycles; if a gate still fails, return STATUS: ESCALATION, " +
                 "CIRCUIT_BREAKER_TRIGGER: ITERATION_CAP_EXCEEDED and FAILURE_CLUSTER: task-gate/" + failed[0].Id +
                 " (the task-gate skill's Escalation section).",
@@ -111,9 +117,28 @@ public static class TaskGateNextStep
 
     private static string Command(string agent, IReadOnlyList<string> paths, string? task, string outPath)
     {
-        string files = paths.Count > 0 ? string.Join(' ', paths.Select(path => "--paths " + path)) : "--paths <file>";
-        return $"kyber-weave review gates . --agent {agent} {files} --task {task ?? "<task-id>"} --out {outPath}";
+        string files = paths.Count > 0 ? string.Join(' ', paths.Select(path => "--paths " + Quoted(path))) : "--paths <file>";
+        string taskWord = task is null ? "<task-id>" : Slug(task);
+        return $"kyber-weave review gates . --agent {Quoted(agent)} {files} --task {taskWord} --out {outPath}";
     }
+
+    /// <summary>The task's slug, which names its scratch folder. A value that leaves none is refused, never written to a guessed folder.</summary>
+    private static string Slug(string task)
+    {
+        string slug = TaskSlug.Normalise(task);
+        return slug.Length > 0
+            ? slug
+            : throw new ArgumentException("A task id made only of punctuation cannot name a task folder.", nameof(task));
+    }
+
+    /// <summary>
+    /// The path as a shell word: left bare when every character is plain, quoted otherwise, so a path carrying a
+    /// separator or a space stays one argument when the line is pasted.
+    /// </summary>
+    private static string Quoted(string path) =>
+        path.All(character => char.IsAsciiLetterOrDigit(character) || character is '/' or '.' or '-' or '_')
+            ? path
+            : ShellQuote.Quote(path);
 }
 
 /// <summary>What the next step needs to know about one declared task gate.</summary>

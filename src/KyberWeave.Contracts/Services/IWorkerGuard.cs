@@ -4,12 +4,13 @@ namespace KyberWeave.Contracts.Services;
 
 /// <summary>
 /// The guard on a Squad subagent's own tool calls, from machine facts only: it refuses a write into the repository's
-/// canonical checkout while a live run works in a worktree of its own, and ends a dispatch that has run past its budget.
+/// canonical checkout while a live run works in a worktree of its own, refuses a call that would carry a secret into
+/// the transcript, and ends a dispatch that has run past its budget.
 /// </summary>
 public interface IWorkerGuard
 {
     /// <summary>Answers one tool-call event. Always returns 0: a deny rides stdout.</summary>
-    /// <param name="harness">The harness token: <c>copilot-cli</c> or <c>claude</c>.</param>
+    /// <param name="harness">The harness token: <c>copilot-cli</c>, <c>claude</c> or <c>factory</c>.</param>
     /// <param name="stdin">The hook event as JSON.</param>
     /// <param name="stdout">Receives the deny document, and nothing for an allow.</param>
     /// <param name="log">Receives diagnostics.</param>

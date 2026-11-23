@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Domain/Squad
 owner: dpalfery
-last-reviewed: 2026-11-18
+last-reviewed: 2026-11-22
 status: current
 decided-by:
   - adr/0076-test-first-is-one-worker-per-task
@@ -110,7 +110,7 @@ implemented and registered renderers today.
 ```mermaid
 flowchart TD
     subgraph Canonical["Canonical Product Source (products/kyber-squad/)"]
-        Agents["agents/*.md (15 Agents)"]
+        Agents["agents/*.md"]
         Skills["skills/*/SKILL.md (Squad canonical skills)"]
         Profiles["profiles/*.yml (Lattice & Models)"]
         Catalog["squad.yml / toolchain.yml"]
@@ -260,7 +260,8 @@ accepted widening where it is made, not folded into the taxonomy.
 The shared `architect` capability profile holds `process.execute: allow` on every target
 (changed 2026-11-09; it was `deny`). The shell exists because the MCP servers stay bound to the
 canonical checkout and cannot see a plan written into a run's worktree. In the worktree the
-architect runs `kyber-weave docs validate . --merge-ready`, `kyber-weave docs drift .` and
+architect runs `kyber-weave docs validate .` (without `--merge-ready`, which is the
+pull-request gate and fails while the plan is an open Draft), `kyber-weave docs drift .` and
 `codegraph explore "…"` itself, and reads `git` state. It is not permission to implement:
 `filesystem.write` stays instruction-scoped to the plan, spec and todo directories, the agent
 body enumerates the only commands it may run and forbids edits to code, tests, configuration and
@@ -554,10 +555,10 @@ document, and an existing user file at a block path is not an unmanaged collisio
 
 | Target | File | Owned containers | An entry is Squad's when | Written fields |
 |---|---|---|---|---|
-| `claude` | `~/.claude/settings.json` (global scope only; at project scope Claude's hooks sit in agent and skill frontmatter) | `/hooks/PreToolUse`, `/hooks/PostToolUse` (always PascalCase; a legacy `preToolUse` or `postToolUse` Squad entry is removed when the block is next rendered, and a lower-case container left empty by that removal is deleted) | its `command` starts with `kyber-weave-arbiter hook --harness claude` | `command`, `matcher`, `timeout`; drift is re-anchored across both spellings of each container, so a receipt recorded before the migration reads as moved, not missing |
+| `claude` | `~/.claude/settings.json` (global scope only; at project scope Claude's hooks sit in agent and skill frontmatter) | `/hooks/PreToolUse`, `/hooks/PostToolUse`, and `/hooks/SubagentStop` (matcher-less; the stop hook closes a dispatch whose return hook timed out) — always PascalCase, and a legacy `preToolUse` or `postToolUse` Squad entry is removed when the block is next rendered, and a lower-case container left empty by that removal is deleted | its `command` starts with `kyber-weave-arbiter hook --harness claude` | `command`, `matcher`, `timeout`; drift is re-anchored across both spellings of each container, so a receipt recorded before the migration reads as moved, not missing |
 | `cursor` | `.cursor/hooks.json` | `/hooks/preToolUse`, `/hooks/postToolUse` (a new file starts `{"version":1,"hooks":{}}`) | its `command` starts with `kyber-weave-arbiter hook --harness cursor` | `command`, `matcher`, `timeout`, `failClosed` |
 | `codex` | `.codex/hooks.json` | `/hooks/PreToolUse`, `/hooks/PostToolUse` | every `hooks[].command` in the matcher group starts with `kyber-weave-arbiter hook --harness codex` — a group mixing Squad and user hooks stays user content | `matcher`, `hooks:[{type, command, timeout}]` |
-| `factory` | `.factory/hooks.json` | `/PreToolUse`, `/PostToolUse`, and `/SubagentStop` (matcher-less group, Factory only) — the groups sit at the top level of the file, with no `hooks` wrapper | every `hooks[].command` in the matcher group starts with `kyber-weave-arbiter hook --harness factory` | `matcher`, `hooks:[{type, command, timeout}]` |
+| `factory` | `.factory/hooks.json` | `/PreToolUse`, `/PostToolUse`, and `/SubagentStop` (matcher-less group) — the groups sit at the top level of the file, with no `hooks` wrapper | every `hooks[].command` in the matcher group starts with `kyber-weave-arbiter hook --harness factory` | `matcher`, `hooks:[{type, command, timeout}]` |
 | `devin` | `.devin/hooks.v1.json` | `/PreToolUse`, `/PostToolUse` — the whole file is the hooks object in the Claude Code format | every `hooks[].command` in the matcher group starts with `kyber-weave-arbiter hook --harness devin` | `matcher`, `hooks:[{type, command, timeout}]` |
 | `antigravity` | `.agents/hooks.json` | the top-level `kyber-arbiter` group, owned by key — top-level keys there are group names, so any unknown key would be read as another group | the whole group: ownership is by key, not by signature | matcher groups matching `^invoke_subagent$`, each holding `{type, command, timeout}` hooks |
 
@@ -979,8 +980,10 @@ and validates.
 - **Copilot tool order ([ADR 0017](../adr/0017-copilot-deterministic-tool-order.md))**:
   `CopilotRenderer` emits `CopilotToolCatalog.Normalize(agent.CopilotTools)` — membership from
   the agent, order from one global catalog sequence (`vscode`, `tool_search`, `read`, `todo`, MCP wildcards,
-  then search/execute/web/edit/agent and the granular edit tools). Normalization never adds a
-  tool the agent omitted and never reorders per agent. Capability bindings are an upper bound
+  then search/execute/web/edit/agent, the granular edit tools, and last `skill`). Normalization never adds a
+  tool the agent omitted and never reorders per agent. `skill` is the Copilot CLI's only way for a subagent
+  to load a skill deployed beside it — a subagent receives no tool it does not list, so every agent lists it —
+  and it reads an already-deployed skill, so it binds to no capability. Capability bindings are an upper bound
   at load/validation time, not a second membership source. Wildcards remain single-quoted in
   the YAML flow sequence.
 - **Resource projection**: after each principal file, the renderer appends the owner's validated
@@ -1077,17 +1080,25 @@ and validates.
   claim. Copilot takes the grant from canonical source rather than from a renderer: each agent's
   own `copilot-tools` frontmatter carries `kw-docs/*`, and `conductor` gains that one entry
   there.
-  `FactoryRenderer` has no tool allow-list to extend, because a Factory droid's MCP reach is a
-  **server** list: its `mcpServers` key. Factory reads an omitted key as "inherit the parent
+  `FactoryRenderer` extends its tool allow-list with the MCP grant, because a Factory droid's
+  MCP reach is the `tools` entries, not the `mcpServers` key: the harness honours
+  only the registered `{server}___{tool}` ids listed there, so a droid that names servers
+  and no tool ids reaches no MCP tool. Factory reads an omitted `mcpServers` key as "inherit the parent
   session's servers" and an explicit `[]` as "exclude every server", so the renderer derives a
-  per-droid whitelist from the names the squad itself declares in its `mcp.json` — today exactly
-  `kw-docs`, launched `kyber-weave-mcp --repo-root .` — and emits it for any agent whose
+  per-droid whitelist from the names the squad itself declares in its `mcp.json` — today
+  `kw-docs` (universal) and `codegraph` (orchestrator-excluded; the hook server `kw-arbiter` is
+  always excluded) — still emits the granted names under `mcpServers` as the
+  declared intent, and additionally appends one `{server}___{tool}` entry per roster tool of each
+  granted server to `tools`, after the semantic tool IDs. It does so for any agent whose
   capability profile allows `filesystem.read`, under the shared entitlement predicate that
   `ClaudeRenderer`, `ZCodeRenderer`, and `DevinRenderer` apply to their own grants, so
-  `conductor` carries `mcpServers: [kw-docs]` like every other droid. `[]` remains the
-  fail-closed value for a profile that grants no read entitlement and for a squad that declares no
-  servers, and no droid ever omits the key, because omission is the inherited-and-therefore-widened
-  case. A non-empty whitelist is a distinguished, non-degraded outcome: the
+  read-entitled specialists carry `mcpServers: [codegraph, kw-docs]` plus both tool-id
+  families, while `conductor` carries `mcpServers: [kw-docs]` plus only the `kw-docs___`
+  entries — the carve-out, not the template.
+  `[]` remains the fail-closed value for a profile that grants no read entitlement and for a squad
+  that declares no servers, and no droid ever omits either key, because omitting `mcpServers`
+  inherits the session's servers and omitting `tools` allows every Factory tool — both omissions
+  are the widened case. A non-empty whitelist is a distinguished, non-degraded outcome: the
   `permission-not-expressible` detail that parent MCP was excluded is recorded only for the empty
   list, so the frontmatter value and the receipt agree.
   Widening that whitelist is a declared edit rather than a renderer change: naming a server in
@@ -1338,7 +1349,7 @@ The grant spelling is the harness's, not ours:
 | `copilot` | `kw-docs/*` in the agent's own `copilot-tools` |
 | `opencode`, `kilo` | `kw-docs_*` |
 | `pi` | `ext:pi-mcp-adapter/mcp__kw_docs__<tool>` |
-| `factory` | `mcpServers: [kw-docs]`, launched `kyber-weave-mcp --repo-root .` |
+| `factory` | enumerated `{server}___{tool}` names in `tools` — one per roster tool of `kw-docs` for every entitled droid (e.g. `kw-docs___docs_get_source_repository_and_revision`), plus `codegraph___codegraph_explore` for read-entitled specialists (`conductor` keeps the `kw-docs` family alone); `mcpServers` retains the granted names as declared intent |
 | `antigravity` | `mcpServers: [{name: kw-docs, command: kyber-weave-mcp, args: [--repo-root, .]}]` |
 | `cursor`, `codex`, `warp` | no per-agent key; the session's server is the grant |
 
@@ -1522,8 +1533,8 @@ receipt architecture. It adds no boundary, schema, or dependency.
 
 ### The shared worker baseline, injected once per dispatched worker
 
-Four rules apply to every worker on every task, whatever its role: discover before you read, do not
-open a plan or specification, never run the full test suite, and batch independent reads into one round
+A set of rules applies to every worker on every task, whatever its role: among them discover before you read, do not
+open a plan or specification, never run the full test suite, keep secrets out of the transcript, and batch independent reads into one round
 trip. They used to be paraphrased in every agent body and in several skills, so each worker paid for
 them again on every round trip and two copies could drift. They now live in one file,
 `products/kyber-squad/shared/worker-baseline.md`, and `SquadWorkerBaselineInjector` appends that block
@@ -1534,7 +1545,7 @@ a direct read only for what an index does not cover, with that file and the reas
 report; tools are called directly, tool search only when the harness lists them as deferred, a failed
 call falls back to the shell form and then direct reads, and a tool is called unavailable only with
 the quoted error text of a call that was made); the plan-read ban (`<plan-index>` and `<specification-index>` are the conductor's, and an
-insufficient packet returns a blocker); the scope rule (the task's named files are the scope in any layer, a worker never returns BLOCKED or asks for a handoff over one, and unnamed work or any issue outside its task is reported as an `Open item:` line, never fixed, ADR 0080 and ADR 0082); the documented-rule line (a documented rule wins over nearby code that contradicts it, and the conflict is an open item); the full-suite ban (run the classes the task names, because the
+insufficient packet returns a blocker); the scope rule (the task's named files are the scope in any layer, a worker never returns BLOCKED or asks for a handoff over one, and unnamed work or any issue outside its task is reported as an `Open item:` line, never fixed, ADR 0080 and ADR 0082); the documented-rule line (a documented rule wins over nearby code that contradicts it, and the conflict is an open item); the secrets line (no password, key or token is read, printed or typed, no administrator login and no secret store is used, results are proved through the application's own tests, API or gate, a plan step that breaks it is a `security` finding, and the Arbiter's `KW-ARB-SECRET-001` refuses such calls); the full-suite ban (run the classes the task names, because the
 review council and CI run the full suite on the integrated head); the batched-reads line; and the
 skills-location line, which names the directory this render's skills were installed to
 (`{{skills-root}}` in the source, answered per harness and scope in the render pipeline: repository-relative
@@ -1854,12 +1865,17 @@ New data files use the `.yml` extension, as every YAML file in the repository do
   Rust also receives the parent's rules and skills. A change that spans two unrelated technologies —
   an endpoint and its database migration — is written as two tasks with a dependency between them,
   so plans carry more, smaller tasks than they did before. The task file entry records `difficulty`,
-  `difficulty-source` (`architect`, `default` or `decision-model`) and `technology`. When the task
-  file is written with a decision model configured, the same request that picks the agent asks
-  `KW-ARB-DIFFICULTY-001`; an answer at 0.8 or more replaces the architect's rating, and its
-  `standard` answer becomes `medium`
+  `difficulty-source` (`architect` or `default`) and `technology`. When the task file is written with
+  a decision model configured, the same request that picks the agent asks whether the architect's
+  rating fits the task by the rubric in `products/kyber-squad/shared/difficulty-rubric.md`; the model
+  never changes the rating. An `agreed` answer at 0.8 or more, a lower answer, a provider fault or no
+  model leaves it exactly as the architect wrote it. A `not-agreed` answer at 0.8 or more is
+  `KW-DOC-TASKS-020`, which sends the plan back to the architect to re-rate the task or to keep the
+  rating and add a Decisions row `<task id> difficulty` that says why; that row stops the finding
+  being raised again
   ([ADR 0085](../adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md)).
-  No gate judges whether the rating is right.
+  The dispatch-time rule `KW-ARB-DIFFICULTY-001` is unchanged: it still reads the rating in use and
+  never rates the task.
 - **The conductor chooses the agent.** A plan task names the capabilities its work needs in plain
   words, never an agent or a skill, so a new agent needs no change to the architect. The finalize
   tool's ready queue shows each task's capabilities and its `agent=` pick, and the conductor
@@ -2582,14 +2598,14 @@ flowchart TD
     D --> Done
 ```
 
-A wrong rating therefore costs one attempt and corrects itself; nothing validates whether a rating is
-right.
+A wrong rating costs one attempt and corrects itself; the one check on it is the decision model's
+answer when the task file is written (`KW-DOC-TASKS-020`), and that check never changes the rating.
 
 The conductor does not choose the tier itself. It calls
 `docs_build_task_prompt_for_agent_dispatch` with the task id and the failed-attempt count, and
 dispatches the agent the reply names. The tool and the dispatch hook build the prompt through the
 same service, so the agent, the tier and the prompt cannot disagree. Its reply gives the agent, the
-difficulty in use and its source (`architect`, `default` or `decision-model`), the technology,
+difficulty in use and its source (`architect` or `default`), the technology,
 anything the prompt budget left out, and the prompt file's path on a harness whose hook cannot
 rewrite the dispatch; it never returns the prompt text.
 

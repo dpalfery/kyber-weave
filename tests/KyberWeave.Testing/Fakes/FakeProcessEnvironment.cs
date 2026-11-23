@@ -33,7 +33,8 @@ public sealed class FakeProcessEnvironment : IProcessEnvironment
         bool isFileSystemCaseInsensitive = false,
         bool isInputRedirected = true,
         Func<string, string?>? readVariable = null,
-        string applicationBaseDirectory = "/kw/app")
+        string applicationBaseDirectory = "/kw/app",
+        int processId = 4242)
     {
         ArgumentNullException.ThrowIfNull(currentDirectory);
         ArgumentNullException.ThrowIfNull(homeDirectory);
@@ -51,6 +52,7 @@ public sealed class FakeProcessEnvironment : IProcessEnvironment
         IsFileSystemCaseInsensitive = isFileSystemCaseInsensitive;
         IsInputRedirected = isInputRedirected;
         _readVariable = readVariable;
+        ProcessId = processId;
     }
 
     /// <summary>Creates a fake whose home is supplied as a delegate, read on each access.</summary>
@@ -69,6 +71,7 @@ public sealed class FakeProcessEnvironment : IProcessEnvironment
         IsFileSystemCaseInsensitive = false;
         IsInputRedirected = true;
         _readVariable = variables;
+        ProcessId = 4242;
     }
 
     /// <inheritdoc />
@@ -91,6 +94,9 @@ public sealed class FakeProcessEnvironment : IProcessEnvironment
 
     /// <inheritdoc />
     public string MachineName { get; }
+
+    /// <inheritdoc />
+    public int ProcessId { get; }
 
     /// <inheritdoc />
     public bool IsFileSystemCaseInsensitive { get; }

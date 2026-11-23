@@ -9,11 +9,25 @@ public static class ArbiterHookTimeout
     /// <summary>Seconds of headroom the rendered hook timeout keeps beyond the provider budget.</summary>
     public const int HeadroomSeconds = 2;
 
-    /// <summary>The rendered hook timeout in whole seconds: ceil(timeout-ms / 1000) + 2.</summary>
+    /// <summary>
+    /// The shortest timeout any rendered Arbiter hook carries.
+    /// </summary>
+    /// <remarks>
+    /// A provider budget alone is not enough. A hook also starts a process, reads the plan and the git facts, and
+    /// appends to the per-project ledger, and under a fan-out twelve to twenty of them run at once on a machine that
+    /// is already building. A live Copilot CLI run rendered five seconds from the shipped three-second budget and
+    /// logged 55 hook timeouts, almost all in same-second bursts; two of them cost a dispatch its return row and
+    /// blocked the run. The floor gives that burst the room the work actually needs, and a provider budget that is
+    /// itself longer still keeps its own headroom above this floor.
+    /// </remarks>
+    public const int MinimumRenderedSeconds = 30;
+
+    /// <summary>The rendered hook timeout in whole seconds: <c>ceil(timeout-ms / 1000) + 2</c>, never below the floor.</summary>
     public static int SecondsFor(int providerTimeoutMs)
     {
         long timeoutMs = Math.Max(1, providerTimeoutMs);
-        return (int)Math.Min(int.MaxValue, (timeoutMs + 999) / 1000 + HeadroomSeconds);
+        long seconds = (timeoutMs + 999) / 1000 + HeadroomSeconds;
+        return (int)Math.Min(int.MaxValue, Math.Max(MinimumRenderedSeconds, seconds));
     }
 
     /// <summary>

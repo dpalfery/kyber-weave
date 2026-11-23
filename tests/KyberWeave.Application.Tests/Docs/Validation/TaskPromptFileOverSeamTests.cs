@@ -65,6 +65,8 @@ public sealed class TaskPromptFileOverSeamTests
     {
         public IReadOnlyList<string> ActivePlans(string repoRoot, KyberWeaveConfig config) => throw new NotSupportedException();
 
+        public IReadOnlyList<string> ReviewPlans(string repoRoot, KyberWeaveConfig config) => throw new NotSupportedException();
+
         public PlanTaskFileOutcome Run(
             string repoRoot,
             KyberWeaveConfig config,

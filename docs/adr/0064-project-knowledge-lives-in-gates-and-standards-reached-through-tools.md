@@ -15,7 +15,7 @@ Accepted, 2026-11-08.
 
 ## Context
 
-Kyber-Weave ships 24 canonical agents and 28 skills to 13 harness targets and into two package
+Kyber-Weave ships its canonical agents and skills to 13 harness targets and into two package
 formats. Every one of those files is re-sent on every round trip of every run, in every repository
 that deploys it. A fact about one repository written into that tree is therefore paid for by all of
 them, and it is wrong in all of them but one.
@@ -74,8 +74,8 @@ That is the project's own answer, written in its configuration.
   silent, because nothing compares a host's copy against the repository it describes. A stale
   command is found by a worker at the moment it cannot finish, which is the worst time to discover
   it and the moment at which a fallback (the full suite) looks reasonable.
-- **Each agent carries its own copy of the repository's commands.** Rejected. 24 agents times 13
-  targets is one fact replicated per agent inside a single repository; a change to the test command
+- **Each agent carries its own copy of the repository's commands.** Rejected. Every agent times every
+  target is one fact replicated per agent inside a single repository; a change to the test command
   becomes a many-file edit that no gate covers, and the copies diverge the first time one is
   missed. It re-creates the duplication the task file's paste contract removed for prompts.
 - **A technology reference file inside each portable skill.** Rejected. It is the same problem one

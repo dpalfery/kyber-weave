@@ -58,6 +58,43 @@ internal static class FactoryTranscript
         ArgumentNullException.ThrowIfNull(transcriptPath);
         ArgumentNullException.ThrowIfNull(description);
 
+        return Read(source, transcriptPath, description) is { } read
+            && read.Launches.Select(TaskOf).Distinct().Count() == 1
+                ? read.Launches[^1]
+                : null;
+    }
+
+    /// <summary>
+    /// The target agents of the <c>Task</c> dispatches carrying this description, whether or not their launch
+    /// result was found. A stop event's <c>task_name</c> is a description rather than an agent, so the target the
+    /// dispatch named is the only identity the transcript can supply for it.
+    /// </summary>
+    /// <param name="source">Reads the transcript.</param>
+    /// <param name="transcriptPath">The parent session's transcript.</param>
+    /// <param name="description">The description the stop event names.</param>
+    /// <returns>The distinct targets, or none when the transcript cannot supply them.</returns>
+    public static IReadOnlyList<string> DispatchTargets(
+        IFactoryTranscriptSource source,
+        string transcriptPath,
+        string description)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(transcriptPath);
+        ArgumentNullException.ThrowIfNull(description);
+
+        return Read(source, transcriptPath, description) is { } read
+            ? [.. read.Dispatches.Values
+                .Select(dispatch => dispatch.Target)
+                .Where(target => !string.IsNullOrWhiteSpace(target))
+                .Distinct(StringComparer.OrdinalIgnoreCase)]
+            : [];
+    }
+
+    private static (Dictionary<string, FactoryBackgroundDispatch> Dispatches, List<FactoryBackgroundDispatch> Launches)? Read(
+        IFactoryTranscriptSource source,
+        string transcriptPath,
+        string description)
+    {
         try
         {
             IEnumerable<string>? lines = IsTranscriptPath(transcriptPath)
@@ -91,7 +128,7 @@ internal static class FactoryTranscript
                 }
             }
 
-            return launches.Select(TaskOf).Distinct().Count() == 1 ? launches[^1] : null;
+            return (dispatches, launches);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {

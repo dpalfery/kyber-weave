@@ -1158,6 +1158,18 @@
       "text": "ProcessResult made = ProcessRunner.Run(tar, string.Empty, TimeSpan.FromSeconds(30));",
       "count": 1,
       "bound": "ProcessRunner.Run with a 30 s timeout; the tree is killed on expiry. tar packs one small file and exits."
+    },
+    {
+      "file": "tests/KyberWeave.Integration.Tests/RunIntegrateGitTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Started only through ProcessRunner.Run with a 60 s timeout that kills the child tree on expiry; git argv only, in a temp repository, GIT_TERMINAL_PROMPT=0."
+    },
+    {
+      "file": "tests/KyberWeave.Integration.Tests/RunIntegrateGitTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp repository."
     }
   ]
 }

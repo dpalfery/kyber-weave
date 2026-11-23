@@ -290,10 +290,61 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
         Assert.Empty(Guard("codex-cli", mutating));
     }
 
+    [Fact]
+    public void AFactoryChildResolvedToAReadOnlyTypeIsRefusedByTheTechnologyList()
+    {
+        TechnologyRepository(Repository, "azure");
+        WriteDispatchTechnology("azure");
+        FeedFactoryChild("platform-researcher");
+
+        string answer = Guard("factory", FactoryCommand("az group delete --name db --resource-group rg"));
+
+        Assert.StartsWith("AZURE-READONLY-001", Reason("factory", answer), StringComparison.Ordinal);
+        Assert.Contains("az group delete", Reason("factory", answer), StringComparison.Ordinal);
+    }
+
     /// <summary>
-    /// A repository that turns the Arbiter on, declares <paramref name="technology"/> and holds its shipped
-    /// standards folder, so the folder's rules file is the one the worker guard reads.
+    /// The Factory events the live probe recorded, with the ids replaced: the root session starts, its Task dispatch
+    /// names the child's type, and the child session starts and names the parent it was called from.
     /// </summary>
+    private void FeedFactoryChild(string type)
+    {
+        _ = Guard("factory", JsonSerializer.Serialize(new
+        {
+            session_id = DispatchSession,
+            hook_event_name = "SessionStart",
+            source = "startup",
+            cwd = Repository,
+        }));
+        _ = Guard("factory", JsonSerializer.Serialize(new
+        {
+            session_id = DispatchSession,
+            hook_event_name = "PreToolUse",
+            tool_name = "Task",
+            tool_input = new { subagent_type = type, description = "work", prompt = "do it" },
+            cwd = Repository,
+        }));
+        _ = Guard("factory", JsonSerializer.Serialize(new
+        {
+            session_id = "child-1",
+            hook_event_name = "SessionStart",
+            source = "startup",
+            calling_session_id = DispatchSession,
+            cwd = Repository,
+        }));
+    }
+
+    private string FactoryCommand(string command) => JsonSerializer.Serialize(new
+    {
+        session_id = "child-1",
+        hook_event_name = "PreToolUse",
+        tool_name = "Execute",
+        tool_input = new { command, summary = "run", riskLevel = "low" },
+        cwd = Repository,
+    });
+
+    /// <summary>A repository that turns the Arbiter on, declares <paramref name="technology"/> and holds its shipped
+    /// standards folder, so the folder's rules file is the one the worker guard reads.</summary>
     private void TechnologyRepository(string root, string? technology, bool arbiterOff = false)
     {
         string technologies = technology is null ? string.Empty : $"\n  technologies: [{technology}]";
@@ -507,7 +558,7 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
     {
         using JsonDocument document = JsonDocument.Parse(answer);
         JsonElement root = document.RootElement;
-        return string.Equals(harness, "claude", StringComparison.Ordinal)
+        return harness is "claude" or "factory"
             ? root.GetProperty("hookSpecificOutput").GetProperty("permissionDecisionReason").GetString()!
             : root.GetProperty("permissionDecisionReason").GetString()!;
     }

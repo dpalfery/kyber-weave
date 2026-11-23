@@ -82,6 +82,21 @@ public sealed class RunCheckoutGuard(
     }
 
     /// <summary>
+    /// The repository's canonical checkout that holds <paramref name="path" />, or null when none does.
+    /// </summary>
+    /// <param name="path">The path to place, absolute or relative to the current directory.</param>
+    public string? CanonicalCheckoutContaining(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        string full = paths.GetFullPath(path, environment.CurrentDirectory);
+        return Path.IsPathRooted(full) ? EnclosingMainCheckout(RealPath(full)) : null;
+    }
+
+    /// <summary>
     /// The refusal for a write to <paramref name="path" />, or null to allow. A write is refused only when it
     /// lands inside a repository's canonical checkout while a live run of that repository works in a worktree
     /// of its own. A path in a linked worktree, outside every repository, or inside the git directory is allowed.

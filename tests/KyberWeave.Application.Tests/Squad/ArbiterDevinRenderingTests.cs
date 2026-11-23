@@ -23,7 +23,7 @@ public sealed class ArbiterDevinRenderingTests : IDisposable
     private const string BlockPath = ".devin/hooks.v1.json";
     private const string Matcher = "^run_subagent$";
     private const string Command = "kyber-weave-arbiter hook --harness devin";
-    private const int HookTimeoutSeconds = 5;
+    private const int HookTimeoutSeconds = 30;
 
     private readonly InMemoryFileSystem _files = new();
     private readonly ArbiterSquadFixture _fixture;

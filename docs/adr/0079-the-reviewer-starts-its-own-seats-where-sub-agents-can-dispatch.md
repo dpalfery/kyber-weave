@@ -181,7 +181,7 @@ apply, which the changed-file list already showed.
 12. **The verdict names the fix round; the loop runs until the review is clean.** `review verdict`
     prints `fix:` lines (failed blocking gates, and every critical, major and minor finding),
     `follow-up:` lines (findings the policy leaves out, and findings the reviewer dropped as
-    `pre-existing debt`) and a closing `fix round:` line (`KW-REVIEW-056`), and the conductor
+    `pre-existing debt` or `pr note`) and a closing `fix round:` line (`KW-REVIEW-056`), and the conductor
     dispatches from them, one dispatch per owning worker carrying all of its lines. APPROVE means not
     blocked, not nothing to do: any `fix:` line gets a fix round and then a narrow verifier cycle, and
     this repeats until a cycle prints none (`review clean: proceed to archive`) or a cap stops it,
@@ -193,7 +193,7 @@ apply, which the changed-file list already showed.
     `critical` (failed blocking gates and critical findings), `major` (also majors), `minor` (also
     minors; the default) and `nitpick` (also nitpicks, for a team that wants everything fixed). It
     decides what is fixed, never what blocks: strictness, `major-count-blocks` and `min-confidence`
-    decide that. Findings below the level are listed in the pull request and filed as todos; a nitpick
+    decide that. Findings below the level are listed in the pull request notes; a nitpick
     below it appears only in the review report. The key it replaced, `minor-findings`, never shipped;
     a config that still carries it reads `follow-up` as `major` and `fix` as `minor`. Before this
     amendment an approval got exactly one fix round and the owner had not yet chosen.
@@ -247,8 +247,8 @@ header infers `code-reviewer`.
   rather than everything it would have found. The line makes the gap visible; it does not close it.
 - **The file patterns can be wrong in one direction.** They are wide so that a lens is seated when in
   doubt; an infrastructure change in a folder no pattern names would leave `infra-workflow` unseated.
-- **The budget is enforced only where the worker guard runs** (Copilot CLI and Claude Code with the
-  Arbiter on). Elsewhere it is the seat's own instruction.
+- **The budget is enforced only where the worker guard runs** (Copilot CLI, Claude Code and Factory with
+  the Arbiter on). Elsewhere it is the seat's own instruction.
 - **The decision model judges text, not code paths.** A confident "supports" spares a refuter on the
   cited lines and the lines the evidence cites; a claim about something no line shows (a folder that
   holds no file) stays with the refuter only because the model is then unsure. The nitpick and

@@ -74,6 +74,39 @@ public sealed class StandardsFolderMigrationTests
         Run `dotnet build`.
         """;
 
+    /// <summary>A rules file that exists but whose frontmatter carries no <c>technology</c> line.</summary>
+    private const string RulesWithoutTechnology = """
+        ---
+        id: standards/csharp/rules
+        title: C# rules
+        doc-type: rule
+        status: current
+        owner: dpalfery
+        last-reviewed: 2026-11-16
+        ---
+
+        # C# rules
+
+        CSHARP-RULES-BODY: keep this line byte for byte.
+        """;
+
+    /// <summary>A skills file that says it is a reference rather than a skill.</summary>
+    private const string SkillsTypedReference = """
+        ---
+        id: standards/csharp/skills
+        title: C# skills
+        doc-type: reference
+        status: current
+        technology: csharp
+        owner: dpalfery
+        last-reviewed: 2026-11-16
+        ---
+
+        # C# skills
+
+        CSHARP-SKILLS-BODY: keep this line byte for byte.
+        """;
+
     private static readonly KyberWeaveConfig Declared = KyberWeaveConfigDefaults.Product.WithOntology(new()
     {
         Technologies = ["csharp"],
@@ -212,5 +245,62 @@ public sealed class StandardsFolderMigrationTests
         StandardsFolderMigrationResult second = Migration().Run();
 
         Assert.Empty(second.Changes);
+    }
+
+    /// <summary>
+    /// A rules or skills file the folder already holds is not skipped when its frontmatter does
+    /// not declare the folder's doc-type and scope: the migration sets those two lines and leaves
+    /// every other frontmatter line and the whole body exactly as it was.
+    /// </summary>
+    [Fact]
+    public void ItRepairsAnExistingRulesAndSkillsFilesFrontmatterAndKeepsTheirText()
+    {
+        _disk.CreateDirectory(Folder);
+        _disk.WriteAllText($"{Folder}/csharp.standards.md", LegacyStandard);
+        _disk.WriteAllText($"{Folder}/csharp.rules.md", RulesWithoutTechnology);
+        _disk.WriteAllText($"{Folder}/csharp.skills.md", SkillsTypedReference);
+        _disk.WriteAllText($"{Folder}/csharp.arbiter-rules.yml", "rules: []\n");
+
+        StandardsFolderMigrationResult result = Migration().Run();
+
+        Assert.Contains(
+            result.Changes,
+            change => change.Kind == StandardsFolderChangeKind.Frontmatter
+                      && change.To == "6-Docs/standards/csharp/csharp.rules.md");
+        Assert.Contains(
+            result.Changes,
+            change => change.Kind == StandardsFolderChangeKind.Frontmatter
+                      && change.To == "6-Docs/standards/csharp/csharp.skills.md");
+
+        string expectedRules = RulesWithoutTechnology.Replace(
+            "last-reviewed: 2026-11-16\n---",
+            "last-reviewed: 2026-11-16\ntechnology: csharp\n---",
+            StringComparison.Ordinal);
+        Assert.Equal(expectedRules, _disk.ReadAllText($"{Folder}/csharp.rules.md"));
+
+        string expectedSkills = SkillsTypedReference.Replace(
+            "doc-type: reference", "doc-type: skill", StringComparison.Ordinal);
+        Assert.Equal(expectedSkills, _disk.ReadAllText($"{Folder}/csharp.skills.md"));
+
+        Assert.Empty(Migration().Run().Changes);
+    }
+
+    [Fact]
+    public void ADryRunPlansTheFrontmatterRepairAndWritesNothing()
+    {
+        _disk.CreateDirectory(Folder);
+        _disk.WriteAllText($"{Folder}/csharp.standards.md", LegacyStandard);
+        _disk.WriteAllText($"{Folder}/csharp.rules.md", RulesWithoutTechnology);
+        _disk.WriteAllText($"{Folder}/csharp.skills.md", SkillsTypedReference);
+        _disk.WriteAllText($"{Folder}/csharp.arbiter-rules.yml", "rules: []\n");
+
+        StandardsFolderMigrationResult result = Migration().Run(dryRun: true);
+
+        Assert.Contains(
+            result.Changes,
+            change => change.Kind == StandardsFolderChangeKind.Frontmatter
+                      && change.To.EndsWith("csharp.rules.md", StringComparison.Ordinal));
+        Assert.Equal(RulesWithoutTechnology, _disk.ReadAllText($"{Folder}/csharp.rules.md"));
+        Assert.Equal(SkillsTypedReference, _disk.ReadAllText($"{Folder}/csharp.skills.md"));
     }
 }

@@ -58,8 +58,9 @@ public sealed class ArchitectShellGuardTests
     }
 
     [Theory]
-    [InlineData("cd /w && kyber-weave docs validate . --merge-ready")]
-    [InlineData("kyber-weave docs validate /w --merge-ready")]
+    [InlineData("cd /w && kyber-weave docs validate .")]
+    [InlineData("kyber-weave docs validate /w")]
+    [InlineData("kyber-weave docs validate docs")]
     [InlineData("kyber-weave docs drift .")]
     [InlineData("codegraph explore \"ArbiterHookWiring BuildHooks\"")]
     [InlineData("codegraph explore 'a && b'")]
@@ -213,6 +214,9 @@ public sealed class ArchitectShellGuardTests
     [InlineData("codegraph explore \"\"", "codegraph explore \"\"")]
     [InlineData("codegraph explore -x", "codegraph explore -x")]
     [InlineData("kyber-weave docs validate -x --merge-ready", "kyber-weave docs validate -x --merge-ready")]
+    [InlineData("kyber-weave docs validate . --merge-ready", "kyber-weave docs validate . --merge-ready")]
+    [InlineData("kyber-weave docs validate /w --merge-ready", "kyber-weave docs validate /w --merge-ready")]
+    [InlineData("kyber-weave docs validate --merge-ready", "kyber-weave docs validate --merge-ready")]
     [InlineData("cd /w", "cd /w")]
     [InlineData("cd", "cd")]
     [InlineData("cd /tmp && touch docs/plans/x.md", "cd /tmp")]
@@ -251,6 +255,24 @@ public sealed class ArchitectShellGuardTests
         string reason = result.Reason ?? string.Empty;
         Assert.Contains(RuleId, reason, StringComparison.Ordinal);
         Assert.Contains(offendingSegment, reason, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <c>--merge-ready</c> is the pull-request gate and fails while the plan is an open Draft, so the architect is
+    /// refused it and told to drop the flag rather than to stop running the docs check.
+    /// </summary>
+    [Theory]
+    [InlineData("kyber-weave docs validate . --merge-ready")]
+    [InlineData("kyber-weave docs validate /w --merge-ready")]
+    [InlineData("kyber-weave docs validate docs --merge-ready")]
+    public void Bash_DocsValidateWithMergeReady_IsDeniedAndToldToDropTheFlag(string command)
+    {
+        ShellGuardResult result = CheckBash(command);
+
+        Assert.False(result.Allowed, $"'{command}' passes --merge-ready and must be denied.");
+        string reason = result.Reason ?? string.Empty;
+        Assert.Contains(RuleId, reason, StringComparison.Ordinal);
+        Assert.Contains("Drop --merge-ready", reason, StringComparison.Ordinal);
     }
 
     /// <summary>

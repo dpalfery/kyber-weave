@@ -168,17 +168,25 @@ public sealed class FactoryRendererContractTests : IDisposable
 
             SquadCapabilityProfile capProfile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
             IReadOnlyList<string> tools = RequireSequence(frontmatter, "tools", agent.Name);
-            Assert.Equal(ExpectedFactoryTools(capProfile), tools);
-            Assert.All(tools, tool =>
-                Assert.Contains(tool, DocumentedFactoryTools, StringComparer.Ordinal));
-            foreach (string forbidden in ForbiddenFactoryTools)
-                Assert.DoesNotContain(forbidden, tools, StringComparer.Ordinal);
 
             // The whitelist is computed from the loaded source — the servers the squad's own
             // mcp.json declares plus the entitlement rule — never from the renderer. A blanket
             // mcpServers: [] satisfies an Assert.Empty here but not this.
             IReadOnlyList<string> expectedMcpServers =
                 ExpectedFactoryMcpServers(source, agent, declaredMcpServers);
+            IReadOnlyList<string> expectedMcpToolIds =
+                ExpectedFactoryMcpToolIds(source, expectedMcpServers);
+            Assert.Equal([.. ExpectedFactoryTools(capProfile), .. expectedMcpToolIds], tools);
+            Assert.All(
+                ExpectedFactoryTools(capProfile),
+                tool => Assert.Contains(tool, DocumentedFactoryTools, StringComparer.Ordinal));
+            // Pin the rendered ids independently of the helper that builds the expectation:
+            // every rendered ___ entry is exactly {server}___{tool} over portable names.
+            foreach (string renderedId in tools.Where(tool => tool.Contains("___", StringComparison.Ordinal)))
+                Assert.Matches(@"^[A-Za-z0-9_-]+___[A-Za-z0-9_-]+$", renderedId);
+            foreach (string forbidden in ForbiddenFactoryTools)
+                Assert.DoesNotContain(forbidden, tools, StringComparer.Ordinal);
+
             IReadOnlyList<string> mcpServers = RequireSequence(frontmatter, "mcpServers", agent.Name);
             Assert.True(
                 expectedMcpServers.SequenceEqual(mcpServers, StringComparer.Ordinal),
@@ -392,6 +400,127 @@ public sealed class FactoryRendererContractTests : IDisposable
     }
 
     /// <summary>
+    ///     A read-entitled specialist droid carries a <c>{server}___{tool}</c> entry under
+    ///     <c>tools</c> for every roster tool of each granted server, after the semantic tool
+    ///     IDs — the runtime grant the <c>mcpServers</c> whitelist cannot express on its own —
+    ///     while the orchestrator carries the <c>kw-docs</c> entries and no <c>codegraph</c> one.
+    /// </summary>
+    /// <remarks>
+    ///     The expectation is derived from the loaded toolchain roster, never from the renderer,
+    ///     so a renamed roster tool or a re-added orchestrator carve-out fails the build.
+    /// </remarks>
+    [Fact]
+    public async Task RenderAsync_Factory_ToolsNameGrantedMcpToolIdsAfterSemanticTools()
+    {
+        SquadSource source = CanonicalSquadTree.Shared.Load();
+        IReadOnlyList<string> declaredMcpServers = DeclaredFactoryMcpServers(source);
+
+        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+            ProductRoot,
+            [SquadTarget.Factory],
+            SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // A read-entitled specialist: every roster tool of every granted server.
+        SquadAgent specialist = Assert.Single(source.Agents, agent => agent.Name == "architect");
+        IReadOnlyList<string> specialistServers =
+            ExpectedFactoryMcpServers(source, specialist, declaredMcpServers);
+        Assert.Equal(["codegraph", "kw-docs"], specialistServers);
+        IReadOnlyList<string> expectedSpecialistIds =
+            ExpectedFactoryMcpToolIds(source, specialistServers);
+        Assert.True(
+            expectedSpecialistIds.Count > 1,
+            "The roster names no kw-docs tool, so nothing about the multi-server grant is exercised.");
+        IReadOnlyList<string> specialistTools =
+            RequireSequence(RenderedAgentFrontmatter(result, specialist.Name), "tools", specialist.Name);
+        Assert.Equal(
+            [.. ExpectedFactoryTools(source.CapabilityProfiles.Profiles[specialist.CapabilityProfile]), .. expectedSpecialistIds],
+            specialistTools);
+        // Golden pins on the rendered output, independent of the helper above: the
+        // single-tool server and one multi-tool roster entry, spelled exactly.
+        Assert.Contains("codegraph___codegraph_explore", specialistTools, StringComparer.Ordinal);
+        Assert.Contains("kw-docs___docs_get_source_repository_and_revision", specialistTools, StringComparer.Ordinal);
+
+        // The orchestrator: the kw-docs entries, and no codegraph entry.
+        SquadAgent orchestrator = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        IReadOnlyList<string> orchestratorServers =
+            ExpectedFactoryMcpServers(source, orchestrator, declaredMcpServers);
+        Assert.Equal(["kw-docs"], orchestratorServers);
+        IReadOnlyList<string> orchestratorTools =
+            RequireSequence(RenderedAgentFrontmatter(result, orchestrator.Name), "tools", orchestrator.Name);
+        IReadOnlyList<string> expectedOrchestratorIds =
+            ExpectedFactoryMcpToolIds(source, orchestratorServers);
+        Assert.NotEmpty(expectedOrchestratorIds);
+        Assert.Equal(
+            [.. ExpectedFactoryTools(source.CapabilityProfiles.Profiles[orchestrator.CapabilityProfile]), .. expectedOrchestratorIds],
+            orchestratorTools);
+    }
+
+    /// <summary>
+    ///     A profile that denies <c>filesystem.read</c> carries no MCP tool id under
+    ///     <c>tools</c> — no <c>___</c> entry at all — while its <c>mcpServers</c> stays
+    ///     <c>[]</c>, so the denial withholds the grant on both keys.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Factory_DeniedProfileToolsCarryNoMcpToolIds()
+    {
+        McpDeclarationSquadTree fixture =
+            McpDeclarationSquadTree.WithFileReadDeniedAgent("review-lens");
+        SquadSource source = fixture.Tree.Load();
+        IReadOnlyList<string> declared = DeclaredFactoryMcpServers(source);
+        Assert.NotEmpty(declared);
+
+        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+            fixture.ProductRoot,
+            [SquadTarget.Factory],
+            SquadDeploymentScope.Project).Prepared(fixture.Tree));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
+        Assert.Empty(ExpectedFactoryMcpServers(source, denied, declared));
+        YamlMappingNode frontmatter = RenderedAgentFrontmatter(result, denied.Name);
+        Assert.Empty(RequireSequence(frontmatter, "mcpServers", denied.Name));
+        Assert.DoesNotContain(
+            RequireSequence(frontmatter, "tools", denied.Name),
+            tool => tool.Contains("___", StringComparison.Ordinal));
+        Assert.Equal(
+            ExpectedFactoryTools(source.CapabilityProfiles.Profiles[denied.CapabilityProfile]),
+            RequireSequence(frontmatter, "tools", denied.Name));
+    }
+
+    /// <summary>
+    ///     A squad that declares no MCP server at all grants no MCP tool id: no droid's
+    ///     <c>tools</c> carries a <c>___</c> entry, so an empty declaration cannot turn into a
+    ///     grant through the roster alone.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Factory_EmptyMcpDeclarationGrantsNoMcpToolIds()
+    {
+        McpDeclarationSquadTree fixture = McpDeclarationSquadTree.WithServers();
+        SquadSource source = fixture.Tree.Load();
+        Assert.Empty(DeclaredFactoryMcpServers(source));
+        Assert.NotEmpty(source.Agents);
+
+        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+            fixture.ProductRoot,
+            [SquadTarget.Factory],
+            SquadDeploymentScope.Project).Prepared(fixture.Tree));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            YamlMappingNode frontmatter = RenderedAgentFrontmatter(result, agent.Name);
+            Assert.Empty(RequireSequence(frontmatter, "mcpServers", agent.Name));
+            Assert.DoesNotContain(
+                RequireSequence(frontmatter, "tools", agent.Name),
+                tool => tool.Contains("___", StringComparison.Ordinal));
+            Assert.Equal(
+                ExpectedFactoryTools(source.CapabilityProfiles.Profiles[agent.CapabilityProfile]),
+                RequireSequence(frontmatter, "tools", agent.Name));
+        }
+    }
+
+    /// <summary>
     ///     The <c>permission-not-expressible</c> record reports MCP withholding exactly when the
     ///     rendered whitelist is empty, and exists exactly when it has something to express.
     /// </summary>
@@ -485,6 +614,40 @@ public sealed class FactoryRendererContractTests : IDisposable
     }
 
     /// <summary>
+    ///     A whitelisted server the toolchain roster drops is named in a
+    ///     <c>permission-not-expressible</c> record: the whitelist would otherwise claim a grant
+    ///     that reaches no <c>{server}___</c> tool.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Factory_GrantedButUnrosteredServerIsNamedInDegradation()
+    {
+        McpDeclarationSquadTree fixture = McpDeclarationSquadTree.WithServers("kw-docs", "ghost");
+        SquadSource source = fixture.Tree.Load();
+
+        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+            fixture.ProductRoot,
+            [SquadTarget.Factory],
+            SquadDeploymentScope.Project).Prepared(fixture.Tree));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadAgent specialist = Assert.Single(source.Agents, agent => agent.Name == "architect");
+        YamlMappingNode frontmatter = RenderedAgentFrontmatter(result, specialist.Name);
+        Assert.Contains("ghost", RequireSequence(frontmatter, "mcpServers", specialist.Name), StringComparer.Ordinal);
+        Assert.DoesNotContain(
+            RequireSequence(frontmatter, "tools", specialist.Name),
+            tool => tool.StartsWith("ghost___", StringComparison.Ordinal));
+
+        SquadDegradationRecord dropped = Assert.Single(
+            result.Degradations,
+            record =>
+                string.Equals(record.CanonicalIdentity, specialist.Name, StringComparison.Ordinal) &&
+                string.Equals(record.Code, "permission-not-expressible", StringComparison.Ordinal) &&
+                record.Details is not null &&
+                record.Details.Contains("ghost", StringComparison.Ordinal));
+        Assert.Contains("no ghost___ entries", dropped.Details, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     A primary agent's entry-point caveat names the droid's actual <c>mcpServers</c> value.
     ///     The entry-point skill runs in the main session under the session's permissions, so the
     ///     caveat has to describe what the droid beside it really withholds — a caveat that names an
@@ -537,46 +700,22 @@ public sealed class FactoryRendererContractTests : IDisposable
     }
 
     /// <summary>
-    ///     The entry-point caveat's <c>mcpServers</c> fragment parses back to the droid's
-    ///     whitelist, so the receipt cannot spell one server name as two.
+    ///     A non-portable MCP server name fails the render instead of emitting a whitelist
+    ///     that plain-style YAML parses as two servers: the failure names the bad name.
     /// </summary>
     [Fact]
-    public async Task RenderAsync_Factory_EntryPointCaveatMcpServersFragmentParsesAsTheWhitelist()
+    public async Task RenderAsync_Factory_NonPortableMcpServerNameFailsTheRender()
     {
         McpDeclarationSquadTree fixture =
             McpDeclarationSquadTree.WithServers("a, b");
         SquadSource source = fixture.Tree.Load();
-        IReadOnlyList<string> declared = DeclaredFactoryMcpServers(source);
-        Assert.Equal(["a, b"], declared);
 
-        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
-            fixture.ProductRoot,
-            [SquadTarget.Factory],
-            SquadDeploymentScope.Project).Prepared(fixture.Tree));
-        Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        SquadAgent[] whitelistedPrimaries =
-        [
-            .. source.Agents.Where(agent => agent.Invocation == SquadInvocation.Primary &&
-                                            ExpectedFactoryMcpServers(source, agent, declared).Count > 0)
-        ];
-        Assert.NotEmpty(whitelistedPrimaries);
-        SquadAgent primary = whitelistedPrimaries[0];
-        SquadDegradationRecord record = Assert.Single(
-            result.Degradations,
-            d => string.Equals(d.CanonicalIdentity, primary.Name, StringComparison.Ordinal) &&
-                 string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
-        Assert.NotNull(record.Details);
-
-        Match fragment = Regex.Match(record.Details, @"mcpServers: (\[[^\]]*\])");
-        Assert.True(
-            fragment.Success,
-            $"Agent '{primary.Name}' caveat does not name its mcpServers value: {record.Details}");
-
-        YamlStream caveat = new();
-        caveat.Load(new StringReader($"mcpServers: {fragment.Groups[1].Value}"));
-        YamlMappingNode caveatFrontmatter = Assert.IsType<YamlMappingNode>(caveat.Documents[0].RootNode);
-        Assert.Equal(declared, RequireSequence(caveatFrontmatter, "mcpServers", primary.Name));
+        SquadRenderValidationException thrown = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
+            new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+                fixture.ProductRoot,
+                [SquadTarget.Factory],
+                SquadDeploymentScope.Project).Prepared(fixture.Tree)));
+        Assert.Contains("a, b", thrown.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -655,32 +794,22 @@ public sealed class FactoryRendererContractTests : IDisposable
     }
 
     /// <summary>
-    ///     A declared server name that contains YAML flow indicators still renders as exactly one
-    ///     entry, so the frontmatter cannot invent names the squad never declared.
+    ///     A declared server name that contains YAML flow indicators fails the render instead of
+    ///     emitting an entry plain-style YAML would split in two: the failure names the bad name.
     /// </summary>
-    /// <remarks>
-    ///     The value is YAML the Factory parser reads, not a display string. A plain scalar spelled
-    ///     inside a flow sequence treats <c>,</c>, <c>[</c>, and <c>]</c> as structure, so a name
-    ///     such as <c>a,b</c> would silently become two servers unless the emitter is allowed to
-    ///     quote it.
-    /// </remarks>
     [Fact]
-    public async Task RenderAsync_Factory_McpServerNamesWithFlowIndicatorsStayOneEntry()
+    public async Task RenderAsync_Factory_McpServerNamesWithFlowIndicatorsFailTheRender()
     {
         McpDeclarationSquadTree fixture =
-            McpDeclarationSquadTree.WithServers("a,b", "bracket[server]", "plain");
+            McpDeclarationSquadTree.WithServers("plain", "bracket[server]");
         SquadSource source = fixture.Tree.Load();
-        IReadOnlyList<string> declared = DeclaredFactoryMcpServers(source);
-        Assert.Equal(["a,b", "bracket[server]", "plain"], declared);
 
-        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
-            fixture.ProductRoot,
-            [SquadTarget.Factory],
-            SquadDeploymentScope.Project).Prepared(fixture.Tree));
-        Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        SquadAgent entitled = Assert.Single(source.Agents, agent => agent.Name == "architect");
-        Assert.Equal(declared, RenderedMcpServers(result, entitled.Name));
+        SquadRenderValidationException thrown = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
+            new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+                fixture.ProductRoot,
+                [SquadTarget.Factory],
+                SquadDeploymentScope.Project).Prepared(fixture.Tree)));
+        Assert.Contains("bracket[server]", thrown.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1163,6 +1292,29 @@ public sealed class FactoryRendererContractTests : IDisposable
             }
 
         return granted;
+    }
+
+    /// <summary>
+    ///     The <c>{server}___{tool}</c> entries a droid's <c>tools</c> list must carry for its
+    ///     granted servers: one per roster tool of each granted server, in granted-server then
+    ///     ordinal-tool order with duplicates removed, matching the renderer's discipline.
+    /// </summary>
+    /// <remarks>
+    ///     The expectation is derived from the loaded toolchain roster rather than from the
+    ///     renderer, so a renamed roster tool fails here instead of silently dropping the grant.
+    ///     The rendered shape itself is pinned independently, by regex and golden entries.
+    /// </remarks>
+    private static IReadOnlyList<string> ExpectedFactoryMcpToolIds(
+        SquadSource source,
+        IReadOnlyList<string> grantedServers)
+    {
+        List<string> toolIds = [];
+        foreach (string server in grantedServers)
+            if (source.Toolchain.RequiredMcpTools.TryGetValue(server, out IReadOnlyList<string>? tools))
+                foreach (string tool in tools.OrderBy(t => t, StringComparer.Ordinal))
+                    toolIds.Add($"{server}___{tool}");
+
+        return [.. toolIds.Distinct(StringComparer.Ordinal)];
     }
 
     /// <summary>The rendered droid's frontmatter, located by the identity the agent names.</summary>

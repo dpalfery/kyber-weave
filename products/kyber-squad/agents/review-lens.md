@@ -5,7 +5,7 @@ description: "Applies one named review lens to a diff and returns structured fin
 invocation: subagent
 model-profile: reviewer
 capability-profile: review-seat
-copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, web]
+copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, web, skill]
 delegates-to: []
 fallback: role-skill
 aliases: []
@@ -64,6 +64,8 @@ Every finding is one block in this exact shape:
 - id: <lens-name>/<short-slug>
   lens: <lens-name>
   severity: critical | major | minor | nitpick (nitpick only at fix level nitpick)
+  kind: defect | hardening | plan-objection
+  basis: <what it breaks, quoted: the acceptance criterion, the plan line, or the base behaviour (path:line at the base)>
   confidence: <1-10>
   file: <repository-relative path>
   line: <line number in the file>
@@ -77,7 +79,7 @@ Every finding is one block in this exact shape:
   suggestion: <the specific change that fixes it>
 ```
 
-**`excerpt`, `evidence`, and `failure_scenario` are mandatory.** They are what separates a finding from an opinion, and the reviewer drops any finding missing one of them without reading the rest of it. `guidance` is optional and does not affect whether a finding is kept; it tells the adjudicator which host rule the finding rests on. If you cannot quote the code, name how you know, and describe a concrete way it fails, you do not have a finding yet — you have a suspicion, and the correct action is to not report it.
+**`excerpt`, `evidence`, `failure_scenario`, `kind` and `basis` are mandatory.** They are what separates a finding from an opinion, and the reviewer drops any finding missing one of them without reading the rest of it. `guidance` is optional and does not affect whether a finding is kept; it tells the adjudicator which host rule the finding rests on. If you cannot quote the code, name how you know, and describe a concrete way it fails, you do not have a finding yet — you have a suspicion, and the correct action is to not report it.
 
 `failure_scenario` must be concrete. "Could cause problems under load" is not a scenario. "Two requests for the same tenant id arriving within the cache TTL both see the first tenant's rows" is.
 
@@ -85,11 +87,21 @@ Every finding is one block in this exact shape:
 
 - **critical** — data loss, a security hole, corruption, or a break in behaviour that ships silently.
 - **major** — the change is wrong or will fail under conditions a reasonable user reaches.
-- **minor** — real but bounded: a narrow edge case, a misleading comment or document statement, a missing test for a stated behaviour, a maintainability problem. A purely stylistic point (formatting, wording preference, naming style) is a nitpick, not a minor finding: raise it, as `severity: nitpick`, only when the packet says the fix level is `nitpick`; otherwise do not report it. A file or type placed against the repository's documented structure (wrong project, layer or folder) is `major`.
+- **minor** — real but bounded: a narrow edge case, a misleading comment or document statement, a missing test for a stated behaviour, a maintainability problem. A purely stylistic point (formatting, wording preference, naming style) is a nitpick, not a minor finding: raise it, as `severity: nitpick`, only when the packet says the fix level is `nitpick`; otherwise do not report it. A file or type placed against the repository's documented structure (wrong project, layer or folder) is `major`. Duplicated code (a block repeated instead of reused or extracted) and a document that no longer matches the code are `major`, never a nitpick, whatever their origin: no pull request ships with either.
 
 **Host severity overrides come first.** Your packet may list severity override rows from the host's review guidance. Check each finding against them: when a finding belongs to a row's class, grade it at the row's severity, up or down (to `critical` or to `nitpick` too), and write `override: <id>` on it. Precedence: a host override, then your lens file's severity guidance, then the definitions above.
 
 Severity describes **impact if it ships**, never how confident you are or how much effort the fix takes. Confidence is a separate field; use it. A finding you are 5/10 sure of but which would be critical is `severity: critical, confidence: 5` — say both, and let the reviewer decide.
+
+## Kind
+
+Judge `kind` against your packet's `Request and plan` line: the request's acceptance criteria, the plan's contracts and Decisions, and how the base branch behaves today.
+
+- **defect**: the change breaks a stated acceptance criterion, a contract the plan states, or behaviour that works on the base branch (a regression), including one a plan instruction caused. A security hole, data loss or corruption is always a defect, whatever the request says. A missing test for a behaviour the request or plan states is a defect.
+- **hardening**: the request, the plan and base behaviour are all met, and the finding would make the code sturdier beyond them: heavier load or bursts, extra failure modes (slow or dropped networks, retries), more diagnostics, defensive checks on trusted data, rollout safety. Grade its severity as usual; the verdict decides by review cycle whether a fix round takes it.
+- **plan-objection**: the code does what an approved plan decision says, and you think the decision is wrong. Quote the decision in `basis`. It goes to the pull request notes, never to a fix round.
+
+`basis` quotes what the finding rests on: the acceptance criterion or plan line for a defect or plan-objection, the base `path:line` for a regression. For hardening, name the condition beyond the request (`basis: bursts of status events; no acceptance criterion covers load`). A finding whose `basis` you cannot quote is hardening at most.
 
 ## Confidence
 
@@ -105,7 +117,8 @@ Report a finding only at or above the effective min-confidence your invocation n
 # 4. Boundaries
 
 - **Report only what your lens owns.** Another seat holds the concern you are tempted to stray into, and duplicate findings across lenses cost the reviewer real work to reconcile. If something outside your lens looks genuinely serious, leave it for the lens that owns it. When you must report it yourself — it would otherwise vanish — add it once under `id: <lens>/out-of-scope`, name the owning lens, and keep the severity the rules above require. Do not force `minor` because the concern is out of scope; a security hole remains `critical`.
-- **Only what this change introduces, makes worse or relies on.** Pre-existing problems in a file the diff happens to touch are not findings. The one exception: existing code that contradicts a documented rule or standard, with no comment marking it as a deliberate exception, is a finding when the change touches or extends that area, because the change builds on it; grade it as the rule's breach deserves (`major` for structural placement). If the offending code's file is not in the change, start the `claim` with `Pre-existing debt:`, even where the guidance excludes pre-existing issues; the reviewer routes it to a todo instead of blocking this change. A commented exception is respected.
+- **If the change touches it, the change owns it.** A real defect or a breach of a documented rule or standard in code the change edits or extends is this change's finding, even when it predates the change; grade it as it deserves (`major` for structural placement). Do not call such a problem out of scope to keep the change small. A stale document is always a finding, whatever made it stale. If the offending code's file is not in the change, or the base branch already behaves the same way in the code the change copies or sits beside (cite that base `path:line` in `basis`) and the change neither introduced nor worsened it, start the `claim` with `Pre-existing debt:`, even where the guidance excludes pre-existing issues. A gap that blocks a stated acceptance criterion is never pre-existing debt: it is a defect; the reviewer routes it to the pull request notes instead of blocking this change. A commented exception is respected.
+- **Build what was asked.** Judge scope by the `change-scope` skill. An operation or feature the request did not ask for, which it sends to the pull request notes, is reported in a finding whose `claim` starts `PR note:`, graded as it deserves; the reviewer routes it to the notes instead of a fix round. Robustness beyond what was asked is `kind: hardening`, never a `PR note:`: the verdict's cycle schedule routes it.
 - **Never fix anything.** You have no write capability and would not use it if you did. Your output is findings.
 - **Never run commands.** Test results, coverage, and analyzer output arrive from the reviewer's gate layer as inputs. Do not execute git commands; read the diff `evidence.md` names. If your lens needs gate results and they are absent, say so in the skip or in a finding — do not attempt to produce them.
 - **Do not issue a verdict.** Approve and request-changes are decided downstream by a deterministic engine from all lenses' findings together. Nothing you write should read as a merge recommendation.
@@ -124,7 +137,7 @@ The findings form closes the same way, after the YAML list. Each closing line st
 
 The correctness seat carries one more required output. For every changed code file, write "no input site" or one row per site where a value from outside the process is parsed, converted, or passed to a file or collection API. The table's columns and cell values are in the correctness lens file. Close a correctness seat with Input sites: N traced, M files with none, directly above the Discovery line. Write it even when nothing was traced (`Input sites: 0 traced, M files with none`); a correctness seat that reported findings or `NO FINDINGS` and wrote no readable `Input sites:` line draws `KW-REVIEW-047`; a `SKIPPED` correctness seat is exempt. The example above is the shape every other lens returns; a correctness seat adds its `Input sites:` line between the `NO FINDINGS:` line and `Discovery:`.
 
-**A declared outcome holds no finding key.** A seat file that declares `NO FINDINGS:` or `SKIPPED:` is refused (`KW-REVIEW-040`) if any seat-schema key followed by a colon — `id`, `lens`, `severity`, `confidence`, `file`, `line`, `claim`, `evidence`, `excerpt`, `failure_scenario` (or `failureScenario`), `suggestion`, `guidance` or `override` — appears anywhere else in the file, in any letter case: in a list, a flow mapping, a fence, after prose, or after a table's `|`. The reviewer cannot tell which of the two you meant, so the check fails closed. Prose, a table your lens file requires (such as the correctness seat's input-site table, before the outcome line), the closing lines and plain Markdown bullets with no such key are allowed. In practice: after declaring an outcome, do not write `severity:`, `file:` or any other finding key, even in an explanation. If you found something, return the findings form instead.
+**A declared outcome holds no finding key.** A seat file that declares `NO FINDINGS:` or `SKIPPED:` is refused (`KW-REVIEW-040`) if any seat-schema key followed by a colon — `id`, `lens`, `severity`, `confidence`, `file`, `line`, `claim`, `evidence`, `excerpt`, `failure_scenario` (or `failureScenario`), `suggestion`, `guidance`, `override`, `kind` or `basis` — appears anywhere else in the file, in any letter case: in a list, a flow mapping, a fence, after prose, or after a table's `|`. The reviewer cannot tell which of the two you meant, so the check fails closed. Prose, a table your lens file requires (such as the correctness seat's input-site table, before the outcome line), the closing lines and plain Markdown bullets with no such key are allowed. In practice: after declaring an outcome, do not write `severity:`, `file:` or any other finding key, even in an explanation. If you found something, return the findings form instead.
 
 The attestation line is the same on both forms. It shows the guidance was read and applied, not skipped, so a report with no attestation line is recorded as a coverage gap. `SKIPPED` returns no attestation line; its reason stands on its own. The `NO FINDINGS` sentence matters too: it is the difference between a lens that ran and a lens that gave up, and it is the only way the reviewer can tell them apart.
 
@@ -139,6 +152,7 @@ When the header block at the start of your invocation carries `REFUTE: <lens>/<s
 Answer once per finding id, one line each, in the order the findings arrived:
 
 - `REFUTED: <id> — <one sentence naming the evidence that defeats the finding>` — the finding is wrong, misattributed, or pre-existing (a documented-rule breach the change touches or extends, or one marked `Pre-existing debt:`, is not refuted for being pre-existing). Name the path and line, or the pattern, that shows it.
-- `SUPPORTED: <id> — <one sentence on what you verified>` — you could not defeat it. The reviewer treats that as corroboration of the finding, not as a second opinion about its severity.
+- `UNVERIFIED: <id> — <one sentence on what the code could not establish>` — you could neither confirm the failure from the code nor defeat it (for example, the scenario rests on database or runtime behaviour you cannot read). The reviewer drops it: a finding nobody could establish does not go to a fix round.
+- `SUPPORTED: <id> — <one sentence on what you verified>` — you verified the failure and could not defeat it. The reviewer treats that as corroboration of the finding, not as a second opinion about its severity.
 
 Everything else in this file still applies in this mode: you raise no new finding, you fix nothing, you run nothing, you issue no verdict, and you return only the outcome lines, one per finding id — no preamble, no restatement of the findings you were given.

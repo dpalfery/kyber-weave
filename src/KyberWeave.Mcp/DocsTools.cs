@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -287,8 +288,9 @@ public sealed partial class DocsTools
     /// task-id line with the whole prompt before the worker starts. The conductor therefore needs the
     /// agent's name, not the prompt, and this tool answers with exactly that: who to dispatch, the
     /// difficulty in use and who rated it, the technology, and anything the prompt budget left out.
-    /// On a harness whose hook cannot rewrite the dispatch it also writes the prompt file and answers with
-    /// its path, so this tool is not read-only.
+    /// The harness is the calling client's own name, so the caller never names it and cannot get it wrong.
+    /// On a harness whose hook cannot rewrite the dispatch, and on a client name no probe has verified, it
+    /// also writes the prompt file and answers with its path, so this tool is not read-only.
     /// </remarks>
     [McpServerTool(Name = "docs_build_task_prompt_for_agent_dispatch", ReadOnly = false, OpenWorld = false)]
     [Description("""
@@ -302,11 +304,13 @@ public sealed partial class DocsTools
         Name a technology instead of a task id for a dispatch that belongs to no task, such as a
         research request.
 
-        Name the harness too. Where its hook cannot rewrite the dispatch, the prompt is written to one
-        file under the run's scratch folder and this reply carries the path; name that path in the
-        dispatch and tell the worker to read it first.
+        Do not name your harness: the tool reads it from the MCP client you are running in. Where that
+        harness's hook cannot rewrite the dispatch, or the client is one this tool has not verified, the
+        prompt is written to one file under the run's scratch folder and this reply carries the path;
+        name that path in the dispatch and tell the worker to read it first.
         """)]
     public string BuildTaskPrompt(
+        McpServer server,
         [Description("""
             The task id from the plan or specification, written any natural way: T1, t1, task 1, 1.
             Omit it only when you name a technology for a dispatch that belongs to no task.
@@ -315,15 +319,36 @@ public sealed partial class DocsTools
         [Description("The plan or specification the task is in, when the checkout has more than one active plan.")] string? plan = null,
         [Description("A file holding the results earlier tasks reported, when this is a retry.")] string? priorResults = null,
         [Description("How many attempts at this task already failed; the retry's step-up reads it.")] int failedAttempts = 0,
-        [Description("""
-            The harness you dispatch from, such as 'antigravity' or 'claude'. On a harness whose hook cannot
-            rewrite the dispatch, the prompt is written to the run's scratch folder and this reply gives its path.
-            Omit it when unknown; no file is written then.
-            """)] string? harness = null,
         [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
     {
-        if (Redirect(projectPath, tools => tools.BuildTaskPrompt(taskId, technology, plan, priorResults, failedAttempts, harness)) is { } redirected)
+        ArgumentNullException.ThrowIfNull(server);
+        return BuildTaskPromptForClient(server.ClientInfo?.Name, taskId, technology, plan, priorResults, failedAttempts, projectPath);
+    }
+
+    /// <summary>
+    /// Builds the dispatch answer for the MCP client named <paramref name="clientName"/>, as its
+    /// <c>initialize</c> request named it.
+    /// </summary>
+    /// <param name="clientName">The <c>clientInfo.name</c> the calling client sent, or null when it sent none.</param>
+    /// <param name="taskId">The task to build a prompt for, or null when the dispatch names a technology.</param>
+    /// <param name="technology">The technology of a dispatch that belongs to no task.</param>
+    /// <param name="plan">The plan or specification the task is in, when more than one is active.</param>
+    /// <param name="priorResults">The file holding earlier tasks' reported results, when this is a retry.</param>
+    /// <param name="failedAttempts">How many attempts at this task already failed; the retry's step-up reads it.</param>
+    /// <param name="projectPath">Another worktree of this repository to answer for, or null for the server's root.</param>
+    internal string BuildTaskPromptForClient(
+        string? clientName,
+        string? taskId = null,
+        string? technology = null,
+        string? plan = null,
+        string? priorResults = null,
+        int failedAttempts = 0,
+        string? projectPath = null)
+    {
+        if (Redirect(projectPath, tools => tools.BuildTaskPromptForClient(clientName, taskId, technology, plan, priorResults, failedAttempts)) is { } redirected)
             return redirected;
+
+        string? harness = McpClientHarness.TokenFor(clientName);
 
         DiagnosticReport report = new();
         if (!_hostConfiguration.TryLoad(_repositoryRoot, report, out KyberWeaveConfig config))
@@ -340,13 +365,15 @@ public sealed partial class DocsTools
                 PriorResultsPath: priorResults,
                 Technology: technology,
                 FailedAttempts: failedAttempts,
-                Harness: harness),
+                // A client no probe has verified is built for no rewriting harness, so the prompt goes to the file
+                // the reply names instead of being read as a dispatch some hook already carries.
+                Harness: harness ?? McpClientHarness.UnverifiedToken),
             config);
 
-        return FormatTaskPrompt(prompt);
+        return FormatTaskPrompt(prompt, clientName, harness);
     }
 
-    private string FormatTaskPrompt(TaskPromptResult prompt)
+    private string FormatTaskPrompt(TaskPromptResult prompt, string? clientName, string? harness)
     {
         StringBuilder text = new();
         text.Append(_query.Provenance()).Append('\n');
@@ -366,6 +393,17 @@ public sealed partial class DocsTools
         text.Append('\n');
         text.Append("technology: ").Append(prompt.Technology ?? "none").Append('\n');
         text.Append("left out: ").Append(prompt.LeftOut.Count == 0 ? "none" : string.Join("; ", prompt.LeftOut)).Append('\n');
+        text.Append("harness: ");
+        if (harness is not null)
+        {
+            text.Append(harness).Append(" (from MCP client '").Append(clientName).Append("')\n");
+        }
+        else
+        {
+            text.Append("unknown MCP client '").Append(clientName ?? "(none)")
+                .Append("'; the prompt file was written\n");
+        }
+
         if (prompt.PromptFile is not null)
         {
             text.Append("prompt file: ").Append(prompt.PromptFile).Append('\n');

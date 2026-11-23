@@ -52,11 +52,45 @@ public abstract class ArbiterLogStoreContractTests : IDisposable
         try
         {
             await Store.AppendLineAsync(directory, FileName, "first", CancellationToken.None);
-            await Store.AppendLineAsync(directory, FileName, () => "second", CancellationToken.None);
+            await Store.AppendLineAsync(directory, FileName, Store.ByteLength(Path.Combine(directory, FileName)), _ => "second", CancellationToken.None);
 
             IReadOnlyList<string> read = Store.ReadCompleteLines(Path.Combine(directory, FileName));
 
             Assert.Equal(["first", "second"], read);
+        }
+        finally
+        {
+            DeleteDirectory(directory);
+        }
+    }
+
+    [Fact]
+    public async Task ADerivedAppendSeesWhatLandedAfterItsSnapshot()
+    {
+        string directory = NewDirectory();
+        try
+        {
+            string path = Path.Combine(directory, FileName);
+            await Store.AppendLineAsync(directory, FileName, "older", CancellationToken.None);
+            long snapshot = Store.ByteLength(path);
+            await Store.AppendLineAsync(directory, FileName, "landed-meanwhile", CancellationToken.None);
+
+            List<string> seen = [];
+            await Store.AppendLineAsync(
+                directory,
+                FileName,
+                snapshot,
+                landed =>
+                {
+                    seen.AddRange(landed);
+                    return "derived";
+                },
+                CancellationToken.None);
+
+            // The line that landed between the caller's read and its append is visible to the factory, so a post's
+            // pairing recomputes instead of claiming a pre another post already took.
+            Assert.Contains("landed-meanwhile", seen);
+            Assert.Equal("derived", Store.ReadCompleteLines(path)[^1]);
         }
         finally
         {
@@ -150,7 +184,7 @@ public abstract class ArbiterLogStoreContractTests : IDisposable
         try
         {
             await Task.WhenAll(Enumerable.Range(0, 25).Select(index =>
-                Task.Run(() => Store.AppendLineAsync(directory, FileName, () => $"line-{index}", CancellationToken.None))));
+                Task.Run(() => Store.AppendLineAsync(directory, FileName, snapshotLength: 0, _ => $"line-{index}", CancellationToken.None))));
 
             LogTail tail = Store.ReadComplete(Path.Combine(directory, FileName));
 

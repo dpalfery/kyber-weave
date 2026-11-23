@@ -131,6 +131,20 @@ public sealed class ReviewServiceSeamTests
     }
 
     [Fact]
+    public void ATaskIsStillFoundInThisCheckoutsPlanThatHasMovedIntoReview()
+    {
+        _files.CreateDirectory("/work/repo");
+        PlanTaskTargetService service = Targets(worktrees: [], activeIn: null, reviewPlans: ["docs/plan.md"]);
+
+        PlanTaskTargetMatch? match = service.Find("repo", Config(), "T1", out string? reason);
+
+        Assert.Null(reason);
+        Assert.NotNull(match);
+        Assert.Equal("docs/plan.md", match.Plan);
+        Assert.Equal("T1", match.Entry.Id);
+    }
+
+    [Fact]
     public void ThePlansContractRowIsReadThroughTheFileSeam()
     {
         _files.CreateDirectory("/work/repo/docs");
@@ -175,14 +189,18 @@ public sealed class ReviewServiceSeamTests
 
     /// <summary>
     /// A target service over the shared fakes. The fake worktree list answers for the checkout named
-    /// <c>repo</c>; the plan it finds is active only in <paramref name="activeIn"/>.
+    /// <c>repo</c>; the plan it finds is active only in <paramref name="activeIn"/>, and is one of the plans
+    /// still in review when <paramref name="reviewPlans"/> names them.
     /// </summary>
-    private PlanTaskTargetService Targets(string[] worktrees, string? activeIn)
+    private PlanTaskTargetService Targets(string[] worktrees, string? activeIn, string[]? reviewPlans = null)
     {
         PlanTaskFile file = new(1, Tasks: [new PlanTaskFileEntry(Id: "T1")]);
-        FakePlanTaskService plans = new()
+        FakePlanTaskService service = new()
         {
             PlansByRoot = activeIn is null ? [] : new(StringComparer.Ordinal) { [activeIn] = ["docs/plan.md"] },
+            ReviewPlansByRoot = reviewPlans is null || reviewPlans.Length == 0
+                ? []
+                : new(StringComparer.Ordinal) { ["repo"] = reviewPlans },
             Outcomes = new(StringComparer.Ordinal)
             {
                 ["docs/plan.md"] = new PlanTaskFileOutcome(new DiagnosticReport(), "docs/plan.tasks.json", null, null, 1, false, file)
@@ -193,7 +211,7 @@ public sealed class ReviewServiceSeamTests
             Worktrees = new(StringComparer.Ordinal) { ["repo"] = worktrees }
         };
 
-        return new PlanTaskTargetService(plans, null!, git, _files, Paths, _environment);
+        return new PlanTaskTargetService(service, null!, git, _files, Paths, _environment);
     }
 
     /// <summary>Records the root it was asked to load and refuses, so the command stops before any other seam is used.</summary>

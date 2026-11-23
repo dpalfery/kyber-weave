@@ -54,7 +54,7 @@ public sealed class ArbiterClaudeRenderingTests : IDisposable
     [Fact]
     public async Task RenderAsync_Dispatchers_CarryPreAndPostDispatchHooks()
     {
-        const int timeoutSeconds = 5;
+        const int timeoutSeconds = 30;
         SquadRenderResult result = await RenderClaudeAsync(
             _fixture.Path,
             SquadDeploymentScope.Project,
@@ -78,7 +78,7 @@ public sealed class ArbiterClaudeRenderingTests : IDisposable
     [Fact]
     public async Task RenderAsync_GuardedAgents_CarryTheReadGuardHook()
     {
-        const int timeoutSeconds = 5;
+        const int timeoutSeconds = 30;
         SquadRenderResult result = await RenderClaudeAsync(
             _fixture.Path,
             SquadDeploymentScope.Project,
@@ -105,7 +105,7 @@ public sealed class ArbiterClaudeRenderingTests : IDisposable
         // docs-dev and research-agent are neither dispatchers nor guarded, but both are named
         // in some agent's delegates-to roster, so under the 6.6 contract their only hook is
         // the hand-back PreToolUse entry: no dispatch, guard, or PostToolUse entry.
-        const int timeoutSeconds = 5;
+        const int timeoutSeconds = 30;
         SquadRenderResult result = await RenderClaudeAsync(
             _fixture.Path,
             SquadDeploymentScope.Project,
@@ -142,7 +142,7 @@ public sealed class ArbiterClaudeRenderingTests : IDisposable
     [Fact]
     public async Task RenderAsync_ConductorEntryPointSkill_CarriesDispatchHooks()
     {
-        const int timeoutSeconds = 5;
+        const int timeoutSeconds = 30;
         SquadRenderResult result = await RenderClaudeAsync(
             ProductRoot,
             SquadDeploymentScope.Project,

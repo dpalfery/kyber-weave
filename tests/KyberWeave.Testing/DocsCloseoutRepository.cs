@@ -22,7 +22,7 @@ internal static class DocsCloseoutRepository
     {
         DocFixture fixture = (inMemory ? DocFixture.CreateInMemory() : DocFixture.Create()).WithCatalog()
             .Write("6-Docs/reference/widget.md", CloseoutCorpus.TargetDocument())
-            .Write(Plan, planText ?? CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready"))
+            .Write(Plan, planText ?? CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", linkPrefix: ".."))
             .Write(TaskFile, "{}\n")
             .Write(PlanIndex, planIndex ?? PlanIndexWithRow)
             .Write(Inventory, InventoryWithOneRow);

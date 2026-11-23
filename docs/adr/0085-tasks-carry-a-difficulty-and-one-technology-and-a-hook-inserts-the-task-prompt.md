@@ -123,10 +123,12 @@ it. Three problems followed:
 
 8. **The conductor asks a docs tool which agent to dispatch.** The read-only
    `docs_build_task_prompt_for_agent_dispatch` tool takes a task id (or a technology for a
-   dispatch with no task), the plan when more than one is active, the prior-results file, the
-   failed-attempt count and the harness. It replies with the agent, the difficulty and its source,
-   the technology, what the budget left out and, on a file harness, the prompt file's path. It
-   never returns the prompt text.
+   dispatch with no task), the plan when more than one is active, the prior-results file and the
+   failed-attempt count. It takes no harness: it reads the name the calling MCP client sent in its
+   `initialize` request, because a name the model types is a guess. It replies with the agent, the
+   difficulty and its source, the technology, what the budget left out, the harness in use and, on
+   a file harness or an unverified client, the prompt file's path. It never returns the prompt
+   text.
 
 9. **Task gates resolve by technology.** `TaskGateResolver` reads the agent's own `review.task-gates`
    entry first, then `review.technology-gates.<technology>`, then the entry of the technology agent
@@ -174,6 +176,6 @@ it. Three problems followed:
 - [ADR 0063](0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md) — the tracked task file, its digest and the plan's authority
 - [ADR 0064](0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools.md) — project knowledge reached through tools rather than portable files
 - [Kyber-Squad architecture](../kyber-squad/architecture.md#the-tracked-task-file-and-the-inserted-task-prompt) — the task file, the prompt service and the delivery paths
-- [MCP runbook](../docgraph/mcp-runbook.md#docs_build_task_prompt_for_agent_dispatchtaskid--null-technology--null-plan--null-priorresults--null-failedattempts--0-harness--null-projectpath--null) — the dispatch tool's reply
+- [MCP runbook](../docgraph/mcp-runbook.md#docs_build_task_prompt_for_agent_dispatchtaskid--null-technology--null-plan--null-priorresults--null-failedattempts--0-projectpath--null) — the dispatch tool's reply
 - [Configuration](../configuration.md#task-prompt-budget) — the prompt budget and technology-keyed task gates
 - [The Arbiter's dispatch delivery path](../kyber-arbiter/architecture.md#dispatch-delivery-path) — which harness rewrites and which reads a file

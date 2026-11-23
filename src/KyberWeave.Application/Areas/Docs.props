@@ -117,6 +117,8 @@
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\jira\jira.skills.md" LogicalName="Standards.jira.skills.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\jira\jira.arbiter-rules.yml" LogicalName="Standards.jira.arbiter-rules.yml" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\shared-rules.md" LogicalName="Standards.shared-rules.md" />
+    <!-- The one difficulty rubric: the architect rates by it and the decision model checks the rating by it. -->
+    <EmbeddedResource Include="..\..\products\kyber-squad\shared\difficulty-rubric.md" LogicalName="Squad.difficulty-rubric.md" />
   </ItemGroup>
 
   <Target Name="VerifyPullRequestDescription" BeforeTargets="PrepareForBuild">

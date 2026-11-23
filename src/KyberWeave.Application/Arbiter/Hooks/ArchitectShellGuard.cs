@@ -153,7 +153,7 @@ public static class ArchitectShellGuard
     public static IReadOnlyDictionary<string, DocumentedForm> DocumentedForms { get; } =
         new Dictionary<string, DocumentedForm>(StringComparer.Ordinal)
         {
-            ["kyber-weave docs validate . --merge-ready"] = new("kyber-weave docs validate . --merge-ready", true),
+            ["kyber-weave docs validate ."] = new("kyber-weave docs validate .", true),
             ["kyber-weave docs drift ."] = new("kyber-weave docs drift .", true),
             ["kyber-weave docs tasks <plan file> --write"] = new("kyber-weave docs tasks docs/plans/x.md --write", true),
             ["kyber-weave arbiter plan <plan file> -f json"] = new("kyber-weave arbiter plan docs/plans/x.md -f json", true),
@@ -935,10 +935,15 @@ public static class ArchitectShellGuard
     {
         bool docs = words.Count >= 3 && string.Equals(words[1], "docs", StringComparison.Ordinal);
         bool validate = docs
-            && words.Count == 5
+            && words.Count == 4
             && string.Equals(words[2], "validate", StringComparison.Ordinal)
-            && !IsFlag(words[3])
-            && string.Equals(words[4], "--merge-ready", StringComparison.Ordinal);
+            && !IsFlag(words[3]);
+        // --merge-ready is the pull-request gate: it fails while the plan is an open Draft (KW-DOC-LIFECYCLE-003
+        // and -005), which is exactly the state the architect writes in. The refusal is specific so the architect
+        // drops the flag rather than concluding the docs command itself is off the list.
+        bool validateMergeReady = docs
+            && string.Equals(words[2], "validate", StringComparison.Ordinal)
+            && words.Contains("--merge-ready", StringComparer.Ordinal);
         bool drift = docs
             && words.Count == 4
             && string.Equals(words[2], "drift", StringComparison.Ordinal)
@@ -974,11 +979,19 @@ public static class ArchitectShellGuard
             && Enumerable.Range(0, (words.Count - 4) / 2).All(pair =>
                 BriefFlags.Contains(words[4 + (2 * pair)]) && !IsFlag(words[5 + (2 * pair)]));
 
+        if (validateMergeReady)
+        {
+            return new Refusal(
+                "passes --merge-ready, the pull-request gate, which fails while the plan is an open Draft " +
+                "(KW-DOC-LIFECYCLE-003 and KW-DOC-LIFECYCLE-005)",
+                "Drop --merge-ready: run kyber-weave docs validate <dir> while the plan is in the active plans folder");
+        }
+
         return validate || drift || docsTasks || doctor || arbiterPlan || brief
             ? null
             : new Refusal(
                 "is not a kyber-weave form on the architect's list",
-                "Use kyber-weave docs validate <dir> --merge-ready, docs drift <dir>, docs tasks <plan file> --write, doctor --ensure, arbiter plan <plan file> -f json, or squad brief architect with --path, --plan, --autonomy or --mode");
+                "Use kyber-weave docs validate <dir>, docs drift <dir>, docs tasks <plan file> --write, doctor --ensure, arbiter plan <plan file> -f json, or squad brief architect with --path, --plan, --autonomy or --mode");
     }
 
     private static Refusal? CheckGit(List<string> words)
