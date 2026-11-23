@@ -122,6 +122,44 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     }
 
     /// <inheritdoc />
+    public string? SpanPromptText(string spanId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(spanId);
+
+        // One span-scoped pass over the content-part tables in position order: the first
+        // non-empty prompt bucket wins, the same parts the timeline's captured-prompt rule
+        // chose before the stall fix moved the inspector off the session-wide read.
+        StringBuilder sql = new(TabReadScriptHeader);
+        sql.Append(
+            "SELECT hex(CAST(cp.bucket AS BLOB)), " +
+            "typeof(cpt.part_text), COALESCE(hex(CAST(cpt.part_text AS BLOB)), '') " +
+            "FROM content_part cp " +
+            "LEFT JOIN content_part_text cpt ON cpt.span_id = cp.span_id AND cpt.position = cp.position " +
+            $"WHERE cp.span_id = {TextExpr(spanId)} ORDER BY cp.position ASC;\n");
+
+        string output = ExecuteSqlite(sql.ToString());
+        foreach (string line in TabLines(output))
+        {
+            string[] cols = SplitTabLine(line, 3, "span prompt");
+            ContentBucket bucket = ParseContentBucket(ParseHexRequired(cols[0], "content_part.bucket"));
+            if (bucket is not (ContentBucket.UserPrompt or ContentBucket.UserMessage or ContentBucket.ConversationHistory))
+            {
+                continue;
+            }
+
+            string? text = ParseNullableHex(cols[1], cols[2], "content_part_text.part_text");
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            return text;
+        }
+
+        return null;
+    }
+
+    /// <inheritdoc />
     public IReadOnlyList<StoredSessionAttribution> SessionAttributions()
     {
         string sql = TabReadScriptHeader +

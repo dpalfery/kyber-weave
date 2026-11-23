@@ -497,11 +497,28 @@ public interface IRelationalStoreReader
     /// <returns>The record's content-free metadata, or <see langword="null"/> when absent.</returns>
     /// <remarks>
     /// The inspector prices attributes, tokens, cost, and signals, none of which is content. A
-    /// captured prompt the inspector shows comes from <see cref="TurnContentParts"/>, so reading
-    /// a span attribute never materializes a conversation. The read is scoped to the span: an
-    /// adapter filters the record tables by that span, not by its session's records.
+    /// captured prompt the inspector shows comes from <see cref="SpanPromptText"/>, so the
+    /// attribute read itself never materializes a conversation. The read is scoped to the span:
+    /// an adapter filters the record tables by that span, not by its session's records.
     /// </remarks>
     CollectedRecord? RecordContentFree(string spanId);
+
+    /// <summary>
+    /// Reads that span's first captured prompt part text — the consent-allowed prompt the
+    /// span inspector shows — or <see langword="null"/> when the span carries none.
+    /// </summary>
+    /// <param name="spanId">Record span identifier.</param>
+    /// <returns>
+    /// The span's first non-empty <c>user_prompt</c>, <c>user_message</c>, or
+    /// <c>conversation_history</c> part text in position order, or <see langword="null"/>
+    /// when no such part text was captured. A prompt withheld for consent never becomes a
+    /// part, so a consent-off span answers <see langword="null"/>.
+    /// </returns>
+    /// <remarks>
+    /// One query scoped to the span over the content-part tables, so the inspector pays for
+    /// one span's prompt text rather than its session's whole conversation.
+    /// </remarks>
+    string? SpanPromptText(string spanId);
 
     /// <summary>
     /// Lists per-session-key, per-harness record attributions — one grouped query over
@@ -580,7 +597,8 @@ public interface IRelationalStoreReader
     /// renders and never for the session's whole conversation. Every other read model in this
     /// contract is content-free: list, detail, summary, turn figures, timeline, coverage,
     /// findings, problems, quarantine, harnesses, runs, report, and analytics must not reach a
-    /// content-text column, and none of them calls this member.
+    /// content-text column, and none of them calls this member. The span inspector's
+    /// <see cref="SpanPromptText"/> is the only other content-text read on a request path.
     /// </remarks>
     IReadOnlyList<StoredContentPart> TurnContentParts(
         string sessionKey,

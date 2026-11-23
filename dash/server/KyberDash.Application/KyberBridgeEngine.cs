@@ -623,8 +623,9 @@ public class KyberBridgeEngine
     /// <returns>Span attributes JSON element, or <see langword="null"/> when absent.</returns>
     /// <remarks>
     /// The relational store keeps no raw attribute bag; <c>attributes</c> carries the typed
-    /// attributes a hydrated record still names (declared context window, model, agent). The read
-    /// is content-free: a captured prompt is conversation text, so the content view serves it.
+    /// attributes a hydrated record still names (declared context window, model, agent). A
+    /// consent-allowed Droid prompt is conversation text, so the inspector reads that one
+    /// span's prompt part through a span-scoped read rather than the session's records.
     /// </remarks>
     public JsonElement? GetSpanAttributes(string spanId)
     {
@@ -635,6 +636,13 @@ public class KyberBridgeEngine
         }
 
         CanonicalRecord hydrated = CanonRecordHydration.Hydrate(record);
+        if (string.Equals(record.HarnessId, "droid", StringComparison.OrdinalIgnoreCase)
+            && hydrated.Raw is Dictionary<string, JsonElement> raw
+            && reader.SpanPromptText(spanId) is string prompt)
+        {
+            raw[FactoryKeys.PromptText] = JsonSerializer.SerializeToElement(prompt);
+        }
+
         return JsonSerializer.SerializeToElement(new
         {
             spanId = hydrated.SpanId,

@@ -524,6 +524,9 @@ public class ProjectionReadPathTests
         public CollectedRecord? RecordContentFree(string spanId) => inner.RecordContentFree(spanId);
 
         /// <inheritdoc />
+        public string? SpanPromptText(string spanId) => inner.SpanPromptText(spanId);
+
+        /// <inheritdoc />
         public IReadOnlyList<StoredTokenCount> TokenCounts(string? spanId = null, string? sessionKey = null) => inner.TokenCounts(spanId, sessionKey);
 
         /// <inheritdoc />

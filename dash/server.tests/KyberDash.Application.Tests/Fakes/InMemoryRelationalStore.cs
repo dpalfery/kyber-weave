@@ -378,6 +378,38 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
+    public string? SpanPromptText(string spanId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(spanId);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SpanPromptText));
+            TableMetadata meta = GetTableMetadata("content_part");
+            foreach (object?[] row in state.GetRows("content_part")
+                .Where(r => string.Equals(GetString(meta, r, "span_id"), spanId, StringComparison.Ordinal))
+                .OrderBy(r => GetInt64(meta, r, "position")))
+            {
+                CollectedContentPart part = MaterializeContentPart(state, row);
+                if (part.Bucket is not (ContentBucket.UserPrompt or ContentBucket.UserMessage or ContentBucket.ConversationHistory))
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(part.PlainText))
+                {
+                    continue;
+                }
+
+                materializedContentBytes += Encoding.UTF8.GetByteCount(part.PlainText);
+                return part.PlainText;
+            }
+
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
     public IReadOnlyList<StoredSessionAttribution> SessionAttributions()
     {
         lock (syncRoot)

@@ -549,6 +549,40 @@ public class MinimalApiEndpointTests
     }
 
     [Fact]
+    public async Task SpanAttributesReturnsTheQueryServicePayload()
+    {
+        JsonElement payload = JsonSerializer.SerializeToElement(new
+        {
+            spanId = "span-1",
+            harness = "droid",
+            attributes = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["factory.turn.prompt.text"] = "hello droid",
+            },
+        });
+        await using Host host = await Host.StartAsync(b =>
+            b.Query.Setup(q => q.GetSpanAttributes("span-1")).Returns(payload));
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/span/span-1/attributes", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("span-1", body.RunProperty("spanId").GetString());
+        Assert.Equal("hello droid", body.RunProperty("attributes").GetProperty("factory.turn.prompt.text").GetString());
+        host.Builder.Query.Verify(q => q.GetSpanAttributes("span-1"), Times.Once);
+    }
+
+    [Fact]
+    public async Task MissingSpanAttributesReturnsNotFound()
+    {
+        await using Host host = await Host.StartAsync();
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/span/absent/attributes", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
     public async Task UnknownApiPathReturnsNotFound()
     {
         await using Host host = await Host.StartAsync();

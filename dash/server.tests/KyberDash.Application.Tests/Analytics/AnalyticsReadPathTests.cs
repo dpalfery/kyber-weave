@@ -815,6 +815,18 @@ public sealed class AnalyticsReadPathTests
             repo: "kyber-weave",
             branch: "kw-task/T4",
             title: "sweep session");
+        WriteSession(
+            store,
+            "sess-sweep-droid",
+            [
+                Turn(
+                    "span-sweep-droid",
+                    "sess-sweep-droid",
+                    0,
+                    harnessId: "droid",
+                    parts: [WithheldPart(0, "user_prompt")]),
+            ],
+            harnessId: "droid");
         _ = CreateProjection(store, pricing).ProjectAll();
         KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
         bridge.EnsureProjected();
@@ -837,6 +849,7 @@ public sealed class AnalyticsReadPathTests
             ("session summary", () => _ = bridge.GetSessionSummary(sessionKey)),
             ("turn figures", () => _ = bridge.GetTurnFigures(sessionKey, 0)),
             ("span attributes", () => _ = bridge.GetSpanAttributes("span-sweep-1")),
+            ("span attributes (droid consent withheld)", () => _ = bridge.GetSpanAttributes("span-sweep-droid")),
             ("timeline", () => _ = bridge.GetTimeline(sessionKey)),
             ("coverage", () => _ = bridge.GetCoverage()),
             ("findings", () => _ = bridge.GetFindings(sessionId: sessionKey)),
@@ -856,15 +869,27 @@ public sealed class AnalyticsReadPathTests
             ("analytics findings", () => _ = bridge.ExecuteAnalytics("findings", null)),
         ];
 
+        Dictionary<string, List<string>> readsByPath = new(StringComparer.Ordinal);
         foreach ((string path, Action call) in paths)
         {
             store.ClearReadLog();
             call();
+            readsByPath[path] = [.. store.ReadLog];
             Assert.True(
                 store.MaterializedContentBytes == 0,
                 $"the {path} path materialized {store.MaterializedContentBytes} content bytes");
             Assert.DoesNotContain(store.ReadLog, read => contentBearingReads.Contains(read));
         }
+
+        // The span inspector's prompt read is span-scoped: it appears on the span-attributes
+        // path only. The Droid span's prompt was withheld for consent, so the sweep still
+        // materializes nothing while recording the read.
+        Assert.Equal(
+            ["span attributes (droid consent withheld)"],
+            readsByPath
+                .Where(static entry => entry.Value.Contains(nameof(InMemoryRelationalStore.SpanPromptText), StringComparer.Ordinal))
+                .Select(static entry => entry.Key)
+                .ToList());
     }
 
     /// <summary>
@@ -979,6 +1004,79 @@ public sealed class AnalyticsReadPathTests
         Assert.Equal(400, attributes.GetProperty("tokens").GetProperty("freshInput").GetInt64());
         Assert.Equal("claude-sonnet-4-6", attributes.GetProperty("attributes").GetProperty("gen_ai.response.model").GetString());
         Assert.DoesNotContain("other session text", attributes.GetRawText(), StringComparison.Ordinal);
+        Assert.Null(bridge.GetSpanAttributes("no-such-span"));
+    }
+
+    /// <summary>
+    /// The span inspector carries the consent-allowed Droid prompt: a Droid span with a
+    /// captured prompt part answers it under the captured-prompt attribute key, skipping a
+    /// blank prompt and a non-prompt part for the first prompt text in position order. A
+    /// Droid span whose prompt was withheld for consent carries none, and a span from
+    /// another harness issues no prompt read at all. The read log shows the content-free
+    /// record read and the span-scoped prompt read for that span only, never a
+    /// session-wide read.
+    /// </summary>
+    [Fact]
+    public void SpanAttributesCarryTheConsentAllowedDroidPrompt()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        WriteSession(
+            store,
+            "sess-droid",
+            [
+                Turn(
+                    "span-droid-1",
+                    "sess-droid",
+                    0,
+                    harnessId: "droid",
+                    parts:
+                    [
+                        TextPart(0, "tool_result_content", "tool noise"),
+                        TextPart(1, "user_prompt", "   "),
+                        TextPart(2, "user_message", "hello droid"),
+                    ]),
+                Turn(
+                    "span-droid-off",
+                    "sess-droid",
+                    1,
+                    harnessId: "droid",
+                    parts: [WithheldPart(0, "user_prompt")]),
+            ],
+            harnessId: "droid");
+        WriteSession(
+            store,
+            "sess-other",
+            [Turn("span-other-1", "sess-other", 0, parts: [TextPart(0, "user_prompt", "other harness prompt")])]);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
+        bridge.EnsureProjected();
+
+        store.ClearReadLog();
+        JsonElement attributes = bridge.GetSpanAttributes("span-droid-1")!.Value;
+
+        Assert.Equal("hello droid", attributes.GetProperty("attributes").GetProperty(FactoryKeys.PromptText).GetString());
+        Assert.Equal(11, store.MaterializedContentBytes);
+        Assert.Equal(
+            [nameof(InMemoryRelationalStore.RecordContentFree), nameof(InMemoryRelationalStore.SpanPromptText)],
+            store.ReadLog);
+
+        store.ClearReadLog();
+        JsonElement withheld = bridge.GetSpanAttributes("span-droid-off")!.Value;
+
+        Assert.False(withheld.GetProperty("attributes").TryGetProperty(FactoryKeys.PromptText, out _));
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.Equal(
+            [nameof(InMemoryRelationalStore.RecordContentFree), nameof(InMemoryRelationalStore.SpanPromptText)],
+            store.ReadLog);
+
+        store.ClearReadLog();
+        JsonElement other = bridge.GetSpanAttributes("span-other-1")!.Value;
+
+        Assert.False(other.GetProperty("attributes").TryGetProperty(FactoryKeys.PromptText, out _));
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.Equal([nameof(InMemoryRelationalStore.RecordContentFree)], store.ReadLog);
+
         Assert.Null(bridge.GetSpanAttributes("no-such-span"));
     }
 
@@ -1739,12 +1837,7 @@ public sealed class AnalyticsReadPathTests
     private static CollectedContentPart TextPart(int position, string bucket, string text, long? reportedTokens = null) =>
         new(
             Position: position,
-            Bucket: bucket switch
-            {
-                "user_prompt" => ContentBucket.UserPrompt,
-                "tool_result_content" => ContentBucket.ToolResultContent,
-                _ => throw new ArgumentException($"Unexpected bucket '{bucket}'.", nameof(bucket)),
-            },
+            Bucket: PromptBucket(bucket),
             PlainText: text,
             Withheld: null,
             ReportedTokens: reportedTokens,
@@ -1752,6 +1845,31 @@ public sealed class AnalyticsReadPathTests
             Role: null,
             Resident: null,
             OriginalUtf8BytesWhenTruncated: null);
+
+    /// <summary>A consent-withheld prompt part: metrics only, no text, so the inspector must carry no prompt.</summary>
+    /// <param name="position">Zero-based part position.</param>
+    /// <param name="bucket">Canonical part bucket name.</param>
+    private static CollectedContentPart WithheldPart(int position, string bucket) =>
+        new(
+            Position: position,
+            Bucket: PromptBucket(bucket),
+            PlainText: null,
+            Withheld: new CollectedWithheldText(Utf8Bytes: 12, Characters: 12, MeasuredTokens: 3),
+            ReportedTokens: null,
+            Server: null,
+            Role: null,
+            Resident: null,
+            OriginalUtf8BytesWhenTruncated: null);
+
+    private static ContentBucket PromptBucket(string bucket) =>
+        bucket switch
+        {
+            "user_prompt" => ContentBucket.UserPrompt,
+            "user_message" => ContentBucket.UserMessage,
+            "conversation_history" => ContentBucket.ConversationHistory,
+            "tool_result_content" => ContentBucket.ToolResultContent,
+            _ => throw new ArgumentException($"Unexpected bucket '{bucket}'.", nameof(bucket)),
+        };
 
     private static JsonElement Json(object value) => JsonSerializer.SerializeToElement(value);
 
@@ -1799,6 +1917,8 @@ public sealed class AnalyticsReadPathTests
         public IReadOnlyList<StoredSourceCount> SourceRecordCounts() => inner.SourceRecordCounts();
 
         public CollectedRecord? RecordContentFree(string spanId) => inner.RecordContentFree(spanId);
+
+        public string? SpanPromptText(string spanId) => inner.SpanPromptText(spanId);
 
         public IReadOnlyList<StoredSessionAttribution> SessionAttributions() => inner.SessionAttributions();
 

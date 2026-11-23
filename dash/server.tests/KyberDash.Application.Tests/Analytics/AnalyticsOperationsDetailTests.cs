@@ -335,6 +335,8 @@ public sealed class AnalyticsOperationsDetailTests
 
         public CollectedRecord? RecordContentFree(string spanId) => inner.RecordContentFree(spanId);
 
+        public string? SpanPromptText(string spanId) => inner.SpanPromptText(spanId);
+
         public IReadOnlyList<StoredSessionAttribution> SessionAttributions() => inner.SessionAttributions();
 
         public IReadOnlyList<CollectedRecord> SessionRecordsForRebuild(string sessionKey) => inner.SessionRecordsForRebuild(sessionKey);
