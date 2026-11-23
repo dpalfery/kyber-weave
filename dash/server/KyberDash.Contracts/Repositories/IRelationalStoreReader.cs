@@ -474,6 +474,45 @@ public record SessionSummaryFigure(
     int ReconciliationMismatched = 0);
 
 /// <summary>
+/// Read-time figures the report prices one scoped session with: exactly the fields the report
+/// reads from <see cref="SessionSummaryFigure"/>, and no more (<c>DD-13</c>, decision D13).
+/// </summary>
+/// <param name="SessionKey">Canonical session key.</param>
+/// <param name="TotalInput">Sum of combined input tokens across turns, or <see langword="null"/> when no turn reported tokens.</param>
+/// <param name="TotalCacheRead">Sum of cache-read tokens across turns, or <see langword="null"/> when absent.</param>
+/// <param name="ToolsOffered">Distinct advertised tool names, in record order.</param>
+/// <param name="ToolsInvoked">Distinct invoked tool names, in record order.</param>
+/// <param name="ReportedCost">Non-blended harness-reported cost summary when present, or <see langword="null"/>.</param>
+/// <param name="PublishedCost">Non-blended published-rate cost summary computed across turns.</param>
+/// <remarks>
+/// Carries no content, like the summary figures it projects: the report window prices stored
+/// token, tool, and cost columns only.
+/// </remarks>
+public record SessionReportFigure(
+    string SessionKey,
+    long? TotalInput,
+    long? TotalCacheRead,
+    IReadOnlyList<string> ToolsOffered,
+    IReadOnlyList<string> ToolsInvoked,
+    ReadTimeCostSummary? ReportedCost,
+    ReadTimeCostSummary PublishedCost)
+{
+    /// <summary>Projects the report figures a summary already carries.</summary>
+    /// <param name="summary">The summary figures to project from.</param>
+    public SessionReportFigure(SessionSummaryFigure summary)
+        : this(
+            summary.SessionKey,
+            summary.TotalInput,
+            summary.TotalCacheRead,
+            summary.ToolsOffered,
+            summary.ToolsInvoked,
+            summary.ReportedCost,
+            summary.PublishedCost)
+    {
+    }
+}
+
+/// <summary>
 /// Read-time figures the session detail header renders, with the session's per-turn figures,
 /// tool residency rows, and request metadata (<c>DD-13</c>).
 /// </summary>
@@ -812,6 +851,25 @@ public interface IRelationalStoreReader
     /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
     /// <returns>The summary figures, or <see langword="null"/> when the session row is absent.</returns>
     SessionSummaryFigure? SessionSummaryFigures(string sessionKey, IModelPricingLookup? pricing = null);
+
+    /// <summary>
+    /// Reads the report figures for exactly <paramref name="sessionKeys"/>: the fields the report
+    /// prices each scoped session with, from the same content-free summary computation as
+    /// <see cref="SessionSummaryFigures(string, IModelPricingLookup?)"/> (<c>DD-13</c>, decision D13).
+    /// </summary>
+    /// <param name="sessionKeys">
+    /// Canonical session keys to price. Duplicates are ignored; a key with no session row answers
+    /// no figure.
+    /// </param>
+    /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
+    /// <returns>One figure per named session that has a session row, in session-row order.</returns>
+    /// <remarks>
+    /// One batched pass over only the named keys — the session rows, their content-free record
+    /// scalars, and their stored turns — so the report's statement count never scales with its
+    /// window. Every statement this read issues filters by those keys; it never lists the
+    /// store's sessions or projections. No content column is read.
+    /// </remarks>
+    IReadOnlyList<SessionReportFigure> SessionReportFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null);
 
     /// <summary>
     /// Reads the session detail header figures together with every turn's figures, over

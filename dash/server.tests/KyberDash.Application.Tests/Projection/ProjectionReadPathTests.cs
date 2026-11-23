@@ -589,6 +589,9 @@ public class ProjectionReadPathTests
         public SessionSummaryFigure? SessionSummaryFigures(string sessionKey, IModelPricingLookup? pricing = null) => inner.SessionSummaryFigures(sessionKey, pricing);
 
         /// <inheritdoc />
+        public virtual IReadOnlyList<SessionReportFigure> SessionReportFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null) => inner.SessionReportFigures(sessionKeys, pricing);
+
+        /// <inheritdoc />
         public SessionDetailFigure? SessionDetailFigures(string sessionKey, IModelPricingLookup? pricing = null) => inner.SessionDetailFigures(sessionKey, pricing);
 
         /// <inheritdoc />
