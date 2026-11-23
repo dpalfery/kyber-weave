@@ -575,7 +575,14 @@ public static class CanonAdapters
     private static JsonElement MeasuredElement() =>
         JsonSerializer.SerializeToElement("measured");
 
-    private static string? ReadText(IReadOnlyDictionary<string, JsonElement> attributes, IReadOnlyList<string> keys)
+    /// <summary>
+    /// Reads the first present attribute from <paramref name="keys"/> as text: a JSON string's
+    /// value when non-empty, otherwise an object's or array's raw JSON text.
+    /// </summary>
+    /// <param name="attributes">Raw adapter attributes.</param>
+    /// <param name="keys">Attribute keys in precedence order.</param>
+    /// <returns>The attribute text, or <see langword="null"/> when no listed key carries text.</returns>
+    public static string? ReadText(IReadOnlyDictionary<string, JsonElement> attributes, IReadOnlyList<string> keys)
     {
         foreach (string key in keys)
         {

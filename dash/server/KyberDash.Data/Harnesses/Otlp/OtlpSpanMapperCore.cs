@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using KyberDash.Data.Collector;
 using KyberDash.Domain;
 
@@ -10,10 +11,43 @@ namespace KyberDash.Data.Harnesses.Otlp;
 /// resolution, and any pre/post span quirks) and delegates the identical batch/record/tool/part
 /// assembly here through <see cref="OtlpMapperHooks"/> so the wire behavior stays in one place.
 /// </summary>
-internal static class OtlpSpanMapperCore
+internal static partial class OtlpSpanMapperCore
 {
     internal const string DefaultToolErrorMessage = "Tool execution failed.";
     internal const string DefaultAgentErrorMessage = "Agent invocation failed.";
+
+    [GeneratedRegex(@"^invoke_agent(?:[ :]|$)", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex InvokeAgentNameRegex();
+
+    /// <summary>
+    /// Classifies a span by the operation signals every harness shares: a tool-name attribute is a
+    /// tool invocation, an <c>invoke_agent</c> operation or span name is an agent invocation, and
+    /// token-count attributes are a model invocation. Mappers with a harness-specific routing rule
+    /// run it after their own checks so the shared signals classify identically everywhere.
+    /// </summary>
+    /// <param name="native">Typed native OTLP span.</param>
+    /// <returns>The classified operation.</returns>
+    internal static RecordOp ResolveGenericOp(OtlpSpanNative native)
+    {
+        if (OtlpSpanNative.HasAnyKey(native.Attributes, ["gen_ai.tool.name"]))
+        {
+            return RecordOp.ToolInvoke;
+        }
+
+        if (string.Equals(native.OperationName, "invoke_agent", StringComparison.Ordinal)
+            || InvokeAgentNameRegex().IsMatch(native.Name))
+        {
+            return RecordOp.AgentInvoke;
+        }
+
+        if (OtlpSpanNative.HasAnyKey(native.Attributes, OtlpSpanNative.InputTokenKeys)
+            || OtlpSpanNative.HasAnyKey(native.Attributes, OtlpSpanNative.OutputTokenKeys))
+        {
+            return RecordOp.LlmInvoke;
+        }
+
+        return RecordOp.Unspecified;
+    }
 
     /// <summary>Per-harness token-convention hook shared by the span mappers.</summary>
     internal delegate bool TryBuildTokenUsageHandler(OtlpSpanNative native, RecordOp op, out TokenUsage? usage);

@@ -1012,33 +1012,8 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
         return null;
     }
 
-    private static string? ReadCodexMessageText(JsonElement payload)
-    {
-        if (!payload.TryGetProperty("content", out JsonElement content))
-            return null;
-
-        if (content.ValueKind == JsonValueKind.String)
-        {
-            string? text = content.GetString();
-            return string.IsNullOrEmpty(text) ? null : text;
-        }
-
-        if (content.ValueKind != JsonValueKind.Array)
-            return null;
-
-        List<string> texts = [];
-        foreach (JsonElement block in content.EnumerateArray())
-        {
-            if (block.ValueKind != JsonValueKind.Object)
-                continue;
-
-            string? text = ReadString(block, "text");
-            if (!string.IsNullOrEmpty(text))
-                texts.Add(text);
-        }
-
-        return texts.Count > 0 ? string.Join('\n', texts) : null;
-    }
+    private static string? ReadCodexMessageText(JsonElement payload) =>
+        HarnessJson.ReadCodexMessageText(payload);
 
     private static string? ReadCodexToolResultText(JsonElement payload)
     {
