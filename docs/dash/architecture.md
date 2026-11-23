@@ -1659,10 +1659,13 @@ measured independently from whether individual composition buckets are available
   each child the declared reason for every key it does not carry itself. `tool_result_content` is
   measured on a child only when the tool result it was handed carries a `content` value. Other
   harnesses copy the parent's map unchanged.
-- **Stored text can be gone.** Measurability is stamped at ingest and not re-derived. The 14-day
-  purge ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)) empties `content_json` and
-  `parts_json` and leaves `measurability_json` as it was, so a record can read as measured while no
-  text is stored for it.
+- **Stored text can be gone.** Measurability is stamped at ingest and not re-derived, so a record
+  can read as measured while no text is stored for it: clearing a store
+  ([the runbook's clean section](runbook.md#2b-database-clean-dash-clean)) leaves `measurability_json` as it was.
+  The 14-day purge ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)) does not yet
+  empty `content_json` and `parts_json` on the relational engine — it records the retention mark
+  and deletes nothing, which the [runbook's retention policy](runbook.md#4-content-retention-policy)
+  states.
 - **Non-resident parts.** `ContentPart.resident: false` marks a tool definition the turn was offered
   but did not keep resident. It adds no tokens to the context composition (`CanonContextAnalysis.AnalyzeContext`),
   is counted in `TurnPressure.nonResidentToolDefinitions`, and stays on the part for the turn-content
