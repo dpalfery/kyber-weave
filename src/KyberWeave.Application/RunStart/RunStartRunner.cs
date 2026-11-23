@@ -35,7 +35,7 @@ public sealed class RunStartRunner : IRunStartRunner
     /// <param name="git">The git seam, bounded by its own timeout.</param>
     /// <param name="files">The file system worktree folders and their claims live on.</param>
     /// <param name="environment">The process state the CodeGraph lookup reads.</param>
-    /// <param name="paths">Resolves the repository root into the full path the worktree folder sits beside.</param>
+    /// <param name="paths">Resolves the repository root into the full path the worktree folder sits inside.</param>
     /// <param name="repositoryRoot">The repository root every git command runs in.</param>
     public RunStartRunner(IGitCommandRunner git, IWritableFileSystem files, IProcessEnvironment environment, IPathResolver paths, string repositoryRoot)
     {
@@ -272,10 +272,7 @@ public sealed class RunStartRunner : IRunStartRunner
         ArgumentException.ThrowIfNullOrWhiteSpace(branch);
 
         string root = Path.TrimEndingDirectorySeparator(_paths.GetFullPath(_repositoryRoot, _environment.CurrentDirectory));
-        string? parent = Path.GetDirectoryName(root);
-        string container = Path.Combine(
-            string.IsNullOrEmpty(parent) ? root : parent,
-            Path.GetFileName(root) + ".worktrees");
+        string container = Path.Combine(root, AgentWorktreeFolder.Name);
         string stamp = startedAt.UtcDateTime.ToString(WorktreeStampFormat, CultureInfo.InvariantCulture);
         string folder = stamp + "-" + branch.Replace('/', '-');
 
@@ -299,6 +296,54 @@ public sealed class RunStartRunner : IRunStartRunner
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // A claim left behind only makes a later run in the same second take the next suffix.
+        }
+    }
+
+    /// <summary>
+    ///     Excludes <see cref="AgentWorktreeFolder.Name" /> from git's status in the local exclude file, writing the
+    ///     line only when no line already holds it.
+    /// </summary>
+    /// <returns>The outcome: succeeded when the file already excludes the folder or now does; failed when git could
+    ///     not name the file or the file could not be read or written.</returns>
+    /// <remarks>
+    ///     <c>git rev-parse --git-path info/exclude</c> names the file git actually reads: a linked worktree shares
+    ///     the exclude file of the main checkout, and git answers with that file's location. A relative answer is
+    ///     resolved against the repository root, where git ran. The file is local, so the exclusion never enters a
+    ///     commit.
+    /// </remarks>
+    public GitOutcome EnsureWorktreeFolderExcluded()
+    {
+        GitOutcome located = Git("rev-parse", "--git-path", "info/exclude");
+        if (!located.Succeeded)
+            return located;
+
+        string root = Path.TrimEndingDirectorySeparator(_paths.GetFullPath(_repositoryRoot, _environment.CurrentDirectory));
+        string excludePath = Path.Combine(root, located.StandardOutput.Trim());
+
+        try
+        {
+            string directory = Path.GetDirectoryName(excludePath) ?? root;
+            if (!_files.DirectoryExists(directory))
+                _files.CreateDirectory(directory);
+
+            if (!_files.FileExists(excludePath))
+            {
+                _files.WriteAllText(excludePath, AgentWorktreeFolder.ExcludeLine + "\n");
+                return new GitOutcome(0, string.Empty, string.Empty);
+            }
+
+            string existing = _files.ReadAllText(excludePath);
+            if (existing.Split('\n').Any(line => string.Equals(line.Trim(), AgentWorktreeFolder.ExcludeLine, StringComparison.Ordinal)))
+                return new GitOutcome(0, string.Empty, string.Empty);
+
+            // A file that ends without a newline gets one first, so the appended line starts a line of its own.
+            string separator = existing.Length == 0 || existing.EndsWith('\n') ? string.Empty : "\n";
+            _files.WriteAllText(excludePath, existing + separator + AgentWorktreeFolder.ExcludeLine + "\n");
+            return new GitOutcome(0, string.Empty, string.Empty);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new GitOutcome(1, string.Empty, $"could not update '{excludePath}': {ex.Message}");
         }
     }
 

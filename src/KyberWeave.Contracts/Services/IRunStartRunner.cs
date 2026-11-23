@@ -92,11 +92,15 @@ public interface IRunStartRunner
     /// <returns>The outcome of the switch.</returns>
     GitOutcome SwitchToBranch(string branch);
 
-    /// <summary>The worktree path a branch is created at: a sibling of the repository, claimed so two runs in one second never share it.</summary>
+    /// <summary>The worktree path a branch is created at: inside <c>.agent_worktrees</c> under the repository root, claimed so two runs in one second never share it.</summary>
     /// <param name="branch">The branch the worktree holds.</param>
     /// <param name="startedAt">When the run started; the folder name carries it in UTC.</param>
-    /// <returns>The path. The caller releases the claim with <see cref="ReleaseWorktreeClaim"/> once git has run.</returns>
+    /// <returns>The path, <c>&lt;root&gt;/.agent_worktrees/&lt;stamp&gt;-&lt;branch&gt;</c>. The caller releases the claim with <see cref="ReleaseWorktreeClaim"/> once git has run.</returns>
     string WorktreePathFor(string branch, DateTimeOffset startedAt);
+
+    /// <summary>Excludes the worktree folder from git's status in the local exclude file, before any worktree is created in it.</summary>
+    /// <returns>The outcome: succeeded when the exclusion is in place; failed with git's or the file system's reason otherwise.</returns>
+    GitOutcome EnsureWorktreeFolderExcluded();
 
     /// <summary>Removes the claim <see cref="WorktreePathFor"/> took.</summary>
     /// <param name="worktreePath">The path <see cref="WorktreePathFor"/> returned.</param>

@@ -64,8 +64,8 @@ public sealed class RunStartCommandTests : IDisposable
     {
         _probe.AppendLine("README.md", "uncommitted work");
         string leftover = Path.Combine(
-            Path.GetDirectoryName(_probe.Root)!,
-            Path.GetFileName(_probe.Root) + ".worktrees",
+            _probe.Root,
+            ".agent_worktrees",
             "claude-fix-tighten-the-gate");
         Directory.CreateDirectory(leftover);
         File.WriteAllText(Path.Combine(leftover, "left-behind.txt"), "an earlier run\n");

@@ -18,16 +18,16 @@ public sealed class RunStartRunnerWorktreeTests
         new(
             new UnusedGit(),
             _files,
-            new FakeProcessEnvironment(currentDirectory: "/kw/work"),
+            new FakeProcessEnvironment(currentDirectory: _files.Root),
             new FakePathResolver(_files),
             repositoryRoot);
 
     [Fact]
-    public void TheWorktreeFolderSitsBesideTheCheckoutAndCarriesTheStampAndBranch()
+    public void TheWorktreeFolderSitsInsideTheCheckoutAndCarriesTheStampAndBranch()
     {
-        string path = Runner("/kw/work/repo/").WorktreePathFor("claude/x", Started);
+        string path = Runner(Path.Combine(_files.Root, "repo") + Path.DirectorySeparatorChar).WorktreePathFor("claude/x", Started);
 
-        Assert.Equal("/kw/work/repo.worktrees/20261118T010203Z-claude-x", path);
+        Assert.Equal(Path.Combine(_files.Root, "repo", ".agent_worktrees", "20261118T010203Z-claude-x"), path);
         Assert.True(_files.FileExists(path + ".claim"));
     }
 
@@ -36,13 +36,13 @@ public sealed class RunStartRunnerWorktreeTests
     {
         string path = Runner("repo").WorktreePathFor("b", Started);
 
-        Assert.Equal("/kw/work/repo.worktrees/20261118T010203Z-b", path);
+        Assert.Equal(Path.Combine(_files.Root, "repo", ".agent_worktrees", "20261118T010203Z-b"), path);
     }
 
     [Fact]
     public void ASecondRunInTheSameSecondTakesTheNextSuffix()
     {
-        RunStartRunner runner = Runner("/kw/work/repo");
+        RunStartRunner runner = Runner(Path.Combine(_files.Root, "repo"));
 
         string first = runner.WorktreePathFor("b", Started);
         string second = runner.WorktreePathFor("b", Started);
@@ -53,7 +53,7 @@ public sealed class RunStartRunnerWorktreeTests
     [Fact]
     public void ReleasingTheClaimFreesTheName()
     {
-        RunStartRunner runner = Runner("/kw/work/repo");
+        RunStartRunner runner = Runner(Path.Combine(_files.Root, "repo"));
         string first = runner.WorktreePathFor("b", Started);
 
         runner.ReleaseWorktreeClaim(first);
