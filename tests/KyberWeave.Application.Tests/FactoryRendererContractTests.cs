@@ -700,46 +700,22 @@ public sealed class FactoryRendererContractTests : IDisposable
     }
 
     /// <summary>
-    ///     The entry-point caveat's <c>mcpServers</c> fragment parses back to the droid's
-    ///     whitelist, so the receipt cannot spell one server name as two.
+    ///     A non-portable MCP server name fails the render instead of emitting a whitelist
+    ///     that plain-style YAML parses as two servers: the failure names the bad name.
     /// </summary>
     [Fact]
-    public async Task RenderAsync_Factory_EntryPointCaveatMcpServersFragmentParsesAsTheWhitelist()
+    public async Task RenderAsync_Factory_NonPortableMcpServerNameFailsTheRender()
     {
         McpDeclarationSquadTree fixture =
             McpDeclarationSquadTree.WithServers("a, b");
         SquadSource source = fixture.Tree.Load();
-        IReadOnlyList<string> declared = DeclaredFactoryMcpServers(source);
-        Assert.Equal(["a, b"], declared);
 
-        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
-            fixture.ProductRoot,
-            [SquadTarget.Factory],
-            SquadDeploymentScope.Project).Prepared(fixture.Tree));
-        Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        SquadAgent[] whitelistedPrimaries =
-        [
-            .. source.Agents.Where(agent => agent.Invocation == SquadInvocation.Primary &&
-                                            ExpectedFactoryMcpServers(source, agent, declared).Count > 0)
-        ];
-        Assert.NotEmpty(whitelistedPrimaries);
-        SquadAgent primary = whitelistedPrimaries[0];
-        SquadDegradationRecord record = Assert.Single(
-            result.Degradations,
-            d => string.Equals(d.CanonicalIdentity, primary.Name, StringComparison.Ordinal) &&
-                 string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
-        Assert.NotNull(record.Details);
-
-        Match fragment = Regex.Match(record.Details, @"mcpServers: (\[[^\]]*\])");
-        Assert.True(
-            fragment.Success,
-            $"Agent '{primary.Name}' caveat does not name its mcpServers value: {record.Details}");
-
-        YamlStream caveat = new();
-        caveat.Load(new StringReader($"mcpServers: {fragment.Groups[1].Value}"));
-        YamlMappingNode caveatFrontmatter = Assert.IsType<YamlMappingNode>(caveat.Documents[0].RootNode);
-        Assert.Equal(declared, RequireSequence(caveatFrontmatter, "mcpServers", primary.Name));
+        SquadRenderValidationException thrown = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
+            new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+                fixture.ProductRoot,
+                [SquadTarget.Factory],
+                SquadDeploymentScope.Project).Prepared(fixture.Tree)));
+        Assert.Contains("a, b", thrown.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
