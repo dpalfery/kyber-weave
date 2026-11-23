@@ -1,9 +1,9 @@
 // Shared harness-collection world backed by `kyberdash e2e-seed` (never ~/.kyberdash/canon.db).
 
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const USER_CANON = join(homedir(), '.kyberdash', 'canon.db')
@@ -19,13 +19,93 @@ export type CollectedWorld = {
   readonly dbPath: string
 }
 
-export function createTempRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), 'kyber-harness-collection-'))
-  if (!root.startsWith(tmpdir())) {
-    throw new Error(`harness-collection temp root escaped tmpdir: ${root}`)
+function ensureTrailingSep(dir: string): string {
+  return dir.endsWith(sep) ? dir : `${dir}${sep}`
+}
+
+function findNearestExistingAncestor(targetPath: string): string | null {
+  let current = targetPath
+  while (true) {
+    try {
+      lstatSync(current)
+      return current
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+        return null
+      }
+      const parent = dirname(current)
+      if (parent === current) {
+        return null
+      }
+      current = parent
+    }
   }
-  if (root.includes('.kyberdash')) {
-    throw new Error(`harness-collection temp root must not sit under .kyberdash: ${root}`)
+}
+
+export function isIsolatedTempRoot(rootDir: string, baseTmpDir: string = tmpdir()): boolean {
+  if (rootDir.trim() === '' || rootDir.includes('\0') || baseTmpDir.trim() === '' || baseTmpDir.includes('\0')) {
+    return false
+  }
+
+  const resolvedTmp = resolve(baseTmpDir)
+  const tmpPrefix = ensureTrailingSep(resolvedTmp)
+  const resolvedTarget = resolve(rootDir)
+
+  if (resolvedTarget === resolvedTmp || !resolvedTarget.startsWith(tmpPrefix)) {
+    return false
+  }
+  if (resolvedTarget.includes('.kyberdash')) {
+    return false
+  }
+
+  if (existsSync(resolvedTmp)) {
+    let realTmp: string
+    try {
+      realTmp = realpathSync(resolvedTmp)
+    } catch {
+      return false
+    }
+    const realTmpPrefix = ensureTrailingSep(realTmp)
+
+    try {
+      if (lstatSync(resolvedTarget).isSymbolicLink()) {
+        return false
+      }
+      const realTarget = realpathSync(resolvedTarget)
+      if (realTarget === realTmp || !realTarget.startsWith(realTmpPrefix) || realTarget.includes('.kyberdash')) {
+        return false
+      }
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+        return false
+      }
+      const ancestor = findNearestExistingAncestor(resolvedTarget)
+      if (ancestor === null) {
+        return false
+      }
+      try {
+        if (ancestor !== resolvedTmp && lstatSync(ancestor).isSymbolicLink()) {
+          return false
+        }
+        const realAncestor = realpathSync(ancestor)
+        const isAllowedAncestor = realAncestor === realTmp || realAncestor.startsWith(realTmpPrefix)
+        if (!isAllowedAncestor || realAncestor.includes('.kyberdash')) {
+          return false
+        }
+      } catch {
+        return false
+      }
+    }
+  }
+
+  return true
+}
+
+export function createTempRoot(baseTmpDir: string = tmpdir()): string {
+  const resolvedBase = resolve(baseTmpDir)
+  const root = mkdtempSync(join(resolvedBase, 'kyber-harness-collection-'))
+  if (!isIsolatedTempRoot(root, resolvedBase)) {
+    throw new Error(`harness-collection temp root escaped tmpdir: ${root}`)
   }
   return root
 }
@@ -77,7 +157,7 @@ export function runE2eSeed(worldName: 'harness-collection' | 'factory-replay', d
 
 export async function refreshTempCanon(root = createTempRoot()): Promise<CollectedWorld> {
   const dbPath = join(root, 'canon.db')
-  if (dbPath === USER_CANON) {
+  if (resolve(dbPath) === resolve(USER_CANON)) {
     throw new Error('refusing to use the user canon.db as a harness-collection write target')
   }
   runE2eSeed('harness-collection', dbPath)
@@ -90,7 +170,7 @@ export async function bootIsolatedWorld(
 ): Promise<void> {
   const root = createTempRoot()
   const dbPath = join(root, 'canon.db')
-  if (dbPath === USER_CANON) {
+  if (resolve(dbPath) === resolve(USER_CANON)) {
     throw new Error('refusing to serve the user canon.db')
   }
 
@@ -210,10 +290,11 @@ async function stopProcessGroup(pid: number): Promise<void> {
   }
 }
 
-function cleanupIsolatedTempRoot(rootDir: string): void {
-  if (rootDir.startsWith(tmpdir()) && !rootDir.includes('.kyberdash')) {
-    rmSync(rootDir, { recursive: true, force: true })
+export function cleanupIsolatedTempRoot(rootDir: string, baseTmpDir: string = tmpdir()): void {
+  if (!isIsolatedTempRoot(rootDir, baseTmpDir)) {
+    throw new Error(`refusing to remove directory outside isolated tmpdir: ${rootDir}`)
   }
+  rmSync(resolve(rootDir), { recursive: true, force: true })
 }
 
 export async function startIsolatedServer(options?: {
@@ -221,13 +302,12 @@ export async function startIsolatedServer(options?: {
 }): Promise<IsolatedServerHandle> {
   const startupTimeoutMs = options?.startupTimeoutMs ?? 90_000
   const rootDir = mkdtempSync(join(tmpdir(), 'kyber-otel-e2e-'))
-  if (!rootDir.startsWith(tmpdir()) || rootDir.includes('.kyberdash')) {
-    cleanupIsolatedTempRoot(rootDir)
+  if (!isIsolatedTempRoot(rootDir)) {
     throw new Error(`isolated server temp root invalid: ${rootDir}`)
   }
 
   const dbPath = join(rootDir, 'canon.db')
-  if (dbPath === USER_CANON) {
+  if (resolve(dbPath) === resolve(USER_CANON)) {
     cleanupIsolatedTempRoot(rootDir)
     throw new Error('refusing to serve the user canon.db')
   }
@@ -374,6 +454,10 @@ export async function startIsolatedServer(options?: {
   }
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 async function postOtlpSignal(baseUrl: string, path: '/v1/traces' | '/v1/logs', payload: unknown): Promise<void> {
   const response = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
@@ -424,9 +508,15 @@ export async function waitForOtlpIngest(
         continue
       }
 
-      const healthJson = (await healthRes.json()) as { pendingCount?: unknown }
-      if (typeof healthJson.pendingCount === 'number' && healthJson.pendingCount > 0) {
-        lastError = `collector still draining (${healthJson.pendingCount} pending)`
+      const healthJson: unknown = await healthRes.json()
+      const pendingCount =
+        isPlainRecord(healthJson) &&
+        typeof healthJson['pendingCount'] === 'number' &&
+        Number.isFinite(healthJson['pendingCount'])
+          ? healthJson['pendingCount']
+          : 0
+      if (pendingCount > 0) {
+        lastError = `collector still draining (${pendingCount} pending)`
         await new Promise<void>((resolveWait) => setTimeout(resolveWait, pollIntervalMs))
         continue
       }
@@ -436,34 +526,44 @@ export async function waitForOtlpIngest(
       const coverageRes = await fetch(`${baseUrl}/api/kyber/coverage`, { signal: AbortSignal.timeout(10_000) })
 
       if (sessionsRes.ok && coverageRes.ok && harnessesRes.ok) {
-        const sessionsJson = (await sessionsRes.json()) as {
-          sessions?: Array<{ session_id?: unknown; sessionId?: unknown }>
-        }
-        const coverageJson = (await coverageRes.json()) as {
-          ingest?: unknown
-          harnesses?: Array<{ harness?: unknown }>
-        }
-        const harnessesJson = (await harnessesRes.json()) as {
-          harnesses?: Array<{ harness?: unknown; sampleCount?: unknown }>
-        }
+        const sessionsJson: unknown = await sessionsRes.json()
+        const coverageJson: unknown = await coverageRes.json()
+        const harnessesJson: unknown = await harnessesRes.json()
 
         const seenSessions = new Set<string>()
-        for (const row of sessionsJson.sessions ?? []) {
-          if (typeof row.session_id === 'string') seenSessions.add(row.session_id)
-          if (typeof row.sessionId === 'string') seenSessions.add(row.sessionId)
+        const sessionRows =
+          isPlainRecord(sessionsJson) && Array.isArray(sessionsJson['sessions'])
+            ? sessionsJson['sessions']
+            : []
+        for (const row of sessionRows) {
+          if (!isPlainRecord(row)) continue
+          if (typeof row['session_id'] === 'string') seenSessions.add(row['session_id'])
+          if (typeof row['sessionId'] === 'string') seenSessions.add(row['sessionId'])
         }
 
         const seenHarnesses = new Set<string>()
-        for (const row of harnessesJson.harnesses ?? []) {
-          if (typeof row.harness === 'string' && typeof row.sampleCount === 'number' && row.sampleCount > 0) {
-            seenHarnesses.add(row.harness)
+        const harnessRows =
+          isPlainRecord(harnessesJson) && Array.isArray(harnessesJson['harnesses'])
+            ? harnessesJson['harnesses']
+            : []
+        for (const row of harnessRows) {
+          if (!isPlainRecord(row)) continue
+          if (
+            typeof row['harness'] === 'string' &&
+            typeof row['sampleCount'] === 'number' &&
+            Number.isFinite(row['sampleCount']) &&
+            row['sampleCount'] > 0
+          ) {
+            seenHarnesses.add(row['harness'])
           }
         }
+
+        const hasIngest = isPlainRecord(coverageJson) && coverageJson['ingest'] !== undefined
 
         missingSessions = expectedSessionIds.filter((id) => !seenSessions.has(id))
         missingHarnesses = expectedHarnesses.filter((h) => !seenHarnesses.has(h))
 
-        if (missingSessions.length === 0 && missingHarnesses.length === 0 && coverageJson.ingest !== undefined) {
+        if (missingSessions.length === 0 && missingHarnesses.length === 0 && hasIngest) {
           return
         }
       } else {

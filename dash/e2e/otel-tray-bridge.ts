@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { dirname, extname, join, resolve, sep } from 'node:path'
+import { dirname, extname, isAbsolute, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Page } from '@playwright/test'
 
@@ -79,6 +79,9 @@ const DEFAULT_TRAY_SETTINGS: TraySettings = {
 }
 
 const MAX_BODY_BYTES = 1_048_576
+export const MAX_PROXY_RESPONSE_BYTES = 10 * 1024 * 1024
+export const MIN_CADENCE_MINUTES = 1
+export const MAX_CADENCE_MINUTES = 1440
 const MAX_HISTORY_WEEKS = 52
 const MAX_WINDOW_DAYS = 3650
 const TRAY_BUILD_TIMEOUT_MS = 120_000
@@ -170,6 +173,20 @@ function validateWeeks(raw: unknown, fieldName: string): number {
   return raw
 }
 
+export function isValidRefreshCadenceMinutes(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    Number.isInteger(value) &&
+    value >= MIN_CADENCE_MINUTES &&
+    value <= MAX_CADENCE_MINUTES
+  )
+}
+
+export function isValidApiVersion(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value >= 1
+}
+
 function isFraction(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1
 }
@@ -188,7 +205,13 @@ function applyPartialTraySettings(current: TraySettings, patch: Record<string, u
   }
 
   const days = patch['windowDays']
-  if (typeof days === 'number' && Number.isInteger(days) && days >= 1 && days <= MAX_WINDOW_DAYS) {
+  if (
+    typeof days === 'number' &&
+    Number.isFinite(days) &&
+    Number.isInteger(days) &&
+    days >= 1 &&
+    days <= MAX_WINDOW_DAYS
+  ) {
     next.windowDays = days
   }
 
@@ -392,15 +415,34 @@ export function ensureTrayUiBuilt(options?: { readonly forceRebuild?: boolean })
   return trayUiDist
 }
 
+class RequestBodyTooLargeError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'RequestBodyTooLargeError'
+  }
+}
+
+export class UpstreamResponseTooLargeError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'UpstreamResponseTooLargeError'
+  }
+}
+
 async function readRequestBody(req: IncomingMessage): Promise<string> {
   return new Promise<string>((resolveBody, rejectBody) => {
     const chunks: Buffer[] = []
     let totalBytes = 0
+    let settled = false
 
     req.on('data', (chunk: Buffer) => {
+      if (settled) {
+        return
+      }
       totalBytes += chunk.length
       if (totalBytes > MAX_BODY_BYTES) {
-        rejectBody(new Error(`Request body exceeded ${MAX_BODY_BYTES} bytes`))
+        settled = true
+        rejectBody(new RequestBodyTooLargeError(`Request body exceeded ${MAX_BODY_BYTES} bytes`))
         req.destroy()
         return
       }
@@ -408,13 +450,62 @@ async function readRequestBody(req: IncomingMessage): Promise<string> {
     })
 
     req.once('end', () => {
+      if (settled) {
+        return
+      }
+      settled = true
       resolveBody(Buffer.concat(chunks).toString('utf8'))
     })
 
     req.once('error', (error) => {
+      if (settled) {
+        return
+      }
+      settled = true
       rejectBody(error)
     })
   })
+}
+
+export async function readBoundedResponseBuffer(response: Response, maxBytes: number): Promise<Buffer> {
+  const contentLengthHeader = response.headers.get('content-length')
+  if (contentLengthHeader !== null && contentLengthHeader.trim() !== '') {
+    const declaredLength = Number(contentLengthHeader)
+    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+      await response.body?.cancel().catch(() => undefined)
+      throw new UpstreamResponseTooLargeError(
+        `Upstream response Content-Length (${declaredLength} bytes) exceeded ${maxBytes} byte limit`,
+      )
+    }
+  }
+
+  if (response.body === null) {
+    return Buffer.alloc(0)
+  }
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let totalBytes = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) {
+        break
+      }
+      if (value !== undefined) {
+        totalBytes += value.byteLength
+        if (totalBytes > maxBytes) {
+          await reader.cancel().catch(() => undefined)
+          throw new UpstreamResponseTooLargeError(`Upstream response exceeded ${maxBytes} byte limit`)
+        }
+        chunks.push(value)
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  return Buffer.concat(chunks)
 }
 
 function sendJson(res: ServerResponse, statusCode: number, payload: unknown): void {
@@ -426,47 +517,120 @@ function sendJson(res: ServerResponse, statusCode: number, payload: unknown): vo
   res.end(body)
 }
 
-function serveStaticAsset(res: ServerResponse, distDir: string, pathname: string): void {
+export type StaticAssetResolution =
+  | { readonly ok: true; readonly filePath: string; readonly contentType: string }
+  | { readonly ok: false; readonly statusCode: 400 | 403 | 404; readonly message: string }
+
+export function resolveStaticAsset(distDir: string, pathname: string): StaticAssetResolution {
+  if (pathname.includes('\0')) {
+    return { ok: false, statusCode: 400, message: 'Bad request path' }
+  }
+
   let decodedPath: string
   try {
     decodedPath = decodeURIComponent(pathname)
   } catch {
-    res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' })
-    res.end('Bad request path')
-    return
+    return { ok: false, statusCode: 400, message: 'Bad request path' }
   }
 
-  const relativePath = decodedPath === '/' ? 'index.html' : decodedPath.replace(/^\/+/, '')
-  const candidate = resolve(distDir, relativePath)
-  if (candidate !== distDir && !candidate.startsWith(distDir + sep)) {
-    res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' })
-    res.end('Forbidden')
-    return
+  if (decodedPath.includes('\0')) {
+    return { ok: false, statusCode: 400, message: 'Bad request path' }
   }
 
-  if (!existsSync(candidate) || !statSync(candidate).isFile()) {
-    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
-    res.end('Not found')
-    return
+  if (decodedPath.includes('\\') || decodedPath.startsWith('//') || !decodedPath.startsWith('/')) {
+    return { ok: false, statusCode: 403, message: 'Forbidden' }
   }
 
-  const ext = extname(candidate).toLowerCase()
+  const relativeRaw = decodedPath === '/' ? 'index.html' : decodedPath.slice(1)
+  if (
+    relativeRaw === '' ||
+    isAbsolute(relativeRaw) ||
+    /^[a-zA-Z]:/.test(relativeRaw) ||
+    relativeRaw.split('/').some((seg) => seg === '..' || seg === '.')
+  ) {
+    return { ok: false, statusCode: 403, message: 'Forbidden' }
+  }
+
+  let realDistDir: string
+  try {
+    realDistDir = realpathSync(distDir)
+  } catch {
+    return { ok: false, statusCode: 404, message: 'Not found' }
+  }
+
+  const realDistPrefix = realDistDir.endsWith(sep) ? realDistDir : `${realDistDir}${sep}`
+  const candidate = resolve(realDistDir, relativeRaw)
+  if (candidate === realDistDir || !candidate.startsWith(realDistPrefix)) {
+    return { ok: false, statusCode: 403, message: 'Forbidden' }
+  }
+
+  const segments = relativeRaw.split('/').filter((seg) => seg.length > 0)
+  let current = realDistDir
+  for (const segment of segments) {
+    current = join(current, segment)
+    try {
+      if (lstatSync(current).isSymbolicLink()) {
+        return { ok: false, statusCode: 403, message: 'Forbidden' }
+      }
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
+        return { ok: false, statusCode: 404, message: 'Not found' }
+      }
+      return { ok: false, statusCode: 403, message: 'Forbidden' }
+    }
+  }
+
+  let realCandidate: string
+  try {
+    realCandidate = realpathSync(candidate)
+  } catch {
+    return { ok: false, statusCode: 404, message: 'Not found' }
+  }
+
+  if (realCandidate === realDistDir || !realCandidate.startsWith(realDistPrefix)) {
+    return { ok: false, statusCode: 403, message: 'Forbidden' }
+  }
+
+  try {
+    if (!statSync(realCandidate).isFile()) {
+      return { ok: false, statusCode: 404, message: 'Not found' }
+    }
+  } catch {
+    return { ok: false, statusCode: 404, message: 'Not found' }
+  }
+
+  const ext = extname(realCandidate).toLowerCase()
   const contentType = MIME_TYPES[ext] ?? 'application/octet-stream'
-  const contents = readFileSync(candidate)
+  return { ok: true, filePath: realCandidate, contentType }
+}
+
+function serveStaticAsset(res: ServerResponse, distDir: string, pathname: string): void {
+  const resolved = resolveStaticAsset(distDir, pathname)
+  if (!resolved.ok) {
+    res.writeHead(resolved.statusCode, { 'content-type': 'text/plain; charset=utf-8' })
+    res.end(resolved.message)
+    return
+  }
+
+  const contents = readFileSync(resolved.filePath)
   res.writeHead(200, {
-    'content-type': contentType,
+    'content-type': resolved.contentType,
     'cache-control': 'no-store',
   })
   res.end(contents)
 }
 
-async function fetchLoopbackJson(url: string, init?: { readonly method?: 'GET' | 'POST' | 'PUT'; readonly body?: unknown }): Promise<{
+async function fetchLoopbackJson(
+  url: string,
+  init?: { readonly method?: 'GET' | 'POST' | 'PUT'; readonly body?: unknown; readonly maxResponseBytes?: number },
+): Promise<{
   readonly ok: boolean
   readonly status: number
   readonly data: unknown
   readonly errorMessage: string | null
 }> {
   const method = init?.method ?? 'GET'
+  const maxResponseBytes = init?.maxResponseBytes ?? MAX_PROXY_RESPONSE_BYTES
   // Loopback server-to-server request intentionally omits any browser Origin header
   // so DashHttp.IsAllowedMutation permits local mutations.
   const headers: Record<string, string> = {}
@@ -483,7 +647,7 @@ async function fetchLoopbackJson(url: string, init?: { readonly method?: 'GET' |
     signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
   })
 
-  const text = await response.text()
+  const text = (await readBoundedResponseBuffer(response, maxResponseBytes)).toString('utf8')
   let parsed: unknown = null
   if (text.length > 0) {
     try {
@@ -507,6 +671,32 @@ async function fetchLoopbackJson(url: string, init?: { readonly method?: 'GET' |
   return { ok: response.ok, status: response.status, data: parsed, errorMessage }
 }
 
+export function buildTrayViewState(input: {
+  readonly report: Record<string, unknown> | null
+  readonly reportFetchedAt: string | null
+  readonly error: string | null
+  readonly jobs: Record<string, unknown> | null
+  readonly sharedSettings: TraySharedSettings | null
+  readonly coverage: Record<string, unknown> | null
+  readonly kyberdashVersion: { version: string; apiVersion: number } | null
+  readonly settings: TraySettings
+}): TrayViewState {
+  // Any refresh error (including initial refresh when report is still null) yields 'stale'
+  // so failure states cannot masquerade as a clean empty state.
+  const phase: TrayPhase = input.error !== null ? 'stale' : 'ready'
+  return {
+    phase,
+    report: input.report,
+    reportFetchedAt: input.reportFetchedAt,
+    error: input.error,
+    jobs: input.jobs,
+    sharedSettings: input.sharedSettings,
+    coverage: input.coverage,
+    kyberdashVersion: input.kyberdashVersion,
+    settings: { ...input.settings },
+  }
+}
+
 /**
  * Starts a same-origin Node HTTP server serving the built `dash/tray/ui/dist` bundle,
  * `GET /tray/state`, and `POST /tray/invoke` while proxying `/api/kyber/*` to the isolated
@@ -515,9 +705,15 @@ async function fetchLoopbackJson(url: string, init?: { readonly method?: 'GET' |
 export async function startTrayBridge(options: {
   readonly serverUrl: string
   readonly forceBuild?: boolean
+  readonly distDir?: string
+  readonly maxProxyResponseBytes?: number
 }): Promise<TrayBridgeHandle> {
   const serverOrigin = assertLoopbackServerOrigin(options.serverUrl)
-  const distDir = ensureTrayUiBuilt({ forceRebuild: options.forceBuild })
+  const distDir = options.distDir ?? ensureTrayUiBuilt({ forceRebuild: options.forceBuild })
+  const maxProxyBytes = options.maxProxyResponseBytes ?? MAX_PROXY_RESPONSE_BYTES
+  if (!Number.isFinite(maxProxyBytes) || !Number.isInteger(maxProxyBytes) || maxProxyBytes < 1) {
+    throw new Error(`maxProxyResponseBytes must be a positive integer, got ${String(options.maxProxyResponseBytes)}`)
+  }
   const viewPathPatterns = loadViewPathPatterns()
 
   let traySettings: TraySettings = { ...DEFAULT_TRAY_SETTINGS }
@@ -534,10 +730,8 @@ export async function startTrayBridge(options: {
   let hidePopoverCount = 0
   let quitCount = 0
 
-  const buildViewState = (): TrayViewState => {
-    const phase: TrayPhase = lastError !== null && cachedReport !== null ? 'stale' : 'ready'
-    return {
-      phase,
+  const buildViewState = (): TrayViewState =>
+    buildTrayViewState({
       report: cachedReport,
       reportFetchedAt,
       error: lastError,
@@ -545,9 +739,8 @@ export async function startTrayBridge(options: {
       sharedSettings,
       coverage,
       kyberdashVersion,
-      settings: { ...traySettings },
-    }
-  }
+      settings: traySettings,
+    })
 
   const refreshState = async (): Promise<TrayViewState> => {
     const qs = new URLSearchParams({ days: String(traySettings.windowDays) })
@@ -556,7 +749,9 @@ export async function startTrayBridge(options: {
     }
 
     try {
-      const reportRes = await fetchLoopbackJson(`${serverOrigin}/api/kyber/report?${qs.toString()}`)
+      const reportRes = await fetchLoopbackJson(`${serverOrigin}/api/kyber/report?${qs.toString()}`, {
+        maxResponseBytes: maxProxyBytes,
+      })
       if (!reportRes.ok || !isPlainObject(reportRes.data)) {
         lastError = reportRes.errorMessage ?? `Unexpected /api/kyber/report response (${reportRes.status})`
         jobs = null
@@ -579,10 +774,10 @@ export async function startTrayBridge(options: {
     }
 
     const [jobsRes, settingsRes, coverageRes, versionRes] = await Promise.all([
-      fetchLoopbackJson(`${serverOrigin}/api/kyber/jobs`).catch(() => null),
-      fetchLoopbackJson(`${serverOrigin}/api/kyber/settings`).catch(() => null),
-      fetchLoopbackJson(`${serverOrigin}/api/kyber/coverage`).catch(() => null),
-      fetchLoopbackJson(`${serverOrigin}/api/kyber/version`).catch(() => null),
+      fetchLoopbackJson(`${serverOrigin}/api/kyber/jobs`, { maxResponseBytes: maxProxyBytes }).catch(() => null),
+      fetchLoopbackJson(`${serverOrigin}/api/kyber/settings`, { maxResponseBytes: maxProxyBytes }).catch(() => null),
+      fetchLoopbackJson(`${serverOrigin}/api/kyber/coverage`, { maxResponseBytes: maxProxyBytes }).catch(() => null),
+      fetchLoopbackJson(`${serverOrigin}/api/kyber/version`, { maxResponseBytes: maxProxyBytes }).catch(() => null),
     ])
 
     jobs = jobsRes?.ok && isPlainObject(jobsRes.data) ? jobsRes.data : null
@@ -591,7 +786,7 @@ export async function startTrayBridge(options: {
       isPlainObject(settingsRes.data) &&
       typeof settingsRes.data['folderImportScheduled'] === 'boolean' &&
       typeof settingsRes.data['jobsPaused'] === 'boolean' &&
-      typeof settingsRes.data['refreshCadenceMinutes'] === 'number' &&
+      isValidRefreshCadenceMinutes(settingsRes.data['refreshCadenceMinutes']) &&
       typeof settingsRes.data['receiverHosted'] === 'boolean'
         ? {
             folderImportScheduled: settingsRes.data['folderImportScheduled'],
@@ -605,7 +800,8 @@ export async function startTrayBridge(options: {
       versionRes?.ok &&
       isPlainObject(versionRes.data) &&
       typeof versionRes.data['version'] === 'string' &&
-      typeof versionRes.data['apiVersion'] === 'number'
+      versionRes.data['version'].trim() !== '' &&
+      isValidApiVersion(versionRes.data['apiVersion'])
         ? { version: versionRes.data['version'], apiVersion: versionRes.data['apiVersion'] }
         : null
 
@@ -675,9 +871,23 @@ export async function startTrayBridge(options: {
         if (!isPlainObject(patch)) {
           throw new Error('set_shared_settings patch must be a JSON object')
         }
+        if (
+          patch['refreshCadenceMinutes'] !== undefined &&
+          !isValidRefreshCadenceMinutes(patch['refreshCadenceMinutes'])
+        ) {
+          throw new Error(
+            `refreshCadenceMinutes must be an integer between ${MIN_CADENCE_MINUTES} and ${MAX_CADENCE_MINUTES}`,
+          )
+        }
+        for (const boolKey of ['folderImportScheduled', 'jobsPaused', 'receiverHosted'] as const) {
+          if (patch[boolKey] !== undefined && typeof patch[boolKey] !== 'boolean') {
+            throw new Error(`${boolKey} must be a boolean`)
+          }
+        }
         const res = await fetchLoopbackJson(`${serverOrigin}/api/kyber/settings`, {
           method: 'PUT',
           body: patch,
+          maxResponseBytes: maxProxyBytes,
         })
         if (!res.ok) {
           throw new Error(res.errorMessage ?? `set_shared_settings failed (${res.status})`)
@@ -814,6 +1024,10 @@ export async function startTrayBridge(options: {
       }
 
       if (pathname.startsWith('/api/kyber/')) {
+        if (pathname.includes('\0')) {
+          sendJson(res, 400, { error: 'Invalid /api/kyber path' })
+          return
+        }
         let decodedApiPath: string
         try {
           decodedApiPath = decodeURIComponent(pathname)
@@ -821,24 +1035,42 @@ export async function startTrayBridge(options: {
           sendJson(res, 400, { error: 'Invalid /api/kyber path' })
           return
         }
-        if (decodedApiPath.split('/').some((seg) => seg === '..')) {
+        if (decodedApiPath.includes('\0') || decodedApiPath.split('/').some((seg) => seg === '..')) {
           sendJson(res, 400, { error: 'Invalid /api/kyber path' })
           return
         }
         const targetUrl = `${serverOrigin}${pathname}${requestUrl.search}`
         const bodyText = method === 'GET' || method === 'HEAD' ? undefined : await readRequestBody(req)
-        const upstreamRes = await fetch(targetUrl, {
-          method,
-          headers: bodyText !== undefined ? { 'content-type': 'application/json' } : {},
-          ...(bodyText !== undefined ? { body: bodyText } : {}),
-          signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-        })
-        const upstreamBody = await upstreamRes.text()
+        let upstreamRes: Response
+        try {
+          upstreamRes = await fetch(targetUrl, {
+            method,
+            headers: bodyText !== undefined ? { 'content-type': 'application/json' } : {},
+            ...(bodyText !== undefined ? { body: bodyText } : {}),
+            signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+          })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          sendJson(res, 502, { error: `Upstream request failed: ${message}` })
+          return
+        }
+        let upstreamBody: Buffer
+        try {
+          upstreamBody = await readBoundedResponseBuffer(upstreamRes, maxProxyBytes)
+        } catch (error) {
+          if (error instanceof UpstreamResponseTooLargeError) {
+            sendJson(res, 502, { error: error.message })
+            return
+          }
+          const message = error instanceof Error ? error.message : String(error)
+          sendJson(res, 502, { error: `Upstream response failed: ${message}` })
+          return
+        }
         res.writeHead(upstreamRes.status, {
           'content-type': upstreamRes.headers.get('content-type') ?? 'application/json; charset=utf-8',
           'cache-control': 'no-store',
         })
-        res.end(upstreamBody)
+        res.end(upstreamBody.length > 0 ? upstreamBody : undefined)
         return
       }
 
@@ -850,6 +1082,10 @@ export async function startTrayBridge(options: {
       res.writeHead(405, { 'content-type': 'text/plain; charset=utf-8' })
       res.end('Method not allowed')
     } catch (error) {
+      if (error instanceof RequestBodyTooLargeError) {
+        sendJson(res, 413, { ok: false, error: { kind: 'runtime', message: error.message } })
+        return
+      }
       const message = error instanceof Error ? error.message : String(error)
       sendJson(res, 500, { ok: false, error: { kind: 'runtime', message } })
     }
@@ -887,16 +1123,7 @@ export async function startTrayBridge(options: {
     url: bridgeUrl,
     serverUrl: serverOrigin,
     distDir,
-    getState: async (opts) => {
-      const suffix = opts?.refresh ? '?refresh=1' : ''
-      const res = await fetch(`${bridgeUrl}/tray/state${suffix}`, {
-        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-      })
-      if (!res.ok) {
-        throw new Error(`GET /tray/state failed (${res.status})`)
-      }
-      return (await res.json()) as TrayBridgeStateSnapshot
-    },
+    getState: async (opts) => fetchTrayBridgeState(bridgeUrl, { refresh: opts?.refresh, maxBytes: maxProxyBytes }),
     refreshState,
     stop: async () => {
       if (stopped) {
@@ -912,6 +1139,154 @@ export async function startTrayBridge(options: {
   }
 }
 
+function isTrayPhase(value: unknown): value is TrayPhase {
+  return value === 'setup' || value === 'starting' || value === 'ready' || value === 'stale'
+}
+
+function isNullablePlainObject(value: unknown): value is Record<string, unknown> | null {
+  return value === null || isPlainObject(value)
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === 'string'
+}
+
+function isNonNegativeInt(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value >= 0
+}
+
+function isTraySettings(value: unknown): value is TraySettings {
+  return (
+    isPlainObject(value) &&
+    typeof value['harness'] === 'string' &&
+    typeof value['windowDays'] === 'number' &&
+    Number.isFinite(value['windowDays']) &&
+    Number.isInteger(value['windowDays']) &&
+    value['windowDays'] >= 1 &&
+    isFraction(value['attentionThreshold']) &&
+    isFraction(value['criticalThreshold']) &&
+    typeof value['launchAtLogin'] === 'boolean'
+  )
+}
+
+function isTraySharedSettings(value: unknown): value is TraySharedSettings {
+  return (
+    isPlainObject(value) &&
+    typeof value['folderImportScheduled'] === 'boolean' &&
+    typeof value['jobsPaused'] === 'boolean' &&
+    isValidRefreshCadenceMinutes(value['refreshCadenceMinutes']) &&
+    typeof value['receiverHosted'] === 'boolean'
+  )
+}
+
+function isKyberdashVersionRecord(value: unknown): value is { version: string; apiVersion: number } {
+  return (
+    isPlainObject(value) &&
+    typeof value['version'] === 'string' &&
+    value['version'].trim() !== '' &&
+    isValidApiVersion(value['apiVersion'])
+  )
+}
+
+function isTrayViewState(value: unknown): value is TrayViewState {
+  if (!isPlainObject(value)) {
+    return false
+  }
+  if (!isTrayPhase(value['phase'])) {
+    return false
+  }
+  if (!isNullablePlainObject(value['report'])) {
+    return false
+  }
+  if (!isNullableString(value['reportFetchedAt']) || !isNullableString(value['error'])) {
+    return false
+  }
+  if (!isNullablePlainObject(value['jobs']) || !isNullablePlainObject(value['coverage'])) {
+    return false
+  }
+  if (value['sharedSettings'] !== null && !isTraySharedSettings(value['sharedSettings'])) {
+    return false
+  }
+  if (value['kyberdashVersion'] !== null && !isKyberdashVersionRecord(value['kyberdashVersion'])) {
+    return false
+  }
+  return isTraySettings(value['settings'])
+}
+
+function isTrayInvocationRecord(value: unknown): value is TrayInvocationRecord {
+  return (
+    isPlainObject(value) &&
+    typeof value['cmd'] === 'string' &&
+    isPlainObject(value['args']) &&
+    typeof value['ok'] === 'boolean' &&
+    (value['error'] === undefined || typeof value['error'] === 'string') &&
+    typeof value['at'] === 'string'
+  )
+}
+
+function isOpenedViewRecord(value: unknown): value is OpenedViewRecord {
+  return (
+    isPlainObject(value) &&
+    typeof value['view'] === 'string' &&
+    typeof value['url'] === 'string' &&
+    typeof value['at'] === 'string'
+  )
+}
+
+export function parseTrayBridgeStateSnapshot(raw: unknown): TrayBridgeStateSnapshot {
+  if (!isPlainObject(raw)) {
+    throw new Error('Invalid /tray/state payload: expected a JSON object')
+  }
+  if (!isTrayViewState(raw['viewState'])) {
+    throw new Error('Invalid /tray/state payload: malformed viewState')
+  }
+  const rawInvocations = raw['invocations']
+  if (!Array.isArray(rawInvocations) || !rawInvocations.every(isTrayInvocationRecord)) {
+    throw new Error('Invalid /tray/state payload: malformed invocations array')
+  }
+  const rawOpenedViews = raw['openedViews']
+  if (!Array.isArray(rawOpenedViews) || !rawOpenedViews.every(isOpenedViewRecord)) {
+    throw new Error('Invalid /tray/state payload: malformed openedViews array')
+  }
+  if (!isNonNegativeInt(raw['hidePopoverCount'])) {
+    throw new Error('Invalid /tray/state payload: malformed hidePopoverCount')
+  }
+  if (!isNonNegativeInt(raw['quitCount'])) {
+    throw new Error('Invalid /tray/state payload: malformed quitCount')
+  }
+
+  return {
+    viewState: raw['viewState'],
+    invocations: rawInvocations,
+    openedViews: rawOpenedViews,
+    hidePopoverCount: raw['hidePopoverCount'],
+    quitCount: raw['quitCount'],
+  }
+}
+
+export async function fetchTrayBridgeState(
+  bridgeUrl: string,
+  options?: { readonly refresh?: boolean; readonly maxBytes?: number },
+): Promise<TrayBridgeStateSnapshot> {
+  const origin = assertLoopbackServerOrigin(bridgeUrl)
+  const suffix = options?.refresh ? '?refresh=1' : ''
+  const maxBytes = options?.maxBytes ?? MAX_PROXY_RESPONSE_BYTES
+  const res = await fetch(`${origin}/tray/state${suffix}`, {
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+  })
+  if (!res.ok) {
+    throw new Error(`GET /tray/state failed (${res.status})`)
+  }
+  const rawText = (await readBoundedResponseBuffer(res, maxBytes)).toString('utf8')
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawText)
+  } catch (error) {
+    throw new Error('GET /tray/state returned invalid JSON', { cause: error })
+  }
+  return parseTrayBridgeStateSnapshot(parsed)
+}
+
 /**
  * Installs a complete `@tauri-apps/api` v2 `window.__TAURI_INTERNALS__` +
  * `window.__TAURI_EVENT_PLUGIN_INTERNALS__` bridge in the Playwright page before page scripts run.
@@ -924,17 +1299,6 @@ export async function installTrayTauriBridge(page: Page, bridgeUrl: string): Pro
       readonly fn: (payload: unknown) => void
       readonly once: boolean
     }
-
-    type InvokeResponse =
-      | {
-          readonly ok: true
-          readonly result: unknown
-          readonly emittedEvents?: ReadonlyArray<{ readonly event: string; readonly payload: unknown }>
-        }
-      | {
-          readonly ok: false
-          readonly error?: { readonly kind?: string; readonly message?: string }
-        }
 
     type TauriWindow = Window & {
       isTauri?: boolean
@@ -1065,17 +1429,43 @@ export async function installTrayTauriBridge(page: Page, bridgeUrl: string): Pro
           body: JSON.stringify({ cmd, args }),
         })
 
-        const payload = (await response.json()) as InvokeResponse
-        if (!response.ok || !payload.ok) {
-          const msg = !payload.ok && payload.error?.message ? payload.error.message : `Tray command ${cmd} failed (${response.status})`
+        const rawPayload: unknown = await response.json().catch(() => null)
+        const payloadObj =
+          typeof rawPayload === 'object' && rawPayload !== null && !Array.isArray(rawPayload)
+            ? (rawPayload as Record<string, unknown>)
+            : null
+        const isOk = payloadObj !== null && payloadObj['ok'] === true
+        if (!response.ok || !isOk) {
+          const errorObj =
+            payloadObj !== null &&
+            typeof payloadObj['error'] === 'object' &&
+            payloadObj['error'] !== null &&
+            !Array.isArray(payloadObj['error'])
+              ? (payloadObj['error'] as Record<string, unknown>)
+              : null
+          const msg =
+            errorObj !== null && typeof errorObj['message'] === 'string'
+              ? errorObj['message']
+              : `Tray command ${cmd} failed (${response.status})`
           throw new Error(msg)
         }
 
-        for (const emitted of payload.emittedEvents ?? []) {
-          dispatchEvent(emitted.event, emitted.payload)
+        const emittedRaw = payloadObj['emittedEvents']
+        if (Array.isArray(emittedRaw)) {
+          for (const emitted of emittedRaw) {
+            if (
+              typeof emitted === 'object' &&
+              emitted !== null &&
+              !Array.isArray(emitted) &&
+              typeof (emitted as Record<string, unknown>)['event'] === 'string'
+            ) {
+              const entry = emitted as { event: string; payload?: unknown }
+              dispatchEvent(entry.event, entry.payload)
+            }
+          }
         }
 
-        return payload.result
+        return payloadObj['result']
       },
     }
   }, bridgeOrigin)
