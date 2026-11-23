@@ -135,14 +135,15 @@ public sealed class ArbiterUninstallCommandSeamTests
         _credentials.Seed(ArbiterKeyResolver.TypeSafeOrigin, "typesafe-key");
         FakeArbiterUserSettings userSettings = new()
         {
-            Override = (_, _) => throw new YamlDotNet.Core.YamlException("the test override is malformed"),
+            Override = (_, home) => throw new YamlDotNet.Core.YamlException(
+                $"[KW-ARB-CONFIG-001] The user override '{ArbiterUserSettings.GetPath(home)}' is malformed in this test."),
         };
 
         int exit = Run(new ArbiterUninstallSettings { Target = "claude", RemoveKey = true }, userSettings);
 
         Assert.Equal(1, exit);
         Assert.Empty(_credentials.Deletes);
-        Assert.Contains("malformed", _console.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(ArbiterUserSettings.GetPath(Home), _console.Output, StringComparison.Ordinal);
         Assert.Equal("typesafe-key", _credentials.Read(ArbiterKeyResolver.TypeSafeOrigin));
     }
 

@@ -239,7 +239,8 @@ public sealed class ArbiterInstallServiceSeamsTests
 
         FakeArbiterUserSettings malformed = new()
         {
-            Override = (_, _) => throw new YamlDotNet.Core.YamlException("the test override turned malformed after prepare"),
+            Override = (_, home) => throw new YamlDotNet.Core.YamlException(
+                $"[KW-ARB-CONFIG-001] The user override '{ArbiterUserSettings.GetPath(home)}' is malformed in this test."),
         };
         ArbiterInstallService applyService = Service(
             malformed,
@@ -250,7 +251,7 @@ public sealed class ArbiterInstallServiceSeamsTests
 
         Assert.Equal(1, applied.ExitCode);
         ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
-        Assert.Contains("malformed", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(ArbiterUserSettings.GetPath(Home), error.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("no key resolves", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
