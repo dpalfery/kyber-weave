@@ -2,7 +2,7 @@
 id: plans/2026-11-23-arbiter-install-effective-provider-endpoint
 title: Arbiter install and uninstall resolve the effective provider endpoint
 doc-type: plan
-status: current
+status: archived
 component: KyberArbiter
 owner: dpalfery
 last-reviewed: 2026-11-23
@@ -14,7 +14,7 @@ impact-components:
 
 # Arbiter install and uninstall resolve the effective provider endpoint
 
-**Status: Ready, 2026-11-23.**
+**Status: Archived, 2026-11-23.**
 
 ## Problem and goal
 
@@ -188,14 +188,14 @@ plan-authoring contract.
 
 | ID | Destination |
 |---|---|
-| D1 | [Install and uninstall key origin](../kyber-arbiter/runbook.md#setup-doctor-audit) |
-| D2 | [Install and uninstall key origin](../kyber-arbiter/runbook.md#setup-doctor-audit) |
-| D3 | [Environment-key origin binding](../kyber-arbiter/architecture.md#configuration) |
-| D4 | [Install and uninstall key origin](../kyber-arbiter/runbook.md#setup-doctor-audit) |
+| D1 | [Install and uninstall key origin](../../kyber-arbiter/runbook.md#setup-doctor-audit) |
+| D2 | [Install and uninstall key origin](../../kyber-arbiter/runbook.md#setup-doctor-audit) |
+| D3 | [Environment-key origin binding](../../kyber-arbiter/architecture.md#configuration) |
+| D4 | [Install and uninstall key origin](../../kyber-arbiter/runbook.md#setup-doctor-audit) |
 | D5 | Documentation waiver — one-task organization was transient execution sequencing with no surviving architectural, operational or behavioral invariant |
 | D6 | Documentation waiver — commit mechanics were transient process with no surviving invariant |
 | AP1 | Documentation waiver — the approval is recorded in the Decisions table above, which the archive preserves; no separate lasting record is needed |
-| KyberArbiter | [Kyber Arbiter runbook](../kyber-arbiter/runbook.md#setup-doctor-audit) and [Kyber Arbiter architecture](../kyber-arbiter/architecture.md#configuration) — the two Design harvest rows land in the sections those links name |
+| KyberArbiter | [Kyber Arbiter runbook](../../kyber-arbiter/runbook.md#setup-doctor-audit) and [Kyber Arbiter architecture](../../kyber-arbiter/architecture.md#configuration) — the two Design harvest rows land in the sections those links name |
 
 no ADR — ADR waiver: applies the established per-user-override precedence and the ArbiterKeyResolver origin binding to two more surfaces; no new boundary, dependency or contract.
 

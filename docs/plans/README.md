@@ -64,9 +64,7 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-| Plan | Status | Date | Goal |
-|---|---|---|---|
-| [2026-11-23-arbiter-install-effective-provider-endpoint.md](2026-11-23-arbiter-install-effective-provider-endpoint.md) | Ready | 2026-11-23 | Make `arbiter install` and `arbiter uninstall --remove-key` derive the endpoint, its origin and every key lookup from the effective provider (host config plus the per-user override), keeping the environment key bound to the TypeSafe or override origin (issue 664) |
+No plans are open.
 
 ## Archived Plans
 
