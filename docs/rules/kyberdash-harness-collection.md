@@ -43,7 +43,7 @@ zero, never silently skipped, and never labelled complete.
 
 ### Per-harness OTLP telemetry collection matrix
 
-The isolated multi-turn OTLP Playwright suites (`dash/e2e/otel-web-dashboard.spec.ts` and `dash/e2e/otel-tray-dashboard.spec.ts`, fed by `dash/e2e/otel-harness-payloads.ts`) verify end-to-end `/v1/traces` and `/v1/logs` ingestion against both Web Dashboard and Tray UI projections across all 7 stored OTLP harnesses plus `gemini` exclusion:
+The isolated multi-turn OTLP Playwright suites (`dash/e2e/otel-web-dashboard.spec.ts` and `dash/e2e/otel-tray-dashboard.spec.ts`, fed by `dash/e2e/otel-harness-payloads.ts`) verify end-to-end `/v1/traces` ingestion across all 7 stored OTLP harnesses (`claude-code`, `opencode`, `droid`, `codex`, `copilot`, `pi`, `antigravity`) plus `gemini` exclusion against both Web Dashboard and Tray UI projections, and post `/v1/logs` payloads for the 2 harnesses whose fixtures carry native OTLP logs (`claude-code` and `codex`; the remaining fixtures carry `logPayload: null`):
 
 | Harness | OTLP signals | Measured in UI | Explicit `not_measurable` / `—` gap contract |
 |---|---|---|---|

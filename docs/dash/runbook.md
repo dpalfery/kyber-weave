@@ -1591,13 +1591,13 @@ tray uses, and it is not the isolated path. Which specs have no sanctioned invoc
 
 #### Isolated Playwright OTLP suites (Web Dashboard and Tray UI)
 
-Two isolated OTLP end-to-end suites verify live `/v1/traces` and `/v1/logs` ingestion (up to 12 turns per harness from `dash/e2e/otel-harness-payloads.ts` across `claude-code`, `opencode`, `droid`, `codex`, `copilot`, `pi`, and `antigravity`, plus `gemini` exclusion) against an ephemeral `kyberdash web --no-open --port 0 --db <temp> --state-dir <temp>` instance (`startIsolatedServer` and `waitForOtlpIngest` in `dash/e2e/harness-collection-world.ts`):
+Two isolated OTLP end-to-end suites verify live `/v1/traces` ingestion across all 7 stored harnesses (`claude-code`, `opencode`, `droid`, `codex`, `copilot`, `pi`, and `antigravity`, plus `gemini` exclusion, up to 12 turns per harness from `dash/e2e/otel-harness-payloads.ts`) and `/v1/logs` ingestion for the 2 harnesses with native OTLP log payloads (`claude-code` and `codex`; the remaining 5 stored fixtures and `gemini` have `logPayload: null` and are never posted to `/v1/logs`), against an ephemeral `kyberdash web --no-open --port 0 --db <temp> --state-dir <temp>` instance (`startIsolatedServer` and `waitForOtlpIngest` in `dash/e2e/harness-collection-world.ts`):
 
 - **Web Dashboard OTLP suite (`dash/e2e/otel-web-dashboard.spec.ts`):**
   ```bash
   npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/otel-web-dashboard.spec.ts
   ```
-  Posts multi-turn OTLP payloads to `/v1/traces` and `/v1/logs`, drains `/healthz` (`pendingCount == 0`) and `/api/kyber/{sessions,harnesses,coverage}`, and validates Context Doctor, Harness Detail, Sessions, and every Agent Session Dashboard section plus explicit `not_measurable` / `—` gaps.
+  Posts multi-turn OTLP trace payloads to `/v1/traces` (and log payloads to `/v1/logs` for `claude-code` and `codex`), drains `/healthz` (`pendingCount == 0`) and `/api/kyber/{sessions,harnesses,coverage}`, and validates Context Doctor, Harness Detail, Sessions, and every Agent Session Dashboard section plus explicit `not_measurable` / `—` gaps.
 - **Tray UI OTLP suite (`dash/e2e/otel-tray-dashboard.spec.ts`):**
   Requires `dash/tray/ui/node_modules` (`npm --prefix dash/tray/ui ci`). The bridge (`dash/e2e/otel-tray-bridge.ts`) serves `dash/tray/ui/dist` (building it with `npm --prefix dash/tray/ui run build` under a 120 s `SIGKILL` bound if absent), proxies `/tray/invoke` and `/api/kyber/*` over loopback HTTP **without** an `Origin` header (complying with `DashHttp.IsAllowedMutation`), and injects a `window.__TAURI_INTERNALS__` + `window.__TAURI_EVENT_PLUGIN_INTERNALS__` bridge supporting all 9 Tauri IPC commands and `view-state-changed` events:
   ```bash
