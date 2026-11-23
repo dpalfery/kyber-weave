@@ -1,0 +1,85 @@
+schema-version: 2
+plan: docs/plans/2026-11-23-arbiter-install-effective-provider-endpoint.md
+execution-digest: 2727eb68947c6d56e42bb5634e09347dfbdac621b02c0a98f5e3f35f1309cda1
+tasks:
+  - id: T1
+    capabilities: C# development in the Application and Cli layers with xUnit tests over the shared in-memory fakes; comfortable with constructor-injected seams and the repository's fake/contract-suite conventions.
+    depends-on: []
+    files:
+      - src/KyberWeave.Application/Arbiter/ArbiterInstallService.cs
+      - src/KyberWeave.Domain/Arbiter/ArbiterConfig.cs
+      - src/KyberWeave.Application/Arbiter/Credentials/ArbiterKeyResolver.cs
+      - src/KyberWeave.Cli/Commands/Arbiter/ArbiterUninstallCommand.cs
+      - tests/KyberWeave.Application.Tests/Arbiter/ArbiterInstallServiceSeamsTests.cs
+      - tests/KyberWeave.Testing/Fakes/FakeCredentialStore.cs
+      - tests/KyberWeave.Cli.Tests/Arbiter/ArbiterInstallCommandSeamTests.cs
+      - tests/KyberWeave.Cli.Tests/ArbiterUninstallCommandSeamTests.cs
+      - tests/KyberWeave.Cli.Tests/Arbiter/ArbiterUninstallCommandInMemoryTests.cs
+    session: arbiter-effective-endpoint
+    prompt: >
+      Task T1: Effective-provider endpoint and key origin in install and uninstall
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Make `arbiter install` and `arbiter uninstall --remove-key` derive the endpoint, its origin and every key lookup from the effective provider (host configuration plus the per-user override), keeping the environment key bound to the TypeSafe origin or the override origin.
+
+      - **Capabilities:** C# development in the Application and Cli layers with xUnit tests over the shared in-memory fakes; comfortable with constructor-injected seams and the repository's fake/contract-suite conventions.
+
+      - **Difficulty:** medium
+
+      - **Technology:** csharp
+
+      - **Session:** `arbiter-effective-endpoint`
+
+      - **Depends on:** none
+
+      - **Files:**
+        - `src/KyberWeave.Application/Arbiter/ArbiterInstallService.cs`: `ArbiterInstallService` (primary constructor) — add `IArbiterKeyService keys` (already registered; `ArbiterStatusCommand` and `ArbiterDoctorService` consume it). `ReadExistingProviderKind` — generalize to one read returning the loaded repository `KyberWeaveConfig`, the configured kind, and the merged effective provider (for example `ReadExistingProvider`), still called inside `Prepare`'s existing `catch (YamlDotNet.Core.YamlException)` block. `Prepare` — derive `endpoint` from the effective provider (trimmed when non-blank, else the pinned default endpoint declared in `src/KyberWeave.Domain/Arbiter/ArbiterConfig.cs`); delete the second host-config load. `ResolveEndpoint` — remove, superseded by the single effective-provider read. `ResolveStoredKey` — delegate to `keys.TryResolveKey`, passing the endpoint and the un-merged repository configuration the generalized read returned: `ArbiterKeyService.UserOverrideEndpoint` derives the env-key binding by comparing the merged endpoint against the repository's, so passing a merged config would return null and disable the env key for the override origin (tests 2 and 3 pin this). `Verify` — replace the static resolver call, declared in `src/KyberWeave.Application/Arbiter/Credentials/ArbiterKeyResolver.cs`, with `keys.TryResolveKey` over the plan endpoint and the host configuration this method already loads, that configuration being the un-merged repository one.
+        - `src/KyberWeave.Cli/Commands/Arbiter/ArbiterUninstallCommand.cs`: `ArbiterUninstallCommand` (primary constructor) — add `IArbiterUserSettings userSettings`. `RemoveKey` — after the existing resolver load of the host configuration, apply the per-user override to the loaded repository provider inside a `catch (YamlDotNet.Core.YamlException)` that prints the escaped message and returns false without deleting; derive the endpoint from the merged provider (trimmed when non-blank, else `ArbiterSetupCommand.TypeSafeEndpoint` as today), then the existing origin derivation, `AnotherTargetIsDeployed` warning and `credentials.Delete(origin)` stay.
+        - `tests/KyberWeave.Application.Tests/Arbiter/ArbiterInstallServiceSeamsTests.cs`: extend the `Service` fixture to take an `IArbiterUserSettings` (default the existing `NoOverride`) and `IArbiterKeyService`; swap the local `NoCredentials` stub for the shared `FakeCredentialStore` (`tests/KyberWeave.Testing/Fakes/FakeCredentialStore.cs`, visible to this project — `Seed` per origin, `Reads`/`Writes`/`Deletes` recording; create no new fake); add tests 1–5 from the Test contract; update direct constructions of the service for the new parameter.
+        - `tests/KyberWeave.Cli.Tests/Arbiter/ArbiterInstallCommandSeamTests.cs`: add test 6 (the issue's dry-run repro at the command seam).
+        - `tests/KyberWeave.Cli.Tests/ArbiterUninstallCommandSeamTests.cs` (class `KyberWeave.Tests.ArbiterUninstallCommandSeamTests`; the file sits at the test project's root, not inside its Arbiter subfolder): add tests 7 and 8 beside the existing `Execute_RemoveKey_DeletesTheStoredKeyForTheEndpointOrigin`; the `Run` fixture constructs the command directly, so it passes the new `IArbiterUserSettings` (a `FakeArbiterUserSettings` or a no-override stub) and seeds `_credentials`, the file's existing `FakeCredentialStore` field.
+        - `tests/KyberWeave.Cli.Tests/Arbiter/ArbiterUninstallCommandInMemoryTests.cs` and any other fixture the compiler names: update `ArbiterUninstallCommand`/`ArbiterInstallService` constructions for the new dependencies; existing tests keep their assertions.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <agent> --task T1 -- --red` (after the tests are written, before the implementation)
+        - `kyber-weave review gates . --agent <agent> --task T1`
+      - **Acceptance:**
+        - The Test contract's three filtered runs each report a non-zero test count and all eight tests pass with no weakened assertion.
+        - The reported scenario — host config `kind: none`, per-user override `systemone` + `https://openrouter.ai/api/v1`, key stored only under `https://openrouter.ai`, `--provider systemone`, dry run — completes with exit 0 and no `KW-ARB-KEY-001` (test 6).
+        - A repository-configured endpoint never receives the environment key (test 3 green).
+        - A malformed per-user override stops install with one `ArbiterInstallError` (exit 1) and stops `--remove-key` with an error line, deleting nothing (tests 4 and 8 green).
+        - The omitted-`--provider` flow's output and key behavior are unchanged (test 5 green).
+        - No sibling in the install/uninstall key path reads host configuration alone.
+        - Standards to fetch before writing code: the `csharp` and `test` bundles via `docs_get_coding_standard_for_technology`.
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T1
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T1 | `tests/KyberWeave.Application.Tests/Arbiter/ArbiterInstallServiceSeamsTests.cs` (extend), `tests/KyberWeave.Cli.Tests/Arbiter/ArbiterInstallCommandSeamTests.cs` (extend), `tests/KyberWeave.Cli.Tests/ArbiterUninstallCommandSeamTests.cs` (extend; at the test project's root, not inside its Arbiter subfolder); fixture: the shared `FakeCredentialStore` (`tests/KyberWeave.Testing/Fakes/FakeCredentialStore.cs` — no new fake) | `dotnet build KyberWeave.sln -c Release && dotnet test tests/KyberWeave.Application.Tests/KyberWeave.Application.Tests.csproj -c Release --no-build --filter 'FullyQualifiedName~ArbiterInstallServiceSeamsTests' && dotnet test tests/KyberWeave.Cli.Tests/KyberWeave.Cli.Tests.csproj -c Release --no-build --filter 'FullyQualifiedName~ArbiterInstallCommandSeamTests' && dotnet test tests/KyberWeave.Cli.Tests/KyberWeave.Cli.Tests.csproj -c Release --no-build --filter 'FullyQualifiedName~ArbiterUninstallCommandSeamTests'` (three filtered runs; each must report a non-zero test count — exit 8 means the filter matched nothing) | 1. `Prepare_SystemoneWithOverrideEndpoint_ResolvesTheKeyFromTheOverrideOrigin`: host config `kind: none`, `FakeArbiterUserSettings` with `systemone` + `https://openrouter.ai/api/v1`, credential fake seeded only under `https://openrouter.ai`, `ProviderOption="systemone"`, `DryRun=true`, no key input — exit 0, plan endpoint and origin are the override's, no `KW-ARB-KEY-001`. 2. `Prepare_OverrideEndpoint_ServesTheEnvironmentKeyForTheOverrideOriginOnly`: same override, empty store, env key set — succeeds with the override endpoint/origin (the env remedy line's promise; also pins that `TryResolveKey` receives the un-merged repository config, the input its env-key binding is computed from). 3. `Prepare_RepositoryEndpoint_NeverServesTheEnvironmentKey`: no override, host config names `https://repo.example.net/v1`, env key set, empty store, `--provider systemone` — `KW-ARB-KEY-001` naming that origin (guard: the env key never serves a repository origin). 4. `Prepare_MalformedOverride_StopsWithOneError`: `ApplyTo` throws `YamlException` — exit 1, one `ArbiterInstallError`, null plan (guard: fail closed through the restructure). 5. `Prepare_OmittedProvider_KeepsNoneAndSkipsTheKey`: override present, `ProviderOption` null — provider line `none (kept...)` with the precedence note, no key demanded (guard: D4). 6. `Install_SystemoneWithOverrideEndpointAndStoredKey_CompletesTheDryRun`: the issue's exact repro at the command seam — `--target factory --provider systemone --dry-run`, key stored only under the override origin — exit 0, no `KW-ARB-KEY-001`. 7. `Execute_RemoveKey_DeletesTheKeyForTheOverrideEndpointOrigin`: override endpoint set, keys seeded under both origins — the override origin's key is deleted, the TypeSafe key is untouched, output names the override origin. 8. `Execute_RemoveKey_MalformedOverride_DeletesNothing`: malformed override — error line, no deletion (guard). Left out, with reasons: a loopback override endpoint (the `needsKey`-false path is unchanged logic); a project-scope install variant (the override applies identically on both load paths; one scope keeps the suite inside its budget); a post-`Apply` `Verify` case (its key resolution is the same `TryResolveKey` delegation, whose binding `ArbiterKeyResolutionTests.EnvKeyHonoredOnlyForUserOverrideOrigin` already pins). | Tests 1, 2 (on the endpoint/origin assertions), 6 and 7 fail on the current code: 1 and 6 with exit 2 and `KW-ARB-KEY-001` for `https://api.typesafe.ai`; 7 deletes the TypeSafe key instead. Tests 3, 4, 5 and 8 are guards that are green today and must stay green — 3 and 4 exist so the fix cannot regress the boundary or the fail-closed path. | All eight pass with no weakened assertion, a non-zero test count from each of the three filtered runs, and the guards unchanged. |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D4 | Does the override's kind change whether install demands a key? | No. `needsKey` stays keyed on the CLI-or-existing provider kind (Prepare :92-93). Only endpoint, origin and key resolution become override-aware. | The issue reports the omitted-`--provider` flow as working (`none (kept...)` plus the precedence note) and asks only for the endpoint/origin fix; keying `needsKey` on the override kind would change that flow's behavior, which the request did not ask for. Guard test `Prepare_OmittedProvider_KeepsNoneAndSkipsTheKey` pins it. | ANSWERED — autonomous (issue body) |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-medium
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+    technology: csharp
+worker-roster: tiered
