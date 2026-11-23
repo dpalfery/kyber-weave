@@ -184,6 +184,8 @@ export interface KyberSessionSummary {
   models?: string[]
   problems?: number
   subagents?: KyberSessionSummary[]
+  /** How many subagents the session has in total; the first page rides inline in `subagents`. */
+  subagent_total?: number
   rollup?: SessionRollup
 }
 
@@ -383,16 +385,103 @@ export function findContextTurn<T extends TurnIdentity>(
   return findByIdentity(rows, oneBasedTurn, contextTurnNumber, (i) => i + 1)
 }
 
-export async function fetchKyberSessions(harness?: string | null): Promise<KyberSessionSummary[]> {
-  const url = harness ? `/api/kyber/sessions?harness=${encodeURIComponent(harness)}` : '/api/kyber/sessions'
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Request failed (${res.status}) for ${url}`)
-  const json = (await res.json()) as { sessions: KyberSessionSummary[] }
-  let list = json.sessions ?? []
-  if (harness) {
-    list = list.filter((s) => s.harness?.toLowerCase() === harness.toLowerCase())
+export const KYBER_SESSIONS_PAGE_LIMIT = 100
+
+/** The subagents a root previews inline and a subagent page holds. */
+export const KYBER_SUBAGENTS_PAGE_LIMIT = 25
+
+/**
+ * One paged envelope a `/api/kyber` paging route serves: the page's rows
+ * under the engine's `data` key (and the route's own items key beside it),
+ * plus the window it answered under.
+ *
+ * A 2xx body without these members is a broken server, not an empty list:
+ * the validator refuses it, and the consumer renders the error state.
+ */
+export type KyberPage<T> = {
+  /** The page's rows, the generic name consumers read. */
+  entries: T[]
+  /** The same rows under the engine's envelope key. */
+  data: T[]
+  /** How many rows the whole list holds, across every page. */
+  total: number
+  /** The one-based page this envelope answers. */
+  page: number
+  /** Rows per page, after the server clamped it. */
+  limit: number
+}
+
+function malformedPage(path: string, why: string): Error {
+  return new Error(`Malformed paged envelope for ${path}: ${why}`)
+}
+
+/**
+ * Validates one paged envelope. The rows are read from `data` — the one items
+ * key every paging route serves — and each row must be an object, so a route
+ * that answers a different document cannot pose as a page.
+ */
+function parseKyberPage<T>(
+  raw: unknown,
+  path: string,
+  readRow: (row: unknown) => T,
+): KyberPage<T> {
+  if (!isRaw(raw) || !Array.isArray(raw.data)) throw malformedPage(path, 'data is not an array')
+  const total = raw.total
+  const page = raw.page
+  const limit = raw.limit
+  if (typeof total !== 'number' || !Number.isFinite(total)) throw malformedPage(path, 'total is not a number')
+  if (typeof page !== 'number' || !Number.isInteger(page) || page < 1) throw malformedPage(path, 'page is not a page number')
+  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1) throw malformedPage(path, 'limit is not a page size')
+  const entries = raw.data.map((row) => {
+    if (!isRaw(row)) throw malformedPage(path, 'a row is not an object')
+    return readRow(row)
+  })
+  return { entries, data: entries, total, page, limit }
+}
+
+/**
+ * One page of the sessions list, from `GET /api/kyber/sessions`.
+ *
+ * The store chooses the page — root resolution, harness filter, search,
+ * order and window — so the shell's harness scope and the search text travel
+ * on the query string, and a page costs what it shows rather than what the
+ * store holds. Every root carries its first subagents inline under
+ * `subagents` and its full subagent count under `subagent_total`; the rest
+ * are paged by `fetchKyberSubagentPage`.
+ */
+export async function fetchKyberSessionPage(opts: {
+  page?: number
+  limit?: number
+  harness?: string | null
+  q?: string
+}): Promise<KyberPage<KyberSessionSummary>> {
+  const path = '/api/kyber/sessions'
+  const params = new URLSearchParams()
+  params.set('page', String(opts.page ?? 1))
+  params.set('limit', String(opts.limit ?? KYBER_SESSIONS_PAGE_LIMIT))
+  // `all` (and its older spelling) is the shell's word for every harness; the
+  // route has no such harness, so it is never sent.
+  const harness = opts.harness
+  if (harness !== undefined && harness !== null && harness !== '' && harness !== 'all' && harness !== 'agent-all') {
+    params.set('harness', harness)
   }
-  return list
+  if (opts.q) params.set('q', opts.q)
+  const query = params.toString()
+  const body = await fetchJson<unknown>(`${path}?${query}`)
+  return parseKyberPage<KyberSessionSummary>(body, `${path}?${query}`, (row) => row as KyberSessionSummary)
+}
+
+/**
+ * One page of a session's subagents, from `GET /api/kyber/session/:id/subagents`.
+ * The same set a root's `subagent_total` counts and its inline preview begins.
+ */
+export async function fetchKyberSubagentPage(parentId: string, page = 1): Promise<KyberPage<KyberSessionSummary>> {
+  const params = new URLSearchParams()
+  params.set('page', String(page))
+  params.set('limit', String(KYBER_SUBAGENTS_PAGE_LIMIT))
+  const path = `/api/kyber/session/${encodeURIComponent(parentId)}/subagents?${params.toString()}`
+  const body = await fetchJson<unknown>(path)
+  return parseKyberPage<KyberSessionSummary>(body, path, (row) => row as KyberSessionSummary)
 }
 
 // ── Session view payload (/api/kyber/session/:id) ───────────────────────────
