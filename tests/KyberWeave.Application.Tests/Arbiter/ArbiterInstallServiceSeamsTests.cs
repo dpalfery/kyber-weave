@@ -181,6 +181,79 @@ public sealed class ArbiterInstallServiceSeamsTests
         Assert.Empty(prepared.Events.OfType<ArbiterInstallError>());
     }
 
+    /// <summary>
+    /// A non-dry-run install verifies the key against the override endpoint: the environment key
+    /// serves the override origin through the key service, so no stored key is needed and no key
+    /// error is reported. Reverting <c>Verify</c> to the static resolver, which binds the
+    /// environment key to the TypeSafe origin only, fails this test.
+    /// </summary>
+    [Fact]
+    public void Apply_VerifyWithOverrideEndpointAndEnvironmentKey_SucceedsWithoutAStoredKey()
+    {
+        Func<string, string?> readVariable = name =>
+            string.Equals(name, ArbiterKeyResolver.EnvVarName, StringComparison.Ordinal) ? "env-key-for-verify" : null;
+        IArbiterConfigResolver configs = new RepositoryEndpointConfigs(ArbiterProviderConfig.DefaultNone.Endpoint);
+        ArbiterInstallService prepareService = Service(
+            OverrideToSystemone(),
+            configs: configs,
+            readVariable: readVariable,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallPrepared prepared = prepareService.Prepare(
+            Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
+
+        Assert.Equal(0, prepared.ExitCode);
+        Assert.NotNull(prepared.Plan);
+
+        ArbiterInstallService applyService = Service(
+            OverrideToSystemone(),
+            configs: configs,
+            readVariable: readVariable,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+
+        Assert.Equal(0, applied.ExitCode);
+        Assert.Empty(applied.Events.OfType<ArbiterInstallError>());
+    }
+
+    /// <summary>
+    /// An override that turns malformed between <c>Prepare</c> and <c>Verify</c> surfaces as the
+    /// malformed override, not as a missing key: the key service swallows the malformation by
+    /// design, so <c>Verify</c> validates the override explicitly first.
+    /// </summary>
+    [Fact]
+    public void Apply_MalformedOverrideAfterPrepare_ReportsTheMalformedOverride()
+    {
+        Func<string, string?> readVariable = name =>
+            string.Equals(name, ArbiterKeyResolver.EnvVarName, StringComparison.Ordinal) ? "env-key-for-verify" : null;
+        IArbiterConfigResolver configs = new RepositoryEndpointConfigs(ArbiterProviderConfig.DefaultNone.Endpoint);
+        ArbiterInstallService prepareService = Service(
+            OverrideToSystemone(),
+            configs: configs,
+            readVariable: readVariable,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallPrepared prepared = prepareService.Prepare(
+            Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
+
+        Assert.Equal(0, prepared.ExitCode);
+        Assert.NotNull(prepared.Plan);
+
+        FakeArbiterUserSettings malformed = new()
+        {
+            Override = (_, _) => throw new YamlDotNet.Core.YamlException("the test override turned malformed after prepare"),
+        };
+        ArbiterInstallService applyService = Service(
+            malformed,
+            configs: configs,
+            readVariable: readVariable,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+
+        Assert.Equal(1, applied.ExitCode);
+        ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
+        Assert.Contains("malformed", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("no key resolves", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static FakeArbiterUserSettings OverrideToSystemone() =>
         new()
         {
@@ -209,7 +282,8 @@ public sealed class ArbiterInstallServiceSeamsTests
         IArbiterUserSettings? userSettings = null,
         IArbiterKeyService? keys = null,
         IArbiterConfigResolver? configs = null,
-        Func<string, string?>? readVariable = null)
+        Func<string, string?>? readVariable = null,
+        IArbiterInstallLifecycle? lifecycle = null)
     {
         IArbiterUserSettings effectiveSettings = userSettings ?? new NoOverride();
         FakeProcessEnvironment environment = readVariable is null
@@ -228,7 +302,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             _store,
             _files,
             new FakeSquadStateStore(new FakeSquadUserPaths(Home)),
-            new NoLifecycle(),
+            lifecycle ?? new NoLifecycle(),
             new FakeSquadGlobalRootResolver(Home),
             new PresentBinary(),
             new NoScaffolder(),
@@ -332,6 +406,20 @@ public sealed class ArbiterInstallServiceSeamsTests
             SquadArbiterWiring wiring,
             CancellationToken cancellationToken) =>
             throw new InvalidOperationException("A preparation must not deploy.");
+    }
+
+    /// <summary>An install the test drives through <c>Apply</c> answers successfully without writing a receipt.</summary>
+    private sealed class SucceedingLifecycle : IArbiterInstallLifecycle
+    {
+        public Task<SquadLifecycleResult> InstallAsync(
+            string root,
+            SquadDeploymentScope scope,
+            SquadTarget target,
+            SquadReceipt? existingReceipt,
+            bool dryRun,
+            SquadArbiterWiring wiring,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new SquadLifecycleResult(true));
     }
 
     /// <summary>The binary is reported as present, so the verification adds no warning.</summary>

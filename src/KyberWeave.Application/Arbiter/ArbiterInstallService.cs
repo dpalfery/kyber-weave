@@ -602,6 +602,19 @@ public sealed class ArbiterInstallService(
 
         if (plan.NeedsKey)
         {
+            // TryResolveKey treats a malformed override as no binding by design, so the
+            // override is validated explicitly first: a file that broke between Prepare
+            // and Verify must surface as itself, not as a missing key.
+            try
+            {
+                _ = userSettings.ApplyTo(loaded.Config.Arbiter.Provider, environment.HomeDirectory);
+            }
+            catch (YamlDotNet.Core.YamlException ex)
+            {
+                events.Add(new ArbiterInstallError(ex.Message));
+                return false;
+            }
+
             string? key = keys.TryResolveKey(loaded.Config, plan.Endpoint);
 
             if (string.IsNullOrEmpty(key))
