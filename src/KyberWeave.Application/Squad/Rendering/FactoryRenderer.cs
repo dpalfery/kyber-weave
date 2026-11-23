@@ -312,6 +312,9 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
         IReadOnlyList<string> grantedServers,
         IReadOnlyDictionary<string, IReadOnlyList<string>> requiredMcpTools)
     {
+        ArgumentNullException.ThrowIfNull(grantedServers);
+        ArgumentNullException.ThrowIfNull(requiredMcpTools);
+
         List<string> toolIds = [];
         foreach (string server in grantedServers)
             if (requiredMcpTools.TryGetValue(server, out IReadOnlyList<string>? tools))
