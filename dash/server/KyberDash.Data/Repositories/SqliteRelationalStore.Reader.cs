@@ -781,14 +781,14 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return null;
         }
 
-        return BuildSessionFigures(
+        SessionSummaryFigure summary = BuildSessionFigures(
             session,
             SessionRecordsContentFree(sessionKey),
             GetSessionProjection(sessionKey),
             GetSessionTurns(sessionKey),
             QuerySessionIngestProblems(sessionKey),
-            pricing).Summary with
-        { SkillInvocations = SkillsInvoked(sessionKey: sessionKey) };
+            pricing).Summary;
+        return summary with { SkillInvocations = SkillsInvoked(sessionKey: sessionKey) };
     }
 
     /// <inheritdoc />
