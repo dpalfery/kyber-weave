@@ -147,18 +147,6 @@ public sealed class ReviewGatesService(
             report.AddMetric("mode", cycle.Mode);
         }
 
-        // Before any gate process starts, so a review in a fresh worktree gets an index instead of silently having
-        // none. A repository without governed docs has no index to keep and is not checked.
-        // The index belongs to the tree, so a run pointed at a subdirectory still checks the tree's root.
-        string indexRoot = EnclosingRepositoryRoot(root);
-        WorktreeIndexOutcome index = worktreeIndex.Ensure(
-            indexRoot,
-            DoctorOptions.Defaults,
-            indexExecutor,
-            environment.TempDirectory);
-        if (index.Status is not WorktreeIndexStatus.NotGoverned)
-            ReviewGateReporting.AddIndexDiagnostic(report, indexRoot, index);
-
         // The changed set is only needed when a gate is scoped by include; it is never computed for gates alone.
         IReadOnlyList<string>? changed = null;
         string? unknownReason = null;
@@ -206,16 +194,46 @@ public sealed class ReviewGatesService(
         // pre-push self-review reads the other gates as its evidence — so it keeps running them.
         if (request.All && fullSuite.Refused.Count > 0)
         {
-            ReviewReportWriter.TryWrite(
-                files,
-                pathResolver,
-                environment,
-                request.Out,
-                ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [])),
-                ReviewGateReporting.ReportWriteFailed,
-                report);
-            return ReviewCommandResultFactory.Reported(1, report);
+            return RefuseWithEmptyReport(request, report);
         }
+
+        // A council or --all run is the whole review: a gate that cannot start for a missing path leaves a report the
+        // caller would have to read as incomplete, after paying for the index sync and every other gate. The runner
+        // itself says which required paths are missing (same applies-when, same path resolution), so the refusal
+        // lists exactly what the run would have reported as not started. A scoped run keeps going: the pre-push
+        // self-review reads the other gates as its evidence, and the missing one is reported not started as before.
+        if (request.Council || request.All)
+        {
+            IReadOnlyList<MissingGateRequirement> missing = gateRunner.MissingRequirements(
+                new ReviewConfig { Gates = fullSuite.Admitted, Parallelism = config.Review.Parallelism },
+                root,
+                changed);
+            if (missing.Count > 0)
+            {
+                foreach (MissingGateRequirement requirement in missing)
+                    report.Add(new Diagnostic(
+                        ReviewGateReporting.GateNotStarted,
+                        Severity.Error,
+                        $"{requirement.GateId}: required path '{requirement.Path}' is missing, so the gate cannot start. {requirement.Fix}, then run the review again.",
+                        requirement.GateId));
+
+                // Nothing but the empty report is written: no evidence and no finished-cycle record, so a rerun with
+                // the same --out is the same cycle, in the same mode.
+                return RefuseWithEmptyReport(request, report);
+            }
+        }
+
+        // Before any gate process starts, so a review in a fresh worktree gets an index instead of silently having
+        // none. A repository without governed docs has no index to keep and is not checked.
+        // The index belongs to the tree, so a run pointed at a subdirectory still checks the tree's root.
+        string indexRoot = EnclosingRepositoryRoot(root);
+        WorktreeIndexOutcome index = worktreeIndex.Ensure(
+            indexRoot,
+            DoctorOptions.Defaults,
+            indexExecutor,
+            environment.TempDirectory);
+        if (index.Status is not WorktreeIndexStatus.NotGoverned)
+            ReviewGateReporting.AddIndexDiagnostic(report, indexRoot, index);
 
         // GateRunner.Run reads only Gates from its configuration, so the selected gates travel in a
         // configuration of their own and the runner itself stays unchanged. The changed set and base
@@ -293,6 +311,23 @@ public sealed class ReviewGatesService(
         // Non-blocking gate failures stay Warning and do not fail the process. Gates that
         // did not apply are Info and never fail it either.
         return ReviewCommandResultFactory.Reported(report.HasErrors ? 1 : 0, report, epilogue);
+    }
+
+    /// <summary>
+    /// Ends a run that cannot deliver the whole suite: an empty report goes to <c>--out</c>, so no earlier report is
+    /// read as this run's, and the exit code is 1. Nothing else is written.
+    /// </summary>
+    private ReviewCommandResult RefuseWithEmptyReport(ReviewGatesRequest request, DiagnosticReport report)
+    {
+        ReviewReportWriter.TryWrite(
+            files,
+            pathResolver,
+            environment,
+            request.Out,
+            ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [])),
+            ReviewGateReporting.ReportWriteFailed,
+            report);
+        return ReviewCommandResultFactory.Reported(1, report);
     }
 
     /// <summary>The cycle a council run found itself in, and what that decides for each declared gate.</summary>
