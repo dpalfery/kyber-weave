@@ -794,32 +794,22 @@ public sealed class FactoryRendererContractTests : IDisposable
     }
 
     /// <summary>
-    ///     A declared server name that contains YAML flow indicators still renders as exactly one
-    ///     entry, so the frontmatter cannot invent names the squad never declared.
+    ///     A declared server name that contains YAML flow indicators fails the render instead of
+    ///     emitting an entry plain-style YAML would split in two: the failure names the bad name.
     /// </summary>
-    /// <remarks>
-    ///     The value is YAML the Factory parser reads, not a display string. A plain scalar spelled
-    ///     inside a flow sequence treats <c>,</c>, <c>[</c>, and <c>]</c> as structure, so a name
-    ///     such as <c>a,b</c> would silently become two servers unless the emitter is allowed to
-    ///     quote it.
-    /// </remarks>
     [Fact]
-    public async Task RenderAsync_Factory_McpServerNamesWithFlowIndicatorsStayOneEntry()
+    public async Task RenderAsync_Factory_McpServerNamesWithFlowIndicatorsFailTheRender()
     {
         McpDeclarationSquadTree fixture =
-            McpDeclarationSquadTree.WithServers("a,b", "bracket[server]", "plain");
+            McpDeclarationSquadTree.WithServers("plain", "bracket[server]");
         SquadSource source = fixture.Tree.Load();
-        IReadOnlyList<string> declared = DeclaredFactoryMcpServers(source);
-        Assert.Equal(["a,b", "bracket[server]", "plain"], declared);
 
-        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
-            fixture.ProductRoot,
-            [SquadTarget.Factory],
-            SquadDeploymentScope.Project).Prepared(fixture.Tree));
-        Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        SquadAgent entitled = Assert.Single(source.Agents, agent => agent.Name == "architect");
-        Assert.Equal(declared, RenderedMcpServers(result, entitled.Name));
+        SquadRenderValidationException thrown = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
+            new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+                fixture.ProductRoot,
+                [SquadTarget.Factory],
+                SquadDeploymentScope.Project).Prepared(fixture.Tree)));
+        Assert.Contains("bracket[server]", thrown.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
