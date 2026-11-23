@@ -6,6 +6,7 @@ import { cn, usd, fmtNum, fmtTokens } from '../lib/utils.js'
 import { fetchKyberSessionContent, fetchKyberSessionTurn, fetchSpanAttributes, fetchTurnContentFull } from '../lib/kyberApi.js'
 import type {
   KyberMessageLike,
+  KyberSessionTurnSection,
   KyberSkillRow,
   KyberTurnContentBlock,
   KyberTurnContentPart,
@@ -17,6 +18,8 @@ import { reasonOf, skillTurnLabel, unmeasured } from './SkillsPanel.js'
 import { CONTEXT_BUCKET_LABELS } from './SessionSpendCharts.js'
 import { Skeleton } from './ui/skeleton.js'
 import { SlideOutDrawer } from './ui/SlideOutDrawer.js'
+import { SectionError } from './session/SectionError.js'
+import { PROJECTION_FAILED_STATUS, projectionFailureMessage } from './session/useSectionPage.js'
 import { CopyExactButton, SearchableContentView, type ContentViewMode } from './ContentViewToolbar.js'
 
 export { CopyExactButton }
@@ -2966,18 +2969,11 @@ export function TurnFullContentPanel({
 
   // The keyed row's own states, ahead of the content states below (D9): the
   // drawer opened on a key, so the per-turn route is this panel's first wait.
-  if (turn === undefined && sectionQuery.isError) {
-    return (
-      <div
-        className="rounded border border-red-500/30 bg-red-500/10 p-4 text-xs text-red-600 dark:text-red-400 space-y-1.5"
-        data-testid="turn-section-error"
-      >
-        <p className="font-semibold">Unable to load this turn.</p>
-        <p className="text-muted-foreground">
-          {sectionQuery.error instanceof Error ? sectionQuery.error.message : 'Turn not found.'}
-        </p>
-      </div>
-    )
+  // A payload whose projection read faulted is this panel's error state, never
+  // a strip of figures or zeros: the route answered, but the answer is not data.
+  const projectionFailed = sectionQuery.data?.projection_status === PROJECTION_FAILED_STATUS
+  if (projectionFailed || (turn === undefined && sectionQuery.isError)) {
+    return <TurnSectionFailure data={sectionQuery.data} error={sectionQuery.error} />
   }
   if (turn === undefined && sectionQuery.data === undefined) {
     return (
@@ -3155,6 +3151,21 @@ export function TurnFullContentPanel({
 }
 
 /**
+ * The one error state both per-turn panels render: the route failed, or it
+ * answered with a faulted projection. A faulted projection's figures are not
+ * data, so the panel states the fault instead of rendering a figure or a zero.
+ */
+function TurnSectionFailure({ data, error }: { data: KyberSessionTurnSection | undefined; error: unknown }) {
+  return (
+    <SectionError
+      testId="turn-section-error"
+      label="This turn"
+      message={projectionFailureMessage(data) ?? (error instanceof Error ? error.message : 'Turn not found.')}
+    />
+  )
+}
+
+/**
  * One context-bucket drill-down (D9): the opener hands over the key pair
  * only. The per-turn route answers the turn widened with its own context;
  * the bucket's figures and span-scoped content request derive from that
@@ -3168,18 +3179,11 @@ function TurnBucketPanel({ request }: { request: TurnBucketContentRequest }) {
     retry: false,
   })
 
-  if (sectionQuery.isError) {
-    return (
-      <div
-        className="rounded border border-red-500/30 bg-red-500/10 p-4 text-xs text-red-600 dark:text-red-400 space-y-1.5"
-        data-testid="turn-section-error"
-      >
-        <p className="font-semibold">Unable to load this turn.</p>
-        <p className="text-muted-foreground">
-          {sectionQuery.error instanceof Error ? sectionQuery.error.message : 'Turn not found.'}
-        </p>
-      </div>
-    )
+  // A payload whose projection read faulted is an error state here too: its
+  // figures are not data, so neither the bucket figure nor a zero may render.
+  const projectionFailed = sectionQuery.data?.projection_status === PROJECTION_FAILED_STATUS
+  if (projectionFailed || sectionQuery.isError) {
+    return <TurnSectionFailure data={sectionQuery.data} error={sectionQuery.error} />
   }
   if (sectionQuery.data === undefined) {
     return (
