@@ -48,6 +48,11 @@ public sealed class RunIntegrateServiceTests
     private string _dirtyStatus = string.Empty;
     private string _runDirtyStatus = string.Empty;
     private string _taskBranch = TaskBranch;
+    private string _runBranch = RunBranch;
+    private int? _mergeBaseErrorCode;
+    private string _mergeBaseError = string.Empty;
+    private bool _candidateCheckFails;
+    private string _candidateCheckError = string.Empty;
     private string[] _conflicted = [];
     private string _head = BeforeHead;
 
@@ -129,7 +134,7 @@ public sealed class RunIntegrateServiceTests
         RunIntegrateOutcome outcome = Integrate(Request(run: null));
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
-        Assert.True(_git.Called("-C", Run, "merge", "--ff-only", TaskBranch));
+        Assert.True(_git.Called("-C", Run, "merge", "--ff-only", "--end-of-options", TaskBranch));
     }
 
     [Fact]
@@ -145,7 +150,7 @@ public sealed class RunIntegrateServiceTests
         RunIntegrateOutcome outcome = Integrate(Request(run: null));
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
-        Assert.True(_git.Called("-C", Run, "merge", "--ff-only", TaskBranch));
+        Assert.True(_git.Called("-C", Run, "merge", "--ff-only", "--end-of-options", TaskBranch));
         Assert.DoesNotContain(_git.Calls, call => call.WorkingDirectory == Canonical + "/older");
     }
 
@@ -267,6 +272,65 @@ public sealed class RunIntegrateServiceTests
     }
 
     [Fact]
+    public void ATaskBranchThatGitWouldReadAsAnOptionFailsTheIntegration()
+    {
+        _taskBranch = "-evil";
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("-evil", outcome.Message, StringComparison.Ordinal);
+        Assert.True(_git.Called("-C", Task, "check-ref-format", "--branch", "-evil"));
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("rev-list", StringComparer.Ordinal));
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("merge", StringComparer.Ordinal));
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("cherry-pick", StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void ARunBranchThatGitWouldReadAsAnOptionFailsTheIntegration()
+    {
+        _runBranch = "-evil";
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("-evil", outcome.Message, StringComparison.Ordinal);
+        Assert.True(_git.Called("-C", Run, "check-ref-format", "--branch", "-evil"));
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("rev-list", StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void AMergeBaseFailureIsReportedInsteadOfReadAsNotAnAncestor()
+    {
+        _mergeBaseErrorCode = 128;
+        _mergeBaseError = "fatal: Not a valid object name run/main";
+
+        RunIntegrateOutcome outcome = Integrate(Request());
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("Not a valid object name", outcome.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("cherry-pick", StringComparer.Ordinal));
+        Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("merge", StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void AMergeBaseFailureWhileChoosingBetweenLiveRunsFailsTheIntegration()
+    {
+        _candidateCheckFails = true;
+        _candidateCheckError = "fatal: Not a valid object name run/older";
+        _checkouts.Runs =
+        [
+            new RunRecord(CanonicalGitDirectory, "run/older", Canonical + "/older", DateTimeOffset.UnixEpoch),
+            new RunRecord(CanonicalGitDirectory, RunBranch, Run, DateTimeOffset.UnixEpoch.AddHours(1))
+        ];
+
+        RunIntegrateOutcome outcome = Integrate(Request(run: null));
+
+        Assert.Equal(RunIntegrateStatus.Failed, outcome.Status);
+        Assert.Contains("Not a valid object name", outcome.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void WithNoCommitTheRunLacksTheStepReportsNothingToIntegrate()
     {
         _commitsAhead = 0;
@@ -290,7 +354,7 @@ public sealed class RunIntegrateServiceTests
         Assert.Equal(RunIntegrateStatus.NothingToIntegrate, outcome.Status);
         Assert.True(_files.FileExists(Run + "/.agent_scratchpad/T3/report.md"));
         Assert.True(_git.Called("-C", Run, "worktree", "remove", "--force", Task));
-        Assert.True(_git.Called("-C", Run, "branch", "-D", TaskBranch));
+        Assert.True(_git.Called("-C", Run, "branch", "-D", "--end-of-options", TaskBranch));
     }
 
     [Fact]
@@ -300,7 +364,7 @@ public sealed class RunIntegrateServiceTests
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
         Assert.Equal(AfterHead, outcome.RunHead);
-        Assert.True(_git.Called("-C", Run, "merge", "--ff-only", TaskBranch));
+        Assert.True(_git.Called("-C", Run, "merge", "--ff-only", "--end-of-options", TaskBranch));
         Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("cherry-pick", StringComparer.Ordinal));
     }
 
@@ -312,7 +376,7 @@ public sealed class RunIntegrateServiceTests
         RunIntegrateOutcome outcome = Integrate(Request());
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
-        Assert.True(_git.Called("-C", Run, "cherry-pick", "--empty=drop", RunBranch + ".." + TaskBranch));
+        Assert.True(_git.Called("-C", Run, "cherry-pick", "--empty=drop", "--end-of-options", RunBranch + ".." + TaskBranch));
         Assert.DoesNotContain(_git.Calls, call => call.Arguments.Contains("merge", StringComparer.Ordinal));
     }
 
@@ -404,7 +468,7 @@ public sealed class RunIntegrateServiceTests
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
         Assert.True(_git.Called("-C", Run, "worktree", "remove", "--force", Task));
-        Assert.True(_git.Called("-C", Run, "branch", "-D", TaskBranch));
+        Assert.True(_git.Called("-C", Run, "branch", "-D", "--end-of-options", TaskBranch));
         Assert.True(IndexOf("worktree") < IndexOf("branch"));
     }
 
@@ -547,7 +611,13 @@ public sealed class RunIntegrateServiceTests
 
         if (command == "symbolic-ref --short HEAD")
         {
-            return Ok(workingDirectory == Task ? _taskBranch : RunBranch);
+            return Ok(workingDirectory == Task ? _taskBranch : _runBranch);
+        }
+
+        if (command.StartsWith("check-ref-format --branch ", StringComparison.Ordinal))
+        {
+            string name = command.Substring("check-ref-format --branch ".Length);
+            return name.StartsWith('-') ? Exit(128, $"fatal: '{name}' is not a valid branch name") : Ok(name);
         }
 
         if (command == "status --porcelain --untracked-files=no")
@@ -564,14 +634,24 @@ public sealed class RunIntegrateServiceTests
         {
             if (workingDirectory == Task)
             {
-                string branch = argv[2];
+                if (_candidateCheckFails)
+                {
+                    return Exit(128, _candidateCheckError);
+                }
+
+                string branch = argv[^2];
                 return Exit(_ancestorRunBranches.Contains(branch) ? 0 : 1);
+            }
+
+            if (_mergeBaseErrorCode.HasValue)
+            {
+                return Exit(_mergeBaseErrorCode.Value, _mergeBaseError);
             }
 
             return Exit(_runIsAncestor ? 0 : 1);
         }
 
-        if (command == "merge --ff-only " + TaskBranch)
+        if (command == "merge --ff-only --end-of-options " + TaskBranch)
         {
             if (!_mergeSucceeds)
             {
@@ -582,7 +662,7 @@ public sealed class RunIntegrateServiceTests
             return Ok();
         }
 
-        if (command == "cherry-pick --empty=drop " + RunBranch + ".." + TaskBranch)
+        if (command == "cherry-pick --empty=drop --end-of-options " + RunBranch + ".." + TaskBranch)
         {
             if (!_cherryPickSucceeds)
             {

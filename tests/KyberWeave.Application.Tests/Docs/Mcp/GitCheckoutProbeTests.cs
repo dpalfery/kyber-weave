@@ -84,6 +84,14 @@ public sealed class GitCheckoutProbeTests
     }
 
     [Fact]
+    public void ADotGitFileWithoutAGitdirPointerFingerprintsToZero()
+    {
+        Write(Root + "/.git", "not a pointer");
+
+        Assert.Equal(0, Probe().Fingerprint(Root));
+    }
+
+    [Fact]
     public void TheRevisionIsGitsFirstLineAndACleanTreeIsNotDirty()
     {
         _ = _git

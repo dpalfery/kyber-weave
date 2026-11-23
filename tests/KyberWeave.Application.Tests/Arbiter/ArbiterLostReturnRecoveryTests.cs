@@ -1,10 +1,14 @@
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter.Providers;
+using KyberWeave.Core.Arbiter.Stores;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -123,6 +127,67 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
         Assert.Single(
             _host.Decisions.Last(record => record.Rules.Any(rule => rule.Id == ruleId)).Rules,
             rule => rule.Id == ruleId).Answer;
+
+    /// <summary>The engine over the test's ledger log: the paired reads see the host's rows, the recovery append
+    /// answers the way the test's log answers.</summary>
+    private ArbiterHookDecisionEngine EngineOver(IArbiterLogStore log) => new(
+        _host.Get<IArbiterEvaluatorFactory>(),
+        new LedgerStateOver(_host.State, log),
+        _host.Get<IArbiterProviderFactory>(),
+        _host.Get<IArbiterUserSettings>(),
+        _host.Get<IPlanFacts>(),
+        _host.Get<IPlanRootResolver>(),
+        _host.Get<IHookGitFactsFactory>(),
+        _host.Get<ICredentialStore>(),
+        _host.Get<IArbiterHostConfig>(),
+        _host.Get<IProcessEnvironment>(),
+        _host.Get<IBackgroundDispatchStore>(),
+        _host.Get<IIdGenerator>(),
+        new ReviewSeatRecorder(_host.Get<IWritableFileSystem>(), _host.Get<IPathResolver>()),
+        providerFactory: _ => _provider,
+        gitFactsFactory: _ => new NoGitFacts(),
+        planReaderFactory: _ => new PlanFacts(),
+        homeDirectory: () => _host.RepoRoot,
+        clock: _host.Clock);
+
+    /// <summary>The state factory the bound test's engine opens: the ledger over the test's log, the decision log
+    /// over the host's.</summary>
+    private sealed class LedgerStateOver(InMemoryArbiterState inner, IArbiterLogStore log) : IArbiterStateFactory
+    {
+        public IArbiterLedger OpenLedger(string arbiterDirectory) => new InFlightLedger(arbiterDirectory, log);
+
+        public IArbiterDecisionLog OpenDecisionLog(string arbiterDirectory) => inner.Decisions(arbiterDirectory);
+
+        public IArbiterRunStore OpenRunStore(string arbiterDirectory, ArbiterStoreOptions? options = null, TimeProvider? clock = null) =>
+            inner.RunStore(arbiterDirectory, options, clock);
+    }
+
+    /// <summary>An append that never answers unless its token is cancelled: the recovery wait must carry its own bound.</summary>
+    private sealed class NeverAnsweringLogStore(IArbiterLogStore inner) : IArbiterLogStore
+    {
+        public Task AppendLineAsync(string directory, string fileName, string line, CancellationToken cancellationToken) =>
+            Task.Delay(System.Threading.Timeout.InfiniteTimeSpan, cancellationToken);
+
+        public Task AppendLineAsync(
+            string directory,
+            string fileName,
+            long snapshotLength,
+            Func<IReadOnlyList<string>, string> lineFactory,
+            CancellationToken cancellationToken) =>
+            inner.AppendLineAsync(directory, fileName, snapshotLength, lineFactory, cancellationToken);
+
+        public long ByteLength(string path) => inner.ByteLength(path);
+
+        public IReadOnlyList<string> ReadCompleteLines(string path) => inner.ReadCompleteLines(path);
+
+        public LogTail ReadComplete(string path) => inner.ReadComplete(path);
+
+        public IReadOnlyList<string> ReadTailLines(string path, long tailBytes, bool keepUnterminatedFinalLine) =>
+            inner.ReadTailLines(path, tailBytes, keepUnterminatedFinalLine);
+
+        public LogTail ReadTail(string path, long tailBytes, bool keepUnterminatedFinalLine) =>
+            inner.ReadTail(path, tailBytes, keepUnterminatedFinalLine);
+    }
 
     private IReadOnlyList<ArbiterLedgerEvent> Events() => _host.Ledger.ReadAll();
 
@@ -284,6 +349,48 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
         Advance();
         Stop("dev-easy", log, sessionId: "session-2");
 
+        Assert.Empty(RecoveredPosts());
+    }
+
+    [Fact]
+    public void ACancelledRecoveryAppend_ClosesNothing_AndLogsOneLine()
+    {
+        // The recovery row is written on the stop hook, which the harness kills at its timeout. When the append
+        // cannot finish, the recovery closes nothing loudly instead of throwing out of the hook.
+        StringWriter log = new();
+        Dispatch("dev-easy", "T2", "call-1", log);
+        ArbiterLedgerEvent pre = Assert.Single(Events(), e => e.Phase == ArbiterLedgerPhases.Pre);
+
+        Advance();
+        _host.State.Log.AppendFailure = new OperationCanceledException();
+        int closed = Engine().RecoverLostReturn("copilot-cli", "session-1", ["dev-easy"], Context(log));
+
+        Assert.Equal(0, closed);
+        Assert.Empty(RecoveredPosts());
+        Assert.Equal(pre.Id, Assert.Single(Events(), e => e.Phase == ArbiterLedgerPhases.Pre).Id);
+        string line = Assert.Single(
+            log.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries),
+            line => line.Contains("closed nothing", StringComparison.Ordinal));
+        Assert.Contains("subagentStop", line, StringComparison.Ordinal);
+        Assert.Contains(pre.Id, line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ARecoveryAppendThatNeverAnswers_DoesNotOutlastTheHookBudget()
+    {
+        // A recovery whose ledger append never answers must not hold the stop hook past its timeout: the harness
+        // kills a hook past its budget, which would lose the very row the recovery exists to write.
+        StringWriter log = new();
+        Dispatch("dev-easy", "T2", "call-1", log);
+
+        Advance();
+        ArbiterHookDecisionEngine engine = EngineOver(new NeverAnsweringLogStore(_host.State.Log));
+        Task<int> recovery = Task.Run(
+            () => engine.RecoverLostReturn("copilot-cli", "session-1", ["dev-easy"], Context(log)));
+        Task finished = await Task.WhenAny(recovery, Task.Delay(TimeSpan.FromSeconds(15)));
+
+        Assert.Same(recovery, finished);
+        Assert.Equal(0, await recovery);
         Assert.Empty(RecoveredPosts());
     }
 

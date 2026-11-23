@@ -53,7 +53,7 @@ public sealed class GitCheckoutProbe(IFileSystem files, IProcessRunner process, 
                 long pointerStamp = (files.GetLastWriteTimeUtc(gitPath).Ticks * 31) + files.GetLength(gitPath);
 
                 // Worktree / submodule indirection: the file itself notices a retarget.
-                if (GitDirectoryFor(root) is not { } worktree) return pointerStamp;
+                if (GitDirectoryFor(root) is not { } worktree) return 0;
 
                 long linked = MixFile(pointerStamp, Path.Combine(worktree, "HEAD"));
                 linked = MixFile(linked, Path.Combine(worktree, "index"));

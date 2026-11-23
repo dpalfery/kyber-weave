@@ -13,6 +13,7 @@ instead; `byAgentSource` and `tokensSource` name the source actually used.
 """
 import collections
 import json
+import math
 import pathlib
 import sys
 
@@ -25,6 +26,13 @@ def load(name, default=None):
         return json.loads(p.read_text())
     except Exception:
         return default
+
+
+def num(x):
+    """An event-stream number: a finite int or float, never a bool, string, NaN or Infinity."""
+    if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x):
+        return 0
+    return x
 
 
 events = []
@@ -48,9 +56,18 @@ final_answer = None
 result = None
 
 for e in events:
-    t, d = e.get("type"), e.get("data") or {}
-    if t == "session.usage_checkpoint" and isinstance(d.get("totalNanoAiu"), (int, float)):
-        nano_aiu = max(nano_aiu or 0, d["totalNanoAiu"])
+    if not isinstance(e, dict):
+        continue
+    data = e.get("data")
+    if data is None:
+        d = {}
+    elif not isinstance(data, dict):
+        continue
+    else:
+        d = data
+    t = e.get("type")
+    if t == "session.usage_checkpoint" and (num(d.get("totalNanoAiu")) or d.get("totalNanoAiu") == 0):
+        nano_aiu = max(nano_aiu or 0, num(d["totalNanoAiu"]))
         checkpoint = d
     elif t == "model.call_start":
         model_calls[d.get("model", "?")] += 1
@@ -91,9 +108,16 @@ def find_key(node, key):
 
 # The last usage checkpoint is cumulative: tokens per model, and spend per agent.
 for m in (checkpoint or {}).get("providerModelMetrics") or []:
-    for k, v in ((m.get("metrics") or {}).get("usage") or {}).items():
-        if isinstance(v, (int, float)):
-            tokens[k] += v
+    if not isinstance(m, dict):
+        continue
+    metrics = m.get("metrics")
+    usage = metrics.get("usage") if isinstance(metrics, dict) else None
+    if not isinstance(usage, dict):
+        continue
+    for k, v in usage.items():
+        n = num(v)
+        if n or v == 0:
+            tokens[k] += n
 
 # Copilot CLI 1.0.115 reports spend and tokens per sub-agent dispatch, but no longer
 # aggregates either per role in the checkpoint.
@@ -102,9 +126,9 @@ subagents = collections.defaultdict(
 for d in subagent_dispatches:
     row = subagents[d.get("agentName") or "?"]
     row["dispatches"] += 1
-    row["tokens"] += d.get("totalTokens") or 0
-    row["toolCalls"] += d.get("totalToolCalls") or 0
-    row["durationMs"] += d.get("durationMs") or 0
+    row["tokens"] += num(d.get("totalTokens"))
+    row["toolCalls"] += num(d.get("totalToolCalls"))
+    row["durationMs"] += num(d.get("durationMs"))
 
 tokens_source = "providerModelMetrics" if tokens else None
 if not tokens and subagents:
@@ -113,11 +137,16 @@ if not tokens and subagents:
 
 # Spend per agent role (conductor = "main"), summed over every dispatch of that role.
 agents = collections.defaultdict(lambda: {"dispatches": 0, "aiUnits": 0.0, "apiMinutes": 0.0})
-for agent_id, a in (find_key(checkpoint or {}, "agentMetrics") or {}).items():
+agent_metrics = find_key(checkpoint or {}, "agentMetrics") or {}
+if not isinstance(agent_metrics, dict):
+    agent_metrics = {}
+for agent_id, a in agent_metrics.items():
+    if not isinstance(a, dict):
+        continue
     row = agents["conductor" if agent_id == "main" else agent_names.get(agent_id, agent_id)]
     row["dispatches"] += 1
-    row["aiUnits"] = round(row["aiUnits"] + (a.get("totalNanoAiu") or 0) / 1e9, 2)
-    row["apiMinutes"] = round(row["apiMinutes"] + (a.get("totalApiDurationMs") or 0) / 60000, 1)
+    row["aiUnits"] = round(row["aiUnits"] + num(a.get("totalNanoAiu")) / 1e9, 2)
+    row["apiMinutes"] = round(row["apiMinutes"] + num(a.get("totalApiDurationMs")) / 60000, 1)
 agents = dict(sorted(agents.items(), key=lambda kv: -kv[1]["aiUnits"]))
 by_agent_source = "agentMetrics" if agents else None
 if not agents and subagents:

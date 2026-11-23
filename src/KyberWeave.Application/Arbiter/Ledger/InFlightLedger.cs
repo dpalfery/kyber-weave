@@ -62,8 +62,13 @@ public sealed class InFlightLedger : IArbiterLedger
         }
 
         long snapshot = _log.ByteLength(FilePath);
-        IReadOnlyList<ArbiterLedgerEvent> events = ReadAll();
-        string? match = ArbiterLedgerQueries.MatchPre(events, record);
+        ArbiterLogRead<ArbiterLedgerEvent> read = ReadAllWithDiagnostics();
+        // A read that did not see the whole log cannot pair safely: the oldest pre it would match first may be the
+        // one the window cut off, so a match here would claim the wrong dispatch. No match is the fail-closed
+        // answer, the way a missing pre reads, and the post is stored unpaired.
+        bool complete = !read.Truncated && read.Unreadable is null;
+        IReadOnlyList<ArbiterLedgerEvent> events = read.Records;
+        string? match = complete ? ArbiterLedgerQueries.MatchPre(events, record) : null;
         return _log.AppendLineAsync(
             _directory,
             FileName,
@@ -71,7 +76,7 @@ public sealed class InFlightLedger : IArbiterLedger
             landed =>
             {
                 string? paired = match;
-                if (landed.Count > 0)
+                if (complete && landed.Count > 0)
                 {
                     // The ledger moved between the read and the lock: another post may have claimed the pre this
                     // one matched, or a twin dispatch may have landed. Recompute over both, so a pre is claimed
@@ -159,7 +164,17 @@ public sealed class InFlightLedger : IArbiterLedger
     public string? MatchPre(ArbiterLedgerEvent post)
     {
         ArgumentNullException.ThrowIfNull(post);
-        return post.PreId ?? ArbiterLedgerQueries.MatchPre(ReadAll(), post);
+        if (post.PreId is not null)
+        {
+            return post.PreId;
+        }
+
+        // The append path's fail-closed rule: a read that did not see the whole log must not pair with the
+        // wrong pre, so it reads as no match, the way an empty log reads.
+        ArbiterLogRead<ArbiterLedgerEvent> read = ReadAllWithDiagnostics();
+        return read.Truncated || read.Unreadable is not null
+            ? null
+            : ArbiterLedgerQueries.MatchPre(read.Records, post);
     }
 
     /// <summary>
