@@ -64,7 +64,9 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plans are open.
+| Plan | Status | Date | Development Mode | Goal |
+|---|---|---|---|---|
+| [2026-11-23-kyberdash-lazy-sectioned-session-views.md](2026-11-23-kyberdash-lazy-sectioned-session-views.md) | Ready | 2026-11-23 | test-first | Load KyberDash session views by section and by page |
 
 ## Archived Plans
 

@@ -1,0 +1,1120 @@
+schema-version: 2
+plan: docs/plans/2026-11-23-kyberdash-lazy-sectioned-session-views.md
+execution-digest: af0bfe1a2f3e6f886448eefb60d1597bf71ab667bf688750741659ee76d78fca
+tasks:
+  - id: T1
+    capabilities: C# read-path work in the KyberDash engine with read-log tests over the shared fake.
+    depends-on: []
+    files:
+      - dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs
+      - dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs
+      - dash/server/KyberDash.Application/KyberBridgeEngine.cs
+      - InMemoryRelationalStore.cs
+    session: dash-sections-server
+    prompt: >
+      Task T1: Restore the consent-allowed prompt in the span inspector
+
+      Worktree: {worktree}
+
+
+      - **Objective:** `/span/:id/attributes` carries the Droid captured prompt again, read from that one span's prompt part, so CI's harness-collection e2e passes the inspector assertion.
+
+      - **Capabilities:** C# read-path work in the KyberDash engine with read-log tests over the shared fake.
+
+      - **Difficulty:** easy
+
+      - **Technology:** csharp
+
+      - **Session:** `dash-sections-server`
+
+      - **Depends on:** none
+
+      - **Files:**
+        - `dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs`: add `SpanPromptText(string spanId)` (that span's first non-empty `UserPrompt`, `UserMessage` or `ConversationHistory` part text — the parts `CapturedPromptText` chose — or `null`).
+        - `dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs`: implement it as one query scoped to the span.
+        - `dash/server/KyberDash.Application/KyberBridgeEngine.cs`: `GetSpanAttributes` attaches the prompt under the same `FactoryKeys.PromptText` key for Droid records, as `AttachCapturedPrompt` did before the stall fix.
+        - `InMemoryRelationalStore.cs` (logged through `NoteRead`), both `FaultingSessionReader` copies, `DelegatingReader`.
+        - Tests per the Test contract.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T1 --red`
+        - `kyber-weave review gates . --agent <worker> --task T1`
+      - **Acceptance:** T1 rows pass; the content sweep's expected reads list `SpanPromptText` for the span-attributes path only.
+
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T1
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T1 | `AnalyticsReadPathTests.cs` (extend) and a Presentation endpoint test | `dotnet test dash/server/KyberDash.sln -c Release --filter "FullyQualifiedName~AnalyticsReadPathTests"` | `SpanAttributesCarryTheConsentAllowedDroidPrompt`: a Droid span with a captured prompt part answers it in `attributes` (the key `AttachCapturedPrompt` used); a span without consent carries none; the read log shows `RecordContentFree` and `SpanPromptText` for that span only, and no session-wide read. | Fails on current code: the attributes carry no prompt. | Test passes; the content sweep records `SpanPromptText` only on the span-attributes path. |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-easy
+    agent-confidence: 1
+    difficulty: easy
+    difficulty-source: architect
+    technology: csharp
+  - id: T2
+    capabilities: C# contract, SQLite query and application read-path work, with read-log, SQL-recording and parity tests.
+    depends-on:
+      - T1
+    files:
+      - dash/server/KyberDash.Contracts/Repositories/IProjectionStore.cs
+      - dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs
+      - dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs
+      - dash/server/KyberDash.Application/KyberBridgeEngine.cs
+      - dash/server/KyberDash.Contracts/Services/IDashServices.cs
+      - dash/server/KyberDash.Application/Services/DashboardQueryService.cs
+      - dash/server/KyberDash.Api/Endpoints/DashEndpointMappings.cs
+      - InMemoryRelationalStore.cs
+      - AnalyticsErrorEnvelopeTests.cs
+      - AnalyticsOperationsDetailTests.cs
+      - MinimalApiEndpointTests.cs
+      - PresentationBuilder.cs
+      - dash/server.tests/KyberDash.Data.Tests/**
+    session: dash-sections-server
+    prompt: >
+      Task T2: Sessions list server — page and filter before pricing
+
+      Worktree: {worktree}
+
+
+      - **Objective:** `/sessions` returns one page of 100 roots filtered and searched on the server, each with its first 25 subagents and a total, priced only for the page; `/session/:id/subagents` pages a root's subagents at 25.
+
+      - **Capabilities:** C# contract, SQLite query and application read-path work, with read-log, SQL-recording and parity tests.
+
+      - **Difficulty:** hard
+
+      - **Technology:** csharp
+
+      - **Session:** `dash-sections-server`
+
+      - **Depends on:** T1
+
+      - **Files:**
+        - `dash/server/KyberDash.Contracts/Repositories/IProjectionStore.cs`: `SessionHeaderPage`, `SessionChildHeaderPage`, `SessionChildPreview`, `SessionHeadersByKeys`, the `StoredSessionHeader` record (header columns only) and a page result record (`Items`, `Total`).
+        - `dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs`: keyed `SessionListFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null)`.
+        - `dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs`: the three header reads in SQL per D3 (`TextExpr` binding, `LIKE … ESCAPE '\'` with escaped search text, `hex(CAST(... AS BLOB))` read convention); the keyed figures read that never calls `Sessions(harnessId)` or `ListSessionProjections`.
+        - `dash/server/KyberDash.Application/KyberBridgeEngine.cs`: `GetSessionPage(page, limit, harness, search)` and `GetSubagentPage(parentId, page)`; the shared paging envelope helper (extracted from the existing findings/quarantine envelope code) that later tasks reuse; drop the per-row `reader.GetSession`; keep today's row DTO (`ToSessionDto`) and the batched-fault fallback; remove `GetSessions(limit, harness)`.
+        - `dash/server/KyberDash.Contracts/Services/IDashServices.cs`, `dash/server/KyberDash.Application/Services/DashboardQueryService.cs`, `dash/server/KyberDash.Api/Endpoints/DashEndpointMappings.cs` (`/sessions`, `/session` alias, `/session/{id}/subagents`, through `DashHttp.Pagination`).
+        - `InMemoryRelationalStore.cs`, `FaultingSessionReader` copies, `DelegatingReader`, Moq setups in `AnalyticsErrorEnvelopeTests.cs`, `AnalyticsOperationsDetailTests.cs`, `MinimalApiEndpointTests.cs`, `PresentationBuilder.cs`.
+        - Tests per the Test contract (the SQL-recording subclass lives in `dash/server.tests/KyberDash.Data.Tests/` and is reused by T6 and T8).
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T2 --red`
+        - `kyber-weave review gates . --agent <worker> --task T2`
+      - **Acceptance:** T2 rows pass; the `/sessions` and `/session/{id}/subagents` routes issue no `ListSessionProjections`, no unkeyed `Sessions`, no per-row `GetSession` (other callers of `ListSessionProjections` — `EnsureProjected`, `CleanService` — are out of this task's scope); no schema change.
+
+
+      Failure modes this task must not allow:
+
+
+      - **Root membership changes** under the SQL root rule — a root becomes a child or vanishes. Mitigation: the adapter parity test on orphaned children, a parent outside the harness filter and a cycle.
+
+      - **A hidden unkeyed read** inside the keyed figures pass (the fake cannot see adapter internals). Mitigation: the SQL-recording adapter test asserts every statement is keyed.
+
+      - **Figure drift** between the page and today's list (absent-versus-zero token totals). Mitigation: parity on the four named seeds, assertions never weakened.
+
+      - **An N+1 subagent preview** (one child query per root). Mitigation: `SessionChildPreview` is one window-function statement; the SQL-recording test counts it.
+
+      - **Search injection or wildcard leakage** through `q`. Mitigation: `TextExpr` binding, `ESCAPE '\'`, and the literal-match test with `%`, `_`, `\` and a quote.
+
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T2
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T2 | new `dash/server.tests/KyberDash.Application.Tests/Sessions/SessionListPagingTests.cs`; `SqliteRelationalStoreReadTests.cs` (extend); `MinimalApiEndpointTests.cs`, `PresentationBuilder.cs` | `dotnet test dash/server/KyberDash.sln -c Release --filter "FullyQualifiedName~SessionListPagingTests"` | `TheSessionsListPagesRootsInSqlAndPricesOnlyThePage` (250 roots, page 2 → 100 rows, `total` 250; read log: `SessionHeaderPage`, `SessionHeadersByKeys`, keyed `SessionListFigures` with the page's keys; no `ListSessionProjections`, no `GetSession`); `HarnessAndSearchFilterOnTheServer` (search text with `%`, `_`, `\` and a quote matches literally); `SubagentsAttachWithTheFirst25AndATotal` (the preview is one statement for all roots on the page, asserted by the SQL-recording test); `SubagentPagesAnswer25ByPage`; `APagePastTheEndAnswersEmptyWithTheTotal`; `MalformedPagingIs400`; `LimitTenStillAnswersTheFirstTenRoots`. Adapter: `SessionHeaderPageMatchesTheTreeRule` (orphaned child, parent outside the harness filter, a cycle whose members fall on different pages); `TheSessionsPageIssuesNoUnkeyedStatement` (SQL-recording subclass: every statement on the page path filters by the page's keys or is the header page query). Page figures equal today's `GetSessions` figures on the token-less, multi-harness, empty and content-bearing seeds. | New members do not compile; current code reads every projection and prices every session. | All named tests pass; existing `GetSessions` figure assertions kept; non-zero test count. |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D3 | How does the sessions list avoid reading every session? | `IProjectionStore` gains `SessionHeaderPage(harness?, search?, page, limit)`, `SessionChildHeaderPage(parentId, page, limit)`, `SessionChildPreview(parentIds, perParent)` and `SessionHeadersByKeys(keys)`, reading only `session_projection` header columns. Root resolution, harness filter, search, `ORDER BY started_at_utc DESC, session_id` and `LIMIT/OFFSET` run in SQL with a `COUNT(*)` total. `IRelationalStoreReader` gains a keyed `SessionListFigures(IReadOnlyCollection<string> keys, pricing)` whose SQLite implementation never calls `Sessions(harness)` or `ListSessionProjections` (it reads the page's session rows, header columns and records by key). The page build drops the per-row `reader.GetSession` call (repo and branch come from the figures). | Today's list reads every session's full projection twice and every session row once per row, then discards all but `limit`. The root rule stays today's: a session is a root unless its parent is a projected session within the same harness filter and attaching it would not form a cycle. The page's subagent preview (first 25 children per root plus each root's child total) is **one** statement for all roots on the page — a `row_number() OVER (PARTITION BY parent_session_id ORDER BY started_at_utc, session_id)` window query filtered to `<= 25`, with the totals from the same pass — never one query per root. Cycle handling: a session whose parent chain loops back to itself is treated as a root, as today; the chain is resolved by a recursive CTE over `session_projection` (`parent_session_id` links, bounded by the store's session count) inside the header query, so ancestors off the page are seen. The parity seed includes a cycle whose members fall on different pages. | autonomous: follows `KW-STD-SQL-001/003` |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-hard
+    agent-confidence: 0.98
+    difficulty: hard
+    difficulty-source: architect
+    technology: csharp
+  - id: T3
+    capabilities: React and TypeScript UI work over TanStack Query and the shared API client, with Vitest and Testing Library tests.
+    depends-on:
+      - T2
+    files:
+      - dash/web/src/lib/kyberApi.ts
+      - dash/web/src/components/ui/Pager.tsx
+      - dash/web/src/components/ContextExplorer.tsx
+      - dash/web/src/pages/RunDetail.tsx
+      - dash/web/src/pages/ContextDoctor.tsx
+      - dash/web/src/App.tsx
+      - dash/web/src/App.navigation.test.tsx
+    session: dash-sections-ui
+    prompt: >
+      Task T3: Sessions list UI, shared pager, and the pages that used the whole list
+
+      Worktree: {worktree}
+
+
+      - **Objective:** The sessions list and subagent lists page through the server with one shared pager; `RunDetail` and `ContextDoctor` stop downloading the whole list.
+
+      - **Capabilities:** React and TypeScript UI work over TanStack Query and the shared API client, with Vitest and Testing Library tests.
+
+      - **Difficulty:** medium
+
+      - **Technology:** react
+
+      - **Session:** `dash-sections-ui`
+
+      - **Depends on:** T2
+
+      - **Files:**
+        - `dash/web/src/lib/kyberApi.ts`: `KyberPage<T>` type and validator for the `{ entries, data, total, page, limit }` envelope, the sessions-page validator for `{ sessions, total, page, limit }`, `fetchKyberSessionPage({ page, limit, harness, q })`, `fetchKyberSubagentPage(id, page)`; remove the unpaged `fetchKyberSessions` once its callers move.
+        - New `dash/web/src/components/ui/Pager.tsx`: the one pager every list uses (previous, next and page numbers from `page`, `limit`, `total`; keyboard-operable; disabled while its page loads; nothing rendered when `total <= limit`).
+        - `dash/web/src/components/ContextExplorer.tsx`: query key `['kyber-sessions', harness, q, page]`; harness from the shell's selector sent to the server; a search box sending `q`; pager; subagent rows from the root's first 25 with a pager fetching further pages.
+        - `dash/web/src/pages/RunDetail.tsx`: resolve the execution's session through `fetchKyberSession` (`/session/:id/summary`); read `summary.turn_count`.
+        - `dash/web/src/pages/ContextDoctor.tsx`: replace the `<select>` with a search combobox over `q` (paged); validate a selected or deep-linked id through `/summary`, not list membership; keep harness scoping.
+        - `dash/web/src/App.tsx` and `dash/web/src/App.navigation.test.tsx` where they mock or call `fetchKyberSessions`.
+        - Tests per the Test contract.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T3 --red`
+        - `kyber-weave review gates . --agent <worker> --task T3`
+      - **Acceptance:** T3 rows pass; each query-backed view has loading, error, empty and data tests.
+
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T3
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T3 | `ContextExplorer.test.tsx`, `RunDetail.test.tsx`, `ContextDoctor.test.tsx`, `App.navigation.test.tsx`, new `dash/web/src/components/ui/Pager.test.tsx`, `kyberApi` tests | `npm --prefix dash run test:related -- <changed files>` | The list requests `/api/kyber/sessions?page=1&limit=100` with harness and `q` on the query string; next requests page 2 only on press; loading, error, empty and data states render; a root with 30 subagents shows 25 and its pager requests `/session/:id/subagents?page=2`; `RunDetail` resolves its session through `/session/:id/summary` and shows `summary.turn_count`; the `ContextDoctor` picker is a search combobox over `q`, and a deep-linked session not on page 1 resolves through `/summary` (not reported unavailable); a malformed envelope renders the error state. | The explorer requests the unpaged list; no pager; the picker checks list membership. | Named tests pass; `typecheck` and `lint` clean. |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-medium
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+    technology: react
+  - id: T4
+    capabilities: C# contract, SQLite query and application read-path work, with parity and read-log tests.
+    depends-on:
+      - T2
+    files:
+      - IRelationalStoreReader.cs
+      - SqliteRelationalStore.Reader.cs
+      - KyberBridgeEngine.cs
+      - IDashServices.cs
+      - DashboardQueryService.cs
+      - DashEndpointMappings.cs
+      - InMemoryRelationalStore.cs
+    session: dash-sections-server
+    prompt: >
+      Task T4: Section server part 1 — summary, charts, turn figures, run turns
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Widen `/summary` and `/turn/:index`, add `/charts`, add `SessionTurnFigures`, and move `ExtractRunTurns` onto it.
+
+      - **Capabilities:** C# contract, SQLite query and application read-path work, with parity and read-log tests.
+
+      - **Difficulty:** medium
+
+      - **Technology:** csharp
+
+      - **Session:** `dash-sections-server`
+
+      - **Depends on:** T2
+
+      - **Files:**
+        - `IRelationalStoreReader.cs`: `SessionTurnFigures(sessionKey, pricing)` (the per-turn `ReadTimeTurnSummary` list, content-free); widen `SessionSummaryFigure` with the header fields the API contract lists.
+        - `SqliteRelationalStore.Reader.cs`: implement from turn records' token and cost columns (reuse `BuildContentFreeTurnSummaries` and `BuildReaderTurnSummary`), the summary widening, and the stored context turn for `/turn/:index`.
+        - `KyberBridgeEngine.cs`: `GetSessionCharts` (today's `turns` via `ToTurnDto` and `context` via `BuildContextPayload`), widened `GetSessionSummary` (fields via `BuildNotes`, `BuildCostBasisMismatchObject`, `BuildSessionSummary`) and `GetTurnFigures`; `ExtractRunTurns` reads `SessionTurnFigures`; section 404s through `SessionHeadersByKeys`.
+        - `IDashServices.cs`, `DashboardQueryService.cs`, `DashEndpointMappings.cs`, `InMemoryRelationalStore.cs`, `FaultingSessionReader` copies, `DelegatingReader`.
+        - Tests per the Test contract.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T4 --red`
+        - `kyber-weave review gates . --agent <worker> --task T4`
+      - **Acceptance:** T4 rows pass; `/charts` and `/summary` parity with today's detail payload holds while `GetSessionDetail` still exists.
+
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T4
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T4 | new `dash/server.tests/KyberDash.Application.Tests/Sessions/SessionSectionEndpointsTests.cs`, Presentation endpoint tests | `dotnet test dash/server/KyberDash.sln -c Release --filter "FullyQualifiedName~SessionSectionEndpointsTests"` | `/summary` carries every field the API contract lists (parity with today's `GetSessionDetail` `summary`, `notes`, `costBasisMismatch`, `span_count`, reconciliation totals, `unused_tools_count`); `/charts` equals today's `GetSessionDetail` `turns` and `context` on a 128-turn seed and issues no tool, skill, request, timeline or content read; `/turn/:index` carries that turn's context buckets; `ExtractRunTurns` answers the same run turns from `SessionTurnFigures`; section 404s use `SessionHeadersByKeys`. | Routes and reads do not exist. | Named tests pass; `EveryOtherPathLeavesContentUnread` includes the new routes. |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-medium
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+    technology: csharp
+  - id: T5
+    capabilities: C# contract, SQLite query and application read-path work, with parity and read-log tests.
+    depends-on:
+      - T4
+    files:
+      - IRelationalStoreReader.cs
+      - SqliteRelationalStore.Reader.cs
+      - KyberBridgeEngine.cs
+      - IDashServices.cs
+      - DashboardQueryService.cs
+      - DashEndpointMappings.cs
+      - InMemoryRelationalStore.cs
+    session: dash-sections-server
+    prompt: >
+      Task T5: Section server part 2 — requests, reconciliation, problems
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Add the three paged routes; request rows carry prompt previews read for the page only.
+
+      - **Capabilities:** C# contract, SQLite query and application read-path work, with parity and read-log tests.
+
+      - **Difficulty:** medium
+
+      - **Technology:** csharp
+
+      - **Session:** `dash-sections-server`
+
+      - **Depends on:** T4
+
+      - **Files:**
+        - `IRelationalStoreReader.cs`: `SessionRequestFigures`, `SessionReconciliationFigures`, `SessionProblems` (paged: items plus total), `RequestPromptPreviews(sessionKey, requestSpanIds)`.
+        - `SqliteRelationalStore.Reader.cs`: implement each over only its tables (`session_request` and turn ownership; turn reported/tokenized totals; ingest problems); prompt previews via the scoped part read, truncated as `ExtractReaderPromptFromParts` does.
+        - `KyberBridgeEngine.cs`: `GetSessionRequests`, `GetSessionReconciliation`, `GetSessionProblems` with today's field mapping (`RequestRows`, `ReconciliationRows`) and the T2 envelope helper.
+        - `IDashServices.cs`, `DashboardQueryService.cs`, `DashEndpointMappings.cs`, `InMemoryRelationalStore.cs`, `FaultingSessionReader` copies, `DelegatingReader`.
+        - Tests per the Test contract.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T5 --red`
+        - `kyber-weave review gates . --agent <worker> --task T5`
+      - **Acceptance:** T5 rows pass.
+
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T5
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T5 | `SessionSectionEndpointsTests.cs` (extend) | same filter as T4 | `/requests`, `/reconciliation`, `/problems` page at 25 with totals and equal today's rows; `/requests` reads prompt previews only for the page's request spans (`RequestPromptPreviews` called once with ≤ 25 ids); each route's read log names only its own reads. | Routes and reads do not exist. | Named tests pass; the sweep records `RequestPromptPreviews` only on `/requests`. |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-medium
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+    technology: csharp
+  - id: T6
+    capabilities: C# contract, SQLite query and application read-path work, with parity, read-log and SQL-recording tests.
+    depends-on:
+      - T5
+    files:
+      - IRelationalStoreReader.cs
+      - SqliteRelationalStore.Reader.cs
+      - KyberBridgeEngine.cs
+      - IDashServices.cs
+      - DashboardQueryService.cs
+      - DashEndpointMappings.cs
+      - InMemoryRelationalStore.cs
+    session: dash-sections-server
+    prompt: >
+      Task T6: Section server part 3 — tools, servers, skills
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Add the tools, servers and skills routes, paged at 25 with page-independent aggregates.
+
+      - **Capabilities:** C# contract, SQLite query and application read-path work, with parity, read-log and SQL-recording tests.
+
+      - **Difficulty:** medium
+
+      - **Technology:** csharp
+
+      - **Session:** `dash-sections-server`
+
+      - **Depends on:** T5
+
+      - **Files:**
+        - `IRelationalStoreReader.cs`: `SessionToolFigures(sessionKey, pricing)` (ranked rows including never-invoked, server rollups, the aggregate fields of the API contract) and `SessionSkillFigures(sessionKey)` — tool-call and tool-definition metadata, skill rows and the stored schema projection only.
+        - `SqliteRelationalStore.Reader.cs`: implement them reusing `BuildReaderToolSummaries`, `BuildReaderServerSummaries`, `ResolveReaderUnusedRange`.
+        - `KyberBridgeEngine.cs`: `GetSessionTools`, `GetSessionServers`, `GetSessionSkills`, mapping fields as `ToolRows`, `ServerRows`, `BuildSchemaPayload`, `BuildSkillsPayload` do; aggregates over all rows before paging.
+        - `IDashServices.cs`, `DashboardQueryService.cs`, `DashEndpointMappings.cs`, `InMemoryRelationalStore.cs`, `FaultingSessionReader` copies, `DelegatingReader`.
+        - Tests per the Test contract.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T6 --red`
+        - `kyber-weave review gates . --agent <worker> --task T6`
+      - **Acceptance:** T6 rows pass.
+
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T6
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T6 | `SessionSectionEndpointsTests.cs` (extend) | same filter as T4 | `/tools` pages ranked rows (never-invoked included) at 25, and its `aggregate` equals what today's payload yields over all rows (`maxCost`, `residentCostTotal`, `invocationCount`, `unusedCount`, `unusedRange`, `byServer`, `definitionsSpanId`), also on page 2; `/servers` and `/skills` page at 25; each route's statements (SQL-recording adapter test) touch only tool / skill tables and the stored schema. | Routes and reads do not exist. | Named tests pass; the sweep holds. |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-medium
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+    technology: csharp
+  - id: T7
+    capabilities: C# application and domain work on the timeline builder with a content-free scoped read and parity tests.
+    depends-on:
+      - T6
+    files:
+      - IRelationalStoreReader.cs
+      - SqliteRelationalStore.Reader.cs
+      - InMemoryRelationalStore.cs
+      - KyberBridgeEngine.cs
+      - IDashServices.cs
+      - DashboardQueryService.cs
+      - DashEndpointMappings.cs
+    session: dash-sections-server
+    prompt: >
+      Task T7: Timeline by level and page
+
+      Worktree: {worktree}
+
+
+      - **Objective:** `/session/:id/timeline` answers one tree level at a time, 25 nodes per page, with `childCount` and `bounds` (D17).
+
+      - **Capabilities:** C# application and domain work on the timeline builder with a content-free scoped read and parity tests.
+
+      - **Difficulty:** hard
+
+      - **Technology:** csharp
+
+      - **Session:** `dash-sections-server`
+
+      - **Depends on:** T6
+
+      - **Files:**
+        - `IRelationalStoreReader.cs`, `SqliteRelationalStore.Reader.cs`, `InMemoryRelationalStore.cs`, test-local readers: `SessionTimelineRecords(sessionKey)` — the content-free record metadata `BuildTimeline` reads, no more.
+        - `KyberBridgeEngine.cs`: `GetSessionTimeline(sessionId, parentNodeId, page)` builds the tree with `CanonContextAnalysis.BuildTimeline`, locates the level (top level, or the node with that id), pages it, and maps nodes with today's fields minus `children`, plus `childCount`; `bounds` from the tree; remove `AttachCapturedPrompt` from the timeline path (D17).
+        - `IDashServices.cs`, `DashboardQueryService.cs`, `DashEndpointMappings.cs` (decode `parent`).
+        - Tests per the Test contract.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T7 --red`
+        - `kyber-weave review gates . --agent <worker> --task T7`
+      - **Acceptance:** T7 rows pass, including union-of-levels parity with today's tree.
+
+
+      Failure modes this task must not allow:
+
+
+      - **Synthetic node ids** (`(auxiliary)`, `(orphan:…)`) not round-tripping through the URL. Mitigation: the test requests a synthetic node's children through an encoded `parent`.
+
+      - **Lost or duplicated nodes across pages** (unstable sibling order). Mitigation: siblings keep `BuildTimeline`'s order; the union-of-levels parity test.
+
+      - **A content read sneaking in** through record hydration. Mitigation: `SessionTimelineRecords` returns metadata only; the sweep covers the route.
+
+      - **Cost on a very large session** (the tree is rebuilt per page). Mitigation: recorded in the register and measured in the PR notes (D17).
+
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T7
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T7 | `SessionSectionEndpointsTests.cs` (extend), `dash/server.tests/KyberDash.Domain.Tests` timeline tests | same filter as T4 | `/timeline` top level returns the first 25 nodes with `childCount` and `bounds`; `?parent=` (including a synthetic id, URL-encoded) returns that node's children paged at 25; the union of all levels equals today's `BuildTimeline` tree on a nested seed with more than 25 children at one level and synthetic nodes; no content read. | Route and read do not exist. | Named tests pass. |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D17 | Timeline paging | `BuildTimeline` creates synthetic grouping nodes (`(auxiliary)`, `(orphan:…)`, `CanonContextAnalysis.cs`), so SQL paging by parent span is not possible. `SessionTimelineLevel` builds the tree from the session's content-free record metadata (only the columns `BuildTimeline` reads), finds the requested level, and pages it with `childCount` per node. `AttachCapturedPrompt` is removed from the timeline path: it is a no-op on content-free records (no parts), and the prompt now reaches the inspector through D16. | The per-request cost is the session's metadata tree, not its content; it is recorded in the read-model register and measured in the PR notes. | autonomous: from plan review |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-hard
+    agent-confidence: 0.98
+    difficulty: hard
+    difficulty-source: architect
+    technology: csharp
+  - id: T8
+    capabilities: C# read-path and endpoint work with read-log and SQL-recording tests.
+    depends-on:
+      - T7
+    files:
+      - IRelationalStoreReader.cs
+      - SqliteRelationalStore.Reader.cs
+      - InMemoryRelationalStore.cs
+      - KyberBridgeEngine.cs
+      - IDashServices.cs
+      - DashboardQueryService.cs
+      - DashEndpointMappings.cs
+    session: dash-sections-server
+    prompt: >
+      Task T8: Stored fields — inventory at mount, rows on demand
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Split stored fields into a content-free inventory and a paged, allowlisted per-table rows route (D15).
+
+      - **Capabilities:** C# read-path and endpoint work with read-log and SQL-recording tests.
+
+      - **Difficulty:** medium
+
+      - **Technology:** csharp
+
+      - **Session:** `dash-sections-server`
+
+      - **Depends on:** T7
+
+      - **Files:**
+        - `IRelationalStoreReader.cs`, `SqliteRelationalStore.Reader.cs`, `InMemoryRelationalStore.cs`, test-local readers: `StoredFieldsInventory(sessionKey)` and `StoredFieldsRows(sessionKey, table, page, limit)` replacing `StoredFields`; `table` checked against the catalog tables the inventory lists.
+        - `KyberBridgeEngine.cs`, `IDashServices.cs`, `DashboardQueryService.cs`, `DashEndpointMappings.cs`: the inventory route and `/session/{sessionKey}/stored-fields/{table}`.
+        - Tests per the Test contract.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T8 --red`
+        - `kyber-weave review gates . --agent <worker> --task T8`
+      - **Acceptance:** T8 rows pass.
+
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T8
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T8 | stored-fields tests in `dash/server.tests` (extend) | `dotnet test dash/server/KyberDash.sln -c Release --filter "FullyQualifiedName~StoredFields"` | The inventory route returns names, columns, counts and missing keys with no row values and no content read; the rows route returns one table's page of 25; an unknown or non-catalog `table` is 404; rows are limited in SQL (SQL-recording adapter test). | Rows are returned unbounded with the inventory today. | Named tests pass. |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D15 | Stored fields reads content — when may it load? | The stored-fields section loads only the inventory at mount (names, columns, counts, missing keys; no row values). A table's rows load when the viewer opens that table, one page of 25 at a time. | `KW-STD-SQL-002`: content text is read only where it is consumed. Rows hold stored column values, including content text. | autonomous: from plan review |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-medium
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+    technology: csharp
+  - id: T9
+    capabilities: TypeScript API-client work with Vitest tests.
+    depends-on:
+      - T3
+      - T8
+    files:
+      - dash/web/src/lib/kyberApi.ts
+    session: dash-sections-ui
+    prompt: >
+      Task T9: Session view API client — fetchers, validators, query keys
+
+      Worktree: {worktree}
+
+
+      - **Objective:** The shared client gains one fetcher and one response validator per section route, plus the section query-key helpers, so the layout task only wires components.
+
+      - **Capabilities:** TypeScript API-client work with Vitest tests.
+
+      - **Difficulty:** easy
+
+      - **Technology:** react
+
+      - **Session:** `dash-sections-ui`
+
+      - **Depends on:** T3, T8
+
+      - **Files:**
+        - `dash/web/src/lib/kyberApi.ts`: fetchers and validators for summary, charts, tools, servers, skills, timeline level, requests, reconciliation, problems, stored-fields inventory and rows, and the widened turn route; query-key helpers `['kyber-session', id, section, page]`. Validators build on the T3 envelope validator.
+        - `kyberApi` tests (one per fetcher: valid envelope parses; malformed envelope is an error, never a crash or a default).
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T9 --red`
+        - `kyber-weave review gates . --agent <worker> --task T9`
+      - **Acceptance:** T9 rows pass; `typecheck` and `lint` clean.
+
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T9
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T9 | `kyberApi` tests | `npm --prefix dash run test:related -- <changed files>` | Each section fetcher requests its route with the page and returns the validated payload; a malformed payload rejects with a validation error. | Fetchers do not exist. | Named tests pass; `typecheck` and `lint` clean. |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-easy
+    agent-confidence: 1
+    difficulty: easy
+    difficulty-source: architect
+    technology: react
+  - id: T10
+    capabilities: React UI refactor over TanStack Query and the shared API client, with Vitest and Testing Library tests.
+    depends-on:
+      - T9
+    files:
+      - dash/web/src/components/AgentSessionDashboard.tsx
+      - dash/web/src/components/session/**
+    session: dash-sections-ui
+    prompt: >
+      Task T10: Session view layout — sections issued in page order
+
+      Worktree: {worktree}
+
+
+      - **Objective:** The session view renders from per-section queries issued at mount in page order; header, banners and overview render from `/summary`; requests and reconciliation lists page; no raw `fetch`.
+
+      - **Capabilities:** React UI refactor over TanStack Query and the shared API client, with Vitest and Testing Library tests.
+
+      - **Difficulty:** hard
+
+      - **Technology:** react
+
+      - **Session:** `dash-sections-ui`
+
+      - **Depends on:** T9
+
+      - **Files:**
+        - `dash/web/src/components/AgentSessionDashboard.tsx`: `AgentSessionLoader` loads the summary through the client; `AgentSessionContent` becomes a layout of section components in today's order, each owning its query and four states. New section components under `dash/web/src/components/session/` (one file per section). Header, subagent notice, reconciliation badge (from `summary.reconciliation`), harness notes, requests banner (first page of requests with the pager and "N user requests" from the total), aux banner and overview strip render from `/summary` and their own queries. Keep every `data-testid` the e2e specs use.
+        - Charts, tools, skills, cost and timeline sections render their existing components fed from the new queries with minimal adaptation; their paging and scale work is T11–T13.
+        - Tests per the Test contract.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T10 --red`
+        - `kyber-weave review gates . --agent <worker> --task T10`
+      - **Acceptance:** T10 rows pass; no measured value renders as `0` or `—` while loading or failed.
+
+
+      Failure modes this task must not allow:
+
+
+      - **A section waits on another's query** (one slow route blanks the page). Mitigation: each section component owns exactly one query; the test holds every other route back and asserts each section's own data state still renders.
+
+      - **Request order drifts from page order** as components move. Mitigation: the test asserts the issued order before any response resolves.
+
+      - **A content route fires at mount** through a drawer default or a stored-fields rows prefetch. Mitigation: the test asserts no `/content`, `/turn/:index/content` or `/stored-fields/:table` request on open.
+
+      - **e2e locators break** when markup moves into section files. Mitigation: every `data-testid` the e2e specs use is kept; T16's typecheck plus CI's harness-collection job catch the rest.
+
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T10
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T10 | `AgentSessionDashboard.test.tsx` and new section tests under `dash/web/src/components/session/`, `kyberApi` tests | `npm --prefix dash run test:related -- <changed files>` | Opening a session issues, before any response resolves, the section requests in page order (summary, charts, tools, servers, skills, timeline top level, requests, reconciliation, problems, stored-fields inventory) and no content-route or stored-fields-rows request; each section renders its own loading, error, empty and data states while the others are held back; the header and banners render from `/summary` alone; requests and reconciliation lists show the shared pager past 25; no component outside `lib/kyberApi.ts` calls `fetch`. | One monolithic raw `fetch`; no per-section states. | Named tests pass; `typecheck`, `lint`, `check:reachable` clean. |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-hard
+    agent-confidence: 0.98
+    difficulty: hard
+    difficulty-source: architect
+    technology: react
+  - id: T11
+    capabilities: React UI component work with Vitest tests.
+    depends-on:
+      - T10
+    files:
+      - dash/web/src/components/SessionSpendCharts.tsx
+      - dash/web/src/components/SchemaCostRanking.tsx
+      - dash/web/src/components/SkillsPanel.tsx
+      - dash/web/src/components/SessionCostPanel.tsx
+      - dash/web/src/components/session/**
+    session: dash-sections-ui
+    prompt: >
+      Task T11: Charts, tool ranking, skills and cost panel on their own data
+
+      Worktree: {worktree}
+
+
+      - **Objective:** The four components consume their section routes; their lists page at 25; scales and totals come from server aggregates.
+
+      - **Capabilities:** React UI component work with Vitest tests.
+
+      - **Difficulty:** medium
+
+      - **Technology:** react
+
+      - **Session:** `dash-sections-ui`
+
+      - **Depends on:** T10
+
+      - **Files:**
+        - `dash/web/src/components/SessionSpendCharts.tsx` (from `/charts`), `dash/web/src/components/SchemaCostRanking.tsx` (paged rows; `aggregate` for scale, `byServer`, waste and counts), `dash/web/src/components/SkillsPanel.tsx` (paged; `aggregate.maxTokens`), `dash/web/src/components/SessionCostPanel.tsx` (cost blocks from the summary; problems list paged), and the matching section components under `dash/web/src/components/session/`.
+        - Tests per the Test contract.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T11 --red`
+        - `kyber-weave review gates . --agent <worker> --task T11`
+      - **Acceptance:** T11 rows pass.
+
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T11
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T11 | `SessionSpendCharts.test.tsx`, `SchemaCostRanking.test.tsx`, `SkillsPanel.test.tsx`, `SessionCostPanel.test.tsx` | `npm --prefix dash run test:related -- <changed files>` | Charts render from `/charts`; the tool ranking, skills and problems lists page at 25; bar scales, waste banner and "N of M tools never called" come from the summary or the section `aggregate` — with page 2 held back they already show whole-session values. | Components read the monolithic payload. | Named tests pass. |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-medium
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+    technology: react
+  - id: T12
+    capabilities: React UI work on the drawer and its openers with Vitest tests.
+    depends-on:
+      - T11
+    files:
+      - dash/web/src/components/SessionInspectorDrawer.tsx
+      - dash/web/src/components/AgentSessionDashboard.tsx
+    session: dash-sections-ui
+    prompt: >
+      Task T12: Inspector drawer fetches what it opens
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Drawer openers resolve turns, tools, skills and spans by key (D9), with content requested only after opening.
+
+      - **Capabilities:** React UI work on the drawer and its openers with Vitest tests.
+
+      - **Difficulty:** medium
+
+      - **Technology:** react
+
+      - **Session:** `dash-sections-ui`
+
+      - **Depends on:** T11
+
+      - **Files:**
+        - `dash/web/src/components/SessionInspectorDrawer.tsx`; the drawer openers in `AgentSessionDashboard.tsx` or their extracted section components.
+        - Tests per the Test contract.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T12 --red`
+        - `kyber-weave review gates . --agent <worker> --task T12`
+      - **Acceptance:** T12 rows pass.
+
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T12
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T12 | `SessionInspectorDrawer*.test.tsx`, `AgentSessionDashboard.test.tsx` drawer cases | `npm --prefix dash run test:related -- <changed files>` | Opening a turn requests `/turn/:index` and only then its content; a bucket drill-down uses that turn's `context`; a tool opens its definitions through `aggregate.definitionsSpanId`; a skill through `turns_listed`; a span from the loaded node or `/span/:id/attributes`. | The drawer looks rows up in the retired payload. | Named tests pass. |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D9 | How does the inspector drawer work without the session-wide turn list and span map? | It fetches what it opens: a turn through `/session/:id/turn/:index` (widened with that turn's `context`), a span from the loaded timeline node or `/span/:id/attributes`, a tool's definitions through the tools `aggregate.definitionsSpanId` and the existing content route, a skill through its row's `turns_listed`. | Today the drawer looks rows up in `session.turns`, `session.context` and a whole-timeline span map — the payload this change retires. | autonomous: derived |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-medium
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+    technology: react
+  - id: T13
+    capabilities: React UI work on the timeline and stored-fields components with Vitest tests.
+    depends-on:
+      - T12
+    files:
+      - dash/web/src/components/analysis/TimelineView.tsx
+      - dash/web/src/components/StoredFieldsPanel.tsx
+    session: dash-sections-ui
+    prompt: >
+      Task T13: Timeline tree, duration view and stored-fields panel by page
+
+      Worktree: {worktree}
+
+
+      - **Objective:** The call tree and duration view load levels on expand and page them; the stored-fields panel loads a table's rows only when opened.
+
+      - **Capabilities:** React UI work on the timeline and stored-fields components with Vitest tests.
+
+      - **Difficulty:** medium
+
+      - **Technology:** react
+
+      - **Session:** `dash-sections-ui`
+
+      - **Depends on:** T12
+
+      - **Files:**
+        - `dash/web/src/components/analysis/TimelineView.tsx` and the timeline section component; `dash/web/src/components/StoredFieldsPanel.tsx` and its section component.
+        - Tests per the Test contract.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T13 --red`
+        - `kyber-weave review gates . --agent <worker> --task T13`
+      - **Acceptance:** T13 rows pass.
+
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T13
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T13 | `TimelineView` tests, `StoredFieldsPanel.test.tsx` | `npm --prefix dash run test:related -- <changed files>` | Expanding a node with `childCount > 0` requests that node's first page (id URL-encoded); a level past 25 pages; the duration view scales to `bounds` and lists loaded nodes; a stored-fields table's rows load only when the viewer opens it, 25 at a time. | The tree expects nested `children`; the panel renders rows from the inventory. | Named tests pass. |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-medium
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+    technology: react
+  - id: T14
+    capabilities: C# contract retirement, application migration and test migration.
+    depends-on:
+      - T8
+      - T13
+    files:
+      - IRelationalStoreReader.cs
+      - SqliteRelationalStore.Reader.cs
+      - InMemoryRelationalStore.cs
+      - KyberBridgeEngine.cs
+      - IDashServices.cs
+      - DashboardQueryService.cs
+      - DashEndpointMappings.cs
+      - StoreInterfaceShapeTests.cs
+      - AnalyticsReadPathTests.cs
+      - ApplicationParityTests.cs
+      - RelationalIngestTests.cs
+      - SqliteRelationalStoreReadTests.cs
+      - SettingsCleanDoctorReportTests.cs
+    session: dash-sections-server
+    prompt: >
+      Task T14: Retire the monolithic route and migrate the report (server)
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Remove `/api/kyber/session/:id`, `GetSessionDetail` and `SessionDetailFigures`; move their tests to the section routes; the report reads batched (D13).
+
+      - **Capabilities:** C# contract retirement, application migration and test migration.
+
+      - **Difficulty:** medium
+
+      - **Technology:** csharp
+
+      - **Session:** `dash-sections-server`
+
+      - **Depends on:** T8, T13
+
+      - **Files:**
+        - `IRelationalStoreReader.cs`, `SqliteRelationalStore.Reader.cs`, `InMemoryRelationalStore.cs`, test-local readers: remove `SessionDetailFigures` / `SessionDetailFigure`; add `SessionReportFigures(keys, pricing)`.
+        - `KyberBridgeEngine.cs`: remove `GetSessionDetail`, `ReadSessionDetailFigures` and helpers left without callers; `GetReport` per D13.
+        - `IDashServices.cs`, `DashboardQueryService.cs`, `DashEndpointMappings.cs`: remove the route and members.
+        - Tests: `StoreInterfaceShapeTests.cs`, `AnalyticsReadPathTests.cs`, `ApplicationParityTests.cs`, `RelationalIngestTests.cs`, `SqliteRelationalStoreReadTests.cs`, `SettingsCleanDoctorReportTests.cs`, Presentation tests — every `GetSessionDetail` assertion re-pointed to the section route that now serves that field; none deleted or weakened.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T14 --red`
+        - `kyber-weave review gates . --agent <worker> --task T14`
+      - **Acceptance:** T14 rows pass; the solution builds.
+
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T14
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T14 | `StoreInterfaceShapeTests.cs`, `AnalyticsReadPathTests.cs`, `ApplicationParityTests.cs`, `RelationalIngestTests.cs`, `SqliteRelationalStoreReadTests.cs`, `SettingsCleanDoctorReportTests.cs`, Presentation tests | `dotnet test dash/server/KyberDash.sln -c Release --filter "FullyQualifiedName~StoreInterfaceShapeTests"` plus each named class's filter | `/api/kyber/session/:id` is gone (404); `SessionDetailFigures`, `SessionDetailFigure`, `GetSessionDetail` and the unpaged `GetSessions` signature are gone from contracts and implementers; the `GetSessionDetail` read-path and parity tests are moved to the section routes (each assertion kept, re-pointed, never deleted or weakened); the report reads `SessionReportFigures` once and `SessionTurnFigures` once with unchanged figures. | Members, route and per-session report loop still exist. | Named tests pass; the solution builds. |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D13 | The report endpoint's per-session reads | `GetReport` prices its window's sessions with one keyed batched read, `SessionReportFigures(keys, pricing)`, carrying exactly the fields the report reads today from `SessionSummaryFigure`: `TotalInput`, `TotalCacheRead`, `ToolsOffered`, `ToolsInvoked`, `ReportedCost`, `PublishedCost`. The latest session's turns come from `SessionTurnFigures`. | Replaces the one-read-per-session loop; the report's existing figure tests stay the gate, with their read-count assertions updated to the new read names. | autonomous: derived |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-medium
+    agent-confidence: 1
+    difficulty: medium
+    difficulty-source: architect
+    technology: csharp
+  - id: T15
+    capabilities: TypeScript client cleanup with Vitest tests.
+    depends-on:
+      - T14
+    files:
+      - dash/web/src/lib/kyberApi.ts
+      - dash/web/src/pages/TurnDetail.tsx
+      - dash/web/src/lib/kyberApi.turn-route.test.ts
+      - dash/web/src/App.navigation.test.tsx
+    session: dash-sections-ui
+    prompt: >
+      Task T15: Retire the client's whole-payload paths
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Remove the session-payload fetch, its unused types and the whole-payload turn fallback from the web client.
+
+      - **Capabilities:** TypeScript client cleanup with Vitest tests.
+
+      - **Difficulty:** easy
+
+      - **Technology:** react
+
+      - **Session:** `dash-sections-ui`
+
+      - **Depends on:** T14
+
+      - **Files:**
+        - `dash/web/src/lib/kyberApi.ts`, `dash/web/src/pages/TurnDetail.tsx`, `dash/web/src/lib/kyberApi.turn-route.test.ts`, `dash/web/src/App.navigation.test.tsx`.
+      - **Commands:**
+        - `kyber-weave review gates . --agent <worker> --task T15 --red`
+        - `kyber-weave review gates . --agent <worker> --task T15`
+      - **Acceptance:** T15 rows pass.
+
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T15
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T15 | `kyberApi.turn-route.test.ts`, `App.navigation.test.tsx`, `TurnDetail` tests | `npm --prefix dash run test:related -- <changed files>` | The session-payload fetch, its unused types and `fetchKyberSessionTurns`'s whole-payload fallback are gone; `TurnDetail` always requests `/turn/:index`. | The fallback still exists. | Named tests pass; `typecheck`, `lint`, `check:reachable` clean. |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-easy
+    agent-confidence: 1
+    difficulty: easy
+    difficulty-source: architect
+    technology: react
+  - id: T16
+    capabilities: Playwright end-to-end spec maintenance in TypeScript.
+    depends-on:
+      - T15
+    files:
+      - dash/e2e/harness-collection.spec.ts
+      - dash/e2e/deep-links.spec.ts
+      - dash/e2e/otel-tray-dashboard.spec.ts
+      - dash/e2e/otel-web-dashboard.spec.ts
+      - dash/e2e/harness-collection-world.ts
+    session: dash-sections-ui
+    prompt: >
+      Task T16: End-to-end specs on the new routes
+
+      Worktree: {worktree}
+
+
+      - **Objective:** The Playwright specs read the new routes and shapes, so CI's harness-collection job passes.
+
+      - **Capabilities:** Playwright end-to-end spec maintenance in TypeScript.
+
+      - **Difficulty:** easy
+
+      - **Technology:** typescript
+
+      - **Session:** `dash-sections-ui`
+
+      - **Depends on:** T15
+
+      - **Files:**
+        - `dash/e2e/harness-collection.spec.ts` (the consent-on prompt reads `/session/:id/requests`; the two `/sessions` reads accept the new fields), `dash/e2e/deep-links.spec.ts`, `dash/e2e/otel-tray-dashboard.spec.ts`, `dash/e2e/otel-web-dashboard.spec.ts`, `dash/e2e/harness-collection-world.ts`.
+      - **Commands:**
+        - `npm --prefix dash run typecheck`
+      - **Acceptance:** Typecheck clean; no spec reads `/session/:id` or relies on the whole sessions list for a known id. The specs run in CI's `Dash harness-collection e2e` job (D18); the council reports that job's verdict.
+
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T16
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T16 | `dash/e2e/harness-collection.spec.ts`, `dash/e2e/deep-links.spec.ts`, `dash/e2e/otel-tray-dashboard.spec.ts`, `dash/e2e/otel-web-dashboard.spec.ts`, `dash/e2e/harness-collection-world.ts` | `npm --prefix dash run typecheck` (the specs compile against the new shapes); the specs themselves run in CI's `Dash harness-collection e2e` job, not in a worker gate (D18) | The consent-on prompt assertion reads `/session/:id/requests`; list readers accept `{ sessions, total, page, limit }`; specs that need one known session use `/session/:id/summary` or `q`; `data-testid` values used by the specs exist in the new section components. | Specs read the retired route. | Typecheck clean; CI's harness-collection job is the end-to-end verdict, reported by the council. |
+
+
+      #### Decisions this task cites
+
+      | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+      |---|---|---|---|---|
+
+      | D18 | How are the end-to-end specs verified? | Playwright does not run in a worker gate (it needs Chromium and a self-booted engine). T16's gate is `npm --prefix dash run typecheck`; the specs run in CI's `Dash harness-collection e2e` job, whose verdict the end-of-run council reports. Request order and content laziness are pinned in Vitest (T10, T12, T13), not in a new Playwright spec. | Plan-authoring rule: verification gates use what the host already runs. A new browser spec would be unverifiable inside the run. | autonomous: from plan review |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: dev-easy
+    agent-confidence: 0.96
+    difficulty: easy
+    difficulty-source: architect
+    technology: typescript
+  - id: T17
+    capabilities: Documentation in Markdown under the repository's governed-docs rules.
+    depends-on:
+      - T16
+    files:
+      - docs/dash/architecture.md
+      - docs/dash/runbook.md
+      - docs/adr/0092-dashboard-views-load-by-section-and-page.md
+      - docs/adr/README.md
+    session: docs
+    prompt: >
+      Task T17: docs-dev closeout — register, data-loading section, runbook, ADR 0092
+
+      Worktree: {worktree}
+
+
+      - **Objective:** Harvest H1–H4 into canonical documentation and record ADR 0092.
+
+      - **Capabilities:** Documentation in Markdown under the repository's governed-docs rules.
+
+      - **Difficulty:** easy
+
+      - **Session:** `docs`
+
+      - **Depends on:** T16
+
+      - **Files:**
+        - `docs/dash/architecture.md`: read-model register and Backend REST API contract rows for every new, widened and retired route; the web dashboard data-loading section (H2).
+        - `docs/dash/runbook.md`: §11 update (H3).
+        - New `docs/adr/0092-dashboard-views-load-by-section-and-page.md`, registered in `docs/adr/README.md`; supersession notes in ADRs 0007, 0011, 0014, 0041; cross-reference from ADR 0091 (H4).
+        - This plan's Closeout mapping.
+      - **Commands:**
+        - `dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready`
+        - `dotnet run --project src/KyberWeave.Cli -- docs drift .`
+      - **Acceptance:** Both gates report zero findings; every Design harvest row has a Closeout mapping row.
+
+
+      Reference content for this task, quoted exactly from its source document and complete as given:
+
+
+      #### Test contract row for T17
+
+      | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+
+      |---|---|---|---|---|---|
+
+      | T17 | Documentation; verified by the docs gates | `dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready` and `dotnet run --project src/KyberWeave.Cli -- docs drift .` | H1–H4 harvested; ADR 0092 registered in `docs/adr/README.md`; supersession notes on ADRs 0007, 0011, 0014, 0041; ADR 0091's cross-reference; the Closeout mapping filled. | Not applicable (documentation task). | Both gates report zero findings. |
+
+
+      Results of the tasks this one follows, as their workers reported them:
+
+      {prior_results}
+    agent: docs-dev
+    agent-confidence: 1
+    difficulty: easy
+    difficulty-source: architect
+worker-roster: tiered
