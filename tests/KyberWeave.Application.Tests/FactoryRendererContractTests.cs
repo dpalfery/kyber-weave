@@ -428,7 +428,6 @@ public sealed class FactoryRendererContractTests : IDisposable
         Assert.Equal(["codegraph", "kw-docs"], specialistServers);
         IReadOnlyList<string> expectedSpecialistIds =
             ExpectedFactoryMcpToolIds(source, specialistServers);
-        Assert.Contains("codegraph___codegraph_explore", expectedSpecialistIds, StringComparer.Ordinal);
         Assert.True(
             expectedSpecialistIds.Count > 1,
             "The roster names no kw-docs tool, so nothing about the multi-server grant is exercised.");
@@ -437,6 +436,10 @@ public sealed class FactoryRendererContractTests : IDisposable
         Assert.Equal(
             [.. ExpectedFactoryTools(source.CapabilityProfiles.Profiles[specialist.CapabilityProfile]), .. expectedSpecialistIds],
             specialistTools);
+        // Golden pins on the rendered output, independent of the helper above: the
+        // single-tool server and one multi-tool roster entry, spelled exactly.
+        Assert.Contains("codegraph___codegraph_explore", specialistTools, StringComparer.Ordinal);
+        Assert.Contains("kw-docs___docs_get_source_repository_and_revision", specialistTools, StringComparer.Ordinal);
 
         // The orchestrator: the kw-docs entries, and no codegraph entry.
         SquadAgent orchestrator = Assert.Single(source.Agents, agent => agent.Name == "conductor");
