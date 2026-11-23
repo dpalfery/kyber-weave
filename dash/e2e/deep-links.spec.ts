@@ -8,6 +8,8 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
  * whatever seeded corpus the host was started with.
  */
 const APP = 'http://127.0.0.1:4747'
+/** The widest window the paged routes serve: the seed reads the whole sessions page, not a default page. */
+const WIDEST_PAGE_LIMIT = 500
 
 type Seed = {
   harnessId?: string
@@ -35,8 +37,13 @@ async function seedFromStore(request: APIRequestContext): Promise<Seed> {
     seed.compareB = runs.runs![1]!.runId
   }
 
-  const sessions = (await (await request.get(`${APP}/api/kyber/sessions`)).json()) as {
+  // The sessions list is a page, not the whole store, so the read asks for the widest window
+  // the route serves rather than relying on its default.
+  const sessions = (await (await request.get(`${APP}/api/kyber/sessions?limit=${WIDEST_PAGE_LIMIT}`)).json()) as {
     sessions?: Array<{ session_id?: string; sessionId?: string; turn_count?: number; turnCount?: number }>
+    total: number
+    page: number
+    limit: number
   }
   const withTurns = sessions.sessions?.find((row) => (row.turn_count ?? row.turnCount ?? 0) > 0)
   const session = withTurns ?? sessions.sessions?.[0]
