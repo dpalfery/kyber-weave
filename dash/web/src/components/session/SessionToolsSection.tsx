@@ -68,47 +68,15 @@ export function SessionToolsSection({
   const aggregate = data.aggregate
   const u = summaryRecord ?? {}
 
-  // The server serialises resident cost on every offered row and does not emit
-  // `in_definitions` on rows it could not price, so a priced row is as good a
-  // signal as the definition flag.
-  const measurable = rows.some(
-    (row) =>
-      row.in_definitions ||
-      (typeof row.total_schema_cost === 'number' && Number.isFinite(row.total_schema_cost)),
-  )
-
-  // The analysis shape the ranking table reads, synthesised from the section's
-  // own rows and aggregate. Three verdicts, matching what the engine measured:
-  // priced rows carry a measurable analysis; invocation-only rows (the engine
-  // counted calls but captured no definitions) render as the plain ranking,
-  // exactly as they always have; and an empty page whose aggregate names no
-  // definitions span is the engine's own "not measurable" verdict — the
-  // route answers no rows at all when no tool figures exist.
-  const schema: SchemaCostAnalysis | undefined = measurable
-    ? {
-        measurable: true,
-        neverInvoked: rows
-          .filter((row) => !row.invoked)
-          .map((row) => ({
-            name: row.name,
-            ...(row.server != null ? { server: row.server } : {}),
-            cost: row.total_schema_cost ?? 0,
-            invoked: false,
-          })),
-        byServer: aggregate.byServer,
-        unusedRange: aggregate.unusedRange
-          ? {
-              tokenResidencies: aggregate.unusedRange.tokenResidencies,
-              floor: aggregate.unusedRange.floor,
-              ceiling: aggregate.unusedRange.ceiling,
-              ...(aggregate.unusedRange.currency != null ? { currency: aggregate.unusedRange.currency } : {}),
-            }
-          : { tokenResidencies: 0, floor: 0, ceiling: 0 },
-        turns: rows[0]?.turns_resident ?? 0,
-      }
-    : rows.length === 0 && aggregate.definitionsSpanId == null
-      ? { measurable: false, invocationCount: aggregate.invocationCount }
-      : undefined
+  // The engine's verdicts, read from the aggregate it priced over every row
+  // before paging — never from which rows happen to be on the page. An empty
+  // page whose aggregate names no definitions span is the engine's own "not
+  // measurable" verdict — the route answers no rows at all when no tool
+  // figures exist. Invocation-only rows (calls measured, no definitions)
+  // render as the plain ranking, exactly as they always have.
+  const measurable = aggregate.maxCost != null || aggregate.definitionsSpanId != null
+  const schema: SchemaCostAnalysis | undefined =
+    !measurable && rows.length === 0 ? { measurable: false, invocationCount: aggregate.invocationCount } : undefined
 
   const offeredList = Array.isArray(u.tools_offered) ? u.tools_offered : undefined
   const invokedList = Array.isArray(u.tools_invoked) ? u.tools_invoked : undefined
@@ -232,6 +200,31 @@ export function SessionToolsSection({
         // The payload's tools rows carried names and total_schema_cost when available;
         // the ranking table renders them or falls back where absent.
         tools={rows as unknown as SchemaCostToolRow[]}
+        // The whole-ranking figures travel in the aggregate the route priced
+        // over every row before paging, so the scale, rollup, waste range and
+        // counts are whole-session values with only this page loaded. The
+        // offered count is the summary's own figure when it measured one.
+        aggregate={{
+          maxCost: aggregate.maxCost,
+          unusedCount: aggregate.unusedCount,
+          offeredCount: toolsOfferedCount ?? data.total,
+          unusedRange: aggregate.unusedRange
+            ? {
+                tokenResidencies: aggregate.unusedRange.tokenResidencies,
+                floor: aggregate.unusedRange.floor,
+                ceiling: aggregate.unusedRange.ceiling,
+                ...(aggregate.unusedRange.currency != null ? { currency: aggregate.unusedRange.currency } : {}),
+              }
+            : null,
+          byServer: aggregate.byServer,
+        }}
+        pager={{
+          page: tools.page,
+          total: data.total,
+          limit: data.limit,
+          loading: tools.isFetching,
+          onPageChange: tools.setPage,
+        }}
         onSelectTool={openToolInspector}
       />
     </div>

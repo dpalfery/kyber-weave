@@ -550,3 +550,84 @@ describe('SessionCostPanel: normalizeCostBlock & extractCostBlocks', () => {
     expect(normalized.value).toBeUndefined()
   })
 })
+
+describe('SessionCostPanel: fed by the summary section', () => {
+  it('renders the cost blocks from the summary record alone', () => {
+    // The cost section hands the panel the summary route's stored record; the
+    // blocks render from it with no other source in the props.
+    const session = {
+      summary: {
+        cost: { basis: 'published_rates', status: 'ok', usd: 1.25 },
+      },
+    }
+
+    const element = React.createElement(SessionCostPanel, { session })
+    const html = renderHtml(element)
+
+    expect(findByTestId(element, 'cost-basis-card-published')).toBeDefined()
+    expect(html).toContain('$1.25')
+  })
+
+  it('renders every basis the summary recorded under its own card, never blended', () => {
+    const session = {
+      summary: {
+        costs: [
+          { basis: 'published_rates', status: 'ok', usd: 1.25 },
+          { basis: 'harness_reported', status: 'ok', usd: 2.5 },
+        ],
+      },
+      costBasisMismatch: null,
+    }
+
+    const element = React.createElement(SessionCostPanel, { session })
+    const html = renderHtml(element)
+
+    expect(findByTestId(element, 'cost-basis-card-published')).toBeDefined()
+    expect(findByTestId(element, 'cost-basis-card-harness')).toBeDefined()
+    expect(html).toContain('$1.25')
+    expect(html).toContain('$2.50')
+    expect(html).not.toContain('$3.75')
+  })
+
+  it('surfaces the mismatch verdict from a problems list the problems route pages', () => {
+    // A payload stored before the summary carried the verdict falls back to the
+    // recorded problems — the paged rows `GET /api/kyber/session/:id/problems`
+    // answers, page one of which carries the COST_BASIS_MISMATCH entry here.
+    const session = {
+      costs: [
+        { basis: 'published', status: 'priced', value: 0.8, currency: 'USD' },
+        { basis: 'harness', status: 'priced', value: 0.9, currency: 'USD' },
+      ],
+      problems: [
+        {
+          id: 1,
+          spanId: 'span-1',
+          severity: 'warning',
+          code: 'PARSE_SKIPPED',
+          message: 'A record was skipped',
+          location: 'turn 3',
+          sessionId: 'sess-1',
+          harness: 'claude-code',
+          timestamp: '2026-11-19T10:00:00.000Z',
+        },
+        {
+          id: 2,
+          spanId: 'span-2',
+          severity: 'error',
+          code: 'COST_BASIS_MISMATCH',
+          message: 'cost bases differ across blocks (harness, published); refusing to blend them into one total',
+          location: 'summary',
+          sessionId: 'sess-1',
+          harness: 'claude-code',
+          timestamp: '2026-11-19T10:00:00.000Z',
+        },
+      ],
+    }
+
+    const element = React.createElement(SessionCostPanel, { session })
+    const html = renderHtml(element)
+
+    expect(findByTestId(element, 'cost-basis-mismatch-warning')).toBeDefined()
+    expect(html).toContain('refusing to blend them into one total')
+  })
+})

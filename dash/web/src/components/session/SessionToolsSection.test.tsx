@@ -5,7 +5,7 @@
 // definitions span the aggregate named — or states honestly that the harness
 // exported no definitions and issues no content request at all.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 
@@ -216,6 +216,21 @@ describe('SessionToolsSection states', () => {
       'No tools recorded for this session.',
     )
     expect(within(section).queryByTestId('schema-cost-not-measurable')).toBeNull()
+  })
+
+  it('pages the ranking at 25 and fetches page two only on press', async () => {
+    const fetchMock = stubFetch(() =>
+      jsonResponse({ ...toolsPage([READ_ROW, WRITE_ROW, GIT_ROW], AGGREGATE), total: 30 }),
+    )
+    mount(() => {})
+    const section = await screen.findByTestId('tool-schema-section')
+    const pager = within(section).getByTestId('list-pager')
+    fireEvent.click(within(pager).getByTestId('pager-next'))
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some((call) => String(call[0]).includes('tools?page=2&limit=25')),
+      ).toBe(true),
+    )
   })
 })
 

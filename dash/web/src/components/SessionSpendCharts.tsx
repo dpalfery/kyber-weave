@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 
 import { cn, fmtNum, fmtTokens } from '../lib/utils.js'
-import type { AgentSessionPayload } from './AgentSessionDashboard.js'
 
 // ---------------------------------------------------------------------------
 // Types & Contracts
@@ -98,8 +97,9 @@ export interface ContextCompositionChartProps {
 }
 
 export interface SessionSpendChartsProps {
-  session?: AgentSessionPayload | null
+  /** The `/charts` section's turn rows. */
   turns?: TurnSpendItem[]
+  /** The `/charts` section's context document. */
   context?: ContextCompositionData | null
   selectedTurnIndex?: number | null
   selectedBucket?: ContextBucketKey | string | null
@@ -1492,29 +1492,28 @@ export function ContextCompositionChart({
 // ---------------------------------------------------------------------------
 
 export function SessionSpendCharts({
-  session,
-  turns: propsTurns,
-  context: propsContext,
+  turns,
+  context,
   selectedTurnIndex,
   selectedBucket,
   onSelectTurn,
   className,
 }: SessionSpendChartsProps) {
-  // The charts read looser views of the payload than the served contract
-  // names — `TurnSpendItem` and `ContextCompositionData` are the shapes these
-  // components actually consume, narrowed once at the seam.
-  const turns = (propsTurns ?? session?.turns) as TurnSpendItem[] | undefined
-  const context = (propsContext ?? session?.context) as unknown as ContextCompositionData | undefined
+  // The data is the `/charts` section's, handed over as the section's own
+  // props — the charts read looser views of it than the served contract
+  // names, narrowed once at this seam.
+  const rows = turns as TurnSpendItem[] | undefined
+  const composition = context as unknown as ContextCompositionData | undefined
   return (
     <div className={cn('flex flex-col gap-6', className)} data-testid="session-spend-charts">
       <TurnSpendChart
-        turns={turns}
+        turns={rows}
         selectedTurnIndex={selectedTurnIndex}
         onSelectTurn={(idx) => onSelectTurn?.(idx)}
       />
       <ContextCompositionChart
-        context={context}
-        turns={turns}
+        context={composition}
+        turns={rows}
         selectedTurnIndex={selectedTurnIndex}
         selectedBucket={selectedBucket}
         onSelectTurn={(idx, bucket) => onSelectTurn?.(idx, bucket)}

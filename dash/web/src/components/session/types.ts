@@ -242,6 +242,24 @@ export function stripNotice<T>(content: T): T {
 }
 
 /**
+ * The paging window one section list's rows arrived under, with the page turn
+ * the pager drives. The section reads it off its route's envelope; the list
+ * renders it as the shared pager.
+ */
+export interface PagedWindow {
+  /** The one-based page these rows came from. */
+  page: number
+  /** How many rows the whole list holds, across every page. */
+  total: number
+  /** Rows per page the server answered under. */
+  limit: number
+  /** True while the page being turned to is in flight. */
+  loading?: boolean
+  /** Reports the page the viewer navigated to. */
+  onPageChange: (page: number) => void
+}
+
+/**
  * One request to open the inspector drawer, as a section computes it from its
  * own data. The content request is the section's to build: it knows the span
  * or turn its rows name.
