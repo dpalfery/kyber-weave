@@ -787,7 +787,8 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             GetSessionProjection(sessionKey),
             GetSessionTurns(sessionKey),
             QuerySessionIngestProblems(sessionKey),
-            pricing).Summary with { SkillInvocations = SkillsInvoked(sessionKey: sessionKey) };
+            pricing).Summary with
+        { SkillInvocations = SkillsInvoked(sessionKey: sessionKey) };
     }
 
     /// <inheritdoc />
