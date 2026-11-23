@@ -13,11 +13,31 @@ namespace KyberDash.Application.Tests;
 /// </summary>
 public class CaptureHarnessProbeTests
 {
+    /// <summary>
+    /// The Copilot probe reads the settings file VS Code actually writes on each platform. One
+    /// test pins that layout so the probe cannot read a location VS Code never writes — which is
+    /// exactly what happened when the probe resolved the macOS path and its tests seeded the
+    /// Linux one.
+    /// </summary>
+    [Fact]
+    public void CopilotSettingsFileFollowsTheVSCodeLayoutForThisPlatform()
+    {
+        string home = "/tmp/kw-capture-layout";
+
+        string expected = OperatingSystem.IsMacOS()
+            ? Path.Combine(home, "Library", "Application Support", "Code", "User", "settings.json")
+            : OperatingSystem.IsWindows()
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Code", "User", "settings.json")
+                : Path.Combine(home, ".config", "Code", "User", "settings.json");
+
+        Assert.Equal(expected, CaptureService.CopilotSettingsFile(home));
+    }
+
     [Fact]
     public void CopilotOnSurvivesWhitespaceAndIgnoresACommentedTrue()
     {
         string home = "/tmp/kw-capture-copilot";
-        string path = Path.Combine(home, ".config", "Code", "User", "settings.json");
+        string path = CaptureService.CopilotSettingsFile(home);
         MemoryFiles files = new();
         files.Add(path, """
             {
@@ -37,7 +57,7 @@ public class CaptureHarnessProbeTests
     public void CopilotOffWhenTheBooleanIsFalseDespiteANearbyMention()
     {
         string home = "/tmp/kw-capture-copilot-off";
-        string path = Path.Combine(home, ".config", "Code", "User", "settings.json");
+        string path = CaptureService.CopilotSettingsFile(home);
         MemoryFiles files = new();
         files.Add(path, """{ "note": "github.copilot.chat.otel.enabled: true", "github.copilot.chat.otel.enabled": false }""");
         CaptureService capture = Create(files, home);
@@ -51,7 +71,7 @@ public class CaptureHarnessProbeTests
     public void UnreadableCopilotSettingsAreUnknownRatherThanDisabled()
     {
         string home = "/tmp/kw-capture-copilot-locked";
-        string path = Path.Combine(home, ".config", "Code", "User", "settings.json");
+        string path = CaptureService.CopilotSettingsFile(home);
         MemoryFiles files = new();
         files.Unreadable(path);
         CaptureService capture = Create(files, home);
@@ -69,7 +89,7 @@ public class CaptureHarnessProbeTests
     public void MalformedCopilotSettingsAreUnknownRatherThanDisabled()
     {
         string home = "/tmp/kw-capture-copilot-bad-json";
-        string path = Path.Combine(home, ".config", "Code", "User", "settings.json");
+        string path = CaptureService.CopilotSettingsFile(home);
         MemoryFiles files = new();
         files.Add(path, """{ "github.copilot.chat.otel.enabled": true""");
         CaptureService capture = Create(files, home);
@@ -173,7 +193,7 @@ public class CaptureHarnessProbeTests
     public void HealthIsNotOkWhenAHarnessIsOnButTheReceiverIsNotHosted()
     {
         string home = "/tmp/kw-capture-health";
-        string path = Path.Combine(home, ".config", "Code", "User", "settings.json");
+        string path = CaptureService.CopilotSettingsFile(home);
         MemoryFiles files = new();
         files.Add(path, """{ "github.copilot.chat.otel.enabled": true }""");
         CaptureService capture = Create(files, home);
