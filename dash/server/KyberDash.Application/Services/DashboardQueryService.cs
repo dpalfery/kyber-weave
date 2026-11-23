@@ -44,6 +44,9 @@ public class DashboardQueryService : IDashboardQueryService
     public JsonElement? GetSessionSummary(string sessionId) => bridge.GetSessionSummary(sessionId);
 
     /// <inheritdoc />
+    public JsonElement? GetSessionCharts(string sessionId) => bridge.GetSessionCharts(sessionId);
+
+    /// <inheritdoc />
     public JsonElement? GetTurnFigures(string sessionId, int turnIndex) => bridge.GetTurnFigures(sessionId, turnIndex);
 
     /// <inheritdoc />

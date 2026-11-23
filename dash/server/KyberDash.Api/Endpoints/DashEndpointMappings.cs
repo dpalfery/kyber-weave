@@ -54,6 +54,7 @@ public static class DashEndpointMappings
         kyber.MapGet("/session", SessionsAsync);
         kyber.MapGet("/session/{id}", SessionDetailAsync);
         kyber.MapGet("/session/{id}/summary", SessionSummaryAsync);
+        kyber.MapGet("/session/{id}/charts", SessionChartsAsync);
         kyber.MapGet("/session/{id}/content", SessionContentAsync);
         kyber.MapGet("/session/{id}/subagents", SessionSubagentsAsync);
         kyber.MapGet("/session/{id}/turn/{index}", TurnFiguresAsync);
@@ -258,6 +259,16 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(query);
         return await Task.Run<IResult>(
             () => DashHttp.FromNullableJson(query.GetSessionSummary(id), "Session not found"),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> SessionChartsAsync(string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        return await Task.Run<IResult>(
+            () => query.GetSessionCharts(id) is { } charts
+                ? DashHttp.NoStoreJson(StatusCodes.Status200OK, charts)
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
             cancellationToken).ConfigureAwait(false);
     }
 

@@ -428,6 +428,16 @@ public sealed class AnalyticsOperationsDetailTests
             return inner.TurnFigures(sessionKey, turnIndex, pricing);
         }
 
+        public SessionTurnFigureSet? SessionTurnFigures(string sessionKey, IModelPricingLookup? pricing = null)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return inner.SessionTurnFigures(sessionKey, pricing);
+        }
+
         public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey)
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))

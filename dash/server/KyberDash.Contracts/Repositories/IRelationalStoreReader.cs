@@ -406,6 +406,10 @@ public record SessionListFigure(
 /// <param name="Coverage">Schema and context projection measurability flags.</param>
 /// <param name="Problems">Ingest and pricing diagnostics associated with the session.</param>
 /// <param name="SkillInvocations">Skill names the session's records invoked, in record order — names only, never conversation text.</param>
+/// <param name="ToolRowsCount">Count of per-tool residency and invocation rows the tool sections render.</param>
+/// <param name="UnmeasuredInputTurns">Count of turns that carry no combined input token count.</param>
+/// <param name="ReconciliationTotal">Count of turns whose reported and tokenized input and output totals are both measurable.</param>
+/// <param name="ReconciliationMismatched">Count of measurable reconciliation turns where either reported total disagrees with the tokenized one.</param>
 /// <remarks>
 /// Carries no content: no <c>content_part</c>, tool-call text, tool-definition, or
 /// agent-invocation column is read to build it. The figures that would need those columns —
@@ -434,7 +438,11 @@ public record SessionSummaryFigure(
     ReadTimeCostBasisMismatch? CostBasisMismatch,
     ReadTimeSessionCoverage Coverage,
     IReadOnlyList<Problem> Problems,
-    IReadOnlyList<StoredSkillInvocation> SkillInvocations);
+    IReadOnlyList<StoredSkillInvocation> SkillInvocations,
+    int ToolRowsCount = 0,
+    int UnmeasuredInputTurns = 0,
+    int ReconciliationTotal = 0,
+    int ReconciliationMismatched = 0);
 
 /// <summary>
 /// Read-time figures the session detail header renders, with the session's per-turn figures,
@@ -463,6 +471,24 @@ public record SessionDetailFigure(
     ReadTimeContextBucketSummary? FirstContextBucket,
     ReadTimeContextBucketSummary? LastContextBucket,
     UnusedSchemaRange? UnusedRange);
+
+/// <summary>
+/// The per-turn figures of one session together with its first and last context edges
+/// (<c>DD-13</c>).
+/// </summary>
+/// <param name="Turns">Per-turn figures in turn order.</param>
+/// <param name="FirstContextBucket">First projected context turn bucket summary when present.</param>
+/// <param name="LastContextBucket">Last projected context turn bucket summary when present.</param>
+/// <remarks>
+/// Content-free like the figures it groups: the turn list prices the records' token and cost
+/// columns, and the context edges price the stored projection's first and last context turn plus
+/// the matching record's reported input. The charts section and the run page build their payloads
+/// from this set, so neither pays the detail figure set's tool and request rows.
+/// </remarks>
+public record SessionTurnFigureSet(
+    IReadOnlyList<ReadTimeTurnSummary> Turns,
+    ReadTimeContextBucketSummary? FirstContextBucket,
+    ReadTimeContextBucketSummary? LastContextBucket);
 
 /// <summary>
 /// Typed read-only query contract over normalized telemetry, session, and record tables in
@@ -701,6 +727,20 @@ public interface IRelationalStoreReader
     /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
     /// <returns>The turn's figures, or <see langword="null"/> when the index is outside the session.</returns>
     ReadTimeTurnSummary? TurnFigures(string sessionKey, int turnIndex, IModelPricingLookup? pricing = null);
+
+    /// <summary>
+    /// Reads every turn's figures with the session's first and last context edges, over
+    /// content-free record scalars and the stored context projection only (<c>DD-13</c>).
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
+    /// <returns>The turn figure set, or <see langword="null"/> when the session row is absent and no record is linked.</returns>
+    /// <remarks>
+    /// The charts section answers its whole payload from this read plus the stored context
+    /// projection, and the run page prices a run's turns from it — so neither pays the detail
+    /// figure set's tool and request rows, and neither materializes content.
+    /// </remarks>
+    SessionTurnFigureSet? SessionTurnFigures(string sessionKey, IModelPricingLookup? pricing = null);
 
     /// <summary>
     /// Reads one session's record metadata with no content column, the shape the detail

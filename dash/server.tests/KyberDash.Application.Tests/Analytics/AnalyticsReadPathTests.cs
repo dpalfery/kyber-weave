@@ -847,6 +847,7 @@ public sealed class AnalyticsReadPathTests
             ("sessions list filtered", () => _ = bridge.GetSessionPage(harness: "claude-code")),
             ("session detail", () => _ = bridge.GetSessionDetail(sessionKey)),
             ("session summary", () => _ = bridge.GetSessionSummary(sessionKey)),
+            ("session charts", () => _ = bridge.GetSessionCharts(sessionKey)),
             ("turn figures", () => _ = bridge.GetTurnFigures(sessionKey, 0)),
             ("span attributes", () => _ = bridge.GetSpanAttributes("span-sweep-1")),
             ("span attributes (droid consent withheld)", () => _ = bridge.GetSpanAttributes("span-sweep-droid")),
@@ -2009,6 +2010,16 @@ public sealed class AnalyticsReadPathTests
             }
 
             return inner.TurnFigures(sessionKey, turnIndex, pricing);
+        }
+
+        public SessionTurnFigureSet? SessionTurnFigures(string sessionKey, IModelPricingLookup? pricing = null)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return inner.SessionTurnFigures(sessionKey, pricing);
         }
 
         public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey)

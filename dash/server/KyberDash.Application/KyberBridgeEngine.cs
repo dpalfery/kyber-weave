@@ -465,9 +465,9 @@ public class KyberBridgeEngine
             ["servers"] = figures is null ? Array.Empty<object>() : ServerRows(figures.Tools, figures.Servers),
             ["skills"] = BuildSkillsPayload(distinctSkills, skillCounts, harness),
             ["reconciliation"] = figures is null ? Array.Empty<object>() : ReconciliationRows(figures.Reconciliation),
-            ["context"] = BuildContextPayload(projection, figures, turns),
+            ["context"] = BuildContextPayload(projection, figures?.FirstContextBucket, figures?.LastContextBucket, turns),
             ["schema"] = BuildSchemaPayload(projection, figures),
-            ["notes"] = BuildNotes(projection, figures, turns, distinctSkills),
+            ["notes"] = BuildNotes(projection, figures?.Summary, distinctSkills),
             ["timeline"] = timeline,
             ["requests"] = figures is null ? Array.Empty<object>() : RequestRows(figures.Requests),
         };
@@ -486,6 +486,13 @@ public class KyberBridgeEngine
     public JsonElement? GetSessionSummary(string sessionId)
     {
         EnsureProjected();
+        // The section 404 check reads the projection header row, not the whole projection the
+        // detail route loads; the projection below answers the payload's span and schema fields.
+        if (projections.SessionHeadersByKeys([sessionId]).Count == 0)
+        {
+            return null;
+        }
+
         StoredSessionProjection? projection = projections.GetSessionProjection(sessionId);
         if (projection is null)
         {
@@ -499,6 +506,15 @@ public class KyberBridgeEngine
         (IReadOnlyList<string> distinctSkills, _) =
             CollectSkillCounts(figures?.SkillInvocations ?? []);
 
+        IReadOnlyList<string> offeredTools = figures is null ? [] : OfferedToolNames(figures, projection);
+        int unusedToolCount = 0;
+        if (figures is not null)
+        {
+            HashSet<string> invokedTools = new(figures.ToolsInvoked, StringComparer.Ordinal);
+            unusedToolCount = offeredTools.Count(toolName => !invokedTools.Contains(toolName));
+        }
+
+        int problemCount = figures?.Problems.Count ?? 0;
         Dictionary<string, object?> payload = new(StringComparer.Ordinal)
         {
             ["session_id"] = projection.SessionId,
@@ -512,10 +528,64 @@ public class KyberBridgeEngine
             ["started"] = projection.StartedAtUtc,
             ["ended"] = projection.EndedAtUtc,
             ["span_count"] = projection.SpanCount,
-            ["problems"] = figures?.Problems.Count ?? 0,
+            ["problems"] = problemCount,
+            ["problems_count"] = problemCount,
+            ["request_count"] = figures?.RequestCount ?? 0,
             ["context_limit_source"] = ResolveContextLimitSource(projection),
             ["costBasisMismatch"] = BuildCostBasisMismatchObject(figures?.CostBasisMismatch),
             ["summary"] = figures is null ? null : BuildSessionSummary(figures, projection, harness, distinctSkills),
+            ["notes"] = BuildNotes(projection, figures, distinctSkills),
+            ["reconciliation"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["total"] = figures?.ReconciliationTotal ?? 0,
+                ["mismatched"] = figures?.ReconciliationMismatched ?? 0,
+            },
+            ["tools_offered_count"] = offeredTools.Count,
+            ["tools_invoked_count"] = figures?.ToolsInvoked.Count ?? 0,
+            ["unused_tools_count"] = unusedToolCount,
+            ["skills_count"] = distinctSkills.Count,
+        };
+
+        if (projectionStatus is not null)
+        {
+            payload["projection_status"] = projectionStatus;
+        }
+
+        return JsonSerializer.SerializeToElement(payload, CamelCaseJsonOptions);
+    }
+
+    /// <summary>
+    /// Returns the charts section payload — the detail payload's turn list and context object —
+    /// from the per-session turn figures and the stored context projection, or
+    /// <see langword="null"/> when the session has no projection.
+    /// </summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <returns>Charts JSON element, or <see langword="null"/>.</returns>
+    public JsonElement? GetSessionCharts(string sessionId)
+    {
+        EnsureProjected();
+        // The section 404 check reads the projection header row, not the whole projection the
+        // charts payload's context needs below.
+        if (projections.SessionHeadersByKeys([sessionId]).Count == 0)
+        {
+            return null;
+        }
+
+        StoredSessionProjection? projection = projections.GetSessionProjection(sessionId);
+        if (projection is null)
+        {
+            return null;
+        }
+
+        IModelPricingLookup lookup = pricing.LoadPricingTables();
+        (SessionTurnFigureSet? figures, string? projectionStatus) = TrySessionTurnFigures(sessionId, lookup);
+        IReadOnlyList<ReadTimeTurnSummary> turns = figures?.Turns ?? [];
+
+        Dictionary<string, object?> payload = new(StringComparer.Ordinal)
+        {
+            ["sessionId"] = sessionId,
+            ["turns"] = turns.Select(ToTurnDto).ToList(),
+            ["context"] = BuildContextPayload(projection, figures?.FirstContextBucket, figures?.LastContextBucket, turns),
         };
 
         if (projectionStatus is not null)
@@ -533,17 +603,31 @@ public class KyberBridgeEngine
     public JsonElement? GetTurnFigures(string sessionId, int turnIndex)
     {
         EnsureProjected();
+        // The section 404 check reads the projection header row, not the whole projection the
+        // stored context turn below scopes to.
+        if (projections.SessionHeadersByKeys([sessionId]).Count == 0)
+        {
+            return null;
+        }
+
         ReadTimeTurnSummary? turn = TryTurnFigures(sessionId, turnIndex);
         if (turn is null)
         {
             return null;
         }
 
+        StoredSessionContextTurn? storedContextTurn = projections
+            .GetSessionProjection(sessionId)?
+            .Context?
+            .Turns
+            .FirstOrDefault(storedTurn => storedTurn.Position == turnIndex);
+
         return JsonSerializer.SerializeToElement(new
         {
             sessionId,
             turnIndex,
             turn = ToTurnDto(turn),
+            context = storedContextTurn is null ? null : BuildStoredContextTurn(storedContextTurn),
         }, CamelCaseJsonOptions);
     }
 
@@ -2010,6 +2094,25 @@ public class KyberBridgeEngine
         }
     }
 
+    /// <summary>Reads a session's per-turn figures with its context edges, isolating any fault to that session.</summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="lookup">Read-time pricing tables.</param>
+    /// <returns>The turn figure set when readable, and the isolation marker when the read failed.</returns>
+    private (SessionTurnFigureSet? Figures, string? ProjectionStatus) TrySessionTurnFigures(
+        string sessionKey,
+        IModelPricingLookup lookup)
+    {
+        try
+        {
+            return (reader.SessionTurnFigures(sessionKey, lookup), null);
+        }
+        catch (Exception ex)
+        {
+            RecordProjectionFailure(sessionKey, ex.Message);
+            return (null, ProjectionFailedStatus);
+        }
+    }
+
     /// <summary>Reads a session's timeline span tree, isolating any fault to that session.</summary>
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <returns>The timeline children when readable, and the isolation marker when the read failed.</returns>
@@ -2355,7 +2458,8 @@ public class KyberBridgeEngine
 
     private static Dictionary<string, object?> BuildContextPayload(
         StoredSessionProjection projection,
-        SessionDetailFigure? figures,
+        ReadTimeContextBucketSummary? firstBucket,
+        ReadTimeContextBucketSummary? lastBucket,
         IReadOnlyList<ReadTimeTurnSummary> turns)
     {
         int unmeasuredTurns = turns.Count(static t => !t.InputTokens.HasValue);
@@ -2372,10 +2476,10 @@ public class KyberBridgeEngine
                 ["reason"] = reason,
                 ["turns"] = turns.Count,
                 ["contextLimit"] = 0L,
-                ["first"] = figures?.FirstContextBucket is ReadTimeContextBucketSummary firstOnly
+                ["first"] = firstBucket is ReadTimeContextBucketSummary firstOnly
                     ? BuildContextEdge(firstOnly, storedTurn: null)
                     : null,
-                ["last"] = figures?.LastContextBucket is ReadTimeContextBucketSummary lastOnly
+                ["last"] = lastBucket is ReadTimeContextBucketSummary lastOnly
                     ? BuildContextEdge(lastOnly, storedTurn: null)
                     : null,
                 ["unmeasuredTurns"] = unmeasuredTurns,
@@ -2397,45 +2501,7 @@ public class KyberBridgeEngine
         List<Dictionary<string, object?>> contextTurns = new(ctx.Turns.Count);
         foreach (StoredSessionContextTurn turn in ctx.Turns)
         {
-            Dictionary<string, long> buckets = new(StringComparer.Ordinal);
-            foreach (StoredTurnBucketTokens bucket in turn.Buckets)
-            {
-                buckets[bucket.Bucket] = bucket.Tokens;
-            }
-
-            Dictionary<string, long> toolDefsByServer = new(StringComparer.Ordinal);
-            foreach (StoredTurnServerDefinitionTokens serverDef in turn.ServerDefinitions)
-            {
-                toolDefsByServer[serverDef.Server] = serverDef.Tokens;
-            }
-
-            contextTurns.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["index"] = turn.Position + 1,
-                ["inputTokens"] = turn.InputTokens,
-                ["reported_input"] = turn.InputTokens,
-                ["buckets"] = buckets,
-                ["toolDefinitionsByServer"] = toolDefsByServer,
-                ["builtinToolDefinitionTokens"] = turn.BuiltinToolDefinitionTokens,
-                ["strippedInstructionBlocks"] = new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["count"] = turn.StrippedBlockCount ?? 0L,
-                    ["tokens"] = turn.StrippedTokens ?? 0L,
-                },
-                ["bucketedTokens"] = turn.BucketedTokens,
-                ["residual"] = new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["tokens"] = turn.ResidualTokens,
-                    ["attribution"] = turn.ResidualAttribution,
-                },
-                ["headroom"] = turn.Headroom,
-                ["pressure"] = turn.Pressure,
-                ["accumulationRate"] = turn.AccumulationRate,
-                ["freshInput"] = turn.FreshInput,
-                ["previousFreshInput"] = turn.PreviousFreshInput,
-                ["freshJumpFactor"] = turn.FreshJumpFactor,
-                ["nonResidentTokens"] = turn.NonResidentTokens,
-            });
+            contextTurns.Add(BuildStoredContextTurn(turn));
         }
 
         StoredSessionContextTurn? firstStored = ctx.Turns.Count > 0 ? ctx.Turns[0] : null;
@@ -2454,8 +2520,55 @@ public class KyberBridgeEngine
             ["flaggedTurns"] = flaggedTurns,
             ["unmeasuredTurns"] = unmeasuredTurns,
             ["turns"] = contextTurns,
-            ["first"] = BuildContextEdge(figures?.FirstContextBucket, firstStored),
-            ["last"] = BuildContextEdge(figures?.LastContextBucket, lastStored),
+            ["first"] = BuildContextEdge(firstBucket, firstStored),
+            ["last"] = BuildContextEdge(lastBucket, lastStored),
+        };
+    }
+
+    /// <summary>
+    /// Projects one stored context turn onto the per-turn entry the charts context object and the
+    /// widened turn section both render, so the two routes answer the same buckets.
+    /// </summary>
+    private static Dictionary<string, object?> BuildStoredContextTurn(StoredSessionContextTurn turn)
+    {
+        Dictionary<string, long> buckets = new(StringComparer.Ordinal);
+        foreach (StoredTurnBucketTokens bucket in turn.Buckets)
+        {
+            buckets[bucket.Bucket] = bucket.Tokens;
+        }
+
+        Dictionary<string, long> toolDefsByServer = new(StringComparer.Ordinal);
+        foreach (StoredTurnServerDefinitionTokens serverDef in turn.ServerDefinitions)
+        {
+            toolDefsByServer[serverDef.Server] = serverDef.Tokens;
+        }
+
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["index"] = turn.Position + 1,
+            ["inputTokens"] = turn.InputTokens,
+            ["reported_input"] = turn.InputTokens,
+            ["buckets"] = buckets,
+            ["toolDefinitionsByServer"] = toolDefsByServer,
+            ["builtinToolDefinitionTokens"] = turn.BuiltinToolDefinitionTokens,
+            ["strippedInstructionBlocks"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["count"] = turn.StrippedBlockCount ?? 0L,
+                ["tokens"] = turn.StrippedTokens ?? 0L,
+            },
+            ["bucketedTokens"] = turn.BucketedTokens,
+            ["residual"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["tokens"] = turn.ResidualTokens,
+                ["attribution"] = turn.ResidualAttribution,
+            },
+            ["headroom"] = turn.Headroom,
+            ["pressure"] = turn.Pressure,
+            ["accumulationRate"] = turn.AccumulationRate,
+            ["freshInput"] = turn.FreshInput,
+            ["previousFreshInput"] = turn.PreviousFreshInput,
+            ["freshJumpFactor"] = turn.FreshJumpFactor,
+            ["nonResidentTokens"] = turn.NonResidentTokens,
         };
     }
 
@@ -2589,8 +2702,7 @@ public class KyberBridgeEngine
 
     private static List<string> BuildNotes(
         StoredSessionProjection projection,
-        SessionDetailFigure? figures,
-        IReadOnlyList<ReadTimeTurnSummary> turns,
+        SessionSummaryFigure? figures,
         IReadOnlyList<string> distinctSkills)
     {
         List<string> notes = [];
@@ -2620,27 +2732,27 @@ public class KyberBridgeEngine
 
         if (figures is not null)
         {
-            if (!figures.Summary.HasToolDefinitions && figures.Tools.Count > 0)
+            if (!figures.HasToolDefinitions && figures.ToolRowsCount > 0)
             {
                 AddNote("Tool definitions were not exported; tool residency and schema costs are marked unmeasured.");
             }
 
-            if (figures.Summary.ReportedCost is null && figures.Summary.TurnCount > 0)
+            if (figures.ReportedCost is null && figures.TurnCount > 0)
             {
                 AddNote("Harness-reported cost was not exported; published pricing estimates are shown separately.");
             }
 
-            if (figures.Summary.CostBasisMismatch is not null)
+            if (figures.CostBasisMismatch is not null)
             {
-                AddNote(figures.Summary.CostBasisMismatch.Message);
+                AddNote(figures.CostBasisMismatch.Message);
             }
 
-            if (!figures.Summary.TotalCacheCreation.HasValue && figures.Summary.TurnCount > 0)
+            if (!figures.TotalCacheCreation.HasValue && figures.TurnCount > 0)
             {
                 AddNote("Cache creation tokens were not reported for this session.");
             }
 
-            if (turns.Any(static t => !t.InputTokens.HasValue))
+            if (figures.UnmeasuredInputTurns > 0)
             {
                 AddNote("One or more turns lack input token counts.");
             }
@@ -2659,6 +2771,22 @@ public class KyberBridgeEngine
         ["reason"] = reason,
     };
 
+    /// <summary>
+    /// Resolves the advertised tool names the summary's <c>tools_offered</c> shows: the projection
+    /// schema's ranked tools when the figures carried none, else the figures' own list.
+    /// </summary>
+    private static IReadOnlyList<string> OfferedToolNames(SessionSummaryFigure figures, StoredSessionProjection projection)
+    {
+        if (figures.HasToolDefinitions)
+        {
+            return figures.ToolsOffered;
+        }
+
+        return projection.Schema is StoredSessionSchema schema
+            ? [.. schema.RankedTools.OrderBy(static t => t.Position).Select(static t => t.ToolName)]
+            : [];
+    }
+
     private static Dictionary<string, object?> BuildSessionSummary(
         SessionSummaryFigure figures,
         StoredSessionProjection projection,
@@ -2666,22 +2794,9 @@ public class KyberBridgeEngine
         IReadOnlyList<string> distinctSkills)
     {
         bool hasToolDefinitions = figures.HasToolDefinitions || projection.Schema is not null;
-        object toolsOffered;
-        if (figures.HasToolDefinitions)
-        {
-            toolsOffered = figures.ToolsOffered;
-        }
-        else if (projection.Schema is StoredSessionSchema schema)
-        {
-            toolsOffered = schema.RankedTools
-                .OrderBy(static t => t.Position)
-                .Select(static t => t.ToolName)
-                .ToList();
-        }
-        else
-        {
-            toolsOffered = NotMeasurableBlock($"{harness} did not export tool definitions for this session.");
-        }
+        object toolsOffered = hasToolDefinitions
+            ? OfferedToolNames(figures, projection)
+            : NotMeasurableBlock($"{harness} did not export tool definitions for this session.");
 
         Dictionary<string, object?> summary = new(StringComparer.Ordinal)
         {
@@ -3263,10 +3378,10 @@ public class KyberBridgeEngine
             IReadOnlyList<ReadTimeTurnSummary> sessionTurns;
             try
             {
-                // The run page lists every turn of the run, so it pays one content-free detail
-                // read per session rather than the broad per-session record read that read model
-                // exists to replace.
-                sessionTurns = reader.SessionDetailFigures(exec.SessionId, lookup)?.Turns ?? [];
+                // The run page lists every turn of the run, so it pays one content-free turn
+                // figures read per session rather than the detail figure set's tool and request
+                // rows the read model exists to avoid.
+                sessionTurns = reader.SessionTurnFigures(exec.SessionId, lookup)?.Turns ?? [];
             }
             catch (Exception ex)
             {

@@ -180,6 +180,9 @@ public interface IDashboardQueryService
     /// <summary>Returns lightweight session summary payload.</summary>
     JsonElement? GetSessionSummary(string sessionId);
 
+    /// <summary>Returns the charts section payload: the session's turn list and context object.</summary>
+    JsonElement? GetSessionCharts(string sessionId);
+
     /// <summary>Returns metrics and bucket figures for a specific turn.</summary>
     JsonElement? GetTurnFigures(string sessionId, int turnIndex);
 

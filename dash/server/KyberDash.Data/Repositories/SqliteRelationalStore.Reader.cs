@@ -1279,6 +1279,36 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     }
 
     /// <inheritdoc />
+    public SessionTurnFigureSet? SessionTurnFigures(string sessionKey, IModelPricingLookup? pricing = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        CollectedSession? session = GetSession(sessionKey);
+        IReadOnlyList<CollectedRecord> records = SessionRecordsContentFree(sessionKey);
+        if (session is null && records.Count == 0)
+        {
+            return null;
+        }
+
+        string harnessId = session is not null ? session.HarnessId : records[0].HarnessId;
+        IReadOnlyList<StoredSessionTurn> projectedTurns = GetSessionTurns(sessionKey);
+        IReadOnlyList<ReadTimeTurnSummary> turns =
+            BuildContentFreeTurnSummaries(projectedTurns, records, harnessId, pricing);
+        ReadTimeContextBucketSummary? firstContextBucket = null;
+        ReadTimeContextBucketSummary? lastContextBucket = null;
+        if (GetSessionProjection(sessionKey)?.Context?.Turns is { Count: > 0 } contextTurns)
+        {
+            List<StoredSessionContextTurn> orderedContext = [.. contextTurns.OrderBy(static t => t.Position)];
+            List<(int Position, CollectedRecord Record)> turnEntries =
+                ResolveSessionTurnEntriesForReader(projectedTurns, records);
+            firstContextBucket = BuildReaderContextBucketSummary(orderedContext[0], turnEntries);
+            lastContextBucket = BuildReaderContextBucketSummary(orderedContext[^1], turnEntries);
+        }
+
+        return new SessionTurnFigureSet(turns, firstContextBucket, lastContextBucket);
+    }
+
+    /// <inheritdoc />
     public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
@@ -1346,6 +1376,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         bool hasCacheCreation = false;
         int cacheCreationTurns = 0;
         List<ReadTimeTurnReconciliation> reconciliation = new(turnEntries.Count);
+        int unmeasuredInputTurns = 0;
 
         foreach ((int position, CollectedRecord turnRecord) in turnEntries)
         {
@@ -1356,6 +1387,11 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 pricing,
                 out CostBlock publishedBlock,
                 out CostBlock? harnessBlock);
+
+            if (!turnSummary.InputTokens.HasValue)
+            {
+                unmeasuredInputTurns++;
+            }
 
             turnPublishedBlocks.Add(publishedBlock);
             if (publishedBlock.Value is double publishedValue && double.IsFinite(publishedValue))
@@ -1582,6 +1618,21 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             toolsInvoked,
             invCounts,
             errCounts);
+        int reconciliationTotal = 0;
+        int reconciliationMismatched = 0;
+        foreach (ReadTimeTurnReconciliation row in reconciliation)
+        {
+            if (!row.InputMatch.HasValue || !row.OutputMatch.HasValue)
+            {
+                continue;
+            }
+
+            reconciliationTotal++;
+            if (!row.InputMatch.Value || !row.OutputMatch.Value)
+            {
+                reconciliationMismatched++;
+            }
+        }
 
         IReadOnlyList<string> requestSpanIds = projection is not null && projection.RequestSpanIds.Count > 0
             ? projection.RequestSpanIds
@@ -1637,7 +1688,11 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 CostBasisMismatch: basisMismatch,
                 Coverage: coverage,
                 Problems: problems,
-                SkillInvocations: []),
+                SkillInvocations: [],
+                ToolRowsCount: tools.Count,
+                UnmeasuredInputTurns: unmeasuredInputTurns,
+                ReconciliationTotal: reconciliationTotal,
+                ReconciliationMismatched: reconciliationMismatched),
             tools,
             requests,
             servers,

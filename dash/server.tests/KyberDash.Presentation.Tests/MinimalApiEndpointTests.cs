@@ -142,6 +142,36 @@ public class MinimalApiEndpointTests
     }
 
     [Fact]
+    public async Task ChartsRouteReturnsTheQueryServicePayload()
+    {
+        await using Host host = await Host.StartAsync(builder =>
+        {
+            builder.Query
+                .Setup(q => q.GetSessionCharts("sess-1"))
+                .Returns(JsonSerializer.SerializeToElement(new { turns = Array.Empty<object>(), context = new { measurable = false } }));
+        });
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/session/sess-1/charts", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("turns").ValueKind);
+        Assert.Equal(JsonValueKind.Object, body.RootElement.GetProperty("context").ValueKind);
+        host.Builder.Query.Verify(q => q.GetSessionCharts("sess-1"), Times.Once);
+    }
+
+    [Fact]
+    public async Task ChartsRouteReturnsNotFoundWhenUnknown()
+    {
+        await using Host host = await Host.StartAsync();
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/session/absent/charts", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
     public async Task SettingsGetReturnsCurrentSettings()
     {
         await using Host host = await Host.StartAsync();

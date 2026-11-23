@@ -1129,6 +1129,40 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
+    public SessionTurnFigureSet? SessionTurnFigures(string sessionKey, IModelPricingLookup? pricing = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionTurnFigures));
+            object?[]? sessionRow = FindRowByKey(state, "session", [("session_id", sessionKey)]);
+            List<CollectedRecord> records = CollectSessionRecordsContentFree(state, sessionKey);
+            if (sessionRow is null && records.Count == 0)
+            {
+                return null;
+            }
+
+            string harnessId = sessionRow is not null
+                ? GetString(GetTableMetadata("session"), sessionRow, "harness_id")
+                : records[0].HarnessId;
+            IReadOnlyList<ReadTimeTurnSummary> turns = BuildSessionTurnFigures(state, sessionKey, records, harnessId, pricing);
+            ReadTimeContextBucketSummary? firstContextBucket = null;
+            ReadTimeContextBucketSummary? lastContextBucket = null;
+            if (GetSessionProjectionFromState(state, sessionKey)?.Context?.Turns is { Count: > 0 } contextTurns)
+            {
+                List<StoredSessionContextTurn> orderedContext = [.. contextTurns.OrderBy(static t => t.Position)];
+                List<(int Position, CollectedRecord Record)> turnEntries =
+                    ResolveSessionTurnEntries(state, sessionKey, records);
+                firstContextBucket = BuildContextBucketSummary(orderedContext[0], turnEntries);
+                lastContextBucket = BuildContextBucketSummary(orderedContext[^1], turnEntries);
+            }
+
+            return new SessionTurnFigureSet(turns, firstContextBucket, lastContextBucket);
+        }
+    }
+
+    /// <inheritdoc />
     public StoredSessionProjection? GetSessionProjection(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -5783,6 +5817,7 @@ public class InMemoryRelationalStore :
         bool hasCacheCreation = false;
         int cacheCreationTurns = 0;
         List<ReadTimeTurnReconciliation> reconciliation = new(turnEntries.Count);
+        int unmeasuredInputTurns = 0;
 
         foreach ((int position, CollectedRecord turnRecord) in turnEntries)
         {
@@ -5793,6 +5828,11 @@ public class InMemoryRelationalStore :
                 pricing,
                 out CostBlock publishedBlock,
                 out CostBlock? harnessBlock);
+
+            if (!turnSummary.InputTokens.HasValue)
+            {
+                unmeasuredInputTurns++;
+            }
 
             turnPublishedBlocks.Add(publishedBlock);
             if (publishedBlock.Value is double publishedValue && double.IsFinite(publishedValue))
@@ -6016,6 +6056,21 @@ public class InMemoryRelationalStore :
             toolsInvoked,
             invCounts,
             errCounts);
+        int reconciliationTotal = 0;
+        int reconciliationMismatched = 0;
+        foreach (ReadTimeTurnReconciliation row in reconciliation)
+        {
+            if (!row.InputMatch.HasValue || !row.OutputMatch.HasValue)
+            {
+                continue;
+            }
+
+            reconciliationTotal++;
+            if (!row.InputMatch.Value || !row.OutputMatch.Value)
+            {
+                reconciliationMismatched++;
+            }
+        }
 
         IReadOnlyList<string> requestSpanIds = projection is not null && projection.RequestSpanIds.Count > 0
             ? projection.RequestSpanIds
@@ -6067,7 +6122,11 @@ public class InMemoryRelationalStore :
                     SchemaMeasurable: projection?.Schema is not null,
                     ContextMeasurable: projection?.Context is not null),
                 Problems: problems,
-                SkillInvocations: []),
+                SkillInvocations: [],
+                ToolRowsCount: tools.Count,
+                UnmeasuredInputTurns: unmeasuredInputTurns,
+                ReconciliationTotal: reconciliationTotal,
+                ReconciliationMismatched: reconciliationMismatched),
             tools,
             requests,
             servers,
