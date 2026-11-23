@@ -19,7 +19,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import type { ContextDoctorProps } from '@/pages/ContextDoctor'
 import type { KyberHarnessSummary, KyberRunSummary, KyberSessionSummary } from '@/lib/kyberApi'
-import { fetchHarnesses, fetchKyberSession, fetchKyberSessionTurns, fetchKyberSessions, fetchRuns } from '@/lib/kyberApi'
+// The paged sessions client is destructured from the module namespace: the
+// explorer's page function does not exist yet, so the binding is the missing
+// symbol this RED run reads (the named imports below already exist).
+import * as kyberApi from '@/lib/kyberApi'
+import { fetchHarnesses, fetchKyberSession, fetchKyberSessionTurns, fetchRuns } from '@/lib/kyberApi'
 
 // No DashboardTools mock: PI's header tools are mounted for real, because the
 // defect this suite guards is what a narrow row does to those two controls. A
@@ -29,7 +33,7 @@ import { fetchHarnesses, fetchKyberSession, fetchKyberSessionTurns, fetchKyberSe
 
 vi.mock('@/lib/kyberApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/kyberApi')>()
-  return { ...actual, fetchHarnesses: vi.fn(), fetchKyberSessions: vi.fn(), fetchKyberSession: vi.fn(), fetchRuns: vi.fn() }
+  return { ...actual, fetchHarnesses: vi.fn(), fetchKyberSessionPage: vi.fn(), fetchKyberSession: vi.fn(), fetchRuns: vi.fn() }
 })
 
 /**
@@ -77,6 +81,22 @@ const session = (harness: string, suffix = ''): KyberSessionSummary => ({
   cost_usd: 0.185,
 })
 
+/**
+ * The session store the stubbed page route answers from, filtered the way the
+ * engine filters: by harness and by the search text, server-side. The shell
+ * sends the scope; the store decides what it holds.
+ */
+let sessionStore: KyberSessionSummary[] = []
+
+function serveSessionStore(rows: KyberSessionSummary[]): void {
+  sessionStore = rows
+}
+
+/** The page envelope the sessions paging route serves, built to its shape. */
+function sessionPageOf(rows: KyberSessionSummary[]) {
+  return { entries: rows, data: rows, total: rows.length, page: 1, limit: 100 }
+}
+
 const harnesses = [harnessSummary('codex', 40), harnessSummary('claude-code', 12)]
 const sessions = [session('codex'), session('claude-code'), session('codex', '-second')]
 
@@ -95,7 +115,8 @@ const runs = (['codex', 'claude-code'] as const).map((harness, idx): KyberRunSum
 }))
 
 const mockedHarnesses = vi.mocked(fetchHarnesses)
-const mockedSessions = vi.mocked(fetchKyberSessions)
+const { fetchKyberSessionPage } = kyberApi
+const mockedSessionPage = vi.mocked(fetchKyberSessionPage)
 const mockedSession = vi.mocked(fetchKyberSession)
 const mockedRuns = vi.mocked(fetchRuns)
 
@@ -119,7 +140,19 @@ function doctorProbe(): HTMLElement {
 
 beforeEach(() => {
   mockedHarnesses.mockResolvedValue(harnesses)
-  mockedSessions.mockResolvedValue(sessions)
+  serveSessionStore(sessions)
+  mockedSessionPage.mockImplementation((opts?: { page?: number; limit?: number; harness?: string | null; q?: string }) => {
+    const { harness, q } = opts ?? {}
+    let rows = sessionStore
+    if (harness && harness !== 'all') {
+      rows = rows.filter((s) => (s.harness ?? '').toLowerCase() === harness.toLowerCase())
+    }
+    if (q) {
+      const wanted = q.toLowerCase()
+      rows = rows.filter((s) => (s.label ?? '').toLowerCase().includes(wanted) || s.session_id.toLowerCase().includes(wanted))
+    }
+    return Promise.resolve(sessionPageOf(rows))
+  })
   mockedRuns.mockResolvedValue(runs)
   mockedSession.mockResolvedValue({
     id: 'sess-detail',
@@ -141,7 +174,7 @@ describe('one harness selector scopes the shell', () => {
   it('narrows Sessions in place instead of navigating into the harness detail route', async () => {
     renderApp({ initialPage: 'sessions' })
     await harnessTab('codex')
-    expect(screen.getByTestId('agent-session-row-sess-claude-code')).toBeDefined()
+    expect(await screen.findByTestId('agent-session-row-sess-claude-code')).toBeDefined()
 
     fireEvent.click(await harnessTab('codex'))
 
@@ -150,8 +183,9 @@ describe('one harness selector scopes the shell', () => {
     expect(screen.getByTestId('page-title').textContent).toBe('Sessions')
     expect(window.location.pathname).toBe('/')
 
-    // …and narrowed to the chosen harness.
-    expect(screen.queryByTestId('agent-session-row-sess-claude-code')).toBeNull()
+    // …and narrowed to the chosen harness: the old scope's rows are gone
+    // once the narrowed page lands (they stay up while it loads).
+    await waitFor(() => expect(screen.queryByTestId('agent-session-row-sess-claude-code')).toBeNull())
     expect(screen.getByTestId('agent-session-row-sess-codex')).toBeDefined()
     expect(screen.getByTestId('agent-session-row-sess-codex-second')).toBeDefined()
   })
@@ -199,7 +233,7 @@ describe('one harness selector scopes the shell', () => {
       ...harnesses,
       harnessSummary('future-harness-v2', 7),
     ])
-    mockedSessions.mockResolvedValue(sessions)
+    serveSessionStore(sessions)
     renderApp({ initialPage: 'sessions' })
 
     const future = await harnessTab('future-harness-v2')
@@ -208,12 +242,15 @@ describe('one harness selector scopes the shell', () => {
     expect(future.textContent).toContain('future-harness-v2')
 
     fireEvent.click(future)
-    expect(screen.queryByTestId('agent-session-row-sess-codex')).toBeNull()
+    // The rows on screen are the old scope's until the narrowed page lands
+    // (the pager keeps the previous page up while it loads); once it does,
+    // nothing from the other harness remains.
+    await waitFor(() => expect(screen.queryByTestId('agent-session-row-sess-codex')).toBeNull())
     expect(screen.getByTestId('explorer-empty').textContent).toContain('future-harness-v2')
   })
 
   it('shows a scoped empty state for a harness with no sessions, never all sessions', async () => {
-    mockedSessions.mockResolvedValue([session('claude-code')])
+    serveSessionStore([session("claude-code")])
     renderApp({ initialPage: 'sessions' })
 
     fireEvent.click(await harnessTab('codex'))
