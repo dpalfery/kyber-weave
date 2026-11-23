@@ -128,9 +128,14 @@ public sealed class RunIntegrateService : IRunIntegrateService
                 $"the task worktree '{taskWorktree}' has no branch checked out; a task commit must be on a branch.");
         }
 
-        if (!TryRunWorktree(request, taskWorktree, taskBranch, taskFacts.CommonDirectory, out string runWorktree, out refused))
+        if (!TryBranchName(taskWorktree, taskBranch, "task", out RunIntegrateOutcome? taskBranchFailed))
         {
-            return refused!;
+            return taskBranchFailed!;
+        }
+
+        if (!TryRunWorktree(request, taskWorktree, taskBranch, taskFacts.CommonDirectory, out string runWorktree, out RunIntegrateOutcome? outcome))
+        {
+            return outcome!;
         }
 
         WorktreeFacts? runFacts = ReadFacts(runWorktree);
@@ -179,6 +184,11 @@ public sealed class RunIntegrateService : IRunIntegrateService
             return Refuse($"the run worktree '{runWorktree}' has no branch checked out.");
         }
 
+        if (!TryBranchName(runWorktree, runBranch, "run", out RunIntegrateOutcome? runBranchFailed))
+        {
+            return runBranchFailed!;
+        }
+
         if (string.Equals(taskBranch, runBranch, StringComparison.Ordinal))
         {
             return Refuse(
@@ -201,7 +211,7 @@ public sealed class RunIntegrateService : IRunIntegrateService
         }
 
         GitOutcome ahead = _git.Run(
-            runWorktree, ["-C", runWorktree, "rev-list", "--count", runBranch + ".." + taskBranch]);
+            runWorktree, ["-C", runWorktree, "rev-list", "--count", "--end-of-options", runBranch + ".." + taskBranch]);
         if (!ahead.Succeeded || !int.TryParse(ahead.StandardOutput.Trim(), out int count))
         {
             return Failed($"git could not compare '{taskBranch}' with '{runBranch}': {ahead.FirstErrorLine}");
@@ -285,7 +295,7 @@ public sealed class RunIntegrateService : IRunIntegrateService
                 removed.FirstErrorLine);
         }
 
-        GitOutcome deleted = _git.Run(runWorktree, ["-C", runWorktree, "branch", "-D", taskBranch]);
+        GitOutcome deleted = _git.Run(runWorktree, ["-C", runWorktree, "branch", "-D", "--end-of-options", taskBranch]);
         if (!deleted.Succeeded)
         {
             return Failed(
@@ -328,19 +338,23 @@ public sealed class RunIntegrateService : IRunIntegrateService
                 "Commit or stash them before integrating.");
         }
 
-        bool fastForward = _git.Run(
-            runWorktree, ["-C", runWorktree, "merge-base", "--is-ancestor", runBranch, taskBranch]).Succeeded;
+        bool? fastForward = IsAncestor(runWorktree, runBranch, taskBranch, out GitOutcome ancestry);
+        if (fastForward is null)
+        {
+            return Failed(
+                $"git could not tell whether '{runBranch}' is an ancestor of '{taskBranch}': {ancestry.FirstErrorLine}");
+        }
 
-        GitOutcome applied = fastForward
-            ? _git.Run(runWorktree, ["-C", runWorktree, "merge", "--ff-only", taskBranch])
+        GitOutcome applied = fastForward.Value
+            ? _git.Run(runWorktree, ["-C", runWorktree, "merge", "--ff-only", "--end-of-options", taskBranch])
             : _git.Run(
                 runWorktree,
-                ["-C", runWorktree, "cherry-pick", "--empty=drop", runBranch + ".." + taskBranch]);
+                ["-C", runWorktree, "cherry-pick", "--empty=drop", "--end-of-options", runBranch + ".." + taskBranch]);
 
         if (!applied.Succeeded)
         {
             string[] conflicts = UnmergedPaths(runWorktree);
-            if (!fastForward)
+            if (!fastForward.Value)
             {
                 AbandonCherryPick(runWorktree);
             }
@@ -409,10 +423,10 @@ public sealed class RunIntegrateService : IRunIntegrateService
         string taskBranch,
         string taskCommon,
         out string runWorktree,
-        out RunIntegrateOutcome? refused)
+        out RunIntegrateOutcome? outcome)
     {
         runWorktree = string.Empty;
-        refused = null;
+        outcome = null;
         if (!string.IsNullOrWhiteSpace(request.RunWorktree))
         {
             runWorktree = _paths.GetFullPath(request.RunWorktree, request.WorkingDirectory);
@@ -421,14 +435,14 @@ public sealed class RunIntegrateService : IRunIntegrateService
                 return true;
             }
 
-            refused = Refuse($"the run worktree '{runWorktree}' does not exist.");
+            outcome = Refuse($"the run worktree '{runWorktree}' does not exist.");
             return false;
         }
 
         string? canonical = _checkouts.CanonicalCheckoutOf(taskCommon);
         if (canonical is null || string.IsNullOrWhiteSpace(request.HomeDirectory))
         {
-            refused = Refuse(
+            outcome = Refuse(
                 $"no live run record of this repository names a run worktree; pass the run's worktree with " +
                 "--run-worktree.");
             return false;
@@ -437,14 +451,14 @@ public sealed class RunIntegrateService : IRunIntegrateService
         IReadOnlyList<RunRecord>? runs = _checkouts.LiveSeparateRuns(request.HomeDirectory, canonical);
         if (runs is null)
         {
-            refused = Refuse(
+            outcome = Refuse(
                 "the live run records could not be read; pass the run's worktree with --run-worktree.");
             return false;
         }
 
         if (runs.Count == 0)
         {
-            refused = Refuse(
+            outcome = Refuse(
                 $"no live run of '{canonical}' works in a worktree of its own; pass the run's worktree with " +
                 "--run-worktree.");
             return false;
@@ -458,7 +472,24 @@ public sealed class RunIntegrateService : IRunIntegrateService
 
         // The branch a task was cut from is an ancestor of the branch the task committed on. That is the only
         // record a task can belong to, so several live runs are narrowed to it, never guessed by recency.
-        List<RunRecord> candidates = [.. runs.Where(run => IsAncestor(taskWorktree, run.Branch, taskBranch))];
+        List<RunRecord> candidates = [];
+        foreach (RunRecord run in runs)
+        {
+            bool? ancestor = IsAncestor(taskWorktree, run.Branch, taskBranch, out GitOutcome ancestry);
+            if (ancestor is null)
+            {
+                outcome = Failed(
+                    $"git could not tell whether '{run.Branch}' is an ancestor of '{taskBranch}': " +
+                    ancestry.FirstErrorLine);
+                return false;
+            }
+
+            if (ancestor.Value)
+            {
+                candidates.Add(run);
+            }
+        }
+
         if (candidates.Count == 1)
         {
             runWorktree = candidates[0].Worktree;
@@ -466,7 +497,7 @@ public sealed class RunIntegrateService : IRunIntegrateService
         }
 
         string named = string.Join(", ", runs.Select(run => $"'{run.Branch}' at '{run.Worktree}'"));
-        refused = Refuse(
+        outcome = Refuse(
             candidates.Count == 0
                 ? $"several live runs work in their own worktrees and none has a run branch the task branch " +
                   $"'{taskBranch}' was cut from: {named}; pass the run's worktree with --run-worktree."
@@ -475,9 +506,43 @@ public sealed class RunIntegrateService : IRunIntegrateService
         return false;
     }
 
-    /// <summary>Whether <paramref name="ancestor"/> is reachable from <paramref name="descendant"/> in one repository.</summary>
-    private bool IsAncestor(string worktree, string ancestor, string descendant) =>
-        _git.Run(worktree, ["-C", worktree, "merge-base", "--is-ancestor", ancestor, descendant]).Succeeded;
+    /// <summary>
+    /// Whether <paramref name="ancestor"/> is reachable from <paramref name="descendant"/> in one repository.
+    /// </summary>
+    /// <returns>
+    /// True or false from git's exit code — 0 means an ancestor, 1 means not — or null with
+    /// <paramref name="outcome"/> when git itself failed, so an error is never read as "not an ancestor".
+    /// </returns>
+    private bool? IsAncestor(string worktree, string ancestor, string descendant, out GitOutcome outcome)
+    {
+        outcome = _git.Run(
+            worktree, ["-C", worktree, "merge-base", "--is-ancestor", "--end-of-options", ancestor, descendant]);
+        return outcome.ExitCode switch
+        {
+            0 => true,
+            1 => false,
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Rejects a branch name git would parse as an option before it reaches any git command.
+    /// </summary>
+    /// <param name="worktree">The worktree git checks the name in.</param>
+    /// <param name="branch">The branch name <c>symbolic-ref</c> reported.</param>
+    /// <param name="role">Whether the branch belongs to the task or the run, for the message.</param>
+    /// <param name="failed">The failure to report when the name is not a branch name.</param>
+    private bool TryBranchName(string worktree, string branch, string role, out RunIntegrateOutcome? failed)
+    {
+        failed = null;
+        if (_git.Run(worktree, ["-C", worktree, "check-ref-format", "--branch", branch]).Succeeded)
+        {
+            return true;
+        }
+
+        failed = Failed($"the {role} branch '{branch}' is not a valid branch name.");
+        return false;
+    }
 
     /// <summary>
     /// Opens the run worktree's lock for exclusive use, waiting for a parallel worker. The open handle is the lock:
