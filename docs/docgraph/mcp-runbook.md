@@ -1544,15 +1544,16 @@ still reports the root, a count of `0`, and unavailable revision markers when Gi
 read. It is also the one tool that always answers: under the stop rule every other tool can
 return `STATUS: TOOL_FAILURE`, and this one cannot, so a failure can be diagnosed.
 
-### `docs_build_task_prompt_for_agent_dispatch(taskId = null, technology = null, plan = null, priorResults = null, failedAttempts = 0, harness = null, projectPath = null)`
+### `docs_build_task_prompt_for_agent_dispatch(taskId = null, technology = null, plan = null, priorResults = null, failedAttempts = 0, projectPath = null)`
 
 The conductor's dispatch question: for this task, which agent do I dispatch, and is its prompt
 whole? It builds the same prompt `kyber-weave docs packet <task id>` prints, through the same
 service, and answers with the facts the dispatch needs and **never the prompt text**: the agent,
-the difficulty in use and who rated it (`architect`, `default` or `decision-model`), the one
-technology the task names, what the prompt budget left out, and the prompt file's path when this
-harness gets a file. The prompt reaches the worker through the dispatch hook, which replaces the
-dispatch's header block before the worker starts, so the conductor never reads or retypes it.
+the difficulty in use and who rated it (`architect` or `default`), the one
+technology the task names, what the prompt budget left out, the harness in use, and the prompt
+file's path when this harness gets a file. The prompt reaches the worker through the dispatch hook,
+which replaces the dispatch's header block before the worker starts, so the conductor never reads
+or retypes it.
 
 `taskId` is written any natural way (`T1`, `t1`, `task 1`, `1`) and is resolved in the one plan
 that is Ready or In progress, or the one `plan` names. `priorResults` is the file a retry names,
@@ -1560,13 +1561,18 @@ and `failedAttempts` is how many attempts already failed, so the tool and the ho
 same question. Name `technology` instead of a task id for a dispatch that belongs to no task,
 such as a research request: the reply then describes the parts from the shared rules on.
 
-Name `harness` as well when you know it. On a harness whose dispatch hook can rewrite the call,
-no file is written and the reply says `prompt file: none`. On ZCode, CommandCode and Warp the
-hook cannot rewrite the dispatch — the rows in the
-[dispatch delivery path](../kyber-arbiter/architecture.md#dispatch-delivery-path) — so the prompt
-is written to `.agent_scratchpad/<task>/prompt.md` (untracked) and the reply carries that path.
-Name the path in the dispatch and tell the worker to read it first. Omit `harness` when it is
-unknown: no file is written then.
+The tool never asks for the harness: it reads the name the MCP client sent in its `initialize`
+request (`clientInfo.name`), because a harness name the model types is a guess. A name a probe has
+verified — Copilot CLI, Claude Code, opencode — maps to that harness's hook token, and the reply
+says `harness: <token> (from MCP client '<name>')`. On a harness whose dispatch hook can rewrite
+the call, no file is written and the reply says `prompt file: none`. On ZCode, CommandCode and
+Warp the hook cannot rewrite the dispatch — the rows in the
+[dispatch delivery path](../kyber-arbiter/architecture.md#dispatch-delivery-path) — and a client
+name no probe has verified is treated the same way, so the prompt is written to
+`.agent_scratchpad/<task>/prompt.md` (untracked) and the reply carries that path, after
+`harness: unknown MCP client '<name>'; the prompt file was written`. Name the path in the dispatch
+and tell the worker to read it first; that line means a new harness can be added to the register
+from evidence rather than guessed at.
 
 A task file that is missing or no longer matches its plan builds no prompt: the reply is
 `prompt: none` and a `reason:` line naming `kyber-weave docs tasks <plan> --write`, so no worker

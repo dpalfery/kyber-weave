@@ -20,7 +20,12 @@ Each folder holds four files named after it: `<name>.standards.md` (the standard
 headings), `<name>.rules.md` (this repository's hard rules for the technology),
 `<name>.skills.md` (its procedures and commands) and `<name>.arbiter-rules.yml` (machine
 rules; empty when there are none). `shared-rules.md` beside the folders holds the rules that
-apply to every technology. Nothing ships for testing alone: cross-technology testing rules live
+apply to every technology. A rules or skills file is found by its frontmatter, not its name:
+it needs `doc-type: rule` or `doc-type: skill` and the folder's `technology` (or `role`) line.
+Without them `docs validate` reports `KW-DOC-SPEC-015`, and the tool and the task prompt cannot
+carry the file even though it is on disk; `kyber-weave docs standards migrate` sets exactly
+those two lines in place and leaves every other line and the body alone. Nothing ships for
+testing alone: cross-technology testing rules live
 in `shared-rules.md` and each standard's **Testing** heading, because `test` and `sql` went with
 the per-technology agents the roster removal deleted.
 

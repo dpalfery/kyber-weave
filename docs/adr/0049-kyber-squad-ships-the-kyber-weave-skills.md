@@ -26,7 +26,7 @@ Kyber-Squad". The sentence is removed in place, and this record holds the decisi
 
 ## Context
 
-Kyber-Squad deploys its 28 skills from `products/kyber-squad/skills/` into each selected
+Kyber-Squad deploys its skills from `products/kyber-squad/skills/` into each selected
 harness's user-level folder. A global install therefore puts `task-gate` in `~/.claude/skills/`.
 
 Six Kyber-Weave skills live in `.apm/skills/`: `kyber-docs-authoring`,
@@ -42,13 +42,13 @@ Four facts constrain the choice:
 - Squad's receipt, update, and uninstall are the only lifecycle that keeps user-level files in
   step with a version-locked release (KS-004 and KS-005).
 - The Squad loader, the bundle roster, and the renderers were written for one canonical tree of
-  28 skills.
+  skills.
 
 ## Decision
 
 1. **Kyber-Squad deploys the Kyber-Weave skills with its own skills.** Install, update, status,
-   doctor, and uninstall, at global and project scope and on every target, carry the six skills
-   beside the 28 Squad skills, under the same receipt. This decision adds no flag, no default,
+   doctor, and uninstall, at global and project scope and on every target, carry the Kyber-Weave skills
+   beside the Squad skills, under the same receipt. This decision adds no flag, no default,
    and no skip to `kyber-weave docs init`: a change another record makes to that command is that
    record's, not this one's.
 2. **`.apm/skills/` stays the only source.** Nothing is moved, copied, or symlinked into
@@ -57,9 +57,9 @@ Four facts constrain the choice:
    `SquadCompanionSkills`, does this for both callers, so pack and a checkout run cannot disagree.
 3. **Every directory under `.apm/skills/` that holds a `SKILL.md` ships.** Discovery replaces a
    list, so a skill added there ships with the next release.
-4. **Both archives carry the skills.** The APM bundle and the Agent Plugins archive each hold 34
-   skills (28 Squad, 6 Kyber-Weave) and 125 skill-tree files (34 `SKILL.md` and 91 resources).
-   `bundles/full.yml` still lists only the 28 Squad skills.
+4. **Both archives carry the skills.** The APM bundle and the Agent Plugins archive each hold
+   both the Squad and the Kyber-Weave skills with every skill-tree file.
+   `bundles/full.yml` still lists only the Squad skills.
 5. **A name clash fails closed.** A companion skill whose name equals a Squad skill directory or
    a Squad agent file (`agents/<name>.md`), ignoring letter case, makes `squad pack` exit 1 and write
    no archive. The message names both paths. The checkout release source throws before it writes
@@ -79,9 +79,9 @@ Four facts constrain the choice:
 
 ## Alternatives considered
 
-1. **Move the six into `products/kyber-squad/skills/`.** Rejected. The APM package reads
+1. **Move the Kyber-Weave skills into `products/kyber-squad/skills/`.** Rejected. The APM package reads
    `.apm/`, so the move breaks `apm install` and `docs init`, and the package-shape tests fail.
-2. **Mirror the six into `products/kyber-squad/skills/` with a drift test.** Rejected. Two
+2. **Mirror the Kyber-Weave skills into `products/kyber-squad/skills/` with a drift test.** Rejected. Two
    sources drift.
 3. **Symlink `products/kyber-squad/skills/<name>` to `.apm/skills/<name>`.** Rejected. Links break
    on Windows checkouts and fail the loader's path-discovery guard.

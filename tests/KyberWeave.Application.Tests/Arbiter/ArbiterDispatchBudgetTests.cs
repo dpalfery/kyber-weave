@@ -150,6 +150,54 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     }
 
     [Fact]
+    public void StalledCall_AllowsALongGapAfterACallThatStartedNoProcess()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 1000, CallMinutes: 5);
+
+        // A read returns at once, so a gap after it is the model's own turn: no process of the worker's can be hung.
+        Assert.Empty(Guard("copilot-cli", CopilotView("dev-medium", "agent-1"), Start, budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(6), budget));
+    }
+
+    [Fact]
+    public void StalledCall_DeniesTheNextCallOnce_AfterAWaitOnARunningShell()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 1000, CallMinutes: 5);
+
+        // Copilot's read_bash waits on a shell that is still running, which is where a hung test shows up: the call
+        // carries no command, but it is judged like the bash call that started the process.
+        Assert.Empty(Guard("copilot-cli", CopilotReadBash("dev-medium", "agent-1"), Start, budget));
+
+        string answer = Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(10), budget);
+
+        using JsonDocument document = JsonDocument.Parse(answer);
+        Assert.Equal("deny", document.RootElement.GetProperty("permissionDecision").GetString());
+        Assert.Contains("NOT VERIFIED:", document.RootElement.GetProperty("permissionDecisionReason").GetString()!, StringComparison.Ordinal);
+
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(10).AddSeconds(5), budget));
+    }
+
+    [Fact]
+    public void StalledCall_StillDeniesAfterABareTimestampFromABudgetFileWrittenBeforeTheMarker()
+    {
+        string directory = Path.Combine(_host.HomeDirectory, ".kyber-weave", "arbiter", "budgets");
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 1000, CallMinutes: 5);
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start, budget));
+
+        // Rewrite the file as an older build left it: the header, then a call line with a bare timestamp.
+        string file = Assert.Single(_host.Files.EnumerateFiles(directory, "*", recursive: false));
+        string[] lines = [.. _host.Files.ReadLines(file)];
+        Assert.EndsWith(" p", lines[^1], StringComparison.Ordinal);
+        _host.Files.WriteAllText(file, string.Join("\n", [lines[0], lines[^1].Split(' ')[0]]) + "\n");
+
+        string answer = Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(6), budget);
+
+        using JsonDocument document = JsonDocument.Parse(answer);
+        Assert.Equal("deny", document.RootElement.GetProperty("permissionDecision").GetString());
+        Assert.Contains("NOT VERIFIED:", document.RootElement.GetProperty("permissionDecisionReason").GetString()!, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void StalledCall_DeniesOnClaudeToo()
     {
         ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 1000, CallMinutes: 5);
@@ -159,6 +207,108 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
 
         using JsonDocument document = JsonDocument.Parse(answer);
         Assert.Equal("deny", document.RootElement.GetProperty("hookSpecificOutput").GetProperty("permissionDecision").GetString());
+    }
+
+    [Fact]
+    public void EffectiveCallMinutes_KeepsTheConfiguredValueWhenTheRepositoryDeclaresNoTaskGates()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 150, CallMinutes: 5);
+
+        Assert.Equal(5, WorkerGuardRules.EffectiveCallMinutes(budget, new ReviewConfig()));
+        Assert.Equal(5, WorkerGuardRules.EffectiveCallMinutes(budget, review: null));
+    }
+
+    [Fact]
+    public void EffectiveCallMinutes_RaisesTheLimitToCoverASixHundredSecondGatePlusTheModelsTurn()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 150, CallMinutes: 5);
+        ReviewConfig review = ReviewWithGates(new ReviewTaskGate("test", [], null, ["dotnet", "test"], [], TimeoutSeconds: 600));
+
+        Assert.Equal(11, WorkerGuardRules.EffectiveCallMinutes(budget, review));
+    }
+
+    [Fact]
+    public void EffectiveCallMinutes_KeepsALongerConfiguredLimitOverAShorterGate()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 150, CallMinutes: 5);
+        ReviewConfig review = ReviewWithGates(new ReviewTaskGate("test", [], null, ["dotnet", "test"], [], TimeoutSeconds: 120));
+
+        Assert.Equal(5, WorkerGuardRules.EffectiveCallMinutes(budget, review));
+    }
+
+    [Fact]
+    public void EffectiveCallMinutes_CountsATechnologyGatesTimeoutToo()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 150, CallMinutes: 5);
+        ReviewConfig review = new()
+        {
+            TechnologyGates = new Dictionary<string, IReadOnlyList<ReviewTaskGate>>(StringComparer.Ordinal)
+            {
+                ["csharp"] = [new ReviewTaskGate("test", [], null, ["dotnet", "test"], [], TimeoutSeconds: 600)],
+            },
+        };
+
+        Assert.Equal(11, WorkerGuardRules.EffectiveCallMinutes(budget, review));
+    }
+
+    [Fact]
+    public void EffectiveCallMinutes_GivesAHugeGateTimeoutAHugeLimit()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 150, CallMinutes: 5);
+        ReviewConfig review = ReviewWithGates(
+            new ReviewTaskGate("test", [], null, ["dotnet", "test"], [], TimeoutSeconds: int.MaxValue));
+
+        int minutes = WorkerGuardRules.EffectiveCallMinutes(budget, review);
+
+        // The arithmetic must not overflow into a negative or small limit: a huge timeout allows a huge call.
+        Assert.True(minutes > 30_000_000, $"A gate timeout of {int.MaxValue} seconds gave only {minutes} minutes.");
+    }
+
+    [Fact]
+    public void Window_ReadsTheCallLimitFromAHeaderWhoseAgentNameContainsASpace()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 150, CallMinutes: 14);
+        string header = WorkerGuardRules.HeaderLine(Start, budget, "my agent");
+
+        WorkerGuardRules.Window? window = WorkerGuardRules.Window.Read([header.TrimEnd('\n')]);
+
+        Assert.NotNull(window);
+        Assert.Equal(14, window.CallMinutes);
+    }
+
+    [Fact]
+    public void StalledCall_AllowsAGapThatFitsTheLongestDeclaredTaskGate()
+    {
+        _host.Write(
+            _host.InHome(".kyber-weave", "kyber-weave.yml"),
+            TaskGateYaml);
+
+        // The repository allows the gate 10 minutes, so a 7-minute shell call is healthy, not hung.
+        Assert.Empty(HostConfigGuard(Copilot("dev-medium", "agent-1"), Start));
+        Assert.Empty(HostConfigGuard(Copilot("dev-medium", "agent-1"), Start.AddMinutes(7)));
+
+        string directory = Path.Combine(_host.HomeDirectory, ".kyber-weave", "arbiter", "budgets");
+        string file = Assert.Single(_host.Files.EnumerateFiles(directory, "*", recursive: false));
+        string[] lines = [.. _host.Files.ReadLines(file)];
+        Assert.Equal("11", lines[0].Split(' ')[4]);
+    }
+
+    [Fact]
+    public void StalledCall_DeniesAGapPastTheLongestDeclaredTaskGateOnce()
+    {
+        _host.Write(
+            _host.InHome(".kyber-weave", "kyber-weave.yml"),
+            TaskGateYaml);
+
+        Assert.Empty(HostConfigGuard(Copilot("dev-medium", "agent-1"), Start));
+
+        string answer = HostConfigGuard(Copilot("dev-medium", "agent-1"), Start.AddMinutes(12));
+
+        using JsonDocument document = JsonDocument.Parse(answer);
+        Assert.Equal("deny", document.RootElement.GetProperty("permissionDecision").GetString());
+        Assert.Contains("NOT VERIFIED:", document.RootElement.GetProperty("permissionDecisionReason").GetString()!, StringComparison.Ordinal);
+
+        Assert.Empty(HostConfigGuard(Copilot("dev-medium", "agent-1"), Start.AddMinutes(12).AddSeconds(5)));
     }
 
     [Fact]
@@ -298,6 +448,32 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
         return stdout.ToString();
     }
 
+    /// <summary>The repository's own task-gate declaration, read from the host configuration the guard loads.</summary>
+    private const string TaskGateYaml =
+        "review:\n" +
+        "  task-gates:\n" +
+        "    csharp-dev:\n" +
+        "      - id: test\n" +
+        "        include: [\"**/*.cs\"]\n" +
+        "        run: [dotnet, test]\n" +
+        "        timeout: 600\n";
+
+    /// <summary>Runs the guard with the configuration on disk, so the budget comes from the host config rather than a loader.</summary>
+    private string HostConfigGuard(string json, DateTimeOffset now)
+    {
+        using StringWriter stdout = new();
+        _host.Get<IWorkerGuard>().Run("copilot-cli", json, stdout, TextWriter.Null, _host.HomeDirectory, () => now);
+        return stdout.ToString();
+    }
+
+    private static ReviewConfig ReviewWithGates(ReviewTaskGate gate) => new()
+    {
+        TaskGates = new Dictionary<string, IReadOnlyList<ReviewTaskGate>>(StringComparer.Ordinal)
+        {
+            ["csharp-dev"] = [gate],
+        },
+    };
+
     private string Copilot(string agentType, string agentId) => JsonSerializer.Serialize(new
     {
         cwd = _host.HomeDirectory,
@@ -306,6 +482,28 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
         agentType,
         toolName = "bash",
         toolArgs = JsonSerializer.Serialize(new { command = "dotnet test" }),
+    });
+
+    /// <summary>A read through Copilot CLI's file tool: a call that starts no process.</summary>
+    private string CopilotView(string agentType, string agentId) => JsonSerializer.Serialize(new
+    {
+        cwd = _host.HomeDirectory,
+        agentId,
+        parentAgentId = "root",
+        agentType,
+        toolName = "view",
+        toolArgs = JsonSerializer.Serialize(new { path = Path.Combine(_host.HomeDirectory, "docs", "README.md") }),
+    });
+
+    /// <summary>Copilot CLI's wait on a shell that is still running: the call that hangs when the shell's process does.</summary>
+    private string CopilotReadBash(string agentType, string agentId) => JsonSerializer.Serialize(new
+    {
+        cwd = _host.HomeDirectory,
+        agentId,
+        parentAgentId = "root",
+        agentType,
+        toolName = "read_bash",
+        toolArgs = JsonSerializer.Serialize(new { shellId = "shell-1", delay = 30 }),
     });
 
     /// <summary>A Copilot CLI <c>subagentStop</c> event, trimmed from a live run: it ends one turn of the agent.</summary>

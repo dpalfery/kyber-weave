@@ -1,9 +1,11 @@
 using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Rules;
+using KyberWeave.Core.Configuration;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Arbiter.Hooks;
 
@@ -15,6 +17,15 @@ internal static class WorkerGuardRules
 
     /// <summary>The rule id an exhausted budget is refused under.</summary>
     internal const string BudgetRuleId = "KW-ARB-BUDGET-001";
+
+    /// <summary>The marker a call line carries when the call started a process: the only kind of call that can hang.</summary>
+    internal const string ProcessCallMarker = "p";
+
+    /// <summary>
+    /// The marker a call line carries when the call started no process. An older file's bare timestamp means a process
+    /// call, so a call that starts none must say so for the per-call limit to tell the two apart.
+    /// </summary>
+    internal const string NoProcessCallMarker = "n";
 
     /// <summary>The trigger a sub-agent's own command call raises, so a technology's rules can allow-list its forms.</summary>
     internal const string CommandTrigger = "worker.command";
@@ -58,6 +69,13 @@ internal static class WorkerGuardRules
     /// <summary>The Claude Code harness token.</summary>
     internal const string ClaudeHarness = "claude";
 
+    /// <summary>The Factory Droid harness token.</summary>
+    internal const string FactoryHarness = "factory";
+
+    /// <summary>The tool names a Factory PreToolUse call can carry into the guard.</summary>
+    private static readonly HashSet<string> FactoryGuardedTools =
+        new(StringComparer.Ordinal) { "Execute", "Read", "Edit", "Create", "ApplyPatch" };
+
     /// <summary>The closing line a seat stopped by its budget writes, naming what it did not examine.</summary>
     internal const string SeatBudgetLine = "Budget reached, not examined:";
 
@@ -85,8 +103,8 @@ internal static class WorkerGuardRules
 
     /// <summary>
     /// Whether the event can need a refusal at all, decided from the event alone: a root agent, an agent outside the Squad
-    /// catalog, and a developer-less call that writes no file are never guarded. The guard process asks it before it
-    /// builds anything, because the guard runs on every tool call.
+    /// catalog, and a developer-less call that neither writes a file nor runs a shell command are never guarded. The guard
+    /// process asks it before it builds anything, because the guard runs on every tool call.
     /// </summary>
     /// <param name="harness">The harness token.</param>
     /// <param name="stdin">The hook event as JSON.</param>
@@ -95,6 +113,11 @@ internal static class WorkerGuardRules
     {
         try
         {
+            if (string.Equals(harness, FactoryHarness, StringComparison.Ordinal))
+            {
+                return FactoryNeedsDecision(stdin);
+            }
+
             if (WorkerGuardEventReader.TurnEndOf(harness, stdin) is not null)
             {
                 return true;
@@ -103,6 +126,8 @@ internal static class WorkerGuardRules
             ToolCall? call = WorkerGuardEventReader.Read(harness, stdin);
             return call is not null
                 && (call.WritePath is not null
+                    || call.ReadPath is not null
+                    || call.Command is not null
                     || IsCommandJudged(call)
                     || string.Equals(call.Agent.CapabilityProfile, SeatProfile, StringComparison.Ordinal)
                     || IsBudgeted(call.Agent.CapabilityProfile));
@@ -112,6 +137,97 @@ internal static class WorkerGuardRules
             return true;
         }
     }
+
+    /// <summary>
+    /// Whether the event can need a refusal once the ledger is consulted: as
+    /// <see cref="NeedsDecision(string, string)"/>, and for a Factory tool call only when the ledger holds an entry for
+    /// its session. A Factory root session's calls are most of the guard's traffic and are never guarded, so the
+    /// caller learns it from one file-existence test and builds nothing for them.
+    /// </summary>
+    /// <param name="harness">The harness token.</param>
+    /// <param name="stdin">The hook event as JSON.</param>
+    /// <param name="home">The operator's home, where the ledger lives.</param>
+    /// <returns>False only when the guard would allow without reading a file; true when it must decide, and when the event is unreadable, so the guard reports it.</returns>
+    internal static bool NeedsDecision(string harness, string stdin, string home)
+    {
+        try
+        {
+            if (!NeedsDecision(harness, stdin))
+            {
+                return false;
+            }
+
+            if (!string.Equals(harness, FactoryHarness, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            using JsonDocument document = JsonDocument.Parse(stdin);
+            JsonElement root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !string.Equals(FactoryText(root, "hook_event_name"), "PreToolUse", StringComparison.Ordinal))
+            {
+                // The ledger's own events always run: they are what records a child in the first place.
+                return true;
+            }
+
+            string? tool = FactoryText(root, "tool_name");
+            if (tool is null || !FactoryGuardedTools.Contains(tool))
+            {
+                return true;
+            }
+
+            string? sessionId = FactoryText(root, "session_id");
+            return sessionId is null || WorkerSessionPaths.ChildEntryExists(home, harness, sessionId);
+        }
+        catch (Exception)
+        {
+            // An unreadable event is left to the guard, which reports it.
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Whether a Factory event needs the guard process at all, from the event alone. The ledger events always do,
+    /// because they are what identifies a child; a pre-tool call of a tool the guard judges does too, because only
+    /// the ledger can say whether its session is a child.
+    /// </summary>
+    private static bool FactoryNeedsDecision(string stdin)
+    {
+        using JsonDocument document = JsonDocument.Parse(stdin);
+        JsonElement root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        string? eventName = FactoryText(root, "hook_event_name");
+        if (eventName is "SessionStart" or "SessionEnd" or "Stop")
+        {
+            return true;
+        }
+
+        if (eventName is not ("PreToolUse" or "PostToolUse"))
+        {
+            return false;
+        }
+
+        string? tool = FactoryText(root, "tool_name");
+        if (string.Equals(tool, "Task", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return string.Equals(eventName, "PreToolUse", StringComparison.Ordinal)
+            && tool is not null
+            && FactoryGuardedTools.Contains(tool);
+    }
+
+    private static string? FactoryText(JsonElement element, string name) =>
+        element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String
+        && value.GetString() is { Length: > 0 } text
+            ? text
+            : null;
 
     /// <summary>Whether a dispatch with this capability profile carries a budget.</summary>
     internal static bool IsBudgeted(string capabilityProfile) => BudgetedProfiles.Contains(capabilityProfile);
@@ -124,6 +240,542 @@ internal static class WorkerGuardRules
     internal static bool IsCommandJudged(ToolCall call) =>
         call.Command is { Length: > 0 }
         && string.Equals(call.Agent.CapabilityProfile, PlatformReaderProfile, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The refusal a shell command earns when it would run in a repository's canonical checkout while a live run of
+    /// that repository works in a worktree of its own.
+    /// </summary>
+    /// <param name="canonicalCheckout">The canonical checkout the command would run in.</param>
+    /// <param name="runWorktree">The worktree the live run works in.</param>
+    internal static string StrayCommandRefusal(string canonicalCheckout, string runWorktree) =>
+        $"{CheckoutRuleId}: this command would run in the repository's canonical checkout {canonicalCheckout} while " +
+        $"your run works in {runWorktree}. Start the command with `cd {runWorktree} && ` so every step runs in " +
+        "the run worktree; the canonical checkout stays untouched for the whole run.";
+
+    /// <summary>
+    /// The refusal a command earns when a <c>cd</c> or <c>pushd</c> names a directory the guard cannot place, because
+    /// the shell, not the command, decides where it points.
+    /// </summary>
+    internal static string UnplaceableDirectoryRefusal() =>
+        $"{CheckoutRuleId}: this command changes directory to one the guard cannot place, because the shell expands " +
+        "the path at run time. Nothing ran. Start the command with `cd <absolute path> && ` naming the directory, " +
+        "so every step runs where the guard can check it.";
+
+    /// <summary>
+    /// The refusal a command earns when a step runs in the shell's working directory and the event named no directory
+    /// the guard can resolve.
+    /// </summary>
+    internal static string UnknownWorkingDirectoryRefusal() =>
+        $"{CheckoutRuleId}: this command would run in the shell's working directory, but the event named no directory " +
+        "the guard can resolve, so it cannot tell whether that directory is the repository's canonical checkout. " +
+        "Nothing ran. Start the command with `cd <absolute path> && ` naming the run worktree, so every step runs " +
+        "where the guard can check it.";
+
+    /// <summary>
+    /// The reading of one command: the directories it enters, whether a step of it runs in the working directory,
+    /// and whether a change directory names a place the guard cannot judge.
+    /// </summary>
+    /// <param name="RunsInWorkingDirectory">True when some step runs in the call's own working directory.</param>
+    /// <param name="HasUnplaceableDirectory">True when a <c>cd</c> or <c>pushd</c> names a directory the guard cannot place.</param>
+    /// <param name="EnteredDirectories">Every directory the command moves into, as a path the guard can place.</param>
+    internal readonly record struct CommandWalk(
+        bool RunsInWorkingDirectory,
+        bool HasUnplaceableDirectory,
+        IReadOnlyList<string> EnteredDirectories);
+
+    /// <summary>The words that end one command and begin the next, kept as words of their own by <see cref="ShellTokens" />.</summary>
+    private static readonly string[] CommandSeparators = ["&&", "||", "|", ";", "&", "(", ")"];
+
+    /// <summary>The words that may stand before a program without being one: wrappers, keywords and assignments.</summary>
+    private static readonly HashSet<string> CommandPrefixes = new(StringComparer.Ordinal)
+    {
+        "sudo", "env", "command", "exec", "nohup", "time",
+        "if", "then", "else", "elif", "do", "while", "until", "!", "{", "}",
+    };
+
+    private static bool IsCommandSeparator(string token) =>
+        CommandSeparators.Contains(token, StringComparer.Ordinal);
+
+    private static bool IsCommandPrefix(string token) =>
+        CommandPrefixes.Contains(token, StringComparer.Ordinal) || IsAssignment(token);
+
+    private static bool IsChangeDirectory(string token) =>
+        string.Equals(token, "cd", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(token, "pushd", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Whether a word names git, however its path is written, including Windows' <c>git.exe</c>.</summary>
+    private static bool IsGitProgram(string token)
+    {
+        string program = Normalise(token);
+        int separator = program.LastIndexOf('\\');
+        if (separator >= 0)
+        {
+            program = program[(separator + 1)..];
+        }
+
+        return string.Equals(program, "git", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(program, "git.exe", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The directory a <c>cd</c> or <c>pushd</c> at <paramref name="index"/> moves into, or null when it names none:
+    /// a bare <c>pushd</c> swaps the directory stack, and <c>cd -</c> returns to a directory the command does not
+    /// name. The argument it does return may still be one the guard cannot place, such as a variable, which
+    /// <see cref="PlaceDirectory" /> rejects.
+    /// </summary>
+    private static string? ChangeDirectoryArgument(string[] tokens, int index)
+    {
+        for (int next = index + 1; next < tokens.Length && !IsCommandSeparator(tokens[next]); next++)
+        {
+            if (tokens[next].StartsWith('-'))
+            {
+                continue;
+            }
+
+            return tokens[next];
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Walks the command's steps once in shell order, tracking the directory each step runs in and every directory
+    /// the command moves into. The working directory is the initial one and the value no step can name: a directory
+    /// change the guard cannot place falls back to it, so the caller judges the safer path.
+    /// </summary>
+    /// <remarks>
+    /// Every segment is scanned, including the parts after a <c>&amp;&amp;</c>, <c>;</c> or <c>|</c> and inside a
+    /// subshell, because a command can step into the canonical checkout at any point. A word only counts as the
+    /// program where a program can stand, so a quoted argument that happens to read <c>cd</c> is not mistaken for
+    /// one, and quoted text stays a single word, so a path is taken whole. A leading <c>~</c> is expanded to
+    /// <paramref name="home" />. A path the shell expands at run time, such as a variable or a glob, is not one the
+    /// guard can place, and a change directory that names one is reported through
+    /// <see cref="CommandWalk.HasUnplaceableDirectory" />, which the caller refuses. A subshell's changes end at its
+    /// closing <c>)</c>, a pipeline stage starts in the directory the pipeline did, and a step after <c>||</c> may
+    /// run in the directory the previous step started in. A <c>git</c> step runs in the directory its <c>-C</c>,
+    /// <c>--work-tree</c> or <c>--git-dir</c> names, and leaves the shell where it was; a <c>git</c> step naming no
+    /// directory, and any other step at the shell's own level, runs in the working directory. A command with no step
+    /// at all reports true, the fail-closed reading.
+    /// </remarks>
+    /// <param name="command">The command as the harness reported it.</param>
+    /// <param name="home">The operator's home, which a leading <c>~</c> expands to; null when the caller has none.</param>
+    /// <returns>The reading described above.</returns>
+    internal static CommandWalk Walk(string command, string? home)
+    {
+        string[] tokens = ShellTokens(command);
+        List<string> entered = [];
+        Stack<(string? Current, string? PipelineBase, string? BeforeLastStep, bool InPipeline)> subshells = [];
+        bool runsInWorkingDirectory = false;
+        bool hasUnplaceableDirectory = false;
+        bool sawStep = false;
+        string? current = null;
+        string? pipelineBase = null;
+        string? beforeLastStep = null;
+        bool inPipeline = false;
+        bool commandStart = true;
+        for (int index = 0; index < tokens.Length; index++)
+        {
+            string token = tokens[index];
+            if (IsCommandSeparator(token))
+            {
+                if (string.Equals(token, "(", StringComparison.Ordinal))
+                {
+                    subshells.Push((current, pipelineBase, beforeLastStep, inPipeline));
+                    pipelineBase = current;
+                    inPipeline = false;
+                }
+                else if (string.Equals(token, ")", StringComparison.Ordinal))
+                {
+                    if (subshells.TryPop(out var outer))
+                    {
+                        (current, pipelineBase, beforeLastStep, inPipeline) = outer;
+                    }
+
+                    pipelineBase = current;
+                    inPipeline = false;
+                }
+                else if (string.Equals(token, "|", StringComparison.Ordinal))
+                {
+                    // A pipeline stage runs in its own subshell from the directory the pipeline began in.
+                    current = pipelineBase;
+                    inPipeline = true;
+                }
+                else
+                {
+                    if (inPipeline)
+                    {
+                        current = pipelineBase;
+                        inPipeline = false;
+                    }
+
+                    if (string.Equals(token, "||", StringComparison.Ordinal))
+                    {
+                        // The right side runs when the left failed, which can leave the shell where the left began.
+                        current = beforeLastStep;
+                    }
+
+                    pipelineBase = current;
+                }
+
+                commandStart = true;
+                continue;
+            }
+
+            if (!commandStart)
+            {
+                continue;
+            }
+
+            beforeLastStep = current;
+            if (IsChangeDirectory(token))
+            {
+                string? target = ChangeDirectoryArgument(tokens, index);
+                if (PlaceDirectory(target, home) is { } directory)
+                {
+                    entered.Add(directory);
+                    current = directory;
+                }
+                else
+                {
+                    // A change directory the guard cannot place may run in the canonical checkout, so the caller
+                    // refuses the command rather than judging the working directory alone.
+                    hasUnplaceableDirectory = true;
+                    runsInWorkingDirectory = true;
+                    current = null;
+                }
+
+                sawStep = true;
+                commandStart = false;
+            }
+            else if (IsGitProgram(token))
+            {
+                (IReadOnlyList<string> directories, bool alsoRunsInWorkingDirectory) = GitDirectories(tokens, index);
+                if (directories.Count > 0)
+                {
+                    foreach (string directory in directories)
+                    {
+                        if (PlaceDirectory(directory, home) is { } placed)
+                        {
+                            entered.Add(placed);
+                        }
+                        else
+                        {
+                            // The step names a directory this guard cannot place, so it may run anywhere:
+                            // refuse like an unplaceable cd rather than judging the cwd alone.
+                            hasUnplaceableDirectory = true;
+                            runsInWorkingDirectory = true;
+                        }
+                    }
+
+                    // A --git-dir that names no .git leaves git in the shell's directory while changing
+                    // the repository it names, so judge that directory as well.
+                    if (alsoRunsInWorkingDirectory && current is null)
+                    {
+                        runsInWorkingDirectory = true;
+                    }
+                }
+                else if (current is null)
+                {
+                    // git naming no directory of its own runs where the shell stands.
+                    runsInWorkingDirectory = true;
+                }
+
+                sawStep = true;
+                commandStart = false;
+            }
+            else if (!IsCommandPrefix(token))
+            {
+                if (current is null)
+                {
+                    runsInWorkingDirectory = true;
+                }
+
+                sawStep = true;
+                commandStart = false;
+            }
+        }
+
+        return new CommandWalk(runsInWorkingDirectory || !sawStep, hasUnplaceableDirectory, entered);
+    }
+
+    /// <summary>
+    /// The directory <paramref name="directory" /> names, when the guard can place it, or null when the shell
+    /// decides it: a variable, a glob or a command substitution. A leading <c>~</c> expands to
+    /// <paramref name="home" />, and a path it cannot expand is not placeable.
+    /// </summary>
+    private static string? PlaceDirectory(string? directory, string? home)
+    {
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return null;
+        }
+
+        string? placed = directory;
+        if (placed.StartsWith('~'))
+        {
+            if (string.IsNullOrWhiteSpace(home))
+            {
+                return null;
+            }
+
+            placed = placed.Length == 1
+                ? home
+                : placed[1] is '/' or '\\'
+                    ? Path.Combine(home, placed[2..])
+                    : null;
+        }
+
+        return placed is not null
+            && !placed.Contains('$', StringComparison.Ordinal)
+            && !placed.Contains('`', StringComparison.Ordinal)
+            && !placed.Contains('*', StringComparison.Ordinal)
+            && !placed.Contains('?', StringComparison.Ordinal)
+                ? placed
+                : null;
+    }
+
+    /// <summary>
+    /// The directories a <c>git</c> step at <paramref name="index" /> runs in, as the command names them: a
+    /// <c>-C</c> or <c>--work-tree</c> directory, and the parent of a <c>--git-dir</c> that ends in <c>.git</c>.
+    /// A <c>--git-dir</c> that names no <c>.git</c> with no <c>--work-tree</c> leaves git in the shell's directory
+    /// while changing the repository it names, so its value is returned as a directory to judge and
+    /// <c>AlsoRunsInWorkingDirectory</c> is true, meaning the shell's directory must be judged as well.
+    /// Only git's global options, which come before its subcommand, are read, so a subcommand's own <c>-C</c> is
+    /// never taken for a directory change. An empty list means the step names no directory of its own.
+    /// </summary>
+    private static (IReadOnlyList<string> Directories, bool AlsoRunsInWorkingDirectory) GitDirectories(string[] tokens, int index)
+    {
+        List<string> directories = [];
+        List<string> gitDirValues = [];
+        bool hasWorkTree = false;
+        for (int next = index + 1; next < tokens.Length && !IsCommandSeparator(tokens[next]); next++)
+        {
+            string option = tokens[next];
+            if (!option.StartsWith('-') || string.Equals(option, "--", StringComparison.Ordinal))
+            {
+                break;
+            }
+
+            if (option is "-C" or "--work-tree" or "--git-dir")
+            {
+                if (next + 1 < tokens.Length && !IsCommandSeparator(tokens[next + 1]))
+                {
+                    string value = tokens[++next];
+                    if (string.Equals(option, "--work-tree", StringComparison.Ordinal))
+                    {
+                        hasWorkTree = true;
+                        AddGitDirectory(directories, option, value);
+                    }
+                    else if (string.Equals(option, "--git-dir", StringComparison.Ordinal))
+                    {
+                        gitDirValues.Add(value);
+                    }
+                    else
+                    {
+                        AddGitDirectory(directories, option, value);
+                    }
+                }
+
+                continue;
+            }
+
+            if (option.StartsWith("-C", StringComparison.Ordinal) && option.Length > 2)
+            {
+                directories.Add(option[2..].TrimStart('='));
+                continue;
+            }
+
+            int equals = option.IndexOf('=', StringComparison.Ordinal);
+            if (equals > 0 && option[..equals] is "--work-tree" or "--git-dir")
+            {
+                string name = option[..equals];
+                string value = option[(equals + 1)..];
+                if (string.Equals(name, "--work-tree", StringComparison.Ordinal))
+                {
+                    hasWorkTree = true;
+                    AddGitDirectory(directories, name, value);
+                }
+                else
+                {
+                    gitDirValues.Add(value);
+                }
+
+                continue;
+            }
+
+            if (GitOptionTakesValue(option))
+            {
+                next++;
+            }
+        }
+
+        bool alsoRunsInWorkingDirectory = false;
+        foreach (string value in gitDirValues)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            string trimmed = value.TrimEnd('/', '\\');
+            if (string.Equals(Path.GetFileName(trimmed), ".git", StringComparison.Ordinal)
+                && Path.GetDirectoryName(trimmed) is { Length: > 0 } parent)
+            {
+                directories.Add(parent);
+            }
+            else
+            {
+                directories.Add(value);
+                if (!hasWorkTree)
+                {
+                    alsoRunsInWorkingDirectory = true;
+                }
+            }
+        }
+
+        return (directories, alsoRunsInWorkingDirectory);
+    }
+
+    /// <summary>
+    /// Adds the directory one git option names: the value itself for <c>-C</c> and <c>--work-tree</c>, and the
+    /// parent of a git directory that ends in <c>.git</c>, which is the directory git then runs in.
+    /// </summary>
+    private static void AddGitDirectory(List<string> directories, string option, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        if (!string.Equals(option, "--git-dir", StringComparison.Ordinal))
+        {
+            directories.Add(value);
+            return;
+        }
+
+        string trimmed = value.TrimEnd('/', '\\');
+        if (string.Equals(Path.GetFileName(trimmed), ".git", StringComparison.Ordinal)
+            && Path.GetDirectoryName(trimmed) is { Length: > 0 } parent)
+        {
+            directories.Add(parent);
+        }
+    }
+
+    /// <summary>The git global options that take a separate value, so the word after one is not a subcommand.</summary>
+    private static bool GitOptionTakesValue(string option) =>
+        option is "-c" or "--git-dir" or "--work-tree" or "--namespace" or "--exec-path" or "--super-prefix"
+            or "--config-env" or "--attr-source";
+
+    /// <summary>
+    /// The command split into words: quotes are honoured and removed, and an unquoted join, redirect or newline
+    /// becomes a word of its own, so the scan can stop one command where the next begins.
+    /// </summary>
+    private static string[] ShellTokens(string command)
+    {
+        List<string> tokens = [];
+        StringBuilder word = new();
+        bool singleQuoted = false;
+        bool doubleQuoted = false;
+        for (int index = 0; index < command.Length; index++)
+        {
+            char current = command[index];
+            if (singleQuoted)
+            {
+                if (current == '\'')
+                {
+                    singleQuoted = false;
+                }
+                else
+                {
+                    word.Append(current);
+                }
+
+                continue;
+            }
+
+            if (doubleQuoted)
+            {
+                if (current == '\\'
+                    && index + 1 < command.Length
+                    && command[index + 1] is '"' or '\\')
+                {
+                    word.Append(command[++index]);
+                }
+                else if (current == '"')
+                {
+                    doubleQuoted = false;
+                }
+                else
+                {
+                    word.Append(current);
+                }
+
+                continue;
+            }
+
+            switch (current)
+            {
+                case '\'':
+                    singleQuoted = true;
+                    break;
+                case '"':
+                    doubleQuoted = true;
+                    break;
+                case ' ' or '\t':
+                    FlushWord(tokens, word);
+                    break;
+                case ';' or '\n' or '\r':
+                    FlushWord(tokens, word);
+                    tokens.Add(";");
+                    break;
+                case '(' or ')':
+                    FlushWord(tokens, word);
+                    tokens.Add(current.ToString());
+                    break;
+                case '|':
+                    FlushWord(tokens, word);
+                    if (index + 1 < command.Length && command[index + 1] == '|')
+                    {
+                        index++;
+                        tokens.Add("||");
+                    }
+                    else
+                    {
+                        tokens.Add("|");
+                    }
+
+                    break;
+                case '&':
+                    FlushWord(tokens, word);
+                    if (index + 1 < command.Length && command[index + 1] == '&')
+                    {
+                        index++;
+                        tokens.Add("&&");
+                    }
+                    else
+                    {
+                        tokens.Add("&");
+                    }
+
+                    break;
+                default:
+                    word.Append(current);
+                    break;
+            }
+        }
+
+        FlushWord(tokens, word);
+        return [.. tokens];
+    }
+
+    private static void FlushWord(List<string> tokens, StringBuilder word)
+    {
+        if (word.Length > 0)
+        {
+            tokens.Add(word.ToString());
+            word.Clear();
+        }
+    }
 
     /// <summary>
     /// The refusal a technology's command allow-list makes, or null when no rule refuses this command. A rule
@@ -338,8 +990,9 @@ internal static class WorkerGuardRules
         string.Join(' ', command.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
     /// <summary>
-    /// The one-time deny after a call that ran past the per-call limit. The denied call is counted like any other, so
-    /// the retry that follows comes right after it and is allowed.
+    /// The one-time deny after a call that started a process, or waited on one, and ran past the per-call limit. A
+    /// call that starts no process (a file read) cannot hang, so the limit never judges it. The denied call is counted
+    /// like any other, so the retry that follows comes right after it and is allowed.
     /// </summary>
     internal static string StalledCallRefusal(TimeSpan gap, int limit) =>
         $"{BudgetRuleId}: your previous tool call ran for about {(int)gap.TotalMinutes} minutes, past the {limit}-minute " +
@@ -360,7 +1013,7 @@ internal static class WorkerGuardRules
     }
 
     internal static string KeyOf(string harness, string agentId) =>
-        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(harness + "\n" + agentId)))[..24];
+        WorkerSessionPaths.KeyOf(harness, agentId);
 
     /// <summary>The refusal an exhausted budget answers with.</summary>
     internal static string ExhaustedRefusal(bool seat, bool writesSeatFile, int calls, TimeSpan elapsed, int maxCalls, int minutes)
@@ -383,27 +1036,50 @@ internal static class WorkerGuardRules
                $"first line is {BudgetExceededStatus}, then what is done, what is not, and the last failure you saw.";
     }
 
+    /// <summary>
+    /// The per-call limit the guard applies: the configured one, or the longest task gate the repository declares plus a
+    /// minute for the model's own turn, whichever is longer. The runner stops a gate at its own timeout, so a limit
+    /// below that would call a healthy gate a hung process.
+    /// </summary>
+    internal static int EffectiveCallMinutes(ArbiterDispatchBudgetConfig budget, ReviewConfig? review)
+    {
+        int longestSeconds = 0;
+        if (review is not null)
+        {
+            foreach (IReadOnlyList<ReviewTaskGate> gates in review.TaskGates.Values.Concat(review.TechnologyGates.Values))
+            {
+                foreach (ReviewTaskGate gate in gates)
+                {
+                    longestSeconds = Math.Max(longestSeconds, gate.TimeoutSeconds);
+                }
+            }
+        }
+
+        if (longestSeconds <= 0)
+        {
+            return budget.CallMinutes;
+        }
+
+        // A very large timeout overflows int arithmetic, which would turn a huge limit into a small or negative one.
+        long gateMinutes = ((long)longestSeconds + 59) / 60 + 1;
+        return Math.Max(budget.CallMinutes, (int)Math.Min(gateMinutes, int.MaxValue));
+    }
+
     /// <summary>The header line a budget file opens with.</summary>
     internal static string HeaderLine(DateTimeOffset now, ArbiterDispatchBudgetConfig budget, string agentName) =>
         string.Create(
             CultureInfo.InvariantCulture,
             $"{now.ToUnixTimeMilliseconds()} {budget.Minutes} {budget.ToolCalls} {agentName} {budget.CallMinutes}\n");
 
-    /// <summary>The line a call appends to a budget file.</summary>
-    internal static string CallLine(DateTimeOffset now) =>
-        string.Create(CultureInfo.InvariantCulture, $"{now.ToUnixTimeMilliseconds()}\n");
+    /// <summary>The line a call appends to a budget file: its timestamp and whether the call started a process.</summary>
+    internal static string CallLine(DateTimeOffset now, bool startedProcess) =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"{now.ToUnixTimeMilliseconds()} {(startedProcess ? ProcessCallMarker : NoProcessCallMarker)}\n");
 
     internal static string Deny(string harness, string reason) =>
-        string.Equals(harness, ClaudeHarness, StringComparison.Ordinal)
-            ? new JsonObject
-            {
-                ["hookSpecificOutput"] = new JsonObject
-                {
-                    ["hookEventName"] = "PreToolUse",
-                    ["permissionDecision"] = "deny",
-                    ["permissionDecisionReason"] = reason,
-                },
-            }.ToJsonString()
+        harness is ClaudeHarness or FactoryHarness
+            ? HookDecisionDocuments.PreToolUsePermissionDeny(reason)
             : new JsonObject
             {
                 ["permissionDecision"] = "deny",
@@ -413,8 +1089,18 @@ internal static class WorkerGuardRules
     internal static string OneLine(string message) =>
         message.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\n', ' ').Replace('\r', ' ');
 
-    /// <summary>One budget window as its file records it: the header, then one timestamp per call.</summary>
-    internal sealed record Window(DateTimeOffset Start, int Minutes, int MaxCalls, int Calls, DateTimeOffset LastCall, int CallMinutes)
+    /// <summary>
+    /// One budget window as its file records it: the header, then one line per call holding its timestamp and a marker
+    /// that says whether the call started a process.
+    /// </summary>
+    internal sealed record Window(
+        DateTimeOffset Start,
+        int Minutes,
+        int MaxCalls,
+        int Calls,
+        DateTimeOffset LastCall,
+        int CallMinutes,
+        bool LastCallStartedProcess)
     {
         public bool IsOver(DateTimeOffset at) => Calls > MaxCalls || at - Start > TimeSpan.FromMinutes(Minutes);
 
@@ -429,18 +1115,21 @@ internal static class WorkerGuardRules
                 return null;
             }
 
-            // A header written before the per-call limit existed has four fields; it gets the shipped limit.
+            // The per-call limit is the header's last field, because the agent's name before it can contain spaces and
+            // so cannot be skipped by counting. A header written before the per-call limit existed has four fixed
+            // fields, ends in (part of) the name, and gets the shipped limit.
             int callMinutes = header.Length >= 5
-                && int.TryParse(header[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedCall)
+                && int.TryParse(header[^1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedCall)
                 && parsedCall > 0
                     ? parsedCall
                     : ArbiterDispatchBudgetConfig.Defaults.CallMinutes;
 
             long lastMs = startMs;
-            if (lines.Length > 1
-                && long.TryParse(lines[^1], NumberStyles.Integer, CultureInfo.InvariantCulture, out long parsed))
+            bool lastStartedProcess = true;
+            if (lines.Length > 1 && TryReadCall(lines[^1], out long parsed, out bool startedProcess))
             {
                 lastMs = parsed;
+                lastStartedProcess = startedProcess;
             }
 
             return new Window(
@@ -449,10 +1138,30 @@ internal static class WorkerGuardRules
                 maxCalls,
                 lines.Length - 1,
                 DateTimeOffset.FromUnixTimeMilliseconds(lastMs),
-                callMinutes);
+                callMinutes,
+                lastStartedProcess);
+        }
+
+        /// <summary>
+        /// Reads one call line into its timestamp and whether the call started a process. A line written before the
+        /// marker existed carries a bare timestamp: it counts as a process call, which is how that file was judged then.
+        /// </summary>
+        private static bool TryReadCall(string line, out long milliseconds, out bool startedProcess)
+        {
+            string[] fields = line.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            milliseconds = 0;
+            startedProcess = fields.Length < 2 || !string.Equals(fields[1], NoProcessCallMarker, StringComparison.Ordinal);
+            return fields.Length > 0
+                && long.TryParse(fields[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out milliseconds);
         }
     }
 
+    /// <summary>
+    /// One guarded tool call. <paramref name="Command"/> is the shell command the call carries, which other rules
+    /// match on; <paramref name="StartedProcess"/> is true for a call that runs a process or waits on a running one,
+    /// which is what the per-call limit is judged on. <paramref name="ReadPath"/> is the path a harness's own read or
+    /// view tool names, which the secret rule judges like a file a command would read.
+    /// </summary>
     internal sealed record ToolCall(
         string Harness,
         string AgentId,
@@ -460,5 +1169,7 @@ internal static class WorkerGuardRules
         string? Cwd,
         string? WritePath,
         string? Command,
-        string? SessionId = null);
+        bool StartedProcess,
+        string? SessionId = null,
+        string? ReadPath = null);
 }

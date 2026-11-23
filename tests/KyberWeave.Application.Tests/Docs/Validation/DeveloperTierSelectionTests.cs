@@ -22,6 +22,9 @@ public sealed class DeveloperTierSelectionTests
 {
     private const string Plan = PlanTaskFileProbe.PlanPath;
 
+    private static readonly FakeEmbeddedResources Resources = new FakeEmbeddedResources()
+        .Add(PlanTaskAgentPick.RubricResourceName, "Rate the task by the rubric.");
+
     private static KyberWeaveConfig Tiered => KyberWeaveConfigDefaults.Product
         .WithOntology(new OntologyConfig { Technologies = ["csharp"] })
         .WithWorkerRoster(WorkerRosters.Tiered);
@@ -329,7 +332,7 @@ public sealed class DeveloperTierSelectionTests
         _ = fixture.EnsureDirectory(".git");
         StubProvider provider = new("dev-medium");
         using PlanTaskAgentPick picker = new(
-            provider, PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered));
+            provider, PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered), Resources);
 
         PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store, picker)
             .Run(Plan, PlanTaskFileMode.Write);
@@ -360,7 +363,7 @@ public sealed class DeveloperTierSelectionTests
 
         using PlanTaskAgentPick picker = new(
             new StubProvider("dev-medium"),
-            PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered));
+            PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered), Resources);
         PlanTaskFileOutcome second = new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store, picker)
             .Run(Plan, PlanTaskFileMode.Write);
 
@@ -380,7 +383,7 @@ public sealed class DeveloperTierSelectionTests
         _ = fixture.EnsureDirectory(".git");
         using PlanTaskAgentPick picker = new(
             new StubProvider("dev-medium"),
-            PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered));
+            PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered), Resources);
         PlanTaskFileOutcome written = new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store, picker)
             .Run(Plan, PlanTaskFileMode.Write);
         Assert.False(written.Report.HasErrors, string.Join("; ", written.Report.Items.Select(item => item.Message)));
@@ -409,7 +412,7 @@ public sealed class DeveloperTierSelectionTests
 
         using PlanTaskAgentPick repick = new(
             new StubProvider("dev-medium"),
-            PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered));
+            PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered), Resources);
         PlanTaskFileOutcome rewritten = new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store, repick)
             .Run(Plan, PlanTaskFileMode.Write);
         Assert.False(rewritten.Report.HasErrors, string.Join("; ", rewritten.Report.Items.Select(item => item.Message)));

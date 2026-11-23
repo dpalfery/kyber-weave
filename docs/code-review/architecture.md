@@ -289,8 +289,8 @@ The review council enforces explicit contract verification disciplines across it
 Seventeen concerns, but only **two** canonical agents carry them. The lens is a reference file;
 the agent is the seat that reads it.
 
-Seventeen agents would push the canonical roster from 22 to 39, clutter every harness's agent
-picker, and produce seventeen near-identical descriptions that would collide under
+An agent per lens would multiply the canonical roster, clutter every harness's agent
+picker, and produce near-identical descriptions that would collide under
 `KW-AGENT-LINT-001` and `KW-SKILL-LINT-011`. As files, adding a lens is a Markdown file rather
 than a deployment — which is exactly what adding `prior-art` cost.
 
@@ -578,11 +578,13 @@ gates --agent <slug>` runs the first of those that resolves — the agent's own 
 technology's, then the entry of the technology agent the shipped map names, then the parent
 technology's — against the files the agent changed. Both are optional; when no route declares a
 gate, `--agent` reports `KW-REVIEW-027`, naming both keys. With `--task <id>` and no `--paths`, the
-files and the test classes for `{tests}` come from the task in the active plan, the report goes to
-the task's scratch folder, and each test gate prints a short result (failing tests with their first
-error line) with the full output in a log beside it; the plan is also read from another worktree of
-the repository, so a worker whose checkout does not hold the run's plan resolves the task the way
-`docs packet` does. See the [command surface](../cli-command-surface.md).
+files and the test classes for `{tests}` come from the task in the plan in flight, or in this
+checkout's plan that has moved into review, so a review rework re-runs the task's own gates and
+resolves its technology; the report goes to the task's scratch folder, and each test gate prints a
+short result (failing tests with their first error line) with the full output in a log beside it;
+the plan is also read from another worktree of the repository when no plan here holds the task, so
+a worker whose checkout does not hold the run's plan resolves the task the way `docs packet` does.
+See the [command surface](../cli-command-surface.md).
 
 ```yaml
 review:
@@ -1093,7 +1095,7 @@ rather than performing it.
 
 **The review loop.** The verdict prints what the fix round takes, one `fix:` line each (every
 failed blocking gate and every finding at or above `review.policy.fix-level`), what becomes follow-up work (`follow-up:`: findings
-below the fix level, and findings dropped as `pre-existing debt`), and a
+below the fix level, and findings dropped as `pre-existing debt` or `pr note`), and a
 closing `fix round:` line (`KW-REVIEW-056`). Each `fix:` line goes to the worker that owns its
 scope, one dispatch per worker, after `REQUEST_CHANGES` and after an `APPROVE` alike. The council
 re-reviews until the verdict prints `fix round: none`: `review clean: proceed to archive` when

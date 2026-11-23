@@ -180,8 +180,12 @@ The reviewer applies the checks no individual lens can, because no lens sees the
   others with `--drop <id>=duplicate of <kept id>`.
 - **Reconcile contradictions** — read the code and resolve, or escalate as unresolved.
 - **Mark pre-existing debt.** A finding about code the change did not touch is dropped with
-  `--drop <id>=pre-existing debt: <one line>`; it blocks nothing and the verdict lists it as
-  follow-up work. Code the change touched or extends is the change's own.
+  `--drop <id>=pre-existing debt: <one line>`; it blocks nothing and the verdict lists it for
+  the pull request notes. Code the change touched or extends is the change's own, and a stale document is
+  never pre-existing debt, whatever its origin.
+- **Mark a pull request note.** A finding the pull request's description should carry rather than a
+  code change is dropped with `--drop <id>=pr note: <one line>`; it blocks nothing and the verdict
+  lists it for the pull request notes, as it does pre-existing debt.
 - **Check the claims against the gates.** Any assertion that something was built, tested, or
   verified, with no corresponding gate result, is a `critical` finding, written in
   `reviewer.md` in the seats folder.
@@ -224,7 +228,7 @@ number. Minor findings never block at any level; `review.policy.fix-level` decid
 findings instead of having them dropped at the source and a lenient host is not flooded. The
 security lens is the one exception: it keeps its own floor of 8 (see its lens file).
 
-**Fix round.** The verdict prints what the fix round takes (`fix:` lines: failed blocking gates and every finding at or above the fix level, after an APPROVE too) and what becomes follow-up work (`follow-up:` lines: pre-existing debt, and findings below the level), then `fix round:` saying whether the loop goes on: the council re-reviews after every fix round until the verdict prints `fix round: none` (`review clean: proceed to archive`, or a cap with `open:` lines). `review.policy.fix-level` decides what the fix round takes: `critical` (failed blocking gates and critical findings: data loss, a security hole, corruption, behaviour that breaks silently), `major` (also major findings: the change is wrong or fails under conditions a normal user reaches, or a file or type sits against the documented structure), `minor` (also minor findings: real but bounded, such as a narrow edge case, a misleading comment or document statement, a missing test for a stated behaviour; the default) and `nitpick` (also nitpicks: purely stylistic points with no effect on how the application operates). Findings below the level go to `follow-up:` lines and the pull request; a nitpick below it is dropped and listed in the verdict report only. Every cycle after the first is a verifier cycle, set out in [references/verifier-cycle.md](references/verifier-cycle.md).
+**Fix round.** The verdict prints what the fix round takes (`fix:` lines: failed blocking gates and every finding at or above the fix level, after an APPROVE too) and what becomes follow-up work (`follow-up:` lines: pre-existing debt, pr notes, and findings below the level), then `fix round:` saying whether the loop goes on: the council re-reviews after every fix round until the verdict prints `fix round: none` (`review clean: proceed to archive`, or a cap with `open:` lines). `review.policy.fix-level` decides what the fix round takes: `critical` (failed blocking gates and critical findings: data loss, a security hole, corruption, behaviour that breaks silently), `major` (also major findings: the change is wrong or fails under conditions a normal user reaches, or a file or type sits against the documented structure), `minor` (also minor findings: real but bounded, such as a narrow edge case, a misleading comment or document statement, a missing test for a stated behaviour; the default) and `nitpick` (also nitpicks: purely stylistic points with no effect on how the application operates). Findings below the level go to `follow-up:` lines and the pull request; a nitpick below it is dropped and listed in the verdict report only. Every cycle after the first is a verifier cycle, set out in [references/verifier-cycle.md](references/verifier-cycle.md).
 
 **Risk** (`LOW` / `MEDIUM` / `HIGH`) is graded from what was found and what was touched,
 never from diff size. A twelve-line migration dropping a column outranks a three-thousand-line

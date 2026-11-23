@@ -5,7 +5,7 @@ description: "Implements application code and its tests in any technology, for a
 invocation: subagent
 model-profile: fast
 capability-profile: worker
-copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]
+copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, skill]
 delegates-to: []
 fallback: role-skill
 aliases: []
@@ -88,10 +88,15 @@ Use the host's indexes before raw reads.
 
 ## Completion digest
 
+Return the digest the passing task gate prints, with your commit's sha:
+
 ```text
-STATUS: READY_FOR_REVIEW
-ARTIFACTS: <files changed or created>
-SUMMARY: <2 to 4 sentences: what was built, what was tested, any hand-off>
-TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE>, agent=dev-easy gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
-OPEN_QUESTIONS: <bullets, or "none">
+STATUS: PASS | FAIL | ESCALATION
+FILES: <comma-separated paths>
+TESTS: total=<N> failed=<N> passed=<N>
+COMMIT: <commit-sha>
+REMOTE_HEAD: UNPUSHED
+TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — agent=dev-easy gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 ```
+
+A question you could not settle goes on an `Open item:` line after the digest.

@@ -23,4 +23,4 @@ last-reviewed: 2026-11-22
 - No `//nolint` or `//lint:ignore` without the check name and a reason on the same line.
 
 The rules that hold for every technology, including secrets and input validation, are
-in the shared rules file beside this folder.
+in the shared rules file, `shared-rules.md` at the root of the standards folders (`<standards-root>/shared-rules.md`), one level above this folder.

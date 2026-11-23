@@ -32,6 +32,7 @@ internal static class ArbiterDataServiceCollectionExtensions
         services.TryAddSingleton<IHookSnapshotStore, FileHookSnapshotStore>();
         services.TryAddSingleton<IHookFileWindowReader, FileHookFileWindowReader>();
         services.TryAddSingleton<IWorkerBudgetStore, FileWorkerBudgetStore>();
+        services.TryAddSingleton<IWorkerSessionStore, FileWorkerSessionStore>();
         services.TryAddSingleton<IFileLinkProbe, FileLinkProbe>();
         services.TryAddSingleton<IFactoryTranscriptSource, FileFactoryTranscriptSource>();
         return services;

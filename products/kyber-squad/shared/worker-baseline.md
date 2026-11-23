@@ -15,18 +15,22 @@ as not tried. Name specific symbols or files in each `codegraph_explore` query r
 If the result says "Output too large … Saved to: <path>", `view` that file once and use it as your
 answer: do not re-run the query and do not fall back to grep.
 
-When you work in a linked worktree, pass projectPath=<absolute path of your worktree> to every kw-docs tool and to codegraph_explore; the answer's provenance root= must equal your worktree.
+When you work in a linked worktree, pass projectPath=<absolute path of your worktree> to every kw-docs tool and to codegraph_explore; the answer's provenance root= must equal your worktree. Start every shell command with `cd <absolute path of your worktree> && `: some harnesses report the canonical checkout as your directory, and the Arbiter refuses a step that would run there.
 
-**Plans are the conductor's.** Do not open a file under `<plan-index>`, `<specification-index>` or any plan folder. Your first action is `kyber-weave docs packet <task id> --agent <your agent name>`, run from the worktree your dispatch names (a dispatch with no task id has no packet); its output is your whole brief, and its Host facts section answers what the host `AGENTS.md` would: open that file only for what it does not. If it fails or falls short, report that output verbatim and stop.
+**Plans are the conductor's.** Do not open a file under `<plan-index>`, `<specification-index>` or any plan folder. Your prompt is your whole brief: the dispatch hook has already put your task, the Host facts, the rules, the skills and the standard into its tagged parts (`<task>` to `<left-out>`), and the Host facts answer what the host `AGENTS.md` would: open that file only for what they do not. Only when your dispatch has no `<task>` part, and still shows a `TASK:` line, run `kyber-weave docs packet <task id> --agent <your agent name>` from the worktree your dispatch names; if that fails or falls short, report its output verbatim and stop.
 
-The host's rules (Host facts, root `AGENTS.md`) apply to every task; fetch the standard for the technology you change in one `docs_get_coding_standard_for_technology` call, never as a whole file.
+The host's rules (Host facts, root `AGENTS.md`) apply to every task. The standard for your task's technology is already in `<standard>`: call `docs_get_coding_standard_for_technology` only for a section `<left-out>` names, or for another technology your task's files touch, and never read a standard as a whole file.
 
 **Your task's files are your scope.** Change every file the task names, in whatever layer; what you are
 usually good at is not a boundary. Never return BLOCKED or ask for a handoff over a named file: make
 the change to that technology's standard. Never fix an issue outside your task's files or unrelated to
 your task; report it and finish, one line each, `Open item: <file> — <what> — <why it matters>`. They
-are filed as todos when the run ends. Stop only for a missing packet, a contradiction inside the task itself, or a
+go in the pull request notes when the run ends; you never write a todo. An open item is never debt in what you touch: a comment or test that no longer
+matches, or code you copied instead of reusing, is part of your task; fix it. A stale document is reported as
+`Open item: <file> — stale document — <what>` and fixed by docs-dev in this run. Stop only for a missing packet, a contradiction inside the task itself, or a
 safety limit (a migration you would apply by hand to a database other people or environments use, CI or deploy secrets, a push). The task gate is never such a limit: when the host's gate or test setup script itself starts a local container, creates the test database or applies the repository's existing migrations to it, that is the host's declared procedure and you run it as given.
+
+**Secrets stay out of the transcript.** Every command you run, every file you read and every output you see goes to the model provider. Never read, print or type a password, key or token. Never use an administrator or superuser login (`sa`, `root`, `postgres`). Never open a secret store: user-secrets, a `.env` file, a password file, or a container's environment. Prove a result through the application's own path: its tests, its API, its gate. A tool may read its own configuration, and a value may be passed by reference (`"$VAR"`), because then the value never appears. A plan step that breaks this rule is a `security` finding against the plan. A task that cannot be done without a secret is a stop: return BLOCKED with an `Open item:` line saying so. The Arbiter refuses such calls (`KW-ARB-SECRET-001`).
 
 **The documented rule wins over nearby code.** Where existing code contradicts a documented rule or
 standard (where a kind of file goes, a layering or naming rule), follow the rule in your change and add
