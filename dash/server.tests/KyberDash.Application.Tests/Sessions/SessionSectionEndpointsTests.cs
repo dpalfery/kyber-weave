@@ -14,8 +14,9 @@ namespace KyberDash.Application.Tests.Sessions;
 /// section renders with parity to the detail payload it widens, the charts section equals the
 /// detail payload's turn list and context object without paying for any other section's reads,
 /// the turn section carries that turn's stored context buckets, the requests, reconciliation and
-/// problems sections page today's rows at 25 with the true total, and the run page's turn list
-/// comes from the same per-session turn figures.
+/// problems sections page today's rows at 25 with the true total, the tools section pages the
+/// ranked rows with the aggregate priced over every row, the servers and skills sections page
+/// today's rows at 25, and the run page's turn list comes from the same per-session turn figures.
 /// </summary>
 public sealed class SessionSectionEndpointsTests
 {
@@ -398,6 +399,193 @@ public sealed class SessionSectionEndpointsTests
     }
 
     /// <summary>
+    /// The tools section pages the ranked tool rows — never-invoked rows included — at 25 with
+    /// the true total, and its aggregate equals what today's detail payload yields over all rows,
+    /// on page 1 and on page 2: the largest resident cost, the resident cost total, the invocation
+    /// count, the unused count, the unused range, the per-server rollup, and the span that carries
+    /// the session's tool definitions.
+    /// </summary>
+    [Fact]
+    public void TheToolsSectionPagesRankedRowsAndCarriesTodaysAggregate()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-tools";
+        WriteManyToolSession(store, sessionKey);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        JsonElement detail = bridge.GetSessionDetail(sessionKey)!.Value;
+        JsonElement schema = detail.GetProperty("schema");
+        Assert.True(schema.GetProperty("measurable").GetBoolean());
+        JsonElement[] rankedRows = [.. schema.GetProperty("ranked").EnumerateArray()];
+        Assert.Equal(30, rankedRows.Length);
+
+        store.ClearReadLog();
+        JsonElement page = bridge.GetSessionTools(sessionKey)!.Value;
+
+        Assert.Equal(30, page.GetProperty("total").GetInt32());
+        JsonElement[] rows = [.. page.GetProperty("tools").EnumerateArray()];
+        Assert.Equal(25, rows.Length);
+        JsonElement[] detailRows = [.. detail.GetProperty("tools").EnumerateArray()];
+        for (int index = 0; index < rows.Length; index++)
+        {
+            // The ranked rows carry today's payload row shape: the name and cost the schema
+            // ranking shows, and the invocations and residency the payload's tools array carries.
+            Assert.Equal(rankedRows[index].GetProperty("name").GetString(), rows[index].GetProperty("name").GetString());
+            Assert.Equal(rankedRows[index].GetProperty("cost").GetRawText(), rows[index].GetProperty("total_schema_cost").GetRawText());
+            Assert.Equal(detailRows[index].GetRawText(), rows[index].GetRawText());
+        }
+
+        // The ranking includes the never-invoked rows: tool-29 sits at the top of page 1 and
+        // tool-00 at the end of the ranking, on page 2 — two invoked rows across both pages.
+        Assert.Equal(1, rows.Count(static row => row.GetProperty("invoked").GetBoolean()));
+
+        // The aggregate equals what today's payload yields over all rows, not just the page: the
+        // largest resident cost, the resident cost total, the invocations the rows carry, the
+        // rows never invoked, the unused range, the per-server rollup, and the span that carries
+        // the session's tool definitions.
+        JsonElement aggregate = page.GetProperty("aggregate");
+        Assert.Equal(detailRows.Where(static row => row.TryGetProperty("total_schema_cost", out JsonElement cost) && cost.ValueKind == JsonValueKind.Number).Max(static row => row.GetProperty("total_schema_cost").GetInt64()), aggregate.GetProperty("maxCost").GetInt64());
+        Assert.Equal(detailRows.Where(static row => row.TryGetProperty("total_schema_cost", out JsonElement cost) && cost.ValueKind == JsonValueKind.Number).Sum(static row => row.GetProperty("total_schema_cost").GetInt64()), aggregate.GetProperty("residentCostTotal").GetInt64());
+        Assert.Equal(detailRows.Sum(static row => row.GetProperty("invocations").GetInt32()), aggregate.GetProperty("invocationCount").GetInt32());
+        Assert.Equal(detailRows.Count(static row => !row.GetProperty("invoked").GetBoolean()), aggregate.GetProperty("unusedCount").GetInt32());
+        Assert.Equal(schema.GetProperty("unusedRange").GetRawText(), aggregate.GetProperty("unusedRange").GetRawText());
+        Assert.Equal(schema.GetProperty("byServer").GetRawText(), aggregate.GetProperty("byServer").GetRawText());
+        Assert.Equal("turn-tools-000", aggregate.GetProperty("definitionsSpanId").GetString());
+
+        // The tools read prices the tool tables and the stored schema only: no content, no
+        // detail-figure set, no full projection read.
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.DoesNotContain(store.ReadLog, static read => ContentBearingReads.Contains(read));
+        Assert.Equal(
+            (IReadOnlyList<string>)[nameof(InMemoryRelationalStore.SessionToolFigures)],
+            store.ReadLog.Where(static read => read != "CountRecords").ToList());
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.SessionDetailFigures), store.ReadLog);
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.GetSessionProjection), store.SessionProjectionReadLog);
+
+        // Page 2 carries the remaining ranked rows — including the second invoked one — and the
+        // same aggregate, and pays its own read.
+        store.ClearReadLog();
+        JsonElement second = bridge.GetSessionTools(sessionKey, page: 2)!.Value;
+        JsonElement[] secondRows = [.. second.GetProperty("tools").EnumerateArray()];
+        Assert.Equal(5, secondRows.Length);
+        Assert.Equal(rankedRows[25].GetProperty("name").GetString(), secondRows[0].GetProperty("name").GetString());
+        Assert.Equal(1, secondRows.Count(static row => row.GetProperty("invoked").GetBoolean()));
+        Assert.Equal("tool-00", secondRows.Last(static row => row.GetProperty("invoked").GetBoolean()).GetProperty("name").GetString());
+        Assert.Equal(aggregate.GetRawText(), second.GetProperty("aggregate").GetRawText());
+        Assert.Equal(30, second.GetProperty("total").GetInt32());
+        Assert.Equal(
+            (IReadOnlyList<string>)[nameof(InMemoryRelationalStore.SessionToolFigures)],
+            store.ReadLog.Where(static read => read != "CountRecords").ToList());
+    }
+
+    /// <summary>
+    /// The servers section pages today's per-server rollup rows at 25 with the true total, from
+    /// the same tool figures read the tools section pays.
+    /// </summary>
+    [Fact]
+    public void TheServersSectionPagesTodaysRowsAt25()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-tools";
+        WriteManyToolSession(store, sessionKey);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        JsonElement detail = bridge.GetSessionDetail(sessionKey)!.Value;
+        JsonElement[] detailRows = [.. detail.GetProperty("servers").EnumerateArray()];
+        Assert.Equal(2, detailRows.Length);
+
+        store.ClearReadLog();
+        JsonElement page = bridge.GetSessionServers(sessionKey)!.Value;
+
+        Assert.Equal(detailRows.Length, page.GetProperty("total").GetInt32());
+        JsonElement[] rows = [.. page.GetProperty("servers").EnumerateArray()];
+        Assert.Equal(detailRows.Length, rows.Length);
+        for (int index = 0; index < rows.Length; index++)
+        {
+            Assert.Equal(detailRows[index].GetRawText(), rows[index].GetRawText());
+        }
+
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.DoesNotContain(store.ReadLog, static read => ContentBearingReads.Contains(read));
+        Assert.Equal(
+            (IReadOnlyList<string>)[nameof(InMemoryRelationalStore.SessionToolFigures)],
+            store.ReadLog.Where(static read => read != "CountRecords").ToList());
+    }
+
+    /// <summary>
+    /// The skills section pages the session's distinct skill rows at 25 with the true total,
+    /// carrying the same rows the detail payload's skills block lists, and answers a session that
+    /// invoked no skills with the not-measurable block the detail payload carries.
+    /// </summary>
+    [Fact]
+    public void TheSkillsSectionPagesTodaysRowsAt25()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-skills";
+        List<CollectedRecord> turns =
+        [
+            .. Enumerable.Range(0, 30).Select(i => Turn($"turn-skills-{i:D3}", sessionKey, i, inputTokens: 1_000)),
+        ];
+        for (int index = 0; index < turns.Count; index++)
+        {
+            string skillName = $"skill-{index:D2}";
+            turns[index] = turns[index] with { SkillsInvoked = new[] { skillName } };
+        }
+
+        WriteSession(store, sessionKey, turns, repo: "kyber-weave", branch: "kw-task/T6", title: "skills session");
+        WriteSession(
+            store,
+            "sess-noskills",
+            [
+                Turn("span-noskills-1", "sess-noskills", 0, inputTokens: 100),
+                Turn("span-noskills-2", "sess-noskills", 1, inputTokens: 200),
+            ]);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        JsonElement detail = bridge.GetSessionDetail(sessionKey)!.Value;
+        JsonElement[] detailRows = [.. detail.GetProperty("skills").GetProperty("rows").EnumerateArray()];
+        Assert.Equal(30, detailRows.Length);
+
+        store.ClearReadLog();
+        JsonElement page = bridge.GetSessionSkills(sessionKey)!.Value;
+
+        Assert.True(page.GetProperty("measurable").GetBoolean());
+        Assert.Equal(30, page.GetProperty("total").GetInt32());
+        JsonElement[] rows = [.. page.GetProperty("rows").EnumerateArray()];
+        Assert.Equal(25, rows.Length);
+        for (int index = 0; index < rows.Length; index++)
+        {
+            Assert.Equal(detailRows[index].GetRawText(), rows[index].GetRawText());
+        }
+
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.DoesNotContain(store.ReadLog, static read => ContentBearingReads.Contains(read));
+        Assert.Contains(nameof(InMemoryRelationalStore.SessionSkillFigures), store.ReadLog);
+
+        JsonElement second = bridge.GetSessionSkills(sessionKey, page: 2)!.Value;
+        JsonElement[] secondRows = [.. second.GetProperty("rows").EnumerateArray()];
+        Assert.Equal(5, secondRows.Length);
+        Assert.Equal(detailRows[25].GetRawText(), secondRows[0].GetRawText());
+        Assert.Equal(30, second.GetProperty("total").GetInt32());
+
+        // A session that invoked no skills answers the not-measurable block the detail payload
+        // carries, with no rows.
+        JsonElement none = bridge.GetSessionSkills("sess-noskills")!.Value;
+        Assert.Equal("not_measurable", none.GetProperty("availability").GetString());
+        Assert.Empty(none.GetProperty("rows").EnumerateArray().ToList());
+        Assert.Equal(0, none.GetProperty("total").GetInt32());
+    }
+
+    /// <summary>
     /// An unknown session's section routes answer nothing through the header read: the 404 check
     /// is <see cref="InMemoryRelationalStore.SessionHeadersByKeys"/>, never the full projection
     /// read, and no content-free read runs either.
@@ -418,6 +606,9 @@ public sealed class SessionSectionEndpointsTests
         Assert.Null(bridge.GetSessionRequests("sess-absent"));
         Assert.Null(bridge.GetSessionReconciliation("sess-absent"));
         Assert.Null(bridge.GetSessionProblems("sess-absent"));
+        Assert.Null(bridge.GetSessionTools("sess-absent"));
+        Assert.Null(bridge.GetSessionServers("sess-absent"));
+        Assert.Null(bridge.GetSessionSkills("sess-absent"));
 
         Assert.Contains(nameof(InMemoryRelationalStore.SessionHeadersByKeys), store.SessionProjectionReadLog);
         Assert.DoesNotContain(nameof(InMemoryRelationalStore.GetSessionProjection), store.SessionProjectionReadLog);
@@ -493,6 +684,44 @@ public sealed class SessionSectionEndpointsTests
                 new CollectedToolDefinition(1, "write", null, 80),
             ],
         };
+
+    /// <summary>
+    /// Seeds a thirty-turn session with thirty advertised tools — two invoked, the rest never
+    /// invoked, and three servers' worth of definitions — so the tools section has more rows than
+    /// a page holds.
+    /// </summary>
+    private static void WriteManyToolSession(InMemoryRelationalStore store, string sessionKey)
+    {
+        List<CollectedRecord> turns =
+        [
+            .. Enumerable.Range(0, 30).Select(i => Turn($"turn-tools-{i:D3}", sessionKey, i, inputTokens: 1_000, outputTokens: 100)),
+        ];
+        turns[0] = turns[0] with
+        {
+            Tool = ToolCall("call-tools-0", "tool-00"),
+            ToolDefinitions =
+            [
+                .. Enumerable.Range(0, 30).Select(i => new CollectedToolDefinition(
+                    i,
+                    $"tool-{i:D2}",
+                    i % 3 == 0 ? "mcp-alpha" : i % 3 == 1 ? "mcp-beta" : null,
+                    100 + i)),
+            ],
+        };
+        turns[1] = turns[1] with { Tool = ToolCall("call-tools-1", "tool-29") };
+        WriteSession(store, sessionKey, turns, repo: "kyber-weave", branch: "kw-task/T6", title: "tools session");
+    }
+
+    private static CollectedToolCall ToolCall(string callId, string toolName) => new(
+        CallId: callId,
+        ToolName: toolName,
+        McpServerName: null,
+        McpToolName: null,
+        Input: null,
+        Result: null,
+        Succeeded: true,
+        Error: null,
+        ExitCode: 0);
 
     private static KyberBridgeEngine CreateBridge(InMemoryRelationalStore store, FakePricingRepository pricing) =>
         new(

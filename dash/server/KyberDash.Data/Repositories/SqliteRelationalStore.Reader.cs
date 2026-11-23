@@ -1504,6 +1504,279 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     }
 
     /// <inheritdoc />
+    public SessionToolFigureSet SessionToolFigures(string sessionKey, IModelPricingLookup? pricing = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        string key = TextExpr(sessionKey);
+
+        // One script, five tagged selects: the two identity columns the unused-range pricing
+        // resolves (the session's harness and its first turn model), the tool-call metadata, the
+        // tool-definition metadata, and the stored schema projection. No content column, no
+        // content-text table, no timeline, and no context row is touched.
+        StringBuilder sql = new(TabReadScriptHeader);
+        sql.Append(CultureInfo.InvariantCulture, $"SELECT 'HARNESS', typeof(s.harness_id), COALESCE(hex(CAST(s.harness_id AS BLOB)), '') FROM session s WHERE s.session_id = {key};\n");
+        sql.Append(CultureInfo.InvariantCulture, $"SELECT 'MODEL', typeof(rm.model_id), COALESCE(hex(CAST(rm.model_id AS BLOB)), '') FROM record_session_link rsl JOIN record r ON r.span_id = rsl.span_id JOIN record_model rm ON rm.span_id = r.span_id WHERE rsl.session_key = {key} AND r.op = 'llm.invoke' ORDER BY r.started_at_utc ASC, r.span_id ASC LIMIT 1;\n");
+        sql.Append(CultureInfo.InvariantCulture, $"SELECT 'CALL', hex(CAST(tc.span_id AS BLOB)), hex(CAST(tc.tool_name AS BLOB)), typeof(oco.succeeded), COALESCE(CAST(oco.succeeded AS TEXT), ''), typeof(terr.message), COALESCE(hex(CAST(terr.message AS BLOB)), '') FROM tool_call tc JOIN record_session_link rsl ON rsl.span_id = tc.span_id AND rsl.session_key = {key} LEFT JOIN tool_call_outcome oco ON oco.span_id = tc.span_id LEFT JOIN tool_call_error terr ON terr.span_id = tc.span_id ORDER BY tc.rowid ASC;\n");
+        sql.Append(CultureInfo.InvariantCulture, $"SELECT 'DEF', hex(CAST(td.span_id AS BLOB)), td.position, hex(CAST(td.tool_name AS BLOB)), td.schema_tokens, typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), '') FROM tool_definition td JOIN record_session_link rsl ON rsl.span_id = td.span_id AND rsl.session_key = {key} JOIN record r ON r.span_id = td.span_id LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position ORDER BY r.rowid ASC, td.position ASC;\n");
+        sql.Append(CultureInfo.InvariantCulture, $"SELECT 'SCH', t.invocation_count, t.turn_count, typeof(u.token_residencies), COALESCE(CAST(u.token_residencies AS TEXT), '') FROM session_schema t LEFT JOIN session_schema_unused u ON u.session_id = t.session_id WHERE t.session_id = {key};\n");
+        sql.Append(CultureInfo.InvariantCulture, $"SELECT 'SCH_TOOL', t.position, hex(CAST(t.tool_name AS BLOB)), t.cost_tokens, t.invoked, typeof(s.server_name), COALESCE(hex(CAST(s.server_name AS BLOB)), '') FROM session_schema_ranked_tool t LEFT JOIN session_schema_ranked_tool_server s ON s.session_id = t.session_id AND s.position = t.position WHERE t.session_id = {key} ORDER BY t.position ASC;\n");
+        sql.Append(CultureInfo.InvariantCulture, $"SELECT 'SCH_SRV', hex(CAST(t.server_name AS BLOB)), t.tokens FROM session_schema_server t WHERE t.session_id = {key} ORDER BY t.rowid ASC;\n");
+
+        string output = ExecuteSqlite(sql.ToString());
+        string? harnessId = null;
+        string? primaryModel = null;
+        int toolCallTotal = 0;
+        List<string> toolsInvoked = [];
+        HashSet<string> seenInvokedTools = new(StringComparer.Ordinal);
+        Dictionary<string, int> invCounts = new(StringComparer.Ordinal);
+        Dictionary<string, int> errCounts = new(StringComparer.Ordinal);
+        Dictionary<string, (long SchemaTokens, string? Server, HashSet<string> SpanIds)> defStats = new(StringComparer.Ordinal);
+        List<string> toolsOffered = [];
+        HashSet<string> seenOfferedTools = new(StringComparer.Ordinal);
+        StoredSessionSchema? schema = null;
+        List<StoredSchemaRankedTool> rankedTools = [];
+        List<StoredSchemaServerTokens> schemaServers = [];
+        string? definitionsSpanId = null;
+
+        foreach (string line in TabLines(output))
+        {
+            string[] cols = line.Split('\t');
+            if (cols.Length < 2)
+            {
+                throw new InvalidOperationException("Unexpected short row in the session tool figures read.");
+            }
+
+            switch (cols[0])
+            {
+                case "HARNESS":
+                    if (cols.Length != 3)
+                    {
+                        throw new InvalidOperationException($"Expected 3 columns for HARNESS row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                    }
+
+                    harnessId = ParseNullableHex(cols[1], cols[2], "session.harness_id");
+                    break;
+
+                case "MODEL":
+                    if (cols.Length != 3)
+                    {
+                        throw new InvalidOperationException($"Expected 3 columns for MODEL row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                    }
+
+                    primaryModel = ParseNullableHex(cols[1], cols[2], "record_model.model_id");
+                    break;
+
+                case "CALL":
+                    if (cols.Length != 7)
+                    {
+                        throw new InvalidOperationException($"Expected 7 columns for CALL row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                    }
+
+                    toolCallTotal++;
+                    string callToolName = ParseHexRequired(cols[2], "tool_call.tool_name");
+                    if (seenInvokedTools.Add(callToolName))
+                    {
+                        toolsInvoked.Add(callToolName);
+                    }
+
+                    invCounts[callToolName] = invCounts.GetValueOrDefault(callToolName) + 1;
+                    bool? succeeded = ParseOptionalBool(cols[3], cols[4], "tool_call_outcome.succeeded");
+                    string? callError = ParseNullableHex(cols[5], cols[6], "tool_call_error.message");
+                    if (succeeded == false || callError is not null)
+                    {
+                        errCounts[callToolName] = errCounts.GetValueOrDefault(callToolName) + 1;
+                    }
+
+                    break;
+
+                case "DEF":
+                    if (cols.Length != 7)
+                    {
+                        throw new InvalidOperationException($"Expected 7 columns for DEF row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                    }
+
+                    string defSpan = ParseHexRequired(cols[1], "tool_definition.span_id");
+                    definitionsSpanId ??= defSpan;
+                    string defToolName = ParseHexRequired(cols[3], "tool_definition.tool_name");
+                    long schemaTokens = ParseInt64Required(cols[4], "tool_definition.schema_tokens");
+                    string? defServer = ParseNullableHex(cols[5], cols[6], "tool_definition_server.server_name");
+                    if (seenOfferedTools.Add(defToolName))
+                    {
+                        toolsOffered.Add(defToolName);
+                    }
+
+                    if (!defStats.TryGetValue(defToolName, out (long SchemaTokens, string? Server, HashSet<string> SpanIds) existing))
+                    {
+                        defStats[defToolName] = (schemaTokens, defServer, new HashSet<string>(StringComparer.Ordinal) { defSpan });
+                    }
+                    else
+                    {
+                        _ = existing.SpanIds.Add(defSpan);
+                        defStats[defToolName] = (existing.SchemaTokens, existing.Server ?? defServer, existing.SpanIds);
+                    }
+
+                    break;
+
+                case "SCH":
+                    if (cols.Length != 5)
+                    {
+                        throw new InvalidOperationException($"Expected 5 columns for SCH row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                    }
+
+                    schema = new StoredSessionSchema(
+                        InvocationCount: ParseInt32Required(cols[1], "session_schema.invocation_count"),
+                        TurnCount: ParseInt32Required(cols[2], "session_schema.turn_count"),
+                        RankedTools: rankedTools,
+                        Servers: schemaServers,
+                        UnusedTokenResidencies: ParseNullableInt64(cols[3], cols[4], "session_schema_unused.token_residencies"));
+                    break;
+
+                case "SCH_TOOL":
+                    if (cols.Length != 7)
+                    {
+                        throw new InvalidOperationException($"Expected 7 columns for SCH_TOOL row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                    }
+
+                    rankedTools.Add(new StoredSchemaRankedTool(
+                        Position: ParseInt32Required(cols[1], "session_schema_ranked_tool.position"),
+                        ToolName: ParseHexRequired(cols[2], "session_schema_ranked_tool.tool_name"),
+                        CostTokens: ParseInt64Required(cols[3], "session_schema_ranked_tool.cost_tokens"),
+                        Invoked: ParseBoolFlag(cols[4], "session_schema_ranked_tool.invoked"),
+                        ServerName: ParseNullableHex(cols[5], cols[6], "session_schema_ranked_tool_server.server_name")));
+                    break;
+
+                case "SCH_SRV":
+                    if (cols.Length != 3)
+                    {
+                        throw new InvalidOperationException($"Expected 3 columns for SCH_SRV row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                    }
+
+                    schemaServers.Add(new StoredSchemaServerTokens(
+                        ServerName: ParseHexRequired(cols[1], "session_schema_server.server_name"),
+                        Tokens: ParseInt64Required(cols[2], "session_schema_server.tokens")));
+                    break;
+
+                default:
+                    throw new InvalidOperationException($"Unexpected row tag in the session tool figures read: '{cols[0]}'.");
+            }
+        }
+
+        // The residency helpers price the stored schema only, so the read carries the schema in a
+        // minimal projection shape instead of reading the session's whole projection.
+        StoredSessionProjection? projection = schema is null
+            ? null
+            : new StoredSessionProjection(
+                SessionId: sessionKey,
+                Label: string.Empty,
+                IsSubagent: false,
+                SpanCount: 0,
+                StartedAtUtc: string.Empty,
+                EndedAtUtc: string.Empty,
+                ParentSessionId: null,
+                AgentName: null,
+                IncludedInParent: false,
+                RequestSpanIds: [],
+                Turns: [],
+                Schema: schema);
+
+        List<ReadTimeSessionToolSummary> tools = BuildReaderToolSummaries(
+            projection,
+            schema?.TurnCount ?? 0,
+            defStats,
+            toolsInvoked,
+            invCounts,
+            errCounts);
+        List<ReadTimeSessionServerSummary> servers = BuildReaderServerSummaries(projection, tools);
+        UnusedSchemaRange? unusedRange = ResolveReaderUnusedRange(
+            projection,
+            harnessId ?? string.Empty,
+            primaryModel is null ? [] : [primaryModel],
+            pricing);
+
+        List<StoredSchemaServerTokens> byServer = [];
+        if (schema is not null)
+        {
+            foreach (StoredSchemaServerTokens server in schema.Servers)
+            {
+                byServer.Add(new StoredSchemaServerTokens(server.ServerName, server.Tokens));
+            }
+        }
+        else
+        {
+            // The unmeasured ranking's rollup, priced from the tool rows themselves the way the
+            // display layer derives it today: rows carrying a server and a measured cost, largest
+            // cost first.
+            Dictionary<string, long> totals = new(StringComparer.Ordinal);
+            foreach (ReadTimeSessionToolSummary tool in tools)
+            {
+                if (tool.Server is null || tool.TotalSchemaCost <= 0)
+                {
+                    continue;
+                }
+
+                totals[tool.Server] = totals.GetValueOrDefault(tool.Server) + tool.TotalSchemaCost;
+            }
+
+            byServer.AddRange(totals
+                .OrderByDescending(static kv => kv.Value)
+                .ThenBy(static kv => kv.Key, StringComparer.Ordinal)
+                .Select(static kv => new StoredSchemaServerTokens(kv.Key, kv.Value)));
+        }
+
+        long? maxCost = null;
+        long residentCostTotal = 0;
+        int unusedCount = 0;
+        foreach (ReadTimeSessionToolSummary tool in tools)
+        {
+            if (!maxCost.HasValue || tool.TotalSchemaCost > maxCost.Value)
+            {
+                maxCost = tool.TotalSchemaCost;
+            }
+
+            residentCostTotal += tool.TotalSchemaCost;
+            if (!tool.Invoked)
+            {
+                unusedCount++;
+            }
+        }
+
+        return new SessionToolFigureSet(
+            Tools: tools,
+            Servers: servers,
+            ToolsOffered: toolsOffered,
+            UnusedRange: unusedRange,
+            ByServer: byServer,
+            MaxCost: maxCost,
+            ResidentCostTotal: residentCostTotal,
+            InvocationCount: toolCallTotal,
+            UnusedCount: unusedCount,
+            DefinitionsSpanId: definitionsSpanId);
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<StoredSkillInvocation> SessionSkillFigures(string sessionKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        string sql = TabReadScriptHeader +
+                     "SELECT hex(CAST(rsi.span_id AS BLOB)), hex(CAST(rsi.skill_name AS BLOB)) " +
+                     "FROM record_skill_invocation rsi " +
+                     "JOIN record_session_link rsl ON rsl.span_id = rsi.span_id " +
+                     $"WHERE rsl.session_key = {TextExpr(sessionKey)} ORDER BY rsi.rowid ASC;\n";
+
+        string output = ExecuteSqlite(sql);
+        List<StoredSkillInvocation> results = [];
+        foreach (string line in TabLines(output))
+        {
+            string[] cols = SplitTabLine(line, 2, "session record_skill_invocation page");
+            results.Add(new StoredSkillInvocation(
+                SpanId: ParseHexRequired(cols[0], "record_skill_invocation.span_id"),
+                SkillName: ParseHexRequired(cols[1], "record_skill_invocation.skill_name")));
+        }
+
+        return results;
+    }
+
+    /// <inheritdoc />
     public IReadOnlyDictionary<string, string?> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
@@ -4855,6 +5128,19 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         "0" => false,
         "1" => true,
         _ => throw new InvalidOperationException($"Invalid boolean flag '{cell}' for '{columnName}'."),
+    };
+
+    /// <summary>Parses a nullable boolean stored as an integer, absent when the column is null.</summary>
+    private static bool? ParseOptionalBool(string typeCell, string valCell, string columnName) => typeCell switch
+    {
+        "null" => null,
+        "integer" => valCell switch
+        {
+            "0" => false,
+            "1" => true,
+            _ => throw new InvalidOperationException($"Invalid boolean flag '{valCell}' for '{columnName}'."),
+        },
+        _ => throw new InvalidOperationException($"Unexpected SQLite storage type '{typeCell}' for nullable boolean column '{columnName}'."),
     };
 
     private static double ParseDoubleRequired(string cell, string columnName)

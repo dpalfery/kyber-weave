@@ -287,6 +287,123 @@ public class MinimalApiEndpointTests
     }
 
     [Fact]
+    public async Task ToolsRouteReturnsTheQueryServiceEnvelope()
+    {
+        await using Host host = await Host.StartAsync(builder =>
+        {
+            builder.Query
+                .Setup(q => q.GetSessionTools("sess-1", 1, 25))
+                .Returns(JsonSerializer.SerializeToElement(new
+                {
+                    tools = Array.Empty<object>(),
+                    data = Array.Empty<object>(),
+                    total = 0,
+                    limit = 25,
+                    offset = 0,
+                    page = 1,
+                    aggregate = new { maxCost = (long?)null },
+                }));
+        });
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/session/sess-1/tools", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("tools").ValueKind);
+        Assert.Equal(0, body.RootElement.GetProperty("total").GetInt32());
+        Assert.Equal(JsonValueKind.Object, body.RootElement.GetProperty("aggregate").ValueKind);
+        host.Builder.Query.Verify(q => q.GetSessionTools("sess-1", 1, 25), Times.Once);
+    }
+
+    [Fact]
+    public async Task ToolsRouteReturnsNotFoundWhenUnknown()
+    {
+        await using Host host = await Host.StartAsync();
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/session/absent/tools", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ServersRouteReturnsTheQueryServiceEnvelope()
+    {
+        await using Host host = await Host.StartAsync(builder =>
+        {
+            builder.Query
+                .Setup(q => q.GetSessionServers("sess-1", 1, 25))
+                .Returns(JsonSerializer.SerializeToElement(new
+                {
+                    servers = Array.Empty<object>(),
+                    data = Array.Empty<object>(),
+                    total = 0,
+                    limit = 25,
+                    offset = 0,
+                    page = 1,
+                }));
+        });
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/session/sess-1/servers", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("servers").ValueKind);
+        Assert.Equal(0, body.RootElement.GetProperty("total").GetInt32());
+        host.Builder.Query.Verify(q => q.GetSessionServers("sess-1", 1, 25), Times.Once);
+    }
+
+    [Fact]
+    public async Task ServersRouteReturnsNotFoundWhenUnknown()
+    {
+        await using Host host = await Host.StartAsync();
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/session/absent/servers", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task SkillsRouteReturnsTheQueryServiceEnvelope()
+    {
+        await using Host host = await Host.StartAsync(builder =>
+        {
+            builder.Query
+                .Setup(q => q.GetSessionSkills("sess-1", 1, 25))
+                .Returns(JsonSerializer.SerializeToElement(new
+                {
+                    measurable = true,
+                    rows = Array.Empty<object>(),
+                    total = 0,
+                    limit = 25,
+                    offset = 0,
+                    page = 1,
+                }));
+        });
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/session/sess-1/skills", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.True(body.RootElement.GetProperty("measurable").GetBoolean());
+        Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("rows").ValueKind);
+        Assert.Equal(0, body.RootElement.GetProperty("total").GetInt32());
+        host.Builder.Query.Verify(q => q.GetSessionSkills("sess-1", 1, 25), Times.Once);
+    }
+
+    [Fact]
+    public async Task SkillsRouteReturnsNotFoundWhenUnknown()
+    {
+        await using Host host = await Host.StartAsync();
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/session/absent/skills", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
     public async Task SettingsGetReturnsCurrentSettings()
     {
         await using Host host = await Host.StartAsync();

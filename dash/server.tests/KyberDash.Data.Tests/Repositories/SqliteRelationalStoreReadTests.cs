@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Core.Resilience;
@@ -401,6 +402,10 @@ public class SqliteRelationalStoreReadTests : IDisposable
             memory.SessionSummaryFigures("sess-unpriced", customTables),
             sqlite.SessionSummaryFigures("sess-unpriced", customTables),
             strict: true);
+        Assert.Equivalent(
+            memory.SessionToolFigures("sess-proj", customLookup),
+            sqlite.SessionToolFigures("sess-proj", customLookup),
+            strict: true);
 
         // Spot-check key DD-13 and OD-3 invariants observed on the populated corpus.
         SessionSummaryFigure? projAgg = sqlite.SessionSummaryFigures("sess-proj");
@@ -521,6 +526,52 @@ public class SqliteRelationalStoreReadTests : IDisposable
         Assert.Equal(2, multi.TurnCount);
         Assert.Equal(300, multi.TotalInput);
         Assert.Equal(["claude-sonnet-4-5", "gpt-5.1-codex"], multi.Models);
+    }
+
+    /// <summary>
+    /// The tool figures read prices tool-call and tool-definition metadata and the stored schema
+    /// projection only: every statement it issues references just those tables plus the session
+    /// and first-model identity rows its unused-range pricing resolves, and never a content-text
+    /// table, the timeline, the context projection, or the session's whole projection. Its figures
+    /// match <see cref="InMemoryRelationalStore"/> on a projected, an unprojected, and an unknown
+    /// session.
+    /// </summary>
+    [Fact]
+    public void SessionToolFigures_TouchOnlyToolTablesTheStoredSchemaAndTheIdentityRows()
+    {
+        string dbPath = Path.Combine(directory.Path, "tool-figures", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+        SeedPopulatedStores(sqlite, memory);
+
+        foreach (string sessionKey in (string[])["sess-proj", "sess-unproj", "sess-missing"])
+        {
+            sqlite.ClearRecordedSql();
+            SessionToolFigureSet figures = sqlite.SessionToolFigures(sessionKey);
+            AssertScriptsTouchOnlyTables(sqlite.ExecutedSql, SessionToolFigureTables);
+            Assert.Equivalent(memory.SessionToolFigures(sessionKey), figures, strict: true);
+        }
+    }
+
+    /// <summary>
+    /// The skill figures read scopes the stored skill invocations by the session's spans and
+    /// touches the skill table alone, matching <see cref="InMemoryRelationalStore"/> row for row.
+    /// </summary>
+    [Fact]
+    public void SessionSkillFigures_TouchOnlyTheSkillTable()
+    {
+        string dbPath = Path.Combine(directory.Path, "skill-figures", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+        SeedPopulatedStores(sqlite, memory);
+
+        foreach (string sessionKey in (string[])["sess-proj", "sess-missing"])
+        {
+            sqlite.ClearRecordedSql();
+            IReadOnlyList<StoredSkillInvocation> rows = sqlite.SessionSkillFigures(sessionKey);
+            AssertScriptsTouchOnlyTables(sqlite.ExecutedSql, SessionSkillFigureTables);
+            Assert.Equivalent(memory.SessionSkillFigures(sessionKey), rows, strict: true);
+        }
     }
 
     /// <summary>
@@ -885,6 +936,56 @@ public class SqliteRelationalStoreReadTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// The tables the tool figures read may touch: the tool-call and tool-definition metadata, the
+    /// stored schema projection, and — because the unused-range pricing resolves the session's
+    /// harness and first turn model — the session and model identity rows. The list is closed: a
+    /// content-text table, the timeline, the context projection, the turn tables, or the session's
+    /// whole projection would fail it.
+    /// </summary>
+    private static readonly string[] SessionToolFigureTables =
+    [
+        "session",
+        "record",
+        "record_session_link",
+        "record_model",
+        "tool_call",
+        "tool_call_outcome",
+        "tool_call_error",
+        "tool_definition",
+        "tool_definition_server",
+        "session_schema",
+        "session_schema_ranked_tool",
+        "session_schema_ranked_tool_server",
+        "session_schema_server",
+        "session_schema_unused",
+    ];
+
+    /// <summary>The tables the skill figures read may touch: the skill table and its session scoping.</summary>
+    private static readonly string[] SessionSkillFigureTables =
+    [
+        "record_skill_invocation",
+        "record_session_link",
+    ];
+
+    /// <summary>
+    /// Asserts every table a <c>FROM</c> or <c>JOIN</c> names is in the allowed set, so a closed
+    /// table claim is checked over the whole script and not just a deny-list of substrings.
+    /// </summary>
+    private static void AssertScriptsTouchOnlyTables(IReadOnlyList<string> scripts, IReadOnlyCollection<string> allowed)
+    {
+        Assert.NotEmpty(scripts);
+        Assert.All(scripts, sql =>
+        {
+            Assert.Contains(".headers off", sql, StringComparison.Ordinal);
+            Assert.Contains(".mode tabs", sql, StringComparison.Ordinal);
+            foreach (Match match in Regex.Matches(sql, "(?:FROM|JOIN)\\s+([A-Za-z_]+)", RegexOptions.IgnoreCase))
+            {
+                Assert.Contains(match.Groups[1].Value, allowed);
+            }
+        });
+    }
+
     private static void AssertQueryParity(
         IRelationalStoreReader sqliteReader,
         IRelationalStoreReader memoryReader,
@@ -948,6 +1049,8 @@ public class SqliteRelationalStoreReadTests : IDisposable
             Assert.Equivalent(memoryReader.SessionReconciliationFigures(sessionKey, 1, 25), sqliteReader.SessionReconciliationFigures(sessionKey, 1, 25), strict: true);
             Assert.Equivalent(memoryReader.SessionReconciliationFigures(sessionKey, 2, 25), sqliteReader.SessionReconciliationFigures(sessionKey, 2, 25), strict: true);
             Assert.Equivalent(memoryReader.SessionProblems(sessionKey, 1, 25), sqliteReader.SessionProblems(sessionKey, 1, 25), strict: true);
+            Assert.Equivalent(memoryReader.SessionToolFigures(sessionKey), sqliteReader.SessionToolFigures(sessionKey), strict: true);
+            Assert.Equivalent(memoryReader.SessionSkillFigures(sessionKey), sqliteReader.SessionSkillFigures(sessionKey), strict: true);
             Assert.Equivalent(
                 memoryReader.RequestPromptPreviews(sessionKey, ["span-req-1", "span-req-2"]),
                 sqliteReader.RequestPromptPreviews(sessionKey, ["span-req-1", "span-req-2"]),

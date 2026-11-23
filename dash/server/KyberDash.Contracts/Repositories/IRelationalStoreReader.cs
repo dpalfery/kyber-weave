@@ -506,6 +506,43 @@ public record SessionReconciliationFigurePageResult(IReadOnlyList<ReadTimeTurnRe
 public record SessionProblemPageResult(IReadOnlyList<Problem> Items, int Total);
 
 /// <summary>
+/// One session's tool and server section figures with the aggregates the tools section carries
+/// page-independently (<c>DD-13</c>).
+/// </summary>
+/// <param name="Tools">Per-tool residency and invocation rows in ranking order — ranked schema rows first, never-invoked rows included.</param>
+/// <param name="Servers">Per-server schema and invocation rollups in projection order.</param>
+/// <param name="ToolsOffered">Distinct advertised tool names in definition order — the rows' <c>in_definitions</c> input.</param>
+/// <param name="UnusedRange">Cost or residency bounds for uninvoked schemas when measurable, or <see langword="null"/>.</param>
+/// <param name="ByServer">
+/// Per-server resident cost totals — the stored schema's rollup when measurable, else the tool
+/// rows' own rollup priced per server — one row per server, largest total first.
+/// </param>/// <param name="MaxCost">Largest measured resident cost over the tool rows, or <see langword="null"/> when no row measured one.</param>
+/// <param name="ResidentCostTotal">Resident cost summed over every tool row, page-independently.</param>
+/// <param name="InvocationCount">Tool invocations the session's records carry.</param>
+/// <param name="UnusedCount">Tool rows that were never invoked.</param>
+/// <param name="DefinitionsSpanId">
+/// The first span, in record order, whose record carries a tool definition — the span the tool
+/// inspector opens its definition content at — or <see langword="null"/> when the session
+/// exported none.
+/// </param>
+/// <remarks>
+/// Prices tool-call and tool-definition metadata and the stored schema projection only: no
+/// content part, no content text, no timeline, and no context read. The session harness and the
+/// session's first turn model are the two identity columns the unused-range pricing resolves.
+/// </remarks>
+public record SessionToolFigureSet(
+    IReadOnlyList<ReadTimeSessionToolSummary> Tools,
+    IReadOnlyList<ReadTimeSessionServerSummary> Servers,
+    IReadOnlyList<string> ToolsOffered,
+    UnusedSchemaRange? UnusedRange,
+    IReadOnlyList<StoredSchemaServerTokens> ByServer,
+    long? MaxCost,
+    long ResidentCostTotal,
+    int InvocationCount,
+    int UnusedCount,
+    string? DefinitionsSpanId);
+
+/// <summary>
 /// Typed read-only query contract over normalized telemetry, session, and record tables in
 /// the relational KyberDash store.
 /// </summary>
@@ -806,6 +843,40 @@ public interface IRelationalStoreReader
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
     SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit);
+
+    /// <summary>
+    /// Reads one session's tool and server section figures with the tools section's
+    /// page-independent aggregates, over tool-call and tool-definition metadata and the stored
+    /// schema projection only (<c>DD-13</c>).
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
+    /// <returns>
+    /// The tool figures — ranked rows first, never-invoked rows included — or an empty set when
+    /// the session has no linked records.
+    /// </returns>
+    /// <remarks>
+    /// The tools section answers its rows and its aggregate from this read alone, so paging never
+    /// re-reads: the aggregate fields (largest resident cost, resident cost total, invocation
+    /// count, unused count, unused range, per-server rollup, and the definitions span) price every
+    /// row before the engine pages. No content column is read and no turn, context, or projection
+    /// row beyond the stored schema is touched; the session harness and first turn model are the
+    /// two identity columns the unused-range pricing resolves.
+    /// </remarks>
+    SessionToolFigureSet SessionToolFigures(string sessionKey, IModelPricingLookup? pricing = null);
+
+    /// <summary>
+    /// Reads one session's stored skill invocations (<c>record_skill_invocation</c>) in record
+    /// order — names only, never conversation text (<c>DD-13</c>).
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <returns>The skill invocation rows in record order; empty when the session invoked none.</returns>
+    /// <remarks>
+    /// The skills section pages the distinct rows this read returns, so a page of 25 skills never
+    /// costs more than the session's stored skill rows. The statement scopes to the session's
+    /// spans and touches the skill table alone.
+    /// </remarks>
+    IReadOnlyList<StoredSkillInvocation> SessionSkillFigures(string sessionKey);
 
     /// <summary>
     /// Reads the prompt previews of exactly the named request spans, and no other span's parts.
