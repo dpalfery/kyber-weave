@@ -311,9 +311,14 @@ export async function fetchKyberSessionTurns(
   turnIndex?: number,
 ): Promise<KyberSessionTurnRow[] | KyberSessionTurn> {
   if (turnIndex !== undefined) {
-    return fetchJson<KyberSessionTurn>(
-      `/api/kyber/session/${encodeURIComponent(sessionId)}/turn/${turnIndex}`,
-    )
+    // The bounded route answers the widened section; the flat row keeps the
+    // turn page's existing consumer reading the same counters it always did.
+    const section = await fetchKyberSessionTurn(sessionId, turnIndex)
+    return {
+      ...section.turn,
+      session_id: section.sessionId,
+      turn_index: section.turnIndex,
+    }
   }
   const body = await fetchJson<{ turns?: KyberSessionTurnRow[] }>(`/api/kyber/session/${encodeURIComponent(sessionId)}`)
   return Array.isArray(body.turns) ? body.turns : []
@@ -424,15 +429,16 @@ function parseKyberPage<T>(
   raw: unknown,
   path: string,
   readRow: (row: unknown) => T,
+  itemsKey = 'data',
 ): KyberPage<T> {
-  if (!isRaw(raw) || !Array.isArray(raw.data)) throw malformedPage(path, 'data is not an array')
+  if (!isRaw(raw) || !Array.isArray(raw[itemsKey])) throw malformedPage(path, `${itemsKey} is not an array`)
   const total = raw.total
   const page = raw.page
   const limit = raw.limit
   if (typeof total !== 'number' || !Number.isFinite(total)) throw malformedPage(path, 'total is not a number')
   if (typeof page !== 'number' || !Number.isInteger(page) || page < 1) throw malformedPage(path, 'page is not a page number')
   if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1) throw malformedPage(path, 'limit is not a page size')
-  const entries = raw.data.map((row) => {
+  const entries = raw[itemsKey].map((row) => {
     if (!isRaw(row)) throw malformedPage(path, 'a row is not an object')
     return readRow(row)
   })
@@ -2327,15 +2333,817 @@ export interface StoredFieldsResponse {
 }
 
 /**
- * Reads the catalog-driven stored-fields view for a session.
+ * Reads the catalog-driven stored-fields view for a session: the table and
+ * column inventory plus the rows the store persisted.
  *
  * WHY this route and not the session payload: the payload serves the
  * session's measured counters, while this route serves what the relational
  * store actually persisted — every reachable catalog column labeled
  * `table.column` — for the session execution inspection.
  */
-export async function fetchStoredFields(sessionKey: string): Promise<StoredFieldsResponse> {
-  return fetchJson<StoredFieldsResponse>(
-    `/api/kyber/session/${encodeURIComponent(sessionKey)}/stored-fields`,
+export async function fetchKyberSessionStoredFields(sessionKey: string): Promise<StoredFieldsResponse> {
+  const path = `/api/kyber/session/${encodeURIComponent(sessionKey)}/stored-fields`
+  return parseStoredFields(await fetchJson<unknown>(path), path)
+}
+
+/** The stored-fields section's fetcher under its original name. */
+export const fetchStoredFields = fetchKyberSessionStoredFields
+
+// ── Session view sections (/api/kyber/session/:id/{section}) ────────────────
+//
+// Every section route answers one slice of the session view. The client
+// validates each answered document here, so a 2xx body that is not the
+// documented shape becomes an error state rather than a crash or a silent
+// default. The list routes build on T3's paged-envelope validator; summary,
+// charts, skills, timeline, turn and stored-fields carry their own members
+// beside the shared window.
+
+/** Rows per page every session section list route serves when the caller names none. */
+export const KYBER_SECTION_PAGE_LIMIT = 25
+
+/** The sections a session view can request; the query key's third member. */
+export type KyberSessionSection =
+  | 'summary'
+  | 'charts'
+  | 'tools'
+  | 'servers'
+  | 'skills'
+  | 'timeline'
+  | 'requests'
+  | 'reconciliation'
+  | 'problems'
+  | 'stored-fields'
+  | 'turn'
+
+/**
+ * The query key one session section is cached under: `['kyber-session', id, section, page]`.
+ * The whole-session key `['kyber-session', id]` is its prefix, so invalidating the
+ * session invalidates every section read with it.
+ */
+export function kyberSessionSectionQueryKey(
+  sessionId: string,
+  section: KyberSessionSection,
+  page = 1,
+): readonly ['kyber-session', string, KyberSessionSection, number] {
+  return ['kyber-session', sessionId, section, page]
+}
+
+/** The one-based page window every section list route answers. */
+export interface KyberSectionWindow {
+  /** How many rows the whole list holds, across every page. */
+  total: number
+  /** The one-based page this document answers. */
+  page: number
+  /** Rows per page, after the server clamped it. */
+  limit: number
+  /** Zero-based offset of this page's first row. */
+  offset: number
+}
+
+/** One page of a session section: the T3 page envelope plus its window offset. */
+export interface KyberSectionPage<T> extends KyberPage<T>, KyberSectionWindow {}
+
+function malformedSection(path: string, why: string): Error {
+  return new Error(`Malformed session section for ${path}: ${why}`)
+}
+
+function requireStringField(raw: Raw, key: string, path: string): string {
+  const value = raw[key]
+  if (typeof value !== 'string') throw malformedSection(path, `${key} is not a string`)
+  return value
+}
+
+function requireNumberField(raw: Raw, key: string, path: string): number {
+  const value = raw[key]
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw malformedSection(path, `${key} is not a number`)
+  return value
+}
+
+function requireIntegerField(raw: Raw, key: string, path: string, minimum: number): number {
+  const value = requireNumberField(raw, key, path)
+  if (!Number.isInteger(value) || value < minimum) throw malformedSection(path, `${key} is not a whole number`)
+  return value
+}
+
+function requireBooleanField(raw: Raw, key: string, path: string): boolean {
+  const value = raw[key]
+  if (typeof value !== 'boolean') throw malformedSection(path, `${key} is not a boolean`)
+  return value
+}
+
+function readNullableString(value: unknown, path: string, key: string): string | null {
+  if (value === null) return null
+  if (typeof value === 'string') return value
+  throw malformedSection(path, `${key} is not a string or null`)
+}
+
+function readNullableNumber(value: unknown, path: string, key: string): number | null {
+  if (value === null) return null
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  throw malformedSection(path, `${key} is not a number or null`)
+}
+
+function readOptionalString(value: unknown, path: string, key: string): string | null | undefined {
+  if (value === undefined || value === null) return value
+  if (typeof value === 'string') return value
+  throw malformedSection(path, `${key} is not a string`)
+}
+
+function readOptionalNumber(value: unknown, path: string, key: string): number | null | undefined {
+  if (value === undefined || value === null) return value
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  throw malformedSection(path, `${key} is not a number`)
+}
+
+function readStringArray(value: unknown, path: string, key: string): string[] {
+  if (!Array.isArray(value)) throw malformedSection(path, `${key} is not an array`)
+  return value.map((entry) => {
+    if (typeof entry !== 'string') throw malformedSection(path, `${key} holds a non-string`)
+    return entry
+  })
+}
+
+function readNumberMap(value: unknown, path: string, key: string): Record<string, number> {
+  if (!isRaw(value)) throw malformedSection(path, `${key} is not an object`)
+  const out: Record<string, number> = {}
+  for (const [entryKey, entry] of Object.entries(value)) {
+    if (typeof entry !== 'number' || !Number.isFinite(entry)) {
+      throw malformedSection(path, `${key}.${entryKey} is not a number`)
+    }
+    out[entryKey] = entry
+  }
+  return out
+}
+
+function readNullableNumberMap(
+  value: unknown,
+  path: string,
+  key: string,
+): Record<string, number | null> {
+  if (!isRaw(value)) throw malformedSection(path, `${key} is not an object`)
+  const out: Record<string, number | null> = {}
+  for (const [entryKey, entry] of Object.entries(value)) {
+    out[entryKey] = readNullableNumber(entry, path, `${key}.${entryKey}`)
+  }
+  return out
+}
+
+function readSectionWindow(raw: Raw, path: string): KyberSectionWindow {
+  return {
+    total: requireNumberField(raw, 'total', path),
+    page: requireIntegerField(raw, 'page', path, 1),
+    limit: requireIntegerField(raw, 'limit', path, 1),
+    offset: requireIntegerField(raw, 'offset', path, 0),
+  }
+}
+
+/** Reads one section page from the route's own items key, on top of T3's envelope. */
+function parseSectionPage<T>(
+  raw: unknown,
+  path: string,
+  itemsKey: string,
+  readRow: (row: Raw, path: string) => T,
+): KyberSectionPage<T> {
+  const page = parseKyberPage<T>(raw, path, (row) => readRow(row as Raw, path), itemsKey)
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  return { ...page, offset: requireIntegerField(raw, 'offset', path, 0) }
+}
+
+// ── Summary ─────────────────────────────────────────────────────────────────
+
+/** The bounded summary section: identity, counts and notes, no turn bodies. */
+export interface KyberSessionSummarySection {
+  session_id: string
+  harness: string
+  label?: string | null
+  is_subagent: boolean
+  parent_session?: string | null
+  agent_name?: string | null
+  repo?: string | null
+  branch?: string | null
+  started?: string | null
+  ended?: string | null
+  span_count: number
+  problems: number
+  problems_count: number
+  request_count: number
+  context_limit_source?: string | null
+  costBasisMismatch: KyberCostBasisMismatch | null
+  summary: Record<string, unknown> | null
+  notes: string[]
+  reconciliation: { total: number; mismatched: number }
+  tools_offered_count: number
+  tools_invoked_count: number
+  unused_tools_count: number
+  skills_count: number
+  projection_status?: string
+}
+
+function readCostBasisMismatch(value: unknown, path: string): KyberCostBasisMismatch | null {
+  if (value === null) return null
+  if (!isRaw(value)) throw malformedSection(path, 'costBasisMismatch is not an object or null')
+  return {
+    code: requireStringField(value, 'code', path),
+    message: requireStringField(value, 'message', path),
+    bases: readStringArray(value.bases, path, 'costBasisMismatch.bases'),
+    totalsByBasis: readNullableNumberMap(
+      value.totalsByBasis,
+      path,
+      'costBasisMismatch.totalsByBasis',
+    ),
+  }
+}
+
+function parseSessionSummarySection(raw: unknown, path: string): KyberSessionSummarySection {
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  const reconciliation = raw.reconciliation
+  if (!isRaw(reconciliation)) throw malformedSection(path, 'reconciliation is not an object')
+  if (!Array.isArray(raw.notes) || raw.notes.some((note) => typeof note !== 'string')) {
+    throw malformedSection(path, 'notes is not a string array')
+  }
+  if (raw.summary !== null && !isRaw(raw.summary)) {
+    throw malformedSection(path, 'summary is not an object or null')
+  }
+
+  const section: KyberSessionSummarySection = {
+    session_id: requireStringField(raw, 'session_id', path),
+    harness: requireStringField(raw, 'harness', path),
+    is_subagent: requireBooleanField(raw, 'is_subagent', path),
+    span_count: requireNumberField(raw, 'span_count', path),
+    problems: requireNumberField(raw, 'problems', path),
+    problems_count: requireNumberField(raw, 'problems_count', path),
+    request_count: requireNumberField(raw, 'request_count', path),
+    costBasisMismatch: readCostBasisMismatch(raw.costBasisMismatch, path),
+    summary: raw.summary === null ? null : (raw.summary as Record<string, unknown>),
+    notes: raw.notes as string[],
+    reconciliation: {
+      total: requireNumberField(reconciliation, 'total', path),
+      mismatched: requireNumberField(reconciliation, 'mismatched', path),
+    },
+    tools_offered_count: requireNumberField(raw, 'tools_offered_count', path),
+    tools_invoked_count: requireNumberField(raw, 'tools_invoked_count', path),
+    unused_tools_count: requireNumberField(raw, 'unused_tools_count', path),
+    skills_count: requireNumberField(raw, 'skills_count', path),
+  }
+
+  for (const key of [
+    'label',
+    'parent_session',
+    'agent_name',
+    'repo',
+    'branch',
+    'started',
+    'ended',
+    'context_limit_source',
+  ] as const) {
+    const value = readOptionalString(raw[key], path, key)
+    if (value !== undefined) section[key] = value
+  }
+  if (typeof raw.projection_status === 'string') section.projection_status = raw.projection_status
+
+  return section
+}
+
+// ── Charts ──────────────────────────────────────────────────────────────────
+
+/** The charts section: the detail payload's turns and context, without its other reads. */
+export interface KyberSessionChartsSection {
+  sessionId: string
+  turns: KyberSessionTurnRow[]
+  context: KyberSessionContext
+  projection_status?: string
+}
+
+function readChartTurn(value: unknown, path: string): KyberSessionTurnRow {
+  if (!isRaw(value)) throw malformedSection(path, 'a turn is not an object')
+  requireNumberField(value, 'index', path)
+  return value as unknown as KyberSessionTurnRow
+}
+
+function parseSessionChartsSection(raw: unknown, path: string): KyberSessionChartsSection {
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  if (!Array.isArray(raw.turns)) throw malformedSection(path, 'turns is not an array')
+  const context = raw.context
+  if (!isRaw(context) || typeof context.measurable !== 'boolean') {
+    throw malformedSection(path, 'context is not a context document')
+  }
+  if (context.measurable) {
+    if (!Array.isArray(context.turns)) throw malformedSection(path, 'context.turns is not an array')
+    requireNumberField(context, 'contextLimit', path)
+  } else if (typeof context.reason !== 'string') {
+    throw malformedSection(path, 'context.reason is not a string')
+  }
+
+  const section: KyberSessionChartsSection = {
+    sessionId: requireStringField(raw, 'sessionId', path),
+    turns: raw.turns.map((turn) => readChartTurn(turn, path)),
+    context: context as unknown as KyberSessionContext,
+  }
+  if (typeof raw.projection_status === 'string') section.projection_status = raw.projection_status
+  return section
+}
+
+// ── Tools ───────────────────────────────────────────────────────────────────
+
+/** One ranked tool row: never-invoked rows included. */
+export interface KyberSessionToolRow {
+  name: string
+  server: string | null
+  invocations: number
+  schema_tokens?: number | null
+  turns_resident?: number | null
+  total_schema_cost?: number | null
+  invoked: boolean
+  in_definitions: boolean
+  is_mcp: boolean
+}
+
+/** The unused-schema cost band, served once for every row rather than per page. */
+export interface KyberUnusedRange {
+  tokenResidencies: number
+  floor: number
+  ceiling: number
+  currency: string | null
+}
+
+/** The tools section's aggregate, priced over every row before paging. */
+export interface KyberSessionToolsAggregate {
+  maxCost: number | null
+  residentCostTotal: number
+  invocationCount: number
+  unusedCount: number
+  unusedRange: KyberUnusedRange | null
+  byServer: Record<string, number>
+  definitionsSpanId: string | null
+}
+
+/** One page of the tools section with the aggregate over the whole ranking. */
+export interface KyberSessionToolsPage extends KyberSectionPage<KyberSessionToolRow> {
+  aggregate: KyberSessionToolsAggregate
+}
+
+function readUnusedRange(value: unknown, path: string): KyberUnusedRange | null {
+  if (value === null) return null
+  if (!isRaw(value)) throw malformedSection(path, 'aggregate.unusedRange is not an object or null')
+  const currency = value.currency === undefined ? null : readNullableString(value.currency, path, 'aggregate.unusedRange.currency')
+  return {
+    tokenResidencies: requireNumberField(value, 'tokenResidencies', path),
+    floor: requireNumberField(value, 'floor', path),
+    ceiling: requireNumberField(value, 'ceiling', path),
+    currency,
+  }
+}
+
+function readToolsAggregate(value: unknown, path: string): KyberSessionToolsAggregate {
+  if (!isRaw(value)) throw malformedSection(path, 'aggregate is not an object')
+  return {
+    maxCost: readNullableNumber(value.maxCost, path, 'aggregate.maxCost'),
+    residentCostTotal: requireNumberField(value, 'residentCostTotal', path),
+    invocationCount: requireNumberField(value, 'invocationCount', path),
+    unusedCount: requireNumberField(value, 'unusedCount', path),
+    unusedRange: readUnusedRange(value.unusedRange, path),
+    byServer: readNumberMap(value.byServer, path, 'aggregate.byServer'),
+    definitionsSpanId: readNullableString(value.definitionsSpanId, path, 'aggregate.definitionsSpanId'),
+  }
+}
+
+function readToolRow(raw: Raw, path: string): KyberSessionToolRow {
+  const row: KyberSessionToolRow = {
+    name: requireStringField(raw, 'name', path),
+    server: readNullableString(raw.server, path, 'server'),
+    invocations: requireNumberField(raw, 'invocations', path),
+    invoked: requireBooleanField(raw, 'invoked', path),
+    in_definitions: requireBooleanField(raw, 'in_definitions', path),
+    is_mcp: requireBooleanField(raw, 'is_mcp', path),
+  }
+  const schemaTokens = readOptionalNumber(raw.schema_tokens, path, 'schema_tokens')
+  if (schemaTokens !== undefined) row.schema_tokens = schemaTokens
+  const turnsResident = readOptionalNumber(raw.turns_resident, path, 'turns_resident')
+  if (turnsResident !== undefined) row.turns_resident = turnsResident
+  const totalSchemaCost = readOptionalNumber(raw.total_schema_cost, path, 'total_schema_cost')
+  if (totalSchemaCost !== undefined) row.total_schema_cost = totalSchemaCost
+  return row
+}
+
+function parseSessionToolsPage(raw: unknown, path: string): KyberSessionToolsPage {
+  const page = parseSectionPage(raw, path, 'tools', readToolRow)
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  return { ...page, aggregate: readToolsAggregate(raw.aggregate, path) }
+}
+
+// ── Servers ─────────────────────────────────────────────────────────────────
+
+/** One per-server schema and invocation rollup row. */
+export interface KyberSessionServerRow {
+  server: string
+  is_mcp: boolean
+  tools: number
+  schema_tokens: number
+  total_schema_cost: number
+  invocations: number
+  unused_tools: number
+  unused_cost: number
+}
+
+function readServerRow(raw: Raw, path: string): KyberSessionServerRow {
+  return {
+    server: requireStringField(raw, 'server', path),
+    is_mcp: requireBooleanField(raw, 'is_mcp', path),
+    tools: requireNumberField(raw, 'tools', path),
+    schema_tokens: requireNumberField(raw, 'schema_tokens', path),
+    total_schema_cost: requireNumberField(raw, 'total_schema_cost', path),
+    invocations: requireNumberField(raw, 'invocations', path),
+    unused_tools: requireNumberField(raw, 'unused_tools', path),
+    unused_cost: requireNumberField(raw, 'unused_cost', path),
+  }
+}
+
+// ── Skills ──────────────────────────────────────────────────────────────────
+
+/**
+ * The skills section: the detail payload's skill block with its rows paged.
+ * A session that recorded no skills answers the whole-block not-measurable
+ * verdict, with no rows.
+ */
+export type KyberSessionSkillsPage = (
+  | { measurable: true; rows: KyberSkillRow[] }
+  | (KyberSkillAvailability & { rows: KyberSkillRow[] })
+) &
+  KyberSectionWindow
+
+function readSkillAvailability(value: unknown, path: string, key: string): KyberSkillAvailability {
+  if (!isRaw(value) || value.availability !== 'not_measurable' || typeof value.reason !== 'string') {
+    throw malformedSection(path, `${key} is not a measured figure`)
+  }
+  return { availability: 'not_measurable', reason: value.reason }
+}
+
+function readSkillFlag(value: unknown, path: string, key: string): boolean | KyberSkillAvailability {
+  if (typeof value === 'boolean') return value
+  return readSkillAvailability(value, path, key)
+}
+
+function readSkillCount(value: unknown, path: string, key: string): number | KyberSkillAvailability {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 0) return value
+  return readSkillAvailability(value, path, key)
+}
+
+function readIntegerArray(value: unknown, path: string, key: string): number[] {
+  if (!Array.isArray(value)) throw malformedSection(path, `${key} is not an array`)
+  return value.map((entry) => {
+    if (typeof entry !== 'number' || !Number.isInteger(entry)) {
+      throw malformedSection(path, `${key} holds a non-integer`)
+    }
+    return entry
+  })
+}
+
+function readSkillRow(raw: Raw, path: string): KyberSkillRow {
+  const row: KyberSkillRow = {
+    name: requireStringField(raw, 'name', path),
+    listed: readSkillFlag(raw.listed, path, 'listed'),
+    invocations: readSkillCount(raw.invocations, path, 'invocations'),
+    turns_listed: readIntegerArray(raw.turns_listed, path, 'turns_listed'),
+  }
+  const derivedTokens = readOptionalNumber(raw.derived_tokens, path, 'derived_tokens')
+  if (derivedTokens !== undefined && derivedTokens !== null) row.derived_tokens = derivedTokens
+  const description = readOptionalString(raw.description, path, 'description')
+  if (description !== undefined && description !== null) row.description = description
+  return row
+}
+
+function parseSessionSkillsPage(raw: unknown, path: string): KyberSessionSkillsPage {
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  if (!Array.isArray(raw.rows)) throw malformedSection(path, 'rows is not an array')
+  const rows = raw.rows.map((row) => {
+    if (!isRaw(row)) throw malformedSection(path, 'a skill row is not an object')
+    return readSkillRow(row, path)
+  })
+  const window = readSectionWindow(raw, path)
+  if (raw.availability === 'not_measurable') {
+    if (typeof raw.reason !== 'string') throw malformedSection(path, 'reason is not a string')
+    return { availability: 'not_measurable', reason: raw.reason, rows, ...window }
+  }
+  if (raw.measurable !== true) throw malformedSection(path, 'measurable is not true')
+  return { measurable: true, rows, ...window }
+}
+
+// ── Timeline ────────────────────────────────────────────────────────────────
+
+/** One timeline node: today's node fields minus `children`, plus its child count. */
+export interface KyberSessionTimelineNode {
+  spanId: string
+  parentId: string | null
+  startMs: number
+  durationMs: number
+  kind: string
+  name: string
+  status: string | null
+  attributes: Record<string, unknown>
+  isSubagent: boolean
+  isAuxiliary: boolean
+  cost: Record<string, unknown>
+  childCount: number
+}
+
+/** One page of one timeline level, with the whole tree's bounds. */
+export interface KyberSessionTimelinePage extends KyberSectionWindow {
+  sessionId: string
+  /** The parent whose children this page lists; null for the top level. */
+  parent: string | null
+  nodes: KyberSessionTimelineNode[]
+  bounds: { startMs: number; endMs: number }
+  projection_status?: string
+}
+
+function readTimelineNode(raw: Raw, path: string): KyberSessionTimelineNode {
+  const attributes = raw.attributes
+  if (!isRaw(attributes)) throw malformedSection(path, 'attributes is not an object')
+  const cost = raw.cost
+  if (!isRaw(cost)) throw malformedSection(path, 'cost is not an object')
+  return {
+    spanId: requireStringField(raw, 'spanId', path),
+    parentId: readNullableString(raw.parentId, path, 'parentId'),
+    startMs: requireNumberField(raw, 'startMs', path),
+    durationMs: requireNumberField(raw, 'durationMs', path),
+    kind: requireStringField(raw, 'kind', path),
+    name: requireStringField(raw, 'name', path),
+    status: readNullableString(raw.status, path, 'status'),
+    attributes,
+    isSubagent: requireBooleanField(raw, 'isSubagent', path),
+    isAuxiliary: requireBooleanField(raw, 'isAuxiliary', path),
+    cost,
+    childCount: requireNumberField(raw, 'childCount', path),
+  }
+}
+
+function parseSessionTimelinePage(raw: unknown, path: string): KyberSessionTimelinePage {
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  if (!Array.isArray(raw.nodes)) throw malformedSection(path, 'nodes is not an array')
+  const bounds = raw.bounds
+  if (!isRaw(bounds)) throw malformedSection(path, 'bounds is not an object')
+  const page: KyberSessionTimelinePage = {
+    sessionId: requireStringField(raw, 'sessionId', path),
+    parent: readNullableString(raw.parent, path, 'parent'),
+    nodes: raw.nodes.map((node) => {
+      if (!isRaw(node)) throw malformedSection(path, 'a node is not an object')
+      return readTimelineNode(node, path)
+    }),
+    ...readSectionWindow(raw, path),
+    bounds: {
+      startMs: requireNumberField(bounds, 'startMs', path),
+      endMs: requireNumberField(bounds, 'endMs', path),
+    },
+  }
+  if (typeof raw.projection_status === 'string') page.projection_status = raw.projection_status
+  return page
+}
+
+// ── Requests, reconciliation and problems ───────────────────────────────────
+
+/** One request row: identity and position only; its prompt preview may be absent. */
+export interface KyberSessionRequestRow {
+  request: string
+  timestamp: string | null
+  turns: number | null
+  model: string | null
+  prompt: string | null
+}
+
+function readRequestRow(raw: Raw, path: string): KyberSessionRequestRow {
+  return {
+    request: requireStringField(raw, 'request', path),
+    timestamp: readNullableString(raw.timestamp, path, 'timestamp'),
+    turns: readNullableNumber(raw.turns, path, 'turns'),
+    model: readNullableString(raw.model, path, 'model'),
+    prompt: readNullableString(raw.prompt, path, 'prompt'),
+  }
+}
+
+/** One measurable input/output reconciliation row. */
+export interface KyberSessionReconciliationRow {
+  request: string
+  root_input: number | null
+  sum_chat_input: number | null
+  input_match: boolean
+  root_output: number | null
+  sum_chat_output: number | null
+  output_match: boolean
+}
+
+function readReconciliationRow(raw: Raw, path: string): KyberSessionReconciliationRow {
+  return {
+    request: requireStringField(raw, 'request', path),
+    root_input: readNullableNumber(raw.root_input, path, 'root_input'),
+    sum_chat_input: readNullableNumber(raw.sum_chat_input, path, 'sum_chat_input'),
+    input_match: requireBooleanField(raw, 'input_match', path),
+    root_output: readNullableNumber(raw.root_output, path, 'root_output'),
+    sum_chat_output: readNullableNumber(raw.sum_chat_output, path, 'sum_chat_output'),
+    output_match: requireBooleanField(raw, 'output_match', path),
+  }
+}
+
+/** One stored ingest problem row. */
+export interface KyberIngestProblemRow {
+  id: number
+  spanId: string
+  severity: string
+  code: string
+  message: string
+  location: string | null
+  sessionId: string | null
+  harness: string | null
+  timestamp: string | null
+}
+
+function readIngestProblemRow(raw: Raw, path: string): KyberIngestProblemRow {
+  return {
+    id: requireNumberField(raw, 'id', path),
+    spanId: requireStringField(raw, 'spanId', path),
+    severity: requireStringField(raw, 'severity', path),
+    code: requireStringField(raw, 'code', path),
+    message: requireStringField(raw, 'message', path),
+    location: readNullableString(raw.location, path, 'location'),
+    sessionId: readNullableString(raw.sessionId, path, 'sessionId'),
+    harness: readNullableString(raw.harness, path, 'harness'),
+    timestamp: readNullableString(raw.timestamp, path, 'timestamp'),
+  }
+}
+
+// ── Stored fields ───────────────────────────────────────────────────────────
+
+function readStoredCell(value: unknown, path: string): StoredFieldCell {
+  if (!isRaw(value)) throw malformedSection(path, 'a stored cell is not an object')
+  const cell: StoredFieldCell = { columnName: requireStringField(value, 'columnName', path) }
+  if (value.columnType !== undefined) cell.columnType = value.columnType
+  const text = readOptionalString(value.textValue, path, 'textValue')
+  if (text !== undefined) cell.textValue = text
+  const integer = readOptionalNumber(value.integerValue, path, 'integerValue')
+  if (integer !== undefined) cell.integerValue = integer
+  const real = readOptionalNumber(value.realValue, path, 'realValue')
+  if (real !== undefined) cell.realValue = real
+  return cell
+}
+
+function readStoredRow(value: unknown, path: string): StoredFieldRow {
+  if (!isRaw(value) || !Array.isArray(value.cells)) {
+    throw malformedSection(path, 'a stored row is not a cell array carrier')
+  }
+  return { cells: value.cells.map((cell) => readStoredCell(cell, path)) }
+}
+
+function readStoredTable(value: unknown, path: string): StoredTableFields {
+  if (!isRaw(value)) throw malformedSection(path, 'a stored table is not an object')
+  if (!Array.isArray(value.rows)) throw malformedSection(path, 'a stored table rows is not an array')
+  return {
+    tableName: requireStringField(value, 'tableName', path),
+    columnNames: readStringArray(value.columnNames, path, 'columnNames'),
+    rows: value.rows.map((row) => readStoredRow(row, path)),
+    missingParentKeys: readStringArray(value.missingParentKeys, path, 'missingParentKeys'),
+  }
+}
+
+function parseStoredFields(raw: unknown, path: string): StoredFieldsResponse {
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  if (!Array.isArray(raw.tables)) throw malformedSection(path, 'tables is not an array')
+  return {
+    sessionKey: requireStringField(raw, 'sessionKey', path),
+    tables: raw.tables.map((table) => readStoredTable(table, path)),
+  }
+}
+
+// ── Turn ────────────────────────────────────────────────────────────────────
+
+/** The widened per-turn section: the turn's figures plus its stored context buckets. */
+export interface KyberSessionTurnSection {
+  sessionId: string
+  turnIndex: number
+  turn: KyberSessionTurnRow
+  context: KyberContextTurn | null
+  projection_status?: string
+}
+
+function parseSessionTurnSection(raw: unknown, path: string): KyberSessionTurnSection {
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  const turn = raw.turn
+  if (!isRaw(turn)) throw malformedSection(path, 'turn is not an object')
+  requireNumberField(turn, 'index', path)
+  if (raw.context !== null) {
+    if (!isRaw(raw.context)) throw malformedSection(path, 'context is not an object or null')
+    requireNumberField(raw.context, 'index', path)
+    if (!isRaw(raw.context.buckets)) throw malformedSection(path, 'context.buckets is not an object')
+  }
+  const section: KyberSessionTurnSection = {
+    sessionId: requireStringField(raw, 'sessionId', path),
+    turnIndex: requireNumberField(raw, 'turnIndex', path),
+    turn: turn as unknown as KyberSessionTurnRow,
+    context: raw.context === null ? null : (raw.context as unknown as KyberContextTurn),
+  }
+  if (typeof raw.projection_status === 'string') section.projection_status = raw.projection_status
+  return section
+}
+
+// ── Section fetchers ────────────────────────────────────────────────────────
+
+function sectionPath(sessionId: string, section: string, page: number): string {
+  const params = new URLSearchParams()
+  params.set('page', String(page))
+  params.set('limit', String(KYBER_SECTION_PAGE_LIMIT))
+  return `/api/kyber/session/${encodeURIComponent(sessionId)}/${section}?${params.toString()}`
+}
+
+/** Reads the bounded summary section. */
+export async function fetchKyberSessionSummary(sessionId: string): Promise<KyberSessionSummarySection> {
+  const path = `/api/kyber/session/${encodeURIComponent(sessionId)}/summary`
+  return parseSessionSummarySection(await fetchJson<unknown>(path), path)
+}
+
+/** Reads the charts section: the session's turns and context only. */
+export async function fetchKyberSessionCharts(sessionId: string): Promise<KyberSessionChartsSection> {
+  const path = `/api/kyber/session/${encodeURIComponent(sessionId)}/charts`
+  return parseSessionChartsSection(await fetchJson<unknown>(path), path)
+}
+
+/** Reads one page of the ranked tool rows with the aggregate over every row. */
+export async function fetchKyberSessionTools(
+  sessionId: string,
+  page = 1,
+): Promise<KyberSessionToolsPage> {
+  const path = sectionPath(sessionId, 'tools', page)
+  return parseSessionToolsPage(await fetchJson<unknown>(path), path)
+}
+
+/** Reads one page of the per-server schema and invocation rollup. */
+export async function fetchKyberSessionServers(
+  sessionId: string,
+  page = 1,
+): Promise<KyberSectionPage<KyberSessionServerRow>> {
+  const path = sectionPath(sessionId, 'servers', page)
+  return parseSectionPage(await fetchJson<unknown>(path), path, 'servers', readServerRow)
+}
+
+/** Reads one page of the session's skill rows. */
+export async function fetchKyberSessionSkills(
+  sessionId: string,
+  page = 1,
+): Promise<KyberSessionSkillsPage> {
+  const path = sectionPath(sessionId, 'skills', page)
+  return parseSessionSkillsPage(await fetchJson<unknown>(path), path)
+}
+
+/** Reads one level of the session's timeline tree, page by page. */
+export async function fetchKyberSessionTimeline(
+  sessionId: string,
+  opts?: { parent?: string | null; page?: number },
+): Promise<KyberSessionTimelinePage> {
+  const page = opts?.page ?? 1
+  const params = new URLSearchParams()
+  params.set('page', String(page))
+  params.set('limit', String(KYBER_SECTION_PAGE_LIMIT))
+  if (opts?.parent !== undefined && opts.parent !== null && opts.parent !== '') {
+    params.set('parent', opts.parent)
+  }
+  const path = `/api/kyber/session/${encodeURIComponent(sessionId)}/timeline?${params.toString()}`
+  return parseSessionTimelinePage(await fetchJson<unknown>(path), path)
+}
+
+/** Reads one page of the session's request rows, each with its prompt preview. */
+export async function fetchKyberSessionRequests(
+  sessionId: string,
+  page = 1,
+): Promise<KyberSectionPage<KyberSessionRequestRow>> {
+  const path = sectionPath(sessionId, 'requests', page)
+  return parseSectionPage(await fetchJson<unknown>(path), path, 'requests', readRequestRow)
+}
+
+/** Reads one page of the session's measurable reconciliation rows. */
+export async function fetchKyberSessionReconciliation(
+  sessionId: string,
+  page = 1,
+): Promise<KyberSectionPage<KyberSessionReconciliationRow>> {
+  const path = sectionPath(sessionId, 'reconciliation', page)
+  return parseSectionPage(
+    await fetchJson<unknown>(path),
+    path,
+    'reconciliation',
+    readReconciliationRow,
   )
+}
+
+/** Reads one page of the session's stored ingest problems. */
+export async function fetchKyberSessionProblems(
+  sessionId: string,
+  page = 1,
+): Promise<KyberSectionPage<KyberIngestProblemRow>> {
+  const path = sectionPath(sessionId, 'problems', page)
+  return parseSectionPage(await fetchJson<unknown>(path), path, 'problems', readIngestProblemRow)
+}
+
+/** Reads the widened per-turn section: the turn's figures and its context buckets. */
+export async function fetchKyberSessionTurn(
+  sessionId: string,
+  turnIndex: number,
+): Promise<KyberSessionTurnSection> {
+  const path = `/api/kyber/session/${encodeURIComponent(sessionId)}/turn/${turnIndex}`
+  return parseSessionTurnSection(await fetchJson<unknown>(path), path)
 }

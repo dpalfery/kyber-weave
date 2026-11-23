@@ -38,13 +38,13 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+// The widened route's served shape: the turn row rides under `turn`, beside
+// the session and index identity and the turn's stored context (absent here).
 const PER_TURN_BODY = {
-  session_id: 'sess-1',
-  turn_index: 1,
-  input: 900,
-  output: 130,
-  fresh: 50,
-  cache_read: 860,
+  sessionId: 'sess-1',
+  turnIndex: 1,
+  turn: { index: 1, input: 900, output: 130, fresh: 50, cache_read: 860 },
+  context: null,
 }
 
 type TurnsFetcher = (sessionId: string, turnIndex?: number) => Promise<unknown>
