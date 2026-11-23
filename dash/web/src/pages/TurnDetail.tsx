@@ -121,7 +121,7 @@ export function TurnDetail({
     enabled: !!sessionId,
     // An unknown session, or a turn index past the end, is an answer and not
     // a transient failure: the request is not retried and the counters stay
-    // absent, exactly as they did when the payload answered with no such row.
+    // absent rather than showing a neighbour's numbers.
     retry: false,
   })
   // The strict lookup still applies to the one row the route served: a row

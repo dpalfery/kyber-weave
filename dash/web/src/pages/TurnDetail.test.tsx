@@ -305,11 +305,7 @@ describe('TurnDetail raw packet disclosure (B7)', () => {
     // The bounded per-turn route answers one row, not the session's list of
     // them: the page reads the turn it displays and nothing else. This row
     // carries no counters, so the inspector header renders its absent state.
-    rawPacketApi.fetchKyberSessionTurns.mockResolvedValue({
-      session_id: 'sess-raw-packet',
-      turn_index: 0,
-      index: 0,
-    })
+    rawPacketApi.fetchKyberSessionTurns.mockResolvedValue({ index: 0 })
     rawPacketApi.fetchSpanAttributes.mockResolvedValue(rawPacketApi.spanAttributes)
     rawPacketApi.fetchQuarantineEntry.mockResolvedValue(rawPacketApi.quarantineEntry)
   })
@@ -486,8 +482,6 @@ describe('TurnDetail measured counters (bounded per-turn read)', () => {
 
   it('asks for the turn it displays, and renders that turn\'s counters', async () => {
     rawPacketApi.fetchKyberSessionTurns.mockResolvedValue({
-      session_id: 'sess-raw-packet',
-      turn_index: 0,
       index: 0,
       input: 900,
       output: 130,

@@ -1,17 +1,14 @@
-// RED contract for the web client's per-turn read (change A, client half):
-// `fetchKyberSessionTurns` requests the whole session payload to read one
-// turn's counters. The change repoints it at the new additive route
-// `GET /api/kyber/session/:id/turn/:index`, so the turn page stops paying for
-// the whole blob. Fixtures are inline; fetch is mocked per test so nothing
-// reaches a server (same pattern as `kyberApi.capture.test.ts`).
+// Contract for the web client's per-turn read: one turn, one bounded request.
 //
-// Assumption, stated plainly: per the task contract ("the client's
-// `fetchKyberSessionTurns` targets the new route") GREEN keeps the
-// `fetchKyberSessionTurns` name and adds the turn index as a second
-// parameter, so the call below typechecks today (an extra argument is
-// ignored at runtime) and resolves to the per-turn URL after GREEN. If GREEN
-// instead introduces a differently named fetcher, repoint this file at it —
-// the URL shape asserted here is fixed by the task contract either way.
+// The turn page reads a single turn's counters, so `fetchKyberSessionTurns`
+// asks the additive route `GET /api/kyber/session/:id/turn/:index` and takes
+// the turn index as a required argument. The whole-payload fallback — the
+// read of a session's whole turn list when no index was given — is retired,
+// so no caller can reach the session payload through this module. Fixtures
+// are inline; fetch is mocked per test so nothing reaches a server (same
+// pattern as `kyberApi.capture.test.ts`).
+
+import { readFileSync } from 'node:fs'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -47,14 +44,14 @@ const PER_TURN_BODY = {
   context: null,
 }
 
-type TurnsFetcher = (sessionId: string, turnIndex?: number) => Promise<unknown>
+type TurnsFetcher = (sessionId: string, turnIndex: number) => Promise<unknown>
 
 function fetchOneTurn(sessionId: string, turnIndex: number): Promise<unknown> {
   return (fetchKyberSessionTurns as unknown as TurnsFetcher)(sessionId, turnIndex)
 }
 
 /**
- * The response's counters, tolerating the key shape GREEN chooses: the
+ * The response's counters, tolerating the key shape the client chooses: the
  * detail row spells the fourth counter `cache_read`, the page's
  * `TurnTokenFigures` spells it `cacheRead`. Values are the contract.
  */
@@ -67,10 +64,8 @@ function figuresOf(value: unknown): Record<string, unknown> | undefined {
   return typeof source.input === 'number' ? source : undefined
 }
 
-describe('fetchKyberSessionTurns per-turn route (change A)', () => {
-  it('requests the bounded per-turn route, not the whole-payload detail route', async () => {
-    // RED: today this GETs `/api/kyber/session/sess-1` (the whole payload).
-    // After GREEN it GETs the per-turn route for the requested index.
+describe('fetchKyberSessionTurns per-turn route', () => {
+  it('requests the bounded per-turn route, not a whole-payload read', async () => {
     const calls = stubFetch(200, PER_TURN_BODY)
 
     await fetchOneTurn('sess-1', 1)
@@ -80,8 +75,6 @@ describe('fetchKyberSessionTurns per-turn route (change A)', () => {
   })
 
   it('encodes the session id in the per-turn path', async () => {
-    // RED for the same reason: the per-turn path must carry the id the way
-    // every other session route does (`encodeURIComponent`), never raw.
     const calls = stubFetch(200, PER_TURN_BODY)
 
     await fetchOneTurn('sess/1', 0)
@@ -91,15 +84,36 @@ describe('fetchKyberSessionTurns per-turn route (change A)', () => {
   })
 
   it('carries the same counters the turn page renders for that turn', async () => {
-    // RED: today the stubbed per-turn body has no `turns` key, so the current
-    // implementation resolves `[]`. After GREEN the resolved value carries
-    // the same four counters the detail row holds — the numbers
-    // `turnRowFigures` maps for the inspector header.
     stubFetch(200, PER_TURN_BODY)
 
     const figures = figuresOf(await fetchOneTurn('sess-1', 1))
 
     expect(figures).toMatchObject({ input: 900, output: 130, fresh: 50 })
     expect(figures?.cacheRead ?? figures?.cache_read).toBe(860)
+  })
+
+  it('has no whole-payload fallback: the client reads no session turn list', () => {
+    // The fallback answered a call with no turn index by reading a whole turn
+    // list off the session. The per-turn route replaced it, and the fallback
+    // must not survive beside it — a caller with no index has nothing to read.
+    // Read as text because the rule is about the module's requests, not about
+    // any one render.
+    const source = readFileSync(new URL('./kyberApi.ts', import.meta.url), 'utf8')
+    const start = source.indexOf('export async function fetchKyberSessionTurns')
+    expect(start).toBeGreaterThan(-1)
+    const body = source.slice(start, source.indexOf('\n}', start))
+
+    expect(body).not.toContain('/charts')
+    expect(body).not.toContain('body.turns')
+    expect(body).not.toContain('turnIndex?')
+  })
+
+  it('offers no bare-session read: the turn index is required', () => {
+    // A call with the session id alone was the fallback's shape. The type
+    // surface no longer accepts it, so this assignment must not compile.
+    // @ts-expect-error — a bare session id is not a per-turn read.
+    const bareRead: (sessionId: string) => Promise<unknown> = fetchKyberSessionTurns
+
+    expect(bareRead).toBeTypeOf('function')
   })
 })

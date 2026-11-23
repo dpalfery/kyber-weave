@@ -249,10 +249,8 @@ export type KyberSessionAncestry = KyberSessionSummaryDetail & {
 /**
  * One session's identity fields, from the bounded summary route.
  *
- * WHY this route and not the detail route: the detail route serves the entire
- * session payload, and this consumer needs the identity fields only. The
- * turns consumer (`fetchKyberSessionTurns`) reads the bounded per-turn route
- * for one turn, and the detail route for a session's whole list of them.
+ * WHY this route and not the detail route: the detail route served the entire
+ * session payload, and this consumer needs the identity fields only.
  */
 export async function fetchKyberSession(sessionId: string): Promise<KyberSessionAncestry> {
   return fetchJson<KyberSessionAncestry>(
@@ -263,10 +261,8 @@ export async function fetchKyberSession(sessionId: string): Promise<KyberSession
 /**
  * Measured per-turn token figures from the session turn row (issue #184, Q3).
  * Every field is a harness-measured counter or null; consumers render what is
- * measured and state absence plainly — never estimate from text. A single
- * turn's row comes from the bounded per-turn route, which the turn page
- * reads; the whole list of a session's rows still comes from the full session
- * payload (`GET /api/kyber/session/:id`).
+ * measured and state absence plainly — never estimate from text. The row comes
+ * from the bounded per-turn route.
  */
 export interface TurnTokenFigures {
   input?: number | null
@@ -276,52 +272,18 @@ export interface TurnTokenFigures {
 }
 
 /**
- * One turn's row, from the bounded per-turn route.
+ * One turn's row, from the bounded per-turn route
+ * `GET /api/kyber/session/:id/turn/:index`.
  *
- * <remarks>
- * The same row shape the detail route serves for one turn, so a consumer that
- * already reads the detail route's rows reads this one unchanged — but from
- * `GET /api/kyber/session/:id/turn/:index`, which answers one turn instead of
- * the session's whole payload.
+ * A turn index is required: the route answers one turn, so there is no
+ * whole-payload list read left to fall back to.
  */
-export type KyberSessionTurn = KyberSessionTurnRow & {
-  /** The session the turn belongs to. */
-  session_id: string
-  /** The turn's index in that session. */
-  turn_index: number
-}
-
-/**
- * A session's turn rows, or one turn's row.
- *
- * <remarks>
- * With a turn index, the read is the bounded per-turn route: one row, never
- * the session's whole payload — which is what a single turn's counters cost
- * before (up to 10,933 turn rows to read four numbers). Without one, the read
- * is the charts section's turns array — the same rows the retired detail
- * route served — the shape a list-style consumer expects.
- */
-export async function fetchKyberSessionTurns(sessionId: string): Promise<KyberSessionTurnRow[]>
 export async function fetchKyberSessionTurns(
   sessionId: string,
   turnIndex: number,
-): Promise<KyberSessionTurn>
-export async function fetchKyberSessionTurns(
-  sessionId: string,
-  turnIndex?: number,
-): Promise<KyberSessionTurnRow[] | KyberSessionTurn> {
-  if (turnIndex !== undefined) {
-    // The bounded route answers the widened section; the flat row keeps the
-    // turn page's existing consumer reading the same counters it always did.
-    const section = await fetchKyberSessionTurn(sessionId, turnIndex)
-    return {
-      ...section.turn,
-      session_id: section.sessionId,
-      turn_index: section.turnIndex,
-    }
-  }
-  const body = await fetchJson<{ turns?: KyberSessionTurnRow[] }>(`/api/kyber/session/${encodeURIComponent(sessionId)}/charts`)
-  return Array.isArray(body.turns) ? body.turns : []
+): Promise<KyberSessionTurnRow> {
+  const section = await fetchKyberSessionTurn(sessionId, turnIndex)
+  return section.turn
 }
 
 /** A turn row carrying either numbering shape: 0-based `index`, legacy 1-based `turn`, or neither. */

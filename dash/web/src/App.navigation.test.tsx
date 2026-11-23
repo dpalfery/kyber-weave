@@ -531,25 +531,30 @@ describe('session deep links consume the bounded summary route', () => {
     expect(stack.some((node) => node.level === 'run')).toBe(false)
   })
 
-  it('keeps the turns consumer on the charts section route, still reading body.turns', async () => {
+  it('reads the one turn it displays from the per-turn route, never the session payload', async () => {
     // fetchKyberSessionTurns is TurnDetail's inspector feed, not the ancestry
-    // consumer: it needs the turns array the charts section serves (the same
-    // rows the retired detail route carried), so the switch must not repoint
-    // it. The module mock above leaves this export real, so the static import
-    // reaches the true consumer.
-    const turns = [{ index: 0 }, { index: 1 }]
-    const fetchMock = vi.fn(async (_url: string) => new Response(JSON.stringify({ turns }), {
+    // consumer: the page displays one turn, so it asks for that turn alone.
+    // The whole-list fallback (no turn index) is retired, so no caller can
+    // reach the session payload through this export. The module mock above
+    // leaves this export real, so the static import reaches the true consumer.
+    const section = {
+      sessionId: 'sess-codex-1',
+      turnIndex: 1,
+      turn: { index: 1, input: 900 },
+      context: null,
+    }
+    const fetchMock = vi.fn(async (_url: string) => new Response(JSON.stringify(section), {
       status: 200, headers: { 'Content-Type': 'application/json' },
     }))
     vi.stubGlobal('fetch', fetchMock)
-    let rows: unknown
+    let row: unknown
     try {
-      rows = await fetchKyberSessionTurns('sess-codex-1')
+      row = await fetchKyberSessionTurns('sess-codex-1', 1)
     } finally {
       vi.unstubAllGlobals()
     }
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/kyber/session/sess-codex-1/charts')
-    expect(rows).toEqual(turns)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/kyber/session/sess-codex-1/turn/1')
+    expect(row).toEqual({ index: 1, input: 900 })
   })
 })
