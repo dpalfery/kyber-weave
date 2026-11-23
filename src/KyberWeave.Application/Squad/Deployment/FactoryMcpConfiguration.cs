@@ -59,10 +59,21 @@ public static class FactoryMcpConfiguration
                 .SelectMany(path => ReadServerNames(files, path, unreadable))
                 .ToList(),
             StringComparer.Ordinal);
-        string[] missing =
-        [
-            .. FactoryRenderer.DeclaredMcpServerNames(source).Where(server => !configured.Contains(server))
-        ];
+        string[] missing;
+        try
+        {
+            missing =
+            [
+                .. FactoryRenderer.DeclaredMcpServerNames(source).Where(server => !configured.Contains(server))
+            ];
+        }
+        catch (SquadRenderValidationException ex)
+        {
+            // A malformed declaration fails the render, but this diagnostic reports instead of
+            // throwing: sanitize the attacker-influenced name to one line like every warning.
+            return [SquadLifecycleService.SanitizeTargetTokenForWarning(
+                $"{WarningCode}: the squad's MCP declaration is unusable: {ex.Message}")];
+        }
         if (missing.Length == 0)
         {
             return [];

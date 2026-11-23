@@ -75,7 +75,7 @@ keys differ, and they differ more than you would expect:
 | Client | File | Server key | Notes |
 |---|---|---|---|
 | [Claude Code](#claude-code) | `.mcp.json` (repo root) | `mcpServers` | Committed servers need approval on first run |
-| [Factory](#factory) | `.factory/mcp.json` (repo root) or `~/.factory/mcp.json` | `mcpServers` | Same shape as Claude Code, but a Task-dispatched droid sees only the servers its own droid file whitelists |
+| [Factory](#factory) | `.factory/mcp.json` (repo root) or `~/.factory/mcp.json` | `mcpServers` | Same shape as Claude Code, but a Task-dispatched droid reaches only the `{server}___{tool}` ids its own droid file lists under `tools` |
 | [Cursor](#cursor) | Desktop/local CLI: `.cursor/mcp.json`; Cloud Agents: personal or team settings | `mcpServers` | Same shape as Claude Code, and subagents inherit the session's servers rather than holding a grant of their own |
 | [VS Code / Copilot in the editor](#vs-code-and-github-copilot-in-the-editor) | `.vscode/mcp.json` | `servers` | Not `.mcp.json`, and not `mcpServers` |
 | [Copilot coding agent](#github-copilot-coding-agent) | Repository settings, not a file | `mcpServers` | `tools` is required; the binary must be installed first |
@@ -145,26 +145,32 @@ project. The entry is the same shape as the Claude Code row:
 ```
 
 **This file configures the session, and a Task-dispatched droid is not the session.** Factory
-gives every droid its own `mcpServers` key in its droid file under `.factory/droids/`, and that
-key — not the app-level file — decides which servers the droid may call. The two directions are
-documented and opposite: an **omitted** key inherits the parent session's servers, and an
+gives every droid its own `mcpServers` key in its droid file under `.factory/droids/`, but that
+key documents intent rather than granting anything at runtime: the droid reaches an MCP tool
+only when its `tools` list names the registered `{server}___{tool}` id, so a droid that lists
+servers and no tool ids gets no MCP tools. The two `mcpServers` directions are documented and
+opposite: an **omitted** key inherits the parent session's servers, and an
 explicit `[]` excludes every one of them, unconditionally. A droid whose own list is empty is
 MCP-blind however well the rest of the client is configured.
 
 So there are two grants, made by two owners, and only one of them is your configuration file:
 
-- **The droid-level whitelist** is written by Kyber-Squad's `FactoryRenderer`, into the droid
+- **The droid-level grant** is written by Kyber-Squad's `FactoryRenderer`, into the droid
   file it owns. It is derived from the server names the squad itself declares in the `mcp.json`
   beside its canonical source — today exactly `kw-docs`, launched as
   `kyber-weave-mcp --repo-root .` — and it is granted to every droid whose capability profile
-  allows `filesystem.read`, the pure orchestrator `conductor` included. One of that server's tools
+  allows `filesystem.read`, the pure orchestrator `conductor` included. The renderer still emits
+  that whitelist under `mcpServers`, and additionally appends one `{server}___{tool}` entry per
+  roster tool of each granted server to `tools`, which is the list the harness honours. One of
+  that server's tools
   is `docs_get_coding_standard_for_technology`, and the orchestrator is asked to hold specialists
   to standards it
   could not otherwise read, so the orchestration reasoning that used to exclude it does not reach
   this server ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). `mcpServers: []`
   remains the fail-closed value for a droid whose profile grants no read entitlement and for a
-  squad that declares no servers, and no droid ever omits the key: omission would inherit the
-  session's servers, which is silent widening. The contract is stated in
+  squad that declares no servers, and no droid ever omits either key: omitting `mcpServers`
+  would inherit the session's servers and omitting `tools` would allow every Factory tool,
+  which is silent widening either way. The contract is stated in
   [Kyber-Squad architecture §4](../kyber-squad/architecture.md#4-deployment-scopes-and-state-topology)
   and pinned under the Factory row of the
   [capability matrix](../kyber-squad/requirements.md#target-capability-and-degradation-matrix).
@@ -172,7 +178,9 @@ So there are two grants, made by two owners, and only one of them is your config
   exists. It is yours; Squad writes no Factory settings file and does not invent server names.
 
 Both have to hold for a dispatched droid to reach the corpus. Wire the file first, then confirm
-the droid names the server — and compare the provenance line rather than trusting the answer, as
+the droid names the server — both under `mcpServers` and as `{server}___{tool}` entries under
+`tools`, which is the list the harness grants from — and compare the provenance line rather than
+trusting the answer, as
 with every other client: call `docs_get_source_repository_and_revision`, which takes no
 arguments, and check that its `repo=` equals `git rev-parse --git-common-dir` in the repository
 you meant.
@@ -196,12 +204,13 @@ server:
 ```
 
 Wiring it is not the same as reaching it from a droid, and this is the boundary worth stating
-plainly rather than implying: a dispatched droid sees **only** the servers its rendered whitelist
-names only `kw-docs`. `codegraph_explore` is therefore session-level
-on Factory today — available to you in the main conversation and not claimed as droid-visible.
-A role that needs it, such as `architect` or `research-agent`, gets it by dispatch from a
-session that has it, not by holding the tool itself. Leave the entry in place for your own use
-and do not read a green droid file as evidence that a droid can resolve symbols.
+plainly rather than implying: a dispatched droid reaches **only** the servers its rendered
+`tools` list names `___` entries for. The shipped squad declares `codegraph`, so a read-entitled
+specialist such as `architect` carries `codegraph___codegraph_explore` and can resolve symbols
+once the file above launches that server; the orchestrator `conductor` keeps the carve-out and
+holds only the `kw-docs___` entries. Leave the entry in place for your own use, and for a role
+the grant withholds, get the answer by dispatch from a session that has it rather than by
+holding the tool itself.
 
 `docs drift` reads a `.codegraph/` index and reports a missing or unreadable one as critical
 rather than passing, so `docs_detect_drift_between_documents_and_code` called from any client
@@ -2064,12 +2073,12 @@ index of the root it is bound to, and nothing else.
 |---|---|
 | The server never starts | `kyber-weave-mcp` is not on the PATH the client inherits — use an absolute path |
 | The client lists no tools at all | Wrong file or wrong key for that client — check the table in [Wiring it up](#wiring-it-up) |
-| A Factory Task-dispatched droid lists no MCP tools | `squad install` and `squad update` print `factory-mcp-not-configured` when no Factory config file defines a server the droids are allowed. Check the droid's own `mcpServers` whitelist in `.factory/droids/<name>.md` **and** the server entry in `.factory/mcp.json` or `~/.factory/mcp.json`. The app-level file alone is not enough: an empty or `[]` list in the droid file excludes every server regardless of what the session has, and an omitted key would inherit rather than exclude. Every droid the shipped squad renders is granted `kw-docs` — `conductor` included — so a `[]` no longer means "this is the orchestrator": it means the droid's capability profile grants no read entitlement, or the squad declares no servers ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). Droid-level visibility is Squad's whitelist, not your client config — see [Factory](#factory) |
+| A Factory Task-dispatched droid lists no MCP tools | `squad install` and `squad update` print `factory-mcp-not-configured` when no Factory config file defines a server the droids are allowed. Check the droid's own `{server}___{tool}` entries under `tools` in `.factory/droids/<name>.md` **and** the server entry in `.factory/mcp.json` or `~/.factory/mcp.json`. The app-level file alone is not enough, and the droid's `mcpServers` whitelist alone is not enough either: the harness grants only the tool ids the `tools` list names. Every droid the shipped squad renders is granted `kw-docs` — `conductor` included — so a `[]` no longer means "this is the orchestrator": it means the droid's capability profile grants no read entitlement, or the squad declares no servers ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). Droid-level visibility is Squad's rendered grant, not your client config — see [Factory](#factory) |
 | A ZCode agent lists no MCP tools, and `squad doctor` fails the install | ZCode expands no wildcard and `toolchain.yml`'s `required-mcp-tools` are hard connected-server requirements for every agent, `conductor` included. Declare the `kw-docs` server in the ZCode MCP configuration, or the install does not pass |
 | A Kilo agent has no `permission` key, or an MCP call prompts instead of running | The key is emitted only for an agent entitled to `kw-docs`, and `allow` is an approval rather than a visibility grant — check the agent's capability profile, then the `mcp` key in `kilo.jsonc`. An agent with no key is outside the entitlement by design; a subagent that prompts will fail closed. A `kw_docs_*` key would match nothing, so check the hyphen. See [Kilo](#kilo) |
 | An Antigravity agent lists no MCP tools | Check the agent file's `mcpServers` entry and the workspace `.agents/mcp_config.json`, then the client's `mcp(server/*)` policy patterns — MCP tools default to Ask there. Adding an MCP tool name to `tools:` does not help and makes the executor construction fail with `unknown component` on stderr. See [Antigravity](#antigravity) |
 | A Pi subagent lists no MCP tools | Check the derived `ext:pi-mcp-adapter/mcp__kw_docs__…` entries in the agent file, the adapter version (the per-tool names need `pi-mcp-adapter` 6.0.0 or later), and the adapter's own server configuration plus its first-use trust approval. A lowered primary agent is a skill and carries no overlay at all. See [Pi](#pi) |
-| A droid lists no MCP tools on a target whose session has them | On Factory the droid's own `mcpServers` value governs; on Cursor, Codex, and Warp nothing per-agent governs it at all, because reach is inherited from the session. Identify which case you are in before editing a rendered file — install and update own those bytes |
+| A droid lists no MCP tools on a target whose session has them | On Factory the droid's own `tools` entries govern; on Cursor, Codex, and Warp nothing per-agent governs it at all, because reach is inherited from the session. Identify which case you are in before editing a rendered file — install and update own those bytes |
 | Every query is a miss | Wrong repo root, or `docs-root` in [config](../configuration.md) names a tree the documents are not in — check stderr for `KW-CONFIG-001` |
 | "no CodeGraph index was readable" | No `.codegraph/codegraph.db`, or `sqlite3` missing from PATH |
 | Joins show `(unresolved)` | The symbol is in `code-refs` but not in the index — run [`docs drift`](governance.md) |

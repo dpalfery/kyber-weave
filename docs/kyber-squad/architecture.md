@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Domain/Squad
 owner: dpalfery
-last-reviewed: 2026-11-18
+last-reviewed: 2026-11-22
 status: current
 decided-by:
   - adr/0076-test-first-is-one-worker-per-task
@@ -1079,17 +1079,25 @@ and validates.
   claim. Copilot takes the grant from canonical source rather than from a renderer: each agent's
   own `copilot-tools` frontmatter carries `kw-docs/*`, and `conductor` gains that one entry
   there.
-  `FactoryRenderer` has no tool allow-list to extend, because a Factory droid's MCP reach is a
-  **server** list: its `mcpServers` key. Factory reads an omitted key as "inherit the parent
+  `FactoryRenderer` extends its tool allow-list with the MCP grant, because a Factory droid's
+  MCP reach is the `tools` entries, not the `mcpServers` key: the harness honours
+  only the registered `{server}___{tool}` ids listed there, so a droid that names servers
+  and no tool ids reaches no MCP tool. Factory reads an omitted `mcpServers` key as "inherit the parent
   session's servers" and an explicit `[]` as "exclude every server", so the renderer derives a
-  per-droid whitelist from the names the squad itself declares in its `mcp.json` — today exactly
-  `kw-docs`, launched `kyber-weave-mcp --repo-root .` — and emits it for any agent whose
+  per-droid whitelist from the names the squad itself declares in its `mcp.json` — today
+  `kw-docs` (universal) and `codegraph` (orchestrator-excluded; the hook server `kw-arbiter` is
+  always excluded) — still emits the granted names under `mcpServers` as the
+  declared intent, and additionally appends one `{server}___{tool}` entry per roster tool of each
+  granted server to `tools`, after the semantic tool IDs. It does so for any agent whose
   capability profile allows `filesystem.read`, under the shared entitlement predicate that
   `ClaudeRenderer`, `ZCodeRenderer`, and `DevinRenderer` apply to their own grants, so
-  `conductor` carries `mcpServers: [kw-docs]` like every other droid. `[]` remains the
-  fail-closed value for a profile that grants no read entitlement and for a squad that declares no
-  servers, and no droid ever omits the key, because omission is the inherited-and-therefore-widened
-  case. A non-empty whitelist is a distinguished, non-degraded outcome: the
+  read-entitled specialists carry `mcpServers: [codegraph, kw-docs]` plus both tool-id
+  families, while `conductor` carries `mcpServers: [kw-docs]` plus only the `kw-docs___`
+  entries — the carve-out, not the template.
+  `[]` remains the fail-closed value for a profile that grants no read entitlement and for a squad
+  that declares no servers, and no droid ever omits either key, because omitting `mcpServers`
+  inherits the session's servers and omitting `tools` allows every Factory tool — both omissions
+  are the widened case. A non-empty whitelist is a distinguished, non-degraded outcome: the
   `permission-not-expressible` detail that parent MCP was excluded is recorded only for the empty
   list, so the frontmatter value and the receipt agree.
   Widening that whitelist is a declared edit rather than a renderer change: naming a server in
@@ -1340,7 +1348,7 @@ The grant spelling is the harness's, not ours:
 | `copilot` | `kw-docs/*` in the agent's own `copilot-tools` |
 | `opencode`, `kilo` | `kw-docs_*` |
 | `pi` | `ext:pi-mcp-adapter/mcp__kw_docs__<tool>` |
-| `factory` | `mcpServers: [kw-docs]`, launched `kyber-weave-mcp --repo-root .` |
+| `factory` | enumerated `{server}___{tool}` names in `tools` — one per roster tool of `kw-docs` for every entitled droid (e.g. `kw-docs___docs_get_source_repository_and_revision`), plus `codegraph___codegraph_explore` for read-entitled specialists (`conductor` keeps the `kw-docs` family alone); `mcpServers` retains the granted names as declared intent |
 | `antigravity` | `mcpServers: [{name: kw-docs, command: kyber-weave-mcp, args: [--repo-root, .]}]` |
 | `cursor`, `codex`, `warp` | no per-agent key; the session's server is the grant |
 
