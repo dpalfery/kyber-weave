@@ -47,6 +47,18 @@ public class DashboardQueryService : IDashboardQueryService
     public JsonElement? GetSessionCharts(string sessionId) => bridge.GetSessionCharts(sessionId);
 
     /// <inheritdoc />
+    public JsonElement? GetSessionRequests(string sessionId, int page = 1, int limit = 25) =>
+        bridge.GetSessionRequests(sessionId, page, limit);
+
+    /// <inheritdoc />
+    public JsonElement? GetSessionReconciliation(string sessionId, int page = 1, int limit = 25) =>
+        bridge.GetSessionReconciliation(sessionId, page, limit);
+
+    /// <inheritdoc />
+    public JsonElement? GetSessionProblems(string sessionId, int page = 1, int limit = 25) =>
+        bridge.GetSessionProblems(sessionId, page, limit);
+
+    /// <inheritdoc />
     public JsonElement? GetTurnFigures(string sessionId, int turnIndex) => bridge.GetTurnFigures(sessionId, turnIndex);
 
     /// <inheritdoc />

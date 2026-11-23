@@ -777,11 +777,11 @@ public sealed class AnalyticsReadPathTests
     }
 
     /// <summary>
-    /// Every request path except the content view leaves content unread. The sweep calls the
-    /// list, detail, summary, turn-figure, span-attribute, timeline, coverage, findings,
-    /// problems, quarantine, harness, run, report, and analytics paths over the instrumented
-    /// fake against a session whose turns carry four kilobytes of text each, and each path
-    /// records zero materialized content bytes and no content-bearing read.
+    /// Every request path except the content view and the two scoped prompt reads leaves content
+    /// unread. The sweep calls the list, detail, summary, turn-figure, span-attribute, timeline,
+    /// coverage, findings, problems, quarantine, harness, run, report, and analytics paths over
+    /// the instrumented fake against a session whose turns carry four kilobytes of text each,
+    /// and each path records zero materialized content bytes and no content-bearing read.
     /// </summary>
     [Fact]
     public void EveryOtherPathLeavesContentUnread()
@@ -848,6 +848,9 @@ public sealed class AnalyticsReadPathTests
             ("session detail", () => _ = bridge.GetSessionDetail(sessionKey)),
             ("session summary", () => _ = bridge.GetSessionSummary(sessionKey)),
             ("session charts", () => _ = bridge.GetSessionCharts(sessionKey)),
+            ("session reconciliation", () => _ = bridge.GetSessionReconciliation(sessionKey)),
+            ("session problems", () => _ = bridge.GetSessionProblems(sessionKey)),
+            ("session requests (droid consent withheld)", () => _ = bridge.GetSessionRequests("sess-sweep-droid")),
             ("turn figures", () => _ = bridge.GetTurnFigures(sessionKey, 0)),
             ("span attributes", () => _ = bridge.GetSpanAttributes("span-sweep-1")),
             ("span attributes (droid consent withheld)", () => _ = bridge.GetSpanAttributes("span-sweep-droid")),
@@ -882,13 +885,15 @@ public sealed class AnalyticsReadPathTests
             Assert.DoesNotContain(store.ReadLog, read => contentBearingReads.Contains(read));
         }
 
-        // The span inspector's prompt read is span-scoped: it appears on the span-attributes
-        // path only. The Droid span's prompt was withheld for consent, so the sweep still
-        // materializes nothing while recording the read.
+        // The scoped content reads answer only the path that displays them: the span inspector's
+        // prompt read on the span-attributes path, and the requests section's prompt previews on
+        // the requests path. Both droid spans' prompts were withheld for consent, so the sweep
+        // still materializes nothing while recording the reads.
         Assert.Equal(
-            ["span attributes (droid consent withheld)"],
+            ["session requests (droid consent withheld)", "span attributes (droid consent withheld)"],
             readsByPath
-                .Where(static entry => entry.Value.Contains(nameof(InMemoryRelationalStore.SpanPromptText), StringComparer.Ordinal))
+                .Where(static entry => entry.Value.Contains(nameof(InMemoryRelationalStore.SpanPromptText), StringComparer.Ordinal)
+                    || entry.Value.Contains(nameof(InMemoryRelationalStore.RequestPromptPreviews), StringComparer.Ordinal))
                 .Select(static entry => entry.Key)
                 .ToList());
     }
@@ -2021,6 +2026,39 @@ public sealed class AnalyticsReadPathTests
 
             return inner.SessionTurnFigures(sessionKey, pricing);
         }
+
+        public SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return inner.SessionRequestFigures(sessionKey, page, limit);
+        }
+
+        public SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return inner.SessionReconciliationFigures(sessionKey, page, limit);
+        }
+
+        public SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return inner.SessionProblems(sessionKey, page, limit);
+        }
+
+        public IReadOnlyDictionary<string, string?> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds) =>
+            inner.RequestPromptPreviews(sessionKey, requestSpanIds);
 
         public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey)
         {

@@ -183,6 +183,24 @@ public interface IDashboardQueryService
     /// <summary>Returns the charts section payload: the session's turn list and context object.</summary>
     JsonElement? GetSessionCharts(string sessionId);
 
+    /// <summary>Returns one page of the session's request rows, each with the prompt preview its page read carries.</summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page; 25 unless given.</param>
+    JsonElement? GetSessionRequests(string sessionId, int page = 1, int limit = 25);
+
+    /// <summary>Returns one page of the session's measurable reconciliation rows.</summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page; 25 unless given.</param>
+    JsonElement? GetSessionReconciliation(string sessionId, int page = 1, int limit = 25);
+
+    /// <summary>Returns one page of the session's stored ingest problems.</summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page; 25 unless given.</param>
+    JsonElement? GetSessionProblems(string sessionId, int page = 1, int limit = 25);
+
     /// <summary>Returns metrics and bucket figures for a specific turn.</summary>
     JsonElement? GetTurnFigures(string sessionId, int turnIndex);
 

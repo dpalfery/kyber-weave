@@ -438,6 +438,39 @@ public sealed class AnalyticsOperationsDetailTests
             return inner.SessionTurnFigures(sessionKey, pricing);
         }
 
+        public SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return inner.SessionRequestFigures(sessionKey, page, limit);
+        }
+
+        public SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return inner.SessionReconciliationFigures(sessionKey, page, limit);
+        }
+
+        public SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit)
+        {
+            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return inner.SessionProblems(sessionKey, page, limit);
+        }
+
+        public IReadOnlyDictionary<string, string?> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds) =>
+            inner.RequestPromptPreviews(sessionKey, requestSpanIds);
+
         public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey)
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))

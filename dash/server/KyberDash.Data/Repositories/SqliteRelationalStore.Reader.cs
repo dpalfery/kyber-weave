@@ -1309,6 +1309,385 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     }
 
     /// <inheritdoc />
+    public SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        StringBuilder ctes = new("WITH RECURSIVE ");
+        AppendSessionSectionCtes(ctes, TextExpr(sessionKey));
+        ctes.Append(CultureInfo.InvariantCulture, $"named_requests(position, request_span_id) AS (SELECT position, request_span_id FROM session_request WHERE session_id = {TextExpr(sessionKey)}), ");
+        ctes.Append("fallback_requests(position, request_span_id) AS (SELECT ROW_NUMBER() OVER (ORDER BY rr.started_at_utc ASC, rr.span_id ASC), rr.span_id FROM roots ro JOIN record rr ON rr.span_id = ro.span_id WHERE NOT EXISTS (SELECT 1 FROM session_request WHERE session_id = ");
+        ctes.Append(TextExpr(sessionKey));
+        ctes.Append(")), ");
+        ctes.Append("all_requests(position, request_span_id) AS (SELECT position, request_span_id FROM named_requests WHERE EXISTS (SELECT 1 FROM session_request WHERE session_id = ");
+        ctes.Append(TextExpr(sessionKey));
+        ctes.Append(") UNION ALL SELECT position, request_span_id FROM fallback_requests) ");
+
+        StringBuilder sql = new(TabReadScriptHeader);
+        sql.Append(ctes);
+        sql.Append(CultureInfo.InvariantCulture, $", page(position, request_span_id) AS (SELECT position, request_span_id FROM all_requests ORDER BY position ASC LIMIT {IntSql(limit)} OFFSET {LongSql(((long)page - 1) * limit)}), ");
+        sql.Append("subtree(root, span) AS (SELECT request_span_id, request_span_id FROM page UNION SELECT s.root, ch.span_id FROM subtree s JOIN record_parent ch ON ch.parent_span_id = s.span AND ch.span_id IN (SELECT span_id FROM spans)), ");
+        sql.Append("owned(root, turn_position, turn_span) AS (SELECT s.root, t.position, t.span_id FROM subtree s JOIN turn_entries t ON t.span_id = s.span), ");
+        sql.Append("ranked(root, turn_position, turn_span, turn_rank, turn_total) AS (SELECT root, turn_position, turn_span, ROW_NUMBER() OVER (PARTITION BY root ORDER BY turn_position ASC), COUNT(*) OVER (PARTITION BY root) FROM owned), ");
+        sql.Append("first_model(root, model_id) AS (SELECT root, model_id FROM (SELECT o.root, rm.model_id, ROW_NUMBER() OVER (PARTITION BY o.root ORDER BY o.turn_position ASC) AS model_rank FROM owned o JOIN record_model rm ON rm.span_id = o.turn_span) WHERE model_rank = 1) ");
+
+        sql.Append("SELECT 'REQROW', (SELECT COUNT(*) FROM all_requests), hex(CAST(p.request_span_id AS BLOB)), ");
+        sql.Append("typeof(rr.started_at_utc), COALESCE(hex(CAST(rr.started_at_utc AS BLOB)), ''), ");
+        sql.Append("typeof(rm.model_id), COALESCE(hex(CAST(rm.model_id AS BLOB)), ''), ");
+        sql.Append("COALESCE(rk.turn_total, 0), ");
+        sql.Append("typeof(fts.started_at_utc), COALESCE(hex(CAST(fts.started_at_utc AS BLOB)), ''), ");
+        sql.Append("typeof(fmm.model_id), COALESCE(hex(CAST(fmm.model_id AS BLOB)), '') ");
+        sql.Append("FROM page p ");
+        sql.Append("LEFT JOIN record rr ON rr.span_id = p.request_span_id ");
+        sql.Append("LEFT JOIN record_model rm ON rm.span_id = p.request_span_id ");
+        sql.Append("LEFT JOIN (SELECT root, MAX(turn_total) AS turn_total FROM ranked GROUP BY root) rk ON rk.root = p.request_span_id ");
+        sql.Append("LEFT JOIN (SELECT root, turn_span FROM ranked WHERE turn_rank = 1) ft ON ft.root = p.request_span_id ");
+        sql.Append("LEFT JOIN record fts ON fts.span_id = ft.turn_span ");
+        sql.Append("LEFT JOIN first_model fmm ON fmm.root = p.request_span_id ");
+        sql.Append("ORDER BY p.position ASC;\n");
+
+        string output = ExecuteSqlite(sql.ToString());
+        List<ReadTimeSessionRequestSummary> rows = [];
+        int total = 0;
+        foreach (string line in TabLines(output))
+        {
+            string[] cols = SplitTabLine(line, 12, "session request figures");
+            total = ParseInt32Required(cols[1], "session request page total");
+            string requestSpanId = ParseHexRequired(cols[2], "session_request.request_span_id");
+            string? requestStartedRaw = ParseNullableHex(cols[3], cols[4], "record.started_at_utc");
+            DateTimeOffset? requestStarted = requestStartedRaw is null ? null : ParseTimestampRequired(requestStartedRaw, "record.started_at_utc");
+            string? requestModel = ParseNullableHex(cols[5], cols[6], "record_model.model_id");
+            string? firstTurnStartedRaw = ParseNullableHex(cols[8], cols[9], "owned turn started_at_utc");
+            DateTimeOffset? firstTurnStarted = firstTurnStartedRaw is null ? null : ParseTimestampRequired(firstTurnStartedRaw, "owned turn started_at_utc");
+            string? firstTurnModel = ParseNullableHex(cols[10], cols[11], "owned turn model_id");
+            string? model = string.IsNullOrEmpty(requestModel) ? firstTurnModel : requestModel;
+            string timestampUtc = requestStarted.HasValue
+                ? FormatTimestamp(requestStarted.Value)
+                : (firstTurnStarted.HasValue ? FormatTimestamp(firstTurnStarted.Value) : string.Empty);
+            rows.Add(new ReadTimeSessionRequestSummary(
+                RequestSpanId: requestSpanId,
+                TimestampUtc: timestampUtc,
+                Turns: ParseInt32Required(cols[7], "owned turn count"),
+                Model: model,
+                PromptPreview: null));
+        }
+
+        if (rows.Count == 0)
+        {
+            total = ReadSessionSectionTotal(ctes, "all_requests", "session request page");
+        }
+
+        return new SessionRequestFigurePageResult(rows, total);
+    }
+
+    /// <inheritdoc />
+    public SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        StringBuilder ctes = new("WITH RECURSIVE ");
+        AppendSessionSectionCtes(ctes, TextExpr(sessionKey));
+        ctes.Append("turn_tokens(position, span_id, fresh_input, cache_read, cache_write, output) AS (SELECT t.position, t.span_id, ");
+        ctes.Append("MAX(CASE WHEN tc.token_class = 'input' THEN tc.token_count END), ");
+        ctes.Append("MAX(CASE WHEN tc.token_class = 'cache_read' THEN tc.token_count END), ");
+        ctes.Append("MAX(CASE WHEN tc.token_class = 'cache_write' THEN tc.token_count END), ");
+        ctes.Append("MAX(CASE WHEN tc.token_class = 'output' THEN tc.token_count END) ");
+        ctes.Append("FROM turn_entries t LEFT JOIN record_token_count tc ON tc.span_id = t.span_id GROUP BY t.position, t.span_id), ");
+        ctes.Append("turn_reported(position, span_id, reported_input, reported_output) AS (SELECT t.position, t.span_id, ");
+        ctes.Append("MAX(CASE WHEN rt.direction = 'input' THEN rt.token_count END), ");
+        ctes.Append("MAX(CASE WHEN rt.direction = 'output' THEN rt.token_count END) ");
+        ctes.Append("FROM turn_entries t LEFT JOIN record_reported_total rt ON rt.span_id = t.span_id GROUP BY t.position, t.span_id), ");
+        ctes.Append("reconciled(position, span_id, reported_input, sum_chat_input, input_match, reported_output, sum_chat_output, output_match) AS (SELECT s.position, s.span_id, r.reported_input, ");
+        ctes.Append("CASE WHEN s.fresh_input IS NULL AND s.cache_read IS NULL AND s.cache_write IS NULL THEN NULL ");
+        ctes.Append("ELSE COALESCE(s.fresh_input, 0) + COALESCE(s.cache_read, 0) + COALESCE(s.cache_write, 0) END, ");
+        ctes.Append("CASE WHEN r.reported_input IS NULL OR (s.fresh_input IS NULL AND s.cache_read IS NULL AND s.cache_write IS NULL) THEN NULL ");
+        ctes.Append("ELSE r.reported_input = COALESCE(s.fresh_input, 0) + COALESCE(s.cache_read, 0) + COALESCE(s.cache_write, 0) END, ");
+        ctes.Append("r.reported_output, s.output, ");
+        ctes.Append("CASE WHEN r.reported_output IS NULL OR s.output IS NULL THEN NULL ELSE r.reported_output = s.output END ");
+        ctes.Append("FROM turn_tokens s JOIN turn_reported r ON r.position = s.position AND r.span_id = s.span_id), ");
+        ctes.Append("measurable AS (SELECT * FROM reconciled WHERE input_match IS NOT NULL AND output_match IS NOT NULL) ");
+
+        StringBuilder sql = new(TabReadScriptHeader);
+        sql.Append(ctes);
+        sql.Append("SELECT 'RECON', (SELECT COUNT(*) FROM measurable), position, hex(CAST(span_id AS BLOB)), ");
+        sql.Append("typeof(reported_input), COALESCE(CAST(reported_input AS TEXT), ''), ");
+        sql.Append("sum_chat_input, input_match, ");
+        sql.Append("typeof(reported_output), COALESCE(CAST(reported_output AS TEXT), ''), ");
+        sql.Append("sum_chat_output, output_match ");
+        sql.Append(CultureInfo.InvariantCulture, $"FROM measurable ORDER BY position ASC LIMIT {IntSql(limit)} OFFSET {LongSql(((long)page - 1) * limit)};\n");
+
+        string output = ExecuteSqlite(sql.ToString());
+        List<ReadTimeTurnReconciliation> rows = [];
+        int total = 0;
+        foreach (string line in TabLines(output))
+        {
+            string[] cols = SplitTabLine(line, 12, "session reconciliation figures");
+            total = ParseInt32Required(cols[1], "session reconciliation page total");
+            rows.Add(new ReadTimeTurnReconciliation(
+                RequestSpanId: ParseHexRequired(cols[3], "reconciled turn span_id"),
+                RootInput: ParseNullableInt64(cols[4], cols[5], "record_reported_total.input"),
+                SumChatInput: ParseInt64Required(cols[6], "tokenized input"),
+                InputMatch: ParseBoolFlag(cols[7], "reconciled input_match"),
+                RootOutput: ParseNullableInt64(cols[8], cols[9], "record_reported_total.output"),
+                SumChatOutput: ParseInt64Required(cols[10], "tokenized output"),
+                OutputMatch: ParseBoolFlag(cols[11], "reconciled output_match")));
+        }
+
+        if (rows.Count == 0)
+        {
+            total = ReadSessionSectionTotal(ctes, "measurable", "session reconciliation page");
+        }
+
+        return new SessionReconciliationFigurePageResult(rows, total);
+    }
+
+    /// <inheritdoc />
+    public SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        StringBuilder sql = new(TabReadScriptHeader);
+        sql.Append("SELECT 'PROBLEM', (SELECT COUNT(*) FROM (SELECT DISTINCT problem_id FROM (");
+        AppendSessionProblemAttachment(sql, sessionKey);
+        sql.Append(")) att), ");
+        sql.Append("hex(CAST(ip.severity AS BLOB)), hex(CAST(ip.code AS BLOB)), hex(CAST(ip.message AS BLOB)), ");
+        sql.Append("typeof(ipl.location), COALESCE(hex(CAST(ipl.location AS BLOB)), ''), ");
+        sql.Append("typeof(ips.span_id), COALESCE(hex(CAST(ips.span_id AS BLOB)), ''), ");
+        sql.Append("typeof(ipst.stack), COALESCE(hex(CAST(ipst.stack AS BLOB)), '') ");
+        sql.Append("FROM ingest_problem ip ");
+        sql.Append("LEFT JOIN ingest_problem_location ipl ON ipl.problem_id = ip.problem_id ");
+        sql.Append("LEFT JOIN ingest_problem_span ips ON ips.problem_id = ip.problem_id ");
+        sql.Append("LEFT JOIN ingest_problem_stack ipst ON ipst.problem_id = ip.problem_id ");
+        sql.Append("WHERE ip.problem_id IN (SELECT DISTINCT problem_id FROM (");
+        AppendSessionProblemAttachment(sql, sessionKey);
+        sql.Append(")) ");
+        sql.Append(CultureInfo.InvariantCulture, $"ORDER BY ip.problem_id ASC LIMIT {IntSql(limit)} OFFSET {LongSql(((long)page - 1) * limit)};\n");
+
+        string output = ExecuteSqlite(sql.ToString());
+        List<Problem> rows = [];
+        int total = 0;
+        foreach (string line in TabLines(output))
+        {
+            string[] cols = SplitTabLine(line, 11, "session ingest_problem page");
+            total = ParseInt32Required(cols[1], "session problem page total");
+            ProblemSeverity severity = ParseProblemSeverityValue(ParseHexRequired(cols[2], "ingest_problem.severity"));
+            string code = ParseHexRequired(cols[3], "ingest_problem.code");
+            string message = ParseHexRequired(cols[4], "ingest_problem.message");
+            string? location = ParseNullableHex(cols[5], cols[6], "ingest_problem_location.location")
+                ?? ParseNullableHex(cols[7], cols[8], "ingest_problem_span.span_id");
+            string? stack = ParseNullableHex(cols[9], cols[10], "ingest_problem_stack.stack");
+            rows.Add(new Problem(severity, code, message, location, stack));
+        }
+
+        if (rows.Count == 0)
+        {
+            StringBuilder countSql = new(TabReadScriptHeader);
+            countSql.Append("SELECT 'PROBLEM', COUNT(*) FROM (SELECT DISTINCT problem_id FROM (");
+            AppendSessionProblemAttachment(countSql, sessionKey);
+            countSql.Append("));\n");
+            string[] countLines = [.. TabLines(ExecuteSqlite(countSql.ToString()))];
+            if (countLines.Length != 1)
+            {
+                throw new InvalidOperationException($"Expected 1 count row for the session problem page, got {countLines.Length.ToString(CultureInfo.InvariantCulture)}.");
+            }
+
+            total = ParseInt32Required(SplitTabLine(countLines[0], 2, "session problem page count")[1], "session problem page total");
+        }
+
+        return new SessionProblemPageResult(rows, total);
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, string?> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        ArgumentNullException.ThrowIfNull(requestSpanIds);
+        string[] requested = [.. requestSpanIds.Distinct(StringComparer.Ordinal)];
+        if (requested.Length == 0)
+        {
+            return new Dictionary<string, string?>(StringComparer.Ordinal);
+        }
+
+        StringBuilder ctes = new("WITH RECURSIVE ");
+        AppendSessionSectionCtes(ctes, TextExpr(sessionKey));
+        ctes.Append("requested(request_span_id) AS (SELECT ");
+        ctes.Append(string.Join(" UNION ALL SELECT ", requested.Select(static id => TextExpr(id))));
+        ctes.Append("), ");
+        ctes.Append("subtree(root, span) AS (SELECT request_span_id, request_span_id FROM requested UNION SELECT s.root, ch.span_id FROM subtree s JOIN record_parent ch ON ch.parent_span_id = s.span AND ch.span_id IN (SELECT span_id FROM spans)), ");
+        ctes.Append("candidate(root, span, ord) AS (SELECT root, span, 0 FROM subtree WHERE span = root UNION SELECT s.root, t.span_id, 1 + t.position FROM subtree s JOIN turn_entries t ON t.span_id = s.span WHERE t.span_id <> s.root) ");
+
+        StringBuilder sql = new(TabReadScriptHeader);
+        sql.Append(ctes);
+        sql.Append("SELECT 'PROMPT', hex(CAST(c.root AS BLOB)), hex(CAST(cp.span_id AS BLOB)), c.ord, cp.position, ");
+        sql.Append("hex(CAST(cp.bucket AS BLOB)), typeof(cpt.part_text), COALESCE(hex(CAST(cpt.part_text AS BLOB)), '') ");
+        sql.Append("FROM candidate c ");
+        sql.Append("JOIN content_part cp ON cp.span_id = c.span ");
+        sql.Append("LEFT JOIN content_part_text cpt ON cpt.span_id = cp.span_id AND cpt.position = cp.position ");
+        sql.Append("ORDER BY c.root ASC, c.ord ASC, cp.position ASC;\n");
+
+        string output = ExecuteSqlite(sql.ToString());
+        List<(string Root, int Ord, string Span, int PartPosition, ContentBucket Bucket, string? PlainText)> partRows = [];
+        foreach (string line in TabLines(output))
+        {
+            string[] cols = SplitTabLine(line, 8, "request prompt parts");
+            partRows.Add((
+                ParseHexRequired(cols[1], "content_part request root"),
+                ParseInt32Required(cols[3], "content_part candidate order"),
+                ParseHexRequired(cols[2], "content_part.span_id"),
+                ParseInt32Required(cols[4], "content_part.position"),
+                ParseContentBucket(ParseHexRequired(cols[5], "content_part.bucket")),
+                ParseNullableHex(cols[6], cols[7], "content_part_text.part_text")));
+        }
+
+        Dictionary<string, string?> previews = new(StringComparer.Ordinal);
+        foreach (string root in requested)
+        {
+            previews[root] = ExtractRequestPreviewFromRows(root, partRows);
+        }
+
+        return previews;
+    }
+
+    /// <summary>
+    /// Resolves one request root's preview from the ordered part rows its subtree's candidates
+    /// produced: the request's own prompt-bucket parts first, then its owned turns' in turn order,
+    /// with the first candidate carrying a prompt-bucket part deciding — the same rule the detail
+    /// figures' preview extraction applies. The rows carry only the two fields that rule reads,
+    /// so no content part is materialized.
+    /// </summary>
+    /// <param name="root">Request span the preview answers.</param>
+    /// <param name="partRows">The read's ordered part rows across every requested root.</param>
+    /// <returns>The truncated preview, or <see langword="null"/> when no candidate carries one.</returns>
+    private static string? ExtractRequestPreviewFromRows(
+        string root,
+        List<(string Root, int Ord, string Span, int PartPosition, ContentBucket Bucket, string? PlainText)> partRows)
+    {
+        foreach (IGrouping<(int Ord, string Span), (string Root, int Ord, string Span, int PartPosition, ContentBucket Bucket, string? PlainText)> group in partRows
+            .Where(row => string.Equals(row.Root, root, StringComparison.Ordinal))
+            .GroupBy(static row => (row.Ord, row.Span))
+            .OrderBy(static group => group.Key.Ord))
+        {
+            if (group.Any(static row => row.Bucket is ContentBucket.UserPrompt or ContentBucket.UserMessage or ContentBucket.ConversationHistory))
+            {
+                return ExtractReaderPreview(group);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Extracts one candidate record's preview from its part rows, the rule <see cref="ExtractReaderPromptFromParts"/> applies.</summary>
+    /// <param name="parts">The candidate's part rows, in part order.</param>
+    /// <returns>The truncated preview, or <see langword="null"/> when the prompt parts carry none.</returns>
+    private static string? ExtractReaderPreview(
+        IEnumerable<(string Root, int Ord, string Span, int PartPosition, ContentBucket Bucket, string? PlainText)> parts)
+    {
+        ContentBucket[] priorityBuckets =
+        [
+            ContentBucket.UserPrompt,
+            ContentBucket.UserMessage,
+            ContentBucket.ConversationHistory,
+        ];
+
+        foreach (ContentBucket targetBucket in priorityBuckets)
+        {
+            foreach ((string Root, int Ord, string Span, int PartPosition, ContentBucket Bucket, string? Text) part in parts
+                .Where(row => row.Bucket == targetBucket)
+                .OrderBy(static row => row.PartPosition))
+            {
+                if (part.Text is null)
+                {
+                    return null;
+                }
+
+                string trimmed = part.Text.Trim();
+                if (trimmed.Length == 0)
+                {
+                    continue;
+                }
+
+                return TruncateReaderSurrogateSafe(trimmed, 200);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Appends the common table expressions the three section reads share, ending in a comma.</summary>
+    /// <param name="sql">Script the expressions are appended to, already carrying <c>WITH RECURSIVE </c>.</param>
+    /// <param name="keyExpr">The session key bound as one hex literal.</param>
+    /// <remarks>
+    /// <para>
+    /// <c>spans</c> is the session's record spans, <c>roots</c> the ones with no parent, a
+    /// self-parent, or a parent outside the session — the request-row fallback — and
+    /// <c>turn_entries</c> the session's turns in turn order: the stored <c>session_turn</c> rows
+    /// when the session has them, else its <c>llm.invoke</c> records ordered by start and span.
+    /// </para>
+    /// <para>
+    /// The fallback branches gate themselves on the store's own rows, so one expression tree
+    /// answers sessions with and without projections: the <c>EXISTS</c>/<c>NOT EXISTS</c>
+    /// predicates leave exactly one branch non-empty.
+    /// </para>
+    /// </remarks>
+    private static void AppendSessionSectionCtes(StringBuilder sql, string keyExpr)
+    {
+        sql.Append(CultureInfo.InvariantCulture, $"spans(span_id) AS (SELECT rsl.span_id FROM record_session_link rsl WHERE rsl.session_key = {keyExpr}), ");
+        sql.Append("roots(span_id) AS (SELECT r.span_id FROM record r LEFT JOIN record_parent rp ON rp.span_id = r.span_id WHERE r.span_id IN (SELECT span_id FROM spans) AND (rp.parent_span_id IS NULL OR rp.parent_span_id = r.span_id OR rp.parent_span_id NOT IN (SELECT span_id FROM spans))), ");
+        sql.Append("projected_turns(position, span_id) AS (SELECT position, span_id FROM session_turn WHERE session_id = ");
+        sql.Append(keyExpr);
+        sql.Append("), ");
+        sql.Append("fallback_turns(position, span_id) AS (SELECT ROW_NUMBER() OVER (ORDER BY r.started_at_utc ASC, r.span_id ASC), r.span_id FROM record r WHERE r.span_id IN (SELECT span_id FROM spans) AND r.op = 'llm.invoke' AND NOT EXISTS (SELECT 1 FROM session_turn WHERE session_id = ");
+        sql.Append(keyExpr);
+        sql.Append(")), ");
+        sql.Append("turn_entries(position, span_id) AS (SELECT position, span_id FROM projected_turns WHERE EXISTS (SELECT 1 FROM session_turn WHERE session_id = ");
+        sql.Append(keyExpr);
+        sql.Append(") UNION ALL SELECT position, span_id FROM fallback_turns), ");
+    }
+
+    /// <summary>
+    /// Reads a section read's total when its page came back empty — no rows on the page or none in
+    /// the set at all — by counting the set the read's common table expressions define.
+    /// </summary>
+    /// <param name="ctes">The read's common table expressions, already carrying <c>WITH RECURSIVE</c>.</param>
+    /// <param name="setName">The CTE the rows are cut from.</param>
+    /// <param name="displayName">Name the parse errors carry.</param>
+    /// <returns>The set's row count.</returns>
+    private int ReadSessionSectionTotal(StringBuilder ctes, string setName, string displayName)
+    {
+        StringBuilder countSql = new(TabReadScriptHeader);
+        countSql.Append(ctes);
+        countSql.Append(CultureInfo.InvariantCulture, $"SELECT 'TOTAL', COUNT(*) FROM {setName};\n");
+        string[] countLines = [.. TabLines(ExecuteSqlite(countSql.ToString()))];
+        if (countLines.Length != 1)
+        {
+            throw new InvalidOperationException($"Expected 1 count row for the {displayName} count, got {countLines.Length.ToString(CultureInfo.InvariantCulture)}.");
+        }
+
+        return ParseInt32Required(SplitTabLine(countLines[0], 2, displayName)[1], $"{displayName} total");
+    }
+
+    /// <summary>
+    /// Appends the set of problem ids attached to one session — by <c>ingest_problem_session</c> or
+    /// by one of the session's spans — as one parenthesized select.
+    /// </summary>
+    /// <param name="sql">Script the select is appended to.</param>
+    /// <param name="sessionKey">Canonical session key.</param>
+    private static void AppendSessionProblemAttachment(StringBuilder sql, string sessionKey)
+    {
+        string key = TextExpr(sessionKey);
+        sql.Append("SELECT problem_id FROM ingest_problem_session WHERE session_id = ");
+        sql.Append(key);
+        sql.Append(" UNION SELECT psp.problem_id FROM ingest_problem_span psp JOIN record_session_link rsl ON rsl.span_id = psp.span_id WHERE rsl.session_key = ");
+        sql.Append(key);
+    }
+
+    /// <inheritdoc />
     public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);

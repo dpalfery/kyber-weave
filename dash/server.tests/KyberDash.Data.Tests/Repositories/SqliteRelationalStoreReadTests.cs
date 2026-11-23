@@ -943,6 +943,15 @@ public class SqliteRelationalStoreReadTests : IDisposable
             Assert.Equivalent(memoryReader.SessionSummaryFigures(sessionKey), sqliteReader.SessionSummaryFigures(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.SessionDetailFigures(sessionKey), sqliteReader.SessionDetailFigures(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.TurnFigures(sessionKey, 0), sqliteReader.TurnFigures(sessionKey, 0), strict: true);
+            Assert.Equivalent(memoryReader.SessionRequestFigures(sessionKey, 1, 25), sqliteReader.SessionRequestFigures(sessionKey, 1, 25), strict: true);
+            Assert.Equivalent(memoryReader.SessionRequestFigures(sessionKey, 2, 25), sqliteReader.SessionRequestFigures(sessionKey, 2, 25), strict: true);
+            Assert.Equivalent(memoryReader.SessionReconciliationFigures(sessionKey, 1, 25), sqliteReader.SessionReconciliationFigures(sessionKey, 1, 25), strict: true);
+            Assert.Equivalent(memoryReader.SessionReconciliationFigures(sessionKey, 2, 25), sqliteReader.SessionReconciliationFigures(sessionKey, 2, 25), strict: true);
+            Assert.Equivalent(memoryReader.SessionProblems(sessionKey, 1, 25), sqliteReader.SessionProblems(sessionKey, 1, 25), strict: true);
+            Assert.Equivalent(
+                memoryReader.RequestPromptPreviews(sessionKey, ["span-req-1", "span-req-2"]),
+                sqliteReader.RequestPromptPreviews(sessionKey, ["span-req-1", "span-req-2"]),
+                strict: true);
             Assert.Equivalent(memoryReader.TurnFigures(sessionKey, int.MaxValue), sqliteReader.TurnFigures(sessionKey, int.MaxValue), strict: true);
             Assert.Equivalent(memoryReader.TurnContentParts(sessionKey), sqliteReader.TurnContentParts(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.TurnContentParts(sessionKey, turnIndex: 0), sqliteReader.TurnContentParts(sessionKey, turnIndex: 0), strict: true);

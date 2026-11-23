@@ -490,6 +490,21 @@ public record SessionTurnFigureSet(
     ReadTimeContextBucketSummary? FirstContextBucket,
     ReadTimeContextBucketSummary? LastContextBucket);
 
+/// <summary>One page of a session's request rows, read over <c>session_request</c> and turn ownership only.</summary>
+/// <param name="Items">The page's request rows, in request order. Prompt previews are always <see langword="null"/> here; the scoped <see cref="IRelationalStoreReader.RequestPromptPreviews"/> read supplies them.</param>
+/// <param name="Total">Number of request rows the session holds, before paging.</param>
+public record SessionRequestFigurePageResult(IReadOnlyList<ReadTimeSessionRequestSummary> Items, int Total);
+
+/// <summary>One page of a session's reconciliation rows, read over the turns' reported and tokenized totals only.</summary>
+/// <param name="Items">The page's measurable rows — both matches present — in turn order.</param>
+/// <param name="Total">Number of measurable reconciliation rows the session holds, before paging.</param>
+public record SessionReconciliationFigurePageResult(IReadOnlyList<ReadTimeTurnReconciliation> Items, int Total);
+
+/// <summary>One page of a session's stored ingest problems (<c>ingest_problem</c>), in problem-id order.</summary>
+/// <param name="Items">The page's problems, in problem-id order.</param>
+/// <param name="Total">Number of stored ingest problems attached to the session, before paging.</param>
+public record SessionProblemPageResult(IReadOnlyList<Problem> Items, int Total);
+
 /// <summary>
 /// Typed read-only query contract over normalized telemetry, session, and record tables in
 /// the relational KyberDash store.
@@ -741,6 +756,70 @@ public interface IRelationalStoreReader
     /// figure set's tool and request rows, and neither materializes content.
     /// </remarks>
     SessionTurnFigureSet? SessionTurnFigures(string sessionKey, IModelPricingLookup? pricing = null);
+
+    /// <summary>
+    /// Pages one session's request rows — the <c>session_request</c> rows when the session has
+    /// them, else its root records — over request metadata and turn ownership only (<c>DD-13</c>).
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page.</param>
+    /// <returns>The page's request rows and the session's request-row total.</returns>
+    /// <remarks>
+    /// The requests section answers its rows from this read plus
+    /// <see cref="RequestPromptPreviews"/> for the page's spans, so the section never reads the
+    /// detail figure set's tool, cost, or schema rows, and never materializes content on its own.
+    /// A session without a session row answers an empty page, as the figures the detail payload
+    /// builds from do.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
+    SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit);
+
+    /// <summary>
+    /// Pages one session's measurable reconciliation rows — the turns whose reported and tokenized
+    /// input and output totals are both present — over the turns' reported and tokenized totals
+    /// only (<c>DD-13</c>), in turn order.
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page.</param>
+    /// <returns>The page's reconciliation rows and the session's measurable-row total.</returns>
+    /// <remarks>
+    /// The reconciliation section answers its rows from this read alone, so it never reads the
+    /// detail figure set's tool, cost, or schema rows. Unmeasurable rows — either match absent —
+    /// are not part of the set, as today's detail payload omits them.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
+    SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit);
+
+    /// <summary>
+    /// Pages one session's stored ingest problems (<c>DD-13</c>), attached by session or by one of
+    /// the session's spans, in problem-id order.
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page.</param>
+    /// <returns>The page's problems and the session's stored-problem total.</returns>
+    /// <remarks>
+    /// The problems section answers its rows from this read alone. A problem attached both by
+    /// session and by span appears once, as today's figures deduplicate it.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
+    SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit);
+
+    /// <summary>
+    /// Reads the prompt previews of exactly the named request spans, and no other span's parts.
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key the spans belong to.</param>
+    /// <param name="requestSpanIds">The page's request span ids, from <see cref="SessionRequestFigures"/>.</param>
+    /// <returns>One entry per requested span id: the preview, or <see langword="null"/> when the span carries none.</returns>
+    /// <remarks>
+    /// The requests section's one sanctioned content read: a preview is the span's, or one of its
+    /// owned turns', first non-empty prompt-bucket part, truncated the way the detail figures'
+    /// preview rule truncates. Only the given spans' parts are read, so a page of 25 requests
+    /// never materializes the session's whole conversation.
+    /// </remarks>
+    IReadOnlyDictionary<string, string?> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds);
 
     /// <summary>
     /// Reads one session's record metadata with no content column, the shape the detail
