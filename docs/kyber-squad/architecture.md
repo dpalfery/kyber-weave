@@ -1089,7 +1089,9 @@ and validates.
   granted server to `tools`, after the semantic tool IDs. It does so for any agent whose
   capability profile allows `filesystem.read`, under the shared entitlement predicate that
   `ClaudeRenderer`, `ZCodeRenderer`, and `DevinRenderer` apply to their own grants, so
-  `conductor` carries `mcpServers: [kw-docs]` plus the `kw-docs___` entries like every other droid.
+  read-entitled specialists carry `mcpServers: [codegraph, kw-docs]` plus both tool-id
+  families, while `conductor` carries `mcpServers: [kw-docs]` plus only the `kw-docs___`
+  entries — the carve-out, not the template.
   `[]` remains the fail-closed value for a profile that grants no read entitlement and for a squad
   that declares no servers, and no droid ever omits either key, because omitting `mcpServers`
   inherits the session's servers and omitting `tools` allows every Factory tool — both omissions
