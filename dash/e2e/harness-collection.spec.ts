@@ -37,6 +37,9 @@ const dashRoot = dirname(specDir)
 const scratch = join(dashRoot, '..', '.agent_scratchpad', 'harness-collection-T1')
 const dashDist = join(dashRoot, 'dist', 'dash', 'index.html')
 
+/** The widest window the paged routes serve: a read that must see a whole section asks for it. */
+const WIDEST_PAGE_LIMIT = 500
+
 let child: ChildProcess | undefined
 let bootPid: number | undefined
 let app = ''
@@ -501,18 +504,26 @@ test.describe('the Factory (Droid) replay', () => {
     await expect(page.getByTestId('span-inspector')).toContainText(FACTORY_REPLAY_PROMPT)
 
     // And the prompt is the session's own content, not only an attribute on the
-    // raw span: the session payload's request carries what was asked.
-    const response = await page.request.get(`${factoryApp}/api/kyber/session/${FACTORY_CONTENT_ON_SESSION_ID}`)
+    // raw span: the requests section carries what was asked in each row's prompt
+    // preview. The section is paged, so the read asks for a window wide enough to
+    // hold every request the replayed session recorded.
+    const response = await page.request.get(
+      `${factoryApp}/api/kyber/session/${FACTORY_CONTENT_ON_SESSION_ID}/requests?limit=${WIDEST_PAGE_LIMIT}`,
+    )
     expect(response.status(), await response.text()).toBe(200)
     const payload = (await response.json()) as {
+      data?: Array<{ prompt?: unknown }>
       requests?: Array<{ prompt?: unknown }>
+      total?: number
+      page?: number
+      limit?: number
     }
     // The request that carries the prompt is found, not assumed to be the
-    // first: the payload's order is the session's, and a request that declares
+    // first: the page's order is the session's, and a request that declares
     // the prompt absent says so in a shape of its own.
-    const prompts = (payload.requests ?? []).map((request) => request.prompt)
+    const prompts = (payload.data ?? payload.requests ?? []).map((request) => request.prompt)
     const carried = prompts.find((prompt) => typeof prompt === 'string')
-    expect(carried, 'the session payload must carry the prompt the consent allowed').toBeDefined()
+    expect(carried, 'the requests section must carry the prompt the consent allowed').toBeDefined()
     expect(carried as string).toContain(FACTORY_REPLAY_PROMPT)
   })
 })
@@ -542,14 +553,8 @@ async function sessionTokenState(
   baseUrl: string,
   sessionId: string,
 ): Promise<{ availability: string; reason: string }> {
-  const response = await page.request.get(`${baseUrl}/api/kyber/sessions`)
-  expect(response.status(), 'the sessions answer must be the dashboard own').toBe(200)
-  const body = (await response.json()) as {
-    sessions?: Array<{ session_id?: string; total_input?: unknown }>
-  }
-  const session = body.sessions?.find((row) => row.session_id === sessionId)
-  expect(session, `the sessions answer must carry ${sessionId}`).toBeDefined()
-  const total = session?.total_input as { availability?: string; reason?: string } | undefined
+  const session = await sessionRow(page, baseUrl, sessionId)
+  const total = session.total_input as { availability?: string; reason?: string } | undefined
   expect(total, `${sessionId} must declare a token state`).toBeDefined()
   return {
     availability: total?.availability ?? 'measured',
@@ -562,13 +567,33 @@ async function sessionTokenState(
  * them. The model the plugin captured travels as the session's own attribute.
  */
 async function sessionModels(page: Page, baseUrl: string, sessionId: string): Promise<string[]> {
-  const response = await page.request.get(`${baseUrl}/api/kyber/sessions`)
+  const session = await sessionRow(page, baseUrl, sessionId)
+  const models = session.models
+  return Array.isArray(models) ? models.filter((model): model is string => typeof model === 'string') : []
+}
+
+/**
+ * One session's row, from the sessions page's own search.
+ *
+ * The list is paged, so the row is asked for by id instead of found in a page one read:
+ * a corpus past the first window would otherwise read as missing.
+ */
+async function sessionRow(
+  page: Page,
+  baseUrl: string,
+  sessionId: string,
+): Promise<{ session_id?: string; total_input?: unknown; models?: unknown }> {
+  const response = await page.request.get(
+    `${baseUrl}/api/kyber/sessions?q=${encodeURIComponent(sessionId)}&limit=${WIDEST_PAGE_LIMIT}`,
+  )
   expect(response.status(), 'the sessions answer must be the dashboard own').toBe(200)
   const body = (await response.json()) as {
-    sessions?: Array<{ session_id?: string; models?: unknown }>
+    sessions?: Array<{ session_id?: string; total_input?: unknown; models?: unknown }>
+    total?: number
+    page?: number
+    limit?: number
   }
   const session = body.sessions?.find((row) => row.session_id === sessionId)
   expect(session, `the sessions answer must carry ${sessionId}`).toBeDefined()
-  const models = session?.models
-  return Array.isArray(models) ? models.filter((model): model is string => typeof model === 'string') : []
+  return session!
 }
