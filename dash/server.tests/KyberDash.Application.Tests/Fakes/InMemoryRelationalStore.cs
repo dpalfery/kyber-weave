@@ -837,6 +837,30 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
+    public IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null)
+    {
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionListFigures));
+            TableMetadata sessionMeta = GetTableMetadata("session");
+            List<SessionListFigure> results = [];
+            foreach (object?[] row in state.GetRows("session"))
+            {
+                if (harnessId is not null && !string.Equals(GetString(sessionMeta, row, "harness_id"), harnessId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                CollectedSession session = MaterializeSession(state, row);
+                List<CollectedRecord> records = CollectSessionRecordsContentFree(state, session.SessionKey);
+                results.Add(BuildSessionListFigure(state, session, records, pricing));
+            }
+
+            return results;
+        }
+    }
+
+    /// <inheritdoc />
     public IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
@@ -5375,6 +5399,267 @@ public class InMemoryRelationalStore :
             FirstContextBucket: firstContextBucket,
             LastContextBucket: lastContextBucket,
             UnusedRange: unusedRange);
+    }
+
+    /// <summary>
+    /// Derives one session's sessions-list figures from its session row, content-free records,
+    /// stored projection, and ingest problems. The turn loop mirrors
+    /// <see cref="BuildSessionAggregateView"/> over the same scalar columns; the fields the
+    /// sessions list renders are kept and the content-bearing aggregate fields are deliberately
+    /// absent.
+    /// </summary>
+    private static SessionListFigure BuildSessionListFigure(
+        StoreState currentState,
+        CollectedSession session,
+        IReadOnlyList<CollectedRecord> records,
+        IModelPricingLookup? pricing)
+    {
+        string sessionKey = session.SessionKey;
+        string harnessId = session.HarnessId;
+
+        HashSet<string> sessionSpanIds = new(StringComparer.Ordinal);
+        foreach (CollectedRecord record in records)
+        {
+            _ = sessionSpanIds.Add(record.RecordId);
+        }
+
+        StoredSessionProjection? projection = GetSessionProjectionFromState(currentState, sessionKey);
+        List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntries(currentState, sessionKey, records);
+
+        List<CostBlock> turnPublishedBlocks = new(turnEntries.Count);
+        List<CostBlock> valuedTurnPublishedBlocks = [];
+        List<CostBlock> valuedTurnHarnessBlocks = [];
+        List<string> models = [];
+        HashSet<string> seenModels = new(StringComparer.Ordinal);
+        long totalInput = 0;
+        bool hasInput = false;
+        long totalOutput = 0;
+        bool hasOutput = false;
+
+        foreach ((int position, CollectedRecord turnRecord) in turnEntries)
+        {
+            ReadTimeTurnSummary turnSummary = BuildTurnSummary(
+                turnRecord,
+                position,
+                harnessId,
+                pricing,
+                out CostBlock publishedBlock,
+                out CostBlock? harnessBlock);
+
+            turnPublishedBlocks.Add(publishedBlock);
+            if (publishedBlock.Value is double publishedValue && double.IsFinite(publishedValue))
+            {
+                valuedTurnPublishedBlocks.Add(publishedBlock);
+            }
+
+            if (harnessBlock is not null && harnessBlock.Value is double harnessValue && double.IsFinite(harnessValue))
+            {
+                valuedTurnHarnessBlocks.Add(harnessBlock);
+            }
+
+            if (!string.IsNullOrEmpty(turnRecord.Model) && seenModels.Add(turnRecord.Model))
+            {
+                models.Add(turnRecord.Model);
+            }
+
+            if (turnSummary.InputTokens.HasValue)
+            {
+                totalInput += turnSummary.InputTokens.Value;
+                hasInput = true;
+            }
+
+            if (turnSummary.OutputTokens.HasValue)
+            {
+                totalOutput += turnSummary.OutputTokens.Value;
+                hasOutput = true;
+            }
+        }
+
+        List<CollectedRecord> rootRecords =
+        [
+            .. records
+                .Where(r => r.ParentRecordId is null ||
+                            string.Equals(r.ParentRecordId, r.RecordId, StringComparison.Ordinal) ||
+                            !sessionSpanIds.Contains(r.ParentRecordId))
+                .OrderBy(static r => r.StartedAt)
+                .ThenBy(static r => r.RecordId, StringComparer.Ordinal),
+        ];
+
+        List<Problem> extraProblems = [];
+
+        List<CostBlock> reportedRecordBlocks = [];
+        foreach (CollectedRecord record in records)
+        {
+            if (record.ReportedCost is null)
+            {
+                continue;
+            }
+
+            IReadOnlyDictionary<string, double>? byModel = !string.IsNullOrEmpty(record.Model)
+                ? new Dictionary<string, double>(StringComparer.Ordinal) { [record.Model] = record.ReportedCost.Amount }
+                : null;
+            reportedRecordBlocks.Add(new CostBlock(
+                CostBasis.Harness,
+                CostStatus.Priced,
+                record.ReportedCost.Amount,
+                record.ReportedCost.Currency,
+                byModel));
+        }
+
+        ReadTimeCostSummary? sessionReportedCost = reportedRecordBlocks.Count > 0
+            ? AggregateCostBlocks(reportedRecordBlocks, CostBasis.Harness, extraProblems)
+            : null;
+
+        ReadTimeCostSummary sessionPublishedCost = turnPublishedBlocks.Count > 0
+            ? AggregateCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
+            : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
+
+        ReadTimeCostBasisMismatch? basisMismatch = null;
+        if (valuedTurnHarnessBlocks.Count > 0 && valuedTurnPublishedBlocks.Count > 0)
+        {
+            List<CostBlock> combined = [.. valuedTurnHarnessBlocks, .. valuedTurnPublishedBlocks];
+            CostTotalResult mismatchTotal = CanonPricing.SumCosts(combined);
+            CostBasisMismatch? domainMismatch = CanonPricing.CostBasisMismatchOf(combined, mismatchTotal);
+            if (domainMismatch is not null)
+            {
+                List<ReadTimeBasisTotal> totalsByBasis =
+                [
+                    .. domainMismatch.TotalsByBasis
+                        .OrderBy(static kv => kv.Key, StringComparer.Ordinal)
+                        .Select(static kv => new ReadTimeBasisTotal(kv.Key, kv.Value)),
+                ];
+                basisMismatch = new ReadTimeCostBasisMismatch(
+                    domainMismatch.Code,
+                    domainMismatch.Message,
+                    domainMismatch.Bases,
+                    totalsByBasis);
+            }
+
+            if (mismatchTotal.Problem is not null)
+            {
+                extraProblems.Add(mismatchTotal.Problem);
+            }
+        }
+
+        int requestCount = projection is not null && projection.RequestSpanIds.Count > 0
+            ? projection.RequestSpanIds.Count
+            : rootRecords.Count;
+
+        List<Problem> problems = CollectSessionProblems(currentState, sessionKey, sessionSpanIds);
+        problems.AddRange(extraProblems);
+
+        return new SessionListFigure(
+            SessionKey: sessionKey,
+            HarnessId: harnessId,
+            Repo: session.Workspace?.Repository,
+            Branch: session.Workspace?.Branch,
+            TurnCount: turnEntries.Count,
+            RequestCount: requestCount,
+            TotalInput: hasInput ? totalInput : null,
+            TotalOutput: hasOutput ? totalOutput : null,
+            ReportedCost: sessionReportedCost,
+            PublishedCost: sessionPublishedCost,
+            CostBasisMismatch: basisMismatch,
+            Models: models,
+            ProblemsCount: problems.Count);
+    }
+
+    /// <summary>
+    /// Collects a session's records from state without materializing any content-bearing child
+    /// row, so <see cref="SessionListFigures"/> never counts content bytes on the fake.
+    /// </summary>
+    private static List<CollectedRecord> CollectSessionRecordsContentFree(StoreState currentState, string sessionKey)
+    {
+        HashSet<string> sessionSpans = ResolveSessionSpanIds(currentState, sessionKey);
+        if (sessionSpans.Count == 0)
+        {
+            return [];
+        }
+
+        TableMetadata recordMeta = GetTableMetadata("record");
+        List<CollectedRecord> records = [];
+        foreach (object?[] row in currentState.GetRows("record"))
+        {
+            if (sessionSpans.Contains(GetString(recordMeta, row, "span_id")))
+            {
+                records.Add(MaterializeRecordContentFree(currentState, row));
+            }
+        }
+
+        return records;
+    }
+
+    /// <summary>
+    /// Materializes a record's scalar columns and token counts — the columns the sessions-list
+    /// figures derive from — without any content-bearing child row: parts, tool calls, tool
+    /// definitions, agent invocations, and skills stay absent, and signals stay absent because
+    /// no list figure reads them.
+    /// </summary>
+    private static CollectedRecord MaterializeRecordContentFree(StoreState currentState, object?[] recordRow)
+    {
+        TableMetadata meta = GetTableMetadata("record");
+        string spanId = GetString(meta, recordRow, "span_id");
+        string harnessId = GetString(meta, recordRow, "harness_id");
+        RecordOp op = ParseRecordOp(GetString(meta, recordRow, "op"));
+        RecordKind kind = ParseRecordKind(GetString(meta, recordRow, "kind"));
+        string name = GetString(meta, recordRow, "name");
+        DateTimeOffset startedAt = ParseTimestamp(GetString(meta, recordRow, "started_at_utc"));
+        RecordStatus status = ParseRecordStatus(GetString(meta, recordRow, "status"));
+
+        string? sessionKey = ReadOptionalSingleString(currentState, "record_session_link", "span_id", spanId, "session_key");
+        string? parentSpanId = ReadOptionalSingleString(currentState, "record_parent", "span_id", spanId, "parent_span_id");
+        string? traceId = ReadOptionalSingleString(currentState, "record_trace", "span_id", spanId, "trace_id");
+        string? model = ReadOptionalSingleString(currentState, "record_model", "span_id", spanId, "model_id");
+        string? endedRaw = ReadOptionalSingleString(currentState, "record_end", "span_id", spanId, "ended_at_utc");
+        DateTimeOffset? endedAt = endedRaw is null ? null : ParseTimestamp(endedRaw);
+        long? reportedDurationMs = ReadOptionalSingleInt64(currentState, "record_reported_duration", "span_id", spanId, "duration_ms");
+        string? agentInstanceId = ReadOptionalSingleString(currentState, "record_agent_instance", "span_id", spanId, "agent_instance_id");
+
+        TableMetadata tokenMeta = GetTableMetadata("record_token_count");
+        List<CollectedTokenCount> tokens =
+        [
+            .. currentState.GetRows("record_token_count")
+                .Where(r => string.Equals(GetString(tokenMeta, r, "span_id"), spanId, StringComparison.Ordinal))
+                .Select(r => new CollectedTokenCount(
+                    ParseTokenClass(GetString(tokenMeta, r, "token_class")),
+                    GetInt64(tokenMeta, r, "token_count"))),
+        ];
+
+        object?[]? costRow = FindRowByKey(currentState, "record_reported_cost", [("span_id", spanId)]);
+        CollectedCost? reportedCost = costRow is null
+            ? null
+            : new CollectedCost(
+                GetDouble(GetTableMetadata("record_reported_cost"), costRow, "amount"),
+                GetString(GetTableMetadata("record_reported_cost"), costRow, "currency"));
+
+        long? reportedInput = ReadOptionalReportedTotal(currentState, spanId, "input");
+        long? reportedOutput = ReadOptionalReportedTotal(currentState, spanId, "output");
+
+        return new CollectedRecord(
+            spanId,
+            harnessId,
+            op,
+            kind,
+            name,
+            startedAt,
+            status,
+            sessionKey,
+            parentSpanId,
+            traceId,
+            model,
+            endedAt,
+            reportedDurationMs,
+            tokens,
+            reportedCost,
+            Parts: [],
+            Tool: null,
+            Agent: null,
+            SkillsInvoked: [],
+            agentInstanceId,
+            ToolDefinitions: [],
+            new CollectedRecordSignals(null, null, null, null),
+            reportedInput,
+            reportedOutput);
     }
 
     private static StoredSessionProjection? GetSessionProjectionFromState(StoreState currentState, string sessionId)

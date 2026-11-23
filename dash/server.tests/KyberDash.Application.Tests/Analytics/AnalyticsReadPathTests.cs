@@ -148,6 +148,202 @@ public sealed class AnalyticsReadPathTests
         Assert.Equal(0.0021, summary.GetProperty("summary").GetProperty("cost").GetProperty("value").GetDouble(), precision: 6);
     }
 
+    /// <summary>
+    /// The sessions-list read model answers exactly the figures the broad aggregate reads
+    /// answered: per session, <see cref="InMemoryRelationalStore.SessionListFigures"/> equals the
+    /// <see cref="InMemoryRelationalStore.GetSessionAggregate"/> row and the unfiltered
+    /// <see cref="InMemoryRelationalStore.ListSessionAggregates"/> row, on a token-less session
+    /// (token totals stay absent, never zero), a zero-token session (zero stays zero), a
+    /// multi-harness session (every attributed harness's turns count), an empty session, and a
+    /// content-bearing session.
+    /// </summary>
+    [Fact]
+    public void SessionListFiguresAnswerTheSameFiguresAsTheBroadAggregateRead()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new(snapshot: new Dictionary<string, ModelCosts>(StringComparer.Ordinal)
+        {
+            ["claude-sonnet-4-6"] = new ModelCosts(
+                InputCostPerToken: 0.000003,
+                OutputCostPerToken: 0.000015,
+                CacheWriteCostPerToken: 0.00000375,
+                CacheReadCostPerToken: 0.0000003,
+                WebSearchCostPerRequest: 0,
+                FastMultiplier: 1,
+                CacheWriteCostIsExplicit: true),
+        });
+        WriteSession(store, "sess-tokenless", [Turn("span-tl-1", "sess-tokenless", 0, tokenCounts: [])]);
+        WriteSession(store, "sess-zero-tokens", [Turn("span-zt-1", "sess-zero-tokens", 0, inputTokens: 0, outputTokens: 0)]);
+        // A session key attributed to two harnesses: the codex turn lands first so the session
+        // row upserts to claude-code with the second write, and the figures must still count
+        // both harnesses' turns — the per-session read the list replaced did.
+        WriteSession(
+            store,
+            "sess-multi",
+            [Turn("span-mu-cx", "sess-multi", 1, inputTokens: 200, outputTokens: 20, model: "gpt-5.1-codex", harnessId: "codex")],
+            harnessId: "codex");
+        WriteSession(store, "sess-multi", [Turn("span-mu-cc", "sess-multi", 0, inputTokens: 100, outputTokens: 10)]);
+        WriteSession(store, "sess-empty-list", []);
+        WriteSession(
+            store,
+            "sess-list-content",
+            [Turn("span-lc-1", "sess-list-content", 0, inputTokens: 400, outputTokens: 60, reportedCostUsd: 0.4,
+                parts: [TextPart(0, "user_prompt", "content-bearing prompt text")])],
+            repo: "kyber-weave",
+            branch: "kw-task/T2");
+        _ = CreateProjection(store, pricing).ProjectAll();
+
+        IReadOnlyList<SessionListFigure> figures = store.SessionListFigures();
+        string[] expectedKeys =
+        [
+            "sess-empty-list", "sess-list-content", "sess-multi", "sess-tokenless", "sess-zero-tokens",
+        ];
+        Assert.Equal(expectedKeys, figures.Select(static figure => figure.SessionKey).Order(StringComparer.Ordinal));
+
+        foreach (SessionListFigure figure in figures)
+        {
+            SessionAggregateView? broad = store.GetSessionAggregate(figure.SessionKey);
+            Assert.NotNull(broad);
+            AssertFigureMatchesAggregate(figure, broad, store.GetSession(figure.SessionKey));
+        }
+
+        foreach (SessionAggregateView listed in store.ListSessionAggregates())
+        {
+            SessionListFigure figure = Assert.Single(figures, f => f.SessionKey == listed.SessionKey);
+            AssertFigureMatchesAggregate(figure, listed, store.GetSession(listed.SessionKey));
+        }
+
+        // The absent-versus-zero trap: a turn with no token rows leaves the totals absent, and a
+        // turn with zero-valued rows leaves them zero; neither may leak into the other.
+        SessionListFigure tokenless = Assert.Single(figures, static f => f.SessionKey == "sess-tokenless");
+        Assert.Equal(1, tokenless.TurnCount);
+        Assert.Null(tokenless.TotalInput);
+        Assert.Null(tokenless.TotalOutput);
+        SessionListFigure zeroed = Assert.Single(figures, static f => f.SessionKey == "sess-zero-tokens");
+        Assert.Equal(0, zeroed.TotalInput);
+        Assert.Equal(0, zeroed.TotalOutput);
+
+        // The multi-harness session keeps every attributed harness's figures.
+        SessionListFigure multi = Assert.Single(figures, static f => f.SessionKey == "sess-multi");
+        Assert.Equal("claude-code", multi.HarnessId);
+        Assert.Equal(2, multi.TurnCount);
+        Assert.Equal(300, multi.TotalInput);
+        Assert.Equal(["claude-sonnet-4-6", "gpt-5.1-codex"], multi.Models);
+
+        // A harness filter narrows the session rows without thinning any session's figures.
+        IReadOnlyList<SessionListFigure> claudeFigures = store.SessionListFigures("claude-code");
+        Assert.Equal(expectedKeys, claudeFigures.Select(static figure => figure.SessionKey).Order(StringComparer.Ordinal));
+        Assert.All(claudeFigures, static figure => Assert.Equal("claude-code", figure.HarnessId));
+        SessionListFigure filteredMulti = Assert.Single(claudeFigures, static f => f.SessionKey == "sess-multi");
+        Assert.Equal(2, filteredMulti.TurnCount);
+        Assert.Equal(300, filteredMulti.TotalInput);
+        Assert.Empty(store.SessionListFigures("codex"));
+    }
+
+    /// <summary>
+    /// The sessions list answers from the content-free read model: during
+    /// <see cref="KyberBridgeEngine.GetSessions"/> the instrumented fake records zero
+    /// content-bearing reads and zero materialized content bytes, and the harness filter (set
+    /// and unset), the empty store, and the limit keep answering the same session rows.
+    /// </summary>
+    [Fact]
+    public void TheSessionsListNeverIssuesAContentRead()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        WriteSession(
+            store,
+            "sess-list-cc",
+            [Turn("span-lcc-1", "sess-list-cc", 0, inputTokens: 400, outputTokens: 60,
+                parts: [TextPart(0, "user_prompt", "content-bearing prompt text")])],
+            repo: "kyber-weave",
+            branch: "kw-task/T2");
+        WriteSession(
+            store,
+            "sess-list-cx",
+            [Turn("span-lcx-1", "sess-list-cx", 1, inputTokens: 100, outputTokens: 10, harnessId: "codex")],
+            harnessId: "codex");
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
+        bridge.EnsureProjected();
+
+        string[] contentBearingReads =
+        [
+            nameof(InMemoryRelationalStore.Records),
+            nameof(InMemoryRelationalStore.SessionRecordsForRebuild),
+            nameof(InMemoryRelationalStore.AllSessionRecordsForMaintenance),
+            nameof(InMemoryRelationalStore.GetRecord),
+            nameof(InMemoryRelationalStore.GetSessionAggregate),
+            nameof(InMemoryRelationalStore.ListSessionAggregates),
+            nameof(InMemoryRelationalStore.SessionTurnSummaries),
+            nameof(InMemoryRelationalStore.ContentParts),
+            nameof(InMemoryRelationalStore.ToolCalls),
+            nameof(InMemoryRelationalStore.ToolDefinitions),
+            nameof(InMemoryRelationalStore.AgentInvocations),
+            nameof(InMemoryRelationalStore.SkillsInvoked),
+        ];
+
+        store.ClearReadLog();
+        JsonElement unfiltered = bridge.GetSessions();
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.DoesNotContain(store.ReadLog, read => contentBearingReads.Contains(read));
+        Assert.Equal(
+            ["sess-list-cx", "sess-list-cc"],
+            unfiltered.EnumerateArray().Select(static node => node.GetProperty("session_id").GetString()).ToList());
+        JsonElement ccNode = Assert.Single(
+            unfiltered.EnumerateArray(),
+            static node => node.GetProperty("session_id").GetString() == "sess-list-cc");
+        Assert.Equal("claude-code", ccNode.GetProperty("harness").GetString());
+        Assert.Equal("kyber-weave", ccNode.GetProperty("repo").GetString());
+        Assert.Equal(1, ccNode.GetProperty("turn_count").GetInt32());
+        Assert.Equal(400, ccNode.GetProperty("total_input").GetInt64());
+        Assert.False(ccNode.TryGetProperty("projection_status", out _));
+
+        store.ClearReadLog();
+        JsonElement filtered = bridge.GetSessions(harness: "codex");
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.DoesNotContain(store.ReadLog, read => contentBearingReads.Contains(read));
+        Assert.Equal(
+            ["sess-list-cx"],
+            filtered.EnumerateArray().Select(static node => node.GetProperty("session_id").GetString()).ToList());
+
+        store.ClearReadLog();
+        JsonElement limited = bridge.GetSessions(limit: 1);
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.DoesNotContain(store.ReadLog, read => contentBearingReads.Contains(read));
+        Assert.Equal(
+            ["sess-list-cx"],
+            limited.EnumerateArray().Select(static node => node.GetProperty("session_id").GetString()).ToList());
+
+        InMemoryRelationalStore emptyStore = new();
+        KyberBridgeEngine emptyBridge = CreateBridge(emptyStore, pricing: new FakePricingRepository());
+        emptyStore.ClearReadLog();
+        JsonElement none = emptyBridge.GetSessions();
+        Assert.Equal(0, emptyStore.MaterializedContentBytes);
+        Assert.DoesNotContain(emptyStore.ReadLog, read => contentBearingReads.Contains(read));
+        Assert.Equal(0, none.GetArrayLength());
+    }
+
+    private static void AssertFigureMatchesAggregate(
+        SessionListFigure figure,
+        SessionAggregateView aggregate,
+        CollectedSession? session)
+    {
+        Assert.Equal(aggregate.SessionKey, figure.SessionKey);
+        Assert.Equal(aggregate.HarnessId, figure.HarnessId);
+        Assert.Equal(aggregate.TurnCount, figure.TurnCount);
+        Assert.Equal(aggregate.RequestCount, figure.RequestCount);
+        Assert.Equal(aggregate.TotalInput, figure.TotalInput);
+        Assert.Equal(aggregate.TotalOutput, figure.TotalOutput);
+        Assert.Equal(aggregate.Models, figure.Models);
+        Assert.Equivalent(aggregate.ReportedCost, figure.ReportedCost, strict: true);
+        Assert.Equivalent(aggregate.PublishedCost, figure.PublishedCost, strict: true);
+        Assert.Equivalent(aggregate.CostBasisMismatch, figure.CostBasisMismatch, strict: true);
+        Assert.Equal(aggregate.Problems.Count, figure.ProblemsCount);
+        Assert.Equal(session?.Workspace?.Repository, figure.Repo);
+        Assert.Equal(session?.Workspace?.Branch, figure.Branch);
+    }
+
     /// <summary>Session detail, summary, and span attributes answer from typed rows with no store JSON.</summary>
     [Fact]
     public void GetSessionDetailAnswersTypedSummaryTurnsAndSpanAttributes()
@@ -598,15 +794,23 @@ public sealed class AnalyticsReadPathTests
         double? reportedCostUsd = null,
         IReadOnlyList<CollectedContentPart>? parts = null,
         long? declaredContextWindow = null,
-        string harnessId = "claude-code")
+        string harnessId = "claude-code",
+        IReadOnlyList<CollectedTokenCount>? tokenCounts = null,
+        long? reportedInputTokens = null,
+        long? reportedOutputTokens = null)
     {
-        List<CollectedTokenCount> tokens =
-        [
-            new CollectedTokenCount(TokenClass.Input, inputTokens),
-            new CollectedTokenCount(TokenClass.CacheRead, cacheRead),
-            new CollectedTokenCount(TokenClass.CacheWrite, 0),
-            new CollectedTokenCount(TokenClass.Output, outputTokens),
-        ];
+        // An explicit tokenCounts list overrides the default per-class rows, so a test can seed
+        // a token-less turn (no rows at all) or an exact class breakdown; the reported totals
+        // then default to absent instead of the derived checksum.
+        List<CollectedTokenCount> tokens = tokenCounts is null
+            ?
+            [
+                new CollectedTokenCount(TokenClass.Input, inputTokens),
+                new CollectedTokenCount(TokenClass.CacheRead, cacheRead),
+                new CollectedTokenCount(TokenClass.CacheWrite, 0),
+                new CollectedTokenCount(TokenClass.Output, outputTokens),
+            ]
+            : [.. tokenCounts];
 
         return new CollectedRecord(
             RecordId: spanId,
@@ -633,8 +837,8 @@ public sealed class AnalyticsReadPathTests
             AgentInstanceId: null,
             ToolDefinitions: [],
             Signals: new CollectedRecordSignals(ErrorMessage: null, EditFailures: null, CorrectionRule: null, DeclaredContextWindow: declaredContextWindow),
-            ReportedInputTokens: inputTokens + cacheRead,
-            ReportedOutputTokens: outputTokens);
+            ReportedInputTokens: reportedInputTokens ?? (tokenCounts is null ? inputTokens + cacheRead : null),
+            ReportedOutputTokens: reportedOutputTokens ?? (tokenCounts is null ? outputTokens : null));
     }
 
     private static CollectedContentPart TextPart(int position, string bucket, string text, long? reportedTokens = null) =>
@@ -658,7 +862,9 @@ public sealed class AnalyticsReadPathTests
 
     /// <summary>
     /// Reader decorator that fails every aggregate read for one session key, standing in for a
-    /// store whose projection of that session is broken beyond recovery.
+    /// store whose projection of that session is broken beyond recovery. The batched
+    /// sessions-list read faults when it would cover that session, so the bridge's per-session
+    /// degradation is what isolates it.
     /// </summary>
     private sealed class FaultingSessionReader(InMemoryRelationalStore inner, string failingSessionKey) : IRelationalStoreReader
     {
@@ -717,6 +923,17 @@ public sealed class AnalyticsReadPathTests
 
         public IReadOnlyList<SessionAggregateView> ListSessionAggregates(string? harnessId = null, IModelPricingLookup? pricing = null) =>
             inner.ListSessionAggregates(harnessId, pricing);
+
+        public IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null)
+        {
+            IReadOnlyList<SessionListFigure> figures = inner.SessionListFigures(harnessId, pricing);
+            if (figures.Any(figure => string.Equals(figure.SessionKey, failingSessionKey, StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return figures;
+        }
 
         public IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null)
         {

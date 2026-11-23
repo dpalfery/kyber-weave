@@ -384,6 +384,17 @@ public sealed class AnalyticsOperationsDetailTests
         public IReadOnlyList<SessionAggregateView> ListSessionAggregates(string? harnessId = null, IModelPricingLookup? pricing = null) =>
             inner.ListSessionAggregates(harnessId, pricing);
 
+        public IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null)
+        {
+            IReadOnlyList<SessionListFigure> figures = inner.SessionListFigures(harnessId, pricing);
+            if (figures.Any(figure => string.Equals(figure.SessionKey, failingSessionKey, StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return figures;
+        }
+
         public IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null)
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))

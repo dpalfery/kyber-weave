@@ -330,11 +330,11 @@ public class SqliteRelationalStoreReadTests : IDisposable
         AssertQueryParity(
             sqlite,
             memory,
-            sessionKeys: ["sess-proj", "sess-unproj", "sess-empty", "sess-unpriced", "sess-copilot", "sess-missing"],
-            harnessIds: [null, "claude-code", "copilot", "unknown-harness"],
+            sessionKeys: ["sess-proj", "sess-unproj", "sess-empty", "sess-unpriced", "sess-copilot", "sess-tokenless", "sess-zero-tokens", "sess-multi", "sess-missing"],
+            harnessIds: [null, "claude-code", "copilot", "codex", "unknown-harness"],
             runIds: ["run-cc", "run-cp", "run-missing"],
             findingIds: ["find-1", "find-2", "find-missing"],
-            spanIds: ["span-req-1", "span-turn-1", "span-req-2", "span-unproj-1", "span-missing"],
+            spanIds: ["span-req-1", "span-turn-1", "span-req-2", "span-unproj-1", "span-tokenless-1", "span-multi-cx-1", "span-missing"],
             sourceIds: BuildExpectedSourceIds(memory));
 
         AssertAllReadScriptsUseTabbedHexWithoutJson(sqlite.ExecutedSql);
@@ -362,6 +362,10 @@ public class SqliteRelationalStoreReadTests : IDisposable
         Assert.Equivalent(
             memory.ListSessionAggregates("claude-code", customLookup),
             sqlite.ListSessionAggregates("claude-code", customLookup),
+            strict: true);
+        Assert.Equivalent(
+            memory.SessionListFigures("claude-code", customLookup),
+            sqlite.SessionListFigures("claude-code", customLookup),
             strict: true);
         Assert.Equivalent(
             memory.SessionTurnSummaries("sess-proj", customLookup),
@@ -423,6 +427,88 @@ public class SqliteRelationalStoreReadTests : IDisposable
         Assert.Equal(0, unpricedAgg.UnusedRange.Floor);
         Assert.Equal(50, unpricedAgg.UnusedRange.Ceiling);
         Assert.Null(unpricedAgg.UnusedRange.Currency);
+    }
+
+    /// <summary>
+    /// <see cref="SqliteRelationalStore.SessionListFigures"/> is one content-free pass: no
+    /// executed script touches a content-part, tool-call, tool-definition, agent-invocation, or
+    /// skill table, and every figure equals the session's broad
+    /// <see cref="SqliteRelationalStore.GetSessionAggregate"/> figures on a token-less, a
+    /// zero-token, a multi-harness, an empty, and a content-bearing session — with absent token
+    /// totals staying distinct from zero.
+    /// </summary>
+    [Fact]
+    public void SessionListFigures_AreContentFreeAndMatchTheBroadAggregateRead()
+    {
+        string dbPath = Path.Combine(directory.Path, "list-figures", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+        SeedPopulatedStores(sqlite, memory);
+
+        sqlite.ClearRecordedSql();
+        IReadOnlyList<SessionListFigure> figures = sqlite.SessionListFigures();
+        string[] scripts = [.. sqlite.ExecutedSql];
+        Assert.NotEmpty(scripts);
+        Assert.All(scripts, static sql => Assert.Contains(".mode tabs", sql, StringComparison.Ordinal));
+        // The deny-list names tables, not substrings: the shared projection read legitimately
+        // selects session_context_turn.builtin_tool_definition_tokens, a token-count scalar both
+        // the list and the broad path use, and a bare "tool_definition" substring match would
+        // flag that scalar as content.
+        string[] contentTables =
+        [
+            "content_part",
+            "tool_call",
+            "tool_definition",
+            "agent_invocation",
+            "record_skill_invocation"
+        ];
+        Assert.All(scripts, sql =>
+        {
+            foreach (string table in contentTables)
+            {
+                Assert.DoesNotContain($"FROM {table}", sql, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain($"JOIN {table}", sql, StringComparison.OrdinalIgnoreCase);
+            }
+        });
+
+        Assert.Equivalent(memory.SessionListFigures(), figures, strict: true);
+
+        foreach (SessionListFigure figure in figures)
+        {
+            SessionAggregateView? broad = sqlite.GetSessionAggregate(figure.SessionKey);
+            Assert.NotNull(broad);
+            Assert.Equal(broad.SessionKey, figure.SessionKey);
+            Assert.Equal(broad.HarnessId, figure.HarnessId);
+            Assert.Equal(broad.TurnCount, figure.TurnCount);
+            Assert.Equal(broad.RequestCount, figure.RequestCount);
+            Assert.Equal(broad.TotalInput, figure.TotalInput);
+            Assert.Equal(broad.TotalOutput, figure.TotalOutput);
+            Assert.Equal(broad.Models, figure.Models);
+            Assert.Equivalent(broad.ReportedCost, figure.ReportedCost, strict: true);
+            Assert.Equivalent(broad.PublishedCost, figure.PublishedCost, strict: true);
+            Assert.Equivalent(broad.CostBasisMismatch, figure.CostBasisMismatch, strict: true);
+            Assert.Equal(broad.Problems.Count, figure.ProblemsCount);
+        }
+
+        // The absent-versus-zero trap, on the adapter: a turn with no token rows leaves the
+        // totals absent, and a turn with zero-valued rows leaves them zero.
+        SessionListFigure tokenless = Assert.Single(figures, static figure => figure.SessionKey == "sess-tokenless");
+        Assert.Null(tokenless.TotalInput);
+        Assert.Null(tokenless.TotalOutput);
+        SessionListFigure zeroed = Assert.Single(figures, static figure => figure.SessionKey == "sess-zero-tokens");
+        Assert.Equal(0, zeroed.TotalInput);
+        Assert.Equal(0, zeroed.TotalOutput);
+
+        // The multi-harness session keeps every attributed harness's turns under a harness
+        // filter — the per-session read the sessions list replaced.
+        IReadOnlyList<SessionListFigure> claudeFigures = sqlite.SessionListFigures("claude-code");
+        SessionListFigure multi = Assert.Single(claudeFigures, static figure => figure.SessionKey == "sess-multi");
+        Assert.Equal("claude-code", multi.HarnessId);
+        Assert.Equal("multi-repo", multi.Repo);
+        Assert.Equal("multi-branch", multi.Branch);
+        Assert.Equal(2, multi.TurnCount);
+        Assert.Equal(300, multi.TotalInput);
+        Assert.Equal(["claude-sonnet-4-5", "gpt-5.1-codex"], multi.Models);
     }
 
     /// <summary>
@@ -492,7 +578,8 @@ public class SqliteRelationalStoreReadTests : IDisposable
         IProjectionStore sqliteProj = (IProjectionStore)sqliteReader;
         IProjectionStore memoryProj = (IProjectionStore)memoryReader;
 
-        // 18 IRelationalStoreReader row queries + 3 DD-13 aggregates + StoredFields.
+        // 18 IRelationalStoreReader row queries + 3 DD-13 aggregates + the sessions-list read
+        // model + StoredFields.
         Assert.Equal(memoryReader.Harnesses(), sqliteReader.Harnesses());
         Assert.Equivalent(memoryReader.Sources(), sqliteReader.Sources(), strict: true);
         Assert.Equal(memoryReader.CountRecords(), sqliteReader.CountRecords());
@@ -502,6 +589,7 @@ public class SqliteRelationalStoreReadTests : IDisposable
         Assert.Equivalent(memoryReader.Sessions(), sqliteReader.Sessions(), strict: true);
         Assert.Equivalent(memoryReader.SessionModelUsages(), sqliteReader.SessionModelUsages(), strict: true);
         Assert.Equivalent(memoryReader.ListSessionAggregates(), sqliteReader.ListSessionAggregates(), strict: true);
+        Assert.Equivalent(memoryReader.SessionListFigures(), sqliteReader.SessionListFigures(), strict: true);
 
         foreach (string? harnessId in harnessIds)
         {
@@ -510,6 +598,7 @@ public class SqliteRelationalStoreReadTests : IDisposable
             Assert.Equivalent(memoryReader.Records(harnessId: harnessId), sqliteReader.Records(harnessId: harnessId), strict: true);
             Assert.Equivalent(memoryReader.Sessions(harnessId), sqliteReader.Sessions(harnessId), strict: true);
             Assert.Equivalent(memoryReader.ListSessionAggregates(harnessId), sqliteReader.ListSessionAggregates(harnessId), strict: true);
+            Assert.Equivalent(memoryReader.SessionListFigures(harnessId), sqliteReader.SessionListFigures(harnessId), strict: true);
 
             Assert.Equivalent(memoryProj.ListSessionProjections(harnessId), sqliteProj.ListSessionProjections(harnessId), strict: true);
             Assert.Equivalent(memoryProj.ListRuns(harnessId), sqliteProj.ListRuns(harnessId), strict: true);
@@ -633,6 +722,27 @@ public class SqliteRelationalStoreReadTests : IDisposable
                     NativeSessionId: "native-empty",
                     Workspace: null,
                     Title: "Empty",
+                    ReportedUsage: []),
+                new CollectedSession(
+                    SessionKey: "sess-tokenless",
+                    HarnessId: "claude-code",
+                    NativeSessionId: "native-tokenless",
+                    Workspace: null,
+                    Title: "Tokenless",
+                    ReportedUsage: []),
+                new CollectedSession(
+                    SessionKey: "sess-zero-tokens",
+                    HarnessId: "claude-code",
+                    NativeSessionId: "native-zero",
+                    Workspace: null,
+                    Title: "Zero",
+                    ReportedUsage: []),
+                new CollectedSession(
+                    SessionKey: "sess-multi",
+                    HarnessId: "claude-code",
+                    NativeSessionId: "native-multi",
+                    Workspace: new CollectedWorkspace(null, "multi-repo", "multi-branch"),
+                    Title: "Multi",
                     ReportedUsage: []),
             ],
             [
@@ -912,11 +1022,126 @@ public class SqliteRelationalStoreReadTests : IDisposable
                     AgentInstanceId: null,
                     ToolDefinitions: [],
                     Signals: new CollectedRecordSignals(null, null, null, null)),
+                new CollectedRecord(
+                    RecordId: "span-tokenless-1",
+                    HarnessId: "claude-code",
+                    Op: RecordOp.LlmInvoke,
+                    Kind: RecordKind.Client,
+                    Name: "llm_tokenless",
+                    StartedAt: t0.AddMinutes(5),
+                    Status: RecordStatus.Ok,
+                    SessionKey: "sess-tokenless",
+                    ParentRecordId: null,
+                    TraceId: "trace-tl1",
+                    Model: "claude-sonnet-4-5",
+                    EndedAt: null,
+                    ReportedDurationMs: null,
+                    Tokens: [],
+                    ReportedCost: null,
+                    Parts: [],
+                    Tool: null,
+                    Agent: null,
+                    SkillsInvoked: [],
+                    AgentInstanceId: null,
+                    ToolDefinitions: [],
+                    Signals: new CollectedRecordSignals(null, null, null, null),
+                    ReportedInputTokens: null,
+                    ReportedOutputTokens: null),
+                new CollectedRecord(
+                    RecordId: "span-zero-1",
+                    HarnessId: "claude-code",
+                    Op: RecordOp.LlmInvoke,
+                    Kind: RecordKind.Client,
+                    Name: "llm_zero",
+                    StartedAt: t0.AddMinutes(6),
+                    Status: RecordStatus.Ok,
+                    SessionKey: "sess-zero-tokens",
+                    ParentRecordId: null,
+                    TraceId: "trace-z1",
+                    Model: "claude-sonnet-4-5",
+                    EndedAt: null,
+                    ReportedDurationMs: null,
+                    Tokens:
+                    [
+                        new CollectedTokenCount(TokenClass.Input, 0),
+                        new CollectedTokenCount(TokenClass.Output, 0),
+                    ],
+                    ReportedCost: null,
+                    Parts: [],
+                    Tool: null,
+                    Agent: null,
+                    SkillsInvoked: [],
+                    AgentInstanceId: null,
+                    ToolDefinitions: [],
+                    Signals: new CollectedRecordSignals(null, null, null, null)),
+                new CollectedRecord(
+                    RecordId: "span-multi-cc-1",
+                    HarnessId: "claude-code",
+                    Op: RecordOp.LlmInvoke,
+                    Kind: RecordKind.Client,
+                    Name: "llm_multi_cc",
+                    StartedAt: t0.AddMinutes(7),
+                    Status: RecordStatus.Ok,
+                    SessionKey: "sess-multi",
+                    ParentRecordId: null,
+                    TraceId: "trace-m1",
+                    Model: "claude-sonnet-4-5",
+                    EndedAt: null,
+                    ReportedDurationMs: null,
+                    Tokens:
+                    [
+                        new CollectedTokenCount(TokenClass.Input, 100),
+                        new CollectedTokenCount(TokenClass.Output, 10),
+                    ],
+                    ReportedCost: null,
+                    Parts: [],
+                    Tool: null,
+                    Agent: null,
+                    SkillsInvoked: [],
+                    AgentInstanceId: null,
+                    ToolDefinitions: [],
+                    Signals: new CollectedRecordSignals(null, null, null, null)),
             ],
             [
                 new CollectedProblem("prob-1", "warning", "P_WARN", "Warn\tmsg\n1", "span-turn-1", "line:1", "sess-proj", "claude-code", "2026-11-19T10:00:01.000Z", "stack\ttrace"),
                 new CollectedProblem("prob-2", "error", "P_ERR", "Err msg", "span-req-2", null, "sess-proj", "claude-code", null, null),
             ]);
+
+        // The multi-harness session's codex turn arrives under its own harness source; the
+        // session row stays claude-code so the sessions list must still count both turns.
+        CollectedBatch codexMultiBatch = new(
+            new CollectedSource("codex", SourceKind.Otlp, "http://127.0.0.1:4318/v1/traces-codex-multi"),
+            [],
+            [
+                new CollectedRecord(
+                    RecordId: "span-multi-cx-1",
+                    HarnessId: "codex",
+                    Op: RecordOp.LlmInvoke,
+                    Kind: RecordKind.Client,
+                    Name: "llm_multi_cx",
+                    StartedAt: t0.AddMinutes(8),
+                    Status: RecordStatus.Ok,
+                    SessionKey: "sess-multi",
+                    ParentRecordId: null,
+                    TraceId: "trace-m2",
+                    Model: "gpt-5.1-codex",
+                    EndedAt: null,
+                    ReportedDurationMs: null,
+                    Tokens:
+                    [
+                        new CollectedTokenCount(TokenClass.Input, 200),
+                        new CollectedTokenCount(TokenClass.Output, 20),
+                    ],
+                    ReportedCost: null,
+                    Parts: [],
+                    Tool: null,
+                    Agent: null,
+                    SkillsInvoked: [],
+                    AgentInstanceId: null,
+                    ToolDefinitions: [],
+                    Signals: new CollectedRecordSignals(null, null, null, null)),
+            ],
+            []);
 
         CollectedBatch ccOtlpBatch = new(
             new CollectedSource("claude-code", SourceKind.Otlp, "http://127.0.0.1:4318/v1/traces"),
@@ -1005,6 +1230,8 @@ public class SqliteRelationalStoreReadTests : IDisposable
         memory.WriteBatch(ccOtlpBatch);
         sqlite.WriteBatch(copilotBatch);
         memory.WriteBatch(copilotBatch);
+        sqlite.WriteBatch(codexMultiBatch);
+        memory.WriteBatch(codexMultiBatch);
         sqlite.WriteProblem(standaloneProblem);
         memory.WriteProblem(standaloneProblem);
 

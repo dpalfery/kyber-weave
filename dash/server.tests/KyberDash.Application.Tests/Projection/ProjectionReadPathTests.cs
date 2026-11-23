@@ -470,6 +470,9 @@ public class ProjectionReadPathTests
         public IReadOnlyList<SessionAggregateView> ListSessionAggregates(string? harnessId = null, IModelPricingLookup? pricing = null) => inner.ListSessionAggregates(harnessId, pricing);
 
         /// <inheritdoc />
+        public IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null) => inner.SessionListFigures(harnessId, pricing);
+
+        /// <inheritdoc />
         public IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null) => inner.SessionTurnSummaries(sessionKey, pricing);
     }
 }

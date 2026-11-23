@@ -339,6 +339,43 @@ public record SessionAggregateView(
     UnusedSchemaRange? UnusedRange);
 
 /// <summary>
+/// Read-time figures the sessions list renders, derived in one content-free pass over the
+/// same scalar columns the broad <see cref="SessionAggregateView"/> read prices (<c>DD-13</c>).
+/// </summary>
+/// <param name="SessionKey">Canonical session key.</param>
+/// <param name="HarnessId">Harness identifier of the session row.</param>
+/// <param name="Repo">Workspace repository name, or <see langword="null"/> when unrecorded.</param>
+/// <param name="Branch">Workspace branch name, or <see langword="null"/> when unrecorded.</param>
+/// <param name="TurnCount">Number of turns in the session.</param>
+/// <param name="RequestCount">Number of top-level requests in the session.</param>
+/// <param name="TotalInput">Sum of combined input tokens across turns, or <see langword="null"/> when no turn reported tokens — absent, never zero.</param>
+/// <param name="TotalOutput">Sum of output tokens across turns, or <see langword="null"/> when absent.</param>
+/// <param name="ReportedCost">Non-blended harness-reported cost summary when present, or <see langword="null"/>.</param>
+/// <param name="PublishedCost">Non-blended published-rate cost summary computed across turns.</param>
+/// <param name="CostBasisMismatch">Structured basis mismatch verdict when both valued harness and published costs occur.</param>
+/// <param name="Models">Distinct models observed across session turns in turn order.</param>
+/// <param name="ProblemsCount">Count of ingest and pricing diagnostics associated with the session.</param>
+/// <remarks>
+/// Carries no content: no <c>content_part</c>, tool-call text, tool-definition, or
+/// agent-invocation column is read to build it, so a sessions list never materializes
+/// conversation text regardless of store size.
+/// </remarks>
+public record SessionListFigure(
+    string SessionKey,
+    string HarnessId,
+    string? Repo,
+    string? Branch,
+    int TurnCount,
+    int RequestCount,
+    long? TotalInput,
+    long? TotalOutput,
+    ReadTimeCostSummary? ReportedCost,
+    ReadTimeCostSummary PublishedCost,
+    ReadTimeCostBasisMismatch? CostBasisMismatch,
+    IReadOnlyList<string> Models,
+    int ProblemsCount);
+
+/// <summary>
 /// Typed read-only query contract over normalized telemetry, session, and record tables in
 /// the relational KyberDash store.
 /// </summary>
@@ -471,6 +508,20 @@ public interface IRelationalStoreReader
     /// <param name="harnessId">Optional harness identifier filter.</param>
     /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
     IReadOnlyList<SessionAggregateView> ListSessionAggregates(string? harnessId = null, IModelPricingLookup? pricing = null);
+
+    /// <summary>
+    /// Lists the sessions-list read model, optionally filtered by <paramref name="harnessId"/>,
+    /// reading no content column (<c>DD-13</c>).
+    /// </summary>
+    /// <param name="harnessId">Optional harness identifier filter over the session rows.</param>
+    /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
+    /// <remarks>
+    /// One batched pass over the session rows and each session's linked record scalars, stored
+    /// turns, and ingest problems — the same figures <see cref="GetSessionAggregate"/> answers
+    /// per session, minus every content-bearing column. A session row with no linked records
+    /// answers zeroed figures with absent token totals.
+    /// </remarks>
+    IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null);
 
     /// <summary>Computes read-time per-turn summaries for <paramref name="sessionKey"/> (<c>DD-13</c>).</summary>
     /// <param name="sessionKey">Canonical session key to inspect.</param>

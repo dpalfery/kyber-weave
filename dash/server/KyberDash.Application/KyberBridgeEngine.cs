@@ -18,7 +18,9 @@ namespace KyberDash.Application;
 /// <remarks>
 /// <para>
 /// Every route answers from typed store rows: the engine reads only the relational store
-/// contracts and parses no persisted store JSON. Session figures come from
+/// contracts and parses no persisted store JSON. The sessions list answers from the
+/// content-free <see cref="IRelationalStoreReader.SessionListFigures"/> read model; session
+/// detail figures come from
 /// <see cref="IRelationalStoreReader.GetSessionAggregate"/>,
 /// <see cref="IRelationalStoreReader.ListSessionAggregates"/>, and
 /// <see cref="IRelationalStoreReader.SessionTurnSummaries"/> priced at read time through
@@ -179,14 +181,48 @@ public class KyberBridgeEngine
         IModelPricingLookup lookup = pricing.LoadPricingTables();
         string? normalizedHarness = NormalizeHarnessFilter(harness);
         IReadOnlyList<StoredSessionProjection> rows = projections.ListSessionProjections(normalizedHarness);
+        Dictionary<string, SessionListFigure> figuresBySession = [];
+        HashSet<string> faultedSessions = new(StringComparer.Ordinal);
+        try
+        {
+            foreach (SessionListFigure figure in reader.SessionListFigures(normalizedHarness, lookup))
+            {
+                figuresBySession[figure.SessionKey] = figure;
+            }
+        }
+        catch (Exception)
+        {
+            // A faulted batched read degrades to per-session aggregate reads, so one broken
+            // session still surfaces as PROJECTION_FAILED while the remaining sessions answer.
+            // The per-session retry is the isolation; when every session answers, the list is
+            // complete and nothing user-visible was lost to the batch fault.
+            figuresBySession = [];
+            foreach (StoredSessionProjection row in rows)
+            {
+                try
+                {
+                    SessionAggregateView? aggregate = reader.GetSessionAggregate(row.SessionId, lookup);
+                    if (aggregate is not null)
+                    {
+                        figuresBySession[row.SessionId] = ToSessionListFigure(aggregate, reader.GetSession(row.SessionId));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    RecordProjectionFailure(row.SessionId, ex.Message);
+                    faultedSessions.Add(row.SessionId);
+                }
+            }
+        }
+
         Dictionary<string, SessionNode> byId = new(StringComparer.Ordinal);
         List<SessionNode> orderedNodes = new(rows.Count);
 
         foreach (StoredSessionProjection row in rows)
         {
             CollectedSession? session = reader.GetSession(row.SessionId);
-            (SessionAggregateView? aggregate, _, string? projectionStatus) = ReadSessionFigures(row.SessionId, lookup);
-            string harnessId = ResolveHarness(aggregate, session);
+            figuresBySession.TryGetValue(row.SessionId, out SessionListFigure? figure);
+            string harnessId = figure?.HarnessId ?? session?.HarnessId ?? string.Empty;
             string label = !string.IsNullOrWhiteSpace(row.Label)
                 ? row.Label
                 : CanonPricing.FormatSessionTitle(new SessionTitleInput(row.SessionId, row.AgentName, harnessId, row.Label));
@@ -198,21 +234,21 @@ public class KyberBridgeEngine
                 IsSubagent: row.IsSubagent,
                 ParentSession: row.ParentSessionId,
                 AgentName: row.AgentName,
-                Repo: session?.Workspace?.Repository,
-                Branch: session?.Workspace?.Branch,
+                Repo: figure?.Repo ?? session?.Workspace?.Repository,
+                Branch: figure?.Branch ?? session?.Workspace?.Branch,
                 Started: row.StartedAtUtc,
                 Ended: row.EndedAtUtc,
-                TurnCount: aggregate?.TurnCount,
-                RequestCount: aggregate?.RequestCount,
-                TotalInput: aggregate?.TotalInput,
-                TotalOutput: aggregate?.TotalOutput,
-                CostUsd: ExtractUsdCost(aggregate?.PublishedCost),
-                Cost: aggregate?.PublishedCost,
-                CostReported: aggregate?.ReportedCost,
-                CostBasisMismatch: aggregate?.CostBasisMismatch,
-                Models: aggregate?.Models ?? [],
-                Problems: aggregate?.Problems.Count ?? 0,
-                ProjectionStatus: projectionStatus,
+                TurnCount: figure?.TurnCount,
+                RequestCount: figure?.RequestCount,
+                TotalInput: figure?.TotalInput,
+                TotalOutput: figure?.TotalOutput,
+                CostUsd: ExtractUsdCost(figure?.PublishedCost),
+                Cost: figure?.PublishedCost,
+                CostReported: figure?.ReportedCost,
+                CostBasisMismatch: figure?.CostBasisMismatch,
+                Models: figure?.Models ?? [],
+                Problems: figure?.ProblemsCount ?? 0,
+                ProjectionStatus: faultedSessions.Contains(row.SessionId) ? ProjectionFailedStatus : null,
                 Subagents: []);
 
             byId[row.SessionId] = node;
@@ -1501,6 +1537,28 @@ public class KyberBridgeEngine
 
         return (aggregate, turns, status);
     }
+
+    /// <summary>
+    /// Projects one broad <see cref="SessionAggregateView"/> onto the sessions-list read model,
+    /// so the degraded per-session path answers the same figures the batched read carries.
+    /// </summary>
+    /// <param name="aggregate">Broad aggregate of one session.</param>
+    /// <param name="session">Session row carrying workspace metadata.</param>
+    private static SessionListFigure ToSessionListFigure(SessionAggregateView aggregate, CollectedSession? session) =>
+        new(
+            SessionKey: aggregate.SessionKey,
+            HarnessId: aggregate.HarnessId,
+            Repo: session?.Workspace?.Repository,
+            Branch: session?.Workspace?.Branch,
+            TurnCount: aggregate.TurnCount,
+            RequestCount: aggregate.RequestCount,
+            TotalInput: aggregate.TotalInput,
+            TotalOutput: aggregate.TotalOutput,
+            ReportedCost: aggregate.ReportedCost,
+            PublishedCost: aggregate.PublishedCost,
+            CostBasisMismatch: aggregate.CostBasisMismatch,
+            Models: aggregate.Models,
+            ProblemsCount: aggregate.Problems.Count);
 
     private IReadOnlyList<ReadTimeTurnSummary> TrySessionTurnSummaries(string sessionKey)
     {

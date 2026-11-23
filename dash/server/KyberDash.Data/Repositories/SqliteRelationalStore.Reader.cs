@@ -667,7 +667,13 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
         // Batch the per-session reads: one sqlite3 batch each for all records, all projections,
         // the fallback turns of sessions without a projection, and all stored ingest problems.
-        IReadOnlyList<CollectedRecord> allRecords = Records(harnessId: harnessId);
+        // Records are scoped to the listed sessions' links, never to the record's own harness:
+        // a session shared across harnesses answers the same figures under a harness filter as
+        // the per-session read does, because every record linked to the session is read.
+        List<string> sessionKeys = [.. sessions.Select(static s => s.SessionKey)];
+        string keyFilter = string.Join(", ", sessionKeys.Select(static key => TextExpr(key)));
+        IReadOnlyList<CollectedRecord> allRecords = QueryRecords(
+            $"r.span_id IN (SELECT rsl.span_id FROM record_session_link rsl WHERE rsl.session_key IN ({keyFilter}))");
         Dictionary<string, List<CollectedRecord>> recordsBySession = new(StringComparer.Ordinal);
         foreach (CollectedRecord record in allRecords)
         {
@@ -691,7 +697,6 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             projectionsBySession.TryAdd(projection.SessionId, projection);
         }
 
-        List<string> sessionKeys = [.. sessions.Select(static s => s.SessionKey)];
         List<string> missingProjectionKeys = [.. sessionKeys.Where(key => !projectionsBySession.ContainsKey(key))];
         Dictionary<string, IReadOnlyList<StoredSessionTurn>> fallbackTurnsBySession = QuerySessionTurnsBySession(missingProjectionKeys);
         Dictionary<string, List<Problem>> problemsBySession = QuerySessionIngestProblemsBySession(sessionKeys);
@@ -710,6 +715,47 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         }
 
         return aggregates;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null)
+    {
+        IReadOnlyList<CollectedSession> sessions = Sessions(harnessId);
+        if (sessions.Count == 0)
+        {
+            return [];
+        }
+
+        // Same batching shape as ListSessionAggregates: one batch each for the sessions, the
+        // content-free record scalars, the projections, the fallback turns of sessions without
+        // a projection, and the stored ingest problems. The record batch reads no
+        // content-bearing table, so a sessions list never materializes conversation text.
+        List<string> sessionKeys = [.. sessions.Select(static s => s.SessionKey)];
+        Dictionary<string, List<CollectedRecord>> recordsBySession = QueryContentFreeRecordsBySession(sessionKeys);
+        Dictionary<string, StoredSessionProjection> projectionsBySession = new(StringComparer.Ordinal);
+        foreach (StoredSessionProjection projection in ListSessionProjections(harnessId))
+        {
+            projectionsBySession.TryAdd(projection.SessionId, projection);
+        }
+
+        List<string> missingProjectionKeys = [.. sessionKeys.Where(key => !projectionsBySession.ContainsKey(key))];
+        Dictionary<string, IReadOnlyList<StoredSessionTurn>> fallbackTurnsBySession = QuerySessionTurnsBySession(missingProjectionKeys);
+        Dictionary<string, List<Problem>> problemsBySession = QuerySessionIngestProblemsBySession(sessionKeys);
+
+        List<SessionListFigure> figures = new(sessions.Count);
+        foreach (CollectedSession session in sessions)
+        {
+            IReadOnlyList<CollectedRecord> records = recordsBySession.TryGetValue(session.SessionKey, out List<CollectedRecord>? sessionRecords)
+                ? sessionRecords
+                : [];
+            projectionsBySession.TryGetValue(session.SessionKey, out StoredSessionProjection? projection);
+            IReadOnlyList<StoredSessionTurn> projectedTurns = projection?.Turns
+                ?? (fallbackTurnsBySession.TryGetValue(session.SessionKey, out IReadOnlyList<StoredSessionTurn>? fallbackTurns) ? fallbackTurns : []);
+            IReadOnlyList<Problem> storedProblems = problemsBySession.TryGetValue(session.SessionKey, out List<Problem>? stored) ? stored : [];
+            figures.Add(BuildSessionListFigure(session, records, projection, projectedTurns, storedProblems, pricing));
+        }
+
+        return figures;
     }
 
     /// <inheritdoc />
@@ -1085,6 +1131,167 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             UnusedRange: unusedRange);
     }
 
+    /// <summary>
+    /// Derives one session's sessions-list figures from its session row, content-free records,
+    /// stored projection, and ingest problems. The turn loop mirrors
+    /// <see cref="BuildSessionAggregateView"/> over the same scalar columns; the fields the
+    /// sessions list renders are kept and the content-bearing aggregate fields are deliberately
+    /// absent.
+    /// </summary>
+    private static SessionListFigure BuildSessionListFigure(
+        CollectedSession session,
+        IReadOnlyList<CollectedRecord> records,
+        StoredSessionProjection? projection,
+        IReadOnlyList<StoredSessionTurn> projectedTurns,
+        IReadOnlyList<Problem> storedProblems,
+        IModelPricingLookup? pricing)
+    {
+        string sessionKey = session.SessionKey;
+        string harnessId = session.HarnessId;
+
+        HashSet<string> sessionSpanIds = new(StringComparer.Ordinal);
+        foreach (CollectedRecord record in records)
+        {
+            _ = sessionSpanIds.Add(record.RecordId);
+        }
+
+        List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntriesForReader(projectedTurns, records);
+
+        List<CostBlock> turnPublishedBlocks = new(turnEntries.Count);
+        List<CostBlock> valuedTurnPublishedBlocks = [];
+        List<CostBlock> valuedTurnHarnessBlocks = [];
+        List<string> models = [];
+        HashSet<string> seenModels = new(StringComparer.Ordinal);
+        long totalInput = 0;
+        bool hasInput = false;
+        long totalOutput = 0;
+        bool hasOutput = false;
+
+        foreach ((int position, CollectedRecord turnRecord) in turnEntries)
+        {
+            ReadTimeTurnSummary turnSummary = BuildReaderTurnSummary(
+                turnRecord,
+                position,
+                harnessId,
+                pricing,
+                out CostBlock publishedBlock,
+                out CostBlock? harnessBlock);
+
+            turnPublishedBlocks.Add(publishedBlock);
+            if (publishedBlock.Value is double publishedValue && double.IsFinite(publishedValue))
+            {
+                valuedTurnPublishedBlocks.Add(publishedBlock);
+            }
+
+            if (harnessBlock is not null && harnessBlock.Value is double harnessValue && double.IsFinite(harnessValue))
+            {
+                valuedTurnHarnessBlocks.Add(harnessBlock);
+            }
+
+            if (!string.IsNullOrEmpty(turnRecord.Model) && seenModels.Add(turnRecord.Model))
+            {
+                models.Add(turnRecord.Model);
+            }
+
+            if (turnSummary.InputTokens.HasValue)
+            {
+                totalInput += turnSummary.InputTokens.Value;
+                hasInput = true;
+            }
+
+            if (turnSummary.OutputTokens.HasValue)
+            {
+                totalOutput += turnSummary.OutputTokens.Value;
+                hasOutput = true;
+            }
+        }
+
+        List<CollectedRecord> rootRecords =
+        [
+            .. records
+                .Where(r => r.ParentRecordId is null ||
+                            string.Equals(r.ParentRecordId, r.RecordId, StringComparison.Ordinal) ||
+                            !sessionSpanIds.Contains(r.ParentRecordId))
+                .OrderBy(static r => r.StartedAt)
+                .ThenBy(static r => r.RecordId, StringComparer.Ordinal),
+        ];
+
+        List<Problem> extraProblems = [];
+
+        List<CostBlock> reportedRecordBlocks = [];
+        foreach (CollectedRecord record in records)
+        {
+            if (record.ReportedCost is null)
+            {
+                continue;
+            }
+
+            IReadOnlyDictionary<string, double>? byModel = !string.IsNullOrEmpty(record.Model)
+                ? new Dictionary<string, double>(StringComparer.Ordinal) { [record.Model] = record.ReportedCost.Amount }
+                : null;
+            reportedRecordBlocks.Add(new CostBlock(
+                CostBasis.Harness,
+                CostStatus.Priced,
+                record.ReportedCost.Amount,
+                record.ReportedCost.Currency,
+                byModel));
+        }
+
+        ReadTimeCostSummary? sessionReportedCost = reportedRecordBlocks.Count > 0
+            ? AggregateReaderCostBlocks(reportedRecordBlocks, CostBasis.Harness, extraProblems)
+            : null;
+
+        ReadTimeCostSummary sessionPublishedCost = turnPublishedBlocks.Count > 0
+            ? AggregateReaderCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
+            : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
+
+        ReadTimeCostBasisMismatch? basisMismatch = null;
+        if (valuedTurnHarnessBlocks.Count > 0 && valuedTurnPublishedBlocks.Count > 0)
+        {
+            List<CostBlock> combined = [.. valuedTurnHarnessBlocks, .. valuedTurnPublishedBlocks];
+            CostTotalResult mismatchTotal = CanonPricing.SumCosts(combined);
+            CostBasisMismatch? domainMismatch = CanonPricing.CostBasisMismatchOf(combined, mismatchTotal);
+            if (domainMismatch is not null)
+            {
+                List<ReadTimeBasisTotal> totalsByBasis =
+                [
+                    .. domainMismatch.TotalsByBasis
+                        .OrderBy(static kv => kv.Key, StringComparer.Ordinal)
+                        .Select(static kv => new ReadTimeBasisTotal(kv.Key, kv.Value)),
+                ];
+                basisMismatch = new ReadTimeCostBasisMismatch(
+                    domainMismatch.Code,
+                    domainMismatch.Message,
+                    domainMismatch.Bases,
+                    totalsByBasis);
+            }
+
+            if (mismatchTotal.Problem is not null)
+            {
+                extraProblems.Add(mismatchTotal.Problem);
+            }
+        }
+
+        int requestCount = projection is not null && projection.RequestSpanIds.Count > 0
+            ? projection.RequestSpanIds.Count
+            : rootRecords.Count;
+
+        return new SessionListFigure(
+            SessionKey: sessionKey,
+            HarnessId: harnessId,
+            Repo: session.Workspace?.Repository,
+            Branch: session.Workspace?.Branch,
+            TurnCount: turnEntries.Count,
+            RequestCount: requestCount,
+            TotalInput: hasInput ? totalInput : null,
+            TotalOutput: hasOutput ? totalOutput : null,
+            ReportedCost: sessionReportedCost,
+            PublishedCost: sessionPublishedCost,
+            CostBasisMismatch: basisMismatch,
+            Models: models,
+            ProblemsCount: storedProblems.Count + extraProblems.Count);
+    }
+
     private List<Problem> QuerySessionIngestProblems(string sessionKey)
     {
         Dictionary<string, List<Problem>> grouped = QuerySessionIngestProblemsBySession([sessionKey]);
@@ -1175,6 +1382,206 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         }
 
         return problemsBySession;
+    }
+
+    /// <summary>
+    /// Parses one tab-split <c>REC</c> row of a record query into a raw record header — the
+    /// shared parse behind both the broad record read and the content-free sessions-list read,
+    /// so both derive from the same scalar columns.
+    /// </summary>
+    /// <param name="cols">Tab-split columns of the <c>REC</c> row.</param>
+    private static RawRecordHeader ParseRawRecordHeader(string[] cols)
+    {
+        if (cols.Length != 38)
+        {
+            throw new InvalidOperationException($"Expected 38 columns for REC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+        }
+
+        string spanId = ParseHexRequired(cols[1], "record.span_id");
+        string harnessId = ParseHexRequired(cols[2], "record.harness_id");
+        RecordOp op = ParseRecordOp(ParseHexRequired(cols[3], "record.op"));
+        RecordKind kind = ParseRecordKind(ParseHexRequired(cols[4], "record.kind"));
+        string name = ParseHexRequired(cols[5], "record.name");
+        DateTimeOffset startedAt = ParseTimestampRequired(ParseHexRequired(cols[6], "record.started_at_utc"), "record.started_at_utc");
+        RecordStatus status = ParseRecordStatus(ParseHexRequired(cols[7], "record.status"));
+        string? sessionKey = ParseNullableHex(cols[8], cols[9], "record_session_link.session_key");
+        string? parentSpanId = ParseNullableHex(cols[10], cols[11], "record_parent.parent_span_id");
+        string? traceId = ParseNullableHex(cols[12], cols[13], "record_trace.trace_id");
+        string? model = ParseNullableHex(cols[14], cols[15], "record_model.model_id");
+        string? endedRaw = ParseNullableHex(cols[16], cols[17], "record_end.ended_at_utc");
+        DateTimeOffset? endedAt = endedRaw is null ? null : ParseTimestampRequired(endedRaw, "record_end.ended_at_utc");
+        long? reportedDurationMs = ParseNullableInt64(cols[18], cols[19], "record_reported_duration.duration_ms");
+        double? costAmount = ParseNullableDouble(cols[20], cols[21], "record_reported_cost.amount");
+        string? costCurrency = ParseNullableHex(cols[22], cols[23], "record_reported_cost.currency");
+        CollectedCost? reportedCost = costAmount.HasValue && costCurrency is not null
+            ? new CollectedCost(costAmount.Value, costCurrency)
+            : costAmount.HasValue || costCurrency is not null
+                ? throw new InvalidOperationException("Partial record_reported_cost row returned.")
+                : null;
+        string? agentInstanceId = ParseNullableHex(cols[24], cols[25], "record_agent_instance.agent_instance_id");
+        string? errMsg = ParseNullableHex(cols[26], cols[27], "record_error.message");
+        long? editFailures = ParseNullableInt64(cols[28], cols[29], "record_edit_failure.failure_count");
+        string? correctionRule = ParseNullableHex(cols[30], cols[31], "record_correction_rule.correction_rule");
+        long? declaredWindow = ParseNullableInt64(cols[32], cols[33], "record_declared_context_window.declared_context_window");
+        long? repIn = ParseNullableInt64(cols[34], cols[35], "record_reported_total.input");
+        long? repOut = ParseNullableInt64(cols[36], cols[37], "record_reported_total.output");
+
+        return new RawRecordHeader(
+            spanId,
+            harnessId,
+            op,
+            kind,
+            name,
+            startedAt,
+            status,
+            sessionKey,
+            parentSpanId,
+            traceId,
+            model,
+            endedAt,
+            reportedDurationMs,
+            reportedCost,
+            agentInstanceId,
+            new CollectedRecordSignals(errMsg, editFailures, correctionRule, declaredWindow),
+            repIn,
+            repOut);
+    }
+
+    /// <summary>
+    /// Reads every record linked to <paramref name="sessionKeys"/> in one batched, content-free
+    /// pass: the same <c>REC</c> and <c>TOK</c> selects the broad record read runs, with no
+    /// <c>content_part</c>, tool-call, tool-definition, agent-invocation, or skill select.
+    /// </summary>
+    /// <param name="sessionKeys">Canonical session keys whose records are read.</param>
+    private Dictionary<string, List<CollectedRecord>> QueryContentFreeRecordsBySession(IReadOnlyList<string> sessionKeys)
+    {
+        Dictionary<string, List<CollectedRecord>> recordsBySession = new(StringComparer.Ordinal);
+        if (sessionKeys.Count == 0)
+        {
+            return recordsBySession;
+        }
+
+        string keyFilter = string.Join(", ", sessionKeys.Select(static key => TextExpr(key)));
+        string recordFilter = $" WHERE rsl.session_key IN ({keyFilter})";
+        string tokenFilter = $" WHERE r.span_id IN (SELECT rsl.span_id FROM record_session_link rsl WHERE rsl.session_key IN ({keyFilter}))";
+
+        StringBuilder sql = new(TabReadScriptHeader);
+        sql.Append(
+            "SELECT 'REC', hex(CAST(r.span_id AS BLOB)), hex(CAST(r.harness_id AS BLOB)), hex(CAST(r.op AS BLOB)), hex(CAST(r.kind AS BLOB)), " +
+            "hex(CAST(r.name AS BLOB)), hex(CAST(r.started_at_utc AS BLOB)), hex(CAST(r.status AS BLOB)), " +
+            "typeof(rsl.session_key), COALESCE(hex(CAST(rsl.session_key AS BLOB)), ''), " +
+            "typeof(rp.parent_span_id), COALESCE(hex(CAST(rp.parent_span_id AS BLOB)), ''), " +
+            "typeof(rt.trace_id), COALESCE(hex(CAST(rt.trace_id AS BLOB)), ''), " +
+            "typeof(rm.model_id), COALESCE(hex(CAST(rm.model_id AS BLOB)), ''), " +
+            "typeof(re.ended_at_utc), COALESCE(hex(CAST(re.ended_at_utc AS BLOB)), ''), " +
+            "typeof(rrd.duration_ms), COALESCE(CAST(rrd.duration_ms AS TEXT), ''), " +
+            "typeof(rrc.amount), COALESCE(CAST(rrc.amount AS TEXT), ''), " +
+            "typeof(rrc.currency), COALESCE(hex(CAST(rrc.currency AS BLOB)), ''), " +
+            "typeof(rai.agent_instance_id), COALESCE(hex(CAST(rai.agent_instance_id AS BLOB)), ''), " +
+            "typeof(rerr.message), COALESCE(hex(CAST(rerr.message AS BLOB)), ''), " +
+            "typeof(ref.failure_count), COALESCE(CAST(ref.failure_count AS TEXT), ''), " +
+            "typeof(rcr.correction_rule), COALESCE(hex(CAST(rcr.correction_rule AS BLOB)), ''), " +
+            "typeof(rdcw.declared_context_window), COALESCE(CAST(rdcw.declared_context_window AS TEXT), ''), " +
+            "typeof(rrti.token_count), COALESCE(CAST(rrti.token_count AS TEXT), ''), " +
+            "typeof(rrto.token_count), COALESCE(CAST(rrto.token_count AS TEXT), '') " +
+            "FROM record r " +
+            "LEFT JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
+            "LEFT JOIN record_parent rp ON rp.span_id = r.span_id " +
+            "LEFT JOIN record_trace rt ON rt.span_id = r.span_id " +
+            "LEFT JOIN record_model rm ON rm.span_id = r.span_id " +
+            "LEFT JOIN record_end re ON re.span_id = r.span_id " +
+            "LEFT JOIN record_reported_duration rrd ON rrd.span_id = r.span_id " +
+            "LEFT JOIN record_reported_cost rrc ON rrc.span_id = r.span_id " +
+            "LEFT JOIN record_agent_instance rai ON rai.span_id = r.span_id " +
+            "LEFT JOIN record_error rerr ON rerr.span_id = r.span_id " +
+            "LEFT JOIN record_edit_failure ref ON ref.span_id = r.span_id " +
+            "LEFT JOIN record_correction_rule rcr ON rcr.span_id = r.span_id " +
+            "LEFT JOIN record_declared_context_window rdcw ON rdcw.span_id = r.span_id " +
+            "LEFT JOIN record_reported_total rrti ON rrti.span_id = r.span_id AND rrti.direction = 'input' " +
+            "LEFT JOIN record_reported_total rrto ON rrto.span_id = r.span_id AND rrto.direction = 'output'" +
+            $"{recordFilter} ORDER BY r.rowid ASC;\n");
+
+        sql.Append(
+            "SELECT 'TOK', hex(CAST(r.span_id AS BLOB)), hex(CAST(r.token_class AS BLOB)), r.token_count " +
+            $"FROM record_token_count r{tokenFilter} ORDER BY r.rowid ASC;\n");
+
+        string output = ExecuteSqlite(sql.ToString());
+        List<RawRecordHeader> rawRecords = [];
+        Dictionary<string, List<CollectedTokenCount>> tokensBySpan = new(StringComparer.Ordinal);
+
+        foreach (string line in TabLines(output))
+        {
+            string[] cols = line.Split('\t');
+            if (cols.Length < 1)
+            {
+                throw new InvalidOperationException("Unexpected empty row in QueryContentFreeRecordsBySession.");
+            }
+
+            switch (cols[0])
+            {
+                case "REC":
+                    rawRecords.Add(ParseRawRecordHeader(cols));
+                    break;
+
+                case "TOK":
+                    {
+                        if (cols.Length != 4)
+                        {
+                            throw new InvalidOperationException($"Expected 4 columns for TOK row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+                        }
+
+                        string spanId = ParseHexRequired(cols[1], "record_token_count.span_id");
+                        TokenClass tokenClass = ParseTokenClass(ParseHexRequired(cols[2], "record_token_count.token_class"));
+                        long count = ParseInt64Required(cols[3], "record_token_count.token_count");
+                        GetOrCreateList(tokensBySpan, spanId).Add(new CollectedTokenCount(tokenClass, count));
+                        break;
+                    }
+
+                default:
+                    throw new InvalidOperationException($"Unexpected content-free record query row tag '{cols[0]}'.");
+            }
+        }
+
+        foreach (RawRecordHeader header in rawRecords)
+        {
+            CollectedRecord record = new(
+                header.SpanId,
+                header.HarnessId,
+                header.Op,
+                header.Kind,
+                header.Name,
+                header.StartedAt,
+                header.Status,
+                header.SessionKey,
+                header.ParentSpanId,
+                header.TraceId,
+                header.Model,
+                header.EndedAt,
+                header.ReportedDurationMs,
+                tokensBySpan.TryGetValue(header.SpanId, out List<CollectedTokenCount>? tokens) ? tokens : [],
+                header.ReportedCost,
+                Parts: [],
+                Tool: null,
+                Agent: null,
+                SkillsInvoked: [],
+                header.AgentInstanceId,
+                ToolDefinitions: [],
+                header.Signals,
+                header.ReportedInputTokens,
+                header.ReportedOutputTokens);
+            if (record.SessionKey is not null)
+            {
+                if (!recordsBySession.TryGetValue(record.SessionKey, out List<CollectedRecord>? sessionRecords))
+                {
+                    sessionRecords = [];
+                    recordsBySession[record.SessionKey] = sessionRecords;
+                }
+
+                sessionRecords.Add(record);
+            }
+        }
+
+        return recordsBySession;
     }
 
     private IReadOnlyList<CollectedRecord> QueryRecords(string? wherePredicate)
@@ -1305,59 +1712,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             {
                 case "REC":
                     {
-                        if (cols.Length != 38)
-                        {
-                            throw new InvalidOperationException($"Expected 38 columns for REC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                        }
-
-                        string spanId = ParseHexRequired(cols[1], "record.span_id");
-                        string harnessId = ParseHexRequired(cols[2], "record.harness_id");
-                        RecordOp op = ParseRecordOp(ParseHexRequired(cols[3], "record.op"));
-                        RecordKind kind = ParseRecordKind(ParseHexRequired(cols[4], "record.kind"));
-                        string name = ParseHexRequired(cols[5], "record.name");
-                        DateTimeOffset startedAt = ParseTimestampRequired(ParseHexRequired(cols[6], "record.started_at_utc"), "record.started_at_utc");
-                        RecordStatus status = ParseRecordStatus(ParseHexRequired(cols[7], "record.status"));
-                        string? sessionKey = ParseNullableHex(cols[8], cols[9], "record_session_link.session_key");
-                        string? parentSpanId = ParseNullableHex(cols[10], cols[11], "record_parent.parent_span_id");
-                        string? traceId = ParseNullableHex(cols[12], cols[13], "record_trace.trace_id");
-                        string? model = ParseNullableHex(cols[14], cols[15], "record_model.model_id");
-                        string? endedRaw = ParseNullableHex(cols[16], cols[17], "record_end.ended_at_utc");
-                        DateTimeOffset? endedAt = endedRaw is null ? null : ParseTimestampRequired(endedRaw, "record_end.ended_at_utc");
-                        long? reportedDurationMs = ParseNullableInt64(cols[18], cols[19], "record_reported_duration.duration_ms");
-                        double? costAmount = ParseNullableDouble(cols[20], cols[21], "record_reported_cost.amount");
-                        string? costCurrency = ParseNullableHex(cols[22], cols[23], "record_reported_cost.currency");
-                        CollectedCost? reportedCost = costAmount.HasValue && costCurrency is not null
-                            ? new CollectedCost(costAmount.Value, costCurrency)
-                            : costAmount.HasValue || costCurrency is not null
-                                ? throw new InvalidOperationException("Partial record_reported_cost row returned.")
-                                : null;
-                        string? agentInstanceId = ParseNullableHex(cols[24], cols[25], "record_agent_instance.agent_instance_id");
-                        string? errMsg = ParseNullableHex(cols[26], cols[27], "record_error.message");
-                        long? editFailures = ParseNullableInt64(cols[28], cols[29], "record_edit_failure.failure_count");
-                        string? correctionRule = ParseNullableHex(cols[30], cols[31], "record_correction_rule.correction_rule");
-                        long? declaredWindow = ParseNullableInt64(cols[32], cols[33], "record_declared_context_window.declared_context_window");
-                        long? repIn = ParseNullableInt64(cols[34], cols[35], "record_reported_total.input");
-                        long? repOut = ParseNullableInt64(cols[36], cols[37], "record_reported_total.output");
-
-                        rawRecords.Add(new RawRecordHeader(
-                            spanId,
-                            harnessId,
-                            op,
-                            kind,
-                            name,
-                            startedAt,
-                            status,
-                            sessionKey,
-                            parentSpanId,
-                            traceId,
-                            model,
-                            endedAt,
-                            reportedDurationMs,
-                            reportedCost,
-                            agentInstanceId,
-                            new CollectedRecordSignals(errMsg, editFailures, correctionRule, declaredWindow),
-                            repIn,
-                            repOut));
+                        rawRecords.Add(ParseRawRecordHeader(cols));
                         break;
                     }
 

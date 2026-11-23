@@ -57,6 +57,52 @@ public class SqliteRelationalStoreListAggregatesTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Verifies the sessions-list read model issues a bounded number of <c>sqlite3</c> batches —
+    /// one for sessions, content-free record scalars, projections, fallback turns, and ingest
+    /// problems — and answers the same figures the per-session broad aggregate answers for
+    /// projected and bare sessions alike.
+    /// </summary>
+    [Fact]
+    public void SessionListFigures_BatchTheListReadAndMatchPerSessionAggregates()
+    {
+        string dbPath = Path.Combine(directory.Path, "list-figures", "canon.db");
+        CountingSqliteRelationalStore store = new(dbPath, new SqliteCircuitBreaker());
+        SeedSessions(store);
+
+        store.ResetCount();
+        IReadOnlyList<SessionListFigure> figures = store.SessionListFigures(HarnessId);
+        int batches = store.ExecuteSqliteCoreCount;
+
+        Assert.Equal(5, figures.Count);
+        Assert.Equal(
+            ["sess-agg-0", "sess-agg-1", "sess-agg-2", "sess-agg-3", "sess-agg-4"],
+            figures.Select(static figure => figure.SessionKey).Order(StringComparer.Ordinal));
+        Assert.True(batches <= 5, $"Expected at most 5 sqlite3 batches, observed {batches}.");
+
+        foreach (SessionListFigure figure in figures)
+        {
+            SessionAggregateView? broad = store.GetSessionAggregate(figure.SessionKey);
+            Assert.NotNull(broad);
+            Assert.Equal(broad.SessionKey, figure.SessionKey);
+            Assert.Equal(broad.HarnessId, figure.HarnessId);
+            Assert.Equal(broad.TurnCount, figure.TurnCount);
+            Assert.Equal(broad.RequestCount, figure.RequestCount);
+            Assert.Equal(broad.TotalInput, figure.TotalInput);
+            Assert.Equal(broad.TotalOutput, figure.TotalOutput);
+            Assert.Equal(broad.Models, figure.Models);
+            Assert.Equivalent(broad.ReportedCost, figure.ReportedCost, strict: true);
+            Assert.Equivalent(broad.PublishedCost, figure.PublishedCost, strict: true);
+            Assert.Equivalent(broad.CostBasisMismatch, figure.CostBasisMismatch, strict: true);
+            Assert.Equal(broad.Problems.Count, figure.ProblemsCount);
+        }
+
+        // Projected sessions resolve turns through stored turns and bare ones through the
+        // LLM fallback; both answer one turn here.
+        Assert.Equal(1, figures.Single(static figure => figure.SessionKey == "sess-agg-0").TurnCount);
+        Assert.Equal(1, figures.Single(static figure => figure.SessionKey == "sess-agg-2").TurnCount);
+    }
+
     private static void SeedSessions(SqliteRelationalStore store)
     {
         DateTimeOffset t0 = new(2026, 11, 19, 10, 0, 0, TimeSpan.Zero);
