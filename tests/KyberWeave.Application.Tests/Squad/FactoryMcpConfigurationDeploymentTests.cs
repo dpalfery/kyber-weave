@@ -194,7 +194,8 @@ public sealed class FactoryMcpConfigurationDeploymentTests
             _home));
 
         Assert.DoesNotContain(warning, char.IsControl);
-        Assert.Contains("bad?name (run?it a?b)", warning, StringComparison.Ordinal);
+        Assert.Contains("bad?name", warning, StringComparison.Ordinal);
+        Assert.Contains("not usable", warning, StringComparison.Ordinal);
     }
 
     [Fact]
