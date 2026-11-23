@@ -1217,7 +1217,7 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
-    public virtual IReadOnlyDictionary<string, string?> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds)
+    public virtual IReadOnlyList<StoredRequestPromptPreview> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds)
     {
         ArgumentNullException.ThrowIfNull(requestSpanIds);
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
@@ -1225,17 +1225,19 @@ public class InMemoryRelationalStore :
         lock (syncRoot)
         {
             NoteRead(nameof(RequestPromptPreviews));
-            Dictionary<string, string?> previews = new(StringComparer.Ordinal);
             if (requestSpanIds.Count == 0)
             {
-                return previews;
+                return [];
             }
 
             List<CollectedRecord> records = CollectSessionRecordsContentFree(state, sessionKey);
             List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntries(state, sessionKey, records);
+            List<StoredRequestPromptPreview> previews = [];
             foreach (string requestSpanId in requestSpanIds.Distinct(StringComparer.Ordinal))
             {
-                previews[requestSpanId] = MaterializeRequestPromptPreview(state, sessionKey, requestSpanId, records, turnEntries);
+                previews.Add(new StoredRequestPromptPreview(
+                    requestSpanId,
+                    MaterializeRequestPromptPreview(state, sessionKey, requestSpanId, records, turnEntries)));
             }
 
             return previews;

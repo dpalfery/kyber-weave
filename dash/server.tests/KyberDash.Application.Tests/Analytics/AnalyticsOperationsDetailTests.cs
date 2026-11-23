@@ -468,7 +468,7 @@ public sealed class AnalyticsOperationsDetailTests
             return inner.SessionProblems(sessionKey, page, limit);
         }
 
-        public IReadOnlyDictionary<string, string?> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds) =>
+        public IReadOnlyList<StoredRequestPromptPreview> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds) =>
             inner.RequestPromptPreviews(sessionKey, requestSpanIds);
 
         public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey)

@@ -1504,14 +1504,14 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     }
 
     /// <inheritdoc />
-    public IReadOnlyDictionary<string, string?> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds)
+    public IReadOnlyList<StoredRequestPromptPreview> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
         ArgumentNullException.ThrowIfNull(requestSpanIds);
         string[] requested = [.. requestSpanIds.Distinct(StringComparer.Ordinal)];
         if (requested.Length == 0)
         {
-            return new Dictionary<string, string?>(StringComparer.Ordinal);
+            return [];
         }
 
         StringBuilder ctes = new("WITH RECURSIVE ");
@@ -1545,10 +1545,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 ParseNullableHex(cols[6], cols[7], "content_part_text.part_text")));
         }
 
-        Dictionary<string, string?> previews = new(StringComparer.Ordinal);
+        List<StoredRequestPromptPreview> previews = new(requested.Length);
         foreach (string root in requested)
         {
-            previews[root] = ExtractRequestPreviewFromRows(root, partRows);
+            previews.Add(new StoredRequestPromptPreview(root, ExtractRequestPreviewFromRows(root, partRows)));
         }
 
         return previews;

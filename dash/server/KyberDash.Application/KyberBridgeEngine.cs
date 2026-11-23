@@ -632,9 +632,8 @@ public class KyberBridgeEngine
         IReadOnlyList<ReadTimeSessionRequestSummary> items = pageResult?.Items ?? [];
         Dictionary<string, string?> previews = items.Count == 0
             ? new Dictionary<string, string?>(StringComparer.Ordinal)
-            : new Dictionary<string, string?>(
-                reader.RequestPromptPreviews(sessionId, [.. items.Select(static request => request.RequestSpanId)]),
-                StringComparer.Ordinal);
+            : reader.RequestPromptPreviews(sessionId, [.. items.Select(static request => request.RequestSpanId)])
+                .ToDictionary(static preview => preview.RequestSpanId, static preview => preview.Prompt, StringComparer.Ordinal);
         List<Dictionary<string, object?>> rows = RequestRows(
         [
             .. items.Select(request => previews.TryGetValue(request.RequestSpanId, out string? preview) ? request with { PromptPreview = preview } : request),

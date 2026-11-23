@@ -621,7 +621,7 @@ public sealed class SessionSectionEndpointsTests
         /// <summary>The span ids each <c>RequestPromptPreviews</c> call received, in call order.</summary>
         public List<IReadOnlyList<string>> PromptPreviewReads { get; } = [];
 
-        public override IReadOnlyDictionary<string, string?> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds)
+        public override IReadOnlyList<StoredRequestPromptPreview> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds)
         {
             PromptPreviewReads.Add([.. requestSpanIds]);
             return base.RequestPromptPreviews(sessionKey, requestSpanIds);

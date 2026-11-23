@@ -948,10 +948,9 @@ public class SqliteRelationalStoreReadTests : IDisposable
             Assert.Equivalent(memoryReader.SessionReconciliationFigures(sessionKey, 1, 25), sqliteReader.SessionReconciliationFigures(sessionKey, 1, 25), strict: true);
             Assert.Equivalent(memoryReader.SessionReconciliationFigures(sessionKey, 2, 25), sqliteReader.SessionReconciliationFigures(sessionKey, 2, 25), strict: true);
             Assert.Equivalent(memoryReader.SessionProblems(sessionKey, 1, 25), sqliteReader.SessionProblems(sessionKey, 1, 25), strict: true);
-            Assert.Equivalent(
+            Assert.Equal(
                 memoryReader.RequestPromptPreviews(sessionKey, ["span-req-1", "span-req-2"]),
-                sqliteReader.RequestPromptPreviews(sessionKey, ["span-req-1", "span-req-2"]),
-                strict: true);
+                sqliteReader.RequestPromptPreviews(sessionKey, ["span-req-1", "span-req-2"]));
             Assert.Equivalent(memoryReader.TurnFigures(sessionKey, int.MaxValue), sqliteReader.TurnFigures(sessionKey, int.MaxValue), strict: true);
             Assert.Equivalent(memoryReader.TurnContentParts(sessionKey), sqliteReader.TurnContentParts(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.TurnContentParts(sessionKey, turnIndex: 0), sqliteReader.TurnContentParts(sessionKey, turnIndex: 0), strict: true);

@@ -78,6 +78,11 @@ public record StoredSessionModelUsage(string SessionId, CollectedModelUsage Usag
 /// <param name="RecordCount">Number of records attributed to the session key and harness.</param>
 public record StoredSessionAttribution(string SessionKey, string HarnessId, int RecordCount);
 
+/// <summary>One request's prompt preview, as <see cref="IRelationalStoreReader.RequestPromptPreviews"/> returns it.</summary>
+/// <param name="RequestSpanId">Request span identifier the preview answers.</param>
+/// <param name="Prompt">First 200 characters of the request's plain prompt content, or <see langword="null"/> when the span carries none.</param>
+public record StoredRequestPromptPreview(string RequestSpanId, string? Prompt);
+
 /// <summary>Strongly typed cell value from a catalog-driven stored-fields inspection.</summary>
 /// <param name="ColumnName">Exact catalog column name.</param>
 /// <param name="ColumnType">SQLite storage affinity of the column.</param>
@@ -812,14 +817,17 @@ public interface IRelationalStoreReader
     /// </summary>
     /// <param name="sessionKey">Canonical session key the spans belong to.</param>
     /// <param name="requestSpanIds">The page's request span ids, from <see cref="SessionRequestFigures"/>.</param>
-    /// <returns>One entry per requested span id: the preview, or <see langword="null"/> when the span carries none.</returns>
+    /// <returns>
+    /// One entry per requested span id, in the order requested: the preview, or <see langword="null"/>
+    /// when the span carries none.
+    /// </returns>
     /// <remarks>
     /// The requests section's one sanctioned content read: a preview is the span's, or one of its
     /// owned turns', first non-empty prompt-bucket part, truncated the way the detail figures'
     /// preview rule truncates. Only the given spans' parts are read, so a page of 25 requests
     /// never materializes the session's whole conversation.
     /// </remarks>
-    IReadOnlyDictionary<string, string?> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds);
+    IReadOnlyList<StoredRequestPromptPreview> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds);
 
     /// <summary>
     /// Reads one session's record metadata with no content column, the shape the detail

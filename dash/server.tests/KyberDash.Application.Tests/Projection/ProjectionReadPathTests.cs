@@ -604,7 +604,7 @@ public class ProjectionReadPathTests
         public virtual SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit) => inner.SessionProblems(sessionKey, page, limit);
 
         /// <inheritdoc />
-        public IReadOnlyDictionary<string, string?> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds) => inner.RequestPromptPreviews(sessionKey, requestSpanIds);
+        public IReadOnlyList<StoredRequestPromptPreview> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds) => inner.RequestPromptPreviews(sessionKey, requestSpanIds);
 
         /// <inheritdoc />
         public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey) => inner.SessionRecordsContentFree(sessionKey);
