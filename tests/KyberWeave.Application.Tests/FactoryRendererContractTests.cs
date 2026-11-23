@@ -451,12 +451,9 @@ public sealed class FactoryRendererContractTests : IDisposable
         IReadOnlyList<string> expectedOrchestratorIds =
             ExpectedFactoryMcpToolIds(source, orchestratorServers);
         Assert.NotEmpty(expectedOrchestratorIds);
-        Assert.All(
-            expectedOrchestratorIds,
-            toolId => Assert.Contains(toolId, orchestratorTools, StringComparer.Ordinal));
-        Assert.DoesNotContain(
-            orchestratorTools,
-            tool => tool.StartsWith("codegraph___", StringComparison.Ordinal));
+        Assert.Equal(
+            [.. ExpectedFactoryTools(source.CapabilityProfiles.Profiles[orchestrator.CapabilityProfile]), .. expectedOrchestratorIds],
+            orchestratorTools);
     }
 
     /// <summary>
