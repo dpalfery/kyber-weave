@@ -3,7 +3,7 @@
 // rendered through the existing call-tree and duration-bars views. T10 pins
 // the top level; deeper levels page on expand in T11–T13.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 
@@ -197,5 +197,101 @@ describe('SessionTimelineSection inspector wiring', () => {
     const request = openInspector.mock.calls[0][0] as OpenInspectorRequest
     expect(request.title).toBe('Span: invoke_agent')
     expect(request.contentRequest).toEqual({ sessionId: SESSION_ID, span: 'root-span-1' })
+  })
+})
+
+// T13: deeper levels load on expand and every level pages past its first 25.
+describe('SessionTimelineSection: levels load on expand and page', () => {
+  const CHILD_NODE = {
+    spanId: 'child-1',
+    parentId: 'span/one',
+    startMs: 10000,
+    durationMs: 5000,
+    kind: 'tool',
+    name: 'Read',
+    status: 'ok',
+    attributes: {},
+    isSubagent: false,
+    isAuxiliary: false,
+    cost: { basis: 'none', status: '—' },
+    childCount: 0,
+  }
+
+  function levelPage(
+    nodes: unknown[],
+    opts: { total?: number; page?: number; parent?: string | null; endMs?: number } = {},
+  ) {
+    return {
+      sessionId: SESSION_ID,
+      parent: opts.parent ?? null,
+      nodes,
+      total: opts.total ?? nodes.length,
+      limit: 25,
+      offset: ((opts.page ?? 1) - 1) * 25,
+      page: opts.page ?? 1,
+      bounds: { startMs: 0, endMs: opts.endMs ?? 38400 },
+    }
+  }
+
+  function stubTimelineRoutes(routes: (url: string) => unknown): ReturnType<typeof vi.fn> {
+    const fetchMock = vi.fn((input: unknown) => Promise.resolve(jsonResponse(routes(String(input)))))
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it('expanding a node requests that node’s first page, its id URL-encoded', async () => {
+    const nested = { ...ROOT_NODE, spanId: 'span/one', childCount: 2 }
+    const fetchMock = stubTimelineRoutes((url) =>
+      url.includes('parent=span%2Fone') ? levelPage([CHILD_NODE], { parent: 'span/one' }) : levelPage([nested]),
+    )
+    mount(() => {})
+    const section = await screen.findByTestId('execution-timeline-section')
+    expect(fetchMock.mock.calls.length).toBe(1)
+    fireEvent.click(within(section).getByTestId('timeline-node-expand'))
+    await within(section).findAllByTestId('timeline-node')
+    const urls = fetchMock.mock.calls.map((call) => String(call[0]))
+    expect(urls.some((url) => url.endsWith('/timeline?page=1&limit=25&parent=span%2Fone'))).toBe(true)
+  })
+
+  it('pages a level past its first 25 rows on demand', async () => {
+    const topRows = Array.from({ length: 25 }, (_, i) => ({
+      ...ROOT_NODE,
+      spanId: `top-${i}`,
+      childCount: 0,
+    }))
+    const laterRows = Array.from({ length: 5 }, (_, i) => ({
+      ...ROOT_NODE,
+      spanId: `top-${25 + i}`,
+      childCount: 0,
+    }))
+    const fetchMock = stubTimelineRoutes((url) =>
+      url.includes('page=2')
+        ? levelPage(laterRows, { total: 30, page: 2 })
+        : levelPage(topRows, { total: 30 }),
+    )
+    mount(() => {})
+    const section = await screen.findByTestId('execution-timeline-section')
+    expect(within(section).getAllByTestId('timeline-node').length).toBe(25)
+    expect(fetchMock.mock.calls.length).toBe(1)
+    fireEvent.click(within(section).getByTestId('timeline-level-more'))
+    await waitFor(() => expect(within(section).getAllByTestId('timeline-node').length).toBe(30))
+    const urls = fetchMock.mock.calls.map((call) => String(call[0]))
+    expect(urls.some((url) => url.endsWith('/timeline?page=2&limit=25'))).toBe(true)
+  })
+
+  it('lists every loaded node in the duration view, scaled to the bounds', async () => {
+    const nested = { ...ROOT_NODE, spanId: 'span/one', childCount: 2 }
+    stubTimelineRoutes((url) =>
+      url.includes('parent=span%2Fone') ? levelPage([CHILD_NODE], { parent: 'span/one' }) : levelPage([nested]),
+    )
+    mount(() => {})
+    const section = await screen.findByTestId('execution-timeline-section')
+    fireEvent.click(within(section).getByTestId('timeline-node-expand'))
+    await within(section).findAllByTestId('timeline-node')
+    fireEvent.click(within(section).getByTestId('timeline-tab-bars'))
+    const bars = within(section).getByTestId('timeline-bars-view')
+    expect(within(bars).getAllByTestId('timeline-bar-row').length).toBe(2)
+    const childBar = within(bars).getByTestId('timeline-bar-child-1')
+    expect(childBar.style.left).toBe(`${(10000 / 38400) * 100}%`)
   })
 })

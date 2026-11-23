@@ -1,31 +1,30 @@
-import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQueries } from '@tanstack/react-query'
 import { cn } from '../../lib/utils.js'
 import { formatDuration, formatSpanLabel } from '../../lib/labels.js'
-import { Card } from '../ui/card.js'
-import { TimelineView, type CostBlock, type TimelineNode } from '../analysis/TimelineView.js'
+import {
+  DurationView,
+  TimelineView,
+  TIMELINE_OP_COLORS,
+  type CostBlock,
+  type TimelineLevelState,
+  type TimelineNode,
+} from '../analysis/TimelineView.js'
 import { SectionLoading } from './SectionLoading.js'
 import { SectionError } from './SectionError.js'
 import { sectionErrorMessage } from './useSectionPage.js'
 import {
   fetchKyberSessionTimeline,
-  kyberSessionSectionQueryKey,
   type KyberSessionSummarySection,
   type KyberSessionTimelineNode,
 } from '../../lib/kyberApi.js'
 import type { DrawerContent, OpenInspector, SessionSummaryPayload } from './types.js'
 
-export const TIMELINE_OP_COLORS: Record<string, string> = {
-  invoke_agent: '#3b82f6', // blue
-  agent: '#3b82f6',
-  chat: '#f59e0b', // amber
-  execute_tool: '#10b981', // emerald
-  tool: '#10b981',
-  'tool.invoke': '#10b981',
-  execute_hook: '#ec4899', // pink
-  hook: '#ec4899',
-  embeddings: '#8b5cf6', // purple
-}
+// The legend and the duration bars share the operation colours with the view.
+export { TIMELINE_OP_COLORS }
+
+/** The state-map key of the top level, whose parent the route names as null. */
+const TOP_LEVEL = '(top level)'
 
 /** One served timeline node adapted to the call-tree view's node shape. */
 function adaptTimelineNode(node: KyberSessionTimelineNode): TimelineNode {
@@ -40,8 +39,10 @@ function adaptTimelineNode(node: KyberSessionTimelineNode): TimelineNode {
   return {
     spanId: node.spanId,
     parentId: node.parentId,
-    // Deeper levels page on expand (T11–T13); the top level renders as leaves.
+    // Children are never in the payload: each level pages on demand, and the
+    // section fills them in from that level's queries when it is expanded.
     children: [],
+    childCount: node.childCount,
     startMs: node.startMs,
     durationMs: node.durationMs,
     kind: node.kind,
@@ -54,9 +55,19 @@ function adaptTimelineNode(node: KyberSessionTimelineNode): TimelineNode {
   }
 }
 
+/** One level's pages, as they are requested: page 1 up front, more on demand. */
+type LevelBucket = {
+  nodes: KyberSessionTimelineNode[]
+  total: number
+  loading: boolean
+  error: unknown
+  refetches: Array<() => void>
+}
+
 /**
- * The session's execution timeline, one level at a time. T10 pins the top
- * level; deeper levels page on expand in T11–T13. Both views — the call tree
+ * The session's execution timeline, one level at a time. The top level loads
+ * at mount; expanding a node loads that node's first page of children, and
+ * every level pages past its first 25 on demand. Both views — the call tree
  * and the duration bars — scale by the bounds the route answered, and a span
  * click opens the inspector on the span's own request.
  */
@@ -79,9 +90,43 @@ export function SessionTimelineSection({
   openInspector,
   className,
 }: SessionTimelineSectionProps) {
-  const { data, isPending, isError, error, refetch } = useQuery({
-    queryKey: kyberSessionSectionQueryKey(sessionId, 'timeline'),
-    queryFn: () => fetchKyberSessionTimeline(sessionId, { parent: null, page: 1 }),
+  // Expansion and paging are viewer state; the queries below derive from them.
+  const [expandedIds, setExpandedIds] = useState<string[]>([])
+  const [levelPages, setLevelPages] = useState<Record<string, number>>({})
+
+  const levelRequests: Array<{ parent: string | null; page: number; levelKey: string }> = []
+  const topPages = levelPages[TOP_LEVEL] ?? 1
+  for (let page = 1; page <= topPages; page++) {
+    levelRequests.push({ parent: null, page, levelKey: TOP_LEVEL })
+  }
+  for (const parentId of expandedIds) {
+    const pages = levelPages[parentId] ?? 1
+    for (let page = 1; page <= pages; page++) {
+      levelRequests.push({ parent: parentId, page, levelKey: parentId })
+    }
+  }
+
+  const levelQueries = useQueries({
+    queries: levelRequests.map((request) => ({
+      queryKey: ['kyber-session', sessionId, 'timeline', request.parent, request.page],
+      queryFn: () => fetchKyberSessionTimeline(sessionId, { parent: request.parent, page: request.page }),
+      retry: false,
+    })),
+  })
+
+  const levels = new Map<string, LevelBucket>()
+  levelRequests.forEach((request, index) => {
+    const query = levelQueries[index]
+    const bucket = levels.get(request.levelKey) ?? { nodes: [], total: 0, loading: false, error: null, refetches: [] }
+    if (query.data) {
+      // Pages concatenate in request order, so a level's rows keep their order.
+      bucket.nodes.push(...query.data.nodes)
+      bucket.total = query.data.total
+    }
+    if (query.isPending) bucket.loading = true
+    if (query.isError) bucket.error = query.error
+    bucket.refetches.push(() => void query.refetch())
+    levels.set(request.levelKey, bucket)
   })
 
   // View mode state ('tree' vs 'bars'). Once a viewer chooses a tab, preserve
@@ -91,35 +136,85 @@ export function SessionTimelineSection({
   const [selectedSpanId, setSelectedSpanId] = useState<string | undefined>(undefined)
   const activeTimelineTab = timelineTabSelected ? timelineTab : (initialTab ?? timelineTab)
 
-  const timelineRoot: TimelineNode | null = useMemo(() => {
-    if (!data || data.nodes.length === 0) return null
-    const cost = summaryRecord?.cost
-    return {
-      spanId: 'session-root',
-      parentId: null,
-      children: data.nodes.map(adaptTimelineNode),
-      startMs: data.bounds.startMs,
-      durationMs: Math.max(0, data.bounds.endMs - data.bounds.startMs),
-      kind: 'session',
-      name: summary?.label || `${summary?.harness || 'Agent'} Session`,
-      attributes: {},
-      isSubagent: Boolean(summary?.is_subagent),
-      isAuxiliary: false,
-      cost: {
-        basis: cost?.basis ?? 'none',
-        status: cost?.status ?? (cost?.value != null ? 'ok' : '—'),
-        value: cost?.value ?? undefined,
-        currency: cost?.currency ?? 'USD',
-      },
-    }
-  }, [data, summary, summaryRecord])
+  const childrenByParent = new Map<string, KyberSessionTimelineNode[]>()
+  for (const [levelKey, bucket] of levels) {
+    if (levelKey !== TOP_LEVEL) childrenByParent.set(levelKey, bucket.nodes)
+  }
 
-  const flattened = useMemo(() => data?.nodes ?? [], [data])
-  // The bars scale by the whole tree's bounds, as the route answered them.
-  const maxTimelineSpan = useMemo(() => {
-    if (!data) return 1
-    return Math.max(1, data.bounds.endMs - data.bounds.startMs)
-  }, [data])
+  const buildNode = (raw: KyberSessionTimelineNode): TimelineNode => {
+    const expanded = expandedIds.includes(raw.spanId)
+    return {
+      ...adaptTimelineNode(raw),
+      children: expanded ? (childrenByParent.get(raw.spanId) ?? []).map(buildNode) : [],
+    }
+  }
+
+  const topNodes = (levels.get(TOP_LEVEL)?.nodes ?? []).map(buildNode)
+  const loadedNodes: TimelineNode[] = []
+  const walk = (nodes: TimelineNode[]) => {
+    for (const node of nodes) {
+      loadedNodes.push(node)
+      walk(node.children)
+    }
+  }
+  walk(topNodes)
+
+  const levelState = (parent: string | null): TimelineLevelState | undefined => {
+    const bucket = levels.get(parent ?? TOP_LEVEL)
+    if (!bucket) return undefined
+    return {
+      loading: bucket.loading,
+      error: bucket.error === null ? null : sectionErrorMessage(bucket.error),
+      canLoadMore: bucket.total > bucket.nodes.length,
+      loadedCount: bucket.nodes.length,
+      total: bucket.total,
+    }
+  }
+
+  const toggleExpand = (node: TimelineNode) => {
+    setExpandedIds((ids) =>
+      ids.includes(node.spanId) ? ids.filter((id) => id !== node.spanId) : [...ids, node.spanId],
+    )
+  }
+  const loadMore = (parent: string | null) => {
+    const key = parent ?? TOP_LEVEL
+    setLevelPages((pages) => ({ ...pages, [key]: (pages[key] ?? 1) + 1 }))
+  }
+  const retryLevel = (parent: string | null) => {
+    const bucket = levels.get(parent ?? TOP_LEVEL)
+    for (const refetch of bucket?.refetches ?? []) refetch()
+  }
+
+  // requests[0] is always the top level's first page, so it carries the
+  // section's own window: the bounds every view scales by.
+  const rootQuery = levelQueries[0]
+  const data = rootQuery?.data
+
+  const timelineRoot: TimelineNode | null =
+    data && topNodes.length > 0
+      ? (() => {
+          const cost = summaryRecord?.cost
+          return {
+            spanId: 'session-root',
+            parentId: null,
+            children: topNodes,
+            childCount: 0,
+            startMs: data.bounds.startMs,
+            durationMs: Math.max(0, data.bounds.endMs - data.bounds.startMs),
+            kind: 'session',
+            name: summary?.label || `${summary?.harness || 'Agent'} Session`,
+            attributes: {},
+            isSubagent: Boolean(summary?.is_subagent),
+            isAuxiliary: false,
+            cost: {
+              basis: cost?.basis ?? 'none',
+              status: cost?.status ?? (cost?.value != null ? 'ok' : '—'),
+              value: cost?.value ?? undefined,
+              currency: cost?.currency ?? 'USD',
+            },
+          }
+        })()
+      : null
 
   const openSpanInspector = (node: { spanId: string; name?: string; kind?: string; durationMs?: number }) => {
     setSelectedSpanId(node.spanId)
@@ -131,19 +226,19 @@ export function SessionTimelineSection({
     })
   }
 
-  if (isError) {
+  if (rootQuery?.isError) {
     return (
       <SectionError
         testId="section-error-timeline"
         label="Execution timeline"
-        message={sectionErrorMessage(error)}
-        onRetry={() => void refetch()}
+        message={sectionErrorMessage(rootQuery.error)}
+        onRetry={() => void rootQuery.refetch()}
         className={className}
       />
     )
   }
 
-  if (isPending || data === undefined) {
+  if (rootQuery?.isPending || data === undefined) {
     return <SectionLoading testId="session-timeline-loading" label="execution timeline" />
   }
 
@@ -206,7 +301,7 @@ export function SessionTimelineSection({
         ))}
       </div>
 
-      {data.nodes.length === 0 ? (
+      {topNodes.length === 0 ? (
         <p data-testid="timeline-empty" className="py-6 text-center text-xs text-tertiary-foreground italic">
           No timeline spans recorded.
         </p>
@@ -214,72 +309,22 @@ export function SessionTimelineSection({
         <div data-testid="timeline-tree-view">
           <TimelineView
             root={timelineRoot}
+            expandedIds={expandedIds}
+            levelState={levelState}
+            onToggleExpand={toggleExpand}
+            onLoadMore={loadMore}
+            onRetryLevel={retryLevel}
             selectedId={selectedSpanId}
             onSelectNode={(node) => openSpanInspector(node)}
           />
         </div>
       ) : (
-        /* Duration Bars Timeline View */
-        <Card className="p-4 space-y-2 border border-border" data-testid="timeline-bars-view">
-          <div className="space-y-1.5 overflow-x-auto max-h-[500px]">
-            {flattened.map((node) => {
-              const offset = node.startMs - data.bounds.startMs
-              const leftPct = (offset / maxTimelineSpan) * 100
-              const measuredDuration = typeof node.durationMs === 'number' && node.durationMs > 0
-              const widthPct = measuredDuration
-                ? Math.max((node.durationMs / maxTimelineSpan) * 100, 0.7)
-                : 0
-              const opKey = node.kind || ''
-              const opColor = TIMELINE_OP_COLORS[opKey] || '#64748b'
-              const isSelected = selectedSpanId === node.spanId
-
-              return (
-                <div
-                  key={node.spanId}
-                  onClick={() => openSpanInspector(node)}
-                  className={cn(
-                    'group flex items-center gap-2 rounded px-2 py-1 text-xs font-mono cursor-pointer transition-colors',
-                    isSelected
-                      ? 'bg-interactive-secondary ring-1 ring-primary/40'
-                      : 'hover:bg-interactive-secondary/60',
-                  )}
-                  data-testid="timeline-bar-row"
-                >
-                  {/* Name with depth indent */}
-                  <span
-                    className="truncate text-foreground font-medium shrink-0"
-                    style={{ width: '240px' }}
-                    title={formatSpanLabel(node.name)}
-                  >
-                    {formatSpanLabel(node.name)}
-                  </span>
-
-                  {/* Horizontal Duration Bar Track */}
-                  <div className="relative flex-1 h-3 rounded bg-muted/60 overflow-hidden">
-                    <div
-                      data-testid={`timeline-bar-${node.spanId}`}
-                      className="absolute top-0 bottom-0 rounded-[2px] transition-all opacity-80 group-hover:opacity-100"
-                      style={{
-                        left: `${leftPct}%`,
-                        width: `${widthPct}%`,
-                        backgroundColor: opColor,
-                      }}
-                      title={`${formatSpanLabel(node.name)} · ${formatDuration(node.durationMs)}`}
-                    />
-                  </div>
-
-                  {/* Metadata */}
-                  <span className="w-16 text-right tabular-nums text-tertiary-foreground text-[11px] shrink-0">
-                    {formatDuration(node.durationMs)}
-                  </span>
-                  <span className="w-24 text-right tabular-nums text-tertiary-foreground text-[10px] truncate shrink-0">
-                    {node.childCount > 0 ? `${node.childCount} child${node.childCount === 1 ? '' : 'ren'}` : ''}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-        </Card>
+        <DurationView
+          nodes={loadedNodes}
+          bounds={data.bounds}
+          selectedId={selectedSpanId}
+          onSelectNode={(node) => openSpanInspector(node)}
+        />
       )}
     </div>
   )

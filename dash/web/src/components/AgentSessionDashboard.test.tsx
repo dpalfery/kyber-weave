@@ -306,14 +306,7 @@ const STORED_FIELDS_BODY = {
     {
       tableName: 'session',
       columnNames: ['session_key', 'harness'],
-      rows: [
-        {
-          cells: [
-            { columnName: 'session_key', columnType: 1, textValue: SESSION_ID },
-            { columnName: 'harness', columnType: 1, textValue: 'copilot' },
-          ],
-        },
-      ],
+      rowCount: 1,
       missingParentKeys: [],
     },
   ],

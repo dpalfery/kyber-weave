@@ -2310,16 +2310,30 @@ export interface StoredFieldRow {
 }
 
 /**
- * One catalog table's inspection entry: the reachable `table.column` labels
- * live in `columnNames` plus every row cell's `columnName`; `rows` holds the
- * session's persisted rows; `missingParentKeys` names the parent keys with
- * no row in this optional child table.
+ * One catalog table's inspection entry in the stored-fields inventory: the
+ * reachable `table.column` labels live in `columnNames`, `rowCount` counts
+ * the session's persisted rows across every page, and `missingParentKeys`
+ * names the parent keys with no row in this optional child table. The rows
+ * themselves load through `fetchStoredTableRowsPage` only when the viewer
+ * opens the table (decision D15) — the inventory carries no row content.
  */
 export interface StoredTableFields {
   tableName: string
   columnNames: string[]
-  rows: StoredFieldRow[]
+  rowCount: number
   missingParentKeys: string[]
+}
+
+/** One page of one catalog table's stored rows, read when the viewer opens the table. */
+export interface StoredFieldRowsPage {
+  tableName: string
+  columnNames: string[]
+  /** Rows belonging to the session, across every page. */
+  totalRows: number
+  page: number
+  limit: number
+  offset: number
+  rows: StoredFieldRow[]
 }
 
 /**
@@ -2333,13 +2347,15 @@ export interface StoredFieldsResponse {
 }
 
 /**
- * Reads the catalog-driven stored-fields view for a session: the table and
- * column inventory plus the rows the store persisted.
+ * Reads the catalog-driven stored-fields inventory for a session: the tables
+ * and columns the store can hold for it, with row counts — no row content.
  *
  * WHY this route and not the session payload: the payload serves the
  * session's measured counters, while this route serves what the relational
  * store actually persisted — every reachable catalog column labeled
- * `table.column` — for the session execution inspection.
+ * `table.column` — for the session execution inspection. A large table's
+ * rows never ride along here; they page through `fetchStoredTableRowsPage`
+ * when the viewer opens that table.
  */
 export async function fetchKyberSessionStoredFields(sessionKey: string): Promise<StoredFieldsResponse> {
   const path = `/api/kyber/session/${encodeURIComponent(sessionKey)}/stored-fields`
@@ -2348,6 +2364,20 @@ export async function fetchKyberSessionStoredFields(sessionKey: string): Promise
 
 /** The stored-fields section's fetcher under its original name. */
 export const fetchStoredFields = fetchKyberSessionStoredFields
+
+/**
+ * Reads one page of one catalog table's stored rows for a session, from
+ * `GET /api/kyber/session/:sessionKey/stored-fields/:table`. The table name
+ * is a catalog identifier from the inventory, and it is URL-encoded into the
+ * path like every other id.
+ */
+export async function fetchStoredTableRowsPage(sessionKey: string, table: string, page = 1): Promise<StoredFieldRowsPage> {
+  const params = new URLSearchParams()
+  params.set('page', String(page))
+  params.set('limit', String(KYBER_SECTION_PAGE_LIMIT))
+  const path = `/api/kyber/session/${encodeURIComponent(sessionKey)}/stored-fields/${encodeURIComponent(table)}?${params.toString()}`
+  return parseStoredFieldRowsPage(await fetchJson<unknown>(path), path)
+}
 
 // ── Session view sections (/api/kyber/session/:id/{section}) ────────────────
 //
@@ -2994,11 +3024,14 @@ function readStoredRow(value: unknown, path: string): StoredFieldRow {
 
 function readStoredTable(value: unknown, path: string): StoredTableFields {
   if (!isRaw(value)) throw malformedSection(path, 'a stored table is not an object')
-  if (!Array.isArray(value.rows)) throw malformedSection(path, 'a stored table rows is not an array')
+  const rowCount = value.rowCount
+  if (typeof rowCount !== 'number' || !Number.isFinite(rowCount)) {
+    throw malformedSection(path, 'a stored table rowCount is not a number')
+  }
   return {
     tableName: requireStringField(value, 'tableName', path),
     columnNames: readStringArray(value.columnNames, path, 'columnNames'),
-    rows: value.rows.map((row) => readStoredRow(row, path)),
+    rowCount,
     missingParentKeys: readStringArray(value.missingParentKeys, path, 'missingParentKeys'),
   }
 }
@@ -3009,6 +3042,30 @@ function parseStoredFields(raw: unknown, path: string): StoredFieldsResponse {
   return {
     sessionKey: requireStringField(raw, 'sessionKey', path),
     tables: raw.tables.map((table) => readStoredTable(table, path)),
+  }
+}
+
+function parseStoredFieldRowsPage(raw: unknown, path: string): StoredFieldRowsPage {
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  if (!Array.isArray(raw.rows)) throw malformedSection(path, 'rows is not an array')
+  const totalRows = raw.totalRows
+  if (typeof totalRows !== 'number' || !Number.isFinite(totalRows)) {
+    throw malformedSection(path, 'totalRows is not a number')
+  }
+  const page = raw.page
+  const limit = raw.limit
+  const offset = raw.offset
+  if (typeof page !== 'number' || !Number.isInteger(page) || page < 1) throw malformedSection(path, 'page is not a page number')
+  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1) throw malformedSection(path, 'limit is not a page size')
+  if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0) throw malformedSection(path, 'offset is not a row offset')
+  return {
+    tableName: requireStringField(raw, 'tableName', path),
+    columnNames: readStringArray(raw.columnNames, path, 'columnNames'),
+    totalRows,
+    page,
+    limit,
+    offset,
+    rows: raw.rows.map((row) => readStoredRow(row, path)),
   }
 }
 

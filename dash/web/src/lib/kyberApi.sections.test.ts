@@ -15,6 +15,7 @@ import {
   fetchKyberSessionServers,
   fetchKyberSessionSkills,
   fetchKyberSessionStoredFields,
+  fetchStoredTableRowsPage,
   fetchKyberSessionSummary,
   fetchKyberSessionTimeline,
   fetchKyberSessionTools,
@@ -242,15 +243,22 @@ const STORED_FIELDS_BODY = {
     {
       tableName: 'session',
       columnNames: ['session_id', 'title'],
-      rows: [
-        {
-          cells: [
-            { columnName: 'session_id', columnType: 1, textValue: 'sess-1', integerValue: null, realValue: null },
-            { columnName: 'title', columnType: 1, textValue: 'Fix the parser', integerValue: null, realValue: null },
-          ],
-        },
-      ],
+      rowCount: 1,
       missingParentKeys: [],
+    },
+  ],
+}
+
+const STORED_ROWS_BODY = {
+  tableName: 'session',
+  columnNames: ['session_id', 'title'],
+  totalRows: 30,
+  page: 2,
+  limit: 25,
+  offset: 25,
+  rows: [
+    {
+      cells: [{ columnName: 'session_id', columnType: 1, textValue: 'sess-1' }],
     },
   ],
 }
@@ -409,7 +417,7 @@ describe('session section fetchers', () => {
     await expect(fetchKyberSessionProblems('sess-1', 1)).rejects.toThrow(/malformed/i)
   })
 
-  it('GETs the stored-fields route and returns the inventory and its rows', async () => {
+  it('GETs the stored-fields route and returns the inventory without rows', async () => {
     const calls = stubFetch(200, STORED_FIELDS_BODY)
 
     const stored = await fetchKyberSessionStoredFields('sess-1')
@@ -421,6 +429,30 @@ describe('session section fetchers', () => {
   it('rejects a stored-fields body whose tables is not an array', async () => {
     stubFetch(200, { sessionKey: 'sess-1', tables: 'none' })
     await expect(fetchKyberSessionStoredFields('sess-1')).rejects.toThrow(/malformed/i)
+  })
+
+  it('rejects a stored-fields table without its row count', async () => {
+    stubFetch(200, {
+      sessionKey: 'sess-1',
+      tables: [{ tableName: 'session', columnNames: ['session_id'], missingParentKeys: [] }],
+    })
+    await expect(fetchKyberSessionStoredFields('sess-1')).rejects.toThrow(/malformed/i)
+  })
+
+  it('GETs one stored-fields rows page with the table URL-encoded and the page', async () => {
+    const calls = stubFetch(200, STORED_ROWS_BODY)
+
+    const page = await fetchStoredTableRowsPage('sess/one', 'session', 2)
+
+    expect(calls[0]!.url).toBe('/api/kyber/session/sess%2Fone/stored-fields/session?page=2&limit=25')
+    expect(page.rows).toEqual(STORED_ROWS_BODY.rows)
+    expect(page.totalRows).toBe(30)
+    expect(page.tableName).toBe('session')
+  })
+
+  it('rejects a rows page whose rows is not an array', async () => {
+    stubFetch(200, { tableName: 'session', columnNames: [], totalRows: 0, page: 1, limit: 25, offset: 0, rows: 'no' })
+    await expect(fetchStoredTableRowsPage('sess-1', 'session', 1)).rejects.toThrow(/malformed/i)
   })
 
   it('GETs the widened turn route and returns the turn with its context', async () => {

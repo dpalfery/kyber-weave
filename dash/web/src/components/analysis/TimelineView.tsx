@@ -2,6 +2,7 @@ import * as React from 'react'
 
 import { formatDuration, formatSpanLabel } from '../../lib/labels.js'
 import { fetchSpanAttributes } from '../../lib/kyberApi.js'
+import { cn } from '../../lib/utils.js'
 
 export type CostBlock = {
   basis: string
@@ -14,6 +15,7 @@ export type TimelineNode = {
   spanId: string
   parentId: string | null
   children: TimelineNode[]
+  childCount: number
   startMs: number
   durationMs: number
   kind: string
@@ -25,8 +27,32 @@ export type TimelineNode = {
   cost: CostBlock
 }
 
-/** Synthetic id of the auxiliary group (mirrors AUXILIARY_GROUP_ID in the analysis layer). */
-const AUXILIARY_GROUP_ID = '(auxiliary)'
+/**
+ * One level's load state, as the section's level queries answered it. The
+ * tree renders it under the node whose children are loading.
+ */
+export type TimelineLevelState = {
+  /** A page of this level is still in flight. */
+  loading: boolean
+  /** The level's failure in the words the route answered; null while it stands. */
+  error: string | null
+  canLoadMore: boolean
+  loadedCount: number
+  total: number
+}
+
+/** Operation colour for the duration bars and the legend, keyed by span kind. */
+export const TIMELINE_OP_COLORS: Record<string, string> = {
+  invoke_agent: '#3b82f6', // blue
+  agent: '#3b82f6',
+  chat: '#f59e0b', // amber
+  execute_tool: '#10b981', // emerald
+  tool: '#10b981',
+  'tool.invoke': '#10b981',
+  execute_hook: '#ec4899', // pink
+  hook: '#ec4899',
+  embeddings: '#8b5cf6', // purple
+}
 
 function CostBadge({ cost }: { cost: CostBlock }) {
   if (cost.value === undefined || cost.value === null) {
@@ -45,25 +71,73 @@ function CostBadge({ cost }: { cost: CostBlock }) {
   }
 }
 
+type LevelControls = {
+  expandedIds?: readonly string[]
+  levelState?: (parent: string | null) => TimelineLevelState | undefined
+  onToggleExpand?: (node: TimelineNode) => void
+  onLoadMore?: (parent: string | null) => void
+  onRetryLevel?: (parent: string | null) => void
+}
+
+/** The rows that state one level's progress beneath the node expanded to it. */
+function LevelRows({ parent, state, onRetryLevel, onLoadMore }: {
+  parent: string | null
+  state: TimelineLevelState
+  onRetryLevel?: (parent: string | null) => void
+  onLoadMore?: (parent: string | null) => void
+}) {
+  if (state.loading) {
+    return (
+      <div data-testid="timeline-level-loading" role="status" aria-live="polite" className="px-2 py-1 text-xs text-tertiary-foreground">
+        Loading…
+      </div>
+    )
+  }
+  if (state.error !== null) {
+    return (
+      <div data-testid="timeline-level-error" role="status" aria-live="polite" className="flex items-center gap-2 px-2 py-1 text-xs text-destructive-foreground">
+        <span>{state.error}</span>
+        <button type="button" data-testid="timeline-level-retry" onClick={() => onRetryLevel?.(parent)} className="underline">
+          Retry
+        </button>
+      </div>
+    )
+  }
+  if (state.canLoadMore) {
+    return (
+      <button
+        type="button"
+        data-testid="timeline-level-more"
+        onClick={() => onLoadMore?.(parent)}
+        className="text-xs text-muted-foreground underline"
+      >
+        Load more ({state.total - state.loadedCount} more)
+      </button>
+    )
+  }
+  if (state.loadedCount === 0) {
+    return <div data-testid="timeline-level-empty" className="px-2 py-1 text-xs text-tertiary-foreground">No children.</div>
+  }
+  return null
+}
+
 function NodeRow({
   node,
   depth,
   onSelect,
   selectedId,
+  controls,
 }: {
   node: TimelineNode
   depth: number
   onSelect?: (n: TimelineNode) => void
   selectedId?: string
+  controls: LevelControls
 }) {
   const isSelected = node.spanId === selectedId
-  // The synthetic auxiliary group starts collapsed: its cost stays visible on
-  // the row, its internal helper calls stay out of the primary tree.
-  const collapsible = node.spanId === AUXILIARY_GROUP_ID && node.children.length > 0
-  const [collapsed, setCollapsed] = React.useState(collapsible)
-  React.useEffect(() => {
-    setCollapsed(collapsible)
-  }, [collapsible])
+  const expandable = node.childCount > 0
+  const expanded = expandable && (controls.expandedIds?.includes(node.spanId) ?? false)
+  const level = expanded ? controls.levelState?.(node.spanId) : undefined
   return (
     <>
       <div
@@ -74,18 +148,19 @@ function NodeRow({
         role={onSelect ? 'button' : undefined}
         tabIndex={onSelect ? 0 : undefined}
       >
-        {collapsible && (
+        {expandable && (
           <button
             type="button"
-            aria-expanded={!collapsed}
-            aria-label={collapsed ? 'Expand auxiliary activity' : 'Collapse auxiliary activity'}
+            data-testid="timeline-node-expand"
+            aria-expanded={expanded}
+            aria-label={`${expanded ? 'Collapse' : 'Expand'} ${node.name} children`}
             className="shrink-0 text-xs text-tertiary-foreground"
             onClick={(e) => {
               e.stopPropagation()
-              setCollapsed((c) => !c)
+              controls.onToggleExpand?.(node)
             }}
           >
-            {collapsed ? '▸' : '▾'}
+            {expanded ? '▾' : '▸'}
           </button>
         )}
         <span className="shrink-0 font-mono text-[11px] text-tertiary-foreground">{node.kind}</span>
@@ -93,8 +168,8 @@ function NodeRow({
         {node.isSubagent && (
           <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">subagent</span>
         )}
-        {collapsible && collapsed && (
-          <span className="shrink-0 text-[10px] text-tertiary-foreground">{node.children.length} hidden</span>
+        {expandable && !expanded && (
+          <span className="shrink-0 text-[10px] text-tertiary-foreground" data-testid="timeline-node-hidden">{node.childCount} hidden</span>
         )}
         {node.isAuxiliary && (
           <span className="shrink-0 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-medium text-violet-700">auxiliary</span>
@@ -120,28 +195,42 @@ function NodeRow({
         <span className="shrink-0 tabular-nums text-xs text-tertiary-foreground">{formatDuration(node.durationMs)}</span>
         <CostBadge cost={node.cost} />
       </div>
-      {!collapsed && node.children.map((child) => (
-        <NodeRow key={child.spanId} node={child} depth={depth + 1} onSelect={onSelect} selectedId={selectedId} />
-      ))}
+      {expanded && (
+        <>
+          {node.children.map((child) => (
+            <NodeRow key={child.spanId} node={child} depth={depth + 1} onSelect={onSelect} selectedId={selectedId} controls={controls} />
+          ))}
+          {level && <LevelRows parent={node.spanId} state={level} onRetryLevel={controls.onRetryLevel} onLoadMore={controls.onLoadMore} />}
+        </>
+      )}
     </>
   )
 }
 
-export function TimelineView({
-  root,
-  onSelectNode,
-  selectedId,
-}: {
+export interface TimelineViewProps extends LevelControls {
   root: TimelineNode | null | undefined
   onSelectNode?: (node: TimelineNode) => void
   selectedId?: string
-}) {
+}
+
+export function TimelineView({
+  root,
+  expandedIds,
+  levelState,
+  onToggleExpand,
+  onLoadMore,
+  onRetryLevel,
+  onSelectNode,
+  selectedId,
+}: TimelineViewProps) {
   const [selected, setSelected] = React.useState<TimelineNode | null>(null)
   const handleSelect = (n: TimelineNode) => {
     setSelected(n)
     onSelectNode?.(n)
   }
   const shown = selectedId ? undefined : selected
+  const controls: LevelControls = { expandedIds, levelState, onToggleExpand, onLoadMore, onRetryLevel }
+  const rootLevel = levelState?.(null)
 
   // Session payloads no longer carry each node's attribute map — it is the raw
   // span payload, and embedding it made every session row a second
@@ -196,10 +285,11 @@ export function TimelineView({
             <p className="py-4 text-center text-sm text-tertiary-foreground">Empty session.</p>
           ) : (
             root.children.map((child) => (
-              <NodeRow key={child.spanId} node={child} depth={0} onSelect={handleSelect} selectedId={selectedId ?? selected?.spanId} />
+              <NodeRow key={child.spanId} node={child} depth={0} onSelect={handleSelect} selectedId={selectedId ?? selected?.spanId} controls={controls} />
             ))
           )}
         </div>
+        {rootLevel && <LevelRows parent={null} state={rootLevel} onRetryLevel={onRetryLevel} onLoadMore={onLoadMore} />}
         <div className="mt-3 flex gap-2 text-xs text-tertiary-foreground">
           <span>Total: {formatDuration(root.durationMs)}</span>
           <span>·</span>
@@ -225,6 +315,77 @@ export function TimelineView({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/** The duration bars: every node loaded so far, scaled to the whole tree's bounds. */
+export function DurationView({
+  nodes,
+  bounds,
+  onSelectNode,
+  selectedId,
+}: {
+  nodes: TimelineNode[]
+  bounds: { startMs: number; endMs: number }
+  onSelectNode?: (node: TimelineNode) => void
+  selectedId?: string
+}) {
+  const span = Math.max(1, bounds.endMs - bounds.startMs)
+  return (
+    <div className="space-y-2 rounded-md border border-border bg-card p-4" data-testid="timeline-bars-view">
+      <div className="max-h-[500px] space-y-1.5 overflow-x-auto">
+        {nodes.map((node) => {
+          const offset = node.startMs - bounds.startMs
+          const leftPct = (offset / span) * 100
+          const measuredDuration = typeof node.durationMs === 'number' && node.durationMs > 0
+          const widthPct = measuredDuration
+            ? Math.max((node.durationMs / span) * 100, 0.7)
+            : 0
+          const opColor = TIMELINE_OP_COLORS[node.kind] || '#64748b'
+          const isSelected = selectedId === node.spanId
+
+          return (
+            <div
+              key={node.spanId}
+              onClick={() => onSelectNode?.(node)}
+              className={cn(
+                'group flex cursor-pointer items-center gap-2 rounded px-2 py-1 font-mono text-xs transition-colors',
+                isSelected ? 'bg-interactive-secondary ring-1 ring-primary/40' : 'hover:bg-interactive-secondary/60',
+              )}
+              data-testid="timeline-bar-row"
+            >
+              <span
+                className="shrink-0 truncate font-medium text-foreground"
+                style={{ width: '240px' }}
+                title={node.name}
+              >
+                {node.name}
+              </span>
+
+              <div className="relative h-3 flex-1 overflow-hidden rounded bg-muted/60">
+                <div
+                  data-testid={`timeline-bar-${node.spanId}`}
+                  className="absolute bottom-0 top-0 rounded-[2px] opacity-80 transition-all group-hover:opacity-100"
+                  style={{
+                    left: `${leftPct}%`,
+                    width: `${widthPct}%`,
+                    backgroundColor: opColor,
+                  }}
+                  title={`${node.name} · ${formatDuration(node.durationMs)}`}
+                />
+              </div>
+
+              <span className="w-16 shrink-0 text-right text-[11px] tabular-nums text-tertiary-foreground">
+                {formatDuration(node.durationMs)}
+              </span>
+              <span className="w-24 shrink-0 truncate text-right text-[10px] tabular-nums text-tertiary-foreground">
+                {node.childCount > 0 ? `${node.childCount} child${node.childCount === 1 ? '' : 'ren'}` : ''}
+              </span>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
