@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
 import {
+  SESSION_PAGE_LIMIT,
   USER_CANON,
   postOtlpLogs,
   postOtlpTraces,
@@ -27,9 +28,6 @@ import {
  */
 test.describe.configure({ mode: 'serial' })
 test.setTimeout(180_000)
-
-/** The widest window the paged routes serve: a read that must see the whole store asks for it. */
-const WIDEST_PAGE_LIMIT = 500
 
 let server: IsolatedServerHandle | undefined
 let bridge: TrayBridgeHandle | undefined
@@ -388,7 +386,7 @@ test('exercises CleanDatabase single-harness and all-harness scopes, plus quit I
   await expect(page.getByTestId('empty-state')).toBeVisible()
   await expect(page.getByTestId('ipc-action-error')).toHaveCount(0)
 
-  const sessionsAfterClean = await page.request.get(`${server!.url}/api/kyber/sessions?limit=${WIDEST_PAGE_LIMIT}`)
+  const sessionsAfterClean = await page.request.get(`${server!.url}/api/kyber/sessions?limit=${SESSION_PAGE_LIMIT}`)
   expect(sessionsAfterClean.status()).toBe(200)
   const sessionsAfterJson = (await sessionsAfterClean.json()) as {
     sessions?: unknown[]
@@ -411,7 +409,7 @@ test('exercises CleanDatabase single-harness and all-harness scopes, plus quit I
  */
 async function sessionsPageCarriesSession(page: Page, baseUrl: string, sessionId: string): Promise<boolean> {
   const response = await page.request.get(
-    `${baseUrl}/api/kyber/sessions?q=${encodeURIComponent(sessionId)}&limit=${WIDEST_PAGE_LIMIT}`,
+    `${baseUrl}/api/kyber/sessions?q=${encodeURIComponent(sessionId)}&limit=${SESSION_PAGE_LIMIT}`,
   )
   expect(response.status(), await response.text()).toBe(200)
   const body = (await response.json()) as {

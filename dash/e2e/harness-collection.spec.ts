@@ -9,6 +9,7 @@ import {
   HONEST_EMPTY_HARNESS,
   MEASURED_HARNESS,
   OPENCODE_REPLAY_SESSION_ID,
+  SESSION_PAGE_LIMIT,
   USER_CANON,
   ZERO_RECORD_HARNESS,
 } from './harness-collection-world.js'
@@ -36,9 +37,6 @@ const specDir = fileURLToPath(new URL('.', import.meta.url))
 const dashRoot = dirname(specDir)
 const scratch = join(dashRoot, '..', '.agent_scratchpad', 'harness-collection-T1')
 const dashDist = join(dashRoot, 'dist', 'dash', 'index.html')
-
-/** The widest window the paged routes serve: a read that must see a whole section asks for it. */
-const WIDEST_PAGE_LIMIT = 500
 
 let child: ChildProcess | undefined
 let bootPid: number | undefined
@@ -508,7 +506,7 @@ test.describe('the Factory (Droid) replay', () => {
     // preview. The section is paged, so the read asks for a window wide enough to
     // hold every request the replayed session recorded.
     const response = await page.request.get(
-      `${factoryApp}/api/kyber/session/${FACTORY_CONTENT_ON_SESSION_ID}/requests?limit=${WIDEST_PAGE_LIMIT}`,
+      `${factoryApp}/api/kyber/session/${FACTORY_CONTENT_ON_SESSION_ID}/requests?limit=${SESSION_PAGE_LIMIT}`,
     )
     expect(response.status(), await response.text()).toBe(200)
     const payload = (await response.json()) as {
@@ -584,7 +582,7 @@ async function sessionRow(
   sessionId: string,
 ): Promise<{ session_id?: string; total_input?: unknown; models?: unknown }> {
   const response = await page.request.get(
-    `${baseUrl}/api/kyber/sessions?q=${encodeURIComponent(sessionId)}&limit=${WIDEST_PAGE_LIMIT}`,
+    `${baseUrl}/api/kyber/sessions?q=${encodeURIComponent(sessionId)}&limit=${SESSION_PAGE_LIMIT}`,
   )
   expect(response.status(), 'the sessions answer must be the dashboard own').toBe(200)
   const body = (await response.json()) as {

@@ -14,8 +14,12 @@ export const ZERO_RECORD_HARNESS = 'droid'
 /** The session derived from OpenCode run A (`e2e/fixtures/opencode/otlp-v3-runA.consent-on.json`). */
 export const OPENCODE_REPLAY_SESSION_ID = 'ses_e74c398c7ffeVajzhRWZNgfR2n'
 
-/** The widest window the paged routes serve: a read that must see a whole list asks for it. */
-const SESSION_PAGE_LIMIT = 500
+/**
+ * The widest window the paged routes serve: a read that must see a whole list asks for it.
+ * Exported so every spec that reads a list by page asks the server's own cap rather than
+ * carrying a copy that can drift from it.
+ */
+export const SESSION_PAGE_LIMIT = 500
 
 export type CollectedWorld = {
   readonly root: string
