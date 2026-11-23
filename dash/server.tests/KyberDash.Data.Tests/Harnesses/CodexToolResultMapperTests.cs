@@ -357,7 +357,7 @@ public class CodexToolResultMapperTests
         InMemoryRelationalStore store = new();
         store.WriteBatch(batch);
 
-        CollectedRecord? stored = store.GetRecord("log-batch-ok-1");
+        CollectedRecord? stored = store.FindRecord("log-batch-ok-1");
         Assert.NotNull(stored);
         Assert.NotNull(stored.Tool);
         Assert.Equal("call_batch_1", stored.Tool.CallId);

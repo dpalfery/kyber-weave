@@ -50,7 +50,7 @@ public sealed class AllHarnessFixtureSetTests
     {
         InMemoryRelationalStore store = AllHarnessFixtureSet.CreateStore();
 
-        List<RecordOp> ops = [.. store.Records().Select(static r => r.Op)];
+        List<RecordOp> ops = [.. store.AllSessionRecordsForMaintenance().Select(static r => r.Op)];
 
         Assert.Contains(RecordOp.LlmInvoke, ops);
         Assert.Contains(RecordOp.ToolInvoke, ops);
@@ -63,7 +63,7 @@ public sealed class AllHarnessFixtureSetTests
     {
         InMemoryRelationalStore store = AllHarnessFixtureSet.CreateStore();
 
-        List<RecordKind> kinds = [.. store.Records().Select(static r => r.Kind)];
+        List<RecordKind> kinds = [.. store.AllSessionRecordsForMaintenance().Select(static r => r.Kind)];
 
         Assert.Contains(RecordKind.Internal, kinds);
         Assert.Contains(RecordKind.Client, kinds);
@@ -130,21 +130,21 @@ public sealed class AllHarnessFixtureSetTests
     {
         InMemoryRelationalStore store = AllHarnessFixtureSet.CreateStore();
 
-        CollectedRecord? numericResult = store.GetRecord(AllHarnessFixtureSet.NumericToolResultSpanId);
+        CollectedRecord? numericResult = store.FindRecord(AllHarnessFixtureSet.NumericToolResultSpanId);
         Assert.NotNull(numericResult);
         Assert.Equal("42", numericResult.Tool?.Result?.PlainText);
 
-        CollectedRecord? booleanPart = store.GetRecord(AllHarnessFixtureSet.BooleanContentSpanId);
+        CollectedRecord? booleanPart = store.FindRecord(AllHarnessFixtureSet.BooleanContentSpanId);
         Assert.NotNull(booleanPart);
         Assert.Contains(
-            store.ContentParts(AllHarnessFixtureSet.BooleanContentSpanId),
-            static p => p.Part.PlainText == "true");
+            store.FindRecordParts(AllHarnessFixtureSet.BooleanContentSpanId),
+            static p => p.PlainText == "true");
 
-        CollectedRecord? mixedJsonPart = store.GetRecord(AllHarnessFixtureSet.MixedJsonContentSpanId);
+        CollectedRecord? mixedJsonPart = store.FindRecord(AllHarnessFixtureSet.MixedJsonContentSpanId);
         Assert.NotNull(mixedJsonPart);
-        StoredContentPart storedMixed = Assert.Single(
-            store.ContentParts(AllHarnessFixtureSet.MixedJsonContentSpanId));
-        Assert.Contains("3", storedMixed.Part.PlainText, StringComparison.Ordinal);
-        Assert.Contains("false", storedMixed.Part.PlainText, StringComparison.Ordinal);
+        CollectedContentPart storedMixed = Assert.Single(
+            store.FindRecordParts(AllHarnessFixtureSet.MixedJsonContentSpanId));
+        Assert.Contains("3", storedMixed.PlainText, StringComparison.Ordinal);
+        Assert.Contains("false", storedMixed.PlainText, StringComparison.Ordinal);
     }
 }

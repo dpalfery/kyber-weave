@@ -65,7 +65,6 @@ public class ProjectionReadPathTests
 
         Assert.Contains(nameof(InMemoryRelationalStore.SessionAttributions), store.ReadLog);
         Assert.Contains(nameof(InMemoryRelationalStore.SessionRecordsForRebuild), store.ReadLog);
-        Assert.DoesNotContain(nameof(InMemoryRelationalStore.Records), store.ReadLog);
         Assert.DoesNotContain(nameof(InMemoryRelationalStore.AllSessionRecordsForMaintenance), store.ReadLog);
 
         long expectedBetaBytes = Encoding.UTF8.GetByteCount(betaFirstText) + Encoding.UTF8.GetByteCount(betaSecondText);
@@ -419,16 +418,7 @@ public class ProjectionReadPathTests
         public IReadOnlyList<StoredSourceCount> SourceRecordCounts() => inner.SourceRecordCounts();
 
         /// <inheritdoc />
-        public CollectedRecord? GetRecord(string spanId) => inner.GetRecord(spanId);
-
-        /// <inheritdoc />
         public CollectedRecord? RecordContentFree(string spanId) => inner.RecordContentFree(spanId);
-
-        /// <inheritdoc />
-        public IReadOnlyList<CollectedRecord> Records(
-            string? sessionKey = null,
-            string? harnessId = null,
-            string? sourceId = null) => inner.Records(sessionKey, harnessId, sourceId);
 
         /// <inheritdoc />
         public IReadOnlyList<StoredTokenCount> TokenCounts(string? spanId = null, string? sessionKey = null) => inner.TokenCounts(spanId, sessionKey);
@@ -444,9 +434,6 @@ public class ProjectionReadPathTests
 
         /// <inheritdoc />
         public IReadOnlyList<StoredToolCall> ToolCalls(string? spanId = null, string? sessionKey = null) => inner.ToolCalls(spanId, sessionKey);
-
-        /// <inheritdoc />
-        public IReadOnlyList<StoredContentPart> ContentParts(string? spanId = null, string? sessionKey = null) => inner.ContentParts(spanId, sessionKey);
 
         /// <inheritdoc />
         public IReadOnlyList<StoredContentPart> TurnContentParts(
@@ -480,12 +467,6 @@ public class ProjectionReadPathTests
         public StoredFieldsView StoredFields(string sessionKey) => inner.StoredFields(sessionKey);
 
         /// <inheritdoc />
-        public SessionAggregateView? GetSessionAggregate(string sessionKey, IModelPricingLookup? pricing = null) => inner.GetSessionAggregate(sessionKey, pricing);
-
-        /// <inheritdoc />
-        public IReadOnlyList<SessionAggregateView> ListSessionAggregates(string? harnessId = null, IModelPricingLookup? pricing = null) => inner.ListSessionAggregates(harnessId, pricing);
-
-        /// <inheritdoc />
         public IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null) => inner.SessionListFigures(harnessId, pricing);
 
         /// <inheritdoc />
@@ -499,8 +480,5 @@ public class ProjectionReadPathTests
 
         /// <inheritdoc />
         public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey) => inner.SessionRecordsContentFree(sessionKey);
-
-        /// <inheritdoc />
-        public IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null) => inner.SessionTurnSummaries(sessionKey, pricing);
     }
 }

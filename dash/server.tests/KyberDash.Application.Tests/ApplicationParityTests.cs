@@ -224,8 +224,8 @@ public class ApplicationParityTests
         Assert.Single(scoped.GetProperty("parts").EnumerateArray());
         Assert.Equal(5, store.MaterializedContentBytes);
         Assert.Contains(nameof(InMemoryRelationalStore.TurnContentParts), store.ReadLog);
-        Assert.DoesNotContain(nameof(InMemoryRelationalStore.Records), store.ReadLog);
-        Assert.DoesNotContain(nameof(InMemoryRelationalStore.ContentParts), store.ReadLog);
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.SessionRecordsForRebuild), store.ReadLog);
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.AllSessionRecordsForMaintenance), store.ReadLog);
     }
 
     [Fact]

@@ -182,8 +182,7 @@ public static class ServiceCollectionExtensions
 
         services.TryAddSingleton<IReportService>(provider => new ReportService(
             provider.GetRequiredService<IDashboardQueryService>(),
-            provider.GetRequiredService<IProjectionStore>(),
-            provider.GetRequiredService<IRelationalStoreReader>()));
+            provider.GetRequiredService<IProjectionStore>()));
 
         services.TryAddSingleton<IMenubarService>(provider =>
             new MenubarService(provider.GetRequiredService<IServerStateRepository>()));

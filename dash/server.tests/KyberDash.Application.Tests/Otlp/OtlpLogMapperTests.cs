@@ -82,7 +82,7 @@ public class OtlpLogMapperTests
 
         Assert.Equal(1, store.CountRecords("claude-code"));
         Assert.Empty(store.ListIngestProblems());
-        Assert.All(store.ContentParts("log-claude-1"), static p => Assert.Null(p.Part.PlainText));
+        Assert.All(store.FindRecordParts("log-claude-1"), static p => Assert.Null(p.PlainText));
     }
 
     [Fact]

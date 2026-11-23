@@ -837,7 +837,7 @@ public static class SettingsCleanDoctorReportTests
                     Store.ReplaceFindings([Finding]);
                 }
 
-                Reports = new ReportService(Query.Object, Store, Store);
+                Reports = new ReportService(Query.Object, Store);
             }
 
             public Mock<IDashboardQueryService> Query { get; } = new();

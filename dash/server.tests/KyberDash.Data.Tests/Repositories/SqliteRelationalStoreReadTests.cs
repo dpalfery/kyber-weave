@@ -54,7 +54,7 @@ public class SqliteRelationalStoreReadTests : IDisposable
 
         sqlite.ClearRecordedSql();
 
-        AssertQueryParity(sqlite, memory, sessionKeys: ["sess-missing"], harnessIds: [null, "claude-code"], runIds: ["run-missing"], findingIds: ["find-missing"], spanIds: ["span-missing"], sourceIds: ["src-missing"]);
+        AssertQueryParity(sqlite, memory, sessionKeys: ["sess-missing"], harnessIds: [null, "claude-code"], runIds: ["run-missing"], findingIds: ["find-missing"], spanIds: ["span-missing"]);
         Assert.NotEmpty(sqlite.ExecutedSql);
         AssertAllReadScriptsUseTabbedHexWithoutJson(sqlite.ExecutedSql);
     }
@@ -322,13 +322,13 @@ public class SqliteRelationalStoreReadTests : IDisposable
         CostStatus status,
         double? value)
     {
-        SessionAggregateView memoryView = memory.GetSessionAggregate(sessionKey, pricing)!;
-        SessionAggregateView sqliteView = sqlite.GetSessionAggregate(sessionKey, pricing)!;
+        SessionSummaryFigure memoryView = memory.SessionSummaryFigures(sessionKey, pricing)!;
+        SessionSummaryFigure sqliteView = sqlite.SessionSummaryFigures(sessionKey, pricing)!;
         AssertPublishedCost(memoryView, status, value);
         AssertPublishedCost(sqliteView, status, value);
     }
 
-    private static void AssertPublishedCost(SessionAggregateView view, CostStatus status, double? value)
+    private static void AssertPublishedCost(SessionSummaryFigure view, CostStatus status, double? value)
     {
         Assert.Equal(status, view.PublishedCost.Status);
         if (value is null)
@@ -364,8 +364,7 @@ public class SqliteRelationalStoreReadTests : IDisposable
             harnessIds: [null, "claude-code", "copilot", "codex", "unknown-harness"],
             runIds: ["run-cc", "run-cp", "run-missing"],
             findingIds: ["find-1", "find-2", "find-missing"],
-            spanIds: ["span-req-1", "span-turn-1", "span-req-2", "span-unproj-1", "span-tokenless-1", "span-multi-cx-1", "span-missing"],
-            sourceIds: BuildExpectedSourceIds(memory));
+            spanIds: ["span-req-1", "span-turn-1", "span-req-2", "span-unproj-1", "span-tokenless-1", "span-multi-cx-1", "span-missing"]);
 
         AssertAllReadScriptsUseTabbedHexWithoutJson(sqlite.ExecutedSql);
 
@@ -386,28 +385,24 @@ public class SqliteRelationalStoreReadTests : IDisposable
         IModelPricingLookup customLookup = new OverridePricingLookup("claude-sonnet-4-5", customRates);
 
         Assert.Equivalent(
-            memory.GetSessionAggregate("sess-proj", customLookup),
-            sqlite.GetSessionAggregate("sess-proj", customLookup),
-            strict: true);
-        Assert.Equivalent(
-            memory.ListSessionAggregates("claude-code", customLookup),
-            sqlite.ListSessionAggregates("claude-code", customLookup),
-            strict: true);
-        Assert.Equivalent(
             memory.SessionListFigures("claude-code", customLookup),
             sqlite.SessionListFigures("claude-code", customLookup),
             strict: true);
         Assert.Equivalent(
-            memory.SessionTurnSummaries("sess-proj", customLookup),
-            sqlite.SessionTurnSummaries("sess-proj", customLookup),
+            memory.SessionSummaryFigures("sess-proj", customLookup),
+            sqlite.SessionSummaryFigures("sess-proj", customLookup),
             strict: true);
         Assert.Equivalent(
-            memory.GetSessionAggregate("sess-unpriced", customTables),
-            sqlite.GetSessionAggregate("sess-unpriced", customTables),
+            memory.TurnFigures("sess-proj", 0, customLookup),
+            sqlite.TurnFigures("sess-proj", 0, customLookup),
+            strict: true);
+        Assert.Equivalent(
+            memory.SessionSummaryFigures("sess-unpriced", customTables),
+            sqlite.SessionSummaryFigures("sess-unpriced", customTables),
             strict: true);
 
         // Spot-check key DD-13 and OD-3 invariants observed on the populated corpus.
-        SessionAggregateView? projAgg = sqlite.GetSessionAggregate("sess-proj");
+        SessionSummaryFigure? projAgg = sqlite.SessionSummaryFigures("sess-proj");
         Assert.NotNull(projAgg);
         Assert.Equal(2, projAgg.TurnCount);
         Assert.Equal(2, projAgg.RequestCount);
@@ -417,14 +412,8 @@ public class SqliteRelationalStoreReadTests : IDisposable
         Assert.NotNull(projAgg.CostBasisMismatch);
         Assert.True(projAgg.Coverage.SchemaMeasurable);
         Assert.True(projAgg.Coverage.ContextMeasurable);
-        Assert.NotNull(projAgg.FirstContextBucket);
-        Assert.NotNull(projAgg.LastContextBucket);
-        Assert.NotNull(projAgg.UnusedRange);
-        Assert.Equal("USD", projAgg.UnusedRange.Currency);
-        Assert.NotEmpty(projAgg.Auxiliary.SpanIds);
-        Assert.NotNull(projAgg.Auxiliary.ReportedCost);
 
-        SessionAggregateView? unprojAgg = sqlite.GetSessionAggregate("sess-unproj");
+        SessionSummaryFigure? unprojAgg = sqlite.SessionSummaryFigures("sess-unproj");
         Assert.NotNull(unprojAgg);
         Assert.NotNull(unprojAgg.ReportedCost);
         Assert.Equal(CostStatus.Partial, unprojAgg.ReportedCost.Status);
@@ -434,7 +423,7 @@ public class SqliteRelationalStoreReadTests : IDisposable
         Assert.False(unprojAgg.HasToolDefinitions);
         Assert.Contains(unprojAgg.Problems, static problem => problem.Code == CanonPricing.CostCurrencyMismatchCode);
 
-        SessionAggregateView? emptyAgg = sqlite.GetSessionAggregate("sess-empty");
+        SessionSummaryFigure? emptyAgg = sqlite.SessionSummaryFigures("sess-empty");
         Assert.NotNull(emptyAgg);
         Assert.Equal(0, emptyAgg.TurnCount);
         Assert.Equal(0, emptyAgg.RequestCount);
@@ -449,26 +438,18 @@ public class SqliteRelationalStoreReadTests : IDisposable
         Assert.Equal(CostStatus.NoRate, emptyAgg.PublishedCost.Status);
         Assert.Null(emptyAgg.CacheHitRatio);
         Assert.Null(emptyAgg.CacheCreationCoverage);
-        Assert.Null(emptyAgg.UnusedRange);
-
-        SessionAggregateView? unpricedAgg = sqlite.GetSessionAggregate("sess-unpriced");
-        Assert.NotNull(unpricedAgg);
-        Assert.NotNull(unpricedAgg.UnusedRange);
-        Assert.Equal(0, unpricedAgg.UnusedRange.Floor);
-        Assert.Equal(50, unpricedAgg.UnusedRange.Ceiling);
-        Assert.Null(unpricedAgg.UnusedRange.Currency);
     }
 
     /// <summary>
     /// <see cref="SqliteRelationalStore.SessionListFigures"/> is one content-free pass: no
     /// executed script touches a content-part, tool-call, tool-definition, agent-invocation, or
-    /// skill table, and every figure equals the session's broad
-    /// <see cref="SqliteRelationalStore.GetSessionAggregate"/> figures on a token-less, a
+    /// skill table, and every figure equals the session's
+    /// <see cref="SqliteRelationalStore.SessionSummaryFigures"/> figures on a token-less, a
     /// zero-token, a multi-harness, an empty, and a content-bearing session — with absent token
     /// totals staying distinct from zero.
     /// </summary>
     [Fact]
-    public void SessionListFigures_AreContentFreeAndMatchTheBroadAggregateRead()
+    public void SessionListFigures_AreContentFreeAndMatchThePerSessionSummaryFigures()
     {
         string dbPath = Path.Combine(directory.Path, "list-figures", "canon.db");
         SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
@@ -481,9 +462,9 @@ public class SqliteRelationalStoreReadTests : IDisposable
         Assert.NotEmpty(scripts);
         Assert.All(scripts, static sql => Assert.Contains(".mode tabs", sql, StringComparison.Ordinal));
         // The deny-list names tables, not substrings: the shared projection read legitimately
-        // selects session_context_turn.builtin_tool_definition_tokens, a token-count scalar both
-        // the list and the broad path use, and a bare "tool_definition" substring match would
-        // flag that scalar as content.
+        // selects session_context_turn.builtin_tool_definition_tokens, a token-count scalar the
+        // list read uses, and a bare "tool_definition" substring match would flag that scalar as
+        // content.
         string[] contentTables =
         [
             "content_part",
@@ -505,19 +486,19 @@ public class SqliteRelationalStoreReadTests : IDisposable
 
         foreach (SessionListFigure figure in figures)
         {
-            SessionAggregateView? broad = sqlite.GetSessionAggregate(figure.SessionKey);
-            Assert.NotNull(broad);
-            Assert.Equal(broad.SessionKey, figure.SessionKey);
-            Assert.Equal(broad.HarnessId, figure.HarnessId);
-            Assert.Equal(broad.TurnCount, figure.TurnCount);
-            Assert.Equal(broad.RequestCount, figure.RequestCount);
-            Assert.Equal(broad.TotalInput, figure.TotalInput);
-            Assert.Equal(broad.TotalOutput, figure.TotalOutput);
-            Assert.Equal(broad.Models, figure.Models);
-            Assert.Equivalent(broad.ReportedCost, figure.ReportedCost, strict: true);
-            Assert.Equivalent(broad.PublishedCost, figure.PublishedCost, strict: true);
-            Assert.Equivalent(broad.CostBasisMismatch, figure.CostBasisMismatch, strict: true);
-            Assert.Equal(broad.Problems.Count, figure.ProblemsCount);
+            SessionSummaryFigure? summary = sqlite.SessionSummaryFigures(figure.SessionKey);
+            Assert.NotNull(summary);
+            Assert.Equal(summary.SessionKey, figure.SessionKey);
+            Assert.Equal(summary.HarnessId, figure.HarnessId);
+            Assert.Equal(summary.TurnCount, figure.TurnCount);
+            Assert.Equal(summary.RequestCount, figure.RequestCount);
+            Assert.Equal(summary.TotalInput, figure.TotalInput);
+            Assert.Equal(summary.TotalOutput, figure.TotalOutput);
+            Assert.Equal(summary.Models, figure.Models);
+            Assert.Equivalent(summary.ReportedCost, figure.ReportedCost, strict: true);
+            Assert.Equivalent(summary.PublishedCost, figure.PublishedCost, strict: true);
+            Assert.Equivalent(summary.CostBasisMismatch, figure.CostBasisMismatch, strict: true);
+            Assert.Equal(summary.Problems.Count, figure.ProblemsCount);
         }
 
         // The absent-versus-zero trap, on the adapter: a turn with no token rows leaves the
@@ -579,9 +560,6 @@ public class SqliteRelationalStoreReadTests : IDisposable
         Assert.Throws<InvalidOperationException>(() => store.TokenCounts());
     }
 
-    private static string[] BuildExpectedSourceIds(InMemoryRelationalStore memory) =>
-        memory.Sources().Select(static source => source.SourceId).Distinct(StringComparer.Ordinal).Concat(["src-missing"]).ToArray();
-
     private static void AssertAllReadScriptsUseTabbedHexWithoutJson(IReadOnlyList<string> scripts)
     {
         foreach (string sql in scripts)
@@ -602,32 +580,27 @@ public class SqliteRelationalStoreReadTests : IDisposable
         IReadOnlyList<string?> harnessIds,
         IReadOnlyList<string> runIds,
         IReadOnlyList<string> findingIds,
-        IReadOnlyList<string> spanIds,
-        IReadOnlyList<string> sourceIds)
+        IReadOnlyList<string> spanIds)
     {
         IProjectionStore sqliteProj = (IProjectionStore)sqliteReader;
         IProjectionStore memoryProj = (IProjectionStore)memoryReader;
 
-        // 18 IRelationalStoreReader row queries + 3 DD-13 aggregates + the sessions-list read
-        // model + StoredFields.
+        // The retained IRelationalStoreReader row queries + the sessions-list read model +
+        // StoredFields.
         Assert.Equal(memoryReader.Harnesses(), sqliteReader.Harnesses());
         Assert.Equivalent(memoryReader.Sources(), sqliteReader.Sources(), strict: true);
         Assert.Equal(memoryReader.CountRecords(), sqliteReader.CountRecords());
         Assert.Equal(memoryReader.SessionAttributions(), sqliteReader.SessionAttributions());
-        Assert.Equivalent(memoryReader.Records(), sqliteReader.Records(), strict: true);
         Assert.Equivalent(memoryReader.AllSessionRecordsForMaintenance(), sqliteReader.AllSessionRecordsForMaintenance(), strict: true);
         Assert.Equivalent(memoryReader.Sessions(), sqliteReader.Sessions(), strict: true);
         Assert.Equivalent(memoryReader.SessionModelUsages(), sqliteReader.SessionModelUsages(), strict: true);
-        Assert.Equivalent(memoryReader.ListSessionAggregates(), sqliteReader.ListSessionAggregates(), strict: true);
         Assert.Equivalent(memoryReader.SessionListFigures(), sqliteReader.SessionListFigures(), strict: true);
 
         foreach (string? harnessId in harnessIds)
         {
             Assert.Equivalent(memoryReader.Sources(harnessId), sqliteReader.Sources(harnessId), strict: true);
             Assert.Equal(memoryReader.CountRecords(harnessId), sqliteReader.CountRecords(harnessId));
-            Assert.Equivalent(memoryReader.Records(harnessId: harnessId), sqliteReader.Records(harnessId: harnessId), strict: true);
             Assert.Equivalent(memoryReader.Sessions(harnessId), sqliteReader.Sessions(harnessId), strict: true);
-            Assert.Equivalent(memoryReader.ListSessionAggregates(harnessId), sqliteReader.ListSessionAggregates(harnessId), strict: true);
             Assert.Equivalent(memoryReader.SessionListFigures(harnessId), sqliteReader.SessionListFigures(harnessId), strict: true);
 
             Assert.Equivalent(memoryProj.ListSessionProjections(harnessId), sqliteProj.ListSessionProjections(harnessId), strict: true);
@@ -642,14 +615,8 @@ public class SqliteRelationalStoreReadTests : IDisposable
 
         Assert.Equivalent(memoryReader.SourceRecordCounts(), sqliteReader.SourceRecordCounts(), strict: true);
 
-        foreach (string sourceId in sourceIds)
-        {
-            Assert.Equivalent(memoryReader.Records(sourceId: sourceId), sqliteReader.Records(sourceId: sourceId), strict: true);
-        }
-
         foreach (string spanId in spanIds)
         {
-            Assert.Equivalent(memoryReader.GetRecord(spanId), sqliteReader.GetRecord(spanId), strict: true);
             Assert.Equivalent(memoryReader.RecordContentFree(spanId), sqliteReader.RecordContentFree(spanId), strict: true);
             AssertPairFilterParity(memoryReader, sqliteReader, spanId, null);
         }
@@ -657,12 +624,9 @@ public class SqliteRelationalStoreReadTests : IDisposable
         foreach (string sessionKey in sessionKeys)
         {
             Assert.Equivalent(memoryReader.GetSession(sessionKey), sqliteReader.GetSession(sessionKey), strict: true);
-            Assert.Equivalent(memoryReader.Records(sessionKey: sessionKey), sqliteReader.Records(sessionKey: sessionKey), strict: true);
             Assert.Equivalent(memoryReader.SessionRecordsForRebuild(sessionKey), sqliteReader.SessionRecordsForRebuild(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.SessionModelUsages(sessionKey), sqliteReader.SessionModelUsages(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.StoredFields(sessionKey), sqliteReader.StoredFields(sessionKey), strict: true);
-            Assert.Equivalent(memoryReader.GetSessionAggregate(sessionKey), sqliteReader.GetSessionAggregate(sessionKey), strict: true);
-            Assert.Equivalent(memoryReader.SessionTurnSummaries(sessionKey), sqliteReader.SessionTurnSummaries(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.SessionSummaryFigures(sessionKey), sqliteReader.SessionSummaryFigures(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.SessionDetailFigures(sessionKey), sqliteReader.SessionDetailFigures(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.TurnFigures(sessionKey, 0), sqliteReader.TurnFigures(sessionKey, 0), strict: true);
@@ -728,7 +692,6 @@ public class SqliteRelationalStoreReadTests : IDisposable
         Assert.Equivalent(memoryReader.ReportedCosts(spanId, sessionKey), sqliteReader.ReportedCosts(spanId, sessionKey), strict: true);
         Assert.Equivalent(memoryReader.SkillsInvoked(spanId, sessionKey), sqliteReader.SkillsInvoked(spanId, sessionKey), strict: true);
         Assert.Equivalent(memoryReader.ToolCalls(spanId, sessionKey), sqliteReader.ToolCalls(spanId, sessionKey), strict: true);
-        Assert.Equivalent(memoryReader.ContentParts(spanId, sessionKey), sqliteReader.ContentParts(spanId, sessionKey), strict: true);
         if (spanId is not null && sessionKey is not null)
         {
             Assert.Equivalent(

@@ -345,7 +345,7 @@ public record StoredSourceCount(string SourceId, int Count);
 
 /// <summary>
 /// Read-time figures the sessions list renders, derived in one content-free pass over the
-/// same scalar columns the broad <see cref="SessionAggregateView"/> read prices (<c>DD-13</c>).
+/// same scalar columns the retired broad session-aggregate read priced (<c>DD-13</c>).
 /// </summary>
 /// <param name="SessionKey">Canonical session key.</param>
 /// <param name="HarnessId">Harness identifier of the session row.</param>
@@ -478,10 +478,6 @@ public interface IRelationalStoreReader
     /// </remarks>
     IReadOnlyList<StoredSourceCount> SourceRecordCounts();
 
-    /// <summary>Gets one normalized telemetry record by <paramref name="spanId"/>.</summary>
-    /// <param name="spanId">Record span identifier.</param>
-    CollectedRecord? GetRecord(string spanId);
-
     /// <summary>
     /// Gets one record's metadata with no content-text column, the shape the span inspector reads.
     /// </summary>
@@ -494,15 +490,6 @@ public interface IRelationalStoreReader
     /// adapter filters the record tables by that span, not by its session's records.
     /// </remarks>
     CollectedRecord? RecordContentFree(string spanId);
-
-    /// <summary>Queries normalized telemetry records (<c>record</c> and child tables).</summary>
-    /// <param name="sessionKey">Optional session key filter.</param>
-    /// <param name="harnessId">Optional harness identifier filter.</param>
-    /// <param name="sourceId">Optional source identifier filter.</param>
-    IReadOnlyList<CollectedRecord> Records(
-        string? sessionKey = null,
-        string? harnessId = null,
-        string? sourceId = null);
 
     /// <summary>
     /// Lists per-session-key, per-harness record attributions — one grouped query over
@@ -558,11 +545,6 @@ public interface IRelationalStoreReader
     /// <param name="spanId">Optional record span identifier filter.</param>
     /// <param name="sessionKey">Optional session key filter.</param>
     IReadOnlyList<StoredToolCall> ToolCalls(string? spanId = null, string? sessionKey = null);
-
-    /// <summary>Queries ordered content parts (<c>content_part</c> and child extension tables).</summary>
-    /// <param name="spanId">Optional record span identifier filter.</param>
-    /// <param name="sessionKey">Optional session key filter.</param>
-    IReadOnlyList<StoredContentPart> ContentParts(string? spanId = null, string? sessionKey = null);
 
     /// <summary>
     /// Reads the captured content parts of one turn or one request — the content view's single
@@ -630,16 +612,6 @@ public interface IRelationalStoreReader
     /// <param name="sessionKey">Canonical session key to inspect.</param>
     StoredFieldsView StoredFields(string sessionKey);
 
-    /// <summary>Computes the read-time aggregate view for <paramref name="sessionKey"/> (<c>DD-13</c>).</summary>
-    /// <param name="sessionKey">Canonical session key to aggregate.</param>
-    /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
-    SessionAggregateView? GetSessionAggregate(string sessionKey, IModelPricingLookup? pricing = null);
-
-    /// <summary>Lists read-time session aggregate views, optionally filtered by <paramref name="harnessId"/> (<c>DD-13</c>).</summary>
-    /// <param name="harnessId">Optional harness identifier filter.</param>
-    /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
-    IReadOnlyList<SessionAggregateView> ListSessionAggregates(string? harnessId = null, IModelPricingLookup? pricing = null);
-
     /// <summary>
     /// Lists the sessions-list read model, optionally filtered by <paramref name="harnessId"/>,
     /// reading no content column (<c>DD-13</c>).
@@ -648,7 +620,7 @@ public interface IRelationalStoreReader
     /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
     /// <remarks>
     /// One batched pass over the session rows and each session's linked record scalars, stored
-    /// turns, and ingest problems — the same figures <see cref="GetSessionAggregate"/> answers
+    /// turns, and ingest problems — the figures the retired session-aggregate read answered
     /// per session, minus every content-bearing column. A session row with no linked records
     /// answers zeroed figures with absent token totals.
     /// </remarks>
@@ -692,9 +664,4 @@ public interface IRelationalStoreReader
     /// tool definitions, with no content part, tool input text, or tool result text.
     /// </returns>
     IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey);
-
-    /// <summary>Computes read-time per-turn summaries for <paramref name="sessionKey"/> (<c>DD-13</c>).</summary>
-    /// <param name="sessionKey">Canonical session key to inspect.</param>
-    /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
-    IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null);
 }

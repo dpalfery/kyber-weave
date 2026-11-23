@@ -12,9 +12,10 @@ using Xunit;
 namespace KyberDash.Data.Tests.Repositories;
 
 /// <summary>
-/// <see cref="SqliteRelationalStore.ListSessionAggregates"/> must batch its per-session reads:
-/// one <c>sqlite3</c> batch for sessions, one for all records, one for all projections, and at
-/// most one fallback batch for turns of sessions without a projection, regardless of session count.
+/// <see cref="SqliteRelationalStore.SessionListFigures"/> must batch its per-session reads:
+/// one <c>sqlite3</c> batch for sessions, one for the content-free record scalars, one for all
+/// projections, and at most one fallback batch for turns of sessions without a projection,
+/// regardless of session count.
 /// </summary>
 public class SqliteRelationalStoreListAggregatesTests : IDisposable
 {
@@ -30,41 +31,13 @@ public class SqliteRelationalStoreListAggregatesTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies listing aggregates across projected and bare sessions issues a bounded number of
-    /// <c>sqlite3</c> batches and matches the per-session aggregate for every session.
-    /// </summary>
-    [Fact]
-    public void ListSessionAggregates_BatchesPerSessionReadsIntoABoundedNumberOfSqliteBatches()
-    {
-        string dbPath = Path.Combine(directory.Path, "aggregates", "canon.db");
-        CountingSqliteRelationalStore store = new(dbPath, new SqliteCircuitBreaker());
-        SeedSessions(store);
-
-        store.ResetCount();
-        IReadOnlyList<SessionAggregateView> aggregates = store.ListSessionAggregates(HarnessId);
-        int batches = store.ExecuteSqliteCoreCount;
-
-        Assert.Equal(5, aggregates.Count);
-        Assert.Equal(
-            ["sess-agg-0", "sess-agg-1", "sess-agg-2", "sess-agg-3", "sess-agg-4"],
-            aggregates.Select(static a => a.SessionKey).Order(StringComparer.Ordinal));
-        Assert.True(batches <= 5, $"Expected at most 5 sqlite3 batches, observed {batches}.");
-
-        foreach (SessionAggregateView aggregate in aggregates)
-        {
-            SessionAggregateView? single = store.GetSessionAggregate(aggregate.SessionKey);
-            Assert.Equivalent(aggregate, single, strict: true);
-        }
-    }
-
-    /// <summary>
     /// Verifies the sessions-list read model issues a bounded number of <c>sqlite3</c> batches —
     /// one for sessions, content-free record scalars, projections, fallback turns, and ingest
-    /// problems — and answers the same figures the per-session broad aggregate answers for
+    /// problems — and answers the same figures the per-session summary read answers for
     /// projected and bare sessions alike.
     /// </summary>
     [Fact]
-    public void SessionListFigures_BatchTheListReadAndMatchPerSessionAggregates()
+    public void SessionListFigures_BatchTheListReadAndMatchPerSessionSummaryFigures()
     {
         string dbPath = Path.Combine(directory.Path, "list-figures", "canon.db");
         CountingSqliteRelationalStore store = new(dbPath, new SqliteCircuitBreaker());
@@ -82,19 +55,19 @@ public class SqliteRelationalStoreListAggregatesTests : IDisposable
 
         foreach (SessionListFigure figure in figures)
         {
-            SessionAggregateView? broad = store.GetSessionAggregate(figure.SessionKey);
-            Assert.NotNull(broad);
-            Assert.Equal(broad.SessionKey, figure.SessionKey);
-            Assert.Equal(broad.HarnessId, figure.HarnessId);
-            Assert.Equal(broad.TurnCount, figure.TurnCount);
-            Assert.Equal(broad.RequestCount, figure.RequestCount);
-            Assert.Equal(broad.TotalInput, figure.TotalInput);
-            Assert.Equal(broad.TotalOutput, figure.TotalOutput);
-            Assert.Equal(broad.Models, figure.Models);
-            Assert.Equivalent(broad.ReportedCost, figure.ReportedCost, strict: true);
-            Assert.Equivalent(broad.PublishedCost, figure.PublishedCost, strict: true);
-            Assert.Equivalent(broad.CostBasisMismatch, figure.CostBasisMismatch, strict: true);
-            Assert.Equal(broad.Problems.Count, figure.ProblemsCount);
+            SessionSummaryFigure? summary = store.SessionSummaryFigures(figure.SessionKey);
+            Assert.NotNull(summary);
+            Assert.Equal(summary.SessionKey, figure.SessionKey);
+            Assert.Equal(summary.HarnessId, figure.HarnessId);
+            Assert.Equal(summary.TurnCount, figure.TurnCount);
+            Assert.Equal(summary.RequestCount, figure.RequestCount);
+            Assert.Equal(summary.TotalInput, figure.TotalInput);
+            Assert.Equal(summary.TotalOutput, figure.TotalOutput);
+            Assert.Equal(summary.Models, figure.Models);
+            Assert.Equivalent(summary.ReportedCost, figure.ReportedCost, strict: true);
+            Assert.Equivalent(summary.PublishedCost, figure.PublishedCost, strict: true);
+            Assert.Equivalent(summary.CostBasisMismatch, figure.CostBasisMismatch, strict: true);
+            Assert.Equal(summary.Problems.Count, figure.ProblemsCount);
         }
 
         // Projected sessions resolve turns through stored turns and bare ones through the

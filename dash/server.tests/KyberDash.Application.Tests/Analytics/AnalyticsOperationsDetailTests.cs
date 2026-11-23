@@ -240,12 +240,8 @@ public sealed class AnalyticsOperationsDetailTests
     {
         Mock<IRelationalStoreReader> reader = new();
         reader.Setup(store => store.Sessions(It.IsAny<string?>())).Returns(Array.Empty<CollectedSession>());
-        reader.Setup(store => store.Records(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()))
-            .Returns(Array.Empty<CollectedRecord>());
         reader.Setup(store => store.CountRecords(It.IsAny<string?>())).Returns(0);
         reader.Setup(store => store.Harnesses()).Returns(Array.Empty<string>());
-        reader.Setup(store => store.ListSessionAggregates(It.IsAny<string?>(), It.IsAny<IModelPricingLookup?>()))
-            .Returns(Array.Empty<SessionAggregateView>());
 
         Mock<IProjectionStore> projections = new();
         projections.Setup(store => store.ListSessionProjections(It.IsAny<string?>()))
@@ -337,12 +333,7 @@ public sealed class AnalyticsOperationsDetailTests
         /// <inheritdoc />
         public IReadOnlyList<StoredSourceCount> SourceRecordCounts() => inner.SourceRecordCounts();
 
-        public CollectedRecord? GetRecord(string spanId) => inner.GetRecord(spanId);
-
         public CollectedRecord? RecordContentFree(string spanId) => inner.RecordContentFree(spanId);
-
-        public IReadOnlyList<CollectedRecord> Records(string? sessionKey = null, string? harnessId = null, string? sourceId = null) =>
-            inner.Records(sessionKey, harnessId, sourceId);
 
         public IReadOnlyList<StoredSessionAttribution> SessionAttributions() => inner.SessionAttributions();
 
@@ -359,8 +350,6 @@ public sealed class AnalyticsOperationsDetailTests
         public IReadOnlyList<StoredSkillInvocation> SkillsInvoked(string? spanId = null, string? sessionKey = null) => inner.SkillsInvoked(spanId, sessionKey);
 
         public IReadOnlyList<StoredToolCall> ToolCalls(string? spanId = null, string? sessionKey = null) => inner.ToolCalls(spanId, sessionKey);
-
-        public IReadOnlyList<StoredContentPart> ContentParts(string? spanId = null, string? sessionKey = null) => inner.ContentParts(spanId, sessionKey);
 
         public IReadOnlyList<StoredContentPart> TurnContentParts(
             string sessionKey,
@@ -384,19 +373,6 @@ public sealed class AnalyticsOperationsDetailTests
         public IReadOnlyList<StoredSessionModelUsage> SessionModelUsages(string? sessionKey = null) => inner.SessionModelUsages(sessionKey);
 
         public StoredFieldsView StoredFields(string sessionKey) => inner.StoredFields(sessionKey);
-
-        public SessionAggregateView? GetSessionAggregate(string sessionKey, IModelPricingLookup? pricing = null)
-        {
-            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException("projection exploded");
-            }
-
-            return inner.GetSessionAggregate(sessionKey, pricing);
-        }
-
-        public IReadOnlyList<SessionAggregateView> ListSessionAggregates(string? harnessId = null, IModelPricingLookup? pricing = null) =>
-            inner.ListSessionAggregates(harnessId, pricing);
 
         public IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null)
         {
@@ -447,16 +423,6 @@ public sealed class AnalyticsOperationsDetailTests
             }
 
             return inner.SessionRecordsContentFree(sessionKey);
-        }
-
-        public IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null)
-        {
-            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException("projection exploded");
-            }
-
-            return inner.SessionTurnSummaries(sessionKey, pricing);
         }
     }
 }

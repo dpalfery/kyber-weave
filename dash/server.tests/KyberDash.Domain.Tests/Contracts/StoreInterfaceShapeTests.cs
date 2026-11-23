@@ -2,6 +2,7 @@ using System.Collections;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector;
 using KyberDash.Domain;
@@ -112,21 +113,16 @@ public class StoreInterfaceShapeTests
         AssertHasMethods(
             typeof(IRelationalStoreReader),
             [
-                nameof(IRelationalStoreReader.Records),
                 nameof(IRelationalStoreReader.TokenCounts),
                 nameof(IRelationalStoreReader.ReportedTotals),
                 nameof(IRelationalStoreReader.ReportedCosts),
                 nameof(IRelationalStoreReader.SkillsInvoked),
                 nameof(IRelationalStoreReader.ToolCalls),
-                nameof(IRelationalStoreReader.ContentParts),
                 nameof(IRelationalStoreReader.ToolDefinitions),
                 nameof(IRelationalStoreReader.AgentInvocations),
                 nameof(IRelationalStoreReader.RecordSignals),
                 nameof(IRelationalStoreReader.Sessions),
                 nameof(IRelationalStoreReader.StoredFields),
-                nameof(IRelationalStoreReader.GetSessionAggregate),
-                nameof(IRelationalStoreReader.ListSessionAggregates),
-                nameof(IRelationalStoreReader.SessionTurnSummaries),
                 nameof(IRelationalStoreReader.SessionListFigures),
                 nameof(IRelationalStoreReader.SessionSummaryFigures),
                 nameof(IRelationalStoreReader.SessionDetailFigures),
@@ -149,21 +145,6 @@ public class StoreInterfaceShapeTests
         Assert.NotNull(storedFields);
         Assert.Equal(typeof(StoredFieldsView), storedFields.ReturnType);
         Assert.Equal([typeof(string)], storedFields.GetParameters().Select(static p => p.ParameterType).ToArray());
-
-        MethodInfo? getSessionAggregate = typeof(IRelationalStoreReader).GetMethod(nameof(IRelationalStoreReader.GetSessionAggregate));
-        Assert.NotNull(getSessionAggregate);
-        Assert.Equal(typeof(SessionAggregateView), getSessionAggregate.ReturnType);
-        Assert.Equal([typeof(string), typeof(IModelPricingLookup)], getSessionAggregate.GetParameters().Select(static p => p.ParameterType).ToArray());
-
-        MethodInfo? listSessionAggregates = typeof(IRelationalStoreReader).GetMethod(nameof(IRelationalStoreReader.ListSessionAggregates));
-        Assert.NotNull(listSessionAggregates);
-        Assert.Equal(typeof(IReadOnlyList<SessionAggregateView>), listSessionAggregates.ReturnType);
-        Assert.Equal([typeof(string), typeof(IModelPricingLookup)], listSessionAggregates.GetParameters().Select(static p => p.ParameterType).ToArray());
-
-        MethodInfo? sessionTurnSummaries = typeof(IRelationalStoreReader).GetMethod(nameof(IRelationalStoreReader.SessionTurnSummaries));
-        Assert.NotNull(sessionTurnSummaries);
-        Assert.Equal(typeof(IReadOnlyList<ReadTimeTurnSummary>), sessionTurnSummaries.ReturnType);
-        Assert.Equal([typeof(string), typeof(IModelPricingLookup)], sessionTurnSummaries.GetParameters().Select(static p => p.ParameterType).ToArray());
 
         Assert.True(typeof(IModelPricingLookup).IsInterface);
         Assert.True(typeof(IModelPricingLookup).IsPublic);
@@ -245,6 +226,79 @@ public class StoreInterfaceShapeTests
         MethodInfo? readSettings = typeof(IOperationalStore).GetMethod(nameof(IOperationalStore.ReadSettings));
         Assert.NotNull(readSettings);
         Assert.Equal(typeof(SettingsView), readSettings.ReturnType);
+    }
+
+    /// <summary>
+    /// The reader contract carries no broad read: the whole-record, whole-content,
+    /// whole-aggregate, and whole-turn-summary members the request paths migrated off are gone
+    /// from the interface and from every implementer of it the test host has loaded, so no new
+    /// consumer can reach the read that stalls on a large store.
+    /// </summary>
+    [Fact]
+    public void TheReaderInterfaceCarriesNoBroadReads()
+    {
+        string[] retired =
+        [
+            "Records",
+            "GetRecord",
+            "ContentParts",
+            "GetSessionAggregate",
+            "ListSessionAggregates",
+            "SessionTurnSummaries",
+        ];
+
+        foreach (Type reader in ReaderContractTypes())
+        {
+            HashSet<string> declared =
+            [
+                .. reader.GetMethods(BindingFlags.Public | BindingFlags.Instance).Select(static method => method.Name),
+            ];
+
+            foreach (string name in retired)
+            {
+                Assert.False(
+                    declared.Contains(name),
+                    $"{reader.FullName} still declares the retired broad read '{name}'.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// The reader interface itself plus every concrete implementer the test host has loaded —
+    /// the linked <see cref="InMemoryRelationalStore"/> and any other implementer a referenced
+    /// assembly brings in.
+    /// </summary>
+    private static IEnumerable<Type> ReaderContractTypes()
+    {
+        yield return typeof(IRelationalStoreReader);
+
+        foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            if (assembly.IsDynamic)
+            {
+                continue;
+            }
+
+            foreach (Type type in LoadedTypes(assembly))
+            {
+                if (type is { IsClass: true, IsAbstract: false } && typeof(IRelationalStoreReader).IsAssignableFrom(type))
+                {
+                    yield return type;
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<Type> LoadedTypes(Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            return ex.Types.Where(static type => type is not null).Select(static type => type!);
+        }
     }
 
     [Fact]

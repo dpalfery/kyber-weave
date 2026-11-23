@@ -149,16 +149,15 @@ public sealed class AnalyticsReadPathTests
     }
 
     /// <summary>
-    /// The sessions-list read model answers exactly the figures the broad aggregate reads
-    /// answered: per session, <see cref="InMemoryRelationalStore.SessionListFigures"/> equals the
-    /// <see cref="InMemoryRelationalStore.GetSessionAggregate"/> row and the unfiltered
-    /// <see cref="InMemoryRelationalStore.ListSessionAggregates"/> row, on a token-less session
-    /// (token totals stay absent, never zero), a zero-token session (zero stays zero), a
+    /// The sessions-list read model agrees, field for field, with the per-session summary read
+    /// model: <see cref="InMemoryRelationalStore.SessionListFigures"/> equals
+    /// <see cref="InMemoryRelationalStore.SessionSummaryFigures"/> per session, on a token-less
+    /// session (token totals stay absent, never zero), a zero-token session (zero stays zero), a
     /// multi-harness session (every attributed harness's turns count), an empty session, and a
     /// content-bearing session.
     /// </summary>
     [Fact]
-    public void SessionListFiguresAnswerTheSameFiguresAsTheBroadAggregateRead()
+    public void SessionListFiguresAgreeWithThePerSessionSummaryFigures()
     {
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new(snapshot: new Dictionary<string, ModelCosts>(StringComparer.Ordinal)
@@ -202,15 +201,9 @@ public sealed class AnalyticsReadPathTests
 
         foreach (SessionListFigure figure in figures)
         {
-            SessionAggregateView? broad = store.GetSessionAggregate(figure.SessionKey);
-            Assert.NotNull(broad);
-            AssertFigureMatchesAggregate(figure, broad, store.GetSession(figure.SessionKey));
-        }
-
-        foreach (SessionAggregateView listed in store.ListSessionAggregates())
-        {
-            SessionListFigure figure = Assert.Single(figures, f => f.SessionKey == listed.SessionKey);
-            AssertFigureMatchesAggregate(figure, listed, store.GetSession(listed.SessionKey));
+            SessionSummaryFigure? summary = store.SessionSummaryFigures(figure.SessionKey);
+            Assert.NotNull(summary);
+            AssertFigureMatchesSummary(figure, summary, store.GetSession(figure.SessionKey));
         }
 
         // The absent-versus-zero trap: a turn with no token rows leaves the totals absent, and a
@@ -269,14 +262,8 @@ public sealed class AnalyticsReadPathTests
 
         string[] contentBearingReads =
         [
-            nameof(InMemoryRelationalStore.Records),
             nameof(InMemoryRelationalStore.SessionRecordsForRebuild),
             nameof(InMemoryRelationalStore.AllSessionRecordsForMaintenance),
-            nameof(InMemoryRelationalStore.GetRecord),
-            nameof(InMemoryRelationalStore.GetSessionAggregate),
-            nameof(InMemoryRelationalStore.ListSessionAggregates),
-            nameof(InMemoryRelationalStore.SessionTurnSummaries),
-            nameof(InMemoryRelationalStore.ContentParts),
             nameof(InMemoryRelationalStore.ToolCalls),
             nameof(InMemoryRelationalStore.ToolDefinitions),
             nameof(InMemoryRelationalStore.AgentInvocations),
@@ -352,18 +339,18 @@ public sealed class AnalyticsReadPathTests
         _ = CreateProjection(store, pricing).ProjectAll();
 
         IModelPricingLookup lookup = pricing.LoadPricingTables();
-        SessionAggregateView aggregate = store.GetSessionAggregate(sessionKey, lookup)!;
-        IReadOnlyList<ReadTimeTurnSummary> turns = store.SessionTurnSummaries(sessionKey, lookup);
-        Assert.Equal(128, turns.Count);
 
         store.ClearReadLog();
         SessionDetailFigure detail = store.SessionDetailFigures(sessionKey, lookup)!;
 
+        Assert.Equal(128, detail.Turns.Count);
         Assert.Equal(0, store.MaterializedContentBytes);
         Assert.DoesNotContain(store.ReadLog, read => ContentBearingReads.Contains(read));
         Assert.Equal([nameof(InMemoryRelationalStore.SessionDetailFigures)], store.ReadLog);
-        AssertSummaryMatchesAggregate(detail.Summary, aggregate);
-        Assert.Equivalent(turns, detail.Turns, strict: true);
+
+        // The detail turn list and the single-turn read answer the same figure for the same index.
+        Assert.Equivalent(detail.Turns[0], store.TurnFigures(sessionKey, 0, lookup), strict: true);
+        Assert.Equivalent(detail.Turns[127], store.TurnFigures(sessionKey, 127, lookup), strict: true);
         Assert.Null(store.SessionDetailFigures("missing", lookup));
 
         // The pages answer those same figures: the detail header, the bounded summary, and one
@@ -387,7 +374,7 @@ public sealed class AnalyticsReadPathTests
 
     /// <summary>
     /// The bounded summary page answers from the content-free summary read model alone: no turn
-    /// summary is read, no content is materialized, and every figure equals the broad aggregate.
+    /// summary is read, no content is materialized, and the bounded summary equals the detail header's.
     /// </summary>
     [Fact]
     public void SessionSummaryAnswersWithoutTurnOrContentReads()
@@ -410,7 +397,7 @@ public sealed class AnalyticsReadPathTests
         _ = CreateProjection(store, pricing).ProjectAll();
 
         IModelPricingLookup lookup = pricing.LoadPricingTables();
-        SessionAggregateView aggregate = store.GetSessionAggregate(sessionKey, lookup)!;
+        SessionDetailFigure detail = store.SessionDetailFigures(sessionKey, lookup)!;
 
         store.ClearReadLog();
         SessionSummaryFigure summary = store.SessionSummaryFigures(sessionKey, lookup)!;
@@ -418,8 +405,7 @@ public sealed class AnalyticsReadPathTests
         Assert.Equal(0, store.MaterializedContentBytes);
         Assert.DoesNotContain(store.ReadLog, read => ContentBearingReads.Contains(read));
         Assert.Equal([nameof(InMemoryRelationalStore.SessionSummaryFigures)], store.ReadLog);
-        Assert.DoesNotContain(nameof(InMemoryRelationalStore.SessionTurnSummaries), store.ReadLog);
-        AssertSummaryMatchesAggregate(summary, aggregate);
+        Assert.Equivalent(detail.Summary, summary, strict: true);
         Assert.Null(store.SessionSummaryFigures("missing", lookup));
     }
 
@@ -444,17 +430,17 @@ public sealed class AnalyticsReadPathTests
         _ = CreateProjection(store, pricing).ProjectAll();
 
         IModelPricingLookup lookup = pricing.LoadPricingTables();
-        IReadOnlyList<ReadTimeTurnSummary> turns = store.SessionTurnSummaries(sessionKey, lookup);
-        Assert.Equal(3, turns.Count);
 
         store.ClearReadLog();
         ReadTimeTurnSummary second = store.TurnFigures(sessionKey, 1, lookup)!;
 
         Assert.Equal(0, store.MaterializedContentBytes);
         Assert.DoesNotContain(store.ReadLog, read => ContentBearingReads.Contains(read));
-        Assert.Equivalent(turns[1], second, strict: true);
+        Assert.Equal(1, second.Position);
         Assert.Equal("turn-fig-1", second.SpanId);
-        Assert.Null(store.TurnFigures(sessionKey, turns.Count, lookup));
+        Assert.Equal(200, second.InputTokens);
+        Assert.Equal(20, second.OutputTokens);
+        Assert.Null(store.TurnFigures(sessionKey, 3, lookup));
         Assert.Null(store.TurnFigures(sessionKey, -1, lookup));
         Assert.Null(store.TurnFigures("missing", 0, lookup));
     }
@@ -532,61 +518,31 @@ public sealed class AnalyticsReadPathTests
     /// <summary>Reader methods that materialize conversation text, so a path may not issue them.</summary>
     private static readonly string[] ContentBearingReads =
     [
-        nameof(InMemoryRelationalStore.Records),
         nameof(InMemoryRelationalStore.SessionRecordsForRebuild),
         nameof(InMemoryRelationalStore.AllSessionRecordsForMaintenance),
-        nameof(InMemoryRelationalStore.GetRecord),
-        nameof(InMemoryRelationalStore.GetSessionAggregate),
-        nameof(InMemoryRelationalStore.ListSessionAggregates),
-        nameof(InMemoryRelationalStore.SessionTurnSummaries),
-        nameof(InMemoryRelationalStore.ContentParts),
         nameof(InMemoryRelationalStore.ToolCalls),
         nameof(InMemoryRelationalStore.ToolDefinitions),
         nameof(InMemoryRelationalStore.AgentInvocations),
         nameof(InMemoryRelationalStore.SkillsInvoked),
     ];
 
-    private static void AssertSummaryMatchesAggregate(SessionSummaryFigure summary, SessionAggregateView aggregate)
-    {
-        Assert.Equal(aggregate.SessionKey, summary.SessionKey);
-        Assert.Equal(aggregate.HarnessId, summary.HarnessId);
-        Assert.Equal(aggregate.TurnCount, summary.TurnCount);
-        Assert.Equal(aggregate.RequestCount, summary.RequestCount);
-        Assert.Equal(aggregate.TotalInput, summary.TotalInput);
-        Assert.Equal(aggregate.TotalOutput, summary.TotalOutput);
-        Assert.Equal(aggregate.TotalCacheRead, summary.TotalCacheRead);
-        Assert.Equal(aggregate.TotalCacheCreation, summary.TotalCacheCreation);
-        Assert.Equal(aggregate.DurationMs, summary.DurationMs);
-        Assert.Equal(aggregate.Models, summary.Models);
-        Assert.Equal(aggregate.CacheHitRatio, summary.CacheHitRatio);
-        Assert.Equal(aggregate.CacheCreationCoverage, summary.CacheCreationCoverage);
-        Assert.Equal(aggregate.ToolCalls, summary.ToolCalls);
-        Assert.Equal(aggregate.ToolsInvoked, summary.ToolsInvoked);
-        Assert.Equal(aggregate.HasToolDefinitions, summary.HasToolDefinitions);
-        Assert.Equal(aggregate.ToolsOffered, summary.ToolsOffered);
-        Assert.Equivalent(aggregate.ReportedCost, summary.ReportedCost, strict: true);
-        Assert.Equivalent(aggregate.PublishedCost, summary.PublishedCost, strict: true);
-        Assert.Equivalent(aggregate.CostBasisMismatch, summary.CostBasisMismatch, strict: true);
-        Assert.Equivalent(aggregate.Coverage, summary.Coverage, strict: true);
-        Assert.Equivalent(aggregate.Problems, summary.Problems, strict: true);
-    }
-
-    private static void AssertFigureMatchesAggregate(
+    /// <summary>Cross-checks the sessions-list figure against the per-session summary figure over every field both carry.</summary>
+    private static void AssertFigureMatchesSummary(
         SessionListFigure figure,
-        SessionAggregateView aggregate,
+        SessionSummaryFigure summary,
         CollectedSession? session)
     {
-        Assert.Equal(aggregate.SessionKey, figure.SessionKey);
-        Assert.Equal(aggregate.HarnessId, figure.HarnessId);
-        Assert.Equal(aggregate.TurnCount, figure.TurnCount);
-        Assert.Equal(aggregate.RequestCount, figure.RequestCount);
-        Assert.Equal(aggregate.TotalInput, figure.TotalInput);
-        Assert.Equal(aggregate.TotalOutput, figure.TotalOutput);
-        Assert.Equal(aggregate.Models, figure.Models);
-        Assert.Equivalent(aggregate.ReportedCost, figure.ReportedCost, strict: true);
-        Assert.Equivalent(aggregate.PublishedCost, figure.PublishedCost, strict: true);
-        Assert.Equivalent(aggregate.CostBasisMismatch, figure.CostBasisMismatch, strict: true);
-        Assert.Equal(aggregate.Problems.Count, figure.ProblemsCount);
+        Assert.Equal(summary.SessionKey, figure.SessionKey);
+        Assert.Equal(summary.HarnessId, figure.HarnessId);
+        Assert.Equal(summary.TurnCount, figure.TurnCount);
+        Assert.Equal(summary.RequestCount, figure.RequestCount);
+        Assert.Equal(summary.TotalInput, figure.TotalInput);
+        Assert.Equal(summary.TotalOutput, figure.TotalOutput);
+        Assert.Equal(summary.Models, figure.Models);
+        Assert.Equivalent(summary.ReportedCost, figure.ReportedCost, strict: true);
+        Assert.Equivalent(summary.PublishedCost, figure.PublishedCost, strict: true);
+        Assert.Equivalent(summary.CostBasisMismatch, figure.CostBasisMismatch, strict: true);
+        Assert.Equal(summary.Problems.Count, figure.ProblemsCount);
         Assert.Equal(session?.Workspace?.Repository, figure.Repo);
         Assert.Equal(session?.Workspace?.Branch, figure.Branch);
     }
@@ -765,9 +721,6 @@ public sealed class AnalyticsReadPathTests
             scoped.GetProperty("parts").EnumerateArray().Select(static part => part.GetProperty("spanId").GetString()).ToList());
         Assert.Equal(41, store.MaterializedContentBytes);
         Assert.Contains(nameof(InMemoryRelationalStore.TurnContentParts), store.ReadLog);
-        Assert.DoesNotContain(nameof(InMemoryRelationalStore.ContentParts), store.ReadLog);
-        Assert.DoesNotContain(nameof(InMemoryRelationalStore.Records), store.ReadLog);
-        Assert.DoesNotContain(nameof(InMemoryRelationalStore.GetRecord), store.ReadLog);
         Assert.DoesNotContain(nameof(InMemoryRelationalStore.SessionRecordsForRebuild), store.ReadLog);
         Assert.DoesNotContain(nameof(InMemoryRelationalStore.AllSessionRecordsForMaintenance), store.ReadLog);
 
@@ -777,8 +730,7 @@ public sealed class AnalyticsReadPathTests
             ["user_prompt", "tool_result_content"],
             turnContent.GetProperty("parts").EnumerateArray().Select(static part => part.GetProperty("part").GetString()).ToList());
         Assert.Equal(41, store.MaterializedContentBytes);
-        Assert.DoesNotContain(nameof(InMemoryRelationalStore.Records), store.ReadLog);
-        Assert.DoesNotContain(nameof(InMemoryRelationalStore.ContentParts), store.ReadLog);
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.SessionRecordsForRebuild), store.ReadLog);
     }
 
     /// <summary>
@@ -826,14 +778,8 @@ public sealed class AnalyticsReadPathTests
 
         string[] contentBearingReads =
         [
-            nameof(InMemoryRelationalStore.Records),
             nameof(InMemoryRelationalStore.SessionRecordsForRebuild),
             nameof(InMemoryRelationalStore.AllSessionRecordsForMaintenance),
-            nameof(InMemoryRelationalStore.GetRecord),
-            nameof(InMemoryRelationalStore.GetSessionAggregate),
-            nameof(InMemoryRelationalStore.ListSessionAggregates),
-            nameof(InMemoryRelationalStore.SessionTurnSummaries),
-            nameof(InMemoryRelationalStore.ContentParts),
             nameof(InMemoryRelationalStore.ToolCalls),
             nameof(InMemoryRelationalStore.ToolDefinitions),
             nameof(InMemoryRelationalStore.AgentInvocations),
@@ -1512,12 +1458,7 @@ public sealed class AnalyticsReadPathTests
         /// <inheritdoc />
         public IReadOnlyList<StoredSourceCount> SourceRecordCounts() => inner.SourceRecordCounts();
 
-        public CollectedRecord? GetRecord(string spanId) => inner.GetRecord(spanId);
-
         public CollectedRecord? RecordContentFree(string spanId) => inner.RecordContentFree(spanId);
-
-        public IReadOnlyList<CollectedRecord> Records(string? sessionKey = null, string? harnessId = null, string? sourceId = null) =>
-            inner.Records(sessionKey, harnessId, sourceId);
 
         public IReadOnlyList<StoredSessionAttribution> SessionAttributions() => inner.SessionAttributions();
 
@@ -1534,8 +1475,6 @@ public sealed class AnalyticsReadPathTests
         public IReadOnlyList<StoredSkillInvocation> SkillsInvoked(string? spanId = null, string? sessionKey = null) => inner.SkillsInvoked(spanId, sessionKey);
 
         public IReadOnlyList<StoredToolCall> ToolCalls(string? spanId = null, string? sessionKey = null) => inner.ToolCalls(spanId, sessionKey);
-
-        public IReadOnlyList<StoredContentPart> ContentParts(string? spanId = null, string? sessionKey = null) => inner.ContentParts(spanId, sessionKey);
 
         public IReadOnlyList<StoredContentPart> TurnContentParts(
             string sessionKey,
@@ -1559,19 +1498,6 @@ public sealed class AnalyticsReadPathTests
         public IReadOnlyList<StoredSessionModelUsage> SessionModelUsages(string? sessionKey = null) => inner.SessionModelUsages(sessionKey);
 
         public StoredFieldsView StoredFields(string sessionKey) => inner.StoredFields(sessionKey);
-
-        public SessionAggregateView? GetSessionAggregate(string sessionKey, IModelPricingLookup? pricing = null)
-        {
-            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException("projection exploded");
-            }
-
-            return inner.GetSessionAggregate(sessionKey, pricing);
-        }
-
-        public IReadOnlyList<SessionAggregateView> ListSessionAggregates(string? harnessId = null, IModelPricingLookup? pricing = null) =>
-            inner.ListSessionAggregates(harnessId, pricing);
 
         public IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null)
         {
@@ -1622,16 +1548,6 @@ public sealed class AnalyticsReadPathTests
             }
 
             return inner.SessionRecordsContentFree(sessionKey);
-        }
-
-        public IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null)
-        {
-            if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException("projection exploded");
-            }
-
-            return inner.SessionTurnSummaries(sessionKey, pricing);
         }
     }
 }

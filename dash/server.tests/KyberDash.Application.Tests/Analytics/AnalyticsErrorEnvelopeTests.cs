@@ -106,12 +106,8 @@ public sealed class AnalyticsErrorEnvelopeTests
     {
         Mock<IRelationalStoreReader> reader = new();
         reader.Setup(store => store.Sessions(It.IsAny<string?>())).Returns(Array.Empty<CollectedSession>());
-        reader.Setup(store => store.Records(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()))
-            .Returns(Array.Empty<CollectedRecord>());
         reader.Setup(store => store.CountRecords(It.IsAny<string?>())).Returns(0);
         reader.Setup(store => store.Harnesses()).Returns(Array.Empty<string>());
-        reader.Setup(store => store.ListSessionAggregates(It.IsAny<string?>(), It.IsAny<IModelPricingLookup?>()))
-            .Returns(Array.Empty<SessionAggregateView>());
         reader.Setup(store => store.SessionAttributions()).Returns(Array.Empty<StoredSessionAttribution>());
 
         Mock<IProjectionStore> projections = new();

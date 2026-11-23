@@ -102,7 +102,7 @@ public class RelationalIngestTests
         Assert.NotEmpty(spyWriter.WriteBatchCalls);
         Assert.Equal(2, store.CountRecords());
 
-        CollectedRecord? copilotRecord = store.GetRecord("1111111111111111");
+        CollectedRecord? copilotRecord = store.FindRecord("1111111111111111");
         Assert.NotNull(copilotRecord);
         Assert.Equal("copilot", copilotRecord.HarnessId);
         Assert.Equal("sess-copilot", copilotRecord.SessionKey);
@@ -110,19 +110,19 @@ public class RelationalIngestTests
         Assert.Contains(copilotRecord.Parts, static p => p.Bucket == ContentBucket.SystemPrompt && p.PlainText == "Be concise.");
         Assert.Contains(copilotRecord.Parts, static p => p.Bucket == ContentBucket.ConversationHistory && p.PlainText is null && p.Withheld is not null);
 
-        CollectedRecord? piRecord = store.GetRecord("2222222222222222");
+        CollectedRecord? piRecord = store.FindRecord("2222222222222222");
         Assert.NotNull(piRecord);
         Assert.Equal("pi", piRecord.HarnessId);
 
-        Assert.Null(store.GetRecord("3333333333333333"));
+        Assert.Null(store.FindRecord("3333333333333333"));
         Assert.Equal(1, store.CountIngestProblems());
         StoredIngestProblem problem = Assert.Single(store.ListIngestProblems());
         Assert.Equal(CanonValidation.TokenNegativeClass, problem.Problem.Code);
         Assert.Equal("claude-code", problem.Problem.HarnessId);
         Assert.DoesNotContain("do-not-persist", problem.Problem.Message, StringComparison.Ordinal);
 
-        Assert.Null(store.GetRecord("4444444444444444"));
-        Assert.Empty(store.ContentParts("4444444444444444"));
+        Assert.Null(store.FindRecord("4444444444444444"));
+        Assert.Empty(store.FindRecordParts("4444444444444444"));
         Assert.Equal(1, store.CountQuarantinedSpans());
         StoredQuarantinedSpan? quarantined = store.GetQuarantinedSpan("4444444444444444");
         Assert.NotNull(quarantined);
@@ -199,14 +199,14 @@ public class RelationalIngestTests
         Assert.NotNull(projection);
         Assert.Equal("kw-probe runA shared-service", projection.Label);
 
-        SessionAggregateView? aggregate = store.GetSessionAggregate(sessionId, pricing.LoadPricingTables());
-        Assert.NotNull(aggregate);
-        Assert.Equal(2, aggregate.ToolCalls);
-        Assert.NotNull(aggregate.ReportedCost);
-        Assert.Equal(CostBasis.Harness, aggregate.ReportedCost.Basis);
-        Assert.Equal(0d, aggregate.ReportedCost.Value);
-        Assert.Contains(aggregate.Tools, static tool => tool.Name == "read" && tool.Invocations == 1);
-        Assert.Contains(aggregate.Tools, static tool => tool.Name == "skill" && tool.Invocations == 1);
+        SessionDetailFigure? figure = store.SessionDetailFigures(sessionId, pricing.LoadPricingTables());
+        Assert.NotNull(figure);
+        Assert.Equal(2, figure.Summary.ToolCalls);
+        Assert.NotNull(figure.Summary.ReportedCost);
+        Assert.Equal(CostBasis.Harness, figure.Summary.ReportedCost.Basis);
+        Assert.Equal(0d, figure.Summary.ReportedCost.Value);
+        Assert.Contains(figure.Tools, static tool => tool.Name == "read" && tool.Invocations == 1);
+        Assert.Contains(figure.Tools, static tool => tool.Name == "skill" && tool.Invocations == 1);
 
         KyberBridgeEngine bridge = new(
             store,
@@ -249,15 +249,15 @@ public class RelationalIngestTests
         IngestOutcome outcome = CanonIngestPipeline.IngestBatch([turn], store, store);
         Assert.Equal(new IngestOutcome(1, 0, 0), outcome);
 
-        CollectedRecord? stored = store.GetRecord("aaaaaaaaaaaaaaaa");
+        CollectedRecord? stored = store.FindRecord("aaaaaaaaaaaaaaaa");
         Assert.NotNull(stored);
         Assert.DoesNotContain(stored.Tokens, static token => token.TokenClass == TokenClass.Input);
         Assert.Null(stored.ReportedInputTokens);
 
         _ = new CanonSessionProjectorEngine(store, store, store, pricing).ProjectIncremental();
-        SessionAggregateView? aggregate = store.GetSessionAggregate(sessionId, pricing.LoadPricingTables());
-        Assert.NotNull(aggregate);
-        Assert.Null(aggregate.TotalInput);
+        SessionSummaryFigure? turnTotals = store.SessionSummaryFigures(sessionId, pricing.LoadPricingTables());
+        Assert.NotNull(turnTotals);
+        Assert.Null(turnTotals.TotalInput);
 
         KyberBridgeEngine bridge = new(
             store,
@@ -332,8 +332,8 @@ public class RelationalIngestTests
         // The capture is still stored: a scoped content read, not the detail page, is what
         // returns the prompt.
         Assert.Contains(
-            store.ContentParts("aaaaaaaaaaaaaaaa"),
-            part => part.Part.PlainText == prompt);
+            store.FindRecordParts("aaaaaaaaaaaaaaaa"),
+            part => part.PlainText == prompt);
     }
 
     /// <summary>
@@ -343,7 +343,7 @@ public class RelationalIngestTests
     /// A turn that stored only input, or only output, stays partial.
     /// </summary>
     [Fact]
-    public void GetSessionAggregate_AbsentTokens_IsNotPricedAsZero()
+    public void SessionSummaryFigures_AbsentTokens_IsNotPricedAsZero()
     {
         const double inputRate = 0.000003;
         const double outputRate = 0.000015;
@@ -404,7 +404,7 @@ public class RelationalIngestTests
         CostStatus status,
         double? value)
     {
-        SessionAggregateView view = store.GetSessionAggregate(sessionKey, tables)!;
+        SessionSummaryFigure view = store.SessionSummaryFigures(sessionKey, tables)!;
         Assert.Equal(status, view.PublishedCost.Status);
         if (value is null)
         {
@@ -483,7 +483,7 @@ public class RelationalIngestTests
 
         Assert.Equal(new IngestOutcome(1, 0, 0), outcome);
         Assert.Single(spyWriter.WriteBatchCalls);
-        Assert.NotNull(store.GetRecord("5555555555555555"));
+        Assert.NotNull(store.FindRecord("5555555555555555"));
         Assert.NotNull(store.GetSession("sess-pi-direct"));
     }
 
@@ -582,7 +582,7 @@ public class RelationalIngestTests
 
         Assert.Single(spyWriter.WriteBatchCalls);
         Assert.Equal(1, store.CountRecords("commandcode"));
-        Assert.NotNull(store.GetRecord("rec-good"));
+        Assert.NotNull(store.FindRecord("rec-good"));
 
         Assert.Equal(2, spyWriter.WriteProblemCalls.Count);
         Assert.All(spyWriter.WriteProblemCalls, static p => Assert.Equal("SOURCE_UNREADABLE", p.Code));
@@ -743,7 +743,7 @@ public class RelationalIngestTests
         ]);
 
         Assert.Equal(1, spanOutcome.Accepted);
-        Assert.NotNull(store.GetRecord("8888888888888888"));
+        Assert.NotNull(store.FindRecord("8888888888888888"));
     }
 
     private static string Combine(string root, string relative) =>

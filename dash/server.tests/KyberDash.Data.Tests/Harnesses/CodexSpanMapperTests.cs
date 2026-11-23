@@ -361,7 +361,7 @@ public class CodexSpanMapperTests
 
         Assert.Equal(1, store.CountRecords("codex-cli"));
         Assert.NotNull(store.GetSession("conv-persist-1"));
-        Assert.NotNull(store.GetRecord("span-persist-model"));
+        Assert.NotNull(store.FindRecord("span-persist-model"));
     }
 
     private static OtlpSpan SpanWithUsage(
