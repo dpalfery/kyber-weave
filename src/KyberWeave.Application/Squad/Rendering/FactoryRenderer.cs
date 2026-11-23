@@ -3,6 +3,7 @@ using System.Text.Json;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Parsing;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
@@ -375,16 +376,12 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
     }
 
     /// <summary>
-    ///     The character set a declared MCP server name survives: the same portable set the
-    ///     toolchain roster enforces, since the name lands in a plain YAML scalar and a
-    ///     <c>{server}___{tool}</c> id alike.
+    ///     The declared server names that survive both sinks: the plain-style YAML flow sequence
+    ///     and the <c>{server}___{tool}</c> ids. The character set is the toolchain loader's own
+    ///     portable-name rule, so the two gates cannot disagree about a future name.
     /// </summary>
-    private static bool IsPortableServerName(string value)
-    {
-        return !string.IsNullOrEmpty(value) &&
-               value.All(character =>
-                   char.IsAsciiLetterOrDigit(character) || character is '_' or '-');
-    }
+    private static bool IsPortableServerName(string value) =>
+        SquadSourceLoader.IsPortableMcpNamePart(value);
 
     /// <summary>
     ///     The YAML spelling of a rendered whitelist, so the entry-point caveat names the value the
