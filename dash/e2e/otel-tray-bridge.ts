@@ -808,11 +808,12 @@ export async function startTrayBridge(options: {
           const outcome = await handleInvokeCommand(cmd, args)
           invocations.push({ cmd, args, ok: true, at: new Date().toISOString() })
           sendJson(res, 200, { ok: true, result: outcome.result, emittedEvents: outcome.emittedEvents })
-        } catch (error) {
-          // Never reflect backend error internals in an HTTP response, and never
-          // interpolate request-controlled values into the log line; the failing
-          // command is already recorded structurally in invocations below.
-          console.error('tray invoke failed:', error instanceof Error ? error.message : String(error))
+        } catch {
+          // Both the response and the log line stay static: the caught error's
+          // text can embed request-controlled values (the unknown-command error
+          // names the command), so it must reach neither. The failing command
+          // is already recorded structurally in invocations below.
+          console.error('tray invoke failed')
           const message = 'tray command failed'
           invocations.push({ cmd, args, ok: false, error: message, at: new Date().toISOString() })
           sendJson(res, 400, { ok: false, error: { kind: 'runtime', message } })
