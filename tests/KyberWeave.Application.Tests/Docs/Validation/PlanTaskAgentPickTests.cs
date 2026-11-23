@@ -45,6 +45,8 @@ public sealed class PlanTaskAgentPickTests : IDisposable
         """;
 
     private readonly DocFixture _repo = DocFixture.CreateInMemory();
+    private readonly FakeEmbeddedResources _resources = new FakeEmbeddedResources()
+        .Add(PlanTaskAgentPick.RubricResourceName, "<!-- note -->\nRate the task by the rubric.");
     private readonly List<PlanTaskAgentPick> _pickers = [];
 
     public PlanTaskAgentPickTests()
@@ -61,7 +63,7 @@ public sealed class PlanTaskAgentPickTests : IDisposable
 
     private PlanTaskAgentPick Picker(IArbiterProvider provider)
     {
-        PlanTaskAgentPick picker = new(provider, PlanTaskAgentPick.ImplementationAgents());
+        PlanTaskAgentPick picker = new(provider, PlanTaskAgentPick.ImplementationAgents(), _resources);
         _pickers.Add(picker);
         return picker;
     }
@@ -78,7 +80,7 @@ public sealed class PlanTaskAgentPickTests : IDisposable
         Assert.Equal(0.97, picked.AgentConfidence);
         Assert.Null(file.Tasks[1].Agent);
         Assert.Contains("KW-DOC-TASKS-PICK-T1", provider.Asked);
-        Assert.Contains("KW-DOC-TASKS-RATE-T1", provider.Asked);
+        Assert.Contains("KW-DOC-TASKS-AGREE-T1", provider.Asked);
         Assert.Equal(1, provider.Calls);
         Assert.Contains("| agent=dev-medium |", PlanTaskPacket.ReadyQueue(file.Tasks), StringComparison.Ordinal);
         Assert.Contains("| role=dev-medium |", PlanTaskPacket.ReadyQueue(file.Tasks), StringComparison.Ordinal);
@@ -91,6 +93,17 @@ public sealed class PlanTaskAgentPickTests : IDisposable
 
         Assert.Null(file.Tasks![0].Agent);
         Assert.DoesNotContain("agent=", PlanTaskPacket.ReadyQueue(file.Tasks), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void ANonFiniteConfidence_IsNoPickRatherThanAStoredOne(double confidence)
+    {
+        PlanTaskFile file = Write(Picker(new StubProvider("dev-medium", confidence)));
+
+        Assert.Null(file.Tasks![0].Agent);
+        Assert.Null(file.Tasks[0].AgentConfidence);
     }
 
     [Fact]

@@ -5,7 +5,7 @@ description: "Provides docs-dev closeout for finished plans and specs by harvest
 invocation: subagent
 model-profile: general
 capability-profile: documentation
-copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]
+copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, skill]
 delegates-to: []
 fallback: role-skill
 aliases: []
@@ -25,7 +25,7 @@ Your task's files are your scope (see your baseline). A dispatch with a task id 
 The only processes you run are these ten command classes:
 - `kyber-weave docs packet <task id>`: your brief for a dispatch that carries a task id, run from the worktree the dispatch names.
 - `kyber-weave docs closeout <plan>`: changes nothing and names every closeout item still missing from the plan named by the dispatch's `PLAN_FILE:`. Only an archive dispatch (Plan closeout, step 6) also runs `kyber-weave docs closeout <plan> --archive`, which sets the status, moves the plan to `<docs-root>/archive/plans/`, removes its `<plan>.tasks.yml` and updates both indexes; never do those steps by hand. An index file that command or the archive tool creates because the archive folder has none yet is the tool's own output, not a document you are adding: it needs no approval and is never a reason to return `BLOCKED`.
-- `kyber-weave docs standards migrate`: when a check reports the standards warning period (`KW-DOC-SPEC-012`, `KW-DOC-SPEC-013`, `KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`); it clears those warnings, so run it and re-check rather than reporting them.
+- `kyber-weave docs standards migrate`: when a check reports the standards warning period (`KW-DOC-SPEC-012`, `KW-DOC-SPEC-013`, `KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`); it clears those warnings by renaming every standard and rewriting `AGENTS.md`. Run it only when the request is that migration; inside a feature or fix run, leave the warnings and report one open item naming the command, because the review counts the renames as unrelated scope.
 - `git mv` of the specification directory you close out to `<docs-root>/archive/specs/`, only after its closeout steps are complete.
 - `git rm` of that specification's `<spec-folder>/tasks.yml` in the same commit that archives it, so the file never reaches the main branch. Nothing durable is lost: the archived artifact keeps its decisions, tasks and test contract.
 - `kyber-weave docs validate .`, or, when the tool is not on `PATH`, the source-run form the host's `AGENTS.md` declares (`dotnet run --project <the CLI project> -- docs validate .`). Run it after every corpus edit. Add `--merge-ready` only after an archival move: before it, the open plan and its task file fail it.

@@ -182,7 +182,7 @@ repository, run by an agent together with the user.
 While ContextHygiene validates individual skill specifications, scores routing readiness,
 and scans instruction surfaces, **[Kyber-Squad](../kyber-squad/architecture.md)** acts as the
 unified multi-harness deployment control plane. Kyber-Squad maintains the canonical skills
-(alongside 29 canonical agent roles and lowering rules) under `products/kyber-squad/`. It also
+(alongside the canonical agent roles and lowering rules) under `products/kyber-squad/`. It also
 deploys the Kyber-Weave skills from `.apm/skills/` beside them, in each release
 archive, and manages their transactional deployment, drift tracking, and lifecycle. Its catalog declares thirteen
 harness targets. All thirteen renderers are implemented and registered (`copilot`, `cursor`, `claude`,

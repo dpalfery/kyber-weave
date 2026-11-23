@@ -23,8 +23,6 @@ public sealed class SquadWorktreeMcpContractTests
 {
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private const string ConductorAgentPath = "products/kyber-squad/agents/conductor.md";
-
     /// <summary>
     /// The shared execution contract, which both entry points load. It is a canonical skill rather
     /// than a conductor reference so a fallback target receives it.
@@ -86,7 +84,6 @@ public sealed class SquadWorktreeMcpContractTests
     /// </remarks>
     [Theory]
     [InlineData(ConductorExecutionPath)]
-    [InlineData(ConductorAgentPath)]
     [InlineData("products/kyber-squad/agents/review-lens.md")]
     [InlineData("products/kyber-squad/agents/review-triage.md")]
     [InlineData("products/kyber-squad/agents/research-agent.md")]
@@ -111,7 +108,6 @@ public sealed class SquadWorktreeMcpContractTests
     ///     the runbook carries the per-client list.
     /// </summary>
     [Theory]
-    [InlineData(ConductorAgentPath)]
     [InlineData(ConductorExecutionPath)]
     public void ConductorSurfaces_NameTheTrackedMcpConfigRestoreCommand(string relativePath)
     {

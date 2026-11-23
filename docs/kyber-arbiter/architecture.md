@@ -467,15 +467,47 @@ Arbiter off, and with it the guard. Each `ArchitectShellGuard` decision writes a
 [ADR 0071](../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md).
 
 `WorkerGuard` (`kyber-weave-arbiter worker-guard`) is the hook guard on a Squad subagent's own tool calls. It
-runs on every Copilot CLI and Claude tool call from the user-level hook file or settings block, the only
-places those harnesses report a subagent's calls with its id and type, and it acts only on a call from inside
-a Squad subagent. It denies a write into the canonical checkout while a live run works in its own worktree
-(`KW-ARB-CHECKOUT-001`, the same id as the return rule) and every call of a developer or `docs-dev` dispatch
-whose current turn is past `arbiter.dispatch-budget` (`KW-ARB-BUDGET-001`), and denies once the call after one that ran past
-`dispatch-budget.call-minutes`, measured as the gap between the dispatch's consecutive calls. It reads the run records, the checkout's git files and
+runs on every Copilot CLI, Claude and Factory tool call from the user-level hook file or settings block, and
+it acts only on a call from inside a Squad subagent. Claude and Copilot report the subagent's id and type in
+the call's own payload. Factory reports neither, so the guard keeps a small session ledger under
+`~/.kyber-weave/arbiter/sessions/`: the root's `Task` pre event records the type in flight, the child's
+`SessionStart` records the child-to-parent link through `calling_session_id`, and the dispatch's `PostToolUse`
+text, which names both ids, resolves an ambiguous child and corrects an earlier guess. The child's entry is
+deleted at `SessionEnd`. A child whose type is still unresolved after three seconds is judged by the rules
+that hold for every profile (`KW-ARB-SECRET-001` and `KW-ARB-CHECKOUT-001`); the profile-specific rules are
+skipped and one log line records it. It denies a write into the canonical checkout while a live run works in its own worktree
+(`KW-ARB-CHECKOUT-001`, the same id as the return rule), and a shell command that would run there for the same
+reason: the call's working directory is inside the canonical checkout, or one of its `cd`, `pushd` or `git -C`
+steps moves into it, wherever in the command that step sits. A call's working directory inside the canonical
+checkout does not count when no step of the command runs there: a `cd` or `pushd` into a directory moves the
+shell before every later step, and a `git` step that names its own directory with `-C` runs there, so the guard
+judges those directories instead. The walk follows the shell: a `cd` inside `( … )` ends at the closing `)`, so
+a later step still runs in the outer directory; a pipeline stage starts in the directory the pipeline did, so a
+`cd` in an earlier stage does not carry; and a step after `||` may run in the directory the previous step
+started in, because the left side may have failed. A `cd` or `pushd` it cannot place (a bare `pushd`, `cd -`, or
+a variable such as `$WT`) and any other step do run in the working directory, so it is judged on that. It denies
+every call of a developer or `docs-dev` dispatch whose current turn is past `arbiter.dispatch-budget`
+(`KW-ARB-BUDGET-001`), and denies once the call after a process-starting call that ran past
+`dispatch-budget.call-minutes`, measured as the gap between the dispatch's consecutive calls; a file read is
+never judged, because only a call that started a process, or waited on one, can hang. It also denies a call that
+would put a secret into the transcript, which goes to the model provider (`KW-ARB-SECRET-001`): the rule applies to
+every capability profile, reads no file and starts no process, and decides from the call's own command text or from
+the path the harness's `view` or `Read` tool names. It refuses a command that reads a secret file (a name fragment
+decides only when the file has no extension or a configuration or data extension, so a source file such as
+`TokenService.cs` is not refused for its name), one that prints a
+secret from a store (`dotnet user-secrets list`, `docker inspect` without a non-environment `--format`, `env` and
+`printenv` with nothing to print or with a secret-named argument, a secret-named variable echoed or printed, `env:`
+listings, the keychain and cloud token lookups, `kubectl get secret … -o yaml|json|jsonpath`, `/proc/*/environ`,
+and a Python or Node one-liner over `os.environ` or `process.env`), and one that carries a literal secret
+(`NAME=value` or `-e`/`--env` `NAME=value`, `Password=`/`Pwd=` in a connection string, `sqlcmd -P`, `mysql -p`,
+`curl -u`, `Authorization: Bearer`). A value passed by reference (`"$VAR"`) is allowed, because it never enters the
+transcript. The whole command text is matched, quotes and nested `bash -c`, `sh -c` and `pwsh -Command` strings
+included, so wrapping a command in a shell escapes nothing, and a command the rule cannot read is refused: this rule
+fails closed, unlike the others. It reads the run records, the checkout's git files and
 one append-only counter file per subagent under `~/.kyber-weave/arbiter/budgets/`, starts no process, calls no
-model, and allows anything it cannot read on the write and budget paths. A developer's shell command that writes
-a file is not seen by it; the return rule catches that.
+model, and allows anything it cannot read on the write, command and budget paths. A read through a grep tool carries
+no command, so the checkout rule never judges it; a read through a `view` or `Read` tool is judged only by the secret
+rule. A write a command makes to a file it does not name is left to the return rule below.
 
 A command from a `platform-reader` dispatch (the `platform-researcher` agent) is seen. The guard raises
 `worker.command` with the command's text, its *form* — the program and leading words, with a leading
@@ -499,9 +531,10 @@ falls back to every declared technology's list, so a refusal is never lost; that
 reading for a read-only agent.
 A judged command whose event
 names no working directory is refused too, because the technology's list lives under that directory and
-cannot be read; the missing directory is itself a machine fact. Where no worker guard runs, nothing is
-refused: on those eleven harnesses the same verbs are stated in the technology's `rules.md`, which reaches
-the prompt's `<technology-rules>` part, and are an instruction only. See Requirement 8.6 and the
+cannot be read; the missing directory is itself a machine fact. Factory's guard reads the same list, using
+the parent session id its ledger recorded to find the dispatch's `technology` header. Where no worker guard
+runs, nothing is refused: on those ten harnesses the same verbs are stated in the technology's `rules.md`,
+which reaches the prompt's `<technology-rules>` part, and are an instruction only. See Requirement 8.6 and the
 [runbook](runbook.md#reading-a-canonical-checkout-refusal).
 
 ## Where the rules come from
@@ -1214,7 +1247,7 @@ The degradation records these outcomes produce are listed once, in the
 | Cursor | 2 | Owned entries in the shared `.cursor/hooks.json` (`preToolUse`/`postToolUse`, `failClosed: true`) | `Task` | Header inference from the marker | `tool_input.prompt`; `tool_input.subagent_type` is undocumented, so when absent the rules answer `undecidable`. Returns pair by `tool_use_id` | Unsupported (unverified): whether `updated_input` applies to `Task` is undocumented [CU-SUB], [CU-HOOK] |
 | Kilo | 3 | The `.kilo/plugin/kyber-arbiter.ts` shim speaking the plugin envelope | `task` | Header inference from the marker | `args.subagent_type`, `args.prompt`; returns pair by `callID` | Unsupported (unverified): the task tool documents no model [KI-SUB] |
 | Antigravity | 3 | An owned top-level group `kyber-arbiter` in `.agents/hooks.json`, matching `^invoke_subagent$` | `invoke_subagent`; each element of `Subagents` is one dispatch | Header inference from the marker | `TypeName`, `Prompt`, as one flat `args` object (the shape a real agy call sends) or as the `Subagents` list; see [the Antigravity payload](#the-antigravity-payload-and-caller-rule). Deny writes `{decision: "deny", reason}`; every other answer on a pre-tool event writes `{decision: "allow"}`, never `{}`, which agy reports as a denial with an empty reason. An inserted prompt writes `{decision: "ask", overwrite: {...}}` | Unsupported: `invoke_subagent` has no model field; tier is per custom subagent [AG-SUB], [AG-HOOK] |
-| Factory | 3 | An owned block in `.factory/hooks.json`, matcher groups at the top level with no `hooks` wrapper, plus a `SubagentStop` group with no matcher (Factory runs `Task` in the background, so the worker report arrives at stop, not at `PostToolUse`), unless shadowed (below) | `Task` | Header inference from the marker | `tool_input.subagent_type`, `tool_input.prompt`; returns pair by `pair-digest` | Unsupported: the docs say the caller cannot choose a model for a single call [FA-DROID], [FA-HOOK] |
+| Factory | 3 | An owned block in `.factory/hooks.json`, matcher groups at the top level with no `hooks` wrapper: the dispatch's `Task` groups, a `SubagentStop` group with no matcher (Factory runs `Task` in the background, so the worker report arrives at stop, not at `PostToolUse`), and the worker guard's `PreToolUse` group matching every tool, second `PostToolUse` on `Task`, and matcher-less `SessionStart` and `SessionEnd` groups; unless shadowed (below) | `Task` | Header inference from the marker | `tool_input.subagent_type`, `tool_input.prompt`; returns pair by `pair-digest` | Unsupported: the docs say the caller cannot choose a model for a single call [FA-DROID], [FA-HOOK] |
 | Devin | 3 | An owned block in `.devin/hooks.v1.json` (the Claude Code format), matching `^run_subagent$` | `run_subagent` | Header inference from the marker | `tool_input.profile`, `tool_input.prompt`; returns pair by `pair-digest` | Unsupported (unverified): the `run_subagent` schema documents no model [DV-HOOK], [DV-LOG] |
 | Warp, ZCode | 3 | No hooks: the MCP fallback | — | Asserted by the caller in `arbiter_evaluate_agent_dispatch_or_return` | — | Not applicable: no hooks |
 

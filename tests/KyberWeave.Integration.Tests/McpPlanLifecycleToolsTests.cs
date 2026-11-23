@@ -112,7 +112,10 @@ public sealed class McpPlanLifecycleToolsTests
         Git(fixture.Root, "add", "-A");
         Git(fixture.Root, "commit", "-q", "-m", "init");
         IServiceProvider picking = DocsTestCommands.Services(services => services.AddSingleton<IPlanTaskAgentPickerFactory>(
-            new DocsTestCommands.FixedPickerFactory(() => new PlanTaskAgentPick(new PickingProvider(), PlanTaskAgentPick.ImplementationAgents()))));
+            new DocsTestCommands.FixedPickerFactory(() => new PlanTaskAgentPick(
+                new PickingProvider(),
+                PlanTaskAgentPick.ImplementationAgents(),
+                new FakeEmbeddedResources().Add(PlanTaskAgentPick.RubricResourceName, "Rate the task by the rubric.")))));
         string response = Tools(fixture.Root, picking).FinalizePlan(fixture.Root, PlanTaskFileProbe.PlanPath, "autonomous",
             "AUTONOMOUS_APPROVAL: approve-and-execute");
 

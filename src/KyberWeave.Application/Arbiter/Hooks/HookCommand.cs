@@ -496,8 +496,10 @@ public sealed class HookCommand : IArbiterHookHost
     /// The service is built once per root and reads that checkout's documentation, so it is created on the first
     /// dispatch that needs it rather than for every event. The root is the worktree the invocation's run context
     /// chose — the one that holds the dispatch's plan — so a conductor run whose plan lives in its run worktree builds
-    /// the prompt from that worktree rather than from the checkout the harness session started in. A refusal caused by
-    /// an absent or unreadable input warns and the dispatch continues; only a positive finding stops it.
+    /// the prompt from that worktree rather than from the checkout the harness session started in. The configuration
+    /// is that worktree's own, the same one <c>docs packet</c> reads, even when the user-level hook evaluates the
+    /// event under the user config: the prompt describes the repository's work, not the hook's scope. A refusal
+    /// caused by an absent or unreadable input warns and the dispatch continues; only a positive finding stops it.
     /// </remarks>
     private Func<DispatchPromptQuery, DispatchPromptExpansion>? PromptExpander(
         HookRunContext? runContext,
@@ -511,14 +513,20 @@ public sealed class HookCommand : IArbiterHookHost
         }
 
         Dictionary<string, ITaskPromptService> services = new(StringComparer.Ordinal);
+        Dictionary<string, KyberWeaveConfig> configurations = new(StringComparer.Ordinal);
         return query =>
         {
             string root = runContext is null || _runContexts is null
                 ? repoRoot
                 : _runContexts.SelectPlan(runContext, query.PlanFile, query.RetryText).Worktree;
+            if (!configurations.TryGetValue(root, out KyberWeaveConfig? repositoryConfig))
+            {
+                configurations[root] = repositoryConfig = RepositoryConfigFor(root, config, log);
+            }
+
             if (!services.TryGetValue(root, out ITaskPromptService? service))
             {
-                services[root] = service = _promptFactory.ForRepository(root, config);
+                services[root] = service = _promptFactory.ForRepository(root, repositoryConfig);
             }
 
             TaskPromptResult result = service.Build(
@@ -531,7 +539,7 @@ public sealed class HookCommand : IArbiterHookHost
                     Technology: query.Technology,
                     query.FailedAttempts,
                     RetryText: query.RetryText),
-                config);
+                repositoryConfig);
 
             bool missingInput = result.RefusalKind == TaskPromptRefusalKind.MissingInput;
             if (missingInput)
@@ -543,6 +551,31 @@ public sealed class HookCommand : IArbiterHookHost
 
             return new DispatchPromptExpansion(result.Built, result.Prompt, result.Refusal, missingInput);
         };
+    }
+
+    /// <summary>
+    /// The configuration of the repository whose plan the dispatch names, loaded through the same host-config port
+    /// the project hook and <c>docs packet</c> use. The user config is only an evaluation scope for the Arbiter, so
+    /// it is the fallback here, not the source: its host facts would describe no repository at all.
+    /// </summary>
+    /// <param name="root">The worktree that holds the dispatch's plan.</param>
+    /// <param name="fallback">The configuration the event was evaluated under.</param>
+    /// <param name="log">Receives the reason a repository config could not be read.</param>
+    private KyberWeaveConfig RepositoryConfigFor(string root, KyberWeaveConfig fallback, TextWriter log)
+    {
+        try
+        {
+            return _hostConfig.LoadProject(root) ?? fallback;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
+        {
+            // The prompt still builds, so a readable dispatch is not denied for a configuration the repository
+            // already failed to load elsewhere. Everything the prompt says about the repository is then unverified.
+            log.WriteLine(
+                $"Arbiter: the repository config for '{root}' could not be read ({OneLine(ex.Message)}); " +
+                "the prompt uses the configuration the event was evaluated under.");
+            return fallback;
+        }
     }
 
     /// <summary>

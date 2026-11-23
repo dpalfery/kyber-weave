@@ -28,8 +28,9 @@ from the active plan, and the report goes to `.agent_scratchpad/<task-id>/task-g
 active plan has the task, name the files this task created or modified, one `--paths` per file, and
 never another worker's files.
 
-A run with `--fix` applies each gate's fix command first. It never counts: only a run without
-`--fix` that reports every declared gate passing is a pass.
+A run with `--fix` applies each gate's fix command first. It counts as the verification run only
+when its fix commands changed no task file; one that changed a task file never counts. Either way,
+only a run that reports every declared gate passing is a pass.
 
 ## Failing run (test-first)
 
@@ -48,9 +49,10 @@ Run no format command a declared gate does not cover.
 
 ## Loop and the 3-cycle cap
 
-A cycle is one `--fix` run followed by one verification run. When a gate fails, make the fix its
-output calls for and run one cycle. The loop has a 3-cycle cap: after three cycles, stop even when a
-gate still fails, return the escalation below, and do not run a fourth.
+A cycle is one `--fix` run, plus the verification run after it only when its fixes changed a task
+file. When a gate fails, make the fix its output calls for and run one cycle. The loop has a 3-cycle
+cap: after three cycles, stop even when a gate still fails, return the escalation below, and do not
+run a fourth.
 
 A gate that cannot run for a reason outside the task is not a failure to fix. Report it as skipped
 with its reason, and do not claim a pass for it.

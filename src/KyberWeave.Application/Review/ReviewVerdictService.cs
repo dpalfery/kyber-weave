@@ -61,6 +61,12 @@ public sealed partial class ReviewVerdictService(
     /// <summary>The drop reason that marks a finding about pre-existing code the change did not touch.</summary>
     public const string PreExistingDebt = "pre-existing debt";
 
+    /// <summary>The drop reason that marks a finding the reviewer leaves for the pull request's own review notes.</summary>
+    public const string PullRequestNote = "pr note";
+
+    /// <summary>The drop reasons whose findings become <c>follow-up:</c> lines instead of a fix round.</summary>
+    private static readonly string[] FollowUpReasons = [PreExistingDebt, PullRequestNote];
+
     private const string UnreadableInput = "KW-REVIEW-023";
     private const string Verdict = "KW-REVIEW-024";
     private const string ReportWriteFailed = "KW-REVIEW-025";
@@ -204,7 +210,7 @@ public sealed partial class ReviewVerdictService(
     /// finding at or above <c>review.policy.fix-level</c>. Any <c>fix:</c> line gets a fix round and then a
     /// verifier cycle, an APPROVE included, until a cycle prints none or a cap in <see cref="ReviewLoop"/> stops the
     /// loop; the findings still to fix are then <c>open:</c> lines for human review. <c>follow-up:</c> lines are the
-    /// findings below the level and each finding dropped as pre-existing debt.
+    /// findings below the level and each finding dropped as pre-existing debt or a pull request note.
     /// </summary>
     private static void ReportFixRound(
         ReviewOutcome outcome, IReadOnlyList<GateResult> gates, ReviewPolicy policy, List<int> priorCounts, DiagnosticReport report)
@@ -213,8 +219,9 @@ public sealed partial class ReviewVerdictService(
         fix.AddRange(outcome.Accepted.Where(policy.FixRoundTakes).Select(Line));
         List<string> followUp = [.. outcome.Accepted.Where(finding => !policy.FixRoundTakes(finding)).Select(Line)];
         followUp.AddRange(outcome.Dropped
-            .Where(drop => drop.Reason.StartsWith(PreExistingDebt, StringComparison.OrdinalIgnoreCase))
-            .Select(drop => $"{Line(drop.Finding)} ({PreExistingDebt})"));
+            .Select(drop => (Drop: drop, Reason: FollowUpReason(drop.Reason)))
+            .Where(entry => entry.Reason is not null)
+            .Select(entry => $"{Line(entry.Drop.Finding)} ({entry.Reason})"));
 
         string level = policy.FixLevelName;
         ReviewLoopState state = ReviewLoop.Decide([.. priorCounts, fix.Count]);
@@ -248,6 +255,9 @@ public sealed partial class ReviewVerdictService(
 
         static string Line(ReviewFinding finding) =>
             $"{finding.Id} ({SeverityWord(finding.Severity)}) {finding.File}:{finding.Line.ToString(CultureInfo.InvariantCulture)}";
+
+        static string? FollowUpReason(string dropReason) =>
+            FollowUpReasons.FirstOrDefault(reason => dropReason.StartsWith(reason, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>The blocking gates that failed and are not just stopped for time or not applicable.</summary>

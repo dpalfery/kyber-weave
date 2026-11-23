@@ -99,4 +99,14 @@ public static class DocsLayout
         SkillsFile(docsRoot, name),
         ArbiterRulesFile(docsRoot, name)
     ];
+
+    /// <summary>
+    /// The frontmatter key that scopes a folder's files: <c>role</c> for a declared role, and
+    /// <c>technology</c> for everything else. One decision, because the stub the migration writes
+    /// and the check the validator makes must agree about which line a folder's files carry.
+    /// </summary>
+    /// <param name="roles">The roles the host declares.</param>
+    /// <param name="scope">The folder's name.</param>
+    public static string ScopeKey(IReadOnlyList<string> roles, string scope) =>
+        roles.Contains(scope, StringComparer.Ordinal) ? "role" : "technology";
 }

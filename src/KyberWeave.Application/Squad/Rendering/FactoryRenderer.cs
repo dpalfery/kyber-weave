@@ -75,7 +75,11 @@ namespace KyberWeave.Core.Squad.Rendering;
 ///         <c>.factory/hooks.json</c> holding <c>PreToolUse</c> and <c>PostToolUse</c> matcher
 ///         groups with matcher <c>Task</c>, plus a <c>SubagentStop</c> group with no matcher, each
 ///         with one <c>kyber-weave-arbiter hook --harness factory</c> command hook carrying the wiring
-///         timeout ([F11]). <c>SubagentStop</c> is Factory-only: Factory runs <c>Task</c> in the
+///         timeout ([F11]). Beside them sit the worker guard's groups, because Factory's tool-call
+///         payload names no calling subagent: <c>PreToolUse</c> with matcher <c>*</c>, a second
+///         <c>PostToolUse</c> on <c>Task</c>, and matcher-less <c>SessionStart</c> and
+///         <c>SessionEnd</c>, each running <c>kyber-weave-arbiter worker-guard --harness factory</c>.
+///         <c>SubagentStop</c> is Factory-only: Factory runs <c>Task</c> in the
 ///         background, so its launch-time <c>PostToolUse</c> carries no worker report, and the report
 ///         arrives on the stop event. The verified registration has no <c>matcher</c> key. Factory reads event
 ///         names at the top level of <c>hooks.json</c> — no <c>hooks</c> wrapper — so each entry
@@ -224,7 +228,8 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
         context.AddArbiterMatcherGroupBlock(
             SquadHookBlockFormat.Factory,
             ArbiterMatcher,
-            includeSubagentStop: true);
+            includeSubagentStop: true,
+            includeWorkerGuardHooks: true);
 
     private static SquadDeploymentFile RenderDroid(
         SquadHarnessRenderContext context,

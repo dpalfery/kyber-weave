@@ -68,6 +68,7 @@ public sealed class DeveloperAgentContentTests
         "azure-cli",
         "azure-naming",
         "bug-crusher",
+        "change-scope",
         "code-review",
         "code-review-loop",
         "create-pull-request",

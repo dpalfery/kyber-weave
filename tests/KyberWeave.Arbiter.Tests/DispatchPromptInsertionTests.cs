@@ -9,6 +9,8 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -65,6 +67,23 @@ public sealed class DispatchPromptInsertionTests
             return Refusal is null
                 ? new TaskPromptResult(true, Prompt, "csharp-dev", "medium", "plan", request.Technology, [], null)
                 : TaskPromptResult.NotBuilt(Refusal, RefusalKind);
+        }
+    }
+
+    /// <summary>A prompt service that renders the real host facts from the configuration it is handed.</summary>
+    private sealed class HostFactsPrompts(IFileSystem files) : ITaskPromptServiceFactory, ITaskPromptService
+    {
+        public ITaskPromptService ForRepository(string repositoryRoot, KyberWeaveConfig config) => this;
+
+        public TaskPromptResult Build(TaskPromptRequest request, KyberWeaveConfig config)
+        {
+            string prompt = new PacketHostFacts(files).Render(
+                request.RepoRoot,
+                config,
+                "dev-easy",
+                request.TaskId,
+                technology: request.Technology);
+            return new TaskPromptResult(true, prompt, "dev-easy", "easy", "plan", request.Technology, [], null);
         }
     }
 
@@ -544,13 +563,14 @@ public sealed class DispatchPromptInsertionTests
     private HookCommand Host(
         IHookDecisionEngine engine,
         KyberWeaveConfig config,
-        ScriptedPrompts prompts,
-        IHookRunContextResolver? runContexts = null)
+        ITaskPromptServiceFactory prompts,
+        IHookRunContextResolver? runContexts = null,
+        IArbiterHostConfig? hostConfig = null)
     {
         HarnessAdapterRegistry registry = ArbiterTestServices.Registry(engine);
         return new HookCommand(
             registry,
-            new FixedConfig(config),
+            hostConfig ?? new FixedConfig(config),
             ArbiterTestServices.Get<IDispatchClaimStore>(),
             ArbiterTestServices.Get<IClaudeHookCoverage>(),
             ArbiterTestServices.Get<IProjectDispatchHookProbe>(),
@@ -566,6 +586,14 @@ public sealed class DispatchPromptInsertionTests
         using StringWriter stdout = new();
         using StringWriter log = new();
         int exit = command.Run(harness, "conductor", payload, stdout, log);
+        return (exit, stdout.ToString());
+    }
+
+    private static (int Exit, string Stdout) RunGlobal(HookCommand command, string harness, string payload)
+    {
+        using StringWriter stdout = new();
+        using StringWriter log = new();
+        int exit = command.Run(harness, "conductor", payload, stdout, log, HookScope.Global, "/home/test");
         return (exit, stdout.ToString());
     }
 
@@ -602,6 +630,43 @@ public sealed class DispatchPromptInsertionTests
         TaskPromptRequest request = Assert.Single(prompts.Requests);
         Assert.Equal(worktree, request.RepoRoot);
         Assert.Equal([worktree], prompts.Repositories);
+    }
+
+    /// <summary>
+    /// The user-level hook evaluates a project with the Arbiter unset under the user config. The prompt it inserts is
+    /// still about the repository's work, so its host facts must read the configuration <c>docs packet</c> reads —
+    /// the repository's own — rather than the user config, which declares no technology gates.
+    /// </summary>
+    [Fact]
+    public void AGlobalDispatchReadsTheHostFactsGatesFromTheRepositoryConfigNotTheUserConfig()
+    {
+        const string technology = "data-access-layer";
+        KyberWeaveConfig repository = KyberWeaveConfigAssembler.FromYaml($"""
+            ontology:
+              docs-root: docs
+            review:
+              technology-gates:
+                {technology}:
+                  - id: build
+                    run: [dotnet, build]
+            """);
+        KyberWeaveConfig user = new() { Arbiter = new ArbiterConfig { Enabled = true } };
+        string dispatch =
+            $"KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T1\nTECHNOLOGY: {technology}\n\nImplement the repository.";
+
+        (int exit, string stdout) = RunGlobal(
+            Host(
+                new RecordingEngine(),
+                repository,
+                new HostFactsPrompts(new InMemoryFileSystem()),
+                hostConfig: new TwoScopeConfigs(repository, user)),
+            "copilot-cli",
+            Payload("copilot-cli", dispatch));
+
+        Assert.Equal(0, exit);
+        string prompt = InsertedPrompt("copilot-cli", stdout);
+        Assert.Contains($"review.technology-gates.{technology}", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("No task gates resolve", prompt, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -860,6 +925,20 @@ public sealed class DispatchPromptInsertionTests
         public KyberWeaveConfig Load(string repoRoot, HookScope scope = HookScope.Project, string? homeDirectory = null) => config;
 
         public KyberWeaveConfig? LoadProject(string repoRoot) => config;
+
+        public string ResolveHomeDirectory(string? homeDirectory) => homeDirectory ?? "/home/test";
+    }
+
+    /// <summary>
+    /// The two configurations a user-level hook sees: the project's own, and the user config it evaluates under when
+    /// the project does not enable the Arbiter.
+    /// </summary>
+    private sealed class TwoScopeConfigs(KyberWeaveConfig project, KyberWeaveConfig user) : IArbiterHostConfig
+    {
+        public KyberWeaveConfig Load(string repoRoot, HookScope scope = HookScope.Project, string? homeDirectory = null) =>
+            scope == HookScope.Global ? user : project;
+
+        public KyberWeaveConfig? LoadProject(string repoRoot) => project;
 
         public string ResolveHomeDirectory(string? homeDirectory) => homeDirectory ?? "/home/test";
     }

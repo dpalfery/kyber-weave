@@ -1,4 +1,5 @@
 using KyberWeave.Contracts.Repositories;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -101,7 +102,7 @@ public sealed partial class PlanTaskFileGenerator
             return new PlanTaskFileOutcome(report, taskFile, null, null, 0, false);
         }
 
-        file = WithAgents(file, taskFile, mode);
+        file = WithAgents(file, taskFile, mode, markdown, artifact, report, out IReadOnlyList<string> difficultyChecks);
         string yaml = PlanTaskFileFormat.Serialize(file);
         int count = file.Tasks?.Count ?? 0;
         bool wrote = false;
@@ -123,7 +124,7 @@ public sealed partial class PlanTaskFileGenerator
                 throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unknown task file mode.");
         }
 
-        return new PlanTaskFileOutcome(report, taskFile, yaml, file.ExecutionDigest, count, wrote, file);
+        return new PlanTaskFileOutcome(report, taskFile, yaml, file.ExecutionDigest, count, wrote, file, difficultyChecks);
     }
 
     /// <summary>
@@ -547,12 +548,27 @@ public sealed partial class PlanTaskFileGenerator
     }
 
     /// <summary>
-    /// Adds each task's agent pick. A pick on disk for a task whose role, capabilities and prompt are unchanged is kept,
-    /// so checking the file never asks the model and a rewrite does not move a pick. Only a write asks the picker, and
-    /// only for the tasks still without one; a task the plan assigned a role never gets a pick.
+    /// Adds each task's agent pick and keeps the architect's difficulty. A pick on disk for a task whose role,
+    /// capabilities and prompt are unchanged is kept, so checking the file never asks the model and a rewrite does
+    /// not move a pick. Only a write asks the picker, and only for the tasks still without one; a task the plan
+    /// assigned a role never gets a pick.
     /// </summary>
-    private PlanTaskFile WithAgents(PlanTaskFile file, string taskFile, PlanTaskFileMode mode)
+    /// <remarks>
+    /// A confident answer that the architect's rating does not fit the rubric raises
+    /// <see cref="PlanTaskFileRules.DifficultyDisagreed"/>, unless the plan's Decisions table already carries a row
+    /// answering that task's rating, and never changes the rating itself. <paramref name="difficultyChecks"/> holds
+    /// one line per task for the command's output.
+    /// </remarks>
+    private PlanTaskFile WithAgents(
+        PlanTaskFile file,
+        string taskFile,
+        PlanTaskFileMode mode,
+        string markdown,
+        string artifact,
+        DiagnosticReport report,
+        out IReadOnlyList<string> difficultyChecks)
     {
+        difficultyChecks = [];
         if (file.Tasks is not { Count: > 0 } tasks)
             return file;
 
@@ -572,38 +588,43 @@ public sealed partial class PlanTaskFileGenerator
                 {
                     Agent = old.Agent,
                     AgentConfidence = old.AgentConfidence,
-                    Difficulty = old.Difficulty ?? task.Difficulty,
-                    DifficultySource = old.DifficultySource ?? task.DifficultySource,
                 };
             }
 
             entries.Add(kept);
         }
 
-        if (mode == PlanTaskFileMode.Write && _picker is not null)
+        Dictionary<string, PlanTaskAgentChoice> picks = new(StringComparer.Ordinal);
+        if ((mode is PlanTaskFileMode.Write or PlanTaskFileMode.Convert) && _picker is not null)
         {
             List<PlanTaskFileEntry> open = [.. entries.Where(entry => entry.Role is null && entry.Agent is null)];
             if (open.Count > 0)
             {
-                IReadOnlyDictionary<string, PlanTaskAgentChoice> picks = _picker.Pick(open);
+                foreach (KeyValuePair<string, PlanTaskAgentChoice> pick in _picker.Pick(open))
+                {
+                    picks[pick.Key] = pick.Value;
+                }
+
                 for (int index = 0; index < entries.Count; index++)
                 {
                     PlanTaskFileEntry entry = entries[index];
                     if (entry.Role is null && entry.Agent is null && entry.Id is not null
-                        && picks.TryGetValue(entry.Id, out PlanTaskAgentChoice? choice))
+                        && picks.TryGetValue(entry.Id, out PlanTaskAgentChoice? choice)
+                        && choice.Agent is { } agent)
                     {
                         entries[index] = entry with
                         {
-                            Agent = choice.Agent,
+                            Agent = agent,
                             AgentConfidence = choice.Confidence,
-                            Difficulty = choice.Difficulty ?? entry.Difficulty,
-                            DifficultySource = choice.Difficulty is null
-                                ? entry.DifficultySource
-                                : "decision-model",
                         };
                     }
                 }
             }
+        }
+
+        if (mode is PlanTaskFileMode.Write or PlanTaskFileMode.Convert)
+        {
+            difficultyChecks = Checks(entries, picks, PlanPacketContext.Parse(markdown), artifact, report);
         }
 
         // A developer task's rating in use decides its tier, so the file names that tier: a hard task written as
@@ -623,6 +644,52 @@ public sealed partial class PlanTaskFileGenerator
 
         return file with { Tasks = entries };
     }
+
+    /// <summary>
+    /// One line per task saying what the decision model made of the architect's rating, and the finding that sends
+    /// the plan back to the architect when the model confidently disagreed and no Decisions row already answers it.
+    /// </summary>
+    private static List<string> Checks(
+        IReadOnlyList<PlanTaskFileEntry> entries,
+        IReadOnlyDictionary<string, PlanTaskAgentChoice> picks,
+        PlanPacketContext plan,
+        string artifact,
+        DiagnosticReport report)
+    {
+        List<string> checks = new(entries.Count);
+        foreach (PlanTaskFileEntry entry in entries)
+        {
+            if (entry.Id is not { } id)
+                continue;
+
+            DifficultyAgreement? agreement = picks.TryGetValue(id, out PlanTaskAgentChoice? choice)
+                ? choice.DifficultyCheck
+                : null;
+            checks.Add(CheckLine(id, entry.Difficulty, agreement));
+
+            if (agreement is not { IsAgreed: false } || plan.HasDecisionStartingWith($"{id} difficulty"))
+                continue;
+
+            report.Add(new Diagnostic(
+                PlanTaskFileRules.DifficultyDisagreed,
+                Severity.Error,
+                $"{id}: the decision model did not agree with the difficulty `{entry.Difficulty}` " +
+                $"({PlanTaskAgentPick.TierNameOf(entry.Difficulty)}) by the rubric.",
+                id,
+                artifact,
+                Hint: $"Re-rate the task by the rubric in shared/difficulty-rubric.md, or keep the rating and add a " +
+                $"Decisions row '{id} difficulty' that says why."));
+        }
+
+        return checks;
+    }
+
+    private static string CheckLine(string id, string? difficulty, DifficultyAgreement? agreement) =>
+        agreement is null
+            ? $"{id} difficulty {difficulty}: unchecked"
+            : $"{id} difficulty {difficulty}: " +
+              $"{(agreement.IsAgreed ? DifficultyAgreement.Agreed : DifficultyAgreement.NotAgreed)} " +
+              $"(confidence {agreement.Confidence.ToString("0.###", CultureInfo.InvariantCulture)})";
 
     /// <summary>
     /// Whether a recorded pick can still run for the roster this write records. A technology developer under

@@ -68,6 +68,7 @@ public sealed class SquadPackAndReleaseTests
         "azure-cli",
         "azure-naming",
         "bug-crusher",
+        "change-scope",
         "code-review",
         "code-review-loop",
         "create-pull-request",
@@ -157,8 +158,8 @@ public sealed class SquadPackAndReleaseTests
             Assert.Contains(entryNames, name => name == $"agents/{agent}.md");
         }
 
-        // Presence of all 19 canonical skills
-        Assert.Equal(19, CanonicalSkills.Length);
+        // Presence of all 20 canonical skills
+        Assert.Equal(20, CanonicalSkills.Length);
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));
@@ -324,7 +325,7 @@ public sealed class SquadPackAndReleaseTests
             }
         }
 
-        // Portable components only: contains all 28 canonical skills
+        // Portable components only: contains all 29 canonical skills
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));

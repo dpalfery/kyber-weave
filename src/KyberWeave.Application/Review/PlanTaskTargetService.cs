@@ -12,9 +12,10 @@ using KyberWeave.Core.Review;
 namespace KyberWeave.Application.Review;
 
 /// <summary>
-/// Finds a task by the id a worker typed, and what its tests are, over the plans that are Ready or In progress.
+/// Finds a task by the id a worker typed, and what its tests are, over the plans in flight first and then the
+/// checkout's plans still in review.
 /// </summary>
-/// <param name="tasks">Reads the active plans and their task files.</param>
+/// <param name="tasks">Reads the checkout's plans and their task files.</param>
 /// <param name="taskGates">Checks a path the way the task gate will take it.</param>
 /// <param name="git">Lists the repository's worktrees, so the run's plan is found from a worker's checkout.</param>
 /// <param name="files">Reads a plan and tells a worktree directory that exists from one that does not.</param>
@@ -36,35 +37,48 @@ public sealed partial class PlanTaskTargetService(
         ArgumentNullException.ThrowIfNull(typedTask);
 
         IReadOnlyList<string> active = tasks.ActivePlans(root, config);
+        if (active.Count > 1)
+        {
+            reason = $"{active.Count} plans are Ready or In progress ({string.Join(", ", active)})";
+            return null;
+        }
+
+        // The plan in flight first, then the plans still in review in this checkout: a review rework re-runs its task
+        // gate after the plan has moved into review, and the task's technology and files still come from its task file.
+        // A closed-out plan is left out, so its task with the same id cannot supply them instead.
+        IReadOnlyList<string> plans =
+            [.. active, .. tasks.ReviewPlans(root, config).Where(plan => !active.Contains(plan, StringComparer.Ordinal))];
+
+        string? unusable = null;
+        foreach (string plan in plans)
+        {
+            PlanTaskFileOutcome outcome = tasks.Run(root, config, plan, PlanTaskFileMode.Check);
+            if (outcome.File is null || outcome.Report.HasErrors)
+            {
+                unusable ??= $"the task file for {plan} is missing or does not match the plan";
+                continue;
+            }
+
+            if (PlanTaskPacket.FindTask(outcome.File, typedTask) is { } entry)
+            {
+                reason = null;
+                return new PlanTaskTargetMatch(plan, entry, ContractRow(root, plan, entry.Id));
+            }
+        }
+
         if (active.Count == 0 && FindInOtherWorktree(root, config, typedTask) is { } elsewhere)
         {
             reason = null;
             return elsewhere;
         }
 
-        if (active.Count != 1)
+        reason = unusable ?? (plans.Count switch
         {
-            reason = active.Count == 0
-                ? "no plan is Ready or In progress in this checkout or any other worktree of this repository"
-                : $"{active.Count} plans are Ready or In progress ({string.Join(", ", active)})";
-            return null;
-        }
-
-        PlanTaskFileOutcome outcome = tasks.Run(root, config, active[0], PlanTaskFileMode.Check);
-        if (outcome.File is null || outcome.Report.HasErrors)
-        {
-            reason = $"the task file for {active[0]} is missing or does not match the plan";
-            return null;
-        }
-
-        if (PlanTaskPacket.FindTask(outcome.File, typedTask) is not { } entry)
-        {
-            reason = $"'{typedTask}' names no one task in {active[0]}";
-            return null;
-        }
-
-        reason = null;
-        return new PlanTaskTargetMatch(active[0], entry, ContractRow(root, active[0], entry.Id));
+            0 => "no plan is Ready or In progress in this checkout or any other worktree of this repository",
+            1 => $"'{typedTask}' names no one task in {plans[0]}",
+            _ => $"'{typedTask}' names no one task in {string.Join(", ", plans)}"
+        });
+        return null;
     }
 
     /// <summary>

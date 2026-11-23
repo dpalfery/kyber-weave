@@ -140,7 +140,7 @@ there too, where the person who owns the standard can see and change them.
    every word is read so an absolute path, a quoted program, a wrapper or a subshell still names
    the tool. The `azure` and `aws` templates each ship one rule (`AZURE-READONLY-001`,
    `AWS-READONLY-001`); a technology that declares no such rule refuses nothing. The list is
-   enforced where a worker guard runs (Claude Code and Copilot CLI) and is an instruction only
+   enforced where a worker guard runs (Claude Code, Copilot CLI and Factory) and is an instruction only
    on the harnesses that have no worker guard. A read-only dispatch's tool call names no dispatch
    technology, so the guard reads it from the ledger's pre event for the calling agent in the same
    session: the pre event's `headers` now record the dispatch's `technology`. The guard applies only

@@ -92,6 +92,19 @@ A standard's `builds-on` key must name one declared technology, must not name th
 standard's own technology, and that parent must not itself declare `builds-on`. One level,
 because the task prompt is sized for one parent. Only a `coding-standard` takes the key.
 
+### `KW-DOC-SPEC-015` — a folder file does not declare itself
+
+The folder holds `<name>.rules.md` or `<name>.skills.md`, but its frontmatter does not
+mark it as that file: `doc-type` is something other than `rule` / `skill`, or the
+`technology` (or `role`, in a role folder) line is missing. The standards lookup matches
+on both, so the file exists but reaches no task prompt, and the prompt reports the folder
+as having no such file.
+
+Set `doc-type: rule` (or `doc-type: skill`) and `technology: <folder>` (or
+`role: <folder>`), or run `kyber-weave docs standards migrate`, which sets exactly those
+two lines and keeps every other line and the body unchanged. Fix it before dispatch: a
+worker that never receives the rules is not told they exist.
+
 ## Drift — `docs drift`
 
 Requires a CodeGraph index at `.codegraph/codegraph.db` and the `sqlite3` CLI.

@@ -107,7 +107,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IPlanTaskAgentPickerFactory>(sp => new ConfiguredPlanTaskAgentPickerFactory(
             sp.GetRequiredService<ConfiguredArbiterProviderFactory>(),
-            sp.GetRequiredService<IProcessEnvironment>()));
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IEmbeddedResources>()));
         services.TryAddSingleton(sp => new RunDeliveryPorts(
             sp.GetRequiredService<IRepositoryFileStore>(),
             sp.GetRequiredService<IBoundedProcessExecutor>(),
