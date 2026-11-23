@@ -159,4 +159,33 @@ describe('SessionReconciliationSection paging', () => {
     await screen.findByTestId('reconciliation-row-26')
     expect(fetchMock.mock.calls.some(([url]) => url === ROUTE_PAGE_2)).toBe(true)
   })
+
+  it("holds the previous page's rows on screen while the next page is in flight, then replaces them", async () => {
+    let resolveSecond: (value: Response) => void = () => {}
+    const pageTwoRow = { ...MATCHING_ROW, request: 'span-r26' }
+    const fetchMock = stubFetch((url: string) => {
+      if (url.includes('page=2')) {
+        return new Promise<Response>((resolve) => {
+          resolveSecond = resolve
+        }) as unknown as Response
+      }
+      return jsonResponse(FIRST_PAGE)
+    })
+    mount()
+    await screen.findByTestId('reconciliation-row-1')
+    expect(fetchMock.mock.calls.some(([url]) => url === ROUTE_PAGE_2)).toBe(false)
+
+    fireEvent.click(screen.getByTestId('pager-next'))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === ROUTE_PAGE_2)).toBe(true))
+    // The next page is held back: the rows the viewer was reading stay on
+    // screen, and the new page's rows are absent until it lands.
+    expect(screen.getByTestId('reconciliation-row-1').textContent).toContain('Request 1')
+    expect(screen.getByTestId('reconciliation-row-2').textContent).toContain('mismatch')
+    expect(screen.queryByTestId('reconciliation-row-26')).toBeNull()
+
+    resolveSecond(
+      jsonResponse({ reconciliation: [pageTwoRow], data: [pageTwoRow], total: 40, limit: 25, offset: 25, page: 2 }),
+    )
+    await screen.findByTestId('reconciliation-row-26')
+  })
 })

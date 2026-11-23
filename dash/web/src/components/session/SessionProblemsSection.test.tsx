@@ -127,4 +127,39 @@ describe('SessionProblemsSection paging', () => {
     expect(screen.getByTestId('problem-row-26').textContent).toContain('A later record was skipped')
     expect(fetchMock.mock.calls.some(([url]) => url === ROUTE_PAGE_2)).toBe(true)
   })
+
+  it("holds the previous page's rows on screen while the next page is in flight, then replaces them", async () => {
+    let resolveSecond: (value: Response) => void = () => {}
+    const fetchMock = stubFetch((url: string) => {
+      if (url.includes('page=2')) {
+        return new Promise<Response>((resolve) => {
+          resolveSecond = resolve
+        }) as unknown as Response
+      }
+      return jsonResponse(FIRST_PAGE)
+    })
+    mount()
+    await screen.findByTestId('problem-row-7')
+    expect(fetchMock.mock.calls.some(([url]) => url === ROUTE_PAGE_2)).toBe(false)
+
+    fireEvent.click(screen.getByTestId('pager-next'))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === ROUTE_PAGE_2)).toBe(true))
+    // The next page is held back: the rows the viewer was reading stay on
+    // screen, and the new page's rows are absent until it lands.
+    expect(screen.getByTestId('problem-row-7')).toBeTruthy()
+    expect(screen.queryByTestId('problem-row-26')).toBeNull()
+
+    resolveSecond(
+      jsonResponse({
+        problems: [{ ...PROBLEM_ROW, id: 26, message: 'A later record was skipped' }],
+        data: [{ ...PROBLEM_ROW, id: 26, message: 'A later record was skipped' }],
+        total: 30,
+        limit: 25,
+        offset: 25,
+        page: 2,
+      }),
+    )
+    await screen.findByTestId('problem-row-26')
+    expect(screen.queryByTestId('problem-row-7')).toBeNull()
+  })
 })

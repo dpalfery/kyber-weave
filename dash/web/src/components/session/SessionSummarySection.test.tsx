@@ -289,6 +289,15 @@ describe('SessionSummarySection states', () => {
     expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2)
     expect(fetchMock.mock.calls[0][0]).toBe(ROUTE)
   })
+
+  it('states a faulted projection as the section error, never as zero tiles', async () => {
+    stubFetch(() => jsonResponse({ ...summaryBody(), projection_status: 'PROJECTION_FAILED' }))
+    mount()
+    const error = await screen.findByTestId('session-summary-error')
+    expect(error.textContent).toContain('PROJECTION_FAILED')
+    expect(screen.queryByTestId('overview-strip-section')).toBeNull()
+    expect(screen.queryByTestId('session-summary-header')).toBeNull()
+  })
 })
 
 describe('formatCredits', () => {

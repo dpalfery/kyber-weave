@@ -2390,6 +2390,11 @@ export interface KyberSectionWindow {
   limit: number
   /** Zero-based offset of this page's first row. */
   offset: number
+  /**
+   * The session's projection fault, when the section's projection read faulted;
+   * absent when it did not. A payload carrying a fault is an error state, never data.
+   */
+  projection_status?: string
 }
 
 /** One page of a session section: the T3 page envelope plus its window offset. */
@@ -2481,12 +2486,14 @@ function readNullableNumberMap(
 }
 
 function readSectionWindow(raw: Raw, path: string): KyberSectionWindow {
-  return {
+  const window: KyberSectionWindow = {
     total: requireNumberField(raw, 'total', path),
     page: requireIntegerField(raw, 'page', path, 1),
     limit: requireIntegerField(raw, 'limit', path, 1),
     offset: requireIntegerField(raw, 'offset', path, 0),
   }
+  if (typeof raw.projection_status === 'string') window.projection_status = raw.projection_status
+  return window
 }
 
 /** Reads one section page from the route's own items key, on top of T3's envelope. */
@@ -2498,7 +2505,9 @@ function parseSectionPage<T>(
 ): KyberSectionPage<T> {
   const page = parseKyberPage<T>(raw, path, (row) => readRow(row as Raw, path), itemsKey)
   if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
-  return { ...page, offset: requireIntegerField(raw, 'offset', path, 0) }
+  const section: KyberSectionPage<T> = { ...page, offset: requireIntegerField(raw, 'offset', path, 0) }
+  if (typeof raw.projection_status === 'string') section.projection_status = raw.projection_status
+  return section
 }
 
 // ── Summary ─────────────────────────────────────────────────────────────────
@@ -2851,7 +2860,6 @@ export interface KyberSessionTimelinePage extends KyberSectionWindow {
   parent: string | null
   nodes: KyberSessionTimelineNode[]
   bounds: { startMs: number; endMs: number }
-  projection_status?: string
 }
 
 function readTimelineNode(raw: Raw, path: string): KyberSessionTimelineNode {
@@ -2893,7 +2901,6 @@ function parseSessionTimelinePage(raw: unknown, path: string): KyberSessionTimel
       endMs: requireNumberField(bounds, 'endMs', path),
     },
   }
-  if (typeof raw.projection_status === 'string') page.projection_status = raw.projection_status
   return page
 }
 

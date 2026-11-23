@@ -3,7 +3,7 @@ import { SchemaCostRanking, type SchemaCostAnalysis, type SchemaCostToolRow } fr
 import { SectionLoading } from './SectionLoading.js'
 import { SectionError } from './SectionError.js'
 import { formatCredits } from './SessionSummarySection.js'
-import { sectionErrorMessage, useSectionPage } from './useSectionPage.js'
+import { useSectionPage } from './useSectionPage.js'
 import { fetchKyberSessionTools } from '../../lib/kyberApi.js'
 import { TOOL_DEFINITION_UNAVAILABLE_KEY, type OpenInspector, type SessionSummaryPayload } from './types.js'
 
@@ -48,12 +48,12 @@ export function SessionToolsSection({
   const tools = useSectionPage(sessionId, 'tools', fetchKyberSessionTools)
   const data = tools.data
 
-  if (tools.isError && data === undefined) {
+  if (tools.failure) {
     return (
       <SectionError
         testId="section-error-tools"
         label="Tool ranking"
-        message={sectionErrorMessage(tools.error)}
+        message={tools.failure}
         onRetry={tools.refetch}
         className={className}
       />

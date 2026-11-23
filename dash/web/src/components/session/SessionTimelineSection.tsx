@@ -12,7 +12,7 @@ import {
 } from '../analysis/TimelineView.js'
 import { SectionLoading } from './SectionLoading.js'
 import { SectionError } from './SectionError.js'
-import { sectionErrorMessage } from './useSectionPage.js'
+import { PROJECTION_FAILED_STATUS, projectionFailureMessage, sectionErrorMessage } from './useSectionPage.js'
 import {
   fetchKyberSessionTimeline,
   type KyberSessionSummarySection,
@@ -91,8 +91,18 @@ export function SessionTimelineSection({
   className,
 }: SessionTimelineSectionProps) {
   // Expansion and paging are viewer state; the queries below derive from them.
+  // A session change collapses both: the previous session's expanded nodes and
+  // per-level pages are not where a viewer opening another session is. Adjusted
+  // during render (the React state-when-props-change pattern), so no request
+  // leaves under the new session's id carrying the previous session's levels.
+  const [prevSessionId, setPrevSessionId] = useState(sessionId)
   const [expandedIds, setExpandedIds] = useState<string[]>([])
   const [levelPages, setLevelPages] = useState<Record<string, number>>({})
+  if (prevSessionId !== sessionId) {
+    setPrevSessionId(sessionId)
+    setExpandedIds([])
+    setLevelPages({})
+  }
 
   const levelRequests: Array<{ parent: string | null; page: number; levelKey: string }> = []
   const topPages = levelPages[TOP_LEVEL] ?? 1
@@ -226,12 +236,19 @@ export function SessionTimelineSection({
     })
   }
 
-  if (rootQuery?.isError) {
+  // A faulted projection is an error state, not an empty tree: the top level's
+  // payload names the fault for the whole session, so no level renders as
+  // "no spans recorded".
+  if (rootQuery?.isError || data?.projection_status === PROJECTION_FAILED_STATUS) {
     return (
       <SectionError
         testId="section-error-timeline"
         label="Execution timeline"
-        message={sectionErrorMessage(rootQuery.error)}
+        message={
+          data?.projection_status === PROJECTION_FAILED_STATUS
+            ? projectionFailureMessage(data)
+            : sectionErrorMessage(rootQuery?.error)
+        }
         onRetry={() => void rootQuery.refetch()}
         className={className}
       />

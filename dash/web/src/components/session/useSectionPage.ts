@@ -21,6 +21,31 @@ export interface SectionPageState<T> {
   isError: boolean
   error: unknown
   refetch: () => void
+  /**
+   * The failure to state, when the route failed or its payload names a faulted
+   * projection; null while the section can render. A payload whose projection
+   * read faulted is this section's error state — never an empty list, never a zero.
+   */
+  failure: string | null
+}
+
+/** The status a section payload carries when its session's projection read faulted. */
+export const PROJECTION_FAILED_STATUS = 'PROJECTION_FAILED'
+
+/**
+ * The message a section states when its payload names the session's projection
+ * faulted: the route answered, but the answer is not data. Null when the payload
+ * carries no such fault, or is not an object a fault can be read off.
+ */
+export function projectionFailureMessage(data: unknown): string | null {
+  if (
+    data !== null &&
+    typeof data === 'object' &&
+    (data as { projection_status?: unknown }).projection_status === PROJECTION_FAILED_STATUS
+  ) {
+    return 'The stored projection for this session failed to build (PROJECTION_FAILED), so this section has no data to serve. Re-project the session to restore it.'
+  }
+  return null
 }
 
 export function useSectionPage<T extends KyberSectionWindow>(
@@ -28,7 +53,16 @@ export function useSectionPage<T extends KyberSectionWindow>(
   section: KyberSessionSection,
   fetchPage: (sessionId: string, page: number) => Promise<T>,
 ): SectionPageState<T> {
+  // A session change restarts the section at its first page: page N of the
+  // previous session is not where a viewer opening another session is. Adjusted
+  // during render (the React state-when-props-change pattern), so the request
+  // for the previous session's page never leaves with the new session's id.
+  const [prevSessionId, setPrevSessionId] = useState(sessionId)
   const [page, setPage] = useState(1)
+  if (prevSessionId !== sessionId) {
+    setPrevSessionId(sessionId)
+    setPage(1)
+  }
   const query = useQuery({
     queryKey: kyberSessionSectionQueryKey(sessionId, section, page),
     queryFn: () => fetchPage(sessionId, page),
@@ -37,6 +71,9 @@ export function useSectionPage<T extends KyberSectionWindow>(
     // reading.
     placeholderData: keepPreviousData,
   })
+  const failure =
+    projectionFailureMessage(query.data) ??
+    (query.isError && query.data === undefined ? sectionErrorMessage(query.error) : null)
   return {
     page,
     setPage,
@@ -45,6 +82,7 @@ export function useSectionPage<T extends KyberSectionWindow>(
     isError: query.isError,
     error: query.error,
     refetch: () => void query.refetch(),
+    failure,
   }
 }
 

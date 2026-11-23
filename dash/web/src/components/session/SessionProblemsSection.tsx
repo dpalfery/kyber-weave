@@ -2,7 +2,7 @@ import { cn } from '../../lib/utils.js'
 import { Pager } from '../ui/Pager.js'
 import { SectionLoading } from './SectionLoading.js'
 import { SectionError } from './SectionError.js'
-import { sectionErrorMessage, useSectionPage } from './useSectionPage.js'
+import { useSectionPage } from './useSectionPage.js'
 import { fetchKyberSessionProblems } from '../../lib/kyberApi.js'
 
 /**
@@ -25,12 +25,12 @@ export function SessionProblemsSection({ sessionId, className }: SessionProblems
   const problems = useSectionPage(sessionId, 'problems', fetchKyberSessionProblems)
   const data = problems.data
 
-  if (problems.isError && data === undefined) {
+  if (problems.failure) {
     return (
       <SectionError
         testId="section-error-problems"
         label="Stored ingest problems"
-        message={sectionErrorMessage(problems.error)}
+        message={problems.failure}
         onRetry={problems.refetch}
         className={className}
       />

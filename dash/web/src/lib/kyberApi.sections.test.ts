@@ -391,6 +391,14 @@ describe('session section fetchers', () => {
     await expect(fetchKyberSessionRequests('sess-1', 1)).rejects.toThrow(/malformed/i)
   })
 
+  it('carries the projection status a faulted session page answers', async () => {
+    stubFetch(200, { ...REQUESTS_BODY, projection_status: 'PROJECTION_FAILED' })
+
+    const page = await fetchKyberSessionRequests('sess-1', 1)
+
+    expect(page.projection_status).toBe('PROJECTION_FAILED')
+  })
+
   it('GETs the reconciliation route with the page and returns the validated rows', async () => {
     const calls = stubFetch(200, RECONCILIATION_BODY)
 

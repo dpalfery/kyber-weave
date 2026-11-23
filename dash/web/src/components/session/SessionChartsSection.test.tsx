@@ -110,6 +110,14 @@ describe('SessionChartsSection states', () => {
     expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2)
   })
 
+  it('states a faulted projection as the section error, never as charts', async () => {
+    stubFetch(() => jsonResponse({ ...CHARTS_BODY, projection_status: 'PROJECTION_FAILED' }))
+    mount(() => {})
+    const error = await screen.findByTestId('section-error-charts')
+    expect(error.textContent).toContain('PROJECTION_FAILED')
+    expect(screen.queryByTestId('spend-composition-section')).toBeNull()
+  })
+
   it('renders the spend charts from the section turns and context', async () => {
     stubFetch(() => jsonResponse(CHARTS_BODY))
     mount(() => {})

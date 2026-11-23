@@ -2,7 +2,7 @@ import { cn, fmtTokens } from '../../lib/utils.js'
 import { Pager } from '../ui/Pager.js'
 import { SectionLoading } from './SectionLoading.js'
 import { SectionError } from './SectionError.js'
-import { sectionErrorMessage, useSectionPage } from './useSectionPage.js'
+import { useSectionPage } from './useSectionPage.js'
 import { fetchKyberSessionServers } from '../../lib/kyberApi.js'
 
 /**
@@ -20,12 +20,12 @@ export function SessionServersSection({ sessionId, className }: SessionServersSe
   const servers = useSectionPage(sessionId, 'servers', fetchKyberSessionServers)
   const data = servers.data
 
-  if (servers.isError && data === undefined) {
+  if (servers.failure) {
     return (
       <SectionError
         testId="section-error-servers"
         label="Server rollup"
-        message={sectionErrorMessage(servers.error)}
+        message={servers.failure}
         onRetry={servers.refetch}
         className={className}
       />

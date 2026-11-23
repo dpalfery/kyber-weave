@@ -2,7 +2,7 @@ import { cn } from '../../lib/utils.js'
 import { Pager } from '../ui/Pager.js'
 import { SectionLoading } from './SectionLoading.js'
 import { SectionError } from './SectionError.js'
-import { sectionErrorMessage, useSectionPage } from './useSectionPage.js'
+import { useSectionPage } from './useSectionPage.js'
 import { fetchKyberSessionRequests } from '../../lib/kyberApi.js'
 
 /**
@@ -20,12 +20,12 @@ export function SessionRequestsSection({ sessionId, className }: SessionRequests
   const requests = useSectionPage(sessionId, 'requests', fetchKyberSessionRequests)
   const data = requests.data
 
-  if (requests.isError && data === undefined) {
+  if (requests.failure) {
     return (
       <SectionError
         testId="section-error-requests"
         label="User requests"
-        message={sectionErrorMessage(requests.error)}
+        message={requests.failure}
         onRetry={requests.refetch}
         className={className}
       />

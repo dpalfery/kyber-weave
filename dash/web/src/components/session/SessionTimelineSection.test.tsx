@@ -115,6 +115,15 @@ describe('SessionTimelineSection states', () => {
     expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2)
   })
 
+  it('states a faulted projection as the section error, never as an empty tree', async () => {
+    stubFetch(() => jsonResponse({ ...timelinePage([ROOT_NODE], 38400), projection_status: 'PROJECTION_FAILED' }))
+    mount(() => {})
+    const error = await screen.findByTestId('section-error-timeline')
+    expect(error.textContent).toContain('PROJECTION_FAILED')
+    expect(screen.queryByTestId('timeline-empty')).toBeNull()
+    expect(screen.queryByTestId('execution-timeline-section')).toBeNull()
+  })
+
   it('renders the top-level nodes in the call tree', async () => {
     stubFetch(() => jsonResponse(timelinePage([ROOT_NODE], 38400)))
     mount(() => {})
@@ -293,5 +302,101 @@ describe('SessionTimelineSection: levels load on expand and page', () => {
     expect(within(bars).getAllByTestId('timeline-bar-row').length).toBe(2)
     const childBar = within(bars).getByTestId('timeline-bar-child-1')
     expect(childBar.style.left).toBe(`${(10000 / 38400) * 100}%`)
+  })
+
+  it('re-requests the new session top level, page 1, when the session changes past page 1', async () => {
+    const SESSION_B = 'sess-b-456'
+    const topRows = Array.from({ length: 25 }, (_, i) => ({
+      ...ROOT_NODE,
+      spanId: `top-${i}`,
+      childCount: 0,
+    }))
+    const laterRows = Array.from({ length: 5 }, (_, i) => ({
+      ...ROOT_NODE,
+      spanId: `top-${25 + i}`,
+      childCount: 0,
+    }))
+    const fetchMock = stubTimelineRoutes((url) => {
+      if (url.includes(SESSION_B)) return levelPage(topRows)
+      return url.includes('page=2')
+        ? levelPage(laterRows, { total: 30, page: 2 })
+        : levelPage(topRows, { total: 30 })
+    })
+    const client = queryClient()
+    const view = render(
+      <QueryClientProvider client={client}>
+        <SessionTimelineSection
+          sessionId={SESSION_ID}
+          summary={SUMMARY}
+          summaryRecord={SUMMARY.summary as never}
+          openInspector={() => {}}
+        />
+      </QueryClientProvider>,
+    )
+    const section = await screen.findByTestId('execution-timeline-section')
+    expect(within(section).getAllByTestId('timeline-node').length).toBe(25)
+    fireEvent.click(within(section).getByTestId('timeline-level-more'))
+    await waitFor(() => expect(within(section).getAllByTestId('timeline-node').length).toBe(30))
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('page=2'))).toBe(true)
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes(SESSION_B))).toBe(false)
+
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <SessionTimelineSection
+          sessionId={SESSION_B}
+          summary={SUMMARY}
+          summaryRecord={SUMMARY.summary as never}
+          openInspector={() => {}}
+        />
+      </QueryClientProvider>,
+    )
+    // The new session restarts at its own first page: no page-2 request for it.
+    await waitFor(() => {
+      const urlsForB = fetchMock.mock.calls.map((call) => String(call[0])).filter((url) => url.includes(SESSION_B))
+      expect(urlsForB.length).toBeGreaterThan(0)
+      expect(urlsForB.every((url) => url.endsWith('/timeline?page=1&limit=25'))).toBe(true)
+    })
+  })
+
+  it('collapses expanded levels when the session changes', async () => {
+    const SESSION_B = 'sess-b-456'
+    const nested = { ...ROOT_NODE, spanId: 'span/one', childCount: 2 }
+    const fetchMock = stubTimelineRoutes((url) => {
+      if (url.includes(SESSION_B)) return levelPage([{ ...nested, spanId: 'b-root' }])
+      return url.includes('parent=span%2Fone') ? levelPage([CHILD_NODE], { parent: 'span/one' }) : levelPage([nested])
+    })
+    const client = queryClient()
+    const view = render(
+      <QueryClientProvider client={client}>
+        <SessionTimelineSection
+          sessionId={SESSION_ID}
+          summary={SUMMARY}
+          summaryRecord={SUMMARY.summary as never}
+          openInspector={() => {}}
+        />
+      </QueryClientProvider>,
+    )
+    let section = await screen.findByTestId('execution-timeline-section')
+    fireEvent.click(within(section).getByTestId('timeline-node-expand'))
+    await within(section).findAllByTestId('timeline-node')
+    const urlsForB = () =>
+      fetchMock.mock.calls.map((call) => String(call[0])).filter((url) => url.includes(SESSION_B))
+    expect(urlsForB().length).toBe(0)
+
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <SessionTimelineSection
+          sessionId={SESSION_B}
+          summary={SUMMARY}
+          summaryRecord={SUMMARY.summary as never}
+          openInspector={() => {}}
+        />
+      </QueryClientProvider>,
+    )
+    // The new session's tree is unexpanded: only its own top level, page 1.
+    await waitFor(() => expect(urlsForB().length).toBeGreaterThan(0))
+    expect(urlsForB().every((url) => url.endsWith('/timeline?page=1&limit=25'))).toBe(true)
+    section = await screen.findByTestId('execution-timeline-section')
+    expect(within(section).getAllByTestId('timeline-node').length).toBe(1)
   })
 })

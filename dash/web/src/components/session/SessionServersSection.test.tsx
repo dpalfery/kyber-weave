@@ -4,7 +4,7 @@
 // rollup itself (display layer, ADR 0033). A server that was never invoked is
 // a measured zero and renders as one.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 
@@ -139,5 +139,40 @@ describe('SessionServersSection paging', () => {
     fireEvent.click(within(pager).getByTestId('pager-next'))
     await screen.findByTestId('server-row-search')
     expect(fetchMock.mock.calls.some(([url]) => url === ROUTE_PAGE_2)).toBe(true)
+  })
+
+  it("holds the previous page's rows on screen while the next page is in flight, then replaces them", async () => {
+    let resolveSecond: (value: Response) => void = () => {}
+    const fetchMock = stubFetch((url: string) => {
+      if (url.includes('page=2')) {
+        return new Promise<Response>((resolve) => {
+          resolveSecond = resolve
+        }) as unknown as Response
+      }
+      return jsonResponse({ servers: FIRST_PAGE.servers, data: FIRST_PAGE.data, total: 30, limit: 25, offset: 0, page: 1 })
+    })
+    mount()
+    await screen.findByTestId('server-row-builtin')
+    expect(fetchMock.mock.calls.some(([url]) => url === ROUTE_PAGE_2)).toBe(false)
+
+    fireEvent.click(screen.getByTestId('pager-next'))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === ROUTE_PAGE_2)).toBe(true))
+    // The next page is held back: the rows the viewer was reading stay on
+    // screen, and the new page's rows are absent until it lands.
+    expect(screen.getByTestId('server-row-builtin')).toBeTruthy()
+    expect(screen.getByTestId('server-row-git')).toBeTruthy()
+    expect(screen.queryByTestId('server-row-search')).toBeNull()
+
+    resolveSecond(
+      jsonResponse({
+        servers: [{ ...GIT_ROW, server: 'search' }],
+        data: [{ ...GIT_ROW, server: 'search' }],
+        total: 30,
+        limit: 25,
+        offset: 25,
+        page: 2,
+      }),
+    )
+    await screen.findByTestId('server-row-search')
   })
 })

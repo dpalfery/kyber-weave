@@ -4,7 +4,7 @@ import { cn } from '../../lib/utils.js'
 import { SessionSpendCharts, type ContextCompositionData, type TurnSpendItem } from '../SessionSpendCharts.js'
 import { SectionLoading } from './SectionLoading.js'
 import { SectionError } from './SectionError.js'
-import { sectionErrorMessage } from './useSectionPage.js'
+import { sectionErrorMessage, projectionFailureMessage, PROJECTION_FAILED_STATUS } from './useSectionPage.js'
 import { fetchKyberSessionCharts, kyberSessionSectionQueryKey } from '../../lib/kyberApi.js'
 import type { OpenInspector } from './types.js'
 
@@ -47,12 +47,18 @@ export function SessionChartsSection({ sessionId, openInspector, className }: Se
     [sessionId, openInspector],
   )
 
-  if (isError) {
+  // A faulted projection is an error state, not a chart: the payload names the
+  // fault, so nothing here may render as an honest-looking zero.
+  if (isError || data?.projection_status === PROJECTION_FAILED_STATUS) {
     return (
       <SectionError
         testId="section-error-charts"
         label="Spend charts"
-        message={sectionErrorMessage(error)}
+        message={
+          data?.projection_status === PROJECTION_FAILED_STATUS
+            ? projectionFailureMessage(data)
+            : sectionErrorMessage(error)
+        }
         onRetry={() => void refetch()}
         className={className}
       />

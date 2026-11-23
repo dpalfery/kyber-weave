@@ -130,6 +130,25 @@ describe('SessionRequestsSection states', () => {
     expect(empty.textContent).toMatch(/no user requests/i)
   })
 
+  it('states a faulted projection as the section error, never as an empty list', async () => {
+    stubFetch(() =>
+      jsonResponse({
+        requests: [],
+        data: [],
+        total: 0,
+        limit: 25,
+        offset: 0,
+        page: 1,
+        projection_status: 'PROJECTION_FAILED',
+      }),
+    )
+    mount()
+    const error = await screen.findByTestId('section-error-requests')
+    expect(error.textContent).toContain('PROJECTION_FAILED')
+    expect(screen.queryByTestId('requests-empty')).toBeNull()
+    expect(screen.queryByTestId('user-requests')).toBeNull()
+  })
+
   it('shows no pager while one page holds every request', async () => {
     stubFetch(() =>
       jsonResponse({
@@ -169,5 +188,76 @@ describe('SessionRequestsSection paging', () => {
     mount()
     await screen.findByTestId('user-requests')
     expect(screen.getByTestId('request-row-26').textContent).toContain('Rewrite the parser entry point')
+  })
+
+  it("holds the previous page's rows on screen while the next page is in flight, then replaces them", async () => {
+    let resolveSecond: (value: Response) => void = () => {}
+    const fetchMock = stubFetch((url: string) => {
+      if (url.includes('page=2')) {
+        return new Promise<Response>((resolve) => {
+          resolveSecond = resolve
+        }) as unknown as Response
+      }
+      return jsonResponse(FIRST_PAGE)
+    })
+    mount()
+    await screen.findByTestId('request-row-1')
+    expect(fetchMock.mock.calls.some(([url]) => url === ROUTE_PAGE_2)).toBe(false)
+
+    fireEvent.click(screen.getByTestId('pager-next'))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === ROUTE_PAGE_2)).toBe(true))
+    // The next page is held back: the rows the viewer was reading stay on
+    // screen, and the new page's rows are absent until it lands.
+    expect(screen.getByTestId('request-row-1').textContent).toContain('Analyze the recursion bug in ast.ts')
+    expect(screen.getByTestId('request-row-2').textContent).toContain('Apply the patch and verify tests pass')
+    expect(screen.queryByTestId('request-row-26')).toBeNull()
+
+    resolveSecond(jsonResponse(SECOND_PAGE))
+    await screen.findByTestId('request-row-26')
+    expect(screen.queryByTestId('request-row-1')).toBeNull()
+    expect(screen.queryByTestId('request-row-2')).toBeNull()
+  })
+
+  it('requests the new session page 1 when the session changes past page 1', async () => {
+    const SESSION_B = 'sess-2'
+    const ROUTE_B_PAGE_1 = `/api/kyber/session/${SESSION_B}/requests?page=1&limit=25`
+    const firstPageB = {
+      requests: [FIRST_PAGE.requests[0]],
+      data: [FIRST_PAGE.requests[0]],
+      total: 128,
+      limit: 25,
+      offset: 0,
+      page: 1,
+    }
+    const fetchMock = stubFetch((url: string) =>
+      jsonResponse(
+        url.includes(`session/${SESSION_B}/`)
+          ? firstPageB
+          : url.includes('page=2')
+            ? SECOND_PAGE
+            : FIRST_PAGE,
+      ),
+    )
+    const client = queryClient()
+    const view = render(
+      <QueryClientProvider client={client}>
+        <SessionRequestsSection sessionId={SESSION_ID} />
+      </QueryClientProvider>,
+    )
+    await screen.findByTestId('user-requests')
+    fireEvent.click(screen.getByTestId('pager-next'))
+    await screen.findByTestId('request-row-26')
+    expect(fetchMock.mock.calls.some(([url]) => url.includes(`session/${SESSION_B}/`))).toBe(false)
+
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <SessionRequestsSection sessionId={SESSION_B} />
+      </QueryClientProvider>,
+    )
+    // The new session is read from its first page — page 2 of the previous
+    // session is not where a viewer opening it is.
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === ROUTE_B_PAGE_1)).toBe(true))
+    expect(fetchMock.mock.calls.some(([url]) => url.startsWith(`/api/kyber/session/${SESSION_B}/requests?page=2`))).toBe(false)
+    await screen.findByTestId('request-row-1')
   })
 })

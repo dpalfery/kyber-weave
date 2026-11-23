@@ -2,7 +2,7 @@ import { cn, fmtTokens } from '../../lib/utils.js'
 import { Pager } from '../ui/Pager.js'
 import { SectionLoading } from './SectionLoading.js'
 import { SectionError } from './SectionError.js'
-import { sectionErrorMessage, useSectionPage } from './useSectionPage.js'
+import { useSectionPage } from './useSectionPage.js'
 import { fetchKyberSessionReconciliation } from '../../lib/kyberApi.js'
 
 /**
@@ -21,12 +21,12 @@ export function SessionReconciliationSection({ sessionId, className }: SessionRe
   const reconciliation = useSectionPage(sessionId, 'reconciliation', fetchKyberSessionReconciliation)
   const data = reconciliation.data
 
-  if (reconciliation.isError && data === undefined) {
+  if (reconciliation.failure) {
     return (
       <SectionError
         testId="section-error-reconciliation"
         label="Reconciliation"
-        message={sectionErrorMessage(reconciliation.error)}
+        message={reconciliation.failure}
         onRetry={reconciliation.refetch}
         className={className}
       />

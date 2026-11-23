@@ -2,7 +2,7 @@ import { cn } from '../../lib/utils.js'
 import { SkillsPanel } from '../SkillsPanel.js'
 import { SectionLoading } from './SectionLoading.js'
 import { SectionError } from './SectionError.js'
-import { sectionErrorMessage, useSectionPage } from './useSectionPage.js'
+import { useSectionPage } from './useSectionPage.js'
 import { fetchKyberSessionSkills, type KyberSkillsBlock } from '../../lib/kyberApi.js'
 import type { OpenInspector, SessionSummaryPayload } from './types.js'
 
@@ -29,12 +29,12 @@ export function SessionSkillsSection({
   const skills = useSectionPage(sessionId, 'skills', fetchKyberSessionSkills)
   const data = skills.data
 
-  if (skills.isError && data === undefined) {
+  if (skills.failure) {
     return (
       <SectionError
         testId="section-error-skills"
         label="Skills"
-        message={sectionErrorMessage(skills.error)}
+        message={skills.failure}
         onRetry={skills.refetch}
         className={className}
       />

@@ -3,6 +3,7 @@ import { cn, usd, fmtTokens, fmtNum } from '../../lib/utils.js'
 import { Card } from '../ui/card.js'
 import { Skeleton } from '../ui/skeleton.js'
 import { SectionError } from './SectionError.js'
+import { PROJECTION_FAILED_STATUS, projectionFailureMessage } from './useSectionPage.js'
 import { formatDuration } from '../../lib/labels.js'
 import {
   fetchKyberSessionSummary,
@@ -47,12 +48,20 @@ export function SessionSummarySection({
     queryFn: () => fetchKyberSessionSummary(sessionId),
   })
 
-  if (isError) {
+  // A faulted projection is an error state, not a strip of dashes and zeros:
+  // the payload names the fault, and no tile may read as measured data.
+  if (isError || summary?.projection_status === PROJECTION_FAILED_STATUS) {
     return (
       <SectionError
         testId="session-summary-error"
         label="Session summary"
-        message={error instanceof Error ? error.message : String(error)}
+        message={
+          summary?.projection_status === PROJECTION_FAILED_STATUS
+            ? projectionFailureMessage(summary)
+            : error instanceof Error
+              ? error.message
+              : String(error)
+        }
         onRetry={() => void refetch()}
         className={className}
       />
