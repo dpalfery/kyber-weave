@@ -910,4 +910,22 @@ public interface IRelationalStoreReader
     /// tool definitions, with no content part, tool input text, or tool result text.
     /// </returns>
     IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey);
+
+    /// <summary>
+    /// Reads one session's record metadata with no content column, shaped to the timeline tree
+    /// <see cref="CanonContextAnalysis.BuildTimeline"/> builds: the span, parent, harness,
+    /// timestamp, duration, kind, name, status, cost, model and declared-window columns the
+    /// tree's nodes read, and no other child row.
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <returns>
+    /// Linked records carrying the columns the timeline tree's nodes read, with no token count,
+    /// tool metadata, trace, end time, reported total, or content part.
+    /// </returns>
+    /// <remarks>
+    /// The timeline section route builds the session's metadata tree once per page, so a page's
+    /// cost is that tree, never the session's content (decision D17). The statement scopes to
+    /// the session's spans and touches the record header tables alone.
+    /// </remarks>
+    IReadOnlyList<CollectedRecord> SessionTimelineRecords(string sessionKey);
 }

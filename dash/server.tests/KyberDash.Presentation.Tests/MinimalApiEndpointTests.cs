@@ -404,6 +404,74 @@ public class MinimalApiEndpointTests
     }
 
     [Fact]
+    public async Task TimelineRouteReturnsTheQueryServiceEnvelope()
+    {
+        await using Host host = await Host.StartAsync(builder =>
+        {
+            builder.Query
+                .Setup(q => q.GetSessionTimeline("sess-1", null, 1, 25))
+                .Returns(JsonSerializer.SerializeToElement(new
+                {
+                    nodes = Array.Empty<object>(),
+                    total = 0,
+                    limit = 25,
+                    offset = 0,
+                    page = 1,
+                    parent = (string?)null,
+                    bounds = new { startMs = 0L, endMs = 0L },
+                }));
+        });
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/session/sess-1/timeline", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(JsonValueKind.Array, body.RootElement.GetProperty("nodes").ValueKind);
+        Assert.Equal(0, body.RootElement.GetProperty("total").GetInt32());
+        Assert.Equal(JsonValueKind.Object, body.RootElement.GetProperty("bounds").ValueKind);
+        host.Builder.Query.Verify(q => q.GetSessionTimeline("sess-1", null, 1, 25), Times.Once);
+    }
+
+    [Fact]
+    public async Task TimelineRouteDecodesAnUrlEncodedSyntheticParent()
+    {
+        await using Host host = await Host.StartAsync(builder =>
+        {
+            builder.Query
+                .Setup(q => q.GetSessionTimeline("sess-1", "(auxiliary)", 2, 25))
+                .Returns(JsonSerializer.SerializeToElement(new
+                {
+                    nodes = Array.Empty<object>(),
+                    total = 30,
+                    limit = 25,
+                    offset = 25,
+                    page = 2,
+                    parent = "(auxiliary)",
+                    bounds = new { startMs = 0L, endMs = 0L },
+                }));
+        });
+
+        // The synthetic container id is URL-encoded on the wire: '(' and ')' are reserved
+        // characters, so the route must decode the parent before it names the level.
+        HttpResponseMessage response = await host.Client.GetAsync(
+            new Uri("/api/kyber/session/sess-1/timeline?parent=%28auxiliary%29&page=2", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        host.Builder.Query.Verify(q => q.GetSessionTimeline("sess-1", "(auxiliary)", 2, 25), Times.Once);
+    }
+
+    [Fact]
+    public async Task TimelineRouteReturnsNotFoundWhenUnknown()
+    {
+        await using Host host = await Host.StartAsync();
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/session/absent/timeline", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
     public async Task SettingsGetReturnsCurrentSettings()
     {
         await using Host host = await Host.StartAsync();

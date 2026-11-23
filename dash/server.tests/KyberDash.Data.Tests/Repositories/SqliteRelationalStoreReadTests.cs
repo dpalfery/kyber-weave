@@ -575,6 +575,31 @@ public class SqliteRelationalStoreReadTests : IDisposable
     }
 
     /// <summary>
+    /// The timeline records read scopes to the record-header columns the timeline tree's nodes
+    /// carry: every statement it issues references just the record header, its session link,
+    /// parent link, model, reported duration, reported cost and declared window — and never a
+    /// content-text, token, tool, skill, or trace table. Its rows match
+    /// <see cref="InMemoryRelationalStore"/> on a projected, an unprojected, and an unknown
+    /// session.
+    /// </summary>
+    [Fact]
+    public void SessionTimelineRecords_TouchOnlyTheTimelineHeaderTables()
+    {
+        string dbPath = Path.Combine(directory.Path, "timeline-records", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+        SeedPopulatedStores(sqlite, memory);
+
+        foreach (string sessionKey in (string[])["sess-proj", "sess-unproj", "sess-missing"])
+        {
+            sqlite.ClearRecordedSql();
+            IReadOnlyList<CollectedRecord> records = sqlite.SessionTimelineRecords(sessionKey);
+            AssertScriptsTouchOnlyTables(sqlite.ExecutedSql, SessionTimelineRecordTables);
+            Assert.Equivalent(memory.SessionTimelineRecords(sessionKey), records, strict: true);
+        }
+    }
+
+    /// <summary>
     /// The SQL root rule keeps today's tree semantics: a session is a root unless its parent is a
     /// projected session in the same harness-filtered set and attaching it would not form a
     /// cycle. An orphaned child (its parent has no projection), a child whose parent sits
@@ -969,6 +994,23 @@ public class SqliteRelationalStoreReadTests : IDisposable
     ];
 
     /// <summary>
+    /// The tables the timeline records read may touch: the record header, its session and parent
+    /// links, and the model, reported duration, reported cost and declared-window columns the
+    /// hydrated tree node carries. The list is closed: a content-text, token, tool, skill, or
+    /// trace table would fail it.
+    /// </summary>
+    private static readonly string[] SessionTimelineRecordTables =
+    [
+        "record",
+        "record_session_link",
+        "record_parent",
+        "record_model",
+        "record_reported_duration",
+        "record_reported_cost",
+        "record_declared_context_window",
+    ];
+
+    /// <summary>
     /// Asserts every table a <c>FROM</c> or <c>JOIN</c> names is in the allowed set, so a closed
     /// table claim is checked over the whole script and not just a deny-list of substrings.
     /// </summary>
@@ -1051,6 +1093,7 @@ public class SqliteRelationalStoreReadTests : IDisposable
             Assert.Equivalent(memoryReader.SessionProblems(sessionKey, 1, 25), sqliteReader.SessionProblems(sessionKey, 1, 25), strict: true);
             Assert.Equivalent(memoryReader.SessionToolFigures(sessionKey), sqliteReader.SessionToolFigures(sessionKey), strict: true);
             Assert.Equivalent(memoryReader.SessionSkillFigures(sessionKey), sqliteReader.SessionSkillFigures(sessionKey), strict: true);
+            Assert.Equivalent(memoryReader.SessionTimelineRecords(sessionKey), sqliteReader.SessionTimelineRecords(sessionKey), strict: true);
             Assert.Equal(
                 memoryReader.RequestPromptPreviews(sessionKey, ["span-req-1", "span-req-2"]),
                 sqliteReader.RequestPromptPreviews(sessionKey, ["span-req-1", "span-req-2"]));

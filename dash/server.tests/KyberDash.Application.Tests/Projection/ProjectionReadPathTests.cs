@@ -610,6 +610,9 @@ public class ProjectionReadPathTests
         public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey) => inner.SessionRecordsContentFree(sessionKey);
 
         /// <inheritdoc />
+        public IReadOnlyList<CollectedRecord> SessionTimelineRecords(string sessionKey) => inner.SessionTimelineRecords(sessionKey);
+
+        /// <inheritdoc />
         public SessionToolFigureSet SessionToolFigures(string sessionKey, IModelPricingLookup? pricing = null) => inner.SessionToolFigures(sessionKey, pricing);
 
         /// <inheritdoc />

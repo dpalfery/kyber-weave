@@ -1970,6 +1970,81 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return recordsBySession.TryGetValue(sessionKey, out List<CollectedRecord>? records) ? records : [];
     }
 
+    /// <inheritdoc />
+    public IReadOnlyList<CollectedRecord> SessionTimelineRecords(string sessionKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        // Only the columns BuildTimeline's nodes read: no trace, end time, token count, reported
+        // total, error or correction signal, tool metadata, or content child row (decision D17).
+        StringBuilder sql = new(TabReadScriptHeader);
+        sql.Append(
+            "SELECT 'TREC', hex(CAST(r.span_id AS BLOB)), hex(CAST(r.harness_id AS BLOB)), hex(CAST(r.op AS BLOB)), hex(CAST(r.kind AS BLOB)), " +
+            "hex(CAST(r.name AS BLOB)), hex(CAST(r.started_at_utc AS BLOB)), hex(CAST(r.status AS BLOB)), " +
+            "typeof(rsl.session_key), COALESCE(hex(CAST(rsl.session_key AS BLOB)), ''), " +
+            "typeof(rp.parent_span_id), COALESCE(hex(CAST(rp.parent_span_id AS BLOB)), ''), " +
+            "typeof(rm.model_id), COALESCE(hex(CAST(rm.model_id AS BLOB)), ''), " +
+            "typeof(rrd.duration_ms), COALESCE(CAST(rrd.duration_ms AS TEXT), ''), " +
+            "typeof(rrc.amount), COALESCE(CAST(rrc.amount AS TEXT), ''), " +
+            "typeof(rrc.currency), COALESCE(hex(CAST(rrc.currency AS BLOB)), ''), " +
+            "typeof(rdcw.declared_context_window), COALESCE(CAST(rdcw.declared_context_window AS TEXT), '') " +
+            "FROM record r " +
+            "LEFT JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
+            "LEFT JOIN record_parent rp ON rp.span_id = r.span_id " +
+            "LEFT JOIN record_model rm ON rm.span_id = r.span_id " +
+            "LEFT JOIN record_reported_duration rrd ON rrd.span_id = r.span_id " +
+            "LEFT JOIN record_reported_cost rrc ON rrc.span_id = r.span_id " +
+            "LEFT JOIN record_declared_context_window rdcw ON rdcw.span_id = r.span_id " +
+            $"WHERE rsl.session_key = {TextExpr(sessionKey)} ORDER BY r.rowid ASC;\n");
+
+        List<CollectedRecord> records = [];
+        foreach (string line in TabLines(ExecuteSqlite(sql.ToString())))
+        {
+            string[] cols = line.Split('\t');
+            if (cols.Length != 22)
+            {
+                throw new InvalidOperationException($"Expected 22 columns for TREC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
+            }
+
+            string spanId = ParseHexRequired(cols[1], "record.span_id");
+            double? costAmount = ParseNullableDouble(cols[16], cols[17], "record_reported_cost.amount");
+            string? costCurrency = ParseNullableHex(cols[18], cols[19], "record_reported_cost.currency");
+            CollectedCost? reportedCost = costAmount.HasValue && costCurrency is not null
+                ? new CollectedCost(costAmount.Value, costCurrency)
+                : costAmount.HasValue || costCurrency is not null
+                    ? throw new InvalidOperationException("Partial record_reported_cost row returned.")
+                    : null;
+
+            records.Add(new CollectedRecord(
+                spanId,
+                ParseHexRequired(cols[2], "record.harness_id"),
+                ParseRecordOp(ParseHexRequired(cols[3], "record.op")),
+                ParseRecordKind(ParseHexRequired(cols[4], "record.kind")),
+                ParseHexRequired(cols[5], "record.name"),
+                ParseTimestampRequired(ParseHexRequired(cols[6], "record.started_at_utc"), "record.started_at_utc"),
+                ParseRecordStatus(ParseHexRequired(cols[7], "record.status")),
+                ParseNullableHex(cols[8], cols[9], "record_session_link.session_key"),
+                ParseNullableHex(cols[10], cols[11], "record_parent.parent_span_id"),
+                TraceId: null,
+                ParseNullableHex(cols[12], cols[13], "record_model.model_id"),
+                EndedAt: null,
+                ParseNullableInt64(cols[14], cols[15], "record_reported_duration.duration_ms"),
+                Tokens: [],
+                reportedCost,
+                Parts: [],
+                Tool: null,
+                Agent: null,
+                SkillsInvoked: [],
+                AgentInstanceId: null,
+                ToolDefinitions: [],
+                new CollectedRecordSignals(ErrorMessage: null, EditFailures: null, CorrectionRule: null, ParseNullableInt64(cols[20], cols[21], "record_declared_context_window.declared_context_window")),
+                ReportedInputTokens: null,
+                ReportedOutputTokens: null));
+        }
+
+        return records;
+    }
+
     private static IReadOnlyList<ReadTimeTurnSummary> BuildContentFreeTurnSummaries(
         IReadOnlyList<StoredSessionTurn> projectedTurns,
         IReadOnlyList<CollectedRecord> records,
