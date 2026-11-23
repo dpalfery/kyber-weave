@@ -28,6 +28,9 @@ public static class ReviewJson
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
+    /// <summary>The kind names a findings.json finding may carry, as the document spells them.</summary>
+    private static readonly string[] KindNames = ["defect", "hardening", "plan-objection"];
+
     /// <summary>Serializes a gate report.</summary>
     public static string Write(GateReport report)
     {
@@ -213,8 +216,9 @@ public static class ReviewJson
 
     /// <summary>
     /// Holds a finding read from JSON to the ranges a seat's finding is held to. The serializer would bind a number as
-    /// a severity (any integer becomes an enum value) and any integer as a confidence, so both are checked on the raw
-    /// value: severity must be one of the severity names, confidence a whole number from 1 to 10.
+    /// a severity or a kind (any integer becomes an enum value) and any integer as a confidence, so all three are
+    /// checked on the raw value: severity must be one of the severity names, confidence a whole number from 1 to 10,
+    /// and kind one of the kind names.
     /// </summary>
     /// <remarks>
     /// Every property whose name matches ignoring case is checked, not only the first: the serializer reads names
@@ -254,6 +258,17 @@ public static class ReviewJson
                 throw new JsonException(
                     $"'{path}.{key}' is {Describe(value)}; it must be a whole number from 0 to {ReviewSeatInput.MaxLine}.");
             }
+        }
+
+        foreach ((string key, JsonNode? value) in Members(finding, nameof(ReviewFinding.Kind)))
+        {
+            bool named = value is null
+                         || (value is JsonValue text
+                             && text.GetValueKind() == JsonValueKind.String
+                             && KindNames.Any(name =>
+                                 string.Equals(name, text.GetValue<string>(), StringComparison.OrdinalIgnoreCase)));
+            if (!named)
+                throw new JsonException($"'{path}.{key}' is {Describe(value)}; it must be \"defect\", \"hardening\" or \"plan-objection\".");
         }
     }
 

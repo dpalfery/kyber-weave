@@ -39,6 +39,21 @@ public sealed class ReviewJsonTests
         Assert.Single(ReviewJson.ReadFindings(Report(line)).Findings);
     }
 
+    [Theory]
+    [InlineData("99")]
+    [InlineData("3")]
+    [InlineData("-1")]
+    public void AFindingWhoseKindIsANumberIsRejected(string kind)
+    {
+        JsonException error = Assert.Throws<JsonException>(() => ReviewJson.ReadFindings(KindReport(kind)));
+
+        Assert.Contains("kind", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string KindReport(string kind) =>
+        "{\"schema\":\"kyber-weave.review-findings/v1\",\"findings\":[{\"id\":\"correctness/a\",\"lens\":\"correctness\"," +
+        "\"severity\":\"minor\",\"confidence\":5,\"file\":\"a.cs\",\"line\":12,\"kind\":" + kind + "}],\"changedPaths\":[],\"changedLines\":0}";
+
     private static string Report(string line) =>
         "{\"schema\":\"kyber-weave.review-findings/v1\",\"findings\":[{\"id\":\"correctness/a\",\"lens\":\"correctness\"," +
         "\"severity\":\"minor\",\"confidence\":5,\"file\":\"a.cs\",\"line\":" + line + "}],\"changedPaths\":[],\"changedLines\":0}";

@@ -178,7 +178,7 @@ internal static class FixPacketWriter
         }
         catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException or YamlException or InvalidOperationException)
         {
-            notes.Add(NoTaskNote($"the task file '{relative}' could not be read"));
+            notes.Add(NoTaskNote($"the task file '{relative}' could not be read ({FirstLine(ex.Message)})"));
             return [];
         }
     }

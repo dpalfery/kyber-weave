@@ -433,6 +433,22 @@ public sealed class FixPacketWriterTests : IDisposable
         Assert.Contains("### correctness/a", Read("unassigned"), StringComparison.Ordinal);
     }
 
+    /// <summary>A task file that cannot be parsed is reported with its reason, so it reads differently from a missing one.</summary>
+    [Fact]
+    public void ACorruptTaskFileIsReportedWithItsReason()
+    {
+        Write("repo/" + Plan, "---\nid: demo\ntitle: Demo\ndoc-type: plan\nstatus: Ready\n---\n\n# Demo\n");
+        Write("repo/docs/plans/demo.tasks.yml", "tasks: [unclosed\n: : :\n");
+        ScriptChange(Plan, "src/Core/A.cs");
+
+        FixPacketOutcome outcome = Write([Finding("correctness/a", "src/Core/A.cs")], []);
+
+        string note = Assert.Single(outcome.Notes, note => note.Contains("docs/plans/demo.tasks.yml", StringComparison.Ordinal));
+        Assert.Contains("could not be read (", note, StringComparison.Ordinal);
+        Assert.DoesNotContain("missing", note, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("### correctness/a", Read("unassigned"), StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// A cycle whose record cannot be read is named in the history, never hiding the cycles that can be read, and the
     /// commits section names the first cycle it could actually read.
