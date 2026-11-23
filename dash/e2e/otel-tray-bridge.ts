@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { dirname, extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -444,15 +444,18 @@ function serveStaticAsset(res: ServerResponse, distDir: string, pathname: string
     return
   }
 
-  if (!existsSync(candidate) || !statSync(candidate).isFile()) {
+  // Single syscall: a check-then-read pair is a TOCTOU race, so read directly and
+  // map a missing path (or a directory, which readFileSync rejects) to 404.
+  const ext = extname(candidate).toLowerCase()
+  const contentType = MIME_TYPES[ext] ?? 'application/octet-stream'
+  let contents: Buffer
+  try {
+    contents = readFileSync(candidate)
+  } catch {
     res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
     res.end('Not found')
     return
   }
-
-  const ext = extname(candidate).toLowerCase()
-  const contentType = MIME_TYPES[ext] ?? 'application/octet-stream'
-  const contents = readFileSync(candidate)
   res.writeHead(200, {
     'content-type': contentType,
     'cache-control': 'no-store',
