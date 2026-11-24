@@ -575,6 +575,137 @@ public sealed class ArbiterInstallServiceSeamsTests
     }
 
     /// <summary>
+    /// When planned or effective endpoints (or their origins) exceed 200 characters, the
+    /// <c>Verify</c> mismatch error truncates them instead of embedding unbounded strings.
+    /// </summary>
+    [Fact]
+    public void Apply_VerifyFailsClosed_LongMismatchEndpointsAndOrigins_AreTruncatedInError()
+    {
+        string longPlannedOrigin = "https://" + string.Join('.', Enumerable.Repeat(new string('a', 55), 4)) + ".example.com";
+        string longPlannedEndpoint = longPlannedOrigin + "/v1/planned";
+        string longEffectiveOrigin = "https://" + string.Join('.', Enumerable.Repeat(new string('b', 55), 4)) + ".example.com";
+        string longEffectiveEndpoint = longEffectiveOrigin + "/v1/effective";
+        _store.Seed(longPlannedOrigin, "key-planned");
+        _store.Seed(longEffectiveOrigin, "key-effective");
+        IArbiterConfigResolver configs = new RepositoryEndpointConfigs(longPlannedEndpoint);
+
+        ArbiterInstallService prepareService = Service(
+            configs: configs,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallPrepared prepared = prepareService.Prepare(
+            Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
+
+        Assert.Equal(0, prepared.ExitCode);
+        Assert.NotNull(prepared.Plan);
+
+        FakeArbiterUserSettings switched = new()
+        {
+            Override = (repository, _) => repository with { Kind = ArbiterProviderKind.Systemone, Endpoint = longEffectiveEndpoint },
+        };
+        ArbiterInstallService applyService = Service(
+            switched,
+            configs: configs,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+
+        Assert.Equal(1, applied.ExitCode);
+        ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
+        Assert.Contains("does not match the planned endpoint", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(longPlannedEndpoint[..200] + "...", error.Message, StringComparison.Ordinal);
+        Assert.Contains(longEffectiveEndpoint[..200] + "...", error.Message, StringComparison.Ordinal);
+        Assert.Contains(longPlannedOrigin[..200] + "...", error.Message, StringComparison.Ordinal);
+        Assert.Contains(longEffectiveOrigin[..200] + "...", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(longPlannedEndpoint, error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(longEffectiveEndpoint, error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(longPlannedOrigin, error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(longEffectiveOrigin, error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("\r", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Long endpoints that match through the 200-character display cap but diverge afterwards
+    /// still fail closed in <c>Verify</c> while keeping the error message bounded.
+    /// </summary>
+    [Fact]
+    public void Apply_VerifyFailsClosed_LongEndpointsDifferingAfterTruncationLimit_StillFailClosedAndTruncate()
+    {
+        string sharedPrefix = "https://openrouter.ai/api/" + new string('x', 200);
+        string plannedEndpoint = sharedPrefix + "/planned";
+        string effectiveEndpoint = sharedPrefix + "/effective";
+        _store.Seed(OverrideOrigin, "override-key");
+        IArbiterConfigResolver configs = new RepositoryEndpointConfigs(ArbiterProviderConfig.DefaultNone.Endpoint);
+
+        ArbiterInstallService prepareService = Service(
+            new FakeArbiterUserSettings
+            {
+                Override = (repository, _) => repository with { Kind = ArbiterProviderKind.Systemone, Endpoint = plannedEndpoint },
+            },
+            configs: configs,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallPrepared prepared = prepareService.Prepare(
+            Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
+
+        Assert.Equal(0, prepared.ExitCode);
+        Assert.NotNull(prepared.Plan);
+
+        ArbiterInstallService applyService = Service(
+            new FakeArbiterUserSettings
+            {
+                Override = (repository, _) => repository with { Kind = ArbiterProviderKind.Systemone, Endpoint = effectiveEndpoint },
+            },
+            configs: configs,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+
+        Assert.Equal(1, applied.ExitCode);
+        ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
+        Assert.Contains(sharedPrefix[..200] + "...", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("/planned", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("/effective", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(new string('x', 175), error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Line endings in a planned endpoint or origin are collapsed to spaces in the <c>Verify</c>
+    /// mismatch error so the message remains single-line.
+    /// </summary>
+    [Fact]
+    public void Apply_VerifyFailsClosed_MultilinePlannedValuesInMismatchError_AreSanitizedToSingleLine()
+    {
+        _store.Seed(OverrideOrigin, "override-key");
+        IArbiterConfigResolver configs = new RepositoryEndpointConfigs(ArbiterProviderConfig.DefaultNone.Endpoint);
+
+        ArbiterInstallService prepareService = Service(
+            OverrideToSystemone(),
+            configs: configs,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallPrepared prepared = prepareService.Prepare(
+            Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
+
+        Assert.Equal(0, prepared.ExitCode);
+        Assert.NotNull(prepared.Plan);
+
+        ArbiterInstallPlan multilinePlan = prepared.Plan with
+        {
+            Endpoint = "https://other.example.com/a\r\nb",
+            Origin = "https://other.example.com\nc",
+        };
+        ArbiterInstallService applyService = Service(
+            OverrideToSystemone(),
+            configs: configs,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallApplied applied = applyService.Apply(multilinePlan, CancellationToken.None);
+
+        Assert.Equal(1, applied.ExitCode);
+        ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
+        Assert.DoesNotContain("\n", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("\r", error.Message, StringComparison.Ordinal);
+        Assert.Contains("https://other.example.com/a b", error.Message, StringComparison.Ordinal);
+        Assert.Contains("https://other.example.com c", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// An override file whose endpoint carries surrounding whitespace resolves to the trimmed
     /// endpoint and still receives the environment key across both <c>Prepare</c> and <c>Verify</c>.
     /// </summary>

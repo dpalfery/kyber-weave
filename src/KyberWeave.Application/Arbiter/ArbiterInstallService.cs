@@ -646,10 +646,14 @@ public sealed class ArbiterInstallService(
             if (!string.Equals(effectiveEndpoint, plan.Endpoint, StringComparison.Ordinal) ||
                 !string.Equals(effectiveOrigin, plan.Origin, StringComparison.Ordinal))
             {
+                string displayEffectiveEndpoint = ArbiterUserSettings.FormatCandidateForError(effectiveEndpoint);
+                string displayEffectiveOrigin = ArbiterUserSettings.FormatCandidateForError(effectiveOrigin);
+                string displayPlannedEndpoint = ArbiterUserSettings.FormatCandidateForError(plan.Endpoint);
+                string displayPlannedOrigin = ArbiterUserSettings.FormatCandidateForError(plan.Origin);
                 events.Add(new ArbiterInstallError(
-                    $"Verification failed: the effective provider endpoint '{effectiveEndpoint}' " +
-                    $"(origin '{effectiveOrigin}') does not match the planned endpoint '{plan.Endpoint}' " +
-                    $"(origin '{plan.Origin}')."));
+                    $"Verification failed: the effective provider endpoint '{displayEffectiveEndpoint}' " +
+                    $"(origin '{displayEffectiveOrigin}') does not match the planned endpoint '{displayPlannedEndpoint}' " +
+                    $"(origin '{displayPlannedOrigin}')."));
                 return false;
             }
 

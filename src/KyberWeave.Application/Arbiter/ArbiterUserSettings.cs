@@ -138,8 +138,10 @@ public static class ArbiterUserSettings
         return false;
     }
 
-    private static string FormatCandidateForError(string candidate)
+    /// <summary>Collapses line endings and caps a candidate string at 200 characters for single-line errors.</summary>
+    internal static string FormatCandidateForError(string candidate)
     {
+        ArgumentNullException.ThrowIfNull(candidate);
         string oneLine = candidate.ReplaceLineEndings(" ");
         return oneLine.Length > MaxCandidateDisplayLength
             ? oneLine[..MaxCandidateDisplayLength] + "..."
