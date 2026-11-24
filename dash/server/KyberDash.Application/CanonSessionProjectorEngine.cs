@@ -35,6 +35,15 @@ public partial class CanonSessionProjectorEngine
     /// </remarks>
     public const int DefaultReadPathSessionRecordBudget = 2_000;
 
+    /// <summary>Default total record count one read-path projection pass may rebuild.</summary>
+    /// <remarks>
+    /// The per-session budget bounds one oversized session; this budget bounds the whole pass,
+    /// so a cold read pass over thousands of small sessions rebuilds a bounded prefix of them
+    /// inside the request and leaves the rest dirty for the next pass or the maintenance
+    /// rebuild instead of rebuilding the whole store at once.
+    /// </remarks>
+    public const int DefaultReadPathPassRecordBudget = 20_000;
+
     private const int PromptPreviewLength = 200;
     private const string FileSourcePrefix = "codeburn/";
     private const string DroidHarness = "droid";
@@ -70,6 +79,7 @@ public partial class CanonSessionProjectorEngine
     private readonly IOperationalStore? operationalStore;
     private readonly IPricingRepository pricing;
     private readonly int readPathSessionRecordBudget;
+    private readonly int readPathPassRecordBudget;
     private int projectionPassInFlight;
 
     /// <summary>
@@ -81,24 +91,28 @@ public partial class CanonSessionProjectorEngine
     /// <param name="operationalStore">Operational store backing the token counter and projection watermarks.</param>
     /// <param name="pricing">Model rate-table repository used when resolving context windows.</param>
     /// <param name="readPathSessionRecordBudget">Per-session record count a read-path pass may rebuild before deferring the session.</param>
+    /// <param name="readPathPassRecordBudget">Total record count one read-path pass may rebuild before deferring every later session.</param>
     public CanonSessionProjectorEngine(
         IRelationalStoreReader reader,
         IProjectionStore projections,
         IOperationalStore operationalStore,
         IPricingRepository pricing,
-        int readPathSessionRecordBudget = DefaultReadPathSessionRecordBudget)
+        int readPathSessionRecordBudget = DefaultReadPathSessionRecordBudget,
+        int readPathPassRecordBudget = DefaultReadPathPassRecordBudget)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(projections);
         ArgumentNullException.ThrowIfNull(operationalStore);
         ArgumentNullException.ThrowIfNull(pricing);
         ArgumentOutOfRangeException.ThrowIfLessThan(readPathSessionRecordBudget, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(readPathPassRecordBudget, 1);
 
         this.reader = reader;
         this.projections = projections;
         this.operationalStore = operationalStore;
         this.pricing = pricing;
         this.readPathSessionRecordBudget = readPathSessionRecordBudget;
+        this.readPathPassRecordBudget = readPathPassRecordBudget;
     }
 
     [GeneratedRegex(@"^invoke_agent(?:[ :]|$)", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
@@ -2496,8 +2510,8 @@ public partial class CanonSessionProjectorEngine
             : null;
 
         // Attribution rows replace the whole-store record read: identities, skip decisions, and
-        // per-session record budgets are planned from (session key, harness, count) rows, and
-        // full records are read only for the keys this pass actually rebuilds.
+        // the per-session and per-pass record budgets are planned from (session key, harness,
+        // count) rows, and full records are read only for the keys this pass actually rebuilds.
         IReadOnlyList<StoredSessionAttribution> attributions = reader!.SessionAttributions();
         Dictionary<string, List<string>> harnessesByKey = new(StringComparer.Ordinal);
         Dictionary<string, int> recordCountByKey = new(StringComparer.Ordinal);
@@ -2538,6 +2552,8 @@ public partial class CanonSessionProjectorEngine
         List<string> rebuildKeys = [];
         List<string> deferredKeys = [];
         List<string> skippedKeys = [];
+        int passRecordCount = 0;
+        bool passBudgetExhausted = false;
         foreach (string key in sessionKeys)
         {
             if (canIncremental
@@ -2555,7 +2571,21 @@ public partial class CanonSessionProjectorEngine
                 continue;
             }
 
+            // The pass budget bounds the whole read pass, so a cold store of thousands of small
+            // sessions cannot rebuild every one of them inside a request: once the running total
+            // would cross it, the crossing key and every later key defer to later passes. The
+            // first candidate is always admitted so a pass always rebuilds at least one session
+            // and repeated passes converge.
+            if (forReads && (passBudgetExhausted
+                || (rebuildKeys.Count > 0 && passRecordCount + recordCountByKey[key] > readPathPassRecordBudget)))
+            {
+                passBudgetExhausted = true;
+                deferredKeys.Add(key);
+                continue;
+            }
+
             rebuildKeys.Add(key);
+            passRecordCount += recordCountByKey[key];
         }
 
         Dictionary<string, List<CollectedRecord>> collectedByKey = new(StringComparer.Ordinal);
