@@ -303,6 +303,41 @@ public sealed class KwSkillValidationTests
     }
 
     [Fact]
+    public void AnUnprobeablePoolLinkIsKwDocSkill007NotACrash()
+    {
+        using DocFixture fixture = Scope("[]\n")
+            .Write("6-Docs/standards/skills/go-gates/SKILL.md", "---\nname: go-gates\ndescription: Run.\n---\n\nBODY\n");
+        fixture.Memory!.FailWhen(
+            operation => operation.Name == "GetLinkTarget"
+                && operation.Path is not null
+                && operation.Path.EndsWith("skills", StringComparison.Ordinal),
+            new IOException("denied"));
+
+        Diagnostic finding = Only(Validate(fixture, Dotnet), DocSpecValidator.SkillPoolMalformedFolder, Severity.Error);
+
+        Assert.Contains("could not be checked", finding.Message, StringComparison.Ordinal);
+        Assert.Contains("denied", finding.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnUnprobeableSkillLinkIsKwDocSkill007NotACrash()
+    {
+        using DocFixture fixture = Scope("[]\n")
+            .Write("6-Docs/standards/skills/go-gates/SKILL.md", "---\nname: go-gates\ndescription: Run.\n---\n\nBODY\n");
+        fixture.Memory!.FailWhen(
+            operation => operation.Name == "GetLinkTarget"
+                && operation.Path is not null
+                && operation.Path.EndsWith("SKILL.md", StringComparison.Ordinal),
+            new IOException("denied"));
+
+        Diagnostic finding = Only(Validate(fixture, Dotnet), DocSpecValidator.SkillPoolMalformedFolder, Severity.Error);
+
+        Assert.Contains("go-gates", finding.Message, StringComparison.Ordinal);
+        Assert.Contains("could not be checked", finding.Message, StringComparison.Ordinal);
+        Assert.Contains("denied", finding.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AMalformedPoolSkillMdFrontmatterIsKwDocSkill003WithTheParserReason()
     {
         using DocFixture fixture = Scope("[]\n")

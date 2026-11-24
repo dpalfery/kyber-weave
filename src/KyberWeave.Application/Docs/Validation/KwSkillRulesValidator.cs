@@ -86,7 +86,21 @@ internal sealed class KwSkillRulesValidator(string repoRoot, IFileSystem files, 
     public void CheckPool(string relativePool, DiagnosticReport report)
     {
         string absolutePool = Combine(relativePool);
-        if (!files.DirectoryExists(absolutePool) || files.GetLinkTarget(absolutePool) is not null) return;
+        if (!files.DirectoryExists(absolutePool)) return;
+
+        try
+        {
+            if (files.GetLinkTarget(absolutePool) is not null) return;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            report.Add(new Diagnostic(
+                DocSpecValidator.SkillPoolMalformedFolder, Severity.Error,
+                $"the skill pool '{relativePool}' could not be checked for symbolic links: {exception.Message}",
+                relativePool, relativePool,
+                "Make the pool folder readable, then re-run docs validate."));
+            return;
+        }
 
         foreach (FileSystemEntry entry in files.EnumerateEntries(absolutePool))
         {
@@ -96,9 +110,24 @@ internal sealed class KwSkillRulesValidator(string repoRoot, IFileSystem files, 
             string relativeSkill = $"{relativePool}/{folderName}/{SkillFile}";
             string absoluteSkill = Combine(relativeSkill);
 
-            // The link is asked about before existence, so a dangling link reports as a link
-            // rather than as a missing file, and a linked file is never read.
-            if (files.GetLinkTarget(absoluteSkill) is not null)
+            bool linked;
+            try
+            {
+                // The link is asked about before existence, so a dangling link reports as a link
+                // rather than as a missing file, and a linked file is never read.
+                linked = files.GetLinkTarget(absoluteSkill) is not null;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                report.Add(new Diagnostic(
+                    DocSpecValidator.SkillPoolMalformedFolder, Severity.Error,
+                    $"the skill folder '{folderName}' could not be checked for a symbolic link: {exception.Message}",
+                    folderName, relativeSkill,
+                    "Make the skill folder readable, then re-run docs validate."));
+                continue;
+            }
+
+            if (linked)
             {
                 report.Add(new Diagnostic(
                     DocSpecValidator.SkillPoolMalformedFolder, Severity.Error,
