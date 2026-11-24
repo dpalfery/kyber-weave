@@ -31,6 +31,13 @@ Ask each only where first-look found a gap.
 **Add the worktree index hook?** Only after a yes to the index; after a no, skip it, say the hook has nothing to build, and run no `--ensure`. The context is the
 `githook.post-checkout` row of [doctor-checks.md](doctor-checks.md).
 
+**Add the agent worktree folder to `.gitignore`?**
+- *What*: adds the line `.agent_worktrees/` to the repository's shared `.gitignore`. That folder holds the run worktrees, separate checkouts of this repository that agents work in.
+- *Why*: without the line, the folder shows as untracked in `git status`, and a copied worktree would be indexed as part of this repository.
+- *Options*: add the line (one edit to `.gitignore`; a line already present is left alone, so re-running is safe), or leave it.
+- *Cost and undo*: one repository file; undo by deleting the line.
+- *Recommend*: yes. Nothing else in this repository changes.
+
 **Declare the `codegraph` server for this repository?**
 - *What*: adds `codegraph` to the list of servers this repository's agents rely on, in
   `.kyber-weave/kyber-weave.yml`.

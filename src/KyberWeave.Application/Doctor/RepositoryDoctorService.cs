@@ -6,6 +6,7 @@ using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Processes;
+using KyberWeave.Core.RunStart;
 using KyberWeave.Domain.CopilotPrompt;
 using KyberWeave.Domain.Doctor;
 using KyberWeave.Kernel.FileSystem;
@@ -29,7 +30,8 @@ public sealed class RepositoryDoctorService(
     IDoctorFileSystem files,
     IRepositoryToolSettings settings,
     IProcessEnvironment processEnvironment,
-    IPathResolver paths) : IRepositoryDoctor
+    IPathResolver paths,
+    ICodeGraphPortsFactory codeGraph) : IRepositoryDoctor
 {
     /// <summary>Runs the doctor against <paramref name="root"/>.</summary>
     /// <param name="root">The directory to check. The git toplevel of this directory becomes the repository root.</param>
@@ -79,7 +81,7 @@ public sealed class RepositoryDoctorService(
             executor,
             lockDirectory ?? processEnvironment.TempDirectory);
 
-        List<DoctorCheck> checks = [.. codegraph.Checks, .. mcpProbe.Run(repositoryRoot, options)];
+        List<DoctorCheck> checks = [.. codegraph.Checks, NestedWorktreesCheck(repositoryRoot), .. mcpProbe.Run(repositoryRoot, options)];
 
         // D1: a repository may set `stop-on-tool-failure: false` to be told about a broken tool and carry on. The exit
         // code is what a caller branches on, so the opt-out has to change the code and not only the wording. It applies
@@ -174,6 +176,31 @@ public sealed class RepositoryDoctorService(
 
     /// <summary>The check id the post-checkout run reports under when the repository has switched the hook off.</summary>
     private const string WorktreeIndexHookCheckId = "worktree-index-hook";
+
+    /// <summary>The D4 check id: an index that holds a run worktree's copy of the code.</summary>
+    private const string NestedWorktreesCheckId = "codegraph.nested-worktrees";
+
+    /// <summary>
+    ///     D4: a run worktree lives under <see cref="AgentWorktreeFolder.Name"/> inside the repository, so an index that
+    ///     reads that folder answers queries with a second copy of the code.
+    /// </summary>
+    /// <remarks>
+    ///     An unavailable index passes here: <c>codegraph.index</c> already reports it, and a second line would repeat
+    ///     the same finding. The check sits before the <c>stop-on-tool-failure</c> downgrade, so the opt-out turns it
+    ///     into a warning in the ensure run exactly as it does the other CodeGraph checks.
+    /// </remarks>
+    private DoctorCheck NestedWorktreesCheck(string repositoryRoot)
+    {
+        ICodeGraphResolver resolver = codeGraph.ForRepository(repositoryRoot).Resolver;
+        if (!resolver.IsAvailable || !resolver.HasFilesUnder(AgentWorktreeFolder.Name))
+            return new DoctorCheck(NestedWorktreesCheckId, true, null, null);
+
+        return new DoctorCheck(
+            NestedWorktreesCheckId,
+            false,
+            $"the CodeGraph index holds files under {AgentWorktreeFolder.Name}/, the run worktree folder",
+            $"add '{AgentWorktreeFolder.ExcludeLine}' to .gitignore, then rebuild the index with 'codegraph index .'");
+    }
 
     /// <summary>The operating system this process runs on, in the terms the VS Code layout is keyed by.</summary>
     private static OSPlatform CurrentPlatform() =>

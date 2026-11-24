@@ -279,10 +279,58 @@ public sealed class GateRunService(
     }
 
     private static string MissingRequirementSummary(string path) =>
-        $"required path '{path}' is missing, so the gate did not start. " +
-        (path.StartsWith("dash/", StringComparison.Ordinal)
-            ? "Install the dashboard dependencies with 'npm install --prefix dash', then run the gate again."
-            : "Install whatever provides it, then run the gate again.");
+        $"required path '{path}' is missing, so the gate did not start. {MissingRequirementFix(path)}, then run the gate again.";
+
+    /// <summary>
+    /// How to provide a missing required path. A <c>node_modules</c> folder is provided by installing the package
+    /// that sits next to it, so <c>dash/web/node_modules</c> names <c>dash/web</c>, which has its own lock file, and not
+    /// <c>dash</c>; any other path has no install this code can name.
+    /// </summary>
+    private static string MissingRequirementFix(string path)
+    {
+        string[] segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length > 1 && string.Equals(segments[^1], "node_modules", StringComparison.Ordinal)
+            ? $"Install the dependencies with 'npm install --prefix {string.Join('/', segments[..^1])}'"
+            : "Install whatever provides it";
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<MissingGateRequirement> MissingRequirements(
+        ReviewConfig config,
+        string workingDirectory,
+        IReadOnlyCollection<string>? changedPaths)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+
+        List<MissingGateRequirement> missing = [];
+        foreach (ReviewGate gate in config.Gates)
+        {
+            if (AppliesWhenReason(gate, changedPaths) is not null)
+                continue;
+
+            foreach (string path in gate.RequiresPaths)
+            {
+                if (!PathExists(workingDirectory, path))
+                    missing.Add(new MissingGateRequirement(gate.Id, path, MissingRequirementFix(path)));
+            }
+        }
+
+        return missing;
+    }
+
+    /// <summary>Whether a required path exists; one that cannot be resolved counts as missing, as it does when the gate starts.</summary>
+    private bool PathExists(string root, string path)
+    {
+        try
+        {
+            return fileSystem.PathExists(Resolve(root, path));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+    }
 
     /// <summary>
     /// Reports a gate the council deadline passed before it could start. It never ran, so it is neither a pass nor

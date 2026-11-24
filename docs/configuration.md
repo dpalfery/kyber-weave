@@ -4,7 +4,7 @@ title: Configuration
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-23
 code-refs:
   - KyberWeaveConfig
   - KyberWeaveConfigDiagnosticCodes
@@ -824,11 +824,14 @@ reported as a refused blocking failure (`KW-REVIEW-033`, a gate that never start
 unless the caller asked for the whole suite with `--all`: under `--all` a refused gate ends the run at once,
 with no gate started and exit `1`, because the declared suite cannot be delivered.
 
-A gate may set `requires-paths`: a list of repository-relative paths the gate needs before it can start. The
-dash gates here declare `dash/node_modules`. When a listed path is absent the gate does not start — it reports
+A gate may set `requires-paths`: a list of repository-relative paths the gate needs before it can start. `ts-typecheck`, `ts-test` and `ts-lint` declare both `dash/node_modules` and `dash/web/node_modules`; `ts-reachable` declares `dash/node_modules` only. When a listed path is absent the gate does not start — it reports
 `exitCode: -1` and `outcome: "notStarted"` under `KW-REVIEW-033`, at Error when the gate is blocking and at
 Warning otherwise, with a summary that names the path and the install that unblocks it. It never passes, and it
-never reads as a code failure. An empty list, an empty entry, an absolute path, or a path containing `..` is
+never reads as a code failure. A `--council` or `--all` run does not wait to find out: before any gate or
+index sync it checks every gate it would start, and when any path is missing it refuses the whole run in seconds
+(exit `1`, one `KW-REVIEW-033` error per missing path naming the gate, the path and its fix, an empty `--out`
+report). Only a scoped run keeps the per-gate "not started" result. A path ending in `node_modules` gets the fix
+`npm install --prefix <the folder beside it>`. An empty list, an empty entry, an absolute path, or a path containing `..` is
 refused when the configuration loads, so an entry that could never name something inside the repository never
 reaches a run.
 

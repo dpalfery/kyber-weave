@@ -22,6 +22,20 @@ public interface IGateRunService
         string? baseRef = null,
         TimeSpan? deadline = null);
 
+    /// <summary>Lists the paths the gates that would start require and that do not exist.</summary>
+    /// <remarks>
+    /// "Would start" is decided by the same <c>applies-when</c> rule and the same path resolution <see cref="Run"/> uses,
+    /// so a preflight on this list cannot disagree with the run.
+    /// </remarks>
+    /// <param name="config">The host's review configuration.</param>
+    /// <param name="workingDirectory">The repository root the gates run against.</param>
+    /// <param name="changedPaths">Repository-relative paths the change touches, or null when no base was given; null admits every gate.</param>
+    /// <returns>One entry per missing path, in gate declaration order; empty when every required path exists.</returns>
+    IReadOnlyList<MissingGateRequirement> MissingRequirements(
+        ReviewConfig config,
+        string workingDirectory,
+        IReadOnlyCollection<string>? changedPaths);
+
     /// <summary>Runs one agent's planned task gates in the order they were declared.</summary>
     /// <param name="gates">The gates that will start, already expanded by the task-gate selection.</param>
     /// <param name="workingDirectory">The repository root the gates run against.</param>

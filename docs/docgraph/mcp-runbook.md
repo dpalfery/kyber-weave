@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-23
 decided-by:
   - adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session
   - adr/0052-docs-branch-writes-repository-scope-mcp-configuration
@@ -1808,6 +1808,7 @@ so a server that stops answering is killed rather than left behind. The rule and
 | `repository.root` | The path is not in a git repository, git cannot run, or the root is `$HOME` | `run kyber-weave doctor from inside a git repository`, or `cd into a repository and run kyber-weave doctor` |
 | `codegraph.binary` | `codegraph` is not on `PATH`, or `codegraph --version` does not finish | `install the codegraph CLI so that 'codegraph' is on PATH, then run: kyber-weave doctor --check` |
 | `codegraph.index` | No `.codegraph/` in `--check`, the directory is not writable, the index is damaged, `init`, `sync` or `index` fails, the index lock is busy, or the run exceeds `--index-timeout` | Depends on the cause; see [Provisioning rules](#provisioning-rules) |
+| `codegraph.nested-worktrees` | The CodeGraph index holds a file under `.agent_worktrees/`, the folder `run start` puts run worktrees in. Passes when the index is unavailable (`codegraph.index` reports that). Runs in `--check`, `--provision` and `--ensure`, not `--post-checkout`; with `stop-on-tool-failure: false` an `--ensure` run reports it as a warning | `add '.agent_worktrees/' to .gitignore, then rebuild the index with 'codegraph index .'` |
 | `codegraph.restore` | `--ensure` and `--post-checkout`, and only when it reports something: the index preparation modified a tracked file that was clean before it ran, and the run reverted that file. Absent when the preparation wrote nothing | The paths it restored. Nothing is wrong with the repository; a file the index itself rewrote is not the operator's work |
 | `codegraph.explore` | `--ensure` only: the one `codegraph explore` proof did not answer, even after a single repair with `codegraph index` | Run `codegraph explore README` from the root for the child's own error, then `kyber-weave doctor --ensure` again |
 | `mcp.start` | `kyber-weave-mcp` cannot be started | `kyber-weave update` |

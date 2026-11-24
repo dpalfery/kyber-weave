@@ -4,7 +4,7 @@ title: Runs start from the fetched remote and carry the harness name
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-07
+last-reviewed: 2026-11-23
 code-refs:
   - RunStartCommand
   - RunStartPlanner
@@ -16,7 +16,7 @@ code-refs:
 
 ## Status
 
-Accepted, 2026-11-07.
+Accepted, 2026-11-07. Amended 2026-11-23: run worktrees live inside the repository (decision 4).
 
 ## Context
 
@@ -61,8 +61,11 @@ checkout somebody has already moved.
    `2` refused input, `3` the `codegraph` binary is missing. `--json` prints the facts a dispatching
    caller needs — `base`, `baseRef`, `branch`, `worktree`, `location`, `revision`, `resumed`,
    `versions`, `serverAlignment` — so it reads a result rather than parsing prose. A clean checkout
-   with no second worktree is branched in place; a dirty or shared one gets a worktree beside the
-   repository. Where the harness gives the conductor no shell, it dispatches `github-devops` with
+   with no second worktree is branched in place; a dirty or shared one gets a worktree inside the
+   repository at `.agent_worktrees/<stamp>-<branch>` (amended 2026-11-23: unattended harnesses refuse
+   folders outside the session folder, so a sibling folder made workers improvise their own worktrees;
+   run start writes `.agent_worktrees/` to `.git/info/exclude` first and stops if it cannot, onboarding
+   adds it to `.gitignore`, and `doctor` fails when the index holds a file under it). Where the harness gives the conductor no shell, it dispatches `github-devops` with
    the exact command and a `RUN-START: true` marker, which the Arbiter's `TriggerClassifier`
    classifies as `investigate` so `KW-ARB-PLAN-001` does not refuse the route the marker exists for.
 5. **The name format (D42).** Branch `[<owner>.<agent>.]<harness>/<type>/<slug>`, for example

@@ -18,8 +18,9 @@ internal sealed class InMemoryDoctorWorld
     /// <summary>The reply a healthy server gives <c>initialize</c>.</summary>
     private const string Initialize = DoctorHarness.InitializeReply;
 
-    /// <summary>Creates a world holding an empty repository root.</summary>
-    internal InMemoryDoctorWorld()
+    /// <summary>Creates a world holding an empty repository root, whose CodeGraph index reports the files <paramref name="resolver"/> holds.</summary>
+    /// <param name="resolver">The index the doctor reads through its ports factory. Null is an index holding no files.</param>
+    internal InMemoryDoctorWorld(ICodeGraphResolver? resolver = null)
     {
         Files = new InMemoryFileSystem();
         Root = Path.Combine(Files.Root, "kw", "repo");
@@ -48,7 +49,8 @@ internal sealed class InMemoryDoctorWorld
             DoctorFiles,
             ToolSettings,
             Environment,
-            Paths);
+            Paths,
+            new FakeCodeGraphPortsFactory(resolver ?? FakeCodeGraphResolver.WithNodes()));
     }
 
     /// <summary>Gets the in-memory file system.</summary>
