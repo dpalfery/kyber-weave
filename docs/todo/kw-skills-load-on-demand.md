@@ -36,38 +36,58 @@ In scope:
 
 - **One shared pool.** A KW skill is a folder `standards/skills/<name>/` holding `SKILL.md`. Its frontmatter carries
   `name` and `description`, the same shape harness skills use, so a skill copies between the two unchanged. A skill
-  folder may also hold reference files (for example under `references/`).
+  folder may also hold reference files (for example under `references/`). A skill name is lowercase letters, digits
+  and hyphens, starting with a letter or digit (`^[a-z0-9][a-z0-9-]*$`); no other name is a skill.
 - **Assignment by list.** Each technology and each role assigns zero or more skills in a `<scope>.skills.yml` file in
   its standards folder: a YAML list of skill names, nothing else. The description is read from the skill's own
-  frontmatter and is written nowhere else. The `.yml` file replaces today's `<scope>.skills.md`.
+  frontmatter and is written nowhere else. The `.yml` file replaces today's `<scope>.skills.md`. A scope with no
+  `.skills.yml` assigns no skills; an empty list means the same.
 - **Inheritance.** A child technology's skills are its parent's list plus its own, the same way rules inherit (react
-  gets typescript's skills).
+  gets typescript's skills). The merged list keeps the parent's names first, then the child's, and lists a name once,
+  at its first position.
 - **Shipped and repository skills.** Kyber ships a starter set of KW skills, and `docs init` copies them into the
   repository's pool. A repository may add its own. When a shipped skill and a repository skill share a name, the
-  repository's skill wins.
+  repository's skill wins, in the injected list (its description) and in `load_skill` (its body and folder) alike.
 - **Injection at agent start, for every agent.** The same dispatch hook that inserts rules and standards inserts a
   skills section for every Squad agent it starts, worker and role alike:
   - A worker gets the skills of its task's technology (and its parent's).
-  - A role agent (architect, code-reviewer, plan-reviewer, docs-dev and the others with a role standards folder) gets
-    its role's skills, chosen from the agent's name even when the dispatch names no task and no technology.
-  - The section is wrapped in an XML tag and lists one entry per skill with its `name` and `description`.
+  - A role agent gets its role folder's skills, even when the dispatch names no task and no technology. The agent's
+    name maps to a role folder by exact match on this fixed table: `conductor` → `conductor`, `architect` →
+    `architect`, `code-reviewer` → `reviewer`, `plan-reviewer` → `reviewer`. An agent not in the table (for example
+    `docs-dev` today) has no role folder and gets no role skills; a new role folder adds its row to the table.
+  - The section is wrapped in one `<kyber-weave-skills>` tag and lists one entry per skill with its `name` and
+    `description`, each XML-escaped, so a description cannot close or forge the tag.
+  - A listed skill that has no folder or a malformed `SKILL.md` is left out of the entries, and the section ends with
+    one line naming each left-out skill, so a partial list never reads as complete. `docs validate` reports the same
+    skills.
+  - When the task-prompt budget cuts the section, the section says it is partial and names the skills it left out,
+    through the budget's existing left-out reporting.
   - The section opens with one instruction: these are Kyber-Weave skills, not harness skills; load one by calling
     kw-docs `load_skill` with its name when its description fits the work, and never through the harness's own skill
     tool.
   - An agent with no assigned skills gets no section.
 - **`load_skill` on the kw-docs MCP server.**
-  - Takes a skill name and an optional `projectPath`, the same way the other kw-docs tools do.
+  - Takes a skill name and an optional `projectPath`, the same way the other kw-docs tools do. A name that is not a
+    skill name (see the pool rule: no `/`, `\`, `..` or rooted path) is refused before any file is read.
+  - Reads only inside the pool: the resolved skill folder, after following any link, must lie inside the repository
+    pool or the shipped pool, or the skill is refused as outside the pool.
   - Returns the skill's `SKILL.md` body, the folder the skill was read from, and the absolute path of each reference
     file in the skill folder. The agent reads reference files with its own read tool; the server adds no read tool for
-    them.
+    them. Reference paths are every regular file under the skill folder except `SKILL.md`, in ordinal path order,
+    leaving out any link that resolves outside the folder, and at most 100 paths; past 100 the reply says how many
+    more there are.
   - Resolves the repository copy before the shipped copy.
   - Answers an unknown name with the list of skill names that exist, and a malformed skill (no `name` or
-    `description`) with what is missing; neither is a tool failure.
+    `description`) with what is missing; neither is a tool failure. Each of these replies opens with a status line a
+    caller can match: `STATUS: SKILL_NOT_FOUND`, `STATUS: SKILL_MALFORMED`, `STATUS: SKILL_NAME_INVALID` or
+    `STATUS: SKILL_OUTSIDE_POOL`.
   - Starts with the provenance line every kw-docs response carries.
 - **Validation.** `docs validate` reports:
   - a `.skills.yml` that is not a list of names;
   - a listed skill with no folder in the pool;
-  - a `SKILL.md` with no `name` or no `description`, or whose `name` is not its folder's name.
+  - a `SKILL.md` with no `name` or no `description`, or whose `name` is not its folder's name;
+  - a skill folder whose name is not a skill name;
+  - a `<scope>.skills.md` left in a standards folder after migration.
 - **Never deployed to a harness.** `squad update` does not copy KW skills into any harness skill folder.
 - **KyberDash.** Each `load_skill` call is recorded with the skill, the agent, the session and the time. KyberDash
   shows KW skill loads in their own section, separate from harness skill use. Recording only: nothing is blocked or
@@ -87,8 +107,8 @@ In scope:
 ## Assumptions
 
 - Every Squad agent has a read tool, so reference-file paths are enough.
-- Role names match the role standards folders the templates already ship (`architect`, `reviewer` and the others), and
-  each role agent maps to one of them.
+- The role folders the templates ship today are `conductor`, `architect` and `reviewer`; the role table above maps
+  the role agents onto them.
 - The skills section is small enough to fit the existing task-prompt budget; when it does not, the budget's
   existing left-out reporting names it.
 
@@ -111,12 +131,20 @@ KyberDash shows which skills agents actually load, so unused skills can be cut a
 - When the repository and the shipped set both hold a skill with the same name, `load_skill` and the skills section
   both use the repository's copy.
 - `load_skill` with an unknown name returns the names that exist and is not a tool failure.
+- `load_skill` with `../x`, a rooted path, or a name whose folder links outside the pool reads no file and answers
+  `STATUS: SKILL_NAME_INVALID` or `STATUS: SKILL_OUTSIDE_POOL`.
+- A skill listed by both a parent and its child technology appears once, in the parent's position.
+- A description containing `</kyber-weave-skills>` is escaped and does not end the section.
+- `code-reviewer` and `plan-reviewer` get the `reviewer` folder's skills; an agent with no row in the role table gets
+  no role section.
+- A listed skill with no folder is named on the section's left-out line, not silently dropped.
 - `docs validate` reports a listed skill that has no folder, a `SKILL.md` missing `name` or `description`, a `name`
   that differs from its folder, and a `.skills.yml` that is not a list of names.
 - After `squad update`, no harness skill folder contains a KW skill.
 - After an agent calls `load_skill`, KyberDash shows the load in a KW skills section, separate from harness skills,
   with the skill, agent and session.
-- No shipped standards folder contains a `.skills.md`; each has a `.skills.yml`, and `docs init` writes `.skills.yml`.
+- No shipped standards folder contains a `.skills.md`; each folder that assigns skills has a `.skills.yml`, a folder
+  that assigns none needs no file, and `docs init` writes `.skills.yml`.
 
 ## Suggested tests
 
