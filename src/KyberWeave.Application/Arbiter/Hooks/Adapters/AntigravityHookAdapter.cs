@@ -237,9 +237,10 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
                 ?? throw new InvalidOperationException(
                     "Malformed Antigravity hook event: a Subagents element is not an object.");
             string prompt = GetString(subagent, "Prompt") ?? string.Empty;
+            string? subagentType = GetString(subagent, "TypeName");
             if (IsMarked(prompt))
             {
-                DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+                DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, subagentType);
                 if (insertion.Kind == DispatchInsertionKind.Stopped)
                 {
                     return RenderDeny(insertion.Reason!);
@@ -263,9 +264,10 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
         }
 
         string flatPrompt = GetString(args, "Prompt") ?? string.Empty;
+        string? flatType = GetString(args, "TypeName");
         if (IsMarked(flatPrompt))
         {
-            DispatchInsertion flat = DispatchPromptInsertion.Expand(flatPrompt, context);
+            DispatchInsertion flat = DispatchPromptInsertion.Expand(flatPrompt, context, flatType);
             if (flat.Kind == DispatchInsertionKind.Stopped)
             {
                 return RenderDeny(flat.Reason!);
@@ -285,12 +287,13 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
     private static string? FlatInsertion(JsonElement args, HookContext context)
     {
         string prompt = GetString(args, "Prompt") ?? string.Empty;
+        string? type = GetString(args, "TypeName");
         if (!IsMarked(prompt))
         {
             return null;
         }
 
-        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, type);
         return insertion.Kind switch
         {
             DispatchInsertionKind.Stopped => RenderDeny(insertion.Reason!),

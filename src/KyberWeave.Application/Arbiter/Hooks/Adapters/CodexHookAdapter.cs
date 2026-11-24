@@ -115,7 +115,7 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
 
         JsonElement toolInput = RequireToolInput(payload);
         string message = GetString(toolInput, "message") ?? string.Empty;
-        DispatchInsertion insertion = DispatchPromptInsertion.Expand(message, context);
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(message, context, GetString(toolInput, "agent_type"));
         return insertion.Kind switch
         {
             DispatchInsertionKind.Inserted => RenderPreAllowPrompt(toolInput, insertion.Text),
@@ -145,7 +145,7 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
         HookOutcome outcome = DecidePre(payload, caller, target, message, config, context);
 
         // The rules judge the short dispatch first; the prompt is inserted only for a dispatch they allowed.
-        DispatchInsertion insertion = DispatchPromptInsertion.Expand(message, context);
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(message, context, target);
         if (outcome.Kind == HookOutcomeKind.Deny)
         {
             return RenderPreDeny(

@@ -7,13 +7,15 @@ namespace KyberWeave.Arbiter.Hooks;
 /// <param name="PriorResultsPath">The <c>PRIOR_RESULTS</c> header's value, the file a retry's earlier results live in.</param>
 /// <param name="FailedAttempts">The <c>FAILED_ATTEMPTS</c> header's value; zero when the header is absent or unreadable.</param>
 /// <param name="RetryText">The lines below the header block, which ride after the prompt; the budget reserves room for them.</param>
+/// <param name="Target">The dispatched agent, whose role skills a dispatch with no task or technology gets; null when none is named.</param>
 public sealed record DispatchPromptQuery(
     string? TaskId,
     string? PlanFile,
     string? Technology,
     string? PriorResultsPath,
     int FailedAttempts,
-    string? RetryText = null);
+    string? RetryText = null,
+    string? Target = null);
 
 /// <summary>One prompt the hook built, or why it could not be built.</summary>
 /// <param name="Built">Whether <paramref name="Prompt"/> holds a prompt.</param>

@@ -155,7 +155,8 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 
             JsonElement toolInput = RequireToolInput(payload);
             string prompt = GetString(toolInput, "prompt") ?? string.Empty;
-            DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+            DispatchInsertion insertion = DispatchPromptInsertion.Expand(
+                prompt, context, GetString(toolInput, "agentName"));
             return insertion.Kind switch
             {
                 DispatchInsertionKind.Inserted => RenderLocalPreAllowPrompt(toolInput, insertion.Text),
@@ -195,7 +196,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 
         JsonObject args = ParseCliArgs(payload);
         string cliPrompt = GetNodeString(args, "prompt") ?? string.Empty;
-        DispatchInsertion cliInsertion = DispatchPromptInsertion.Expand(cliPrompt, context);
+        DispatchInsertion cliInsertion = DispatchPromptInsertion.Expand(cliPrompt, context, GetNodeString(args, "agent_type"));
         return cliInsertion.Kind switch
         {
             DispatchInsertionKind.Inserted => RenderCliAllowPrompt(args, cliInsertion.Text),
@@ -401,7 +402,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
                 _harnessToken, payload, caller, target, prompt, config, context);
 
             // The rules judge the short dispatch first; the prompt is inserted only for a dispatch they allowed.
-            DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+            DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, target);
             if (outcome.Kind == HookOutcomeKind.Deny)
             {
                 return RenderLocalPreDeny(
@@ -570,7 +571,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         {
             // The rules judge the short dispatch; the insertion is computed first because the ledger pairs the return
             // with the prompt the worker runs, and an inserted packet replaces the dispatch the post event carries.
-            DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+            DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, target);
             HookOutcome outcome = DecidePre(
                 _harnessToken,
                 payload,

@@ -98,7 +98,7 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
 
         JsonElement toolInput = RequireToolInput(payload);
         string prompt = GetString(toolInput, "prompt") ?? string.Empty;
-        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, GetString(toolInput, "profile"));
         return insertion.Kind switch
         {
             DispatchInsertionKind.Inserted => RenderMergePrompt(insertion.Text),
@@ -178,7 +178,7 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
         }
 
         // The rules judge the short dispatch first; the prompt is inserted only for a dispatch they allowed.
-        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, target);
         if (insertion.Kind == DispatchInsertionKind.Stopped)
         {
             return RenderPreDeny(insertion.Reason!);

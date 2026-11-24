@@ -40,7 +40,7 @@ public static partial class DispatchPromptInsertion
         "<shared-rules>",
         "<parent-rules>",
         "<technology-rules>",
-        "<skills>",
+        "<kw-skills>",
         "<standard>",
         "<left-out>",
     ];
@@ -102,11 +102,15 @@ public static partial class DispatchPromptInsertion
     /// <summary>Expands the dispatch's identity line into the full prompt, or says why it cannot.</summary>
     /// <param name="prompt">The dispatch text as the harness sent it.</param>
     /// <param name="context">The hook context carrying the prompt service, when the host installed one.</param>
+    /// <param name="target">
+    /// The dispatched agent (<c>subagent_type</c> or the harness equivalent), or null when the harness names none.
+    /// A dispatch with no task or technology but a target gets a role-only prompt of that role's skills.
+    /// </param>
     /// <returns>
     /// <see cref="DispatchInsertionKind.None"/> when there is nothing to insert, the dispatch's new text when the
     /// prompt was built, and the repair command when it could not be.
     /// </returns>
-    public static DispatchInsertion Expand(string prompt, HookContext context)
+    public static DispatchInsertion Expand(string prompt, HookContext context, string? target = null)
     {
         ArgumentNullException.ThrowIfNull(prompt);
         ArgumentNullException.ThrowIfNull(context);
@@ -119,7 +123,9 @@ public static partial class DispatchPromptInsertion
         DispatchHeaders headers = DispatchHeaders.Parse(prompt);
         if (headers.TaskId is null && headers.Technology is null)
         {
-            return DispatchInsertion.None;
+            return string.IsNullOrWhiteSpace(target)
+                ? DispatchInsertion.None
+                : ExpandRole(prompt, context, target.Trim());
         }
 
         if (context.BuildDispatchPrompt is null)
@@ -136,7 +142,8 @@ public static partial class DispatchPromptInsertion
                 headers.Technology,
                 headers.PriorResultsPath,
                 headers.FailedAttempts,
-                headers.Body)) ?? new DispatchPromptExpansion(false, string.Empty, Why(headers));
+                headers.Body,
+                target)) ?? new DispatchPromptExpansion(false, string.Empty, Why(headers));
         }
         catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
@@ -156,6 +163,42 @@ public static partial class DispatchPromptInsertion
         return new DispatchInsertion(
             DispatchInsertionKind.Inserted,
             body.Length == 0 ? expansion.Prompt : expansion.Prompt + "\n\n" + body);
+    }
+
+    /// <summary>
+    /// Puts a role's skills in front of a dispatch that names no task or technology. Never a stop: a role with no
+    /// skills, a refusal, an unbuilt prompt or a build failure all leave the dispatch unchanged.
+    /// </summary>
+    /// <param name="prompt">The dispatch text, kept unchanged below the inserted block.</param>
+    /// <param name="context">The hook context carrying the prompt service.</param>
+    /// <param name="target">The dispatched agent.</param>
+    private static DispatchInsertion ExpandRole(string prompt, HookContext context, string target)
+    {
+        if (context.BuildDispatchPrompt is null)
+        {
+            return DispatchInsertion.None;
+        }
+
+        DispatchPromptExpansion? expansion;
+        try
+        {
+            expansion = context.BuildDispatchPrompt(
+                new DispatchPromptQuery(null, null, null, null, 0, prompt, target));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
+        {
+            context.Log.WriteLine($"Arbiter: the role skills for '{target}' could not be built ({ex.Message}). The dispatch continues unchanged.");
+            return DispatchInsertion.None;
+        }
+
+        if (expansion is not { Built: true } || string.IsNullOrWhiteSpace(expansion.Prompt))
+        {
+            return DispatchInsertion.None;
+        }
+
+        return new DispatchInsertion(
+            DispatchInsertionKind.Inserted,
+            prompt.Length == 0 ? expansion.Prompt : expansion.Prompt + "\n\n" + prompt);
     }
 
     /// <summary>The instruction a stopped dispatch carries, naming the command that prints the same prompt.</summary>
