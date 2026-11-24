@@ -259,36 +259,39 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
     /// <remarks>
     /// A skill folder the repository already has is never touched, <c>force</c> or not: the repository's pool
     /// wins a name over the shipped one, so an existing folder is the operator's own version. Only scopes whose
-    /// list came from a shipped template are read; a stub list is empty and names nothing.
+    /// list came from a shipped template are read; a stub list is empty and names nothing. A list that names a
+    /// skill the build does not ship stops the scaffold: the list and the pool ship together or not at all.
     /// </remarks>
     private IEnumerable<ScaffoldedFile> CopyShippedSkills(
         string repoRoot,
         string docsRoot,
         IReadOnlyList<string> scopes)
     {
-        SortedSet<string> names = new(StringComparer.Ordinal);
+        // The scope that first names a skill is kept, so the failure below can name the list.
+        Dictionary<string, string> listedBy = new(StringComparer.Ordinal);
         foreach (string scope in scopes)
         {
             foreach (string name in ListedSkills(scope))
             {
-                names.Add(name);
+                listedBy.TryAdd(name, scope);
             }
 
             if (ParentOf(scope) is { } parent)
             {
                 foreach (string name in ListedSkills(parent))
                 {
-                    names.Add(name);
+                    listedBy.TryAdd(name, parent);
                 }
             }
         }
 
         List<ScaffoldedFile> written = [];
-        foreach (string name in names)
+        foreach ((string name, string scope) in listedBy.OrderBy(pair => pair.Key, StringComparer.Ordinal))
         {
             if (!_templates.TryReadShippedSkill(name, out IReadOnlyList<ShippedSkillFile>? skill))
             {
-                continue;
+                throw new InvalidDataException(
+                    $"The shipped '{scope}' skills list names '{name}', which the build does not ship.");
             }
 
             string folder = $"{docsRoot}/{DocsLayout.Standards}/skills/{name}";
