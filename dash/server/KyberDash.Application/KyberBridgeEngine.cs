@@ -1085,8 +1085,19 @@ public class KyberBridgeEngine
         string? scopedSpan = spanId;
         if (string.IsNullOrEmpty(scopedSpan) && turnIndex.HasValue)
         {
-            (ReadTimeTurnSummary? turn, _) = TryTurnFigures(sessionId, turnIndex.Value);
+            (ReadTimeTurnSummary? turn, string? projectionStatus) = TryTurnFigures(sessionId, turnIndex.Value);
             scopedSpan = turn?.SpanId;
+            if (turn is null)
+            {
+                // The turn index resolves through the figures, so with no figures there is no turn
+                // to read: an out-of-range index answers 404, and a faulted read answers the
+                // section routes' PROJECTION_FAILED convention. Either way the unscoped
+                // whole-session content pass must not run — its loop would pick the Nth record by
+                // index, not turn N.
+                return projectionStatus is not null
+                    ? ProjectionFailedContentPayload(sessionId)
+                    : null;
+            }
         }
 
         List<CanonicalRecord> selected = string.IsNullOrEmpty(scopedSpan)
@@ -2506,6 +2517,20 @@ public class KyberBridgeEngine
             return (null, ProjectionFailedStatus);
         }
     }
+
+    /// <summary>
+    /// The payload the content route answers when the requested turn's figures read faulted: the
+    /// session identity plus the section routes' <see cref="ProjectionFailedStatus"/> marker, with
+    /// no content to serve.
+    /// </summary>
+    private static JsonElement ProjectionFailedContentPayload(string sessionId) =>
+        JsonSerializer.SerializeToElement(new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["sessionId"] = sessionId,
+            ["projection_status"] = ProjectionFailedStatus,
+            ["parts"] = Array.Empty<object>(),
+            ["items"] = Array.Empty<object>(),
+        }, CamelCaseJsonOptions);
 
     /// <summary>
     /// The payload the turn routes answer when this turn's figures read faulted: identity plus the

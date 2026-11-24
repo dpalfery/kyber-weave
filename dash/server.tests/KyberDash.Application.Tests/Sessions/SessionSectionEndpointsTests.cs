@@ -248,6 +248,48 @@ public sealed class SessionSectionEndpointsTests
     }
 
     /// <summary>
+    /// The content route's turn filter resolves through the turn figures, so a turn index that
+    /// resolves to no span reads nothing: out of range answers null (404), and a faulted figures
+    /// read answers the section routes' <c>PROJECTION_FAILED</c> payload. Neither may fall through
+    /// to the unscoped whole-session content pass, whose loop would pick the Nth record by index
+    /// rather than turn N.
+    /// </summary>
+    [Fact]
+    public void TheContentRouteDoesNotReadUnscopedContentWhenTheTurnIndexCannotResolve()
+    {
+        TurnFiguresFaultingStore store = new();
+        FakePricingRepository pricing = new();
+        const string brokenKey = "sess-turn-broken";
+        const string healthyKey = "sess-turn-ok";
+        WriteSession(store, brokenKey, [
+            Turn($"{brokenKey}-0", brokenKey, 0, inputTokens: 1_000, outputTokens: 100, parts: [TextPart(0, "user_prompt", "broken one")]),
+            Turn($"{brokenKey}-1", brokenKey, 1, inputTokens: 1_100, outputTokens: 110, parts: [TextPart(0, "user_prompt", "broken two")]),
+        ]);
+        WriteSession(store, healthyKey, [
+            Turn($"{healthyKey}-0", healthyKey, 0, inputTokens: 1_000, outputTokens: 100, parts: [TextPart(0, "user_prompt", "healthy one")]),
+            Turn($"{healthyKey}-1", healthyKey, 1, inputTokens: 1_100, outputTokens: 110, parts: [TextPart(0, "user_prompt", "healthy two")]),
+        ]);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        // A faulted figures read: the failure payload, with no content read at all.
+        store.ClearReadLog();
+        JsonElement? faulted = bridge.GetSessionContent(brokenKey, turnIndex: 1);
+        Assert.NotNull(faulted);
+        Assert.Equal(brokenKey, faulted.Value.GetProperty("sessionId").GetString());
+        Assert.Equal("PROJECTION_FAILED", faulted.Value.GetProperty("projection_status").GetString());
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.TurnContentParts), store.ReadLog);
+
+        // Out of range on a readable session: 404, and no content read either.
+        store.ClearReadLog();
+        Assert.Null(bridge.GetSessionContent(healthyKey, turnIndex: 9));
+        Assert.Equal(0, store.MaterializedContentBytes);
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.TurnContentParts), store.ReadLog);
+    }
+
+    /// <summary>
     /// The requests section pages today's request rows at 25 with the true total, and carries the
     /// prompt previews the page's requests own — read in one scoped pass over exactly the page's
     /// request spans, never the session's whole conversation.
