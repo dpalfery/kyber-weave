@@ -97,7 +97,7 @@ public class StandardsFolderMigrationScenarioTests
         Assert.False(_host.Files.FileExists(Path.Combine(folder, "README.md")));
         Assert.Equal(LegacyCsharp, _host.Files.ReadAllText(StandardPath(_host.Repo, "csharp")));
         Assert.True(_host.Files.FileExists(Path.Combine(folder, "csharp.rules.md")));
-        Assert.True(_host.Files.FileExists(Path.Combine(folder, "csharp.skills.md")));
+        Assert.True(_host.Files.FileExists(Path.Combine(folder, "csharp.skills.yml")));
         Assert.True(_host.Files.FileExists(Path.Combine(folder, "csharp.arbiter-rules.yml")));
     }
 
@@ -159,9 +159,8 @@ public class StandardsFolderMigrationScenarioTests
         Assert.Contains("role: reviewer", standard, StringComparison.Ordinal);
         Assert.Contains("## Done checklist", standard, StringComparison.Ordinal);
 
-        string skills = _host.Files.ReadAllText(Path.Combine(folder, "reviewer.skills.md"));
-        Assert.Contains("doc-type: skill", skills, StringComparison.Ordinal);
-        Assert.Contains("role: reviewer", skills, StringComparison.Ordinal);
+        Assert.Equal("[]\n", _host.Files.ReadAllText(Path.Combine(folder, "reviewer.skills.yml")));
+        Assert.False(_host.Files.FileExists(Path.Combine(folder, "reviewer.skills.md")));
     }
 
     [Fact]

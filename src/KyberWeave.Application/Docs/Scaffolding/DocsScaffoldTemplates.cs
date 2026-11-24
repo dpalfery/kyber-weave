@@ -253,27 +253,11 @@ public static class DocsScaffoldTemplates
         """;
     }
 
-    /// <summary>Builds the skills stub for a declared technology with no shipped template.</summary>
-    public static string TechnologySkills(string technology, string owner, string today)
-    {
-        string yamlOwner = HostConfigYaml.QuoteScalar(owner);
-        return $"""
-        ---
-        id: standards/{technology}/skills
-        title: "{technology} skills"
-        doc-type: skill
-        status: draft
-        technology: {technology}
-        owner: {yamlOwner}
-        last-reviewed: {today}
-        ---
-
-        # {technology} skills
-
-        How to carry out the common work in {technology}: the commands, tool servers and query
-        patterns this repository uses.
-        """;
-    }
+    /// <summary>
+    /// Builds the skills list for a declared scope with no shipped template: an empty YAML list, because a
+    /// list names skills and a scope that has none lists none.
+    /// </summary>
+    public static string SkillsList() => "[]\n";
 
     /// <summary>Builds the empty Arbiter rules file for a declared technology.</summary>
     public static string TechnologyArbiterRules(string technology) =>
@@ -334,27 +318,6 @@ public static class DocsScaffoldTemplates
         # {role} rules
 
         Rules that apply wherever the {role} role works.
-        """;
-    }
-
-    /// <summary>Builds the skills stub for a declared role.</summary>
-    public static string RoleSkills(string role, string owner, string today)
-    {
-        string yamlOwner = HostConfigYaml.QuoteScalar(owner);
-        return $"""
-        ---
-        id: standards/{role}/skills
-        title: "{role} skills"
-        doc-type: skill
-        status: draft
-        role: {role}
-        owner: {yamlOwner}
-        last-reviewed: {today}
-        ---
-
-        # {role} skills
-
-        How to carry out the {role} role's work in this repository.
         """;
     }
 

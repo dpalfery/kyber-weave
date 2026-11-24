@@ -4,7 +4,11 @@ using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.Model;
+using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Review.Catalogue;
+using YamlDotNet.Core;
+using YamlDotNet.RepresentationModel;
 
 namespace KyberWeave.Core.Docs.Scaffolding;
 
@@ -224,6 +228,11 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
             }
         }
 
+        files.AddRange(CopyShippedSkills(
+            root,
+            resolvedDocsRoot,
+            [.. ontology.Technologies.Where(templatedTechnologies.Contains), .. ontology.Roles]));
+
         if ((kyberStandards || standards is { Count: > 0 })
             && _templates.TryRenderSharedRules(resolvedOwner, Today, out string? sharedRules))
         {
@@ -241,6 +250,118 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         {
             ReviewGates = BuildReviewOutcome(root, reviewPlan, hadReviewSection, loadedConfig.Config?.Review)
         };
+    }
+
+    /// <summary>
+    /// Copies the shipped KW skills the written lists name, and each scope's parent's, into the repository's
+    /// pool at <c>&lt;docs-root&gt;/standards/skills</c>.
+    /// </summary>
+    /// <remarks>
+    /// A skill folder the repository already has is never touched, <c>force</c> or not: the repository's pool
+    /// wins a name over the shipped one, so an existing folder is the operator's own version. Only scopes whose
+    /// list came from a shipped template are read; a stub list is empty and names nothing.
+    /// </remarks>
+    private IEnumerable<ScaffoldedFile> CopyShippedSkills(
+        string repoRoot,
+        string docsRoot,
+        IReadOnlyList<string> scopes)
+    {
+        SortedSet<string> names = new(StringComparer.Ordinal);
+        foreach (string scope in scopes)
+        {
+            foreach (string name in ListedSkills(scope))
+            {
+                names.Add(name);
+            }
+
+            if (ParentOf(scope) is { } parent)
+            {
+                foreach (string name in ListedSkills(parent))
+                {
+                    names.Add(name);
+                }
+            }
+        }
+
+        List<ScaffoldedFile> written = [];
+        foreach (string name in names)
+        {
+            if (!_templates.TryReadShippedSkill(name, out IReadOnlyList<ShippedSkillFile>? skill))
+            {
+                continue;
+            }
+
+            string folder = $"{docsRoot}/{DocsLayout.Standards}/skills/{name}";
+            if (_files.DirectoryExists(RequireContained(repoRoot, folder, nameof(docsRoot))))
+            {
+                written.Add(new ScaffoldedFile(
+                    $"{folder}/SKILL.md", ScaffoldOutcome.Skipped, "the repository already has this skill folder"));
+                continue;
+            }
+
+            foreach (ShippedSkillFile file in skill)
+            {
+                string relative = $"{folder}/{file.RelativePath}";
+                string absolute = RequireContained(repoRoot, relative, nameof(docsRoot));
+                _files.CreateDirectory(Path.GetDirectoryName(absolute)!);
+                _files.WriteAllBytes(absolute, file.Bytes.ToArray());
+                written.Add(new ScaffoldedFile(relative, ScaffoldOutcome.Created));
+            }
+        }
+
+        return written;
+    }
+
+    /// <summary>The skill names a shipped scope's list holds; none when the build ships no list for it.</summary>
+    private IReadOnlyList<string> ListedSkills(string scope)
+    {
+        if (!_templates.TryGetPart(scope, KyberStandardsTemplates.Part.Skills, out string? text))
+        {
+            return [];
+        }
+
+        try
+        {
+            YamlStream stream = new();
+            stream.Load(new StringReader(text));
+            if (stream.Documents.Count == 1
+                && stream.Documents[0].RootNode is YamlSequenceNode sequence
+                && sequence.Children.All(child => child is YamlScalarNode { Value: { Length: > 0 } }))
+            {
+                return [.. sequence.Children.Cast<YamlScalarNode>().Select(node => node.Value!.Trim())];
+            }
+        }
+        catch (YamlException exception)
+        {
+            throw new InvalidDataException($"The shipped '{scope}' skills list is not valid YAML: {exception.Message}", exception);
+        }
+
+        throw new InvalidDataException($"The shipped '{scope}' skills list is not a YAML sequence of skill names.");
+    }
+
+    /// <summary>The technology a shipped standard builds on, or null when it builds on none.</summary>
+    private string? ParentOf(string scope)
+    {
+        if (!_templates.TryGetPart(scope, KyberStandardsTemplates.Part.Standard, out string? standard))
+        {
+            return null;
+        }
+
+        FrontmatterReadResult read = MarkdownFrontmatterReader.Read(standard);
+        if (!read.HasFrontmatter)
+        {
+            return null;
+        }
+
+        try
+        {
+            string? parent = MarkdownFrontmatterReader.Deserializer.Deserialize<DocumentFrontmatter>(read.Yaml)?.BuildsOn?.Trim();
+            return string.IsNullOrEmpty(parent) || string.Equals(parent, scope, StringComparison.Ordinal) ? null : parent;
+        }
+        catch (YamlException exception)
+        {
+            throw new InvalidDataException($"The shipped '{scope}' standard has unreadable frontmatter: {exception.Message}", exception);
+        }
     }
 
     /// <summary>
@@ -272,7 +393,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
             KyberStandardsTemplates.Part.Rules =>
                 DocsScaffoldTemplates.RoleRules(role, owner, Today),
             KyberStandardsTemplates.Part.Skills =>
-                DocsScaffoldTemplates.RoleSkills(role, owner, Today),
+                DocsScaffoldTemplates.SkillsList(),
             KyberStandardsTemplates.Part.ArbiterRules =>
                 DocsScaffoldTemplates.TechnologyArbiterRules(role),
             _ => throw new ArgumentOutOfRangeException(nameof(part))
@@ -326,7 +447,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
             KyberStandardsTemplates.Part.Rules =>
                 DocsScaffoldTemplates.TechnologyRules(technology, owner, Today),
             KyberStandardsTemplates.Part.Skills =>
-                DocsScaffoldTemplates.TechnologySkills(technology, owner, Today),
+                DocsScaffoldTemplates.SkillsList(),
             KyberStandardsTemplates.Part.ArbiterRules =>
                 DocsScaffoldTemplates.TechnologyArbiterRules(technology),
             _ => throw new ArgumentOutOfRangeException(nameof(part))

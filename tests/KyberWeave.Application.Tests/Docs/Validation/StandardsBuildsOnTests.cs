@@ -66,7 +66,7 @@ public class StandardsBuildsOnTests
         fixture
             .Write($"6-Docs/standards/{technology}/{technology}.standards.md", Standard(technology, buildsOn))
             .Write($"6-Docs/standards/{technology}/{technology}.rules.md", Scoped(technology, "rules"))
-            .Write($"6-Docs/standards/{technology}/{technology}.skills.md", Scoped(technology, "skills"))
+            .Write($"6-Docs/standards/{technology}/{technology}.skills.yml", "[]\n")
             .Write($"6-Docs/standards/{technology}/{technology}.arbiter-rules.yml", "rules: []\n");
 
     [Fact]

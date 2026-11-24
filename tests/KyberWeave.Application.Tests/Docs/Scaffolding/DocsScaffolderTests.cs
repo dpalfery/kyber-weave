@@ -1014,7 +1014,7 @@ public sealed class DocsScaffolderTests
         DocumentSet set = _host.Loader(config.Ontology).Load();
         DiagnosticReport report = _host.Validator(config.Ontology).Validate(set);
         Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
-        Assert.Equal(3 + DocsLayout.Folders.Count + (KyberStandardsTemplates.All.Count * 3) + 1, set.Documents.Count);
+        Assert.Equal(3 + DocsLayout.Folders.Count + (KyberStandardsTemplates.All.Count * 2) + 1, set.Documents.Count);
     }
 
     /// <summary>

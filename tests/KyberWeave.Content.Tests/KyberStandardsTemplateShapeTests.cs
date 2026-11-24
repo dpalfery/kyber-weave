@@ -68,17 +68,15 @@ public class KyberStandardsTemplateShapeTests
     }
 
     [Fact]
-    public void EveryRulesAndSkillsFileNamesItsTechnology()
+    public void EveryRulesFileNamesItsTechnology()
     {
+        // The skills part is a bare YAML list with no frontmatter; KwSkillPoolContentTests pins it.
         foreach (string technology in KyberStandardsTemplates.All)
         {
             Templates.TryGetPart(
                 technology, KyberStandardsTemplates.Part.Rules, out string? rules);
-            Templates.TryGetPart(
-                technology, KyberStandardsTemplates.Part.Skills, out string? skills);
 
             Assert.Contains($"technology: {technology}", rules, StringComparison.Ordinal);
-            Assert.Contains($"technology: {technology}", skills, StringComparison.Ordinal);
         }
     }
 
@@ -90,8 +88,7 @@ public class KyberStandardsTemplateShapeTests
             foreach (KyberStandardsTemplates.Part part in new[]
                      {
                          KyberStandardsTemplates.Part.Standard,
-                         KyberStandardsTemplates.Part.Rules,
-                         KyberStandardsTemplates.Part.Skills
+                         KyberStandardsTemplates.Part.Rules
                      })
             {
                 Templates.TryGetPart(role, part, out string? template);
@@ -109,8 +106,7 @@ public class KyberStandardsTemplateShapeTests
         {
             foreach (KyberStandardsTemplates.Part part in new[]
                      {
-                         KyberStandardsTemplates.Part.Rules,
-                         KyberStandardsTemplates.Part.Skills
+                         KyberStandardsTemplates.Part.Rules
                      })
             {
                 Templates.TryGetPart(platform, part, out string? template);
@@ -131,12 +127,9 @@ public class KyberStandardsTemplateShapeTests
     {
         Templates.TryGetPart(
             "github", KyberStandardsTemplates.Part.Standard, out string? standard);
-        Templates.TryGetPart(
-            "github", KyberStandardsTemplates.Part.Skills, out string? skills);
 
         Assert.Contains("permissions", standard, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("pin", standard, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("gh ", skills, StringComparison.Ordinal);
     }
 
     [Fact]

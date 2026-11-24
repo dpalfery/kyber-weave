@@ -20,7 +20,7 @@ public enum StandardsFolderChangeKind
     Reshape,
 
     /// <summary>
-    /// An existing rules or skills file gains the folder's <c>doc-type</c> and scope line,
+    /// An existing rules file gains the folder's <c>doc-type</c> and scope line,
     /// keeping every other line and the whole body.
     /// </summary>
     Frontmatter
@@ -63,9 +63,10 @@ public sealed record StandardsFolderMigrationResult(
 /// with every authored section kept beneath the heading it fits, and each move is reported.
 /// A missing file is written as a stub whose frontmatter states which scope it belongs to and
 /// whose frontmatter's owner is copied from the folder's standard, so the corpus stays within
-/// its catalog vocabulary. A rules or skills file that already exists but does not declare the
+/// its catalog vocabulary. A rules file that already exists but does not declare the
 /// folder's <c>doc-type</c> and scope has those two frontmatter lines repaired in place, and
-/// every other line and the whole body are kept byte for byte. Running it twice changes nothing.
+/// every other line and the whole body are kept byte for byte. A missing skills list is written as an empty
+/// YAML list, and a legacy <c>.skills.md</c> is left in place. Running it twice changes nothing.
 ///
 /// The rename also moves what each <c>&lt;technology&gt;-coding-standard</c> registry property
 /// names, so the same run re-renders the generated block in the root <c>AGENTS.md</c>. Without
@@ -188,27 +189,29 @@ public sealed partial class StandardsFolderMigration
                 string? owner = OwnerOf(standardText);
 
                 Dictionary<string, string> repairs = new(StringComparer.Ordinal);
-                foreach ((string path, string docType) in new[]
-                         {
-                             (DocsLayout.RulesFile(docsRoot, scope), "rule"),
-                             (DocsLayout.SkillsFile(docsRoot, scope), "skill")
-                         })
+                string rules = DocsLayout.RulesFile(docsRoot, scope);
+                if (!_files.FileExists(Absolute(rules)))
                 {
-                    if (!_files.FileExists(Absolute(path)))
-                    {
-                        planned.Add(new StandardsFolderChange(
-                            StandardsFolderChangeKind.Add, string.Empty, path));
-                        continue;
-                    }
-
+                    planned.Add(new StandardsFolderChange(
+                        StandardsFolderChangeKind.Add, string.Empty, rules));
+                }
+                else if (RepairFrontmatter(rules, scope, "rule") is { } repaired)
+                {
                     // A file the folder already holds is still repairable: without the folder's
                     // doc-type and scope line it exists but never reaches a task prompt.
-                    if (RepairFrontmatter(path, scope, docType) is { } repaired)
-                    {
-                        repairs[path] = repaired;
-                        planned.Add(new StandardsFolderChange(
-                            StandardsFolderChangeKind.Frontmatter, path, path));
-                    }
+                    repairs[rules] = repaired;
+                    planned.Add(new StandardsFolderChange(
+                        StandardsFolderChangeKind.Frontmatter, rules, rules));
+                }
+
+                // The skills list is a bare YAML list with no frontmatter to repair. A legacy
+                // <scope>.skills.md beside it is never read, repaired or removed here: the
+                // KW-DOC-SKILL-005 warning is what asks the operator to retire it.
+                string skillsList = DocsLayout.SkillsListFile(docsRoot, scope);
+                if (!_files.FileExists(Absolute(skillsList)))
+                {
+                    planned.Add(new StandardsFolderChange(
+                        StandardsFolderChangeKind.Add, string.Empty, skillsList));
                 }
 
                 string arbiter = DocsLayout.ArbiterRulesFile(docsRoot, scope);
@@ -316,7 +319,7 @@ public sealed partial class StandardsFolderMigration
     /// <param name="Scope">The technology or role scope.</param>
     /// <param name="Owner">The owner the stubs copy, or null.</param>
     /// <param name="ReshapedText">The reshaped standard, or null when it needs no reshape.</param>
-    /// <param name="Repairs">Each rules or skills file's repaired frontmatter, keyed by its path.</param>
+    /// <param name="Repairs">Each rules file's repaired frontmatter, keyed by its path.</param>
     /// <param name="Planned">The changes the folder needs.</param>
     /// <param name="Moves">The sections a reshape places under required headings.</param>
     private sealed record FolderWork(
@@ -365,7 +368,7 @@ public sealed partial class StandardsFolderMigration
     /// <param name="owner">The owner the stubs copy, or null.</param>
     /// <param name="reshapedText">The reshaped standard, or null when the plan has no reshape.</param>
     /// <param name="undo">Receives each write's inverse, for the caller to run if a later folder fails.</param>
-    /// <param name="repairs">Each rules or skills file's repaired frontmatter, keyed by its path.</param>
+    /// <param name="repairs">Each rules file's repaired frontmatter, keyed by its path.</param>
     /// <returns>The changes actually made.</returns>
     internal List<StandardsFolderChange> Apply(
         IReadOnlyList<StandardsFolderChange> planned,
@@ -398,15 +401,18 @@ public sealed partial class StandardsFolderMigration
                     string fileName = Path.GetFileName(change.To);
                     string kind = fileName.EndsWith(DocsLayout.ArbiterRulesSuffix, StringComparison.Ordinal)
                         ? "arbiter"
-                        : fileName.EndsWith(DocsLayout.SkillsSuffix, StringComparison.Ordinal)
+                        : fileName.EndsWith(DocsLayout.SkillsListSuffix, StringComparison.Ordinal)
                             ? "skills"
                             : fileName.EndsWith(DocsLayout.RulesSuffix, StringComparison.Ordinal)
                                 ? "rules"
                                 : "standard";
 
-                    string content = kind == "arbiter"
-                        ? ArbiterRulesStub(scope)
-                        : Stub(scope, kind, owner);
+                    string content = kind switch
+                    {
+                        "arbiter" => ArbiterRulesStub(scope),
+                        "skills" => DocsScaffoldTemplates.SkillsList(),
+                        _ => Stub(scope, kind, owner)
+                    };
                     if (TryCreateNew(target, new UTF8Encoding(false).GetBytes(content)))
                     {
                         applied.Add(change);

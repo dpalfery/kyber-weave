@@ -50,7 +50,7 @@ public sealed class ArbiterCommandAllowListPromptTests
     {
         using DocFixture fixture = DocFixture.CreateInMemory();
         fixture.Write("6-Docs/standards/shared-rules.md", ShippedStandardsFile("shared-rules.md"));
-        foreach (string name in new[] { $"{technology}.standards.md", $"{technology}.rules.md", $"{technology}.skills.md" })
+        foreach (string name in new[] { $"{technology}.standards.md", $"{technology}.rules.md" })
         {
             fixture.Write($"6-Docs/standards/{technology}/{name}", ShippedStandardsFile($"{technology}/{name}"));
         }
