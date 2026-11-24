@@ -617,7 +617,11 @@ export function resolveStaticAsset(distDir: string, pathname: string): StaticAss
     return { ok: false, statusCode: 400, message: 'Bad request path' }
   }
 
-  if (decodedPath.includes('\\') || decodedPath.startsWith('//') || !decodedPath.startsWith('/')) {
+  if (
+    (process.platform === 'win32' && decodedPath.includes('\\')) ||
+    decodedPath.startsWith('//') ||
+    !decodedPath.startsWith('/')
+  ) {
     return { ok: false, statusCode: 403, message: 'Forbidden' }
   }
 
@@ -678,6 +682,19 @@ export type StaticAssetReadResult =
   | { readonly ok: true; readonly contents: Buffer; readonly contentType: string }
   | { readonly ok: false; readonly statusCode: 403 | 404 | 413; readonly message: string }
 
+const STATIC_ASSET_FORBIDDEN_ERROR_CODES: ReadonlySet<string> = new Set([
+  'ERR_PATH_TRAVERSAL',
+  'ELOOP',
+  'EEXIST',
+  'EACCES',
+  'EPERM',
+  'EBUSY',
+  'EMFILE',
+  'ENFILE',
+  'EIO',
+  'EISDIR',
+])
+
 export function mapStaticAssetOpenError(
   error: unknown,
 ): { readonly ok: false; readonly statusCode: 403 | 404 | 413; readonly message: string } {
@@ -690,11 +707,7 @@ export function mapStaticAssetOpenError(
   }
   if (
     error instanceof PathTraversalError ||
-    code === 'ERR_PATH_TRAVERSAL' ||
-    code === 'ELOOP' ||
-    code === 'EEXIST' ||
-    code === 'EACCES' ||
-    code === 'EPERM'
+    (typeof code === 'string' && STATIC_ASSET_FORBIDDEN_ERROR_CODES.has(code))
   ) {
     return { ok: false, statusCode: 403, message: 'Forbidden' }
   }
@@ -791,20 +804,20 @@ export function readResolvedStaticAsset(
   }
 }
 
-function serveStaticAsset(res: ServerResponse, distDir: string, pathname: string): void {
-  const resolved = resolveStaticAsset(distDir, pathname)
-  if (!resolved.ok) {
-    res.writeHead(resolved.statusCode, { 'content-type': 'text/plain; charset=utf-8' })
-    res.end(resolved.message)
-    return
-  }
-
-  let asset: StaticAssetReadResult
+export function serveStaticAsset(
+  res: ServerResponse,
+  distDir: string,
+  pathname: string,
+  resolveAsset: typeof resolveStaticAsset = resolveStaticAsset,
+): void {
+  let asset: StaticAssetReadResult | Extract<StaticAssetResolution, { readonly ok: false }>
   try {
-    asset = readResolvedStaticAsset(distDir, resolved)
+    const resolved = resolveAsset(distDir, pathname)
+    asset = resolved.ok ? readResolvedStaticAsset(distDir, resolved) : resolved
   } catch (error) {
     asset = mapStaticAssetOpenError(error)
   }
+
   if (!asset.ok) {
     res.writeHead(asset.statusCode, { 'content-type': 'text/plain; charset=utf-8' })
     res.end(asset.message)

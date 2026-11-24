@@ -6,12 +6,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const fsHooks = vi.hoisted(() => ({
   fstatSizeOverride: undefined as number | undefined,
+  openSyncError: undefined as Error | undefined,
 }))
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>()
   return {
     ...actual,
+    openSync: ((...args: Parameters<typeof actual.openSync>) => {
+      if (fsHooks.openSyncError !== undefined) {
+        throw fsHooks.openSyncError
+      }
+      return actual.openSync(...args)
+    }) as typeof actual.openSync,
     fstatSync: ((...args: Parameters<typeof actual.fstatSync>) => {
       const stat = actual.fstatSync(...args)
       if (fsHooks.fstatSizeOverride !== undefined && typeof stat.size === 'number') {
@@ -45,6 +52,7 @@ import {
   readBoundedResponseBuffer,
   readResolvedStaticAsset,
   resolveStaticAsset,
+  serveStaticAsset,
   startTrayBridge,
   verifyNoSymlinkSegments,
   type TrayBridgeHandle,
@@ -106,6 +114,7 @@ describe('otel-tray-bridge hardening (Issues 4, 5, 6, 7, 8)', () => {
 
   afterEach(async () => {
     fsHooks.fstatSizeOverride = undefined
+    fsHooks.openSyncError = undefined
     while (activeBridges.length > 0) {
       const bridge = activeBridges.pop()
       if (bridge) {
@@ -136,7 +145,7 @@ describe('otel-tray-bridge hardening (Issues 4, 5, 6, 7, 8)', () => {
       }
     })
 
-    it('rejects null bytes, rooted/absolute paths, backslashes, and parent traversal', () => {
+    it('rejects null bytes, rooted/absolute paths, win32 backslashes, and parent traversal', () => {
       expect(resolveStaticAsset(distDir, '/%00').ok).toBe(false)
       expect(resolveStaticAsset(distDir, '/index.html\0.js').ok).toBe(false)
 
@@ -144,7 +153,6 @@ describe('otel-tray-bridge hardening (Issues 4, 5, 6, 7, 8)', () => {
         '//etc/passwd',
         '/%2fetc/passwd',
         '/C:/Windows/win.ini',
-        '/..\\outside\\secret.txt',
         '/../outside/secret.txt',
         '/assets/../../outside/secret.txt',
       ]) {
@@ -153,6 +161,12 @@ describe('otel-tray-bridge hardening (Issues 4, 5, 6, 7, 8)', () => {
         if (!result.ok) {
           expect(result.statusCode, badPath).toBe(403)
         }
+      }
+
+      const backslashTraversal = resolveStaticAsset(distDir, '/..\\outside\\secret.txt')
+      expect(backslashTraversal.ok).toBe(false)
+      if (!backslashTraversal.ok) {
+        expect(backslashTraversal.statusCode).toBe(process.platform === 'win32' ? 403 : 404)
       }
     })
 
@@ -691,22 +705,135 @@ describe('otel-tray-bridge hardening (Issues 4, 5, 6, 7, 8)', () => {
       expect(await oversizedRes.text()).toBe('Payload Too Large')
     })
 
-    it('treats backslash as a filename character on POSIX in readResolvedStaticAsset', () => {
+    it('treats backslash as a filename character on POSIX across resolveStaticAsset, readResolvedStaticAsset, and HTTP', async () => {
       if (process.platform === 'win32') {
+        for (const winBackslashPath of ['/foo\\bar.js', '/foo%5Cbar.js']) {
+          const winResult = resolveStaticAsset(distDir, winBackslashPath)
+          expect(winResult, winBackslashPath).toEqual({
+            ok: false,
+            statusCode: 403,
+            message: 'Forbidden',
+          })
+        }
         return
       }
+
       const posixBackslashPath = join(distDir, 'foo\\bar.js')
       writeFileSync(posixBackslashPath, 'console.log("backslash-ok")', 'utf8')
+      const nestedPosixBackslashPath = join(distDir, 'assets', 'nested\\asset.js')
+      writeFileSync(nestedPosixBackslashPath, 'console.log("nested-backslash-ok")', 'utf8')
 
-      const result = readResolvedStaticAsset(distDir, {
-        ok: true,
-        filePath: posixBackslashPath,
-        contentType: 'application/javascript; charset=utf-8',
-      })
-      expect(result.ok).toBe(true)
-      if (result.ok) {
-        expect(result.contents.toString('utf8')).toBe('console.log("backslash-ok")')
+      for (const rawPath of ['/foo\\bar.js', '/foo%5Cbar.js']) {
+        const resolved = resolveStaticAsset(distDir, rawPath)
+        expect(resolved.ok, rawPath).toBe(true)
+        if (!resolved.ok) return
+        expect(resolved.filePath).toBe(posixBackslashPath)
+        expect(resolved.contentType).toBe('application/javascript; charset=utf-8')
+
+        const readResult = readResolvedStaticAsset(distDir, resolved)
+        expect(readResult.ok, rawPath).toBe(true)
+        if (readResult.ok) {
+          expect(readResult.contents.toString('utf8')).toBe('console.log("backslash-ok")')
+        }
       }
+
+      const stub = await startStubServer((_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end('{}')
+      })
+      activeServers.push(stub)
+
+      const bridge = await startTrayBridge({ serverUrl: stub.url, distDir })
+      activeBridges.push(bridge)
+
+      const topLevelRes = await fetch(`${bridge.url}/foo%5Cbar.js`)
+      expect(topLevelRes.status).toBe(200)
+      expect(topLevelRes.headers.get('content-type')).toBe('application/javascript; charset=utf-8')
+      expect(await topLevelRes.text()).toBe('console.log("backslash-ok")')
+
+      const nestedRes = await fetch(`${bridge.url}/assets/nested%5Casset.js`)
+      expect(nestedRes.status).toBe(200)
+      expect(nestedRes.headers.get('content-type')).toBe('application/javascript; charset=utf-8')
+      expect(await nestedRes.text()).toBe('console.log("nested-backslash-ok")')
+    })
+
+    it('maps present-but-unusable IO errors (EBUSY, EMFILE, ENFILE, EIO, EISDIR) to 403 Forbidden and missing errors to 404', async () => {
+      for (const forbiddenCode of [
+        'ERR_PATH_TRAVERSAL',
+        'ELOOP',
+        'EEXIST',
+        'EACCES',
+        'EPERM',
+        'EBUSY',
+        'EMFILE',
+        'ENFILE',
+        'EIO',
+        'EISDIR',
+      ]) {
+        const codedError = Object.assign(new Error(`simulated ${forbiddenCode}`), { code: forbiddenCode })
+        expect(mapStaticAssetOpenError(codedError), forbiddenCode).toEqual({
+          ok: false,
+          statusCode: 403,
+          message: 'Forbidden',
+        })
+      }
+
+      for (const missingCode of ['ENOENT', 'ENOTDIR']) {
+        const codedError = Object.assign(new Error(`simulated ${missingCode}`), { code: missingCode })
+        expect(mapStaticAssetOpenError(codedError), missingCode).toEqual({
+          ok: false,
+          statusCode: 404,
+          message: 'Not found',
+        })
+      }
+
+      const resolved = resolveStaticAsset(distDir, '/assets/app.js')
+      expect(resolved.ok).toBe(true)
+      if (!resolved.ok) return
+
+      const stub = await startStubServer((_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end('{}')
+      })
+      activeServers.push(stub)
+
+      const bridge = await startTrayBridge({ serverUrl: stub.url, distDir })
+      activeBridges.push(bridge)
+
+      for (const ioCode of ['EBUSY', 'EMFILE', 'ENFILE', 'EIO', 'EISDIR']) {
+        fsHooks.openSyncError = Object.assign(new Error(`openSync ${ioCode}`), { code: ioCode })
+        try {
+          expect(readResolvedStaticAsset(distDir, resolved), ioCode).toEqual({
+            ok: false,
+            statusCode: 403,
+            message: 'Forbidden',
+          })
+
+          const httpRes = await fetch(`${bridge.url}/assets/app.js`)
+          expect(httpRes.status, ioCode).toBe(403)
+          expect(await httpRes.text(), ioCode).toBe('Forbidden')
+        } finally {
+          fsHooks.openSyncError = undefined
+        }
+      }
+    })
+
+    it('catches PathTraversalError thrown by resolveStaticAsset inside serveStaticAsset and responds 403 instead of 500', async () => {
+      const stub = await startStubServer((_req, res) => {
+        try {
+          serveStaticAsset(res, distDir, '/assets/app.js', () => {
+            throw new PathTraversalError('simulated resolve traversal')
+          })
+        } catch {
+          res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
+          res.end('Internal Server Error')
+        }
+      })
+      activeServers.push(stub)
+
+      const res = await fetch(`${stub.url}/assets/app.js`)
+      expect(res.status).toBe(403)
+      expect(await res.text()).toBe('Forbidden')
     })
 
     it('rejects . and .. traversal segments directly inside verifyNoSymlinkSegments', () => {
