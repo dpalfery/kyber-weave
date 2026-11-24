@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Arbiter.Hooks;
@@ -12,7 +11,7 @@ namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// Contract for task 4.1: the Claude harness adapter. Covers the deny, allow, strip,
-/// post block, annotation and launch-link shapes from the fixture payloads under
+/// post block, annotation and launch shapes from the fixture payloads under
 /// <c>Fixtures/arbiter-hooks/claude/</c> (built from [F1] of the task packet), the
 /// <c>Task</c> alias, and that the payload's <c>agent_type</c> outranks
 /// <c>--caller</c>.
@@ -50,7 +49,7 @@ public sealed class ClaudeHookAdapterTests
         EmbeddedFixtureText.Read(typeof(ClaudeHookAdapterTests).Assembly, $"arbiter-hooks/claude/{name}");
 
     private static (int Exit, string Stdout) Run(
-        string stdin, string? caller, ScriptedEngine engine)
+        string stdin, string? caller, IHookDecisionEngine engine)
     {
         HookCommand command = ArbiterTestServices.Command(
             ArbiterTestServices.Registry(engine),
@@ -165,20 +164,76 @@ public sealed class ClaudeHookAdapterTests
     }
 
     [Fact]
-    public void PostDispatch_AsyncLaunched_RecordsLinkAndWritesNothing()
+    public void PostDispatch_AsyncLaunched_HandsTheDispatchToTheEngineAndWritesNothing()
     {
-        string linkId = "toolu-launch-" + Guid.NewGuid().ToString("N");
-        string stdin = Fixture("post-async-launched.json").Replace(
-            "toolu-launch-1", linkId, StringComparison.Ordinal);
+        BackgroundScriptedEngine engine = new();
 
-        (int exit, string stdout) = Run(stdin, "conductor", new ScriptedEngine());
+        (int exit, string stdout) = Run(Fixture("post-async-launched.json"), "conductor", engine);
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
-        Assert.True(
-            ClaudeHookAdapter.LaunchLinks.TryGetValue(linkId, out string? agentId),
-            $"No launch link recorded for tool_use_id '{linkId}'.");
-        Assert.Equal("agent-9", agentId);
+        BackgroundDispatch tracked = Assert.Single(engine.Tracked);
+        Assert.Equal(
+            new BackgroundDispatch(
+                "claude",
+                "sess-post-2",
+                "agent-9",
+                "conductor",
+                "dev-medium",
+                "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T4\n\nImplement the next task.",
+                "toolu-launch-1"),
+            tracked);
+    }
+
+    [Theory]
+    [InlineData(
+        """{"hook_event_name":"PostToolUse","tool_name":"Agent","session_id":"s","tool_use_id":"t"}""",
+        "carries no tool_response")]
+    [InlineData(
+        """{"hook_event_name":"PostToolUse","tool_name":"Agent","session_id":"s","tool_response":{"status":"weird"}}""",
+        "unknown PostToolUse status")]
+    [InlineData(
+        """{"hook_event_name":"PreToolUse","tool_name":"SubagentHandback","session_id":"s","tool_input":{"message":"hi"}}""",
+        "carries no agent_id")]
+    [InlineData(
+        """{"hook_event_name":"PreToolUse","tool_name":"SubagentHandback","session_id":"s","agent_id":"a","tool_input":{}}""",
+        "carries no message")]
+    public void MalformedDispatchInput_FailsOpenAndLogsTheGuard(string stdin, string expected)
+    {
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(new ScriptedEngine()),
+            _ => EnabledConfig(),
+            () => "decision-test-1");
+        using StringWriter stdout = new();
+        using StringWriter log = new();
+
+        int exit = command.Run("claude", "conductor", stdin, stdout, log);
+
+        Assert.Equal(0, exit);
+        Assert.Contains(expected, log.ToString(), StringComparison.Ordinal);
+        Assert.Contains("The dispatch continues without an Arbiter decision.", log.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>A plain engine that also follows background dispatches, recording what it is handed.</summary>
+    private sealed class BackgroundScriptedEngine : IHookDecisionEngine, IBackgroundDispatchEngine
+    {
+        public List<BackgroundDispatch> Tracked { get; } = [];
+
+        public HookOutcome DecidePreDispatch(string caller, string? target, string prompt, KyberWeaveConfig config) =>
+            new(HookOutcomeKind.Allow);
+
+        public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config) =>
+            new(HookOutcomeKind.Allow);
+
+        public void TrackBackgroundDispatch(BackgroundDispatch dispatch, HookContext context) => Tracked.Add(dispatch);
+
+        public BackgroundDispatchRecord? FindBackgroundDispatch(string sessionId, string agentId, HookContext context) => null;
+
+        public HookOutcome DecideBackgroundReturn(
+            string harness, string sessionId, string agentId, string response, KyberWeaveConfig config, HookContext context) =>
+            new(HookOutcomeKind.Allow);
+
+        public IReadOnlyList<string> TakePendingNotes(string sessionId, string caller, HookContext context) => [];
     }
 
     [Fact]
@@ -202,15 +257,6 @@ public sealed class ClaudeHookAdapterTests
 
         Assert.Equal(0, exit);
         Assert.Equal("dev-medium", engine.SeenPreCaller);
-    }
-
-    [Fact]
-    public void LaunchLinks_AreKeyedByToolUseId()
-    {
-        // The store is keyed by tool_use_id so concurrent background launches do not collide.
-        ConcurrentDictionary<string, string> links = ClaudeHookAdapter.LaunchLinks;
-
-        Assert.NotNull(links);
     }
 
     // Model rewrite (task 2.7). Claude's PreToolUse hook takes an updatedInput that replaces the whole

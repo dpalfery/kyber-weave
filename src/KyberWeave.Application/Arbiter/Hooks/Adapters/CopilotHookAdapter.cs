@@ -275,7 +275,8 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         // is closed, so a hook killed at its timeout cannot leave the dispatch holding its task's files all run.
         if (_engine is ILostReturnRecovery recovery)
         {
-            recovery.RecoverLostReturn(CliToken, sessionId, AgentNamesOf(payload), context);
+            recovery.RecoverLostReturn(
+                CliToken, sessionId, AgentNamesOf(payload), context, GetString(payload, "agentId"));
         }
 
         // The stop hook can only rewrite the response the dispatching agent reads, so a note rides at its end.

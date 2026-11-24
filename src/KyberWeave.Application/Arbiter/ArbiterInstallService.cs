@@ -646,8 +646,8 @@ public sealed class ArbiterInstallService(
                 return false;
             }
 
-            if (!string.Equals(effectiveEndpoint, plan.Endpoint, StringComparison.Ordinal) ||
-                !string.Equals(effectiveOrigin, plan.Origin, StringComparison.Ordinal))
+            if (!ArbiterUserSettings.EndpointsEqual(effectiveEndpoint, plan.Endpoint) ||
+                !ArbiterUserSettings.EndpointsEqual(effectiveOrigin, plan.Origin))
             {
                 (string displayEffectiveEndpoint, string displayPlannedEndpoint) =
                     FormatMismatchPair(effectiveEndpoint, plan.Endpoint);

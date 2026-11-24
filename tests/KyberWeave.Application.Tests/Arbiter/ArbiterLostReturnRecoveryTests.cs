@@ -449,4 +449,84 @@ public sealed class ArbiterLostReturnRecoveryTests : IDisposable
             "session-1",
             Assert.Single(Events(), e => e.Phase == ArbiterLedgerPhases.Pre).Session);
     }
+
+    /// <summary>Remembers a dispatch as a followed background agent, the way the harness adapter does on its launch.</summary>
+    private void Follow(string task, string toolCallId, string agentId, TextWriter log) =>
+        Engine().TrackBackgroundDispatch(
+            new BackgroundDispatch("copilot-cli", "session-1", agentId, "conductor", "dev-easy", Prompt(task), toolCallId),
+            Context(log));
+
+    [Fact]
+    public void AStopThatNamesAFollowedAgentId_ClosesThatDispatchAmongSeveralOfTheSameName()
+    {
+        StringWriter log = new();
+        Dispatch("dev-easy", "T2", "call-1", log);
+        Advance();
+        Dispatch("dev-easy", "T5", "call-2", log);
+        Follow("T2", "call-1", "agent-a", log);
+        Follow("T5", "call-2", "agent-b", log);
+        ArbiterLedgerEvent second = Assert.Single(Events(), e => e.Phase == ArbiterLedgerPhases.Pre && e.CallId == "call-2");
+
+        Advance();
+        int closed = Engine().RecoverLostReturn("copilot-cli", "session-1", ["dev-easy"], Context(log), "agent-b");
+
+        Assert.Equal(1, closed);
+        ArbiterLedgerEvent recovered = Assert.Single(RecoveredPosts());
+        Assert.Equal(second.Id, recovered.PreId);
+        Assert.Equal(second.Headers, recovered.Headers);
+    }
+
+    [Fact]
+    public void AStopThatNamesAnAgentIdWhosePreIsAlreadyPaired_ClosesNothing()
+    {
+        StringWriter log = new();
+        Dispatch("dev-easy", "T2", "call-1", log);
+        Dispatch("dev-easy", "T5", "call-2", log);
+        Follow("T2", "call-1", "agent-a", log);
+        Follow("T5", "call-2", "agent-b", log);
+        Advance();
+        Return("T2", "call-1", log);
+
+        Advance();
+        int closed = Engine().RecoverLostReturn("copilot-cli", "session-1", ["dev-easy"], Context(log), "agent-a");
+
+        Assert.Equal(0, closed);
+        Assert.Empty(RecoveredPosts());
+    }
+
+    [Fact]
+    public void AStopThatNamesAnUnknownAgentId_FallsBackToTheNameRule()
+    {
+        StringWriter log = new();
+        Dispatch("dev-easy", "T2", "call-1", log);
+        ArbiterLedgerEvent only = Assert.Single(Events(), e => e.Phase == ArbiterLedgerPhases.Pre);
+
+        Advance();
+        int closed = Engine().RecoverLostReturn("copilot-cli", "session-1", ["dev-easy"], Context(log), "agent-unknown");
+
+        Assert.Equal(1, closed);
+        Assert.Equal(only.Id, Assert.Single(RecoveredPosts()).PreId);
+    }
+
+    [Fact]
+    public void AStopThatNamesAFollowedAgentId_IsNotHeldBackByASiblingThatAlreadyReturned()
+    {
+        // The name rule treats this stop as the late signal of the sibling that returned and closes nothing. An agent
+        // id says exactly which dispatch ended, so the late-stop check does not apply.
+        StringWriter log = new();
+        Dispatch("dev-easy", "T2", "call-1", log);
+        Advance();
+        Dispatch("dev-easy", "T5", "call-2", log);
+        Follow("T2", "call-1", "agent-a", log);
+        Follow("T5", "call-2", "agent-b", log);
+        ArbiterLedgerEvent open = Assert.Single(Events(), e => e.Phase == ArbiterLedgerPhases.Pre && e.CallId == "call-2");
+        Advance();
+        Return("T2", "call-1", log);
+
+        Advance();
+        int closed = Engine().RecoverLostReturn("copilot-cli", "session-1", ["dev-easy"], Context(log), "agent-b");
+
+        Assert.Equal(1, closed);
+        Assert.Equal(open.Id, Assert.Single(RecoveredPosts()).PreId);
+    }
 }

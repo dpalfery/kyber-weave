@@ -142,10 +142,18 @@ public static class ArbiterUserSettings
     internal static string FormatCandidateForError(string candidate)
     {
         ArgumentNullException.ThrowIfNull(candidate);
-        string oneLine = candidate.ReplaceLineEndings(" ");
-        return oneLine.Length > MaxCandidateDisplayLength
-            ? oneLine[..MaxCandidateDisplayLength] + "..."
-            : oneLine;
+
+        // A line-ending pair collapses two characters into one, so twice the cap is enough raw text
+        // to fill the display. The rest of a huge candidate is never copied.
+        int take = Math.Min(candidate.Length, MaxCandidateDisplayLength * 2);
+        string oneLine = candidate[..take].ReplaceLineEndings(" ");
+        bool truncated = candidate.Length > take || oneLine.Length > MaxCandidateDisplayLength;
+        if (oneLine.Length > MaxCandidateDisplayLength)
+        {
+            oneLine = oneLine[..MaxCandidateDisplayLength];
+        }
+
+        return truncated ? oneLine + "..." : oneLine;
     }
 
     /// <summary>

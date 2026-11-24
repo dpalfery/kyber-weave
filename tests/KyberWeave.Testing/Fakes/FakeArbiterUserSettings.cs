@@ -31,7 +31,7 @@ internal sealed class FakeArbiterUserSettings : IArbiterUserSettings
         Asked.Add(homeDirectory);
         if (Override is null)
         {
-            return new ArbiterUserProviderResolution(repository, EndpointOverridden: false);
+            return new ArbiterUserProviderResolution(repository, EndpointOverridden ?? false);
         }
 
         ArbiterProviderConfig merged = Override(repository, homeDirectory);
