@@ -40,6 +40,7 @@ apm_modules/
 # Agent harness worktrees are nested git checkouts, never source.
 .claude/worktrees/
 .kilo/worktrees/
+.agent_worktrees/
 
 node_modules/
 

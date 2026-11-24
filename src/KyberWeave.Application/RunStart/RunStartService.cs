@@ -249,6 +249,20 @@ public sealed class RunStartService(
                     }
                 }
 
+                // Before the folder exists: once git makes the worktree its untracked folder would show in the checkout.
+                // A failure stops the run here, so no folder or claim is left behind.
+                GitOutcome excluded = runner.EnsureWorktreeFolderExcluded();
+                if (!excluded.Succeeded)
+                {
+                    messages.Add(new RunStartMessage(
+                        RunStartMessageKind.Error,
+                        $"could not exclude '{AgentWorktreeFolder.ExcludeLine}' from git's local exclude file: {excluded.FirstErrorLine}"));
+                    messages.Add(new RunStartMessage(
+                        RunStartMessageKind.Remedy,
+                        $"add '{AgentWorktreeFolder.ExcludeLine}' to .git/info/exclude and start again."));
+                    return Stopped(RunStartStatus.ToolFailure, messages);
+                }
+
                 worktreePath = runner.WorktreePathFor(target, clock.GetUtcNow());
                 try
                 {

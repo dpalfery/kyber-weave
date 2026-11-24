@@ -114,7 +114,7 @@ public sealed class RunStartIndexTests : IDisposable
     }
 
     private string WorktreesFolder() =>
-        Path.Combine(Path.GetDirectoryName(_probe.Root)!, Path.GetFileName(_probe.Root) + ".worktrees");
+        Path.Combine(_probe.Root, ".agent_worktrees");
 
     /// <summary>Every CodeGraph call the stub logged, oldest first, or none when the stub was never called.</summary>
     private IReadOnlyList<CodegraphCall> ReadCodegraphCalls()

@@ -35,7 +35,7 @@ public sealed class RunStartRunner : IRunStartRunner
     /// <param name="git">The git seam, bounded by its own timeout.</param>
     /// <param name="files">The file system worktree folders and their claims live on.</param>
     /// <param name="environment">The process state the CodeGraph lookup reads.</param>
-    /// <param name="paths">Resolves the repository root into the full path the worktree folder sits beside.</param>
+    /// <param name="paths">Resolves the repository root into the full path the worktree folder sits inside.</param>
     /// <param name="repositoryRoot">The repository root every git command runs in.</param>
     public RunStartRunner(IGitCommandRunner git, IWritableFileSystem files, IProcessEnvironment environment, IPathResolver paths, string repositoryRoot)
     {
@@ -255,8 +255,8 @@ public sealed class RunStartRunner : IRunStartRunner
     }
 
     /// <summary>
-    ///     The worktree path a branch of that name is created at: a sibling of the repository, so it never
-    ///     lands inside the checkout the operator is standing in.
+    ///     The worktree path a branch of that name is created at: inside <c>.agent_worktrees</c> under the
+    ///     repository root, which <see cref="EnsureWorktreeFolderExcluded" /> keeps out of git's status.
     /// </summary>
     /// <param name="branch">The branch the worktree holds.</param>
     /// <param name="startedAt">When the run started; the folder name carries it in UTC.</param>
@@ -272,10 +272,7 @@ public sealed class RunStartRunner : IRunStartRunner
         ArgumentException.ThrowIfNullOrWhiteSpace(branch);
 
         string root = Path.TrimEndingDirectorySeparator(_paths.GetFullPath(_repositoryRoot, _environment.CurrentDirectory));
-        string? parent = Path.GetDirectoryName(root);
-        string container = Path.Combine(
-            string.IsNullOrEmpty(parent) ? root : parent,
-            Path.GetFileName(root) + ".worktrees");
+        string container = Path.Combine(root, AgentWorktreeFolder.Name);
         string stamp = startedAt.UtcDateTime.ToString(WorktreeStampFormat, CultureInfo.InvariantCulture);
         string folder = stamp + "-" + branch.Replace('/', '-');
 
@@ -299,6 +296,61 @@ public sealed class RunStartRunner : IRunStartRunner
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // A claim left behind only makes a later run in the same second take the next suffix.
+        }
+    }
+
+    /// <summary>
+    ///     Excludes <see cref="AgentWorktreeFolder.Name" /> from git's status in the local exclude file, writing the
+    ///     line only when no line already holds it.
+    /// </summary>
+    /// <returns>The outcome: succeeded when the file already excludes the folder or now does; failed when git could
+    ///     not name the file or the file could not be read or written.</returns>
+    /// <remarks>
+    ///     <c>git rev-parse --git-path info/exclude</c> names the file git actually reads: a linked worktree shares
+    ///     the exclude file of the main checkout, and git answers with that file's location. A relative answer is
+    ///     resolved against the repository root, where git ran. The file is local, so the exclusion never enters a
+    ///     commit.
+    /// </remarks>
+    public GitOutcome EnsureWorktreeFolderExcluded()
+    {
+        GitOutcome located = Git("rev-parse", "--git-path", "info/exclude");
+        if (!located.Succeeded)
+            return located;
+
+        // git answers with one path on one line. Anything else (nothing, several lines, a character no path may hold)
+        // is not a path to write to, so it fails the step rather than reaching the file system.
+        string answer = located.StandardOutput.Trim();
+        if (answer.Length == 0 || answer.Contains('\n', StringComparison.Ordinal) || answer.IndexOfAny(Path.GetInvalidPathChars()) >= 0)
+            return new GitOutcome(1, string.Empty, $"git did not name the exclude file: '{answer}'");
+
+        string root = Path.TrimEndingDirectorySeparator(_paths.GetFullPath(_repositoryRoot, _environment.CurrentDirectory));
+        string excludePath = Path.Combine(root, answer);
+
+        try
+        {
+            string directory = Path.GetDirectoryName(excludePath) ?? root;
+            if (!_files.DirectoryExists(directory))
+                _files.CreateDirectory(directory);
+
+            if (!_files.FileExists(excludePath))
+            {
+                _files.WriteAllTextAtomic(excludePath, AgentWorktreeFolder.ExcludeLine + "\n");
+                return new GitOutcome(0, string.Empty, string.Empty);
+            }
+
+            string existing = _files.ReadAllText(excludePath);
+            if (existing.Split('\n').Any(line => string.Equals(line.Trim(), AgentWorktreeFolder.ExcludeLine, StringComparison.Ordinal)))
+                return new GitOutcome(0, string.Empty, string.Empty);
+
+            // A file that ends without a newline gets one first, so the appended line starts a line of its own. The
+            // file is the user's own, so it is replaced in one move: a failure part way never leaves it half written.
+            string separator = existing.Length == 0 || existing.EndsWith('\n') ? string.Empty : "\n";
+            _files.WriteAllTextAtomic(excludePath, existing + separator + AgentWorktreeFolder.ExcludeLine + "\n");
+            return new GitOutcome(0, string.Empty, string.Empty);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new GitOutcome(1, string.Empty, $"could not update '{excludePath}': {ex.Message}");
         }
     }
 

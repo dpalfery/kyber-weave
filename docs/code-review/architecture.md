@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Application/Review
 owner: dpalfery
-last-reviewed: 2026-11-18
+last-reviewed: 2026-11-23
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -810,7 +810,7 @@ shipped catalogue, `include`, `os`, `working-directory`, `fail-on-output`, `full
 | `working-directory` | no | the repository root | Repository-relative directory the gate starts in; must exist and stay inside the root |
 | `fail-on-output` | no | `false` | When `true`, the gate also fails if the command exits zero but writes anything other than whitespace to standard output; a non-zero exit fails as always. For tools that list problems and still exit zero, such as `gofmt -l` |
 | `full-suite` | no | `false` | When `true`, the gate runs the full product suite. It runs only for the review council or CI (`--council`) or from a terminal; otherwise it is refused (`KW-REVIEW-033`) and not run |
-| `requires-paths` | no | `[]`, which requires nothing | Repository-relative paths the gate needs before it can start. When one is absent the gate does not start: it is reported under `KW-REVIEW-033` with `exitCode: -1`, `passed: false` and `outcome: "notStarted"`, at Error when the gate is blocking and at Warning otherwise, and its summary carries the install hint. Never a pass, and never `KW-REVIEW-022` |
+| `requires-paths` | no | `[]`, which requires nothing | Repository-relative paths the gate needs before it can start. When one is absent the gate does not start: it is reported under `KW-REVIEW-033` with `exitCode: -1`, `passed: false` and `outcome: "notStarted"`, at Error when the gate is blocking and at Warning otherwise, and its summary carries the install hint. Never a pass, and never `KW-REVIEW-022`. A `--council` or `--all` run refuses before any gate starts when a path is missing (below) |
 | `concurrent` | no | `false` | When `true`, the gate starts at its place in the declared order and runs alongside the gates declared after it instead of holding them up. Its result keeps its declared place in the report, and it is still stopped at its own `timeout-seconds` and reported as timed out. Only for a gate that neither reads nor writes what later gates produce; the runner does not check that |
 
 Gates run one after another in declaration order, except a gate marked `concurrent`. The runner cannot tell
@@ -827,19 +827,30 @@ whose `os` does not match is skipped, a gate whose `include` matches no changed 
 skipped (`KW-REVIEW-026`), and a gate with no `include` runs on every change.
 
 `requires-paths` names what a gate needs installed before it can measure anything. The dash
-gates in this repository (`ts-typecheck`, `ts-test`, `ts-lint`, `ts-reachable`) declare
-`dash/node_modules`, so a review that runs in a worktree where the dependencies were never
+gates in this repository declare `dash/node_modules` (`ts-typecheck`, `ts-test`, `ts-lint`, `ts-reachable`),
+and the three that resolve imports from the web app (`ts-typecheck`, `ts-test`, `ts-lint`) also declare
+`dash/web/node_modules`, so a review that runs in a worktree where the dependencies were never
 installed reports the missing dependency rather than a compiler error. The summary reads:
 
 ```text
-required path 'dash/node_modules' is missing, so the gate did not start. Install the dashboard dependencies with 'npm install --prefix dash', then run the gate again.
+required path 'dash/node_modules' is missing, so the gate did not start. Install the dependencies with 'npm install --prefix dash', then run the gate again.
 ```
 
-A path outside `dash/` gets the same first clause and a generic install sentence. The gate
+A path whose last segment is `node_modules` names the install of the folder beside it
+(`dash/web/node_modules` gives `npm install --prefix dash/web`); any other path gets the same first clause and
+"Install whatever provides it". The gate
 stays a blocking failure, because a check that never ran is not a check that passed; the
 reviewer installs what the hint names and re-runs that one gate with `--gate`. The loader
 refuses an empty list, an empty entry, an absolute path, and a `..` escape where the operator
 wrote them, so an entry that could never name something inside the repository never reaches a run.
+
+**Preflight on a whole-review run.** A scoped run reports a gate with a missing path as not started after the
+earlier gates have run. A `--council` or `--all` run is the whole review, so it asks the gate runner first
+(`IGateRunService.MissingRequirements`, which uses the same `applies-when` test and path resolution the runner
+uses, so "listed" means "would have started") and, when any admitted gate lacks a path, refuses the run before
+the CodeGraph index sync and before any gate starts. It exits `1` with one `KW-REVIEW-033` error per missing
+path naming the gate, the path and its fix, and writes an empty report to `--out`. It writes no evidence and no
+finished-cycle record, so after the fix a rerun with the same `--out` is the same cycle in the same mode.
 
 A failed gate's summary says what failed rather than ending with the last lines the command
 printed: the test totals and each failing test with the first line of its error, or the compile

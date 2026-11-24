@@ -279,6 +279,8 @@ public sealed class RunStartCommandConsoleTests
 
         public string WorktreePathFor(string branch, DateTimeOffset startedAt) => throw new NotSupportedException();
 
+        public GitOutcome EnsureWorktreeFolderExcluded() => throw new NotSupportedException();
+
         public void ReleaseWorktreeClaim(string worktreePath) => throw new NotSupportedException();
 
         public GitOutcome CreateBranchInWorktree(string branch, string startRef, string worktreePath) =>
