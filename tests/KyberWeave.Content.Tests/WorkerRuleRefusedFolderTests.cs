@@ -69,7 +69,10 @@ public sealed class WorkerRuleRefusedFolderTests
     {
         string map = Corpus.ReadText(RuleMapPath);
 
-        Assert.Contains("| D7 |", map, StringComparison.Ordinal);
+        string row = map.Split('\n').Single(line => line.StartsWith("| D7 |", StringComparison.Ordinal));
+
+        Assert.Contains("refuses a folder", row, StringComparison.Ordinal);
+        Assert.Contains("| the baseline block |", row, StringComparison.Ordinal);
     }
 
     /// <summary>
