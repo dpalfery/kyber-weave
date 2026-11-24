@@ -813,6 +813,24 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
         Assert.DoesNotContain("csharp skills", response, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A skills list the catalog cannot read is named in the answer, under a KW skills section that
+    /// still appears, so a malformed list cannot silently answer with neither skills nor reason.
+    /// </summary>
+    [Fact]
+    public void ABadSkillsListIsNamedInTheAnswerRatherThanDropped()
+    {
+        (DocsTools tools, _) = Corpus(
+            (CsharpStandardPath, CsharpStandard()),
+            ("6-Docs/standards/csharp/csharp.skills.yml", "prose, not a sequence of names\n"));
+
+        string response = Ask(tools, "csharp");
+
+        Assert.Contains("## KW skills", response, StringComparison.Ordinal);
+        Assert.Contains("Problems in the skills lists:", response, StringComparison.Ordinal);
+        Assert.Contains("KW-DOC-SKILL-001", response, StringComparison.Ordinal);
+    }
+
     private static string Ask(
         DocsTools tools,
         string technology,

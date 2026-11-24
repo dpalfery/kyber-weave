@@ -58,6 +58,9 @@ public sealed partial class DocsQueryService : IDocsQueryService
     /// <summary>Code joins listed per document.</summary>
     private const int JoinCap = 20;
 
+    /// <summary>Skills-list problems named in one answer before the remainder is counted.</summary>
+    private const int SkillProblemCap = 10;
+
     /// <summary>Hard caps for the conversational analysis surface.</summary>
     private const int AnalysisCandidateCap = 20;
     private const int AnalysisCharCap = 12000;
@@ -573,7 +576,9 @@ public sealed partial class DocsQueryService : IDocsQueryService
 
     /// <summary>
     /// Appends the KW skills a technology gets, listed the way the task prompt lists them (D25). The list is short, so
-    /// it is appended whole rather than cut.
+    /// it is appended whole rather than cut. A problem the catalog reported while reading the lists is named under the
+    /// list — also when no skill survived it, so a bad list answers with the reason instead of silently dropping the
+    /// section.
     /// </summary>
     /// <param name="sb">The answer being built.</param>
     /// <param name="standard">The technology's standard; the technology it declares scopes the skills.</param>
@@ -582,12 +587,33 @@ public sealed partial class DocsQueryService : IDocsQueryService
     private int AppendKwSkills(StringBuilder sb, DocumentModel standard, string requested, int remaining)
     {
         string scope = standard.Frontmatter.Technology?.Trim() ?? requested;
-        IReadOnlyList<KwSkillEntry> entries = _skills.SkillsFor(scope, null).Entries;
-        if (entries.Count == 0) return remaining;
+        KwSkillList skills = _skills.SkillsFor(scope, null);
+        if (skills.Entries.Count == 0 && skills.Problems.Count == 0) return remaining;
 
-        string text = KwSkillListText.Render(entries);
-        sb.Append("## KW skills\n").Append(text).Append('\n');
-        return Math.Max(0, remaining - text.Length - 12);
+        StringBuilder section = new("## KW skills\n");
+        if (skills.Entries.Count > 0)
+        {
+            section.Append(KwSkillListText.Render(skills.Entries)).Append('\n');
+        }
+
+        if (skills.Problems.Count > 0)
+        {
+            section.Append("Problems in the skills lists:\n");
+            foreach (KwSkillProblem problem in skills.Problems.Take(SkillProblemCap))
+            {
+                section.Append("- ").Append(problem.Path).Append(": ").AppendLine(problem.Message);
+            }
+
+            if (skills.Problems.Count > SkillProblemCap)
+            {
+                section.Append(CultureInfo.InvariantCulture,
+                    $"… {skills.Problems.Count - SkillProblemCap} more problems omitted by the hard cap.\n");
+            }
+        }
+
+        section.Append('\n');
+        sb.Append(section);
+        return Math.Max(0, remaining - section.Length);
     }
 
     /// <inheritdoc />
