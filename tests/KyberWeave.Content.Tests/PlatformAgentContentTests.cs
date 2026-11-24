@@ -74,7 +74,17 @@ public sealed class PlatformAgentContentTests
         Assert.Contains("Take the technology from your request", body, StringComparison.Ordinal);
         Assert.Contains("Never assume one and never inspect a second one", body, StringComparison.Ordinal);
         Assert.Contains("<technology-rules>", body, StringComparison.Ordinal);
-        Assert.Contains("<skills>", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ThePlatformResearcherNamesTheKwSkillsPart()
+    {
+        string body = Agent("platform-researcher").InstructionBody;
+
+        Assert.Contains("<kw-skills>", body, StringComparison.Ordinal);
+        Assert.Contains("load_skill", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("<skills>", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("skills file", body, StringComparison.Ordinal);
     }
 
     [Fact]

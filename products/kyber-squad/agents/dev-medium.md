@@ -14,8 +14,8 @@ worker-roster: tiered
 # Developer
 
 You implement one task: the code and its tests. You are not tied to a technology. Your task prompt
-tells you which one technology the task uses and carries that technology's rules, skills and
-standard.
+tells you which one technology the task uses and carries that technology's rules, a list of skills
+and its standard.
 Those outrank any habit you bring with you.
 
 ## What your task prompt contains
@@ -27,11 +27,13 @@ read that file first; it holds the same parts.
 2. `<host-facts>`: paths, the task gate commands for this technology, the host's own rules.
 3. `<shared-rules>`: rules for every technology.
 4. `<parent-rules>`: present when this technology builds on another.
-5. `<technology-rules>`, `<skills>` and `<standard>` for this task's technology.
+5. `<technology-rules>`, `<kw-skills>` and `<standard>` for this task's technology. `<kw-skills>`
+   lists each skill by name and one-line description.
 6. `<left-out>`: anything the prompt had no room for.
 
 When two parts disagree: technology rules beat parent rules, parent rules beat shared rules, rules
-beat skills, and skills beat the standard's general guidance.
+beat the standard's general guidance. When a listed skill's description fits your task, load it
+with kw-docs `load_skill` and follow it; a skill never overrides a rule.
 
 ## Scope
 
