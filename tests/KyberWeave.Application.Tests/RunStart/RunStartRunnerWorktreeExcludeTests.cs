@@ -97,7 +97,7 @@ public sealed class RunStartRunnerWorktreeExcludeTests
     public void AWriteFailureReturnsTheFailure()
     {
         SeedExclude("*.log\n");
-        _files.FailWhen(operation => operation.Name == "WriteAllText", new IOException("disk full"));
+        _files.FailWhen(operation => operation.Name == "WriteAllTextAtomic", new IOException("disk full"));
 
         GitOutcome outcome = Runner(ExcludeAnswer).EnsureWorktreeFolderExcluded();
 
@@ -110,7 +110,7 @@ public sealed class RunStartRunnerWorktreeExcludeTests
     public void AnUnauthorizedWriteReturnsTheFailure()
     {
         SeedExclude("*.log\n");
-        _files.FailWhen(operation => operation.Name == "WriteAllText", new UnauthorizedAccessException("denied"));
+        _files.FailWhen(operation => operation.Name == "WriteAllTextAtomic", new UnauthorizedAccessException("denied"));
 
         GitOutcome outcome = Runner(ExcludeAnswer).EnsureWorktreeFolderExcluded();
 

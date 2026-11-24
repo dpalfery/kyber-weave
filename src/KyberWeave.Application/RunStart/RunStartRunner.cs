@@ -334,7 +334,7 @@ public sealed class RunStartRunner : IRunStartRunner
 
             if (!_files.FileExists(excludePath))
             {
-                _files.WriteAllText(excludePath, AgentWorktreeFolder.ExcludeLine + "\n");
+                _files.WriteAllTextAtomic(excludePath, AgentWorktreeFolder.ExcludeLine + "\n");
                 return new GitOutcome(0, string.Empty, string.Empty);
             }
 
@@ -342,9 +342,10 @@ public sealed class RunStartRunner : IRunStartRunner
             if (existing.Split('\n').Any(line => string.Equals(line.Trim(), AgentWorktreeFolder.ExcludeLine, StringComparison.Ordinal)))
                 return new GitOutcome(0, string.Empty, string.Empty);
 
-            // A file that ends without a newline gets one first, so the appended line starts a line of its own.
+            // A file that ends without a newline gets one first, so the appended line starts a line of its own. The
+            // file is the user's own, so it is replaced in one move: a failure part way never leaves it half written.
             string separator = existing.Length == 0 || existing.EndsWith('\n') ? string.Empty : "\n";
-            _files.WriteAllText(excludePath, existing + separator + AgentWorktreeFolder.ExcludeLine + "\n");
+            _files.WriteAllTextAtomic(excludePath, existing + separator + AgentWorktreeFolder.ExcludeLine + "\n");
             return new GitOutcome(0, string.Empty, string.Empty);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
