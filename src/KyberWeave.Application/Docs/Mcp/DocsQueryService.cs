@@ -61,6 +61,9 @@ public sealed partial class DocsQueryService : IDocsQueryService
     /// <summary>Skills named in the unknown-skill reply before the remainder is counted.</summary>
     private const int SkillNameCap = 20;
 
+    /// <summary>Longest echoed unknown skill name, so a caller's text can neither forge nor blow the reply.</summary>
+    private const int UnknownNameEchoCap = 80;
+
     /// <summary>Skills-list problems named in one answer before the remainder is counted.</summary>
     private const int SkillProblemCap = 10;
 
@@ -642,19 +645,26 @@ public sealed partial class DocsQueryService : IDocsQueryService
     /// <summary>
     /// The reply for a name no skill has: the names that do exist, capped with the remainder
     /// counted so a large pool cannot blow the reply, and a pool with no names at all said so
-    /// rather than rendered as an empty list.
+    /// rather than rendered as an empty list. The name itself is a caller's argument echoed
+    /// back, so it is flattened to one line and capped before it is quoted.
     /// </summary>
     private static string UnknownSkillReply(KwSkillLoadResult result)
     {
+        string name = result.Name.ReplaceLineEndings(" ");
+        if (name.Length > UnknownNameEchoCap)
+        {
+            name = name[..UnknownNameEchoCap] + "…";
+        }
+
         if (result.ExistingNames.Count == 0)
         {
-            return $"No KW skill is named '{result.Name}', and this checkout has no KW skills.";
+            return $"No KW skill is named '{name}', and this checkout has no KW skills.";
         }
 
         string names = string.Join(", ", result.ExistingNames.Take(SkillNameCap));
         return result.ExistingNames.Count > SkillNameCap
-            ? $"No KW skill is named '{result.Name}'. Skills that exist: {names} (+{result.ExistingNames.Count - SkillNameCap} more)."
-            : $"No KW skill is named '{result.Name}'. Skills that exist: {names}.";
+            ? $"No KW skill is named '{name}'. Skills that exist: {names} (+{result.ExistingNames.Count - SkillNameCap} more)."
+            : $"No KW skill is named '{name}'. Skills that exist: {names}.";
     }
 
     /// <summary>
