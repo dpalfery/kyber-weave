@@ -83,6 +83,9 @@ public sealed class ConfiguredArbiterProviderFactoryTests
     private sealed class RepositoryProviderSettings : IArbiterUserSettings
     {
         public ArbiterProviderConfig ApplyTo(ArbiterProviderConfig repository, string homeDirectory) => repository;
+
+        public ArbiterUserProviderResolution Resolve(ArbiterProviderConfig repository, string homeDirectory) =>
+            new(repository, EndpointOverridden: false);
     }
 
     private sealed class CountingHandlers : IArbiterHttpHandlers

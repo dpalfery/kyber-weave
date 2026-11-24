@@ -256,7 +256,11 @@ public sealed class ArbiterConsoleSeamTests
     {
         public string? ResolveKey(KyberWeaveConfig config, string endpoint) => null;
 
+        public string? ResolveKey(KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint) => null;
+
         public string? TryResolveKey(KyberWeaveConfig config, string endpoint) => null;
+
+        public string? TryResolveKey(KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint) => null;
 
         public Func<Uri, string?> CreateKeyResolver(KyberWeaveConfig config) => _ => null;
     }
