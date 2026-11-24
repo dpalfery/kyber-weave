@@ -81,7 +81,7 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
         HashSet<string> seen = new(StringComparer.Ordinal);
 
         string? tech = Scope(technology);
-        string? parent = tech is null ? null : ParentOf(tech);
+        string? parent = tech is null ? null : ParentOf(tech, problems);
         string? agent = roleAgent?.Trim();
         string? role = string.IsNullOrEmpty(agent) ? null : KwSkillRoles.FolderFor(agent, _roles);
 
@@ -222,15 +222,18 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
         return null;
     }
 
-    private string? ParentOf(string technology)
+    private string? ParentOf(string technology, List<KwSkillProblem> problems)
     {
+        string? file = null;
         string? text = null;
         foreach (string root in _docsRoots)
         {
-            string file = Absolute(DocsLayout.StandardFile(root, technology));
-            if (_files.FileExists(file))
+            string relative = DocsLayout.StandardFile(root, technology);
+            string candidate = Absolute(relative);
+            if (_files.FileExists(candidate))
             {
-                text = SafeRead(file);
+                file = relative;
+                text = SafeRead(candidate);
                 break;
             }
         }
@@ -259,8 +262,12 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
             string? scope = Scope(parent);
             return scope == technology ? null : scope;
         }
-        catch (YamlException)
+        catch (YamlException exception)
         {
+            problems.Add(new KwSkillProblem(
+                file ?? $"Standards.{technology}.standards.md",
+                $"the '{technology}' standard's frontmatter could not be read, so the skills of the technology "
+                + $"it builds on are not listed: {exception.Message.ReplaceLineEndings(" ")}"));
             return null;
         }
     }

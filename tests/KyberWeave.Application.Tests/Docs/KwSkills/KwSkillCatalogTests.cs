@@ -125,6 +125,24 @@ public sealed class KwSkillCatalogTests
     }
 
     [Fact]
+    public void AMalformedParentStandardFrontmatterIsReportedAndListsOnlyTheChildsSkills()
+    {
+        Skill("a", "A.");
+        Skill("b", "B.");
+        Put("docs/standards/typescript/typescript.standards.md", Standard("typescript"));
+        Put("docs/standards/react/react.standards.md", "---\nbuilds-on: [unclosed\n---\n\n# react\n");
+        Put("docs/standards/typescript/typescript.skills.yml", "- a\n");
+        Put("docs/standards/react/react.skills.yml", "- b\n");
+
+        KwSkillList list = _catalog.SkillsFor("react", null);
+
+        Assert.Equal(["b"], list.Entries.Select(e => e.Name));
+        KwSkillProblem problem = Assert.Single(list.Problems);
+        Assert.Contains("react.standards.md", problem.Path, StringComparison.Ordinal);
+        Assert.Contains("not listed", problem.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ARoleAgentNameMapsToItsRoleFolder()
     {
         Skill("plan-craft", "Plan craft.");
