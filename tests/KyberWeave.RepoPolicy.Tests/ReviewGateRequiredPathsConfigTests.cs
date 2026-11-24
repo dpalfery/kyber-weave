@@ -32,7 +32,7 @@ public sealed class ReviewGateRequiredPathsConfigTests
 
     /// <summary>
     /// <c>ts-typecheck</c>, <c>ts-test</c> and <c>ts-lint</c> each require both <c>dash/node_modules</c> and
-    /// <c>dash/web/node_modules</c>.
+    /// <c>dash/web/node_modules</c>, and nothing else.
     /// </summary>
     /// <remarks>
     /// Each of the three resolves <c>web/src</c> imports from <c>dash/web/node_modules</c>. Without the second path a
@@ -46,8 +46,7 @@ public sealed class ReviewGateRequiredPathsConfigTests
     {
         string[] paths = RequiredPaths(GateNamed(gateId));
 
-        Assert.Contains(DashNodeModules, paths, StringComparer.Ordinal);
-        Assert.Contains(DashWebNodeModules, paths, StringComparer.Ordinal);
+        Assert.Equal([DashNodeModules, DashWebNodeModules], paths);
     }
 
     /// <summary>
