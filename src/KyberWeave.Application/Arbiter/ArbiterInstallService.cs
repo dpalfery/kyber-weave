@@ -1,4 +1,7 @@
 using System.ComponentModel;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -646,10 +649,10 @@ public sealed class ArbiterInstallService(
             if (!string.Equals(effectiveEndpoint, plan.Endpoint, StringComparison.Ordinal) ||
                 !string.Equals(effectiveOrigin, plan.Origin, StringComparison.Ordinal))
             {
-                string displayEffectiveEndpoint = ArbiterUserSettings.FormatCandidateForError(effectiveEndpoint);
-                string displayEffectiveOrigin = ArbiterUserSettings.FormatCandidateForError(effectiveOrigin);
-                string displayPlannedEndpoint = ArbiterUserSettings.FormatCandidateForError(plan.Endpoint);
-                string displayPlannedOrigin = ArbiterUserSettings.FormatCandidateForError(plan.Origin);
+                (string displayEffectiveEndpoint, string displayPlannedEndpoint) =
+                    FormatMismatchPair(effectiveEndpoint, plan.Endpoint);
+                (string displayEffectiveOrigin, string displayPlannedOrigin) =
+                    FormatMismatchPair(effectiveOrigin, plan.Origin);
                 events.Add(new ArbiterInstallError(
                     $"Verification failed: the effective provider endpoint '{displayEffectiveEndpoint}' " +
                     $"(origin '{displayEffectiveOrigin}') does not match the planned endpoint '{displayPlannedEndpoint}' " +
@@ -692,4 +695,42 @@ public sealed class ArbiterInstallService(
                 $"The 'kyber-weave-arbiter' binary probe failed: {ex.Message}"));
         }
     }
+
+    private static (string Effective, string Planned) FormatMismatchPair(string effective, string planned)
+    {
+        string displayEffective = ArbiterUserSettings.FormatCandidateForError(effective);
+        string displayPlanned = ArbiterUserSettings.FormatCandidateForError(planned);
+
+        if (string.Equals(effective, planned, StringComparison.Ordinal) ||
+            !string.Equals(displayEffective, displayPlanned, StringComparison.Ordinal))
+        {
+            return (displayEffective, displayPlanned);
+        }
+
+        int diffIndex = FirstDifferenceIndex(effective, planned);
+        return (
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"{displayEffective} [differs at index {diffIndex}, len {effective.Length}, sha256:{ShortSha256(effective)}]"),
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"{displayPlanned} [differs at index {diffIndex}, len {planned.Length}, sha256:{ShortSha256(planned)}]"));
+    }
+
+    private static int FirstDifferenceIndex(string left, string right)
+    {
+        int sharedLength = Math.Min(left.Length, right.Length);
+        for (int i = 0; i < sharedLength; i++)
+        {
+            if (left[i] != right[i])
+            {
+                return i;
+            }
+        }
+
+        return sharedLength;
+    }
+
+    private static string ShortSha256(string value) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)))[..8];
 }
