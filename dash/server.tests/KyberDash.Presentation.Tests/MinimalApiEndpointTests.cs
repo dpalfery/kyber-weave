@@ -92,6 +92,65 @@ public class MinimalApiEndpointTests
             Times.Never);
     }
 
+    [Theory]
+    [InlineData("/api/kyber/sessions?harness=all")]
+    [InlineData("/api/kyber/sessions?harness=ALL")]
+    [InlineData("/api/kyber/sessions?harness=%20")]
+    public async Task SessionsTreatAllOrBlankHarnessAsNoFilter(string requestPath)
+    {
+        await using Host host = await Host.StartAsync();
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri(requestPath, UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        host.Builder.Query.Verify(q => q.GetSessionPage(1, 100, null, null), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("/api/kyber/sessions?limit=500")]
+    [InlineData("/api/kyber/sessions?limit=101")]
+    [InlineData("/api/kyber/sessions?limit=100")]
+    public async Task SessionsClampTheLimitToOneHundred(string requestPath)
+    {
+        await using Host host = await Host.StartAsync();
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri(requestPath, UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        host.Builder.Query.Verify(q => q.GetSessionPage(1, 100, null, null), Times.Once);
+    }
+
+    [Fact]
+    public async Task SectionRoutesClampTheLimitToTwentyFive()
+    {
+        await using Host host = await Host.StartAsync();
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri("/api/kyber/session/sess-1/requests?limit=500&page=3", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        host.Builder.Query.Verify(q => q.GetSessionRequests("sess-1", 3, 25), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("/api/kyber/session/%20/subagents")]
+    [InlineData("/api/kyber/session/%20/requests")]
+    [InlineData("/api/kyber/session/%20/reconciliation")]
+    [InlineData("/api/kyber/session/%20/problems")]
+    [InlineData("/api/kyber/session/%20/tools")]
+    [InlineData("/api/kyber/session/%20/servers")]
+    [InlineData("/api/kyber/session/%20/skills")]
+    [InlineData("/api/kyber/session/%20/timeline")]
+    [InlineData("/api/kyber/session/%20/stored-fields/spans")]
+    public async Task SectionRoutesAnswerNotFoundForABlankSessionId(string requestPath)
+    {
+        await using Host host = await Host.StartAsync();
+
+        HttpResponseMessage response = await host.Client.GetAsync(new Uri(requestPath, UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Empty(host.Builder.Query.Invocations);
+    }
+
     [Fact]
     public async Task SessionSubagentsPageThroughTheQueryService()
     {

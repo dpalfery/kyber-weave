@@ -15,11 +15,18 @@ export const ZERO_RECORD_HARNESS = 'droid'
 export const OPENCODE_REPLAY_SESSION_ID = 'ses_e74c398c7ffeVajzhRWZNgfR2n'
 
 /**
- * The widest window the paged routes serve: a read that must see a whole list asks for it.
- * Exported so every spec that reads a list by page asks the server's own cap rather than
- * carrying a copy that can drift from it.
+ * The widest sessions page the server serves: `KyberBridgeEngine.DefaultSessionPageLimit`,
+ * which `/api/kyber/sessions` also clamps `limit` to. A larger `limit` is served as this many
+ * rows, so a read that must see a session it may not find on one page searches for it by id.
  */
-export const SESSION_PAGE_LIMIT = 500
+export const SESSION_PAGE_LIMIT = 100
+
+/**
+ * The widest page a session section route serves: `KyberBridgeEngine.DefaultSectionPageLimit`,
+ * which every `/api/kyber/session/{id}/<section>` route clamps `limit` to. A read that must see
+ * a whole section walks its pages.
+ */
+export const SECTION_PAGE_LIMIT = 25
 
 export type CollectedWorld = {
   readonly root: string

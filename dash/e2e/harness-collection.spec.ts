@@ -9,6 +9,7 @@ import {
   HONEST_EMPTY_HARNESS,
   MEASURED_HARNESS,
   OPENCODE_REPLAY_SESSION_ID,
+  SECTION_PAGE_LIMIT,
   SESSION_PAGE_LIMIT,
   USER_CANON,
   ZERO_RECORD_HARNESS,
@@ -503,23 +504,25 @@ test.describe('the Factory (Droid) replay', () => {
 
     // And the prompt is the session's own content, not only an attribute on the
     // raw span: the requests section carries what was asked in each row's prompt
-    // preview. The section is paged, so the read asks for a window wide enough to
-    // hold every request the replayed session recorded.
-    const response = await page.request.get(
-      `${factoryApp}/api/kyber/session/${FACTORY_CONTENT_ON_SESSION_ID}/requests?limit=${SESSION_PAGE_LIMIT}`,
-    )
-    expect(response.status(), await response.text()).toBe(200)
-    const payload = (await response.json()) as {
-      data?: Array<{ prompt?: unknown }>
-      requests?: Array<{ prompt?: unknown }>
-      total?: number
-      page?: number
-      limit?: number
+    // preview. The section is paged, so the read walks every page of it.
+    const prompts: unknown[] = []
+    for (let pageNumber = 1; ; pageNumber += 1) {
+      const response = await page.request.get(
+        `${factoryApp}/api/kyber/session/${FACTORY_CONTENT_ON_SESSION_ID}/requests?limit=${SECTION_PAGE_LIMIT}&page=${pageNumber}`,
+      )
+      expect(response.status(), await response.text()).toBe(200)
+      const payload = (await response.json()) as {
+        data?: Array<{ prompt?: unknown }>
+        requests?: Array<{ prompt?: unknown }>
+        total?: number
+      }
+      const rows = payload.data ?? payload.requests ?? []
+      prompts.push(...rows.map((request) => request.prompt))
+      if (rows.length === 0 || prompts.length >= (payload.total ?? 0)) break
     }
     // The request that carries the prompt is found, not assumed to be the
     // first: the page's order is the session's, and a request that declares
     // the prompt absent says so in a shape of its own.
-    const prompts = (payload.data ?? payload.requests ?? []).map((request) => request.prompt)
     const carried = prompts.find((prompt) => typeof prompt === 'string')
     expect(carried, 'the requests section must carry the prompt the consent allowed').toBeDefined()
     expect(carried as string).toContain(FACTORY_REPLAY_PROMPT)

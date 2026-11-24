@@ -199,7 +199,7 @@ public static class DashEndpointMappings
         if (refusal is not null)
             return refusal;
 
-        string? harness = DashHttp.OptionalQueryString(request.Query, "harness");
+        string? harness = DashHttp.NormalizeFilter(DashHttp.OptionalQueryString(request.Query, "harness"));
         string? search = DashHttp.OptionalQueryString(request.Query, "q");
         return await Task.Run<IResult>(
             () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetSessionPage(page, limit, harness, search)),
@@ -211,7 +211,7 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
 
-        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSubagentPageLimit);
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSubagentPageLimit, id);
         if (refusal is not null)
             return refusal;
 
@@ -222,14 +222,20 @@ public static class DashEndpointMappings
 
     /// <summary>
     /// Reads the page window the sessions routes share — <c>limit</c> and <c>page</c>, with
-    /// <c>offset</c> accepted only where it starts a page — or the 400 that refuses it.
+    /// <c>offset</c> accepted only where it starts a page — or the response that refuses it: 404
+    /// for a blank session id, 400 for a malformed window. The default page size is also the
+    /// largest the route serves (100 sessions, 25 section rows), so a larger <c>limit</c> is clamped.
     /// </summary>
     /// <param name="request">Incoming request carrying the query string.</param>
-    /// <param name="defaultLimit">Rows per page when the request names no limit.</param>
+    /// <param name="defaultLimit">Rows per page when the request names no limit, and the most it may name.</param>
+    /// <param name="sessionId">The session the route reads, or <see langword="null"/> for the sessions list.</param>
     /// <returns>The clamped limit, the one-based page, and the refusal to answer, or <see langword="null"/> when the window is valid.</returns>
-    private static (int Limit, int Page, IResult? Refusal) ReadPageWindow(HttpRequest request, int defaultLimit)
+    private static (int Limit, int Page, IResult? Refusal) ReadPageWindow(HttpRequest request, int defaultLimit, string? sessionId = null)
     {
-        (int limit, int _, int page) = DashHttp.Pagination(request.Query, defaultLimit, out bool invalid);
+        if (sessionId is not null && string.IsNullOrWhiteSpace(sessionId))
+            return (defaultLimit, 1, DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"));
+
+        (int limit, int _, int page) = DashHttp.Pagination(request.Query, defaultLimit, out bool invalid, maxLimit: defaultLimit);
         if (invalid)
             return (limit, page, DashHttp.Error(StatusCodes.Status400BadRequest, PagingInvalidMessage));
 
@@ -276,7 +282,7 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
 
-        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit);
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit, id);
         if (refusal is not null)
             return refusal;
 
@@ -292,7 +298,7 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
 
-        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit);
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit, id);
         if (refusal is not null)
             return refusal;
 
@@ -308,7 +314,7 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
 
-        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit);
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit, id);
         if (refusal is not null)
             return refusal;
 
@@ -324,7 +330,7 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
 
-        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit);
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit, id);
         if (refusal is not null)
             return refusal;
 
@@ -340,7 +346,7 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
 
-        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit);
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit, id);
         if (refusal is not null)
             return refusal;
 
@@ -356,7 +362,7 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
 
-        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit);
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit, id);
         if (refusal is not null)
             return refusal;
 
@@ -378,7 +384,7 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
 
-        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit);
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit, id);
         if (refusal is not null)
             return refusal;
 
@@ -463,7 +469,7 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
 
-        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit);
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit, sessionKey);
         if (refusal is not null)
             return refusal;
 
