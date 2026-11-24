@@ -71,14 +71,14 @@ export function SessionKwSkillsSection({ sessionId, className }: SessionKwSkills
                       className="border-t border-border"
                     >
                       <td className="px-2 py-1 font-mono text-foreground">
-                        {row.skill ?? <em className="text-tertiary-foreground">not recorded</em>}
+                        {row.skill || <em className="text-tertiary-foreground">not recorded</em>}
                       </td>
                       <td className="px-2 py-1 text-foreground">
-                        {row.agent ?? <em className="text-tertiary-foreground">not recorded</em>}
+                        {row.agent || <em className="text-tertiary-foreground">not recorded</em>}
                       </td>
                       <td className="px-2 py-1 font-mono text-tertiary-foreground">{row.session_id}</td>
                       <td className="px-2 py-1 font-mono text-tertiary-foreground">
-                        {row.loaded_at ?? <em>not recorded</em>}
+                        {row.loaded_at || <em>not recorded</em>}
                       </td>
                     </tr>
                   )

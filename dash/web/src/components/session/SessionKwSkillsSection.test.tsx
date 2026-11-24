@@ -107,6 +107,20 @@ describe('SessionKwSkillsSection states', () => {
     expect(row.textContent).not.toContain('null')
   })
 
+  it('says a skill was not recorded when the row carries an empty name', async () => {
+    stubFetch(() =>
+      jsonResponse({
+        ...KW_PAGE,
+        rows: [{ ...KW_ROW, skill: '', agent: '', loaded_at: '' }],
+      }),
+    )
+    mount()
+    const section = await screen.findByTestId('kw-skills-section')
+    const row = within(section).getByTestId('kw-skill-row-1')
+    expect(row.textContent).toContain('not recorded')
+    expect(row.textContent).not.toContain('null')
+  })
+
   it('heads the section KW skills, with no section number', async () => {
     stubFetch(() => jsonResponse(KW_PAGE))
     mount()
