@@ -127,16 +127,33 @@ public class CaptureService : ICaptureService
         }, CamelCaseOptions);
     }
 
+    /// <summary>
+    /// Resolves the VS Code user settings file the Copilot probe reads on this platform.
+    /// </summary>
+    /// <param name="home">Home directory the probe is rooted at.</param>
+    /// <returns>Absolute path of the VS Code user settings file.</returns>
+    /// <remarks>
+    /// VS Code keeps user settings under <c>Library/Application Support</c> on macOS, the roaming
+    /// AppData profile on Windows, and <c>.config</c> on Linux, so the probe and the test proving
+    /// it ask this one rule rather than each hard-coding a layout and disagreeing on macOS.
+    /// </remarks>
+    public static string CopilotSettingsFile(string home)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(home);
+
+        return OperatingSystem.IsMacOS()
+            ? Path.Combine(home, "Library", "Application Support", "Code", "User", "settings.json")
+            : OperatingSystem.IsWindows()
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Code", "User", "settings.json")
+                : Path.Combine(home, ".config", "Code", "User", "settings.json");
+    }
+
     private List<HarnessStatusView> BuildHarnessStatuses(bool factoryConsent)
     {
         string home = homeDirectory();
         List<HarnessStatusView> list = [];
 
-        string copilotPath = OperatingSystem.IsMacOS()
-            ? Path.Combine(home, "Library", "Application Support", "Code", "User", "settings.json")
-            : OperatingSystem.IsWindows()
-                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Code", "User", "settings.json")
-                : Path.Combine(home, ".config", "Code", "User", "settings.json");
+        string copilotPath = CopilotSettingsFile(home);
         list.Add(DescribeManagedFile(
             "copilot",
             "Copilot",

@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: test
 owner: dpalfery
-last-reviewed: 2026-11-18
+last-reviewed: 2026-11-23
 decided-by:
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
 ---
@@ -151,6 +151,51 @@ guarantee breaks.
 
 New behaviour ships with the test that would fail without it. A bug fix ships with a
 regression test whose name encodes the scenario that was broken.
+
+### Read-path tests assert the shape of the reads
+
+A read path has two outcomes a test can observe: the values it returns, and the reads it issues
+to get them. A value assertion covers the first. The second is the cost, and its absence is why
+a dashboard stayed legal at review while a 579 MB store made it unusable.
+
+**A read path's test asserts which store reads the path issues** (KW-STD-TEST-001), over the
+fake's instrumented read log, not only the values returned: that the sessions list takes
+`SessionHeaderPage` plus the keyed `SessionListFigures` and reads no content, that each section
+route issues only its own reads, that the stored-fields rows route stays scoped to the opened
+table's SQL-limited page. Assert the named reads, not a byte count or a duration — a named read is stable and
+a measurement is not. This is the mechanical lever behind the store-read rules in the
+[SQLite standard](../sqlite/sqlite.standards.md#store-reads-are-shaped-to-their-consumer): a
+later change that widens a read fails this test with no reviewer having to remember the rule. It
+proposes no guard script and no new architecture test;
+[ADR 0089](../../adr/0089-every-behaviour-is-testable-through-a-seam.md) keeps prose enforcement
+in written guidance plus review, and this rule is that guidance's testable half.
+
+It is consistent with [test the decision, not the implementation](#test-the-decision-not-the-implementation):
+the read log is the seam's observable contract. The reads a path issues through its interface
+are its cost behaviour, and a test cannot see how a fake computes a value but can count and name
+what was asked of it.
+
+**Asserting a read model is not asserting a path.** A test over `SessionListFigures` proves that
+query's figures; the page is served by a bridge path that can still reach a broader read, and
+that gap is the defect that shipped. A read path gets an assertion on the path, not only on the
+model it happens to call. The worked examples are
+`AnalyticsReadPathTests.EveryOtherPathLeavesContentUnread`, which sweeps 29 request paths over an
+instrumented fake and fails on the first materialized content byte, and
+`ArchitectureBoundaryTests.RequestPathsCannotReachMaintenanceReads`, which fails when a caller
+outside the allowed list names the maintenance read.
+
+**Replacing a read proves the new one returns the same figures** (KW-STD-TEST-002). Narrowing or
+replacing a store read needs scalar and aggregate parity against the read it replaces, on seeded
+shapes that include the absent-versus-zero cases: a token-less session reports not measured, and
+a session with no rows is not a session whose figures are all zero. A smaller read that returns
+different figures is a silent defect, and no shape assertion catches it.
+
+This does not ask for a latency assertion. A fixture orders of magnitude smaller than production
+cannot prove a read path's latency, so the cost is proved by the shape assertion of
+KW-STD-TEST-001; a timer or a fixed wait in its place is already forbidden by the no-sleeps,
+no-fixed-waits bullet in [the suite's time budget](#the-suite-stays-inside-its-time-budget), which
+this extends rather than restates. These are ordinary in-memory assertions with no waits, so the
+120-second budget is untouched.
 
 ### Isolation and assertions
 

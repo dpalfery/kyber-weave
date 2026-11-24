@@ -1,10 +1,18 @@
 import { cn, fmtNum, fmtTokens } from '../lib/utils.js'
+import { Pager } from './ui/Pager.js'
 import type {
   KyberSkillAvailability,
   KyberSkillRow,
   KyberSkillsBlock,
   KyberSkillsSummary,
 } from '../lib/kyberApi.js'
+import type { PagedWindow } from './session/types.js'
+
+/** The skills section's whole-list figures, computed over every row before paging. */
+export type SkillsPanelAggregate = {
+  /** The token-bar scale: the largest derived-token figure in the whole list. */
+  maxTokens: number | null
+}
 
 /**
  * Section 4 · Skills. The engine decides what was listed and invoked; this
@@ -16,6 +24,15 @@ export type SkillsPanelProps = {
   skills?: KyberSkillsBlock | null
   /** The session summary; `skills_listed` / `skills_invoked` are absent when not measured. */
   summary?: KyberSkillsSummary | null
+  /**
+   * The skills section's whole-list figures, computed over every row before
+   * paging. Its `maxTokens` scales every token bar, so the bars are already
+   * whole-list values with only page one loaded; without it the page's rows
+   * set the scale.
+   */
+  aggregate?: SkillsPanelAggregate | null
+  /** The paging window the skill rows arrived under; absent when the caller holds the whole list. */
+  pager?: PagedWindow
   /** Opens the skill drawer with the payload row. */
   onSelectSkill?: (skill: KyberSkillRow) => void
   className?: string
@@ -134,7 +151,7 @@ function renderRow(row: KyberSkillRow, maxTokens: number, onSelectSkill?: (skill
   )
 }
 
-export function SkillsPanel({ skills, summary, onSelectSkill, className }: SkillsPanelProps) {
+export function SkillsPanel({ skills, summary, aggregate, pager, onSelectSkill, className }: SkillsPanelProps) {
   const rootClass = cn('rounded-lg border border-border bg-card p-4 text-card-foreground shadow-xs', className)
 
   if (skills === undefined || skills === null) {
@@ -168,7 +185,14 @@ export function SkillsPanel({ skills, summary, onSelectSkill, className }: Skill
   }
 
   const rows = skills.rows ?? []
-  const maxTokens = Math.max(0, ...rows.map((row) => (typeof row.derived_tokens === 'number' ? row.derived_tokens : 0)))
+  // The bar scale is the whole list's when the section served its aggregate —
+  // computed over every row before paging, so page two being held back cannot
+  // stretch page one's bars. Without it, the page's rows set the scale.
+  const servedMax = aggregate?.maxTokens
+  const maxTokens =
+    typeof servedMax === 'number' && Number.isFinite(servedMax) && servedMax > 0
+      ? servedMax
+      : Math.max(0, ...rows.map((row) => (typeof row.derived_tokens === 'number' ? row.derived_tokens : 0)))
 
   const listedCount = Array.isArray(summary?.skills_listed) ? summary.skills_listed.length : undefined
   const invokedCount = Array.isArray(summary?.skills_invoked) ? summary.skills_invoked.length : undefined
@@ -215,6 +239,16 @@ export function SkillsPanel({ skills, summary, onSelectSkill, className }: Skill
           <p className="py-4 text-center text-sm text-muted-foreground">No skill was recorded for this session.</p>
         ) : (
           rows.map((row) => renderRow(row, maxTokens, onSelectSkill))
+        )}
+        {pager != null && (
+          <Pager
+            page={pager.page}
+            limit={pager.limit}
+            total={pager.total}
+            onPageChange={pager.onPageChange}
+            loading={pager.loading}
+            ariaLabel="Skill pages"
+          />
         )}
       </div>
 

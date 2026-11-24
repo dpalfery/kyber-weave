@@ -102,7 +102,7 @@ public class RelationalIngestTests
         Assert.NotEmpty(spyWriter.WriteBatchCalls);
         Assert.Equal(2, store.CountRecords());
 
-        CollectedRecord? copilotRecord = store.GetRecord("1111111111111111");
+        CollectedRecord? copilotRecord = store.FindRecord("1111111111111111");
         Assert.NotNull(copilotRecord);
         Assert.Equal("copilot", copilotRecord.HarnessId);
         Assert.Equal("sess-copilot", copilotRecord.SessionKey);
@@ -110,19 +110,19 @@ public class RelationalIngestTests
         Assert.Contains(copilotRecord.Parts, static p => p.Bucket == ContentBucket.SystemPrompt && p.PlainText == "Be concise.");
         Assert.Contains(copilotRecord.Parts, static p => p.Bucket == ContentBucket.ConversationHistory && p.PlainText is null && p.Withheld is not null);
 
-        CollectedRecord? piRecord = store.GetRecord("2222222222222222");
+        CollectedRecord? piRecord = store.FindRecord("2222222222222222");
         Assert.NotNull(piRecord);
         Assert.Equal("pi", piRecord.HarnessId);
 
-        Assert.Null(store.GetRecord("3333333333333333"));
+        Assert.Null(store.FindRecord("3333333333333333"));
         Assert.Equal(1, store.CountIngestProblems());
         StoredIngestProblem problem = Assert.Single(store.ListIngestProblems());
         Assert.Equal(CanonValidation.TokenNegativeClass, problem.Problem.Code);
         Assert.Equal("claude-code", problem.Problem.HarnessId);
         Assert.DoesNotContain("do-not-persist", problem.Problem.Message, StringComparison.Ordinal);
 
-        Assert.Null(store.GetRecord("4444444444444444"));
-        Assert.Empty(store.ContentParts("4444444444444444"));
+        Assert.Null(store.FindRecord("4444444444444444"));
+        Assert.Empty(store.FindRecordParts("4444444444444444"));
         Assert.Equal(1, store.CountQuarantinedSpans());
         StoredQuarantinedSpan? quarantined = store.GetQuarantinedSpan("4444444444444444");
         Assert.NotNull(quarantined);
@@ -199,14 +199,15 @@ public class RelationalIngestTests
         Assert.NotNull(projection);
         Assert.Equal("kw-probe runA shared-service", projection.Label);
 
-        SessionAggregateView? aggregate = store.GetSessionAggregate(sessionId, pricing.LoadPricingTables());
-        Assert.NotNull(aggregate);
-        Assert.Equal(2, aggregate.ToolCalls);
-        Assert.NotNull(aggregate.ReportedCost);
-        Assert.Equal(CostBasis.Harness, aggregate.ReportedCost.Basis);
-        Assert.Equal(0d, aggregate.ReportedCost.Value);
-        Assert.Contains(aggregate.Tools, static tool => tool.Name == "read" && tool.Invocations == 1);
-        Assert.Contains(aggregate.Tools, static tool => tool.Name == "skill" && tool.Invocations == 1);
+        SessionSummaryFigure? summary = store.SessionSummaryFigures(sessionId, pricing.LoadPricingTables());
+        Assert.NotNull(summary);
+        Assert.Equal(2, summary.ToolCalls);
+        Assert.NotNull(summary.ReportedCost);
+        Assert.Equal(CostBasis.Harness, summary.ReportedCost.Basis);
+        Assert.Equal(0d, summary.ReportedCost.Value);
+        SessionToolFigureSet toolFigures = store.SessionToolFigures(sessionId);
+        Assert.Contains(toolFigures.Tools, static tool => tool.Name == "read" && tool.Invocations == 1);
+        Assert.Contains(toolFigures.Tools, static tool => tool.Name == "skill" && tool.Invocations == 1);
 
         KyberBridgeEngine bridge = new(
             store,
@@ -215,11 +216,12 @@ public class RelationalIngestTests
             pricing,
             new CanonSessionProjectorEngine(store, store, store, pricing),
             new CanonRollupsEngine(store, store, pricing));
-        JsonElement detail = bridge.GetSessionDetail(sessionId)!.Value;
+        JsonElement tools = bridge.GetSessionTools(sessionId)!.Value;
         Assert.Contains(
-            detail.GetProperty("tools").EnumerateArray(),
+            tools.GetProperty("tools").EnumerateArray(),
             static tool => tool.GetProperty("name").GetString() == "read" && tool.GetProperty("invocations").GetInt32() == 1);
-        Assert.Equal(0d, detail.GetProperty("summary").GetProperty("cost_reported").GetProperty("value").GetDouble());
+        JsonElement summaryPayload = bridge.GetSessionSummary(sessionId)!.Value;
+        Assert.Equal(0d, summaryPayload.GetProperty("summary").GetProperty("cost_reported").GetProperty("value").GetDouble());
     }
 
     /// <summary>
@@ -249,15 +251,15 @@ public class RelationalIngestTests
         IngestOutcome outcome = CanonIngestPipeline.IngestBatch([turn], store, store);
         Assert.Equal(new IngestOutcome(1, 0, 0), outcome);
 
-        CollectedRecord? stored = store.GetRecord("aaaaaaaaaaaaaaaa");
+        CollectedRecord? stored = store.FindRecord("aaaaaaaaaaaaaaaa");
         Assert.NotNull(stored);
         Assert.DoesNotContain(stored.Tokens, static token => token.TokenClass == TokenClass.Input);
         Assert.Null(stored.ReportedInputTokens);
 
         _ = new CanonSessionProjectorEngine(store, store, store, pricing).ProjectIncremental();
-        SessionAggregateView? aggregate = store.GetSessionAggregate(sessionId, pricing.LoadPricingTables());
-        Assert.NotNull(aggregate);
-        Assert.Null(aggregate.TotalInput);
+        SessionSummaryFigure? turnTotals = store.SessionSummaryFigures(sessionId, pricing.LoadPricingTables());
+        Assert.NotNull(turnTotals);
+        Assert.Null(turnTotals.TotalInput);
 
         KyberBridgeEngine bridge = new(
             store,
@@ -266,11 +268,11 @@ public class RelationalIngestTests
             pricing,
             new CanonSessionProjectorEngine(store, store, store, pricing),
             new CanonRollupsEngine(store, store, pricing));
-        JsonElement summary = bridge.GetSessionDetail(sessionId)!.Value.GetProperty("summary");
+        JsonElement summary = bridge.GetSessionSummary(sessionId)!.Value.GetProperty("summary");
         Assert.Equal(JsonValueKind.Null, summary.GetProperty("total_input").ValueKind);
 
         JsonElement listed = Assert.Single(
-            bridge.GetSessions().EnumerateArray(),
+            bridge.GetSessionPage().GetProperty("sessions").EnumerateArray(),
             row => row.GetProperty("session_id").GetString() == sessionId);
         JsonElement declared = listed.GetProperty("total_input");
         Assert.Equal("not_measurable", declared.GetProperty("availability").GetString());
@@ -278,16 +280,18 @@ public class RelationalIngestTests
         Assert.Contains("droid", reason, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("token", reason, StringComparison.OrdinalIgnoreCase);
 
-        JsonElement timeline = bridge.GetSessionDetail(sessionId)!.Value.GetProperty("timeline");
+        JsonElement timeline = bridge.GetSessionTimeline(sessionId)!.Value.GetProperty("nodes");
         Assert.Contains(timeline.EnumerateArray(), static node => node.GetProperty("name").GetString() == "factory.turn");
     }
 
     /// <summary>
-    /// A Factory turn captured with content consent keeps the prompt on the timeline span
-    /// the inspector reads and on the session request the payload publishes.
+    /// A Factory turn captured with content consent keeps the prompt in the store as a content
+    /// part, but the content-free sections publish none: the timeline section's span attributes
+    /// and read carry no prompt text, and the prompt surfaces only through the requests section's
+    /// page-scoped preview read and the scoped content read.
     /// </summary>
     [Fact]
-    public void IngestBatch_FactoryTurnWithConsent_PublishesPromptOnTimelineAndRequest()
+    public void IngestBatch_FactoryTurnWithConsent_KeepsPromptOutOfTheContentFreeSections()
     {
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
@@ -319,15 +323,27 @@ public class RelationalIngestTests
             pricing,
             new CanonSessionProjectorEngine(store, store, store, pricing),
             new CanonRollupsEngine(store, store, pricing));
-        JsonElement detail = bridge.GetSessionDetail(sessionId)!.Value;
+        store.ClearReadLog();
+        JsonElement timeline = bridge.GetSessionTimeline(sessionId)!.Value.GetProperty("nodes");
         JsonElement node = Assert.Single(
-            detail.GetProperty("timeline").EnumerateArray(),
+            timeline.EnumerateArray(),
             static row => row.GetProperty("name").GetString() == "factory.turn");
-        Assert.Equal(prompt, node.GetProperty("attributes").GetProperty(FactoryKeys.PromptText).GetString());
+        Assert.False(node.GetProperty("attributes").TryGetProperty(FactoryKeys.PromptText, out _));
+        Assert.Equal(0, store.MaterializedContentBytes);
+
+        // The prompt reaches a payload only through the requests section's page-scoped preview
+        // read — never a whole-conversation one.
+        JsonElement requests = bridge.GetSessionRequests(sessionId)!.Value;
         Assert.Contains(
-            detail.GetProperty("requests").EnumerateArray(),
-            row => row.GetProperty("prompt").ValueKind == JsonValueKind.String
-                && row.GetProperty("prompt").GetString() == prompt);
+            requests.GetProperty("requests").EnumerateArray(),
+            static row => row.GetProperty("prompt").ValueKind == JsonValueKind.String);
+        Assert.Contains(nameof(InMemoryRelationalStore.RequestPromptPreviews), store.ReadLog);
+
+        // The capture is still stored: a scoped content read, not the content-free sections, is
+        // what returns the prompt.
+        Assert.Contains(
+            store.FindRecordParts("aaaaaaaaaaaaaaaa"),
+            part => part.PlainText == prompt);
     }
 
     /// <summary>
@@ -337,7 +353,7 @@ public class RelationalIngestTests
     /// A turn that stored only input, or only output, stays partial.
     /// </summary>
     [Fact]
-    public void GetSessionAggregate_AbsentTokens_IsNotPricedAsZero()
+    public void SessionSummaryFigures_AbsentTokens_IsNotPricedAsZero()
     {
         const double inputRate = 0.000003;
         const double outputRate = 0.000015;
@@ -398,7 +414,7 @@ public class RelationalIngestTests
         CostStatus status,
         double? value)
     {
-        SessionAggregateView view = store.GetSessionAggregate(sessionKey, tables)!;
+        SessionSummaryFigure view = store.SessionSummaryFigures(sessionKey, tables)!;
         Assert.Equal(status, view.PublishedCost.Status);
         if (value is null)
         {
@@ -477,8 +493,45 @@ public class RelationalIngestTests
 
         Assert.Equal(new IngestOutcome(1, 0, 0), outcome);
         Assert.Single(spyWriter.WriteBatchCalls);
-        Assert.NotNull(store.GetRecord("5555555555555555"));
+        Assert.NotNull(store.FindRecord("5555555555555555"));
         Assert.NotNull(store.GetSession("sess-pi-direct"));
+    }
+
+    /// <summary>
+    /// A record whose two <c>tool_definitions</c> parts differ in fate: the first parses into
+    /// stored definitions, the second is truncated JSON the parser must refuse. The part that
+    /// produced definitions is the only one skipped from stored content — its unparsed sibling
+    /// keeps its text and reported tokens, so skipping is per part, never all-or-nothing.
+    /// </summary>
+    [Fact]
+    public void IngestBatch_SkipsOnlyTheToolDefinitionPartsThatProducedDefinitions()
+    {
+        InMemoryRelationalStore store = new();
+        ContentPart parsedPart = new("tool_definitions", """[{"name":"read","description":"Read a file"}]""", Order: 0);
+        ContentPart truncatedPart = new("tool_definitions", "[{\"name\":\"wri\"", Tokens: 77, Order: 1);
+        SeededPartsAdapter adapter = new("two-part-harness", [parsedPart, truncatedPart]);
+        OtlpSpan span = MakeOtlpSpan(
+            spanId: "4444444444444444",
+            traceId: "dddddddddddddddddddddddddddddddd",
+            serviceName: "two-part-host",
+            name: "two-part.turn",
+            kind: "client",
+            attributes: new Dictionary<string, JsonElement>(StringComparer.Ordinal));
+
+        IngestOutcome outcome = CanonIngestPipeline.IngestBatch([span], store, store, [adapter]);
+
+        Assert.Equal(new IngestOutcome(1, 0, 0), outcome);
+        Assert.NotNull(store.FindRecord("4444444444444444"));
+        Assert.Equal(
+            ["read"],
+            store.ToolDefinitions("4444444444444444").Select(static row => row.Definition.ToolName).ToList());
+
+        List<CollectedContentPart> definitionParts = [.. store
+            .FindRecordParts("4444444444444444")
+            .Where(static part => part.Bucket == ContentBucket.ToolDefinitions)];
+        Assert.Single(definitionParts);
+        Assert.Equal("[{\"name\":\"wri\"", definitionParts[0].PlainText);
+        Assert.Equal(77, definitionParts[0].ReportedTokens);
     }
 
     /// <summary>
@@ -576,7 +629,7 @@ public class RelationalIngestTests
 
         Assert.Single(spyWriter.WriteBatchCalls);
         Assert.Equal(1, store.CountRecords("commandcode"));
-        Assert.NotNull(store.GetRecord("rec-good"));
+        Assert.NotNull(store.FindRecord("rec-good"));
 
         Assert.Equal(2, spyWriter.WriteProblemCalls.Count);
         Assert.All(spyWriter.WriteProblemCalls, static p => Assert.Equal("SOURCE_UNREADABLE", p.Code));
@@ -737,7 +790,7 @@ public class RelationalIngestTests
         ]);
 
         Assert.Equal(1, spanOutcome.Accepted);
-        Assert.NotNull(store.GetRecord("8888888888888888"));
+        Assert.NotNull(store.FindRecord("8888888888888888"));
     }
 
     private static string Combine(string root, string relative) =>
@@ -781,6 +834,38 @@ public class RelationalIngestTests
                 ["service.name"] = Element(serviceName),
             },
             Scope: new OtlpScope("test-scope", "1.0.0"));
+
+    /// <summary>
+    /// A harness adapter whose normalized record carries exactly the seeded content parts, standing
+    /// in for a harness that reports tool definitions in parts a test controls.
+    /// </summary>
+    private sealed class SeededPartsAdapter(string harnessName, IReadOnlyList<ContentPart> parts) : IHarnessAdapter
+    {
+        public string Name => harnessName;
+
+        public IReadOnlyList<string> Namespaces => ["two-part"];
+
+        public double Detect(RawSpan span) => 1.0;
+
+        public CanonicalRecord Normalize(RawSpan span) => new()
+        {
+            SpanId = span.SpanId,
+            Source = span.Source,
+            Harness = harnessName,
+            Name = span.Name,
+            Op = "llm.invoke",
+            Kind = span.Kind,
+            Timestamp = span.Timestamp ?? string.Empty,
+            Status = "ok",
+            Tokens = new TokenUsage(0, 0, 0, 0, 0, 0),
+            Cost = new CostBlock(CostBasis.Unknown, CostStatus.NoRate),
+            Parts = parts,
+            Content = CanonValidation.ContentFromParts(parts),
+            SessionId = "sess-two-part-defs",
+        };
+
+        public Problem? Validate(CanonicalRecord record) => null;
+    }
 
     private sealed class SpyRelationalStoreWriter(IRelationalStoreWriter inner) : IRelationalStoreWriter
     {

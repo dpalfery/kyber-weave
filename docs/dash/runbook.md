@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-11-22
+last-reviewed: 2026-11-23
 decided-by:
   - adr/0084-kyberdash-csharp-engine
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
@@ -19,6 +19,8 @@ code-refs:
   - JobSchedulerService
   - CanonRefreshEngine
   - CanonSessionProjectorEngine
+  - ProjectIncrementalForReads
+  - TurnContentParts
   - CanonPricing
   - CleanService
   - SettingsService
@@ -196,7 +198,8 @@ Claude Code process or written into `~/.claude/settings.json` by
 
 **Data-exposure warning.** With these enabled, the receiver stores the system prompt, tool
 definitions, message history, and the user's prompt as plaintext content parts, served on the
-loopback-only `/api/kyber/*` API. Assembled turn text is purged after 14 days; the raw packet
+loopback-only `/api/kyber/*` API. Assembled turn text is retained for 14 days by policy, though
+the relational engine does not yet delete it ([§4](#4-content-retention-policy)); the raw packet
 keeps exactly what the sender sent until you wipe the `claude-code` harness or the whole
 database ([§4](#4-content-retention-policy),
 [ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). Set them only when you
@@ -437,8 +440,8 @@ produce identical derived rows.
 
 ### 2a. Local harness-source refresh (`dash refresh`)
 
-Fill or update `canon.db` from installed native session stores, then purge expired content
-and rebuild derived tables:
+Fill or update `canon.db` from installed native session stores, then record the content-retention
+mark and rebuild derived tables:
 
 ```bash
 kyberdash kyber refresh
@@ -1100,18 +1103,21 @@ standing privacy and storage liability ([ADR 0014](../adr/0014-unclipped-turn-in
 
 - **Default 14-day rolling retention**: Full plaintext in `content_json` / `parts_json` is
   retained for 14 days to support the Context Inspector.
-- **Automatic purge on refresh**: `CanonRefreshEngine.RefreshHarnessSources` / `PurgeExpiredContent` clears expired content after source
-  jobs drain, and the maintenance pass calls it too, so the window still advances on a
-  schedule that is not reading folder sources. Rows older than 14 days have content emptied
-  in place (`'{}'` / NULL parts). Token metrics, timestamps, findings, and `records.raw`
-  stay.
-- **The window does not cover raw packets.** Assembled turn text is purged after 14 days.
+- **Automatic purge on refresh records the window; it does not yet delete.** `CanonRefreshEngine.RefreshHarnessSources` / `PurgeExpiredContent` runs after source
+  jobs drain, and the maintenance pass calls it too, so the cutoff advances on a
+  schedule that is not reading folder sources — but on the relational engine it only writes
+  `content_retention_days` and the purge cutoff and reports `purged: 0`. Rows older than 14 days
+  keep their content, and `canon.db` does not shrink on the retention window: deleting expired
+  content is a known gap in the ingestion service, so do not plan on space being reclaimed.
+- **The window does not cover raw packets.** Assembled turn text falls outside the retention
+  window after 14 days, though it is not yet deleted (above).
   The raw packet keeps exactly what the sender sent until you wipe the `claude-code` harness
   or the whole database ([§2b](#2b-database-clean-dash-clean),
   [ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). Never read the 14-day
   window as "all prompt text expires"; raw packets outlive it by design
   ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)).
-- There is no shipped `kyber purge-content` CLI. Re-run `dash refresh` to apply the window.
+- There is no shipped `kyber purge-content` CLI. Re-running `dash refresh` advances the retention
+  mark only; it deletes nothing.
 
 ### 5. LLM Review Provider Configuration & Privacy Guardrails
 
@@ -2031,6 +2037,63 @@ here.
   [Harness OpenTelemetry capture](#harness-opentelemetry-capture). A Kilo installed only under VS
   Code Insiders, JetBrains or a non-standard Windows location is not detected by design; the
   import above still works.
+
+### 11. Slow dashboard responses on a large store
+
+- **Symptom**: the SPA shell loads and its assets answer 200, the Sessions list eventually paints,
+  but the Context Doctor panel sits on "Reading sessions…" and opening a session takes tens of
+  seconds. Measured on a 579 MB store: `/api/kyber/sessions` at 10.3 s growing to 26.5 s and
+  `/api/kyber/coverage` at 11.8 s growing to 52.9 s, worsening with every pass, while
+  `/api/kyber/jobs` (5 ms) and `/api/kyber/settings` (2 ms) stayed fast — the server was healthy,
+  the reads were not.
+- **Cause**: continuous capture advances the store's write marker every second or two, so a
+  dashboard GET always found the projection dirty. Every GET then ran a full projection pass that
+  materialized every session's content text — roughly a gigabyte of strings per pass on that store
+  — before skipping the sessions that were already clean, and repeated polls ran concurrent passes
+  on top of each other. The sessions list then re-read every session twice more, and opening a
+  session built the whole detail payload (every turn, the full span tree) in one response.
+- **What the fixed engine does instead**: reads are shaped to the page, so the list, summary,
+  section, turn, timeline, coverage and analytics paths answer from figures computed over
+  content-free record scalars ([the read-model register](architecture.md#the-read-model-register)).
+  The sessions list resolves, filters, searches and pages in SQL and prices only the page it
+  returns; the session view is ten section queries issued at mount in page order, each paging
+  its own list at 25 (sessions at 100). Content text is read by one view, one turn or one request
+  at a time, from `TurnContentParts(sessionKey, turnIndex, spanId, part, budget, full)` and the
+  two section-scoped content reads (the shown requests page's prompt previews, the inspected
+  span's consent-allowed prompt). The projection pass reads only the dirty sessions it rebuilds
+  and defers oversized ones to the maintenance tick, and a second concurrent pass returns instead
+  of stacking.
+- **What to expect on an oversized store.** The Sessions list, the context report, coverage and
+  findings answer from figures regardless of how much text a session holds. Opening a session
+  paints the header first from `/summary` while the sections fill in below in page order; only
+  the first page of each list is fetched, and the next page is fetched when the viewer presses
+  the page button. Nothing on the list, summary or section paths reads that session's content.
+  The charts section is the one heavy section by design: it carries the whole session's turns
+  and context object (content-free, but per-turn tool-definition maps grow with servers ×
+  turns), so on a session with tens of thousands of turns it is the last section to arrive —
+  still a fraction of the retired whole-payload response. The timeline section rebuilds the
+  session's metadata tree (never its content) once per page. Under live capture a new session
+  can shift the sessions list by one row between pages.
+- **Deferred sessions.** A dirty session whose record count exceeds the read-path budget (default
+  2,000 records) is deferred rather than rebuilt inside a GET: its stored projection stays as it
+  was and its key stays dirty, so its figures can lag capture by up to the refresh cadence
+  (`jobs.refresh_cadence_minutes`, default 5, range 1–1440). Coverage's projection health reports
+  them while `status` stays `"ok"` — `deferredSessions` lists the lagging keys, beside
+  `failedSessions` and `lastError`, and deferral is expected behaviour rather than a fault. To
+  refresh them sooner, shorten the cadence
+  (`kyberdash dash settings set jobs.refresh_cadence_minutes 1`) and let one maintenance tick run;
+  the maintenance pass never defers and rebuilds them.
+- **What stays heavy by design.** A stored-fields table holding hundreds of megabytes of captured
+  text no longer stalls the view: the inventory is content-free and a table's rows page in SQL
+  at 25. The costs that remain are the ones the design names: the charts payload on a very long
+  session, the per-page timeline metadata tree, a maintenance rebuild (`kyber build`, a projection
+  tick), which reads the sessions it rebuilds because token counting and findings consume the
+  part text. Neither the rebuild nor any content read is on a dashboard page read.
+- **Not a remedy.** `kyberdash dash clean` discards captured data, and these docs do not prescribe
+  it. Removing data is the owner's decision, taken with the loss in view; this entry documents how
+  the dashboard behaves on an oversized store, not how to shrink one. The content-retention window
+  ([§4](#4-content-retention-policy)) does not help either: a session that is actively captured
+  stays inside the window, so its text keeps arriving faster than any window closes over it.
 
 ---
 

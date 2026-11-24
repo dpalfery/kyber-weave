@@ -158,14 +158,70 @@ public interface IDashboardQueryService
     /// <summary>Ensures projections and rollups are up to date before reads.</summary>
     void EnsureProjected();
 
-    /// <summary>Returns hierarchical root-first sessions with nested subagents.</summary>
-    JsonElement GetSessions(int? limit = null, string? harness = null);
+    /// <summary>
+    /// Returns one page of root sessions, each with its first 25 subagents inline and its subagent
+    /// total.
+    /// </summary>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Roots on the page; 100 unless given.</param>
+    /// <param name="harness">Optional harness filter, which also scopes the root rule.</param>
+    /// <param name="search">Optional text a root's label or session id must contain, matched literally.</param>
+    JsonElement GetSessionPage(int page = 1, int limit = 100, string? harness = null, string? search = null);
 
-    /// <summary>Returns full session detail payload.</summary>
-    JsonElement? GetSessionDetail(string sessionId);
+    /// <summary>Returns one page of a session's subagents: the sessions that attach to it, oldest start first.</summary>
+    /// <param name="parentId">Session whose subagents are paged.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Subagents on the page; 25 unless given.</param>
+    JsonElement GetSubagentPage(string parentId, int page = 1, int limit = 25);
 
     /// <summary>Returns lightweight session summary payload.</summary>
     JsonElement? GetSessionSummary(string sessionId);
+
+    /// <summary>Returns the charts section payload: the session's turn list and context object.</summary>
+    JsonElement? GetSessionCharts(string sessionId);
+
+    /// <summary>Returns one page of the session's request rows, each with the prompt preview its page read carries.</summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page; 25 unless given.</param>
+    JsonElement? GetSessionRequests(string sessionId, int page = 1, int limit = 25);
+
+    /// <summary>Returns one page of the session's measurable reconciliation rows.</summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page; 25 unless given.</param>
+    JsonElement? GetSessionReconciliation(string sessionId, int page = 1, int limit = 25);
+
+    /// <summary>Returns one page of the session's stored ingest problems.</summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page; 25 unless given.</param>
+    JsonElement? GetSessionProblems(string sessionId, int page = 1, int limit = 25);
+
+    /// <summary>Returns one page of the session's ranked tool rows with the section's page-independent aggregate.</summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page; 25 unless given.</param>
+    JsonElement? GetSessionTools(string sessionId, int page = 1, int limit = 25);
+
+    /// <summary>Returns one page of the session's per-server schema rollup rows.</summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page; 25 unless given.</param>
+    JsonElement? GetSessionServers(string sessionId, int page = 1, int limit = 25);
+
+    /// <summary>Returns one page of the session's distinct skill rows.</summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page; 25 unless given.</param>
+    JsonElement? GetSessionSkills(string sessionId, int page = 1, int limit = 25);
+
+    /// <summary>Returns one page of one level of the session's timeline tree, with each node's child count and the tree's bounds.</summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="parentNodeId">Span id whose children the page lists; the top level when null or empty.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Nodes on the page; 25 unless given.</param>
+    JsonElement? GetSessionTimeline(string sessionId, string? parentNodeId = null, int page = 1, int limit = 25);
 
     /// <summary>Returns metrics and bucket figures for a specific turn.</summary>
     JsonElement? GetTurnFigures(string sessionId, int turnIndex);
@@ -257,8 +313,23 @@ public interface IDashboardQueryService
     /// <summary>Returns model context-window catalog payload.</summary>
     JsonElement GetModelCatalog();
 
-    /// <summary>Returns the catalog-driven stored-fields view for a session, or <see langword="null"/> when unknown.</summary>
-    JsonElement? GetStoredFields(string sessionKey);
+    /// <summary>
+    /// Returns the content-free stored-fields inventory for a session — every catalog table's
+    /// name, columns, scoped row count and missing parent keys, never a row value (decision D15)
+    /// — or <see langword="null"/> when the session is unknown.
+    /// </summary>
+    /// <param name="sessionKey">Canonical session identifier.</param>
+    JsonElement? GetStoredFieldsInventory(string sessionKey);
+
+    /// <summary>
+    /// Returns one page of a single catalog table's stored rows for a session, limited in SQL, or
+    /// <see langword="null"/> when the session or the table is unknown (decision D15).
+    /// </summary>
+    /// <param name="sessionKey">Canonical session identifier.</param>
+    /// <param name="table">Exact catalog table name; the allowlist is the catalog.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page; 25 unless given.</param>
+    JsonElement? GetStoredFieldRows(string sessionKey, string table, int page = 1, int limit = 25);
 }
 
 /// <summary>Shared contract-v1 analytics service powering both HTTP analytics endpoints and <c>kyberdash-mcp</c>.</summary>

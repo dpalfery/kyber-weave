@@ -239,7 +239,7 @@ public class CanonIngestTests
         Assert.Equal(2, outcome.Quarantined);
         Assert.Equal(1, outcome.Rejected);
 
-        CollectedRecord? loadedCopilot = store.GetRecord("1111111111111111");
+        CollectedRecord? loadedCopilot = store.FindRecord("1111111111111111");
         Assert.NotNull(loadedCopilot);
         Assert.Equal("copilot", loadedCopilot.HarnessId);
         Assert.Equal("sess-copilot", loadedCopilot.SessionKey);
@@ -253,7 +253,7 @@ public class CanonIngestTests
             loadedCopilot.Parts,
             static part => part.Bucket == ContentBucket.SystemPrompt && part.PlainText == new string('s', 400));
 
-        CollectedRecord? loadedPi = store.GetRecord("2222222222222222");
+        CollectedRecord? loadedPi = store.FindRecord("2222222222222222");
         Assert.NotNull(loadedPi);
         Assert.Equal("pi", loadedPi.HarnessId);
         Assert.Equal("sess-pi", loadedPi.SessionKey);
@@ -264,12 +264,12 @@ public class CanonIngestTests
             loadedPi.Parts,
             static part => part.Bucket == ContentBucket.InstructionContext && part.PlainText == "debugging");
 
-        CollectedRecord? loadedPiBlank = store.GetRecord("2222222222222223");
+        CollectedRecord? loadedPiBlank = store.FindRecord("2222222222222223");
         Assert.NotNull(loadedPiBlank);
         Assert.Equal("pi", loadedPiBlank.HarnessId);
         Assert.Null(loadedPiBlank.SessionKey);
 
-        Assert.Null(store.GetRecord("3333333333333333"));
+        Assert.Null(store.FindRecord("3333333333333333"));
         StoredIngestProblem problem = Assert.Single(store.ListIngestProblems(spanId: "3333333333333333"));
         Assert.Equal(CanonValidation.TokenNegativeClass, problem.Problem.Code);
         Assert.Equal("claude-code", problem.Problem.HarnessId);
@@ -450,8 +450,8 @@ public class CanonIngestTests
         Assert.Equal(4, flushOutcome.Accepted);
         Assert.Equal(0, writer.PendingBytes);
         Assert.Equal(0, writer.PendingSpans);
-        Assert.NotNull(store.GetRecord("1111111111111110"));
-        Assert.NotNull(store.GetRecord("1111111111111113"));
+        Assert.NotNull(store.FindRecord("1111111111111110"));
+        Assert.NotNull(store.FindRecord("1111111111111113"));
     }
 
     [Fact]

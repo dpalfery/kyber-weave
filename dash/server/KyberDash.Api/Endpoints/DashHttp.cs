@@ -149,7 +149,12 @@ internal static class DashHttp
     /// <paramref name="invalid"/> reports a value that was present but malformed, so a caller can
     /// answer 400 instead of paging with a silent default.
     /// </summary>
-    public static (int Limit, int Offset, int Page) Pagination(IQueryCollection query, int defaultLimit, out bool invalid)
+    /// <param name="query">The request's query string.</param>
+    /// <param name="defaultLimit">Rows per page when the request names no limit.</param>
+    /// <param name="invalid">Set when a paging value is present but malformed.</param>
+    /// <param name="maxLimit">The largest page the route serves; a larger <c>limit</c> is clamped to it.</param>
+    /// <returns>The clamped limit, the row offset, and the one-based page.</returns>
+    public static (int Limit, int Offset, int Page) Pagination(IQueryCollection query, int defaultLimit, out bool invalid, int maxLimit = 500)
     {
         int? requestedLimit = OptionalPositiveInt(query, "limit", out bool invalidLimit);
         int? rawPage = OptionalPositiveInt(query, "page", out bool invalidPage);
@@ -159,7 +164,7 @@ internal static class DashHttp
         if (invalid)
             return (defaultLimit, 0, 1);
 
-        int limit = Math.Clamp(requestedLimit ?? defaultLimit, 1, 500);
+        int limit = Math.Clamp(requestedLimit ?? defaultLimit, 1, maxLimit);
         // A page number is only bounded by int, so page × limit overflows int for a huge page.
         // Compute in long and clamp: an absurd page then reads as "past the end" instead of
         // wrapping to a small offset and returning a different page's rows.

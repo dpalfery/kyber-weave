@@ -49,10 +49,7 @@ public static class SquadModelDiff
         return diffs;
     }
 
-    /// <summary>
-    ///     Computes the diff items between <paramref name="before" /> and <paramref name="after" /> model profiles
-    ///     for all agents in <paramref name="source" /> targeting harness <paramref name="target" />.
-    /// </summary>
+    /// <inheritdoc cref="Compute(SquadSource, string, SquadModelProfiles, SquadModelProfiles)" path="/summary" />
     /// <param name="source">The canonical Squad source containing agents.</param>
     /// <param name="target">The harness target enum value.</param>
     /// <param name="before">The model profiles before the change.</param>

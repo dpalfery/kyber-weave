@@ -80,7 +80,7 @@ public class CopilotCliToolTests
         InMemoryRelationalStore store = new();
         store.WriteBatch(batch);
 
-        CollectedRecord? storedTool = store.GetRecord(toolRecord.RecordId);
+        CollectedRecord? storedTool = store.FindRecord(toolRecord.RecordId);
         Assert.NotNull(storedTool);
         Assert.Equal(firstTurn.RecordId, storedTool.ParentRecordId);
         Assert.Equal(toolRecord.EndedAt, storedTool.EndedAt);
@@ -184,7 +184,7 @@ public class CopilotCliToolTests
         InMemoryRelationalStore store = new();
         store.WriteBatch(batch);
 
-        CollectedRecord? stored = store.GetRecord(startedOnly.RecordId);
+        CollectedRecord? stored = store.FindRecord(startedOnly.RecordId);
         Assert.NotNull(stored);
         Assert.Null(stored.EndedAt);
         Assert.Equal(RecordStatus.Unset, stored.Status);

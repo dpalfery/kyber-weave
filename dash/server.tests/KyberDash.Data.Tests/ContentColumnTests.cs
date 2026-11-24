@@ -64,7 +64,7 @@ public class ContentColumnTests
 
         List<string?> texts =
         [
-            .. store.ContentParts(sessionKey: SessionKey).Select(static part => part.Part.PlainText),
+            .. store.FindSessionParts(SessionKey).Select(static part => part.PlainText),
         ];
 
         Assert.Contains("claude_code.api_request_body", texts, StringComparer.Ordinal);
@@ -80,10 +80,10 @@ public class ContentColumnTests
     {
         InMemoryRelationalStore store = RoundTrip();
 
-        IReadOnlyList<StoredContentPart> parts = store.ContentParts(sessionKey: SessionKey);
+        IReadOnlyList<CollectedContentPart> parts = store.FindSessionParts(SessionKey);
         IReadOnlyList<CollectedContentPart> withheld =
         [
-            .. parts.Select(static part => part.Part).Where(static part => part.Withheld is not null),
+            .. parts.Where(static part => part.Withheld is not null),
         ];
 
         // The relational store keeps JSON documents as withheld metrics rather than raw text.
@@ -93,8 +93,8 @@ public class ContentColumnTests
         Assert.All(withheld, static part => Assert.True(part.Withheld!.Characters > 0));
 
         // The listing itself answers every row instead of throwing over the mixed content.
-        Assert.NotEmpty(store.Records(sessionKey: SessionKey));
-        Assert.Equal(parts.Count, store.ContentParts(sessionKey: SessionKey).Count);
+        Assert.NotEmpty(store.SessionRecordsForRebuild(SessionKey));
+        Assert.Equal(parts.Count, store.FindSessionParts(SessionKey).Count);
     }
 
     private static InMemoryRelationalStore RoundTrip()

@@ -67,7 +67,7 @@ public class CopilotCliSubagentTests
         InMemoryRelationalStore store = new();
         store.WriteBatch(batch);
 
-        CollectedRecord? storedAgent = store.GetRecord(agentRecord.RecordId);
+        CollectedRecord? storedAgent = store.FindRecord(agentRecord.RecordId);
         Assert.NotNull(storedAgent);
         Assert.Equal(RecordOp.AgentInvoke, storedAgent.Op);
         Assert.Equal(toolRecord.RecordId, storedAgent.ParentRecordId);

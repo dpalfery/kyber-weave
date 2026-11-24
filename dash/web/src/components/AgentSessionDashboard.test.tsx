@@ -1,100 +1,125 @@
-import { describe, it, expect, vi } from 'vitest'
-import * as React from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
+// @vitest-environment happy-dom
+// The session view as a whole. Opening a session issues one request per
+// section, in page order, before any response resolves — and no content route
+// fires until something is clicked. Each section renders its own states while
+// every other route is held back, so one slow route never blanks the page.
+// Every section body below is built to the API client's validator, from the
+// server's own serializers (see kyberApi.sections.test.ts).
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import {
-  AgentSessionDashboard,
-  AgentSessionContent,
-  AgentSessionLoader,
-  type AgentSessionPayload,
-  type DrawerContent,
-  type SessionRequestItem,
-  formatDuration,
-  formatCredits,
-} from './AgentSessionDashboard.js'
-import { findContextTurn, findTurnByTransport } from '../lib/kyberApi.js'
-import { SessionInspectorDrawer } from './SessionInspectorDrawer.js'
-import type { TimelineNode } from './analysis/TimelineView.js'
-import type { KyberSessionContext } from '../lib/kyberApi.js'
-import skillsFixtures from './fixtures/skills-payload.json'
-import type { KyberTurnContentResult } from '../lib/kyberApi.js'
-import { readFileSync, readdirSync } from 'node:fs'
+import type { ReactElement } from 'react'
+import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// Set up React 19 test hook dispatcher so components using hooks can be rendered in tests
-type ReactInternals = {
-  __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: {
-    H?: Record<string, unknown>
+import { AgentSessionDashboard } from './AgentSessionDashboard.js'
+import { findContextTurn, findTurnByTransport, fetchKyberSessionSummary } from '../lib/kyberApi.js'
+import { formatDuration } from '../lib/labels.js'
+
+const SESSION_ID = 'sess-abc-123'
+
+const SUMMARY_ROUTE = `/api/kyber/session/${SESSION_ID}/summary`
+const CHARTS_ROUTE = `/api/kyber/session/${SESSION_ID}/charts`
+const TOOLS_ROUTE = `/api/kyber/session/${SESSION_ID}/tools?page=1&limit=25`
+const SERVERS_ROUTE = `/api/kyber/session/${SESSION_ID}/servers?page=1&limit=25`
+const SKILLS_ROUTE = `/api/kyber/session/${SESSION_ID}/skills?page=1&limit=25`
+const TIMELINE_ROUTE = `/api/kyber/session/${SESSION_ID}/timeline?page=1&limit=25`
+const REQUESTS_ROUTE = `/api/kyber/session/${SESSION_ID}/requests?page=1&limit=25`
+const RECONCILIATION_ROUTE = `/api/kyber/session/${SESSION_ID}/reconciliation?page=1&limit=25`
+const PROBLEMS_ROUTE = `/api/kyber/session/${SESSION_ID}/problems?page=1&limit=25`
+const STORED_FIELDS_ROUTE = `/api/kyber/session/${SESSION_ID}/stored-fields`
+
+const PAGE_ORDER = [
+  SUMMARY_ROUTE,
+  CHARTS_ROUTE,
+  TOOLS_ROUTE,
+  SERVERS_ROUTE,
+  SKILLS_ROUTE,
+  TIMELINE_ROUTE,
+  REQUESTS_ROUTE,
+  RECONCILIATION_ROUTE,
+  PROBLEMS_ROUTE,
+  STORED_FIELDS_ROUTE,
+]
+
+function queryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return { ok: status >= 200 && status < 300, status, json: async () => body } as unknown as Response
+}
+
+type Held = { resolve: (response: Response) => void }
+
+/**
+ * One fetch stub for the whole page: every route is held back until the test
+ * answers it by URL, and every call is recorded in issue order.
+ */
+function stubSectionRoutes(): { calls: string[]; respond(route: string, body: unknown): void; fail(route: string): void } {
+  const calls: string[] = []
+  const held = new Map<string, Held[]>()
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string) => {
+      calls.push(url)
+      return new Promise<Response>((resolve) => {
+        const queue = held.get(url) ?? []
+        queue.push({ resolve })
+        held.set(url, queue)
+      })
+    }),
+  )
+  const last = (route: string): Held | undefined => {
+    const queue = held.get(route)
+    return queue && queue.length > 0 ? queue[queue.length - 1] : undefined
+  }
+  return {
+    calls,
+    respond(route, body) {
+      last(route)?.resolve(jsonResponse(body))
+    },
+    fail(route) {
+      last(route)?.resolve(jsonResponse({}, 500))
+    },
   }
 }
-const internalsOf = (): ReactInternals['__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE'] =>
-  (React as unknown as ReactInternals).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
 
-const reactInternals = internalsOf()
-
-if (reactInternals) {
-  reactInternals.H = {
-    useState: <T,>(v: T | (() => T)) => [typeof v === 'function' ? (v as () => T)() : v, () => {}],
-    useMemo: <T,>(fn: () => T) => fn(),
-    useCallback: <T,>(fn: T) => fn,
-    useRef: <T,>(v: T) => ({ current: v }),
-    useEffect: () => {},
-    useLayoutEffect: () => {},
-    useId: () => 'test-id',
-  }
+function mountDashboard(onSelectSession?: (sessionId: string) => void): ReturnType<typeof render> {
+  const element = (
+    <QueryClientProvider client={queryClient()}>
+      <AgentSessionDashboard sessionId={SESSION_ID} onSelectSession={onSelectSession} />
+    </QueryClientProvider>
+  ) as ReactElement
+  return render(element)
 }
 
-function renderHtml(element: React.ReactElement | null | undefined): string {
-  if (element == null) return ''
-  return renderToStaticMarkup(element)
-}
-
-function findElementByTestId(node: unknown, testId: string): React.ReactElement | null {
-  if (node == null) return null
-  if (Array.isArray(node)) {
-    for (const child of node) {
-      const found = findElementByTestId(child, testId)
-      if (found) return found
-    }
-    return null
-  }
-  if (React.isValidElement(node)) {
-    const props = node.props as Record<string, unknown>
-    if (props && props['data-testid'] === testId) {
-      return node
-    }
-    const type = node.type as unknown
-    if (typeof type === 'function') {
-      try {
-        const rendered = (type as (p: unknown) => unknown)(node.props)
-        const found = findElementByTestId(rendered, testId)
-        if (found) return found
-      } catch {
-        // ignore
-      }
-    }
-    if (props && props.children) {
-      const found = findElementByTestId(props.children, testId)
-      if (found) return found
-    }
-  }
-  return null
-}
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 // ---------------------------------------------------------------------------
-// Test Fixtures
+// Section bodies, each valid for the client's validator
 // ---------------------------------------------------------------------------
 
-const sampleSession: AgentSessionPayload = {
-  id: 'sess-abc-123',
-  session_id: 'sess-abc-123',
+const SUMMARY_BODY = {
+  session_id: SESSION_ID,
   harness: 'copilot',
   label: 'Fix parser AST recursion',
+  is_subagent: false,
+  parent_session: null,
+  agent_name: 'coder-bot',
   repo: 'github.com/my-org/kyber-repo',
   branch: 'feature/ast-fix',
-  agent_name: 'coder-bot',
+  started: '2026-11-19T10:00:00.000Z',
+  ended: '2026-11-19T11:00:00.000Z',
   span_count: 48,
+  problems: 0,
+  problems_count: 0,
+  request_count: 2,
+  costBasisMismatch: null,
   summary: {
     turn_count: 5,
     reported_turn_count: 5,
@@ -112,53 +137,28 @@ const sampleSession: AgentSessionPayload = {
     tools_invoked: 2,
     tools_offered: 3,
     median_ttft_ms: 540,
+    aux_chat_calls: 2,
+    aux_models: ['gpt-4o-mini'],
+    aux_input: 1200,
+    aux_output: 80,
     unused_schema_per_turn: 900,
     schema_tokens_per_turn: 2800,
     defs_turns: 5,
-    schema_waste_cost: {
-      usd_low: 0.03,
-      usd_high: 0.12,
-      credits_low: 0.15,
-      credits_high: 0.6,
-    },
-    cost: {
-      usd: 1.25,
-      credits: 6.25,
-      basis: 'published_rates',
-      status: 'ok',
-    },
+    schema_waste_cost: { usd_low: 0.03, usd_high: 0.12, credits_low: 0.15, credits_high: 0.6 },
+    cost: { usd: 1.25, credits: 6.25, basis: 'published_rates', status: 'ok' },
   },
-  notes: [
-    'Harness does not export raw workspace info files.',
-    'Tokens computed with o200k_base tokenizer.',
-  ],
-  requests: [
-    { request: 'Analyze the recursion bug in ast.ts', prompt: 'Analyze the recursion bug in ast.ts', turns: 3, model: 'claude-3-5-sonnet' },
-    { request: 'Apply the patch and verify tests pass', prompt: 'Apply the patch and verify tests pass', turns: 2, model: 'claude-3-5-sonnet' },
-  ],
-  reconciliation: [
-    {
-      request: 'Analyze the recursion bug in ast.ts',
-      root_input: 70000,
-      sum_chat_input: 70000,
-      input_match: true,
-      root_output: 3200,
-      sum_chat_output: 3200,
-      output_match: true,
-    },
-    {
-      request: 'Apply the patch and verify tests pass',
-      root_input: 50500,
-      sum_chat_input: 50500,
-      input_match: true,
-      root_output: 3200,
-      sum_chat_output: 3200,
-      output_match: true,
-    },
-  ],
+  notes: ['Harness does not export raw workspace info files.', 'Tokens computed with o200k_base tokenizer.'],
+  reconciliation: { total: 2, mismatched: 0 },
+  tools_offered_count: 3,
+  tools_invoked_count: 2,
+  unused_tools_count: 1,
+  skills_count: 2,
+}
+
+const CHARTS_BODY = {
+  sessionId: SESSION_ID,
   turns: [
     {
-      // 0-based payload `index`, matching the served contract (issue #184).
       index: 0,
       spanId: 'turn-span-1',
       model: 'claude-3-5-sonnet',
@@ -167,13 +167,6 @@ const sampleSession: AgentSessionPayload = {
       cache_read: 0,
       cache_creation: 18000,
       output: 1200,
-      has_tool_defs: true,
-      content: {
-        tool_definitions: [
-          { name: 'read_file', description: 'Read file contents', parameters: { path: { type: 'string' } } },
-          { name: 'write_file', description: 'Write file contents', parameters: { path: { type: 'string' } } },
-        ],
-      },
     },
     {
       index: 1,
@@ -186,8 +179,6 @@ const sampleSession: AgentSessionPayload = {
       output: 1800,
     },
   ],
-  // The fixture carries the context fields this file exercises; the served
-  // contract is the full KyberSessionContext.
   context: {
     measurable: true,
     contextLimit: 200000,
@@ -195,1385 +186,597 @@ const sampleSession: AgentSessionPayload = {
       {
         turn: 1,
         reported_input: 45500,
-        buckets: {
-          system_prompt: 4000,
-          tool_definitions: 2800,
-          instruction_context: 7200,
-          conversation_history: 12000,
-          tool_result_content: 18000,
-          residual: 1500,
-        },
+        buckets: { system_prompt: 4000, tool_definitions: 2800, residual: 1500 },
       },
     ],
-  } as unknown as KyberSessionContext,
-  tools: [
-    {
-      name: 'read_file',
-      server: 'builtin',
-      is_mcp: false,
-      schema_tokens: 700,
-      turns_resident: 5,
-      total_schema_cost: 3500,
-      invocations: 5,
-      cost_per_invocation: 700,
-      result_tokens: 12000,
-      in_definitions: true,
-    },
-    {
-      name: 'write_file',
-      server: 'builtin',
-      is_mcp: false,
-      schema_tokens: 1200,
-      turns_resident: 5,
-      total_schema_cost: 6000,
-      invocations: 3,
-      cost_per_invocation: 2000,
-      result_tokens: 3500,
-      in_definitions: true,
-    },
-    {
-      name: 'mcp_git_status',
-      server: 'git',
-      is_mcp: true,
-      schema_tokens: 900,
-      turns_resident: 5,
-      total_schema_cost: 4500,
-      invocations: 0, // Unused / 0 calls
-      cost_per_invocation: null,
-      result_tokens: null,
-      in_definitions: true,
-    },
-  ],
-  servers: [
-    {
-      server: 'builtin',
-      is_mcp: false,
-      tools: 2,
-      schema_tokens: 1900,
-      total_schema_cost: 9500,
-      invocations: 8,
-      unused_tools: 0,
-      unused_cost: 0,
-    },
-    {
-      server: 'git',
-      is_mcp: true,
-      tools: 1,
-      schema_tokens: 900,
-      total_schema_cost: 4500,
-      invocations: 0,
-      unused_tools: 1,
-      unused_cost: 4500,
-    },
-  ],
-  timeline: [
+    first: { turn: 1, buckets: { system_prompt: 4000 }, reported_input: 45500 },
+    last: { turn: 2, buckets: { system_prompt: 4000 }, reported_input: 91000 },
+    unmeasuredTurns: 0,
+  },
+}
+
+const TOOL_ROWS = [
+  { name: 'read_file', server: null, invocations: 5, schema_tokens: 700, turns_resident: 5, total_schema_cost: 3500, invoked: true, in_definitions: true, is_mcp: false },
+  { name: 'write_file', server: null, invocations: 3, schema_tokens: 1200, turns_resident: 5, total_schema_cost: 6000, invoked: true, in_definitions: true, is_mcp: false },
+  { name: 'mcp_git_status', server: 'git', invocations: 0, schema_tokens: 900, turns_resident: 5, total_schema_cost: 4500, invoked: false, in_definitions: true, is_mcp: true },
+]
+
+const TOOLS_BODY = {
+  tools: TOOL_ROWS,
+  data: TOOL_ROWS,
+  total: 3,
+  limit: 25,
+  offset: 0,
+  page: 1,
+  aggregate: {
+    maxCost: 6000,
+    residentCostTotal: 14000,
+    invocationCount: 8,
+    unusedCount: 1,
+    unusedRange: { tokenResidencies: 4500, floor: 0.0, ceiling: 0.45, currency: 'USD' },
+    byServer: { git: 4500 },
+    definitionsSpanId: 'turn-span-1',
+    measurable: true,
+    reason: null,
+  },
+}
+
+const SERVER_ROWS = [
+  { server: 'builtin', is_mcp: false, tools: 2, schema_tokens: 1900, total_schema_cost: 9500, invocations: 8, unused_tools: 0, unused_cost: 0 },
+  { server: 'git', is_mcp: true, tools: 1, schema_tokens: 900, total_schema_cost: 4500, invocations: 0, unused_tools: 1, unused_cost: 4500 },
+]
+
+const SERVERS_BODY = { servers: SERVER_ROWS, data: SERVER_ROWS, total: 2, limit: 25, offset: 0, page: 1 }
+
+const SKILL_ROW = { name: 'docs', listed: true, invocations: 2, turns_listed: [0, 1], derived_tokens: 38, description: 'Write the docs' }
+
+const SKILLS_BODY = { measurable: true, rows: [SKILL_ROW], total: 1, limit: 25, offset: 0, page: 1 }
+
+const TIMELINE_BODY = {
+  sessionId: SESSION_ID,
+  parent: null,
+  nodes: [
     {
       spanId: 'root-span-1',
-      name: 'invoke_agent',
-      op: 'invoke_agent',
-      kind: 'agent',
-      durationMs: 38400,
-      offsetMs: 0,
-      status: 'Ok',
-      input: 70000,
-      output: 3200,
-      attributes: { 'agent.name': 'coder-bot' },
-      children: [
-        {
-          spanId: 'chat-span-1',
-          name: 'chat claude-3-5-sonnet',
-          op: 'chat',
-          kind: 'chat',
-          durationMs: 4200,
-          offsetMs: 250,
-          status: 'Ok',
-          input: 45500,
-          output: 1200,
-          attributes: { model: 'claude-3-5-sonnet' },
-          children: [],
-        },
-        {
-          spanId: 'tool-span-1',
-          name: 'execute_tool read_file',
-          op: 'execute_tool',
-          kind: 'tool',
-          durationMs: 180,
-          offsetMs: 4500,
-          status: 'Ok',
-          tool: 'read_file',
-          attributes: { path: 'src/ast.ts' },
-          children: [],
-        },
-      ],
-    },
-  ],
-}
-
-/**
- * Synthetic, content-free B1 ASAD wire payload. It intentionally contains
- * analysis output only: no prompt text, tool schemas, or tool-result content.
- * The dashboard must consume this server shape directly, without an adapter
- * recreating the retired intermediate rows.
- */
-const b1Session = {
-  id: 'b1-asad-session',
-  session_id: 'b1-asad-session',
-  harness: 'claude-code',
-  label: 'B1 fixture session',
-  agent_name: 'test-agent',
-  repo: 'acme/fixture',
-  branch: 'main',
-  span_count: 3,
-  summary: {
-    turn_count: 2,
-    request_count: 1,
-    total_input: 4200,
-    total_output: 600,
-    total_cache_read: 1200,
-    total_cache_creation: 300,
-    duration_ms: 1800,
-    models: ['claude-test'],
-    cost: { basis: 'published', status: 'priced', value: 0.42, currency: 'USD' },
-  },
-  context: {
-    measurable: true,
-    contextLimit: 200000,
-    turns: [
-      {
-        index: 0,
-        buckets: {
-          system_prompt: 400,
-          instruction_context: 200,
-          tool_definitions: 300,
-          conversation_history: 1800,
-          tool_result_content: 1200,
-          residual: 300,
-        },
-        reported_input: 4200,
-      },
-    ],
-    first: { buckets: { system_prompt: 400 }, reported_input: 4200 },
-    last: { buckets: { system_prompt: 400 }, reported_input: 4200 },
-  } as unknown as KyberSessionContext,
-  // B1 serializes tool metadata in `schema`; tools is deliberately free of
-  // content fields such as descriptions or definitions.
-  tools: [{ schema_tokens: 300, invocations: 0, turns_resident: 2 }],
-  schema: {
-    measurable: true,
-    byServer: { filesystem: 600 },
-    neverInvoked: [{ name: 'read_file', server: 'filesystem', cost: 600, invoked: false }],
-    unusedRange: { tokenResidencies: 600, floor: 0, ceiling: 600 },
-    turns: 2,
-  },
-  turns: [
-    { index: 0, spanId: 'b1-turn-1', model: 'claude-test', input: 4200, fresh: 2700, cache_read: 1200, cache_creation: 300, output: 600 },
-  ],
-  timeline: [
-    {
-      spanId: 'b1-turn-1',
       parentId: null,
-      name: 'llm.invoke',
-      kind: 'client',
       startMs: 0,
-      durationMs: 1800,
-      attributes: {},
+      durationMs: 38400,
+      kind: 'agent',
+      name: 'invoke_agent',
+      status: 'Ok',
+      attributes: { 'agent.name': 'coder-bot' },
       isSubagent: false,
       isAuxiliary: false,
-      cost: { basis: 'published', status: 'priced', value: 0.42, currency: 'USD' },
-      children: [],
+      cost: { basis: 'published', status: 'priced', value: 1.25, currency: 'USD' },
+      childCount: 3,
     },
   ],
-  requests: [{ request: 'b1-request', turns: 1, model: 'claude-test' }],
-  servers: [{ server: 'filesystem', is_mcp: true, tools: 1, schema_tokens: 300, invocations: 0, unused_tools: 1, unused_cost: 600 }],
-  coverage: { schema: 1, context: 1 },
-  problems: [],
-  reconciliation: [],
-  subagents: [],
-  auxiliary: [],
-  measurability: {},
+  total: 1,
+  limit: 25,
+  offset: 0,
+  page: 1,
+  bounds: { startMs: 0, endMs: 38400 },
+}
+
+const REQUEST_ROWS = [
+  { request: 'span-r1', timestamp: '2026-11-19T10:00:00.000Z', turns: 3, model: 'claude-3-5-sonnet', prompt: 'Analyze the recursion bug in ast.ts' },
+  { request: 'span-r2', timestamp: '2026-11-19T10:05:00.000Z', turns: 2, model: 'claude-3-5-sonnet', prompt: 'Apply the patch and verify tests pass' },
+]
+
+const REQUESTS_BODY = { requests: REQUEST_ROWS, data: REQUEST_ROWS, total: 128, limit: 25, offset: 0, page: 1 }
+
+const REQUESTS_PAGE_2 = {
+  requests: [{ request: 'span-r26', timestamp: null, turns: 1, model: null, prompt: 'Rewrite the parser entry point' }],
+  data: [{ request: 'span-r26', timestamp: null, turns: 1, model: null, prompt: 'Rewrite the parser entry point' }],
+  total: 128,
+  limit: 25,
+  offset: 25,
+  page: 2,
+}
+
+const RECONCILIATION_ROWS = [
+  { request: 'span-r1', root_input: 70000, sum_chat_input: 70000, input_match: true, root_output: 3200, sum_chat_output: 3200, output_match: true },
+  { request: 'span-r2', root_input: 50500, sum_chat_input: 42000, input_match: false, root_output: 3200, sum_chat_output: 3200, output_match: true },
+]
+
+const RECONCILIATION_BODY = {
+  reconciliation: RECONCILIATION_ROWS,
+  data: RECONCILIATION_ROWS,
+  total: 40,
+  limit: 25,
+  offset: 0,
+  page: 1,
+}
+
+const PROBLEM_ROW = {
+  id: 7,
+  spanId: 'span-1',
+  severity: 'warning',
+  code: 'PARSE_SKIPPED',
+  message: 'A record was skipped',
+  location: null,
+  sessionId: SESSION_ID,
+  harness: 'copilot',
+  timestamp: '2026-11-19T10:00:00.000Z',
+}
+
+const PROBLEMS_BODY = { problems: [PROBLEM_ROW], data: [PROBLEM_ROW], total: 1, limit: 25, offset: 0, page: 1 }
+
+const STORED_FIELDS_BODY = {
+  sessionKey: SESSION_ID,
+  tables: [
+    {
+      tableName: 'session',
+      columnNames: ['session_key', 'harness'],
+      rowCount: 1,
+      missingParentKeys: [],
+    },
+  ],
+}
+
+/** Answers every held route with its data body, or the override's body where one is given. */
+function respondAll(
+  router: ReturnType<typeof stubSectionRoutes>,
+  overrides: Record<string, unknown> = {},
+): void {
+  router.respond(SUMMARY_ROUTE, (overrides[SUMMARY_ROUTE] as typeof SUMMARY_BODY) ?? SUMMARY_BODY)
+  router.respond(CHARTS_ROUTE, (overrides[CHARTS_ROUTE] as typeof CHARTS_BODY) ?? CHARTS_BODY)
+  router.respond(TOOLS_ROUTE, (overrides[TOOLS_ROUTE] as typeof TOOLS_BODY) ?? TOOLS_BODY)
+  router.respond(SERVERS_ROUTE, (overrides[SERVERS_ROUTE] as typeof SERVERS_BODY) ?? SERVERS_BODY)
+  router.respond(SKILLS_ROUTE, (overrides[SKILLS_ROUTE] as typeof SKILLS_BODY) ?? SKILLS_BODY)
+  router.respond(TIMELINE_ROUTE, (overrides[TIMELINE_ROUTE] as typeof TIMELINE_BODY) ?? TIMELINE_BODY)
+  router.respond(REQUESTS_ROUTE, (overrides[REQUESTS_ROUTE] as typeof REQUESTS_BODY) ?? REQUESTS_BODY)
+  router.respond(RECONCILIATION_ROUTE, (overrides[RECONCILIATION_ROUTE] as typeof RECONCILIATION_BODY) ?? RECONCILIATION_BODY)
+  router.respond(PROBLEMS_ROUTE, (overrides[PROBLEMS_ROUTE] as typeof PROBLEMS_BODY) ?? PROBLEMS_BODY)
+  router.respond(STORED_FIELDS_ROUTE, (overrides[STORED_FIELDS_ROUTE] as typeof STORED_FIELDS_BODY) ?? STORED_FIELDS_BODY)
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// Opening a session
 // ---------------------------------------------------------------------------
 
-describe('AgentSessionDashboard: Formatters and Helpers', () => {
-  it('formats durations properly', () => {
-    expect(formatDuration(null)).toBe('—')
-    expect(formatDuration(undefined)).toBe('—')
-    expect(formatDuration(0)).toBe('—')
-    expect(formatDuration(450)).toBe('450ms')
-    expect(formatDuration(2500)).toBe('2.5s')
-    expect(formatDuration(65000)).toBe('1m 5s')
+describe('AgentSessionDashboard: opening a session', () => {
+  it('issues the ten section requests in page order before any response resolves', async () => {
+    const router = stubSectionRoutes()
+    mountDashboard()
+    await waitFor(() => expect(router.calls).toHaveLength(10))
+    expect(router.calls).toEqual(PAGE_ORDER)
   })
 
-  it('formats credits properly', () => {
-    expect(formatCredits(null)).toBe('—')
-    expect(formatCredits(undefined)).toBe('—')
-    expect(formatCredits(12.345)).toBe('12.35')
-    expect(formatCredits(150)).toBe('150')
+  it('issues no content-route or stored-fields-rows request on open', async () => {
+    const router = stubSectionRoutes()
+    mountDashboard()
+    await waitFor(() => expect(router.calls).toHaveLength(10))
+    const lateRoutes = router.calls.filter(
+      (url) => /\/content(\?|$)/.test(url) || /\/turn\/\d+\/content/.test(url) || /\/stored-fields\/[^/?]+/.test(url),
+    )
+    expect(lateRoutes).toEqual([])
+
+    // Nothing new fires once every route answers, either: the drawer stays shut.
+    respondAll(router)
+    await screen.findByTestId('session-harness-badge')
+    expect(router.calls).toHaveLength(10)
+  })
+
+  it('renders the header, banners and overview from /summary alone', async () => {
+    const router = stubSectionRoutes()
+    mountDashboard()
+    router.respond(SUMMARY_ROUTE, SUMMARY_BODY)
+
+    expect(await screen.findByTestId('session-harness-badge').then((el) => el)).toBeTruthy()
+    expect(screen.getByTestId('session-harness-badge').textContent).toBe('copilot')
+    expect(screen.getByTestId('session-label').textContent).toBe('Fix parser AST recursion')
+    expect(screen.getByTestId('harness-notes').textContent).toContain('What copilot does not export:')
+    expect(screen.getByTestId('aux-calls-banner').textContent).toContain('2 auxiliary gpt-4o-mini call(s)')
+    expect(screen.getByTestId('reconciliation-ok').textContent).toContain('across 2 requests')
+    const overview = screen.getByTestId('overview-strip-section').textContent ?? ''
+    expect(overview).toContain('120.5K')
+    expect(overview).toContain('$1.25')
+    expect(overview).toContain('48 spans'.replace(' spans', ''))
+
+    // Every other section is still held back and says so; nothing of theirs renders.
+    expect(screen.getByTestId('session-charts-loading')).toBeTruthy()
+    expect(screen.getByTestId('session-tools-loading')).toBeTruthy()
+  })
+
+  it('shows the summary loading state first, with the section skeletons beside it', () => {
+    stubSectionRoutes()
+    mountDashboard()
+    expect(screen.getByTestId('session-summary-loading').getAttribute('role')).toBe('status')
+    expect(screen.getByTestId('agent-session-dashboard')).toBeTruthy()
+  })
+
+  it('states the summary failure with a retry while the other sections carry on', async () => {
+    const router = stubSectionRoutes()
+    mountDashboard()
+    router.fail(SUMMARY_ROUTE)
+    const error = await screen.findByTestId('session-summary-error')
+    expect(error.textContent).toContain('Request failed (500)')
+
+    // The sections do not wait on the summary.
+    router.respond(CHARTS_ROUTE, CHARTS_BODY)
+    expect(await screen.findByTestId('turn-bar-0')).toBeTruthy()
+
+    fireEvent.click(within(error).getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(router.calls.filter((url) => url === SUMMARY_ROUTE).length).toBe(2))
   })
 })
 
-describe('AgentSessionDashboard: Assembly and Subpanels', () => {
-  it('renders all six ASAD views from the content-free B1 payload', () => {
-    const html = renderHtml(React.createElement(AgentSessionDashboard, { session: b1Session }))
+// ---------------------------------------------------------------------------
+// One section at a time
+// ---------------------------------------------------------------------------
 
-    // 1. Session overview
-    expect(html).toContain('Session Overview')
-    expect(html).toContain('4.2K')
-    // 2. Per-turn token spend
-    expect(html).toContain('Token Spend per Turn')
-    expect(html).toContain('2.7K')
-    // 3. Context composition
-    expect(html).toContain('Context Composition')
-    expect(html).toContain('Conversation history')
-    // 4. Tool/schema cost
-    expect(html).toContain('read_file')
-    expect(html).toContain('By MCP server')
-    // 5. Execution timeline
-    expect(html).toContain('Execution Timeline')
-    expect(html).toContain('llm.invoke')
-    // 6. Session cost/token accounting
-    expect(html).toContain('Session Cost &amp; Token Accounting')
-    expect(html).toContain('$0.42')
+describe('AgentSessionDashboard: each section stands alone', () => {
+  const SECTION_SURFACES: Array<[string, unknown, string]> = [
+    [CHARTS_ROUTE, CHARTS_BODY, 'turn-bar-0'],
+    [TOOLS_ROUTE, TOOLS_BODY, 'tool-row-read_file'],
+    [SERVERS_ROUTE, SERVERS_BODY, 'server-row-builtin'],
+    [SKILLS_ROUTE, SKILLS_BODY, 'skill-row-docs'],
+    [TIMELINE_ROUTE, TIMELINE_BODY, 'timeline-node'],
+    [REQUESTS_ROUTE, REQUESTS_BODY, 'request-row-1'],
+    [RECONCILIATION_ROUTE, RECONCILIATION_BODY, 'reconciliation-row-1'],
+    [PROBLEMS_ROUTE, PROBLEMS_BODY, 'problem-row-7'],
+    [STORED_FIELDS_ROUTE, STORED_FIELDS_BODY, 'stored-fields-table-session'],
+  ]
 
-    expect(html.indexOf('Session Overview')).toBeLessThan(html.indexOf('Token Spend per Turn'))
-    expect(html.indexOf('Token Spend per Turn')).toBeLessThan(html.indexOf('Context Composition'))
-    expect(html.indexOf('Context Composition')).toBeLessThan(
-      html.indexOf('3 · Tool &amp; Schema Cost Ranking')
+  it.each(SECTION_SURFACES)(
+    'renders its own data from %s while every other route is held back',
+    async (route, body, surface) => {
+      const router = stubSectionRoutes()
+      mountDashboard()
+      router.respond(route, body)
+      expect(await screen.findByTestId(surface)).toBeTruthy()
+    },
+  )
+
+  it('renders one section after another fails, and states the failure in place', async () => {
+    const router = stubSectionRoutes()
+    mountDashboard()
+    router.respond(SUMMARY_ROUTE, SUMMARY_BODY)
+    router.fail(CHARTS_ROUTE)
+    const chartsError = await screen.findByTestId('section-error-charts')
+    expect(chartsError.textContent).toContain('Request failed (500)')
+    expect(screen.getByTestId('session-harness-badge').textContent).toBe('copilot')
+
+    router.respond(TOOLS_ROUTE, TOOLS_BODY)
+    expect(await screen.findByTestId('tool-row-read_file')).toBeTruthy()
+    expect(screen.getByTestId('section-error-charts')).toBeTruthy()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Paged lists through the real tree
+// ---------------------------------------------------------------------------
+
+describe('AgentSessionDashboard: paged lists', () => {
+  it('shows the requests pager past 25 and requests page two only on press', async () => {
+    const router = stubSectionRoutes()
+    mountDashboard()
+    router.respond(REQUESTS_ROUTE, REQUESTS_BODY)
+    await screen.findByTestId('user-requests')
+    const pager = screen.getByTestId('list-pager')
+
+    fireEvent.click(within(pager).getByTestId('pager-next'))
+    await waitFor(() =>
+      expect(router.calls).toContain(`/api/kyber/session/${SESSION_ID}/requests?page=2&limit=25`),
     )
-    expect(html.indexOf('3 · Tool &amp; Schema Cost Ranking')).toBeLessThan(
-      html.indexOf('Execution Timeline')
+    router.respond(`/api/kyber/session/${SESSION_ID}/requests?page=2&limit=25`, REQUESTS_PAGE_2)
+    expect(await screen.findByTestId('request-row-26')).toBeTruthy()
+  })
+
+  it('shows the reconciliation pager past 25', async () => {
+    const router = stubSectionRoutes()
+    mountDashboard()
+    router.respond(RECONCILIATION_ROUTE, RECONCILIATION_BODY)
+    await screen.findByTestId('reconciliation-section')
+    expect(screen.getByTestId('list-pager')).toBeTruthy()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The inspector drawer, wired through the real tree
+// ---------------------------------------------------------------------------
+
+describe('AgentSessionDashboard: inspector drawer', () => {
+  it('opens the definitions request on the aggregate span when a tool row is clicked', async () => {
+    const router = stubSectionRoutes()
+    mountDashboard()
+    respondAll(router)
+    await screen.findByTestId('tool-row-read_file')
+
+    fireEvent.click(screen.getByTestId('tool-row-read_file'))
+    expect((await screen.findByTestId('drawer-title')).textContent).toBe('Tool: read_file')
+    await waitFor(() =>
+      expect(router.calls).toContain(
+        `/api/kyber/session/${SESSION_ID}/content?span=turn-span-1&part=tool_definitions&full=true`,
+      ),
     )
-    expect(html.indexOf('Execution Timeline')).toBeLessThan(
-      html.indexOf('Session Cost &amp; Token Accounting')
-    )
   })
 
-  it('renders overview strip with metrics (spans, turns, tokens, cost, cache hit ratio)', () => {
-    const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
+  it('opens the whole-turn lossless request when a turn band is clicked', async () => {
+    const router = stubSectionRoutes()
+    mountDashboard()
+    respondAll(router)
+    await screen.findByTestId('turn-bar-1')
 
-    // Header metadata
-    expect(html).toContain('copilot')
-    expect(html).toContain('Fix parser AST recursion')
-    expect(html).toContain('coder-bot')
-    expect(html).toContain('48 spans')
+    fireEvent.click(screen.getByTestId('turn-bar-1'))
+    expect((await screen.findByTestId('drawer-title')).textContent).toBe('Turn 2 · Full context')
+    // D9: the drawer resolves the turn by key first, and requests its content
+    // only once that row answers.
+    await waitFor(() => expect(router.calls).toContain(`/api/kyber/session/${SESSION_ID}/turn/1`))
+    expect(router.calls.filter((url) => url.includes('/turn/1/content'))).toEqual([])
 
-    // Metric cards
-    expect(html).toContain('Total Input')
-    expect(html).toContain('120.5K') // 120,500 formatted as tokens
-    expect(html).toContain('75.0K from cache')
-
-    expect(html).toContain('Cache Read')
-    expect(html).toContain('75.0K')
-    expect(html).toContain('62.2% hit ratio')
-
-    expect(html).toContain('Cache Creation')
-    expect(html).toContain('18.0K')
-    expect(html).toContain('on 2 turns')
-
-    expect(html).toContain('Total Output')
-    expect(html).toContain('6.4K')
-    expect(html).toContain('1.5K reasoning')
-
-    expect(html).toContain('Cost')
-    expect(html).toContain('$1.25')
-    expect(html).toContain('published')
-
-    expect(html).toContain('Cache Hit Ratio')
-    expect(html).toContain('62.2%')
-
-    expect(html).toContain('Spans')
-    expect(html).toContain('48')
-
-    expect(html).toContain('Turns')
-    expect(html).toContain('5')
-
-    expect(html).toContain('Requests')
-    expect(html).toContain('2')
-
-    expect(html).toContain('Duration')
-    expect(html).toContain('38.4s')
-
-    expect(html).toContain('Tool Calls')
-    expect(html).toContain('8')
-
-    expect(html).toContain('Tools Offered')
-    expect(html).toContain('3')
-    expect(html).toContain('1 never called')
-  })
-
-  it('renders the token totals once, in the Session Overview cards, with no separate Underlying Token Totals section', () => {
-    const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
-
-    expect(html).not.toContain('Underlying Token Totals')
-    expect(html).not.toContain('data-testid="cost-tokens-section"')
-    expect(html).toContain('Cache Hit Ratio')
-  })
-
-  it('marks an unreported tool-call counter unavailable instead of rendering zero', () => {
-    const unavailableToolCalls: AgentSessionPayload = {
-      ...sampleSession,
-      summary: {
-        ...sampleSession.summary,
-        tool_calls: undefined,
-        tools_invoked: undefined,
-      },
-    }
-
-    const tree = AgentSessionDashboard({ session: unavailableToolCalls })
-    const metric = findElementByTestId(tree, 'metric-tool-calls')
-    const html = renderHtml(metric)
-    expect(html).toContain('data-measured="false"')
-    expect(html).toContain('>—<')
-    expect(html).not.toContain('>0<')
-    expect(html).toContain('Tool invocation count was not reported by copilot.')
-  })
-
-  it('preserves a recorded zero tool-call counter as measured', () => {
-    const zeroToolCalls: AgentSessionPayload = {
-      ...sampleSession,
-      summary: {
-        ...sampleSession.summary,
-        tool_calls: 0,
-      },
-    }
-
-    const tree = AgentSessionDashboard({ session: zeroToolCalls })
-    const metric = findElementByTestId(tree, 'metric-tool-calls')
-    const html = renderHtml(metric)
-    expect(html).toContain('data-measured="true"')
-    expect(html).toContain('>0<')
-  })
-
-  it('renders reconciliation OK badge when root inputs match sum of chat inputs', () => {
-    const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
-    expect(html).toContain('data-testid="reconciliation-ok"')
-    expect(html).toContain('Reconciliation OK')
-    expect(html).toContain('across 2 requests')
-  })
-
-  it('renders reconciliation MISMATCH warning when root inputs mismatch', () => {
-    const mismatchSession: AgentSessionPayload = {
-      ...sampleSession,
-      reconciliation: [
-        {
-          request: 'First request',
-          root_input: 50000,
-          sum_chat_input: 42000,
-          input_match: false,
-          root_output: 1000,
-          sum_chat_output: 1000,
-          output_match: true,
-        },
-      ],
-    }
-    const html = renderHtml(<AgentSessionDashboard session={mismatchSession} />)
-    expect(html).toContain('data-testid="reconciliation-mismatch"')
-    expect(html).toContain('Reconciliation MISMATCH')
-    expect(html).toContain('on 1 of 1 request(s):')
-    expect(html).toContain('chat sum 42.0K vs root 50.0K')
-  })
-
-  it('renders subagent notice with parent session link and agent name when is_subagent is true', () => {
-    const subagentSession: AgentSessionPayload = {
-      ...sampleSession,
-      is_subagent: true,
-      parent_session: 'parent-sess-999999',
-      agent_name: 'subagent-worker',
-    }
-    const html = renderHtml(<AgentSessionDashboard session={subagentSession} />)
-    expect(html).toContain('data-testid="subagent-notice"')
-    expect(html).toContain('Subagent session')
-    expect(html).toContain('subagent-worker')
-    expect(html).toContain('parent-sess-999999'.slice(0, 10))
-  })
-
-  it('invokes onSelectSession callback when clicking parent session link', () => {
-    const onSelectSession = vi.fn()
-    const subagentSession: AgentSessionPayload = {
-      ...sampleSession,
-      is_subagent: true,
-      parent_session: 'parent-sess-888888',
-      agent_name: 'subagent-worker',
-    }
-    const tree = AgentSessionDashboard({
-      session: subagentSession,
-      onSelectSession,
+    router.respond(`/api/kyber/session/${SESSION_ID}/turn/1`, {
+      sessionId: SESSION_ID,
+      turnIndex: 1,
+      turn: { index: 1, spanId: 'turn-span-2', fresh: 5000, cache_read: 42000 },
+      context: null,
     })
-    const link = findElementByTestId(tree, 'parent-session-link')
-    expect(link).not.toBeNull()
-    ;(link!.props as { onClick: () => void }).onClick()
-    expect(onSelectSession).toHaveBeenCalledWith('parent-sess-888888')
+    await waitFor(() =>
+      expect(router.calls).toContain(`/api/kyber/session/${SESSION_ID}/turn/1/content?full=true`),
+    )
+    router.respond(`/api/kyber/session/${SESSION_ID}/turn/1/content?full=true`, {
+      sessionId: SESSION_ID,
+      turnIndex: 1,
+      blocks: [],
+      parts: [],
+      assembledText: '',
+    })
+    expect(await screen.findByTestId('turn-content-full')).toBeTruthy()
+    // The measured totals come from the fetched row.
+    expect(screen.getByTestId('turn-total-cache-read').textContent).toContain('42.0K')
   })
 
-  it('renders harness caveats and notes banner', () => {
-    const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
-    expect(html).toContain('data-testid="harness-notes"')
-    expect(html).toContain('What copilot does not export:')
-    expect(html).toContain('Harness does not export raw workspace info files.')
+  it('opens the span inspector for a clicked timeline node', async () => {
+    const router = stubSectionRoutes()
+    mountDashboard()
+    respondAll(router)
+    await screen.findByTestId('timeline-node')
+
+    fireEvent.click(screen.getByTestId('timeline-node'))
+    expect((await screen.findByTestId('drawer-title')).textContent).toBe('Span: invoke_agent')
+    await waitFor(() =>
+      expect(router.calls).toContain(
+        `/api/kyber/session/${SESSION_ID}/content?span=root-span-1&full=true`,
+      ),
+    )
+    // The loaded node still names some attributes inline, but the attributes
+    // route answers for it too: the span-scoped read carries keys the
+    // content-free timeline omits (the consent-allowed prompt text among
+    // them), so the inspector fetches the node it opens.
+    expect(router.calls).toContain('/api/kyber/span/root-span-1/attributes')
   })
 
-  it('keeps a B3 unavailable-context reason verbatim in the dashboard banner', () => {
-    const reason = 'Claude Code session files record tool invocations, not tool definitions.'
-    const unavailableBucketSession = {
-      ...b1Session,
-      context: {
-        measurable: false,
-        reason,
-      } as unknown as KyberSessionContext,
-    }
+  it('fetches the span attributes for a node that also carries some inline, and renders the fetched keys', async () => {
+    const router = stubSectionRoutes()
+    mountDashboard()
+    // A content-free timeline node still names a few typed attributes inline
+    // (the model the span declared, say), but the consent-allowed prompt text
+    // the engine attaches only on the span-scoped read lives behind the
+    // attributes route. The inspector fetches the node it opens even when the
+    // node carries something inline; the inline map stays on screen until the
+    // fetch answers, and the fetched map — a superset — replaces it.
+    respondAll(router)
+    await screen.findByTestId('timeline-node')
 
-    const html = renderHtml(<AgentSessionDashboard session={unavailableBucketSession} />)
-    expect(html).toContain('data-testid="context-composition-not-measurable"')
-    expect(html).toContain(reason)
-  })
+    fireEvent.click(screen.getByTestId('timeline-node'))
+    expect((await screen.findByTestId('drawer-title')).textContent).toBe('Span: invoke_agent')
+    await waitFor(() => expect(router.calls).toContain('/api/kyber/span/root-span-1/attributes'))
+    // The fetch is still in flight: the inline map renders meanwhile.
+    expect(screen.getByTestId('span-inspector').textContent).toContain('coder-bot')
 
-  it('renders multiple user requests list', () => {
-    const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
-    expect(html).toContain('data-testid="user-requests"')
-    expect(html).toContain('2 user requests in this session:')
-    expect(html).toContain('Analyze the recursion bug in ast.ts')
-    expect(html).toContain('Apply the patch and verify tests pass')
-  })
-
-  it('renders auxiliary chat calls banner when aux_chat_calls is present', () => {
-    const auxSession: AgentSessionPayload = {
-      ...sampleSession,
-      summary: {
-        ...sampleSession.summary,
-        aux_chat_calls: 2,
-        aux_models: ['gpt-4o-mini'],
-        aux_input: 1200,
-        aux_output: 80,
+    router.respond('/api/kyber/span/root-span-1/attributes', {
+      spanId: 'root-span-1',
+      attributes: {
+        'agent.name': 'coder-bot',
+        'factory.turn.prompt.text': 'the consent-allowed prompt',
       },
+    })
+    expect(
+      await screen.findByTestId('span-inspector').then((el) => el.textContent),
+    ).toContain('the consent-allowed prompt')
+  })
+
+  it('fetches a span node attributes from the attributes route when the node carries none', async () => {
+    const router = stubSectionRoutes()
+    mountDashboard()
+    // The served node may carry no inline attribute map — the raw payload is
+    // the span's attributes, and the inspector fetches the node it shows.
+    respondAll(router, {
+      [TIMELINE_ROUTE]: { ...TIMELINE_BODY, nodes: [{ ...TIMELINE_BODY.nodes[0], attributes: {} }] },
+    })
+    await screen.findByTestId('timeline-node')
+
+    fireEvent.click(screen.getByTestId('timeline-node'))
+    expect((await screen.findByTestId('drawer-title')).textContent).toBe('Span: invoke_agent')
+    await waitFor(() => expect(router.calls).toContain('/api/kyber/span/root-span-1/attributes'))
+    router.respond('/api/kyber/span/root-span-1/attributes', {
+      spanId: 'root-span-1',
+      attributes: { 'agent.name': 'coder-bot' },
+    })
+    expect(await screen.findByTestId('span-inspector').then((el) => el.textContent)).toContain('coder-bot')
+  })
+
+  it('opens the first listed turn for a clicked skill row', async () => {
+    const router = stubSectionRoutes()
+    mountDashboard()
+    respondAll(router)
+    await screen.findByTestId('skill-row-docs')
+
+    fireEvent.click(screen.getByTestId('skill-row-docs'))
+    expect((await screen.findByTestId('drawer-title')).textContent).toBe('Skill: docs')
+    await waitFor(() =>
+      expect(router.calls).toContain(`/api/kyber/session/${SESSION_ID}/turn/0/content?full=true`),
+    )
+  })
+
+  it('opens a bucket drill-down from the fetched turn context when a context segment is clicked', async () => {
+    const router = stubSectionRoutes()
+    mountDashboard()
+    respondAll(router)
+    await screen.findByTestId('context-composition-chart')
+
+    fireEvent.click(screen.getByTestId('context-segment-tool_definitions'))
+    expect((await screen.findByTestId('drawer-title')).textContent).toBe('Turn 1 · tool_definitions')
+    // D9: the drill-down carries the key pair; the drawer fetches the turn and
+    // reads that turn's own context — no content request before it answers.
+    await waitFor(() => expect(router.calls).toContain(`/api/kyber/session/${SESSION_ID}/turn/0`))
+    expect(router.calls.filter((url) => url.includes('/content'))).toEqual([])
+
+    // The per-turn route answers with figures of its own, distinct from the
+    // session-wide composition the charts rendered.
+    router.respond(`/api/kyber/session/${SESSION_ID}/turn/0`, {
+      sessionId: SESSION_ID,
+      turnIndex: 0,
+      turn: { index: 0, spanId: 'turn-span-1' },
+      context: { index: 1, buckets: { tool_definitions: 321, residual: 44 }, reported_input: 1234 },
+    })
+    const inspector = await screen.findByTestId('context-bucket-inspector')
+    expect(inspector.textContent).toContain('321')
+    expect(inspector.textContent).toContain('1.2K')
+    await waitFor(() =>
+      expect(router.calls).toContain(
+        `/api/kyber/session/${SESSION_ID}/content?span=turn-span-1&part=tool_definitions&full=true`,
+      ),
+    )
+    router.respond(`/api/kyber/session/${SESSION_ID}/content?span=turn-span-1&part=tool_definitions&full=true`, {
+      sessionId: SESSION_ID,
+      spanId: 'turn-span-1',
+      parts: [{ spanId: 'turn-span-1', part: 'tool_definitions', text: 'BUCKET_DEFINITIONS_FULL_TEXT' }],
+    })
+    expect(await screen.findByText('BUCKET_DEFINITIONS_FULL_TEXT')).toBeTruthy()
+  })
+
+  it('states the harness notice and issues no content request when no definitions exist', async () => {
+    const router = stubSectionRoutes()
+    const noDefinitions = {
+      ...SUMMARY_BODY,
+      harness: 'antigravity-cli',
+      summary: { ...SUMMARY_BODY.summary, tools_offered: undefined },
     }
-    const html = renderHtml(<AgentSessionDashboard session={auxSession} />)
-    expect(html).toContain('data-testid="aux-calls-banner"')
-    expect(html).toContain('2 auxiliary gpt-4o-mini call(s)')
-  })
-
-  it('renders Spend and Context Composition section with SessionSpendCharts', () => {
-    const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
-    expect(html).toContain('data-testid="spend-composition-section"')
-    expect(html).toContain('data-testid="session-spend-charts"')
-    expect(html).toContain('data-testid="turn-spend-chart"')
-    expect(html).toContain('data-testid="context-composition-chart"')
-  })
-
-  it('renders Tool and Schema Cost Ranking table with MCP grouping and waste range', () => {
-    const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
-    expect(html).toContain('data-testid="tool-schema-section"')
-    expect(html).toContain('3 · Tool &amp; Schema Cost Ranking')
-
-    // Waste callout banner & range
-    expect(html).toContain('data-testid="schema-waste-banner"')
-    expect(html).toContain('1 of 3 tools were never called')
-    expect(html).toContain('900 tokens/turn')
-    expect(html).toContain('data-testid="schema-waste-range"')
-    expect(html).toContain('Unused waste range: $0.030 – $0.120')
-
-    // Server groups and tools
-    expect(html).toContain('data-testid="tools-ranking-table"')
-    expect(html).toContain('builtin')
-    expect(html).toContain('git')
-    expect(html).toContain('MCP')
-    expect(html).toContain('read_file')
-    expect(html).toContain('write_file')
-    expect(html).toContain('mcp_git_status')
-    expect(html).toContain('0 calls')
-    expect(html).toContain('never called')
-  })
-
-  it('renders fallback banner when harness does not export tool schemas', () => {
-    const piSession: AgentSessionPayload = {
-      ...sampleSession,
-      harness: 'pi',
-      tools: [
-        {
-          name: 'read',
-          invocations: 4,
-          in_definitions: false,
-        },
-      ],
+    const bareTools = {
+      ...TOOLS_BODY,
+      tools: [{ name: 'read_file', server: null, invocations: 4, invoked: true, in_definitions: false, is_mcp: false }],
+      data: [{ name: 'read_file', server: null, invocations: 4, invoked: true, in_definitions: false, is_mcp: false }],
+      aggregate: { ...TOOLS_BODY.aggregate, byServer: {}, unusedRange: null, definitionsSpanId: null },
     }
-    const html = renderHtml(<AgentSessionDashboard session={piSession} />)
-    expect(html).toContain('data-testid="schemas-not-exported-banner"')
-    expect(html).toContain('pi does not export tool definitions')
+    mountDashboard()
+    router.respond(SUMMARY_ROUTE, noDefinitions)
+    router.respond(TOOLS_ROUTE, bareTools)
+    await screen.findByTestId('tool-row-read_file')
+
+    fireEvent.click(screen.getByTestId('tool-row-read_file'))
+    const notice = await screen.findByTestId('tool-definition-unavailable')
+    expect(notice.textContent).toContain(
+      'antigravity-cli does not export tool definitions for this session',
+    )
+    expect(router.calls.filter((url) => /\/content(\?|$)/.test(url))).toEqual([])
   })
+})
 
-  it('renders Execution Timeline with call tree and duration bars toggle', () => {
-    const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
-    expect(html).toContain('data-testid="execution-timeline-section"')
-    expect(html).toContain('5 · Execution Timeline &amp; Call Tree')
-    expect(html).toContain('data-testid="timeline-tab-tree"')
-    expect(html).toContain('data-testid="timeline-tab-bars"')
-    expect(html).toContain('data-testid="timeline-tree-view"')
-    expect(html).toContain('invoke_agent')
-    expect(html).toContain('chat claude-3-5-sonnet')
-    expect(html).toContain('execute_tool read_file')
-  })
+// ---------------------------------------------------------------------------
+// Page order and prop-driven states
+// ---------------------------------------------------------------------------
 
-  it('renders Duration Timeline bars when bars tab is selected', () => {
-    const html = renderHtml(<AgentSessionDashboard session={sampleSession} initialTimelineTab="bars" />)
-    expect(html).toContain('data-testid="timeline-bars-view"')
-    expect(html).toContain('data-testid="timeline-bar-row"')
-  })
+describe('AgentSessionDashboard: layout order', () => {
+  it('renders the sections in page order', async () => {
+    const router = stubSectionRoutes()
+    const { container } = mountDashboard()
+    respondAll(router)
+    await screen.findByTestId('stored-fields-table-session')
 
-  it('renders empty state when session is null', () => {
-    const html = renderHtml(<AgentSessionDashboard session={null} />)
-    expect(html).toContain('data-testid="agent-dashboard-empty"')
-    expect(html).toContain('No agent session selected')
-  })
-
-  it('supports harness reported cost basis', () => {
-    const piSession: AgentSessionPayload = {
-      ...sampleSession,
-      harness: 'pi',
-      summary: {
-        ...sampleSession.summary,
-        cost: {
-          usd: 0.85,
-          basis: 'harness_reported',
-          status: 'ok',
-        },
-      },
-    }
-    const html = renderHtml(<AgentSessionDashboard session={piSession} />)
-    expect(html).toContain('data-testid="metric-cost"')
-    expect(html).toContain('$0.85')
-    expect(html).toContain('reported')
-    expect(html).toContain('reported by harness')
-  })
-
-  // The engine stamps a harness-reported cost as basis `harness`; `harness_reported` is the
-  // legacy spelling. Before the fix the tile read only the legacy one, so a `harness` cost was
-  // labelled "published rates". Both must read as reported.
-  const costTile = (html: string) =>
-    html.slice(html.indexOf('data-testid="metric-cost"'), html.indexOf('Cache Hit Ratio'))
-
-  it.each(['harness', 'harness_reported'])('labels cost basis %s as reported by the harness', (basis) => {
-    const reportedSession: AgentSessionPayload = {
-      ...sampleSession,
-      harness: 'pi',
-      summary: {
-        ...sampleSession.summary,
-        cost: { usd: 0.85, basis, status: 'ok' },
-      },
-    }
-    const tile = costTile(renderHtml(<AgentSessionDashboard session={reportedSession} />))
-    expect(tile).toContain('>reported<')
-    expect(tile).toContain('reported by harness')
-    expect(tile).not.toContain('published rates')
-  })
-
-  it('shows a harness-reported zero instead of an unpriced published block', () => {
-    const reportedZero: AgentSessionPayload = {
-      ...sampleSession,
-      harness: 'opencode',
-      summary: {
-        ...sampleSession.summary,
-        cost: { basis: 'published', status: 'out_of_scope' },
-        cost_reported: { basis: 'harness', status: 'priced', value: 0, currency: 'USD' },
-      },
-    }
-    const tile = costTile(renderHtml(<AgentSessionDashboard session={reportedZero} />))
-    expect(tile).toContain('$0.00')
-    expect(tile).toContain('>reported<')
-    expect(tile).toContain('reported by harness')
-    expect(tile).not.toContain('published rates')
-  })
-
-  it('labels a published cost basis as published rates, not reported', () => {
-    const publishedSession: AgentSessionPayload = {
-      ...sampleSession,
-      harness: 'pi',
-      summary: {
-        ...sampleSession.summary,
-        cost: { usd: 0.85, basis: 'published', status: 'ok' },
-      },
-    }
-    const tile = costTile(renderHtml(<AgentSessionDashboard session={publishedSession} />))
-    expect(tile).toContain('>published<')
-    expect(tile).toContain('published rates')
-    expect(tile).not.toContain('reported by harness')
-  })
-
-  it('keeps session.timeline[0] in children so invoke_agent is not swallowed when timeline has 1 element', () => {
-    const singleSpanTimeline = [
-      {
-        spanId: 'root-span-1',
-        name: 'invoke_agent',
-        op: 'invoke_agent',
-        kind: 'agent',
-        durationMs: 38400,
-        children: [
-          {
-            spanId: 'child-span-1',
-            name: 'chat claude-3-5-sonnet',
-            op: 'chat',
-            children: [],
-          },
-        ],
-      },
+    const html = container.innerHTML
+    const order = [
+      'data-testid="overview-strip-section"',
+      'data-testid="spend-composition-section"',
+      'data-testid="tool-schema-section"',
+      'data-testid="servers-section"',
+      'data-testid="skills-section"',
+      'data-testid="execution-timeline-section"',
+      'data-testid="session-cost-panel"',
+      'data-testid="user-requests"',
+      'data-testid="reconciliation-section"',
+      'data-testid="problems-section"',
+      'data-testid="stored-fields-section"',
     ]
-    const singleTimelineSession: AgentSessionPayload = {
-      ...sampleSession,
-      timeline: singleSpanTimeline,
-    }
-    const tree = AgentSessionContent({ session: singleTimelineSession })
-    let timelineViewEl: React.ReactElement | null = null
-    const walk = (node: unknown): void => {
-      if (!React.isValidElement(node)) return
-      const props = node.props as Record<string, unknown> | undefined
-      if (props?.root && props?.onSelectNode) {
-        timelineViewEl = node
-        return
-      }
-      if (props?.children) {
-        React.Children.forEach(props.children, walk)
-      }
-    }
-    walk(tree)
-
-    expect(timelineViewEl).not.toBeNull()
-    const root = (timelineViewEl!.props as { root: TimelineNode }).root
-    expect(root.spanId).toBe('session-root')
-    expect(root.children).toHaveLength(1)
-    expect(root.children[0].spanId).toBe('root-span-1')
-    expect(root.children[0].name).toBe('invoke_agent')
-    expect(root.children[0].children).toHaveLength(1)
-    expect(root.children[0].children[0].spanId).toBe('child-span-1')
-  })
-
-  it('renders empty table row when toolRows is empty', () => {
-    const emptyToolsSession: AgentSessionPayload = {
-      ...sampleSession,
-      tools: [],
-    }
-    const html = renderHtml(<AgentSessionDashboard session={emptyToolsSession} />)
-    expect(html).toContain('No tools recorded for this session.')
-    expect(html).toMatch(/<td[^>]*colSpan="9"[^>]*>No tools recorded for this session\.<\/td>/i)
-  })
-
-  it('sorts tools within each server in the schema ranking table by total_schema_cost descending', () => {
-    const sessionUnsortedTools: AgentSessionPayload = {
-      ...sampleSession,
-      tools: [
-        {
-          name: 'tool_cheap',
-          server: 'custom_server',
-          is_mcp: false,
-          schema_tokens: 50,
-          turns_resident: 1,
-          total_schema_cost: 50,
-          invocations: 1,
-        },
-        {
-          name: 'tool_expensive',
-          server: 'custom_server',
-          is_mcp: false,
-          schema_tokens: 500,
-          turns_resident: 10,
-          total_schema_cost: 5000,
-          invocations: 2,
-        },
-      ],
-    }
-    const html = renderHtml(<AgentSessionDashboard session={sessionUnsortedTools} />)
-    const expIdx = html.indexOf('tool_expensive')
-    const cheapIdx = html.indexOf('tool_cheap')
-    expect(expIdx).toBeGreaterThan(-1)
-    expect(cheapIdx).toBeGreaterThan(-1)
-    expect(expIdx).toBeLessThan(cheapIdx)
-  })
-
-  it('falls back to node.op || node.kind before indexing TIMELINE_OP_COLORS in duration bars', () => {
-    const sessionWithKindOnly: AgentSessionPayload = {
-      ...sampleSession,
-      timeline: [
-        {
-          spanId: 'span-kind-only',
-          name: 'kind_span',
-          kind: 'tool',
-          durationMs: 500,
-          offsetMs: 0,
-        },
-      ],
-    }
-    const html = renderHtml(<AgentSessionDashboard session={sessionWithKindOnly} initialTimelineTab="bars" />)
-    expect(html).toContain('data-testid="timeline-bars-view"')
-    expect(html).toContain('kind_span')
-    // TIMELINE_OP_COLORS['tool'] is #10b981
-    expect(html).toContain('style="left:0%;width:100%;background-color:#10b981"')
-  })
-})
-
-describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
-  it('routes turn bands, tool rows, and timeline spans through full-content requests', () => {
-    const internals = internalsOf()
-    const originalUseState = internals?.H?.useState
-    const state: unknown[] = []
-    let stateCursor = 0
-
-    const renderWithState = (initialTimelineTab?: 'tree' | 'bars') => {
-      stateCursor = 0
-      return AgentSessionContent({ session: sampleSession, initialTimelineTab })
-    }
-
-    const drawerFrom = (node: unknown): React.ReactElement | null => {
-      if (node == null) return null
-      if (Array.isArray(node)) {
-        for (const child of node) {
-          const found = drawerFrom(child)
-          if (found) return found
-        }
-        return null
-      }
-      if (!React.isValidElement(node)) return null
-      if (node.type === SessionInspectorDrawer) return node
-      return drawerFrom((node.props as { children?: unknown }).children)
-    }
-
-    if (internals?.H) {
-      internals.H.useState = (initial: unknown) => {
-        const index = stateCursor++
-        if (!(index in state)) {
-          state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
-        }
-        return [
-          state[index],
-          (next: unknown) => {
-            state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
-          },
-        ]
-      }
-    }
-
-    try {
-      const turnTree = renderWithState()
-      let spendCharts: React.ReactElement | null = null
-      const findSpendCharts = (node: unknown): void => {
-        if (!React.isValidElement(node) || spendCharts) return
-        const props = node.props as Record<string, unknown> | undefined
-        if (props?.onSelectTurn && props?.session) {
-          spendCharts = node
-          return
-        }
-        if (props?.children) {
-          React.Children.forEach(props.children, findSpendCharts)
-        }
-      }
-      findSpendCharts(turnTree)
-      expect(spendCharts).not.toBeNull()
-      // 0-based transport: the first turn is index 0 (issue #184).
-      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'tool_definitions')
-      expect((drawerFrom(renderWithState())!.props as { contentRequest?: unknown }).contentRequest).toEqual({
-        sessionId: 'sess-abc-123',
-        span: 'turn-span-1',
-        part: 'tool_definitions',
-      })
-
-      const toolTree = renderWithState()
-      ;(findElementByTestId(toolTree, 'tool-row-read_file')!.props as { onClick: () => void }).onClick()
-      expect((drawerFrom(renderWithState())!.props as { contentRequest?: unknown }).contentRequest).toEqual({
-        sessionId: 'sess-abc-123',
-        span: 'turn-span-1',
-        part: 'tool_definitions',
-        toolName: 'read_file',
-      })
-
-      const spanTree = renderWithState('bars')
-      ;(findElementByTestId(spanTree, 'timeline-bar-row')!.props as { onClick: () => void }).onClick()
-      expect((drawerFrom(renderWithState('bars'))!.props as { contentRequest?: unknown }).contentRequest).toEqual({
-        sessionId: 'sess-abc-123',
-        span: 'root-span-1',
-      })
-    } finally {
-      if (internals?.H) {
-        internals.H.useState = originalUseState
-      }
-    }
-  })
-
-  it('opens drawer when clicking a tool row', () => {
-    let capturedOpen = false
-    let capturedTitle = ''
-    let capturedContent: unknown = null
-
-    const reactInternals = internalsOf()
-    const origState = reactInternals?.H?.useState
-    if (reactInternals?.H) {
-      reactInternals.H.useState = (initial: unknown) => {
-        if (typeof initial === 'boolean') {
-          return [capturedOpen, (v: boolean) => { capturedOpen = v }]
-        }
-        if (initial === '') {
-          return [capturedTitle, (t: string) => { capturedTitle = t }]
-        }
-        return [capturedContent, (c: unknown) => { capturedContent = c }]
-      }
-    }
-
-    try {
-      const tree = AgentSessionDashboard({ session: sampleSession })
-      const toolRow = findElementByTestId(tree, 'tool-row-read_file')
-      expect(toolRow).not.toBeNull()
-      expect((toolRow!.props as { onClick?: unknown }).onClick).toBeTypeOf('function')
-
-      ;(toolRow!.props as { onClick: () => void }).onClick()
-      expect(capturedOpen).toBe(true)
-      expect(capturedTitle).toBe('Tool: read_file')
-      expect(capturedContent).toBeDefined()
-      expect((capturedContent as { tool: { name: string } }).tool.name).toBe('read_file')
-    } finally {
-      if (reactInternals?.H) {
-        reactInternals.H.useState = origState
-      }
-    }
-  })
-
-  it('opens drawer when clicking a timeline span in duration bars view', () => {
-    let capturedOpen = false
-    let capturedTitle = ''
-    let capturedContent: unknown = null
-
-    const reactInternals = internalsOf()
-    const origState = reactInternals?.H?.useState
-    if (reactInternals?.H) {
-      reactInternals.H.useState = (initial: unknown) => {
-        if (typeof initial === 'boolean') {
-          return [capturedOpen, (v: boolean) => { capturedOpen = v }]
-        }
-        if (initial === '') {
-          return [capturedTitle, (t: string) => { capturedTitle = t }]
-        }
-        return [capturedContent, (c: unknown) => { capturedContent = c }]
-      }
-    }
-
-    try {
-      const tree = AgentSessionDashboard({ session: sampleSession, initialTimelineTab: 'bars' })
-      const barRow = findElementByTestId(tree, 'timeline-bar-row')
-      expect(barRow).not.toBeNull()
-      expect((barRow!.props as { onClick?: unknown }).onClick).toBeTypeOf('function')
-
-      ;(barRow!.props as { onClick: () => void }).onClick()
-      expect(capturedOpen).toBe(true)
-      expect(capturedTitle).toContain('Span:')
-      expect(capturedContent).toBeDefined()
-    } finally {
-      if (reactInternals?.H) {
-        reactInternals.H.useState = origState
-      }
-    }
-  })
-
-  it('opens drawer for turn when onSelectTurn is invoked on SessionSpendCharts with a 0-based index and populates bucket analysis data', () => {
-    let capturedOpen = false
-    let capturedTitle = ''
-    let capturedContent: unknown = null
-
-    const reactInternals = internalsOf()
-    const origState = reactInternals?.H?.useState
-    if (reactInternals?.H) {
-      reactInternals.H.useState = (initial: unknown) => {
-        if (typeof initial === 'boolean') {
-          return [capturedOpen, (v: boolean) => { capturedOpen = v }]
-        }
-        if (typeof initial === 'string') {
-          return [capturedTitle, (t: string) => { capturedTitle = t }]
-        }
-        return [capturedContent, (c: unknown) => { capturedContent = c }]
-      }
-    }
-
-    try {
-      const tree = AgentSessionContent({ session: sampleSession })
-      let spendChartsEl: React.ReactElement | null = null
-      const walk = (node: unknown): void => {
-        if (!React.isValidElement(node)) return
-        const props = node.props as Record<string, unknown> | undefined
-        if (props?.onSelectTurn && props?.session) {
-          spendChartsEl = node
-          return
-        }
-        if (props?.children) {
-          React.Children.forEach(props.children, walk)
-        }
-      }
-      walk(tree)
-
-      expect(spendChartsEl).not.toBeNull()
-
-      // 0-based transport lookup: index 0 is the human-facing Turn 1 (issue #184).
-      // A plain turn selection opens the whole-turn lossless view (not the
-      // payload row alone): the drawer resolves the exact zero-based index
-      // through the turn-content endpoint.
-      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0)
-      expect(capturedOpen).toBe(true)
-      expect(capturedTitle).toBe('Turn 1 · Full context')
-      expect((capturedContent as { turnIndex?: number }).turnIndex).toBe(0)
-      expect((capturedContent as { turn?: { spanId?: string } }).turn?.spanId).toBe('turn-span-1')
-
-      // 0-based transport lookup: index 1 is Turn 2.
-      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1)
-      expect(capturedOpen).toBe(true)
-      expect(capturedTitle).toBe('Turn 2 · Full context')
-      expect((capturedContent as { turnIndex?: number }).turnIndex).toBe(1)
-      expect((capturedContent as { turn?: { spanId?: string } }).turn?.spanId).toBe('turn-span-2')
-
-      // 0-based turn lookup with bucket: tool_definitions
-      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'tool_definitions')
-      expect(capturedOpen).toBe(true)
-      expect(capturedTitle).toBe('Turn 1 · tool_definitions')
-      expect(capturedContent).toBeDefined()
-      const bucketData = capturedContent as {
-        bucket?: string
-        tokens?: number
-        total?: number
-        label?: string
-        content?: unknown
-      }
-      expect(bucketData.bucket).toBe('tool_definitions')
-      expect(bucketData.tokens).toBe(2800)
-      expect(bucketData.total).toBe(45500)
-      expect(bucketData.label).toBe('Tool definitions')
-      expect(bucketData.content).toEqual(
-        (sampleSession.turns![0].content as { tool_definitions?: unknown }).tool_definitions
-      )
-
-      // Verify ContextBucketInspector properly renders the populated bucket data
-      const drawerHtml = renderHtml(
-        <SessionInspectorDrawer
-          open={true}
-          onClose={() => {}}
-          title={capturedTitle}
-          rawContent={capturedContent as DrawerContent}
-        />
-      )
-      expect(drawerHtml).toContain('data-testid="context-bucket-inspector"')
-      expect(drawerHtml).toContain('Tool definitions')
-      expect(drawerHtml).toContain('2.8K')
-      expect(drawerHtml).toContain('45.5K')
-      expect(drawerHtml).toContain('6.2%')
-    } finally {
-      if (reactInternals?.H) {
-        reactInternals.H.useState = origState
-      }
-    }
-  })
-
-  it('shows the first-turn edge counts, not the last, for Turn 1 when context.turns is empty (issue #184 review)', () => {
-    const edgeSession: AgentSessionPayload = {
-      ...sampleSession,
-      turns: [
-        {
-          index: 0,
-          spanId: 'turn-span-1',
-          model: 'claude-3-5-sonnet',
-          buckets: { tool_definitions: 100 },
-        },
-      ],
-      context: {
-        measurable: true,
-        contextLimit: 200000,
-        turns: [],
-        residualTotal: 0,
-        derivedCounts: false,
-        freshJumpFactor: 2,
-        flaggedTurns: [],
-        sessionAccumulationRate: 0,
-        unmeasuredTurns: 0,
-        first: {
-          buckets: { tool_definitions: 111 },
-          reported_input: 111,
-        },
-        last: {
-          buckets: { tool_definitions: 999 },
-          reported_input: 999,
-        },
-      },
-    }
-
-    let capturedTitle = ''
-    let capturedContent: unknown = null
-
-    const reactInternals = internalsOf()
-    const origState = reactInternals?.H?.useState
-    if (reactInternals?.H) {
-      reactInternals.H.useState = (initial: unknown) => {
-        if (typeof initial === 'boolean') {
-          return [false, () => {}]
-        }
-        if (typeof initial === 'string') {
-          return [capturedTitle, (t: string) => { capturedTitle = t }]
-        }
-        return [capturedContent, (c: unknown) => { capturedContent = c }]
-      }
-    }
-
-    try {
-      const tree = AgentSessionContent({ session: edgeSession })
-      let spendChartsEl: React.ReactElement | null = null
-      const walk = (node: unknown): void => {
-        if (!React.isValidElement(node)) return
-        const props = node.props as Record<string, unknown> | undefined
-        if (props?.onSelectTurn && props?.session) {
-          spendChartsEl = node
-          return
-        }
-        if (props?.children) {
-          React.Children.forEach(props.children, walk)
-        }
-      }
-      walk(tree)
-      expect(spendChartsEl).not.toBeNull()
-
-      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'tool_definitions')
-      expect(capturedTitle).toBe('Turn 1 · tool_definitions')
-      const bucketData = capturedContent as { tokens?: number; total?: number }
-      expect(bucketData.tokens).toBe(111)
-      expect(bucketData.total).toBe(111)
-    } finally {
-      if (reactInternals?.H) {
-        reactInternals.H.useState = origState
-      }
+    let previous = -1
+    for (const marker of order) {
+      const index = html.indexOf(marker)
+      expect(index, `${marker} is rendered`).toBeGreaterThan(-1)
+      expect(index, `${marker} comes after the section before it`).toBeGreaterThan(previous)
+      previous = index
     }
   })
 })
 
-describe('AgentSessionDashboard: Remote Fetch States', () => {
-  it('renders loading skeleton when sessionId is provided and query is pending', () => {
-    const qc = new QueryClient({
-      defaultOptions: { queries: { retry: false, gcTime: 0 } },
-    })
-    const origFetch = globalThis.fetch
-    globalThis.fetch = () => new Promise(() => {})
-
-    try {
-      const html = renderHtml(
-        <QueryClientProvider client={qc}>
-          <AgentSessionDashboard sessionId="remote-sess-123" />
-        </QueryClientProvider>
-      )
-      expect(html).toContain('data-testid="agent-dashboard-loading"')
-    } finally {
-      globalThis.fetch = origFetch
-    }
-  })
-
-  it('renders error state when error prop is present', () => {
-    const html = renderHtml(
+describe('AgentSessionDashboard: prop-driven states', () => {
+  it('renders the error state from the error prop', () => {
+    const element = (
       <AgentSessionDashboard error={new Error('Network connection failed')} />
-    )
-    expect(html).toContain('data-testid="agent-dashboard-error"')
-    expect(html).toContain('Failed to load session')
-    expect(html).toContain('Network connection failed')
+    ) as ReactElement
+    const { container } = render(element)
+    expect(container.textContent).toContain('Failed to load session')
+    expect(container.textContent).toContain('Network connection failed')
+    expect(container.querySelector('[data-testid="agent-dashboard-error"]')).toBeTruthy()
   })
 
-  it('renders loading skeleton when isLoading prop is true', () => {
-    const html = renderHtml(<AgentSessionDashboard isLoading={true} />)
-    expect(html).toContain('data-testid="agent-dashboard-loading"')
+  it('renders the loading skeleton from the isLoading prop', () => {
+    const element = <AgentSessionDashboard isLoading={true} /> as ReactElement
+    const { container } = render(element)
+    expect(container.querySelector('[data-testid="agent-dashboard-loading"]')).toBeTruthy()
   })
 
-  it('forwards initialTimelineTab through AgentSessionLoader to AgentSessionContent', () => {
-    const qc = new QueryClient({
-      defaultOptions: { queries: { retry: false, gcTime: 0 } },
-    })
-    qc.setQueryData(['kyber-session', 'test-sess-1'], sampleSession)
-    const html = renderHtml(
-      <QueryClientProvider client={qc}>
-        <AgentSessionLoader sessionId="test-sess-1" initialTimelineTab="bars" />
+  it('renders the empty state when no session is selected', () => {
+    const element = (
+      <QueryClientProvider client={queryClient()}>
+        <AgentSessionDashboard />
       </QueryClientProvider>
-    )
-    expect(html).toContain('data-testid="timeline-bars-view"')
+    ) as ReactElement
+    const { container } = render(element)
+    expect(container.querySelector('[data-testid="agent-dashboard-empty"]')).toBeTruthy()
+    expect(container.textContent).toContain('No agent session selected')
   })
 })
 
-describe('timeline shape from the canonical store', () => {
-  it('renders when timeline is a single root node, not an array', () => {
-    // buildTimeline() returns ONE root node, and the payload shape documents
-    // it that way — but three consumers here iterated it as an array. Every
-    // unit test passed because the fixtures used an array, while a real
-    // session threw "nodes is not iterable" and the error boundary replaced
-    // the entire expanded view. This pins the real shape.
-    const session = {
-      ...sampleSession,
-      timeline: {
-        spanId: 'root-1',
-        parentId: null,
-        name: 'session',
-        kind: 'session',
-        startMs: 0,
-        durationMs: 100,
-        attributes: {},
-        isSubagent: false,
-        isAuxiliary: false,
-        cost: { basis: 'unknown', status: 'no_rate' },
-        children: [
-          {
-            spanId: 'child-1',
-            parentId: 'root-1',
-            name: 'llm_request',
-            kind: 'client',
-            startMs: 1,
-            durationMs: 10,
-            attributes: {},
-            isSubagent: false,
-            isAuxiliary: false,
-            cost: { basis: 'unknown', status: 'no_rate' },
-            children: [],
-          },
-        ],
-      },
+// ---------------------------------------------------------------------------
+// The client is the only network caller
+// ---------------------------------------------------------------------------
+
+describe('the session view never calls fetch itself', () => {
+  const sessionDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'session')
+
+  function productionFiles(): string[] {
+    const files = readdirSync(sessionDir, { withFileTypes: true })
+      .filter((entry) => /\.(ts|tsx)$/.test(entry.name) && !/\.test\.(ts|tsx)$/.test(entry.name))
+      .map((entry) => path.join(sessionDir, entry.name))
+    return [path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'AgentSessionDashboard.tsx'), ...files]
+  }
+
+  it('holds no raw fetch call outside lib/kyberApi.ts', () => {
+    for (const file of productionFiles()) {
+      expect(readFileSync(file, 'utf8'), `${file} must not call fetch directly`).not.toMatch(/\bfetch\s*\(/)
     }
+  })
 
-    const html = renderHtml(React.createElement(AgentSessionContent as never, { session } as never))
-
-    expect(html).toContain('execution-timeline-section')
-    expect(html).toContain('spend-composition-section')
+  it('reads the summary through the client fetcher, not a raw payload route', async () => {
+    const fetchMock = vi.fn(async (_url: string) => jsonResponse(SUMMARY_BODY))
+    vi.stubGlobal('fetch', fetchMock)
+    const element = (
+      <QueryClientProvider client={queryClient()}>
+        <AgentSessionDashboard sessionId={SESSION_ID} />
+      </QueryClientProvider>
+    ) as ReactElement
+    render(element)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    expect(fetchMock.mock.calls[0][0]).toBe(SUMMARY_ROUTE)
+    expect(await fetchKyberSessionSummary(SESSION_ID)).toMatchObject({ session_id: SESSION_ID, harness: 'copilot' })
   })
 })
 
+// ---------------------------------------------------------------------------
+// Shared lookups the drawer still uses (issue #184)
+// ---------------------------------------------------------------------------
 
-describe('AgentSessionDashboard: Issue #180 Task 8 Dashboard UI Verification', () => {
-  it('renders tool-call count when summary.tool_calls = 5 in Overview card and not a dash', () => {
-    const sessionWith5ToolCalls: AgentSessionPayload = {
-      ...sampleSession,
-      summary: {
-        ...sampleSession.summary,
-        tool_calls: 5,
-        tools_invoked: 3,
-      },
-    }
-
-    const tree = AgentSessionDashboard({ session: sessionWith5ToolCalls })
-    const metric = findElementByTestId(tree, 'metric-tool-calls')
-    const html = renderHtml(metric)
-    expect(html).toContain('data-measured="true"')
-    expect(html).toContain('>5<')
-    expect(html).not.toContain('>—<')
-    expect(html).toContain('3 distinct invoked')
-  })
-
-  it('renders dash with honest unmeasured tooltip when summary.tool_calls is undefined for legacy session or unmeasured harness', () => {
-    const legacySession: AgentSessionPayload = {
-      ...sampleSession,
-      harness: 'claude-code',
-      summary: {
-        ...sampleSession.summary,
-        tool_calls: undefined,
-        tools_invoked: undefined,
-      },
-    }
-
-    const tree = AgentSessionDashboard({ session: legacySession })
-    const metric = findElementByTestId(tree, 'metric-tool-calls')
-    const html = renderHtml(metric)
-    expect(html).toContain('data-measured="false"')
-    expect(html).toContain('>—<')
-    expect(html).not.toContain('>0<')
-    expect(html).toContain('Tool invocation count was not reported by claude-code.')
-  })
-
-  it('renders tool invocations with name and status badge in timeline call tree when session contains tool.invoke records', () => {
-    const sessionWithToolInvokes: AgentSessionPayload = {
-      ...sampleSession,
-      timeline: [
-        {
-          spanId: 'root-span-1',
-          name: 'invoke_agent',
-          op: 'invoke_agent',
-          kind: 'agent',
-          durationMs: 5000,
-          offsetMs: 0,
-          children: [
-            {
-              spanId: 'tool-span-1',
-              parentId: 'root-span-1',
-              name: 'Bash',
-              op: 'tool.invoke',
-              kind: 'tool',
-              durationMs: 350,
-              offsetMs: 100,
-              status: 'ok',
-              attributes: {
-                'gen_ai.tool.name': 'Bash',
-                'gen_ai.tool.status': 'ok',
-                'gen_ai.tool.call_id': 'call_1',
-              },
-              children: [],
-            },
-            {
-              spanId: 'tool-span-2',
-              parentId: 'root-span-1',
-              name: 'Read',
-              op: 'tool.invoke',
-              kind: 'tool',
-              durationMs: 120,
-              offsetMs: 500,
-              status: 'error',
-              attributes: {
-                'gen_ai.tool.name': 'Read',
-                'gen_ai.tool.status': 'error',
-                'gen_ai.tool.call_id': 'call_2',
-              },
-              children: [],
-            },
-          ],
-        },
-      ],
-    }
-
-    const html = renderHtml(<AgentSessionDashboard session={sessionWithToolInvokes} />)
-    const treeView = html.slice(html.indexOf('data-testid="timeline-tree-view"'))
-
-    // Verify tool invocation names and durations render in call tree
-    expect(treeView).toContain('Bash')
-    expect(treeView).toContain('350ms')
-    expect(treeView).toContain('Read')
-    expect(treeView).toContain('120ms')
-
-    // Verify status badges render for tool invocations
-    expect(treeView).toMatch(/data-testid="status-badge"[^>]*>\s*ok\s*</i)
-    expect(treeView).toMatch(/data-testid="status-badge"[^>]*>\s*error\s*</i)
-  })
-  it("formats tools_offered and tools_invoked properly when provided as string arrays", () => {
-    const sessionWithArrayTools: AgentSessionPayload = {
-      ...sampleSession,
-      summary: {
-        ...sampleSession.summary,
-        tool_calls: 3,
-        tools_offered: ["toolA", "toolB"],
-        tools_invoked: ["toolA"],
-      },
-    }
-
-    const html = renderHtml(<AgentSessionDashboard session={sessionWithArrayTools} />)
-    const idx = html.indexOf("Tools Offered");
-    const offeredMetric = html.slice(idx, idx + 400);
-
-    // Card value should format as count 2, not "—"
-    expect(offeredMetric).toContain(">2<")
-    // Subtitle should format as "1 never called", not "NaN never called"
-    expect(offeredMetric).toContain("1 never called")
-    expect(offeredMetric).not.toContain("NaN")
-  })
-
-  it('does NOT render schema-waste-banner and reports unmeasured invocations when tools_invoked is undefined', () => {
-    const sessionWithUnmeasuredInvocations: AgentSessionPayload = {
-      ...sampleSession,
-      summary: {
-        ...sampleSession.summary,
-        tools_offered: ['toolA', 'toolB'],
-        tools_invoked: undefined,
-      },
-    }
-
-    const html = renderHtml(<AgentSessionDashboard session={sessionWithUnmeasuredInvocations} />)
-    expect(html).not.toContain('data-testid="schema-waste-banner"')
-    expect(html).not.toContain('tools were never called')
-    const offeredCard = html.slice(html.indexOf('Tools Offered'), html.indexOf('Tools Offered') + 300)
-    expect(offeredCard).toContain('invocations not reported')
-    expect(offeredCard).not.toContain('never called')
-  })
-
-  it('safely handles non-string node.status in timeline without throwing', () => {
-    const sessionWithMalformedStatus: AgentSessionPayload = {
-      ...sampleSession,
-      timeline: [
-        {
-          spanId: 'span-bad-status',
-          name: 'tool_call',
-          op: 'tool.invoke',
-          kind: 'tool',
-          durationMs: 100,
-          offsetMs: 0,
-          status: true as unknown as string,
-          attributes: {},
-          children: [],
-        },
-      ],
-    }
-
-    expect(() => {
-      renderHtml(<AgentSessionDashboard session={sessionWithMalformedStatus} />)
-    }).not.toThrow()
-  })
-
-  it("computes unusedOfferedCount via set difference and renders waste banner for string arrays (Threads 6 & 7)", () => {
-    const sessionWithArrayTools: AgentSessionPayload = {
-      ...sampleSession,
-      summary: {
-        ...sampleSession.summary,
-        tool_calls: 3,
-        tools_offered: ["toolA", "toolB"],
-        tools_invoked: ["toolA", "toolX"],
-        unused_schema_per_turn: 500,
-        schema_tokens_per_turn: 2000,
-      },
-    }
-
-    const html = renderHtml(<AgentSessionDashboard session={sessionWithArrayTools} />)
-    const idx = html.indexOf("Tools Offered")
-    const offeredMetric = html.slice(idx, idx + 400)
-
-    // Card subtitle should say "1 never called", NOT "0 never called"
-    expect(offeredMetric).toContain("1 never called")
-    expect(offeredMetric).not.toContain("0 never called")
-
-    // Waste banner MUST be rendered because 1 offered tool was never called!
-    expect(html).toContain('data-testid="schema-waste-banner"')
-    expect(html).toContain("1 of 2 tools were never called.")
-  })
-
-  it("styles timeline status badges according to failure/success/neutral classifications (Thread 8)", () => {
-    const sessionWithStatuses: AgentSessionPayload = {
-      ...sampleSession,
-      timeline: [
-        {
-          spanId: "root-span-1",
-          parentId: null,
-          name: "assistant",
-          op: "llm.turn",
-          kind: "turn",
-          durationMs: 1000,
-          children: [
-            { spanId: "c1", parentId: "root-span-1", name: "t1", op: "tool.invoke", kind: "tool", durationMs: 10, status: "error", children: [] },
-            { spanId: "c2", parentId: "root-span-1", name: "t2", op: "tool.invoke", kind: "tool", durationMs: 10, status: "failure", children: [] },
-            { spanId: "c3", parentId: "root-span-1", name: "t3", op: "tool.invoke", kind: "tool", durationMs: 10, status: "fatal", children: [] },
-            { spanId: "c4", parentId: "root-span-1", name: "t4", op: "tool.invoke", kind: "tool", durationMs: 10, status: "ok", children: [] },
-            { spanId: "c5", parentId: "root-span-1", name: "t5", op: "tool.invoke", kind: "tool", durationMs: 10, status: "success", children: [] },
-            { spanId: "c6", parentId: "root-span-1", name: "t6", op: "tool.invoke", kind: "tool", durationMs: 10, status: "unset", children: [] },
-            { spanId: "c7", parentId: "root-span-1", name: "t7", op: "tool.invoke", kind: "tool", durationMs: 10, status: "unknown", children: [] },
-          ],
-        },
-      ],
-    }
-
-    const html = renderHtml(<AgentSessionDashboard session={sessionWithStatuses} />)
-    const treeView = html.slice(html.indexOf('data-testid="timeline-tree-view"'))
-
-    // error, failure, fatal must have red classes
-    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-red-[^>]*>\s*error\s*</i)
-    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-red-[^>]*>\s*failure\s*</i)
-    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-red-[^>]*>\s*fatal\s*</i)
-
-    // ok, success must have green (emerald) classes
-    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-emerald-[^>]*>\s*ok\s*</i)
-    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-emerald-[^>]*>\s*success\s*</i)
-
-    // unset, unknown must have neutral muted classes (NOT emerald or red)
-    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-muted-foreground[^>]*>\s*unset\s*</i)
-    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-muted-foreground[^>]*>\s*unknown\s*</i)
-  })
-});
-
-// Issue #184: the drawer resolves strictly 0-based transport through the shared
-// helper — explicit identity first, array position only for rows that carry
-// neither `index` nor `turn`. Never a neighbor.
 describe('findTurnByTransport (shared drawer lookup)', () => {
   it('matches a 0-based index row and the positional fallback', () => {
     expect(findTurnByTransport([{ index: 4 }], 4)).toEqual({ index: 4 })
@@ -1586,7 +789,7 @@ describe('findTurnByTransport (shared drawer lookup)', () => {
     expect(findTurnByTransport([{ turn: 5 }], 5)).toBeUndefined()
   })
 
-  it('prefers explicit identity over an earlier positional match (issue #184 review)', () => {
+  it('prefers explicit identity over an earlier positional match', () => {
     const rows = [{ turn: 2, spanId: 'span-a' }, { turn: 1, spanId: 'span-b' }]
     expect(findTurnByTransport(rows, 0)).toEqual({ turn: 1, spanId: 'span-b' })
     expect(findTurnByTransport(rows, 1)).toEqual({ turn: 2, spanId: 'span-a' })
@@ -1604,709 +807,20 @@ describe('findContextTurn (shared 1-based context lookup)', () => {
     expect(findContextTurn([{}, {}], 2)).toEqual({})
   })
 
-  it('prefers explicit identity over an earlier positional match (issue #184 review)', () => {
+  it('prefers explicit identity over an earlier positional match', () => {
     const rows = [{ turn: 2 }, { turn: 1 }]
     expect(findContextTurn(rows, 1)).toEqual({ turn: 1 })
     expect(findContextTurn(rows, 2)).toEqual({ turn: 2 })
   })
 })
 
-// Issue #185: a legacy payload carrying cache creation but no coverage count
-// must not print "on 0 turns" — absence is not a measured zero.
-describe('AgentSessionDashboard cache tiles (issue #185)', () => {
-  it('renders honest absence instead of "on 0 turns" when coverage is unreported', () => {
-    const { summary, ...rest } = sampleSession
-    const legacy = {
-      ...rest,
-      summary: {
-        ...summary,
-        total_cache_creation: 10800000,
-        cache_creation_coverage: undefined,
-        cache_hit_ratio: undefined,
-      },
-    }
-    const html = renderHtml(<AgentSessionDashboard session={legacy} />)
-
-    expect(html).toContain('Cache Creation')
-    expect(html).not.toContain('on 0 turns')
-    // The ratio tile falls back to its honest dash without a served ratio.
-    expect(html).toContain('Cache Hit Ratio')
-  })
-})
-
-describe('AgentSessionDashboard: session-level system_prompt request', () => {
-  it('omits the turn span for system_prompt but keeps it for other buckets', () => {
-    const internals = internalsOf()
-    const originalUseState = internals?.H?.useState
-    const state: unknown[] = []
-    let stateCursor = 0
-
-    const renderWithState = (initialTimelineTab?: 'tree' | 'bars') => {
-      stateCursor = 0
-      return AgentSessionContent({ session: sampleSession, initialTimelineTab })
-    }
-
-    const drawerFrom = (node: unknown): React.ReactElement | null => {
-      if (node == null) return null
-      if (Array.isArray(node)) {
-        for (const child of node) {
-          const found = drawerFrom(child)
-          if (found) return found
-        }
-        return null
-      }
-      if (!React.isValidElement(node)) return null
-      if (node.type === SessionInspectorDrawer) return node
-      return drawerFrom((node.props as { children?: unknown }).children)
-    }
-
-    if (internals?.H) {
-      internals.H.useState = (initial: unknown) => {
-        const index = stateCursor++
-        if (!(index in state)) {
-          state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
-        }
-        return [
-          state[index],
-          (next: unknown) => {
-            state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
-          },
-        ]
-      }
-    }
-
-    try {
-      const turnTree = renderWithState()
-      let spendCharts: React.ReactElement | null = null
-      const findSpendCharts = (node: unknown): void => {
-        if (!React.isValidElement(node) || spendCharts) return
-        const props = node.props as Record<string, unknown> | undefined
-        if (props?.onSelectTurn && props?.session) {
-          spendCharts = node
-          return
-        }
-        if (props?.children) {
-          React.Children.forEach(props.children, findSpendCharts)
-        }
-      }
-      findSpendCharts(turnTree)
-      expect(spendCharts).not.toBeNull()
-
-      // The session-level system prompt must not carry the turn span: the
-      // first turn span holds no prompt, so a span-scoped request 404s.
-      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'system_prompt')
-      const systemRequest = (drawerFrom(renderWithState())!.props as { contentRequest?: Record<string, unknown> }).contentRequest
-      expect(systemRequest).toEqual({ sessionId: 'sess-abc-123', part: 'system_prompt' })
-      expect(systemRequest).not.toHaveProperty('span')
-
-      // Normal per-turn buckets keep their prior span behavior.
-      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'tool_definitions')
-      expect((drawerFrom(renderWithState())!.props as { contentRequest?: unknown }).contentRequest).toEqual({
-        sessionId: 'sess-abc-123',
-        span: 'turn-span-1',
-        part: 'tool_definitions',
-      })
-    } finally {
-      if (internals?.H) {
-        internals.H.useState = originalUseState
-      }
-    }
-  })
-})
-
-describe('AgentSessionDashboard: whole-turn selection', () => {
-  it('opens a lossless whole-turn view with the exact zero-based turn index', () => {
-    const internals = internalsOf()
-    const originalUseState = internals?.H?.useState
-    const state: unknown[] = []
-    let stateCursor = 0
-
-    const renderWithState = (initialTimelineTab?: 'tree' | 'bars') => {
-      stateCursor = 0
-      return AgentSessionContent({ session: sampleSession, initialTimelineTab })
-    }
-
-    const drawerFrom = (node: unknown): React.ReactElement | null => {
-      if (node == null) return null
-      if (Array.isArray(node)) {
-        for (const child of node) {
-          const found = drawerFrom(child)
-          if (found) return found
-        }
-        return null
-      }
-      if (!React.isValidElement(node)) return null
-      if (node.type === SessionInspectorDrawer) return node
-      return drawerFrom((node.props as { children?: unknown }).children)
-    }
-
-    if (internals?.H) {
-      internals.H.useState = (initial: unknown) => {
-        const index = stateCursor++
-        if (!(index in state)) {
-          state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
-        }
-        return [
-          state[index],
-          (next: unknown) => {
-            state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
-          },
-        ]
-      }
-    }
-
-    try {
-      const turnTree = renderWithState()
-      let spendCharts: React.ReactElement | null = null
-      const findSpendCharts = (node: unknown): void => {
-        if (!React.isValidElement(node) || spendCharts) return
-        const props = node.props as Record<string, unknown> | undefined
-        if (props?.onSelectTurn && props?.session) {
-          spendCharts = node
-          return
-        }
-        if (props?.children) {
-          React.Children.forEach(props.children, findSpendCharts)
-        }
-      }
-      findSpendCharts(turnTree)
-      expect(spendCharts).not.toBeNull()
-
-      // A plain turn selection (no bucket) opens the whole-turn view backed
-      // by the turn-content endpoint with the exact zero-based index and the
-      // explicit lossless path — never a span or bucket request.
-      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1)
-      const drawer = drawerFrom(renderWithState())!
-      expect(drawer.props as Record<string, unknown>).toMatchObject({ title: 'Turn 2 · Full context' })
-      expect((drawer.props as { contentRequest?: unknown }).contentRequest).toEqual({
-        sessionId: 'sess-abc-123',
-        turnIndex: 1,
-        full: true,
-      })
-
-      // Turn 0 resolves to transport 0, the first turn span — not a neighbor.
-      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0)
-      expect((drawerFrom(renderWithState())!.props as { contentRequest?: unknown }).contentRequest).toEqual({
-        sessionId: 'sess-abc-123',
-        turnIndex: 0,
-        full: true,
-      })
-    } finally {
-      if (internals?.H) {
-        internals.H.useState = originalUseState
-      }
-    }
-  })
-})
-
-/** The markup from one section's test id up to the next section's test id. */
-function sectionOf(html: string, fromTestId: string, toTestId: string): string {
-  const start = html.indexOf(`data-testid="${fromTestId}"`)
-  const end = html.indexOf(`data-testid="${toTestId}"`)
-  expect(start).toBeGreaterThan(-1)
-  expect(end).toBeGreaterThan(start)
-  return html.slice(start, end)
-}
-
-describe('AgentSessionDashboard: Skills section (4 · Skills)', () => {
-  // The fixture's summary and skills blocks are merged onto the existing B1-shaped
-  // session. Its turns array is left alone: it is the per-turn spend list the rest
-  // of the dashboard already reads.
-  const realistic = skillsFixtures.realistic
-  const skillsSession = {
-    ...sampleSession,
-    summary: { ...sampleSession.summary, ...realistic.summary },
-    skills: realistic.skills,
-  } as unknown as AgentSessionPayload
-
-  it('numbers the skills section 4 and renumbers the execution timeline to 5', () => {
-    const html = renderHtml(<AgentSessionDashboard session={skillsSession} />)
-    expect(html).toContain('4 · Skills')
-    expect(html).toContain('5 · Execution Timeline &amp; Call Tree')
-    expect(html).not.toContain('4 · Execution Timeline')
-    expect(html.indexOf('3 · Tool &amp; Schema Cost Ranking')).toBeLessThan(html.indexOf('4 · Skills'))
-    expect(html.indexOf('4 · Skills')).toBeLessThan(html.indexOf('5 · Execution Timeline &amp; Call Tree'))
-  })
-
-  it('renders the skills-listed and skills-invoked tiles inside the skills section', () => {
-    const html = renderHtml(<AgentSessionDashboard session={skillsSession} />)
-    const section = sectionOf(html, 'skills-section', 'execution-timeline-section')
-    expect(section).toContain('data-testid="skills-tile-listed"')
-    expect(section).toContain('data-testid="skills-tile-invoked"')
-    expect(section).toContain('data-testid="skill-row-docs"')
-  })
-
-  it('reads a session with no skills key as not yet projected, never as no skills', () => {
-    const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
-    const section = sectionOf(html, 'skills-section', 'execution-timeline-section')
-    expect(section).toContain('not yet projected')
-    expect(section).not.toMatch(/no skills/i)
-  })
-
-  it('keeps the skills section free of currency figures and waste wording', () => {
-    const html = renderHtml(<AgentSessionDashboard session={skillsSession} />)
-    const section = sectionOf(html, 'skills-section', 'execution-timeline-section')
-    expect(section).not.toMatch(/[$€£¥]/)
-    expect(section).not.toMatch(/waste/i)
-  })
-
-  it('opens the skill drawer when a skill row is clicked', () => {
-    let capturedOpen = false
-    let capturedTitle = ''
-    let capturedContent: unknown = null
-
-    const reactInternals = internalsOf()
-    const origState = reactInternals?.H?.useState
-    if (reactInternals?.H) {
-      reactInternals.H.useState = (initial: unknown) => {
-        if (typeof initial === 'boolean') {
-          return [capturedOpen, (v: boolean) => { capturedOpen = v }]
-        }
-        if (initial === '') {
-          return [capturedTitle, (t: string) => { capturedTitle = t }]
-        }
-        return [capturedContent, (c: unknown) => { capturedContent = c }]
-      }
-    }
-
-    try {
-      const tree = AgentSessionDashboard({ session: skillsSession })
-      const skillRow = findElementByTestId(tree, 'skill-row-docs')
-      expect(skillRow).not.toBeNull()
-      expect((skillRow!.props as { onClick?: unknown }).onClick).toBeTypeOf('function')
-
-      ;(skillRow!.props as { onClick: () => void }).onClick()
-      expect(capturedOpen).toBe(true)
-      expect(capturedTitle).toBe('Skill: docs')
-      expect((capturedContent as { skill: { name: string } }).skill.name).toBe('docs')
-    } finally {
-      if (reactInternals?.H) {
-        reactInternals.H.useState = origState
-      }
-    }
-  })
-})
-
-/** Depth-first search over the element tree for the first element matching `predicate`. */
-function findElementWhere(node: unknown, predicate: (el: React.ReactElement) => boolean): React.ReactElement | null {
-  if (node == null) return null
-  if (Array.isArray(node)) {
-    for (const child of node) {
-      const found = findElementWhere(child, predicate)
-      if (found) return found
-    }
-    return null
-  }
-  if (!React.isValidElement(node)) return null
-  if (predicate(node)) return node
-  return findElementWhere((node.props as { children?: unknown }).children, predicate)
-}
-
-/**
- * Clicks a skill row through the real wiring (SkillsPanel onSelectSkill ->
- * openDrawerForSkill) and returns the props the dashboard hands its drawer.
- * The hook shim is the same stateful one the whole-turn selection test uses.
- */
-function openSkillDrawer(session: AgentSessionPayload, skillName: string): React.ComponentProps<typeof SessionInspectorDrawer> {
-  const internals = internalsOf()
-  const originalUseState = internals?.H?.useState
-  const state: unknown[] = []
-  let cursor = 0
-  const renderContent = () => {
-    cursor = 0
-    return AgentSessionContent({ session })
-  }
-  if (internals?.H) {
-    internals.H.useState = (initial: unknown) => {
-      const index = cursor++
-      if (!(index in state)) {
-        state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
-      }
-      return [
-        state[index],
-        (next: unknown) => {
-          state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
-        },
-      ]
-    }
-  }
-  try {
-    const panel = findElementWhere(renderContent(), (el) => typeof (el.props as { onSelectSkill?: unknown }).onSelectSkill === 'function')
-    expect(panel).not.toBeNull()
-    const row = session.skills && 'rows' in session.skills ? session.skills.rows.find((r) => r.name === skillName) : undefined
-    expect(row).toBeDefined()
-    ;(panel!.props as { onSelectSkill: (r: unknown) => void }).onSelectSkill(row)
-    const drawer = findElementWhere(renderContent(), (el) => el.type === SessionInspectorDrawer)
-    expect(drawer).not.toBeNull()
-    return drawer!.props as React.ComponentProps<typeof SessionInspectorDrawer>
-  } finally {
-    if (internals?.H) {
-      internals.H.useState = originalUseState
-    }
-  }
-}
-
-function turnContentBody(turnIndex: number, extra: Record<string, unknown>): KyberTurnContentResult {
-  return { sessionId: 'sess-abc-123', turnIndex, blocks: [], parts: [], assembledText: '', ...extra } as unknown as KyberTurnContentResult
-}
-
-describe('AgentSessionDashboard: skills headline comes from the served counts (F1, F4)', () => {
-  it('renders the served headline in the skills section, not a count of the rows', () => {
-    const served = skillsFixtures.servedCountsDifferFromRows
-    const session = {
-      ...sampleSession,
-      summary: { ...sampleSession.summary, ...served.summary },
-      skills: served.skills,
-    } as unknown as AgentSessionPayload
-    const html = renderHtml(<AgentSessionDashboard session={session} />)
-    const section = sectionOf(html, 'skills-section', 'execution-timeline-section')
-    expect(section).toContain('5 of 7 listed skills had no observed invocation')
-    expect(section).not.toContain('2 of 3 listed skills')
-  })
-
-  it('shows the no-skill line and no headline for a measurable payload with no rows', () => {
-    const empty = skillsFixtures.noRecordedSkills
-    const session = {
-      ...sampleSession,
-      summary: { ...sampleSession.summary, ...empty.summary },
-      skills: empty.skills,
-    } as unknown as AgentSessionPayload
-    const html = renderHtml(<AgentSessionDashboard session={session} />)
-    const section = sectionOf(html, 'skills-section', 'execution-timeline-section')
-    expect(section).toContain('No skill was recorded for this session.')
-    expect(section).not.toContain('data-testid="skills-headline"')
-    expect(section).not.toMatch(/had no observed invocation/)
-  })
-})
-
-describe('AgentSessionDashboard: skill drawer reads the first listed turn (F2)', () => {
-  it('titles the drawer with the skill and requests the lossless turn content for its first listed turn', () => {
-    const row = { name: 'docs', listed: true, invocations: 2, turns_listed: [1, 2], derived_tokens: 38 }
-    const session = { ...sampleSession, skills: { measurable: true, rows: [row] } } as unknown as AgentSessionPayload
-    const drawerProps = openSkillDrawer(session, 'docs')
-    expect(drawerProps.title).toBe('Skill: docs')
-
-    // Both turns are cached under the whole-turn key. Only the first listed turn
-    // may supply the listing text.
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-    qc.setQueryData(
-      ['kyber-turn-content-full', 'sess-abc-123', 1],
-      turnContentBody(1, { skills: { listed: [{ name: 'docs', text: 'FIRST_LISTED_TURN_TEXT' }], invoked: ['docs'] } }),
-    )
-    qc.setQueryData(
-      ['kyber-turn-content-full', 'sess-abc-123', 2],
-      turnContentBody(2, { skills: { listed: [{ name: 'docs', text: 'LATER_LISTED_TURN_TEXT' }], invoked: ['docs'] } }),
-    )
-    const html = renderHtml(
-      <QueryClientProvider client={qc}>
-        <SessionInspectorDrawer {...drawerProps} />
-      </QueryClientProvider>,
-    )
-    expect(html).toContain('FIRST_LISTED_TURN_TEXT')
-    expect(html).not.toContain('LATER_LISTED_TURN_TEXT')
-  })
-})
-
-describe('KyberSessionTurnSkills (F3): exported types must be used or removed', () => {
-  // The repo already walks web/src as text in kyber.test.ts, so a source-level
-  // check is the established pattern here. It passes when the type is removed.
-  function sourceFiles(dir: string): string[] {
-    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-      const full = path.join(dir, entry.name)
-      if (entry.isDirectory()) return sourceFiles(full)
-      return /\.(?:ts|tsx)$/.test(entry.name) && !/\.test\.(?:ts|tsx)$/.test(entry.name) ? [full] : []
-    })
-  }
-
-  it('has no exported KyberSessionTurnSkills that nothing in web/src references', () => {
-    const webSrc = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-    const files = sourceFiles(webSrc)
-    const declaredIn = files.filter((file) => /export type KyberSessionTurnSkills\b/.test(readFileSync(file, 'utf8')))
-    if (declaredIn.length === 0) return
-    const referencedIn = files.filter((file) => {
-      const text = readFileSync(file, 'utf8').replace(/export type KyberSessionTurnSkills\b[^\n]*/g, '')
-      return /\bKyberSessionTurnSkills\b/.test(text)
-    })
-    expect(referencedIn, `KyberSessionTurnSkills is exported from ${declaredIn.join(', ')} but unused`).not.toEqual([])
-  })
-})
-
-describe('AgentSessionDashboard: tool drawer when the harness exports no definitions', () => {
-  it('shows an honest notice and issues no content request', () => {
-    const internals = internalsOf()
-    const originalUseState = internals?.H?.useState
-    const state: unknown[] = []
-    let stateCursor = 0
-
-    // Synthetic Antigravity-shaped session: tool rows, but no turn carries
-    // definitions and the summary lists no offered tools.
-    const session = {
-      ...sampleSession,
-      harness: 'antigravity-cli',
-      summary: { ...sampleSession.summary, tools_offered: undefined },
-      turns: sampleSession.turns?.map(({ has_tool_defs: _h, content: _c, ...turn }: Record<string, unknown>) => turn),
-    } as unknown as AgentSessionPayload
-
-    const render = () => {
-      stateCursor = 0
-      return AgentSessionContent({ session })
-    }
-    const drawerFrom = (node: unknown): React.ReactElement | null => {
-      if (node == null) return null
-      if (Array.isArray(node)) {
-        for (const child of node) {
-          const found = drawerFrom(child)
-          if (found) return found
-        }
-        return null
-      }
-      if (!React.isValidElement(node)) return null
-      if (node.type === SessionInspectorDrawer) return node
-      return drawerFrom((node.props as { children?: unknown }).children)
-    }
-
-    if (internals?.H) {
-      internals.H.useState = (initial: unknown) => {
-        const index = stateCursor++
-        if (!(index in state)) {
-          state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
-        }
-        return [
-          state[index],
-          (next: unknown) => {
-            state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
-          },
-        ]
-      }
-    }
-
-    try {
-      ;(findElementByTestId(render(), 'tool-row-read_file')!.props as { onClick: () => void }).onClick()
-      const drawer = drawerFrom(render())!
-      const props = drawer.props as { contentRequest?: unknown; rawContent?: Record<string, unknown>; children?: unknown }
-      expect(props.contentRequest).toBeUndefined()
-      expect(props.rawContent).not.toHaveProperty('definitionUnavailableNotice')
-      const html = renderHtml(<>{props.children as React.ReactNode}</>)
-      expect(html).toContain('data-testid="tool-definition-unavailable"')
-      expect(html).toContain('antigravity-cli does not export tool definitions')
-    } finally {
-      if (internals?.H) {
-        internals.H.useState = originalUseState
-      }
-    }
-  })
-})
-
-// ---------------------------------------------------------------------------
-// Antigravity and Copilot CLI payloads (synthetic). These pin the display
-// contract the implementer must meet; see the report for the field names.
-// ---------------------------------------------------------------------------
-
-/**
- * The reason the tool-definitions area states for a Copilot CLI session. The
- * `<tools>` section of the system prompt is usage guidance, so a reader must
- * not take it for the offered tool set.
- */
-const COPILOT_TOOL_DEFINITIONS_REASON =
-  "Copilot CLI session journals carry no tool schemas; the system prompt's <tools> section is usage guidance, not the offered tool set."
-
-/** Visible text: tags dropped, entities decoded, whitespace collapsed. */
-function visibleTextOf(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#x27;/g, "'")
-    .replace(/&amp;/g, '&')
-    .replace(/\s+/g, ' ')
-}
-
-/** The markup from one tool row's testid up to the next tool row. */
-function toolRowHtml(html: string, name: string): string {
-  const start = html.indexOf(`data-testid="tool-row-${name}"`)
-  if (start < 0) return ''
-  const next = html.indexOf('data-testid="tool-row-', start + 1)
-  return html.slice(start, next < 0 ? undefined : next)
-}
-
-type DrawerProps = { contentRequest?: unknown; rawContent?: Record<string, unknown>; children?: unknown }
-
-function drawerElementIn(node: unknown): React.ReactElement | null {
-  if (node == null) return null
-  if (Array.isArray(node)) {
-    for (const child of node) {
-      const found = drawerElementIn(child)
-      if (found) return found
-    }
-    return null
-  }
-  if (!React.isValidElement(node)) return null
-  if (node.type === SessionInspectorDrawer) return node
-  return drawerElementIn((node.props as { children?: unknown }).children)
-}
-
-/** Clicks a tool row and returns the props the dashboard hands its inspector drawer. */
-function openToolDrawer(session: AgentSessionPayload, toolName: string): DrawerProps {
-  const internals = internalsOf()
-  const originalUseState = internals?.H?.useState
-  const state: unknown[] = []
-  let stateCursor = 0
-
-  if (internals?.H) {
-    internals.H.useState = (initial: unknown) => {
-      const index = stateCursor++
-      if (!(index in state)) {
-        state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
-      }
-      return [
-        state[index],
-        (next: unknown) => {
-          state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
-        },
-      ]
-    }
-  }
-
-  const render = () => {
-    stateCursor = 0
-    return AgentSessionContent({ session })
-  }
-
-  try {
-    ;(findElementByTestId(render(), `tool-row-${toolName}`)!.props as { onClick: () => void }).onClick()
-    return drawerElementIn(render())!.props as DrawerProps
-  } finally {
-    if (internals?.H) {
-      internals.H.useState = originalUseState
-    }
-  }
-}
-
-describe('AgentSessionDashboard: Antigravity tools list', () => {
-  // Invoked tools carry their counts; a tool never invoked still appears, with 0.
-  const antigravity = {
-    ...sampleSession,
-    harness: 'antigravity-cli',
-    tools: [
-      { name: 'read_file', server: 'antigravity', invocations: 4, in_definitions: false },
-      { name: 'grep_search', server: 'antigravity', invocations: 2, in_definitions: false },
-      { name: 'unused_tool', server: 'antigravity', invocations: 0, in_definitions: false },
-    ],
-  } as unknown as AgentSessionPayload
-
-  it('lists each invoked tool beside its invocation count', () => {
-    const html = renderHtml(<AgentSessionContent session={antigravity} />)
-    expect(visibleTextOf(toolRowHtml(html, 'read_file'))).toMatch(/read_file.*\b4\b/)
-    expect(visibleTextOf(toolRowHtml(html, 'grep_search'))).toMatch(/grep_search.*\b2\b/)
-  })
-})
-
-describe('AgentSessionDashboard: Copilot CLI tool definitions reason', () => {
-  it('states the Copilot reason verbatim in the tool-definitions area, and issues no content request', () => {
-    const copilot = {
-      ...sampleSession,
-      harness: 'copilot',
-      turns: [],
-      summary: { ...sampleSession.summary, tools_offered: undefined },
-    } as unknown as AgentSessionPayload
-
-    const props = openToolDrawer(copilot, 'read_file')
-
-    expect(props.contentRequest).toBeUndefined()
-    expect(visibleTextOf(renderHtml(<>{props.children as React.ReactNode}</>))).toContain(
-      COPILOT_TOOL_DEFINITIONS_REASON,
-    )
-  })
-})
-
-/**
- * One request item as the API serves it. `request` names the request by its span id;
- * `prompt` previews the user's prompt, and is null or absent when content capture is
- * off; `turns` is the request's real turn count.
- */
-type RequestFixture = SessionRequestItem
-
-function sessionWithRequests(requests: RequestFixture[]): AgentSessionPayload {
-  return { ...sampleSession, requests }
-}
-
-/**
- * The markup of the `<div>` carrying `testId`. Open and close tags are balanced, so
- * markup nested inside the element cannot cut it short.
- */
-function divMarkupByTestId(html: string, testId: string): string {
-  const open = html.indexOf(`data-testid="${testId}"`)
-  expect(open, `a rendered element with data-testid="${testId}"`).toBeGreaterThan(-1)
-  const start = html.lastIndexOf('<div', open)
-  const tags = /<(\/?)div[\s>]/g
-  tags.lastIndex = start
-  let depth = 0
-  for (let m = tags.exec(html); m !== null; m = tags.exec(html)) {
-    depth += m[1] ? -1 : 1
-    if (depth === 0) return html.slice(start, m.index + m[0].length)
-  }
-  throw new Error(`the <div> for data-testid="${testId}" never closes`)
-}
-
-/**
- * Each user request in the list is labelled by its prompt preview, or `Request N` by its
- * position when it has none, and shows its own turn count. A span id identifies the
- * request; it is never its label.
- */
-describe('AgentSessionDashboard: user request labels', () => {
-  const flakyRetry = 'Trace the flaky ingest retry'
-  const verifyFix = 'Verify the fix against the retry suite'
-  const spanIds = ['span-7f3a9c21b0d4e5f6', 'span-18c2d9e0a4b7f355', 'span-c04e11d7a9b26f08'] as const
-
-  function requestListText(session: AgentSessionPayload): string {
-    return visibleTextOf(divMarkupByTestId(renderHtml(<AgentSessionDashboard session={session} />), 'user-requests'))
-  }
-
-  it('labels each request with its prompt preview followed by its own turn count', () => {
-    const list = requestListText(
-      sessionWithRequests([
-        { request: spanIds[0], prompt: flakyRetry, turns: 3 },
-        { request: spanIds[1], prompt: verifyFix, turns: 2 },
-      ]),
-    )
-    expect(list).toContain(`${flakyRetry} (3 turns)`)
-    expect(list).toContain(`${verifyFix} (2 turns)`)
-  })
-
-  it('labels a request whose prompt is null or absent as Request N, by its 1-based position', () => {
-    const list = requestListText(
-      sessionWithRequests([
-        { request: spanIds[0], prompt: flakyRetry, turns: 3 },
-        { request: spanIds[1], prompt: null, turns: 2 },
-        { request: spanIds[2], turns: 4 },
-      ]),
-    )
-    expect(list).toContain('Request 2 (2 turns)')
-    expect(list).toContain('Request 3 (4 turns)')
-  })
-
-  it('labels a request whose prompt is a not_measurable object as Request N, never rendering the object', () => {
-    const list = requestListText(
-      sessionWithRequests([
-        { request: spanIds[0], prompt: { availability: 'not_measurable', reason: 'content capture off' }, turns: 2 },
-        { request: spanIds[1], prompt: flakyRetry, turns: 1 },
-      ]),
-    )
-    expect(list).toContain('Request 1 (2 turns)')
-    expect(list).not.toContain('not_measurable')
-  })
-
-  it('never shows a raw span id as a request label', () => {
-    const list = requestListText(
-      sessionWithRequests([
-        { request: spanIds[0], prompt: flakyRetry, turns: 3 },
-        { request: spanIds[1], prompt: null, turns: 2 },
-        { request: spanIds[2], turns: 4 },
-      ]),
-    )
-    for (const spanId of spanIds) {
-      expect(list, `span id ${spanId} shown as a label`).not.toContain(spanId)
-    }
+describe('formatDuration', () => {
+  it('formats durations properly', () => {
+    expect(formatDuration(null)).toBe('—')
+    expect(formatDuration(undefined)).toBe('—')
+    expect(formatDuration(0)).toBe('—')
+    expect(formatDuration(450)).toBe('450ms')
+    expect(formatDuration(2500)).toBe('2.5s')
+    expect(formatDuration(65000)).toBe('1m 5s')
   })
 })

@@ -1,6 +1,7 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 import {
+  SESSION_PAGE_LIMIT,
   USER_CANON,
   postOtlpLogs,
   postOtlpTraces,
@@ -80,16 +81,16 @@ test.afterAll(async () => {
 })
 
 test('ingests all 7 stored harnesses, excludes gemini, and renders initial Tray state', async ({ page }) => {
-  const sessionsRes = await page.request.get(`${server!.url}/api/kyber/sessions`)
-  expect(sessionsRes.status()).toBe(200)
-  const sessionsBody = (await sessionsRes.json()) as {
-    sessions?: Array<{ session_id?: string; sessionId?: string }>
-  }
-  const sessionIds = (sessionsBody.sessions ?? []).map((row) => row.session_id ?? row.sessionId ?? '')
   for (const contract of STORED_OTLP_HARNESS_CONTRACTS) {
-    expect(sessionIds).toContain(contract.sessionId)
+    expect(
+      await sessionsPageCarriesSession(page, server!.url, contract.sessionId),
+      `the sessions page must carry ${contract.sessionId}`,
+    ).toBe(true)
   }
-  expect(sessionIds).not.toContain(GEMINI_EXCLUDED_SESSION_ID)
+  expect(
+    await sessionsPageCarriesSession(page, server!.url, GEMINI_EXCLUDED_SESSION_ID),
+    'the gemini session is excluded from the store',
+  ).toBe(false)
 
   const bridgeState = await bridge!.getState()
   expect(bridgeState.viewState.phase).toBe('ready')
@@ -385,11 +386,37 @@ test('exercises CleanDatabase single-harness and all-harness scopes, plus quit I
   await expect(page.getByTestId('empty-state')).toBeVisible()
   await expect(page.getByTestId('ipc-action-error')).toHaveCount(0)
 
-  const sessionsAfterClean = await page.request.get(`${server!.url}/api/kyber/sessions`)
+  const sessionsAfterClean = await page.request.get(`${server!.url}/api/kyber/sessions?limit=${SESSION_PAGE_LIMIT}`)
   expect(sessionsAfterClean.status()).toBe(200)
-  const sessionsAfterJson = (await sessionsAfterClean.json()) as { sessions?: unknown[] }
+  const sessionsAfterJson = (await sessionsAfterClean.json()) as {
+    sessions?: unknown[]
+    total?: number
+    page?: number
+    limit?: number
+  }
   expect(sessionsAfterJson.sessions ?? []).toEqual([])
+  expect(sessionsAfterJson.total, 'the clean leaves the store with no session to page').toBe(0)
 
   await page.getByTestId('quit').click()
   await expect.poll(async () => (await bridge!.getState()).quitCount).toBeGreaterThanOrEqual(1)
 })
+
+/**
+ * Whether the sessions page carries the session `sessionId`, read through the page's own search.
+ *
+ * The list is paged, so asking for the id is the read that cannot miss a row the corpus ordered
+ * past the first window.
+ */
+async function sessionsPageCarriesSession(page: Page, baseUrl: string, sessionId: string): Promise<boolean> {
+  const response = await page.request.get(
+    `${baseUrl}/api/kyber/sessions?q=${encodeURIComponent(sessionId)}&limit=${SESSION_PAGE_LIMIT}`,
+  )
+  expect(response.status(), await response.text()).toBe(200)
+  const body = (await response.json()) as {
+    sessions?: Array<{ session_id?: string; sessionId?: string }>
+    total?: number
+    page?: number
+    limit?: number
+  }
+  return (body.sessions ?? []).some((row) => (row.session_id ?? row.sessionId) === sessionId)
+}

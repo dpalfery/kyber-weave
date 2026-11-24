@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import * as React from 'react'
+import { readFileSync } from 'node:fs'
 
 import {
   ContextCompositionChart,
@@ -816,6 +817,44 @@ describe('SessionSpendCharts (composite)', () => {
     )
     expect(text).toContain('Token Spend per Turn')
     expect(text).toContain('Context Composition')
+  })
+})
+
+describe('SessionSpendCharts: fed by the /charts section', () => {
+  // The shapes `GET /api/kyber/session/:id/charts` answers: the detail
+  // payload's turns and context, without its other reads.
+  const sectionTurns: TurnSpendItem[] = [
+    { index: 0, fresh_input: 500, cache_read: 0, output: 100, input: 500 },
+    { index: 1, fresh_input: 200, cache_read: 300, output: 150, input: 650 },
+  ]
+  const sectionContext: ContextCompositionData = {
+    measurable: true,
+    turns: [{ index: 1, buckets: { system_prompt: 400, residual: 100 }, reported_input: 500 }],
+  }
+
+  it('renders both charts from the section data the /charts route serves', () => {
+    const text = renderText(
+      React.createElement(SessionSpendCharts, { turns: sectionTurns, context: sectionContext }),
+    )
+    expect(text).toContain('Token Spend per Turn')
+    expect(text).toContain('Context Composition')
+  })
+
+  it('renders its empty states while the section data has not loaded', () => {
+    const text = renderText(React.createElement(SessionSpendCharts, {}))
+    expect(text).toContain('No agent turns recorded')
+    expect(text).toContain('No context data available')
+  })
+
+  it('consumes the section data only: no monolithic session payload prop remains', () => {
+    // The charts once fell back to `session.turns` / `session.context` off the
+    // whole-session payload. The section's own route answers their data now, so
+    // the payload shape is out of the module entirely — read as text because
+    // the rule is about the module's inputs, not about any one render.
+    const source = readFileSync(new URL('./SessionSpendCharts.tsx', import.meta.url), 'utf8')
+    expect(source).not.toContain('AgentSessionPayload')
+    expect(source).not.toContain('session?.turns')
+    expect(source).not.toContain('session?.context')
   })
 })
 

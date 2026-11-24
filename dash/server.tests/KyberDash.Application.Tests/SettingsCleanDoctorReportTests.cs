@@ -837,7 +837,7 @@ public static class SettingsCleanDoctorReportTests
                     Store.ReplaceFindings([Finding]);
                 }
 
-                Reports = new ReportService(Query.Object, Store, Store);
+                Reports = new ReportService(Query.Object, Store);
             }
 
             public Mock<IDashboardQueryService> Query { get; } = new();
@@ -1464,21 +1464,25 @@ public static class SettingsCleanDoctorReportTests
                 new CanonSessionProjectorEngine(store, store, store, pricing),
                 new CanonRollupsEngine(store, store, pricing)).ProjectAll();
 
-            CountingReader countingReader = new(store);
             KyberBridgeEngine bridge = new(
-                countingReader,
+                store,
                 store,
                 store,
                 pricing,
-                new CanonSessionProjectorEngine(countingReader, store, store, pricing),
-                new CanonRollupsEngine(countingReader, store, pricing),
+                new CanonSessionProjectorEngine(store, store, store, pricing),
+                new CanonRollupsEngine(store, store, pricing),
                 clock: () => FixedNow,
                 storePath: "/tmp/multi.db");
+            store.ClearReadLog();
 
             JsonElement report = bridge.GetReport(null, null, null, 50, 7);
 
-            Assert.True(countingReader.GetSessionAggregateCalls <= 1);
-            Assert.Equal(1, countingReader.SessionTurnSummariesCalls);
+            // The report prices its whole scoped window with one batched report-figures read and
+            // reads the latest session's turns once through the turn read — no per-session loop.
+            Assert.Equal(1, store.ReadLog.Count(static name => name == nameof(IRelationalStoreReader.SessionReportFigures)));
+            Assert.Equal(1, store.ReadLog.Count(static name => name == nameof(IRelationalStoreReader.SessionTurnFigures)));
+            Assert.DoesNotContain(nameof(IRelationalStoreReader.SessionSummaryFigures), store.ReadLog);
+            Assert.DoesNotContain(nameof(IRelationalStoreReader.TurnFigures), store.ReadLog);
             Assert.Equal(5, report.GetProperty("sessionCount").GetInt32());
 
             JsonElement latestSession = report.GetProperty("latestSession");
@@ -1881,65 +1885,6 @@ public static class SettingsCleanDoctorReportTests
                 ],
                 Records: records,
                 Problems: []));
-        }
-
-        private sealed class CountingReader(InMemoryRelationalStore inner) : IRelationalStoreReader
-        {
-            public int GetSessionAggregateCalls { get; private set; }
-
-            public int SessionTurnSummariesCalls { get; private set; }
-
-            public IReadOnlyList<string> Harnesses() => inner.Harnesses();
-
-            public IReadOnlyList<StoredSource> Sources(string? harnessId = null) => inner.Sources(harnessId);
-
-            public int CountRecords(string? harnessId = null) => inner.CountRecords(harnessId);
-
-            public CollectedRecord? GetRecord(string spanId) => inner.GetRecord(spanId);
-
-            public IReadOnlyList<CollectedRecord> Records(string? sessionKey = null, string? harnessId = null, string? sourceId = null) =>
-                inner.Records(sessionKey, harnessId, sourceId);
-
-            public IReadOnlyList<StoredTokenCount> TokenCounts(string? spanId = null, string? sessionKey = null) => inner.TokenCounts(spanId, sessionKey);
-
-            public IReadOnlyList<StoredReportedTotal> ReportedTotals(string? spanId = null, string? sessionKey = null) => inner.ReportedTotals(spanId, sessionKey);
-
-            public IReadOnlyList<StoredReportedCost> ReportedCosts(string? spanId = null, string? sessionKey = null) => inner.ReportedCosts(spanId, sessionKey);
-
-            public IReadOnlyList<StoredSkillInvocation> SkillsInvoked(string? spanId = null, string? sessionKey = null) => inner.SkillsInvoked(spanId, sessionKey);
-
-            public IReadOnlyList<StoredToolCall> ToolCalls(string? spanId = null, string? sessionKey = null) => inner.ToolCalls(spanId, sessionKey);
-
-            public IReadOnlyList<StoredContentPart> ContentParts(string? spanId = null, string? sessionKey = null) => inner.ContentParts(spanId, sessionKey);
-
-            public IReadOnlyList<StoredToolDefinition> ToolDefinitions(string? spanId = null, string? sessionKey = null) => inner.ToolDefinitions(spanId, sessionKey);
-
-            public IReadOnlyList<StoredAgentInvocation> AgentInvocations(string? spanId = null, string? sessionKey = null) => inner.AgentInvocations(spanId, sessionKey);
-
-            public IReadOnlyList<StoredRecordSignals> RecordSignals(string? spanId = null, string? sessionKey = null) => inner.RecordSignals(spanId, sessionKey);
-
-            public CollectedSession? GetSession(string sessionKey) => inner.GetSession(sessionKey);
-
-            public IReadOnlyList<CollectedSession> Sessions(string? harnessId = null) => inner.Sessions(harnessId);
-
-            public IReadOnlyList<StoredSessionModelUsage> SessionModelUsages(string? sessionKey = null) => inner.SessionModelUsages(sessionKey);
-
-            public StoredFieldsView StoredFields(string sessionKey) => inner.StoredFields(sessionKey);
-
-            public SessionAggregateView? GetSessionAggregate(string sessionKey, IModelPricingLookup? pricing = null)
-            {
-                GetSessionAggregateCalls++;
-                return inner.GetSessionAggregate(sessionKey, pricing);
-            }
-
-            public IReadOnlyList<SessionAggregateView> ListSessionAggregates(string? harnessId = null, IModelPricingLookup? pricing = null) =>
-                inner.ListSessionAggregates(harnessId, pricing);
-
-            public IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null)
-            {
-                SessionTurnSummariesCalls++;
-                return inner.SessionTurnSummaries(sessionKey, pricing);
-            }
         }
     }
 }

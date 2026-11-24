@@ -284,7 +284,7 @@ public class AntigravityOpenCodeSpanMapperTests
 
         Assert.Equal(1, store.CountRecords("antigravity"));
         Assert.NotNull(store.GetSession("sess-ag-persist"));
-        Assert.NotNull(store.GetRecord("span-persist-model"));
+        Assert.NotNull(store.FindRecord("span-persist-model"));
     }
 
     [Fact]

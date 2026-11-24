@@ -444,7 +444,7 @@ public static class OtlpLogMapper
             Parts: BuildCollectedParts(normalized, log.Body, item.EventName),
             Tool: null,
             Agent: null,
-            SkillsInvoked: ExtractSkillsInvoked(log.Attributes),
+            SkillsInvoked: SkillExtraction.ExtractInvoked(log.Attributes),
             AgentInstanceId: null,
             ToolDefinitions: [],
             Signals: new CollectedRecordSignals(errorMessage, null, null, null),

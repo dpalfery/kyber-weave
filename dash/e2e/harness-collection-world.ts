@@ -14,6 +14,20 @@ export const ZERO_RECORD_HARNESS = 'droid'
 /** The session derived from OpenCode run A (`e2e/fixtures/opencode/otlp-v3-runA.consent-on.json`). */
 export const OPENCODE_REPLAY_SESSION_ID = 'ses_e74c398c7ffeVajzhRWZNgfR2n'
 
+/**
+ * The widest sessions page the server serves: `KyberBridgeEngine.DefaultSessionPageLimit`,
+ * which `/api/kyber/sessions` also clamps `limit` to. A larger `limit` is served as this many
+ * rows, so a read that must see a session it may not find on one page searches for it by id.
+ */
+export const SESSION_PAGE_LIMIT = 100
+
+/**
+ * The widest page a session section route serves: `KyberBridgeEngine.DefaultSectionPageLimit`,
+ * which every `/api/kyber/session/{id}/<section>` route clamps `limit` to. A read that must see
+ * a whole section walks its pages.
+ */
+export const SECTION_PAGE_LIMIT = 25
+
 export type CollectedWorld = {
   readonly root: string
   readonly dbPath: string
@@ -521,7 +535,9 @@ export async function waitForOtlpIngest(
         continue
       }
 
-      const sessionsRes = await fetch(`${baseUrl}/api/kyber/sessions`, { signal: AbortSignal.timeout(10_000) })
+      const sessionsRes = await fetch(`${baseUrl}/api/kyber/sessions?limit=${SESSION_PAGE_LIMIT}`, {
+        signal: AbortSignal.timeout(10_000),
+      })
       const harnessesRes = await fetch(`${baseUrl}/api/kyber/harnesses`, { signal: AbortSignal.timeout(10_000) })
       const coverageRes = await fetch(`${baseUrl}/api/kyber/coverage`, { signal: AbortSignal.timeout(10_000) })
 
@@ -531,14 +547,19 @@ export async function waitForOtlpIngest(
         const harnessesJson: unknown = await harnessesRes.json()
 
         const seenSessions = new Set<string>()
-        const sessionRows =
-          isPlainRecord(sessionsJson) && Array.isArray(sessionsJson['sessions'])
-            ? sessionsJson['sessions']
-            : []
-        for (const row of sessionRows) {
-          if (!isPlainRecord(row)) continue
+        const sessionsPage = readSessionsPage(sessionsJson)
+        for (const row of sessionsPage.sessions) {
           if (typeof row['session_id'] === 'string') seenSessions.add(row['session_id'])
           if (typeof row['sessionId'] === 'string') seenSessions.add(row['sessionId'])
+        }
+
+        // The page holds at most SESSION_PAGE_LIMIT roots. Only a store larger than that can
+        // hold an expected session the page does not show, so only then is each one read back
+        // through the route's own search.
+        if (sessionsPage.total > sessionsPage.sessions.length) {
+          for (const id of expectedSessionIds) {
+            if (!seenSessions.has(id) && (await sessionsPageCarriesSession(baseUrl, id))) seenSessions.add(id)
+          }
         }
 
         const seenHarnesses = new Set<string>()
@@ -579,4 +600,42 @@ export async function waitForOtlpIngest(
   throw new Error(
     `waitForOtlpIngest timed out after ${timeoutMs}ms. Missing sessions: [${missingSessions.join(', ')}]; missing harnesses: [${missingHarnesses.join(', ')}]${lastError ? `; last error: ${lastError}` : ''}`,
   )
+}
+
+/** One page of the sessions list, as `GET /api/kyber/sessions` answers it. */
+type SessionsPage = {
+  sessions: Array<Record<string, unknown>>
+  total: number
+  page: number
+  limit: number
+}
+
+/** Narrows a sessions answer to its page envelope; a malformed answer reads as an empty page. */
+function readSessionsPage(value: unknown): SessionsPage {
+  if (!isPlainRecord(value)) return { sessions: [], total: 0, page: 1, limit: 0 }
+  const rows = Array.isArray(value['sessions']) ? value['sessions'].filter(isPlainRecord) : []
+  const count = (key: 'total' | 'page' | 'limit', fallback: number): number => {
+    const raw = value[key]
+    return typeof raw === 'number' && Number.isFinite(raw) ? raw : fallback
+  }
+  return {
+    sessions: rows,
+    total: count('total', rows.length),
+    page: count('page', 1),
+    limit: count('limit', rows.length),
+  }
+}
+
+/**
+ * Whether the sessions page carries the session `sessionId`, read through the route's own search,
+ * so the answer does not depend on where the corpus ordered the row.
+ */
+async function sessionsPageCarriesSession(baseUrl: string, sessionId: string): Promise<boolean> {
+  const response = await fetch(
+    `${baseUrl}/api/kyber/sessions?q=${encodeURIComponent(sessionId)}&limit=${SESSION_PAGE_LIMIT}`,
+    { signal: AbortSignal.timeout(10_000) },
+  )
+  if (!response.ok) return false
+  const page = readSessionsPage(await response.json())
+  return page.sessions.some((row) => row['session_id'] === sessionId || row['sessionId'] === sessionId)
 }

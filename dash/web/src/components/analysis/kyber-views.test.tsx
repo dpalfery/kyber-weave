@@ -109,5 +109,84 @@ describe('dash: TurnAlignedDiff and CompareRuns UI', () => {
     expect(text).toContain('not comparable')
     expect(text).not.toContain('+0')
   })
+
+  it('TurnAlignedDiff shows the engine tokens.all verbatim, never a component-side sum', () => {
+    const pairs = [
+      {
+        phase: 'implementation' as const,
+        phaseIndex: 0,
+        runATurn: {
+          turnIndex: 0,
+          // freshInput + cacheRead + output would be 150; the engine says 999.
+          tokens: { freshInput: 100, cacheRead: 20, output: 30, all: 999 },
+        },
+        runBTurn: {
+          turnIndex: 0,
+          tokens: { freshInput: 10, cacheRead: 5, output: 15, all: 30 },
+        },
+        signals: [],
+        reading: 'engine-authored reading',
+      },
+    ]
+
+    const text = renderText(React.createElement(TurnAlignedDiff, { pairs }))
+    // renderText joins element children with spaces, so match across any run of whitespace.
+    expect(text).toMatch(/999\s+tokens/)
+    expect(text).toMatch(/(?<!\d)30\s+tokens/)
+    expect(text).not.toMatch(/150\s*tokens/)
+  })
+
+  it('TurnAlignedDiff never derives a turn total when the engine withholds tokens.all', () => {
+    const pairs = [
+      {
+        phase: 'implementation' as const,
+        phaseIndex: 0,
+        runATurn: {
+          turnIndex: 0,
+          // reportedInput + output would be 150; the engine withheld the canonical total.
+          tokens: { reportedInput: 100, output: 50, allReason: 'token telemetry unavailable for this turn' },
+        },
+        runBTurn: {
+          turnIndex: 0,
+          tokens: { all: 30 },
+        },
+        signals: [],
+        reading: 'engine-authored reading',
+      },
+    ]
+
+    const text = renderText(React.createElement(TurnAlignedDiff, { pairs }))
+    expect(text).not.toMatch(/150\s*tokens/)
+    expect(text).toContain('not measurable')
+    expect(text).toContain('token telemetry unavailable for this turn')
+  })
+
+  it('TurnAlignedDiff renders not measurable when the engine withholds tokens.all', () => {
+    const pairs = [
+      {
+        phase: 'exploration' as const,
+        phaseIndex: 0,
+        runATurn: {
+          turnIndex: 0,
+          tokens: {
+            freshInput: 5,
+            cacheRead: 1,
+            output: 2,
+            allReason: 'token telemetry unavailable for this turn',
+          },
+        },
+        runBTurn: null,
+        signals: [],
+        reading: 'engine-authored reading',
+      },
+    ]
+
+    const text = renderText(React.createElement(TurnAlignedDiff, { pairs }))
+    expect(text).toContain('not measurable')
+    expect(text).toContain('token telemetry unavailable for this turn')
+    // The measured pieces never become a fabricated total.
+    expect(text).not.toMatch(/8\s*tokens/)
+    expect(text).not.toMatch(/0\s+tokens/)
+  })
 })
 

@@ -3,8 +3,8 @@ import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-import { AgentSessionRow, ContextExplorer } from '../ContextExplorer.js'
-import type { KyberSessionSummary } from '../../lib/kyberApi.js'
+import { AgentSessionRow, ContextExplorer, scopeOf } from '../ContextExplorer.js'
+import { KYBER_SESSIONS_PAGE_LIMIT, type KyberPage, type KyberSessionSummary } from '../../lib/kyberApi.js'
 
 const hookStates: unknown[] = []
 let hookIndex = 0
@@ -42,6 +42,11 @@ function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
 }
 
+/** One page as `GET /api/kyber/sessions` answers it: the rows plus their window. */
+function sessionsPageEnvelope(rows: KyberSessionSummary[]): KyberPage<KyberSessionSummary> {
+  return { entries: rows, data: rows, total: rows.length, page: 1, limit: KYBER_SESSIONS_PAGE_LIMIT }
+}
+
 const claudeSession: KyberSessionSummary = {
   session_id: 'sess-claude-canonical',
   harness: 'claude-code',
@@ -61,7 +66,13 @@ describe('ContextExplorer Claude Code canonical-session integration', () => {
   // reach the same inventory, because the harness scope lives in the shell now.
   it.each(['all', 'agent-all', 'claude-code'])('renders Claude Code in %s and expands AgentSessionDashboard', (activeHarness) => {
     const queryClient = createQueryClient()
-    queryClient.setQueryData(['kyber-sessions'], [claudeSession])
+    // The explorer reads the paged route, keyed by the resolved harness scope
+    // (`agent-all` and `all` both resolve to `all`), the committed search text
+    // and the page.
+    queryClient.setQueryData(
+      ['kyber-sessions', scopeOf(activeHarness), '', 1],
+      sessionsPageEnvelope([claudeSession]),
+    )
     queryClient.setQueryData(['kyber-session', claudeSession.session_id], {
       id: claudeSession.session_id,
       session_id: claudeSession.session_id,
@@ -81,7 +92,7 @@ describe('ContextExplorer Claude Code canonical-session integration', () => {
     expect(explorerHtml).toContain('data-testid="agent-session-row-sess-claude-canonical"')
     expect(explorerHtml).toContain('Canonical Claude session')
     // The one harness selector belongs to the shell, so the explorer must not
-    // mint a second strip of its own over the same ['kyber-sessions'] cache.
+    // mint a second strip of its own over the same paged sessions cache.
     expect(explorerHtml).not.toMatch(/data-testid="provider-tab-/)
 
     const expandedHtml = renderHtml(
