@@ -1015,6 +1015,20 @@ never appears in any configuration file: `ArbiterKeyResolver` reads `TYPESAFE_AP
 then the OS credential-store entry for the endpoint origin. Full shape and merge rules are
 in [configuration](../configuration.md).
 
+**Environment-key origin binding.** The environment key serves only the TypeSafe origin or
+the per-user override's origin: the key service compares the merged provider endpoint
+against the repository's, and passes the override endpoint — or nothing, when they match —
+as the binding every key lookup uses. A repository-configured endpoint therefore never
+widens the binding: a repository that points elsewhere cannot obtain the user's
+`TYPESAFE_API_KEY`. Install resolves its keys through that service
+(`IArbiterKeyService.TryResolveKey`, passed the un-merged repository configuration), and
+validates the override explicitly first, so a file that broke between planning and
+verification fails closed with an error naming the override file instead of surfacing as
+a missing key. Uninstall never resolves a key: it derives the endpoint and origin from
+the effective provider (host configuration plus the per-user override) and deletes the
+credential-store entry for that origin directly. A malformed override fails closed on
+both commands instead of falling back to the TypeSafe origin.
+
 The install surface defaults to global scope. `kyber-weave arbiter install --target <t>`
 stores the target list in `~/.kyber-weave/kyber-weave.yml` under `arbiter.global.targets`,
 while `--project` opts into repository scope and `--path` is valid only with that flag. The

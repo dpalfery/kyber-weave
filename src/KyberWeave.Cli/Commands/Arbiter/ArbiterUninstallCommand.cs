@@ -3,6 +3,7 @@ using System.Text.Json;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
@@ -27,7 +28,8 @@ public sealed class ArbiterUninstallCommand(
     ICredentialStore credentials,
     IFileSystem files,
     IPathResolver paths,
-    IAnsiConsole console) : Command<ArbiterUninstallSettings>
+    IAnsiConsole console,
+    IArbiterUserSettings userSettings) : Command<ArbiterUninstallSettings>
 {
     /// <inheritdoc />
     public override int Execute(
@@ -216,11 +218,31 @@ public sealed class ArbiterUninstallCommand(
             return false;
         }
 
-        string endpoint = string.IsNullOrWhiteSpace(loaded.Config?.Arbiter.Provider.Endpoint)
-            ? ArbiterSetupCommand.TypeSafeEndpoint
-            : loaded.Config.Arbiter.Provider.Endpoint;
+        ArbiterProviderConfig repositoryProvider = loaded.Config?.Arbiter.Provider ?? ArbiterProviderConfig.DefaultNone;
+        ArbiterUserProviderResolution effective;
+        try
+        {
+            effective = userSettings.Resolve(repositoryProvider, environment.HomeDirectory);
+        }
+        catch (YamlDotNet.Core.YamlException ex)
+        {
+            console.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(ex.Message)}[/]");
+            return false;
+        }
 
-        string origin = ArbiterKeyResolver.GetOrigin(endpoint) ?? ArbiterKeyResolver.TypeSafeOrigin;
+        if (!ArbiterUserSettings.TryResolveEndpointOrigin(
+                repositoryProvider,
+                effective.Provider,
+                effective.EndpointOverridden,
+                environment.HomeDirectory,
+                loaded.ConfigPath,
+                out _,
+                out string origin,
+                out string? endpointError))
+        {
+            console.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(endpointError)}[/]");
+            return false;
+        }
 
         if (uninstaller.AnotherTargetIsDeployed(root, target))
         {
