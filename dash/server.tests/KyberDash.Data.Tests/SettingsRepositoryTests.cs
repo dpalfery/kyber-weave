@@ -54,7 +54,7 @@ public class SettingsRepositoryTests : IDisposable
         scripted.EnqueueResponse(scriptedRow);
         SettingsRepository repository = new(scripted);
 
-        Assert.Throws<InvalidOperationException>(() => repository.ReadSettings());
+        Assert.Throws<StoredDataException>(() => repository.ReadSettings());
     }
 
     [Fact]

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Data.Collector;
+using KyberDash.Data.Harnesses.Otlp;
 using KyberDash.Domain;
 
 namespace KyberDash.Application;
@@ -507,13 +508,7 @@ public static class CanonIngestPipeline
             }
         }
 
-        CollectedCost? cost = record.Cost.Value is double costValue
-            && double.IsFinite(costValue)
-            && costValue >= 0
-            && !string.IsNullOrWhiteSpace(record.Cost.Currency)
-            && !JsonDocumentText.IsDocument(record.Cost.Currency)
-            ? new CollectedCost(costValue, record.Cost.Currency)
-            : null;
+        CollectedCost? cost = OtlpLogMapper.ExtractReportedCost(record.Cost, record.Raw);
 
         string? model = ExtractSafeAttributeString(record.Raw, ModelKeys);
         string? errorMessage = ExtractSafeAttributeString(record.Raw, ["error.message"]);
@@ -523,6 +518,10 @@ public static class CanonIngestPipeline
         string name = !string.IsNullOrWhiteSpace(record.Name) && !JsonDocumentText.IsDocument(record.Name)
             ? record.Name
             : record.Op;
+
+        CollectedToolCall? tool = BuildToolCall(record);
+        IReadOnlyList<string> skillsInvoked = SkillExtraction.ExtractInvoked(record.Raw, tool?.ToolName);
+        IReadOnlyList<CollectedToolDefinition> toolDefinitions = BuildToolDefinitions(record, out HashSet<int> definitionPartIndexes);
 
         return new CollectedRecord(
             RecordId: record.SpanId,
@@ -540,12 +539,12 @@ public static class CanonIngestPipeline
             ReportedDurationMs: reportedDurationMs,
             Tokens: tokens,
             ReportedCost: cost,
-            Parts: BuildCollectedParts(record),
-            Tool: BuildToolCall(record),
+            Parts: BuildCollectedParts(record, skipToolDefinitions: toolDefinitions.Count > 0, definitionPartIndexes),
+            Tool: tool,
             Agent: null,
-            SkillsInvoked: [],
+            SkillsInvoked: skillsInvoked,
             AgentInstanceId: null,
-            ToolDefinitions: [],
+            ToolDefinitions: toolDefinitions,
             Signals: new CollectedRecordSignals(errorMessage, null, null, null),
             ReportedInputTokens: inputUnmeasured || record.Tokens.ReportedInput < 0 ? null : record.Tokens.ReportedInput,
             ReportedOutputTokens: outputUnmeasured || record.Tokens.ReportedOutput < 0 ? null : record.Tokens.ReportedOutput);
@@ -583,6 +582,189 @@ public static class CanonIngestPipeline
         "gen_ai.tool.call.id",
         "tool.call_id",
     ];
+
+    private static readonly string[] SkillAttributeKeys =
+    [
+        "gen_ai.skill.name",
+        "skill.name",
+        "skill_name",
+        "kyber.skills.invoked",
+    ];
+
+    private static readonly string[] ToolArgumentKeys =
+    [
+        "gen_ai.tool.call.arguments",
+        "gen_ai.tool.arguments",
+        "tool.arguments",
+        "tool_arguments",
+        "arguments",
+        "input",
+        "opencode.tool.input",
+        "tool.input",
+    ];
+
+    private static readonly string[] SkillArgumentPropertyKeys = ["skill", "skill_name", "name"];
+
+    private static IReadOnlyList<string> ExtractSkillsInvoked(
+        IReadOnlyDictionary<string, JsonElement>? attributes,
+        string? resolvedToolName)
+    {
+        if (attributes is null || attributes.Count == 0)
+        {
+            return [];
+        }
+
+        List<string> skills = [];
+        HashSet<string> seen = new(StringComparer.Ordinal);
+
+        foreach (string key in SkillAttributeKeys)
+        {
+            if (attributes.TryGetValue(key, out JsonElement element))
+            {
+                AddSkillsFromElement(element, skills, seen);
+            }
+        }
+
+        string? toolName = !string.IsNullOrWhiteSpace(resolvedToolName)
+            ? resolvedToolName
+            : ExtractSafeAttributeString(attributes, ToolNameKeys);
+        if (string.Equals(toolName, "Skill", StringComparison.OrdinalIgnoreCase))
+        {
+            ExtractSkillFromToolArguments(attributes, skills, seen);
+        }
+
+        return skills;
+    }
+
+    private static void AddSkillsFromElement(JsonElement element, List<string> skills, HashSet<string> seen)
+    {
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            string? raw = element.GetString();
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return;
+            }
+
+            string trimmed = raw.Trim();
+            if (trimmed.StartsWith('['))
+            {
+                try
+                {
+                    using JsonDocument doc = JsonDocument.Parse(trimmed);
+                    if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (JsonElement item in doc.RootElement.EnumerateArray())
+                        {
+                            if (item.ValueKind == JsonValueKind.String)
+                            {
+                                TryAddSkill(item.GetString(), skills, seen);
+                            }
+                        }
+
+                        return;
+                    }
+                }
+                catch (JsonException)
+                {
+                    return;
+                }
+            }
+
+            TryAddSkill(trimmed, skills, seen);
+            return;
+        }
+
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement item in element.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.String)
+                {
+                    TryAddSkill(item.GetString(), skills, seen);
+                }
+            }
+        }
+    }
+
+    private static void ExtractSkillFromToolArguments(
+        IReadOnlyDictionary<string, JsonElement> attributes,
+        List<string> skills,
+        HashSet<string> seen)
+    {
+        foreach (string key in ToolArgumentKeys)
+        {
+            if (!attributes.TryGetValue(key, out JsonElement element))
+            {
+                continue;
+            }
+
+            if (element.ValueKind == JsonValueKind.Object)
+            {
+                AddSkillPropertyFromObject(element, skills, seen);
+                return;
+            }
+
+            if (element.ValueKind == JsonValueKind.String)
+            {
+                string? raw = element.GetString();
+                if (string.IsNullOrWhiteSpace(raw))
+                {
+                    continue;
+                }
+
+                string trimmed = raw.Trim();
+                if (!trimmed.StartsWith('{'))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    using JsonDocument doc = JsonDocument.Parse(trimmed);
+                    if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                    {
+                        AddSkillPropertyFromObject(doc.RootElement, skills, seen);
+                        return;
+                    }
+                }
+                catch (JsonException)
+                {
+                    return;
+                }
+            }
+        }
+    }
+
+    private static void AddSkillPropertyFromObject(JsonElement obj, List<string> skills, HashSet<string> seen)
+    {
+        foreach (string propKey in SkillArgumentPropertyKeys)
+        {
+            if (obj.TryGetProperty(propKey, out JsonElement prop) && prop.ValueKind == JsonValueKind.String)
+            {
+                if (TryAddSkill(prop.GetString(), skills, seen))
+                {
+                    return;
+                }
+            }
+        }
+    }
+
+    private static bool TryAddSkill(string? raw, List<string> skills, HashSet<string> seen)
+    {
+        if (string.IsNullOrWhiteSpace(raw) || JsonDocumentText.IsDocument(raw))
+        {
+            return false;
+        }
+
+        string trimmed = raw.Trim();
+        if (seen.Add(trimmed))
+        {
+            skills.Add(trimmed);
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// Builds the tool-call row for a <c>tool.invoke</c> record. The name is the harness attribute
@@ -629,7 +811,170 @@ public static class CanonIngestPipeline
             ExitCode: null);
     }
 
-    private static List<CollectedContentPart> BuildCollectedParts(CanonicalRecord record)
+    private static IReadOnlyList<CollectedToolDefinition> BuildToolDefinitions(
+        CanonicalRecord record,
+        out HashSet<int> contributingPartIndexes)
+    {
+        List<CollectedToolDefinition> definitions = [];
+        HashSet<string> seenNames = new(StringComparer.Ordinal);
+        HashSet<int> contributing = [];
+        int position = 0;
+
+        if (record.Parts is { Count: > 0 })
+        {
+            for (int partIndex = 0; partIndex < record.Parts.Count; partIndex++)
+            {
+                ContentPart part = record.Parts[partIndex];
+                if (!string.Equals(part.Part, "tool_definitions", StringComparison.Ordinal)
+                    || string.IsNullOrWhiteSpace(part.Text))
+                {
+                    continue;
+                }
+
+                if (AddToolDefinitionsFromText(part.Text, part.Server, part.Tokens, definitions, seenNames, ref position))
+                {
+                    contributing.Add(partIndex);
+                }
+            }
+        }
+        else if (record.Content.TryGetValue("tool_definitions", out string? text) && !string.IsNullOrWhiteSpace(text))
+        {
+            _ = AddToolDefinitionsFromText(text, null, null, definitions, seenNames, ref position);
+        }
+
+        contributingPartIndexes = contributing;
+        return definitions;
+    }
+
+    /// <summary>
+    /// Parses the tool definitions in one part's text into <paramref name="definitions"/>, and
+    /// answers whether any were added: a part the parser refused (truncated JSON, no name) has no
+    /// definitions to store and stays as content instead.
+    /// </summary>
+    private static bool AddToolDefinitionsFromText(
+        string text,
+        string? defaultServer,
+        long? partTokens,
+        List<CollectedToolDefinition> definitions,
+        HashSet<string> seenNames,
+        ref int position)
+    {
+        int addedBefore = definitions.Count;
+        string trimmed = text.Trim();
+        if (trimmed.StartsWith('{') || trimmed.StartsWith('['))
+        {
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(trimmed);
+                JsonElement root = doc.RootElement;
+                bool isSingleItem = root.ValueKind == JsonValueKind.Object
+                    && !(root.TryGetProperty("tools", out JsonElement toolsProp) && toolsProp.ValueKind == JsonValueKind.Array);
+
+                IEnumerable<JsonElement> items = root.ValueKind == JsonValueKind.Array
+                    ? root.EnumerateArray()
+                    : root.ValueKind == JsonValueKind.Object
+                      && root.TryGetProperty("tools", out JsonElement toolsEl)
+                      && toolsEl.ValueKind == JsonValueKind.Array
+                        ? toolsEl.EnumerateArray()
+                        : [root];
+
+                foreach (JsonElement item in items)
+                {
+                    if (item.ValueKind == JsonValueKind.String)
+                    {
+                        string? s = item.GetString();
+                        if (!string.IsNullOrWhiteSpace(s) && !JsonDocumentText.IsDocument(s))
+                        {
+                            string name = s.Trim();
+                            if (seenNames.Add(name))
+                            {
+                                long tokens = isSingleItem && partTokens is > 0
+                                    ? partTokens.Value
+                                    : Math.Max(1L, ToolContentMeasurer.Measure(name).MeasuredTokens);
+                                definitions.Add(new CollectedToolDefinition(position++, name, SafeOptionalText(defaultServer), tokens));
+                            }
+                        }
+                    }
+                    else if (item.ValueKind == JsonValueKind.Object)
+                    {
+                        string? name = ExtractToolNameFromObject(item);
+                        if (name is not null && seenNames.Add(name))
+                        {
+                            string? server = ExtractToolServerFromObject(item) ?? defaultServer;
+                            long tokens = isSingleItem && partTokens is > 0
+                                ? partTokens.Value
+                                : Math.Max(1L, ToolContentMeasurer.Measure(item.GetRawText()).MeasuredTokens);
+                            definitions.Add(new CollectedToolDefinition(position++, name, SafeOptionalText(server), tokens));
+                        }
+                    }
+                }
+
+                return definitions.Count > addedBefore;
+            }
+            catch (JsonException)
+            {
+                return definitions.Count > addedBefore;
+            }
+        }
+
+        if (!JsonDocumentText.IsDocument(trimmed) && seenNames.Add(trimmed))
+        {
+            long tokens = partTokens is > 0
+                ? partTokens.Value
+                : Math.Max(1L, ToolContentMeasurer.Measure(trimmed).MeasuredTokens);
+            definitions.Add(new CollectedToolDefinition(position++, trimmed, SafeOptionalText(defaultServer), tokens));
+        }
+
+        return definitions.Count > addedBefore;
+    }
+
+    private static string? ExtractToolNameFromObject(JsonElement item)
+    {
+        if (item.TryGetProperty("name", out JsonElement n) && n.ValueKind == JsonValueKind.String)
+        {
+            string? value = n.GetString();
+            if (!string.IsNullOrWhiteSpace(value) && !JsonDocumentText.IsDocument(value))
+            {
+                return value.Trim();
+            }
+        }
+
+        if (item.TryGetProperty("function", out JsonElement fn) && fn.ValueKind == JsonValueKind.Object
+            && fn.TryGetProperty("name", out JsonElement fnName) && fnName.ValueKind == JsonValueKind.String)
+        {
+            string? value = fnName.GetString();
+            if (!string.IsNullOrWhiteSpace(value) && !JsonDocumentText.IsDocument(value))
+            {
+                return value.Trim();
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ExtractToolServerFromObject(JsonElement item)
+    {
+        foreach (string key in ToolServerPropertyKeys)
+        {
+            if (item.TryGetProperty(key, out JsonElement prop) && prop.ValueKind == JsonValueKind.String)
+            {
+                string? value = prop.GetString();
+                if (!string.IsNullOrWhiteSpace(value) && !JsonDocumentText.IsDocument(value))
+                {
+                    return value.Trim();
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static readonly string[] ToolServerPropertyKeys = ["server", "mcpServer"];
+
+    private static List<CollectedContentPart> BuildCollectedParts(
+        CanonicalRecord record,
+        bool skipToolDefinitions,
+        HashSet<int> definitionPartIndexes)
     {
         List<CollectedContentPart> parts = [];
         HashSet<int> usedPositions = [];
@@ -637,9 +982,18 @@ public static class CanonIngestPipeline
 
         if (record.Parts is { Count: > 0 })
         {
-            foreach (ContentPart part in record.Parts)
+            for (int partIndex = 0; partIndex < record.Parts.Count; partIndex++)
             {
+                ContentPart part = record.Parts[partIndex];
                 if (!ContentBuckets.TryMap(part.Part, out ContentBucket bucket))
+                {
+                    continue;
+                }
+
+                // Skip only the tool_definitions parts whose text became stored definitions; a
+                // sibling part the parser refused stays as content so its text and reported
+                // tokens survive.
+                if (skipToolDefinitions && bucket == ContentBucket.ToolDefinitions && definitionPartIndexes.Contains(partIndex))
                 {
                     continue;
                 }
@@ -677,6 +1031,11 @@ public static class CanonIngestPipeline
             foreach (KeyValuePair<string, string> entry in record.Content.OrderBy(static kv => kv.Key, StringComparer.Ordinal))
             {
                 if (!ContentBuckets.TryMap(entry.Key, out ContentBucket bucket))
+                {
+                    continue;
+                }
+
+                if (skipToolDefinitions && bucket == ContentBucket.ToolDefinitions)
                 {
                     continue;
                 }

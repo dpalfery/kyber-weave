@@ -153,7 +153,7 @@ public class InMemoryRelationalStoreTests
         Assert.Equal(2, loadedSession.ReportedUsage.Count);
         Assert.Equal(2, store.SessionModelUsages("sess-1").Count);
 
-        CollectedRecord? loadedLlm = store.GetRecord("span-llm-1");
+        CollectedRecord? loadedLlm = store.FindRecord("span-llm-1");
         Assert.NotNull(loadedLlm);
         Assert.Equal("claude-sonnet-4-5", loadedLlm.Model);
         Assert.Equal(1200, loadedLlm.ReportedInputTokens);
@@ -164,7 +164,7 @@ public class InMemoryRelationalStoreTests
         Assert.Equal(["go-dev"], loadedLlm.SkillsInvoked);
         Assert.Equal(new CollectedRecordSignals("warning note", 1, "rule-no-var", 200000), loadedLlm.Signals);
 
-        CollectedRecord? loadedTool = store.GetRecord("span-tool-1");
+        CollectedRecord? loadedTool = store.FindRecord("span-tool-1");
         Assert.NotNull(loadedTool);
         Assert.NotNull(loadedTool.Tool);
         Assert.Equal("codegraph", loadedTool.Tool.McpServerName);
@@ -173,13 +173,13 @@ public class InMemoryRelationalStoreTests
         Assert.Equal(2, loadedTool.Tool.ExitCode);
         Assert.Equal(new CollectedAgentInvocation("explorer", "span-llm-1", false, "aborted"), loadedTool.Agent);
 
-        Assert.Equal(2, store.Records(sessionKey: "sess-1").Count);
+        Assert.Equal(2, store.SessionRecordsForRebuild("sess-1").Count);
         Assert.Equal(3, store.TokenCounts(sessionKey: "sess-1").Count);
         Assert.Equal(2, store.ReportedTotals(sessionKey: "sess-1").Count);
         Assert.Single(store.ReportedCosts(sessionKey: "sess-1"));
         Assert.Single(store.SkillsInvoked(sessionKey: "sess-1"));
         Assert.Single(store.ToolCalls(sessionKey: "sess-1"));
-        Assert.Equal(2, store.ContentParts(sessionKey: "sess-1").Count);
+        Assert.Equal(2, store.FindSessionParts("sess-1").Count);
         Assert.Equal(2, store.ToolDefinitions(sessionKey: "sess-1").Count);
         Assert.Single(store.AgentInvocations(sessionKey: "sess-1"));
         Assert.Single(store.RecordSignals(sessionKey: "sess-1"));
@@ -264,22 +264,36 @@ public class InMemoryRelationalStoreTests
         Assert.Equal(1, store.CountRows("record_session_link"));
         Assert.Empty(store.RecordSignals(spanId: "span-min-1"));
 
-        StoredFieldsView fields = store.StoredFields("sess-min");
+        StoredFieldsInventoryView fields = store.StoredFieldsInventory("sess-min");
         Assert.Equal("sess-min", fields.SessionKey);
         Assert.Equal(RelationalSchemaCatalog.Tables.Count, fields.Tables.Count);
 
-        StoredTableFields recordModelEntry = Assert.Single(
+        StoredTableInventory recordModelEntry = Assert.Single(
             fields.Tables,
             static table => string.Equals(table.TableName, "record_model", StringComparison.Ordinal));
         Assert.Equal(["span_id", "model_id"], recordModelEntry.ColumnNames);
-        Assert.Empty(recordModelEntry.Rows);
+        Assert.Equal(0, recordModelEntry.RowCount);
         Assert.Equal(["span-min-1"], recordModelEntry.MissingParentKeys);
 
-        StoredTableFields sessionTitleEntry = Assert.Single(
+        StoredTableInventory sessionTitleEntry = Assert.Single(
             fields.Tables,
             static table => string.Equals(table.TableName, "session_title", StringComparison.Ordinal));
-        Assert.Empty(sessionTitleEntry.Rows);
+        Assert.Equal(0, sessionTitleEntry.RowCount);
         Assert.Equal(["sess-min"], sessionTitleEntry.MissingParentKeys);
+
+        StoredTableInventory sessionEntry = Assert.Single(
+            fields.Tables,
+            static table => string.Equals(table.TableName, "session", StringComparison.Ordinal));
+        Assert.Equal(1, sessionEntry.RowCount);
+
+        StoredTableRows? recordRows = store.StoredFieldsRows("sess-min", "record", 1, 25);
+        Assert.NotNull(recordRows);
+        Assert.Equal("record", recordRows.TableName);
+        Assert.Equal(1, recordRows.TotalRows);
+        Assert.Single(recordRows.Rows);
+
+        Assert.Null(store.StoredFieldsRows("sess-min", "not_a_catalog_table", 1, 25));
+        Assert.Throws<ArgumentOutOfRangeException>(() => store.StoredFieldsRows("sess-min", "session", 0, 25));
     }
 
     [Fact]
@@ -298,7 +312,7 @@ public class InMemoryRelationalStoreTests
 
         Assert.Equal("STORE_CONSTRAINT_VIOLATED", ex.Code);
         Assert.Equal(1, store.CountRecords());
-        Assert.Null(store.GetRecord("span-new"));
+        Assert.Null(store.FindRecord("span-new"));
     }
 
     [Fact]
@@ -679,7 +693,7 @@ public class InMemoryRelationalStoreTests
             [record],
             []));
 
-        Assert.Equal(allowedText, store.GetRecord("span-prose")?.Parts[0].PlainText);
+        Assert.Equal(allowedText, store.FindRecord("span-prose")?.Parts[0].PlainText);
         Assert.Equal(allowedText, store.GetSession("sess-prose")?.Title);
     }
 
@@ -719,15 +733,15 @@ public class InMemoryRelationalStoreTests
         Assert.Single(store.Harnesses());
         Assert.NotNull(store.GetSession("sess-shared"));
         Assert.Single(store.Sources("claude-code"));
-        Assert.Null(store.GetRecord("span-a"));
-        Assert.NotNull(store.GetRecord("span-b"));
+        Assert.Null(store.FindRecord("span-a"));
+        Assert.NotNull(store.FindRecord("span-b"));
         Assert.Equal(1, store.CountRecords("claude-code"));
         Assert.Empty(store.TokenCounts(spanId: "span-a"));
         Assert.Empty(store.ToolCalls(spanId: "span-a"));
         Assert.Empty(store.ToolDefinitions(spanId: "span-a"));
         Assert.Empty(store.AgentInvocations(spanId: "span-a"));
         Assert.Empty(store.RecordSignals(spanId: "span-a"));
-        Assert.Single(store.ContentParts(sessionKey: "sess-shared"));
+        Assert.Single(store.FindSessionParts("sess-shared"));
         Assert.Equal(0, store.CountRows("tool_call_error_code"));
         Assert.Equal(0, store.CountRows("record_correction_rule"));
         Assert.Equal(0, store.CountRows("record_correction"));

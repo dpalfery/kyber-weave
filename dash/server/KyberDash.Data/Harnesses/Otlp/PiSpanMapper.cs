@@ -76,7 +76,25 @@ public partial class PiSpanMapper : OtlpSpanMapperBase
             }
         }
 
-        return parts.Count == native.Parts.Count ? native : native with { Parts = parts };
+        string? sessionId = string.IsNullOrWhiteSpace(native.SessionId) ? null : native.SessionId.Trim();
+        if (sessionId is null
+            && span.Attributes.TryGetValue("pi.session.id", out JsonElement piSessionEl)
+            && piSessionEl.ValueKind == JsonValueKind.String)
+        {
+            string? candidate = piSessionEl.GetString();
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                sessionId = candidate.Trim();
+            }
+        }
+
+        return parts.Count == native.Parts.Count && string.Equals(sessionId, native.SessionId, StringComparison.Ordinal)
+            ? native
+            : native with
+            {
+                SessionId = sessionId,
+                Parts = parts.Count == native.Parts.Count ? native.Parts : parts,
+            };
     }
 
     /// <summary>

@@ -236,7 +236,7 @@ public partial class SqliteRelationalStore : IOperationalStore
                     keys.Add(ParseHexRequired(cols[2], "projection_dirty_session.session_id"));
                     break;
                 default:
-                    throw new InvalidOperationException($"Unexpected tag '{cols[0]}' in projection_dirty query.");
+                    throw new StoredDataException($"Unexpected tag '{cols[0]}' in projection_dirty query.");
             }
         }
 
@@ -685,7 +685,7 @@ public partial class SqliteRelationalStore : IOperationalStore
                 case "CAT":
                     if (cols.Length != 2)
                     {
-                        throw new InvalidOperationException($"Expected 2 columns for context_window_catalog_state, got {cols.Length}.");
+                        throw new StoredDataException($"Expected 2 columns for context_window_catalog_state, got {cols.Length}.");
                     }
 
                     status = ParseHexRequired(cols[1], "context_window_catalog_state.status");
@@ -694,7 +694,7 @@ public partial class SqliteRelationalStore : IOperationalStore
                 case "VND":
                     if (cols.Length != 7)
                     {
-                        throw new InvalidOperationException($"Expected 7 columns for model_context_window_catalog_vendor, got {cols.Length}.");
+                        throw new StoredDataException($"Expected 7 columns for model_context_window_catalog_vendor, got {cols.Length}.");
                     }
 
                     vendors.Add(new StoredModelCatalogVendorStatus(
@@ -707,7 +707,7 @@ public partial class SqliteRelationalStore : IOperationalStore
                 case "ENT":
                     if (cols.Length != 9)
                     {
-                        throw new InvalidOperationException($"Expected 9 columns for model_context_window_catalog, got {cols.Length}.");
+                        throw new StoredDataException($"Expected 9 columns for model_context_window_catalog, got {cols.Length}.");
                     }
 
                     entries.Add(new StoredModelContextWindowEntry(
@@ -721,7 +721,7 @@ public partial class SqliteRelationalStore : IOperationalStore
                     break;
 
                 default:
-                    throw new InvalidOperationException($"Unexpected tag '{cols[0]}' in model_context_window_catalog query.");
+                    throw new StoredDataException($"Unexpected tag '{cols[0]}' in model_context_window_catalog query.");
             }
         }
 
@@ -1268,7 +1268,7 @@ public partial class SqliteRelationalStore : IOperationalStore
                     break;
 
                 default:
-                    throw new InvalidOperationException($"Unexpected tag '{cols[0]}' in quarantined_span query.");
+                    throw new StoredDataException($"Unexpected tag '{cols[0]}' in quarantined_span query.");
             }
         }
 
@@ -1285,7 +1285,7 @@ public partial class SqliteRelationalStore : IOperationalStore
         List<string> lines = [.. TabLines(output)];
         if (lines.Count != 1)
         {
-            throw new InvalidOperationException($"Expected single scalar row from {context} query, got {lines.Count}.");
+            throw new StoredDataException($"Expected single scalar row from {context} query, got {lines.Count}.");
         }
 
         return SplitTabLine(lines[0], expectedColumns, context);

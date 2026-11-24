@@ -1,3 +1,5 @@
+import { NotMeasurable } from './NotMeasurable.js'
+
 export type TaskPhase = 'exploration' | 'implementation' | 'verification' | 'resolution'
 
 export type SignalComparisonStatus =
@@ -29,6 +31,8 @@ export type RunTurnSummary = {
     reportedInput?: number
     reportedOutput?: number
     all?: number
+    /** Engine's explicit marker when `all` was withheld — never rendered as zero. */
+    allReason?: string
   }
   cost?: {
     basis: string
@@ -112,9 +116,6 @@ function TurnCard({
     )
   }
 
-  const totalTokens =
-    turn.tokens?.all ??
-    (turn.tokens?.reportedInput ?? 0) + (turn.tokens?.output ?? 0)
   const tools = turn.tools ?? []
 
   return (
@@ -128,9 +129,15 @@ function TurnCard({
             Turn {turn.turnIndex + 1}
           </span>
         </div>
-        <span className="font-mono text-xs tabular-nums text-foreground">
-          {fmtTokens(totalTokens)} tokens
-        </span>
+        {/* The engine decides a turn's total; when it withheld one, the marker it
+            sent renders instead of any browser-side sum. */}
+        {turn.tokens?.all !== undefined ? (
+          <span className="font-mono text-xs tabular-nums text-foreground">
+            {fmtTokens(turn.tokens.all)} tokens
+          </span>
+        ) : (
+          <NotMeasurable reason={turn.tokens?.allReason} testId="turn-tokens-not-measurable" />
+        )}
       </div>
 
       {tools.length > 0 && (

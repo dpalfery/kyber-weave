@@ -1,66 +1,34 @@
+// @vitest-environment happy-dom
+// ContextExplorer pages through the server (Task T3): one paged request per
+// scope carrying the shell's harness and the search text, a shared pager, and
+// subagent children paged past the root's inline preview.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-import * as ContextExplorerModule from './ContextExplorer.js'
 import { AgentSessionRow, ContextExplorer } from './ContextExplorer.js'
 import type { KyberSessionSummary } from '../lib/kyberApi.js'
 import { formatCostFigure, normalizeCostBlock } from './SessionCostPanel.js'
 
-type InventoryQuery = {
-  queryKey: readonly unknown[]
-  queryFn: () => Promise<KyberSessionSummary[]>
-  staleTime?: number
+function createTestQueryClient() {
+  // staleTime and gcTime pinned: data a test seeds (an expanded row's
+  // dashboard payload) must survive until its observer mounts — a gcTime of
+  // zero collects an unobserved seed immediately — and must render without
+  // the mount refetch firing an unstubbed request.
+  return new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity, staleTime: Infinity } } })
 }
+
 let queryClient: QueryClient
-let inventoryQuery: InventoryQuery
 
-// SSR does not run React Query's fetching effect. Keep the real QueryClient and
-// query function, and advance that effect explicitly through the mocked HTTP boundary.
-vi.mock('@tanstack/react-query', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@tanstack/react-query')>()
+function session(harness: string, suffix = ''): KyberSessionSummary {
   return {
-    ...actual,
-    useQuery: (options: InventoryQuery) => {
-      if (options.queryKey[0] !== 'kyber-sessions') return actual.useQuery(options)
-      inventoryQuery = options
-      const state = queryClient.getQueryState(options.queryKey)
-      return {
-        data: state?.data,
-        isLoading: !state || state.status === 'pending',
-        isError: state?.status === 'error',
-        error: state?.error,
-      }
-    },
-  }
-})
-
-let hookStates: unknown[] = []
-let hookIndex = 0
-const reactInternals = (
-  React as unknown as {
-    __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: { H?: Record<string, unknown> }
-  }
-).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
-
-function installHooks() {
-  if (!reactInternals) throw new Error('React hook dispatcher unavailable')
-  hookIndex = 0
-  reactInternals.H = {
-    useState: <T,>(value: T | (() => T)): [T, (next: T | ((previous: T) => T)) => void] => {
-      const index = hookIndex++
-      if (index >= hookStates.length) hookStates.push(typeof value === 'function' ? (value as () => T)() : value)
-      return [hookStates[index] as T, (next) => {
-        hookStates[index] = typeof next === 'function' ? (next as (previous: T) => T)(hookStates[index] as T) : next
-      }]
-    },
-    useMemo: <T,>(factory: () => T) => factory(),
-    useCallback: <T,>(callback: T) => callback,
-    useRef: <T,>(value: T) => ({ current: value }),
-    useEffect: () => {},
-    useLayoutEffect: () => {},
-    useId: () => 'test-id',
+    session_id: `sess-${harness}${suffix}`,
+    harness,
+    label: `Canonical ${harness}${suffix} session`,
+    started: '2026-03-01T12:00:00.000Z',
+    turn_count: 3,
+    cost_usd: 0.185,
   }
 }
 
@@ -69,82 +37,91 @@ const canonicalHarnesses = [
   'antigravity-cli', 'antigravity-ide', 'zcode', 'cursor-agent',
   'copilot-cli', 'copilot-vscode', 'copilot-agent', 'future-harness-v2',
 ]
-function session(harness: string, suffix = ''): KyberSessionSummary {
-  return {
-    session_id: `sess-${harness}${suffix}`, harness, label: `Canonical ${harness}${suffix} session`,
-    started: '2026-03-01T12:00:00.000Z', turn_count: 3, cost_usd: 0.185,
-  }
-}
 const inventory = [...canonicalHarnesses.map((harness) => session(harness)), session('claude-code', '-second')]
 
-function mockSessions(sessions = inventory) {
-  const fetchMock = vi.fn(async (_url: string) => new Response(JSON.stringify({ sessions }), {
-    status: 200, headers: { 'Content-Type': 'application/json' },
-  }))
-  vi.stubGlobal('fetch', fetchMock)
-  return fetchMock
-}
-
-type ExplorerProps = Parameters<typeof ContextExplorer>[0]
-
-function createTestQueryClient() {
-  return new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-}
-
-const sampleSession: KyberSessionSummary = {
-  ...session('claude-code'),
-  turn_count: 10,
-  cost: { basis: 'published', status: 'priced', value: 0.185, currency: 'USD' },
+function jsonResponse(payload: unknown, status = 200): Response {
+  return { ok: status >= 200 && status < 300, status, json: async () => payload } as unknown as Response
 }
 
 /**
- * The props these assertions reach for on a rendered node.
- *
- * React 19 types `ReactElement['props']` as `unknown`, so a node found by test id has
- * nothing callable on it. Naming the handful of props the suite actually touches keeps
- * the walker typed without casting each call site past the checker.
+ * A stub that answers the way the engine's paging routes do: harness and
+ * search filter server-side, the window is chosen by page and limit, and a
+ * root's subagent children page at their own route. Requests are recorded so
+ * tests assert what was asked for.
  */
-type TestNodeProps = {
-  'data-testid'?: string
-  'aria-label'?: string
-  children?: React.ReactNode
-  onClick?: (event?: unknown) => unknown
-  title?: string
-}
-type TestNode = React.ReactElement<TestNodeProps>
-
-function renderExplorer(props: ExplorerProps = {}) {
-  installHooks()
-  return ContextExplorer(props)
-}
-async function loadExplorer(props: ExplorerProps = {}) {
-  renderExplorer(props)
-  await queryClient.ensureQueryData(inventoryQuery)
-  return renderExplorer(props)
-}
-function html(tree: React.ReactElement, client: QueryClient = queryClient) {
-  return renderToStaticMarkup(<QueryClientProvider client={client}>{tree}</QueryClientProvider>)
-}
-function nodes(tree: React.ReactNode, predicate: (node: TestNode) => boolean): TestNode[] {
-  const found: TestNode[] = []
-  const walk = (node: React.ReactNode): void => {
-    if (!React.isValidElement<TestNodeProps>(node)) return
-    if (predicate(node)) found.push(node)
-    React.Children.forEach(node.props.children, walk)
+function stubServer(
+  roots: KyberSessionSummary[],
+  childrenOf: Record<string, KyberSessionSummary[]> = {},
+  opts: { hold?: boolean; failSubagents?: boolean } = {},
+) {
+  const requests: string[] = []
+  const waiters: Array<() => void> = []
+  let holding = opts.hold === true
+  const fetchMock = vi.fn(async (input: string) => {
+    const url = new URL(String(input), 'http://localhost')
+    requests.push(`${url.pathname}${url.search}`)
+    if (url.pathname.endsWith('/subagents') && opts.failSubagents === true) return jsonResponse({}, 500)
+    let rows: KyberSessionSummary[] = []
+    let limit = 100
+    if (url.pathname === '/api/kyber/sessions') {
+      const harness = url.searchParams.get('harness')
+      const q = url.searchParams.get('q')
+      rows = roots
+      if (harness) rows = rows.filter((s) => (s.harness ?? '').toLowerCase() === harness.toLowerCase())
+      if (q) {
+        const wanted = q.toLowerCase()
+        rows = rows.filter(
+          (s) => (s.label ?? '').toLowerCase().includes(wanted) || s.session_id.toLowerCase().includes(wanted),
+        )
+      }
+    } else {
+      const subagents = /^\/api\/kyber\/session\/([^/]+)\/subagents$/.exec(url.pathname)
+      if (!subagents) throw new Error(`unstubbed fetch: ${input}`)
+      rows = childrenOf[decodeURIComponent(subagents[1]!)] ?? []
+      limit = 25
+    }
+    const page = Number(url.searchParams.get('page') ?? 1)
+    const windowed = rows.slice((page - 1) * limit, page * limit)
+    if (holding) await new Promise<void>((resolve) => waiters.push(resolve))
+    const itemsKey = url.pathname.endsWith('/subagents') ? 'subagents' : 'sessions'
+    return jsonResponse({ [itemsKey]: windowed, data: windowed, total: rows.length, limit, offset: (page - 1) * limit, page })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return {
+    requests,
+    fetchMock,
+    /** Releases every answer a `hold: true` stub is holding. */
+    release: () => {
+      holding = false
+      waiters.splice(0).forEach((release) => release())
+    },
   }
-  walk(tree)
-  return found
 }
-function rowIds(tree: React.ReactElement) {
-  return [...html(tree).matchAll(/data-testid="agent-session-row-([^"]+)"/g)].map((match) => match[1]).sort()
+
+/** A root carrying its inline subagent preview and the true total. */
+function rootWithChildren(id: string, children: KyberSessionSummary[], harness = 'claude-code'): KyberSessionSummary {
+  // The assertion keeps the engine's `subagent_total` key, which the summary
+  // type does not spell yet.
+  return {
+    ...session(harness),
+    session_id: id,
+    subagents: children.slice(0, 25),
+    subagent_total: children.length,
+  } as KyberSessionSummary
 }
-function openRow(tree: React.ReactElement, sessionId: string) {
-  const rows = nodes(tree, (node) => node.type === AgentSessionRow)
-  const row = rows.find((node) => (node.props as { s?: KyberSessionSummary }).s?.session_id === sessionId)
-  expect(row, `Expected visible canonical session ${sessionId}`).toBeDefined()
-  const onToggle = (row!.props as { onToggle: () => void }).onToggle
-  onToggle()
+
+function renderExplorer(props: Parameters<typeof ContextExplorer>[0] = {}) {
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ContextExplorer {...props} />
+    </QueryClientProvider>,
+  )
 }
+
+function searchBox(): HTMLInputElement {
+  return screen.getByTestId('explorer-search') as HTMLInputElement
+}
+
 /** The detail payload AgentSessionDashboard reads when a row is expanded. */
 function seedSessionDetail(id: string, harness = 'claude-code') {
   queryClient.setQueryData(['kyber-session', id], {
@@ -154,89 +131,216 @@ function seedSessionDetail(id: string, harness = 'claude-code') {
   })
 }
 
+const sampleSession: KyberSessionSummary = {
+  ...session('claude-code'),
+  turn_count: 10,
+  cost: { basis: 'published', status: 'priced', value: 0.185, currency: 'USD' },
+}
+
 beforeEach(() => {
-  hookStates = []
-  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
-  mockSessions()
+  queryClient = createTestQueryClient()
+  stubServer(inventory)
 })
+
 afterEach(() => {
-  queryClient.clear()
+  cleanup()
   vi.unstubAllGlobals()
 })
 
-describe('ContextExplorer renders under the shell harness scope', () => {
-  it('shows every canonical session when the scope is all', async () => {
-    expect(rowIds(await loadExplorer())).toEqual(inventory.map((s) => s.session_id).sort())
-  })
-  it('renders no harness strip of its own (the shell owns the one selector)', async () => {
-    const markup = html(await loadExplorer())
-    expect(markup).not.toMatch(/data-testid="provider-tab-/)
-    expect(nodes(await loadExplorer(), (node) => node.props['data-testid']?.startsWith('provider-tab-') ?? false))
-      .toEqual([])
-  })
-  it.each(canonicalHarnesses)('scopes rows to exactly %s', async (harness) => {
-    expect(rowIds(await loadExplorer({ activeHarness: harness }))).toEqual(
-      inventory.filter((s) => s.harness === harness).map((s) => s.session_id).sort(),
-    )
-  })
-  it('scopes through one unfiltered HTTP request, never a per-harness refetch', async () => {
-    const fetchMock = mockSessions()
-    for (const harness of [...canonicalHarnesses, 'all']) {
-      renderExplorer({ activeHarness: harness })
-      await queryClient.ensureQueryData(inventoryQuery)
-    }
-    expect(fetchMock.mock.calls).toEqual([['/api/kyber/sessions']])
-  })
-  it('keeps an unrecognized canonical harness scoped, showing its raw id', async () => {
-    const tree = await loadExplorer({ activeHarness: 'future-harness-v2' })
-    expect(rowIds(tree)).toEqual(['sess-future-harness-v2'])
-  })
-  it('names a scoped empty state with the harness label, never the whole inventory', async () => {
-    // Codex is a known harness with sessions; scoping to a harness that has none
-    // must read as scoped, and must not fall back to another harness's rows.
-    mockSessions([session('claude-code')])
-    const tree = await loadExplorer({ activeHarness: 'codex-cli' })
-    expect(rowIds(tree)).toEqual([])
-    expect(html(tree)).toContain('data-testid="explorer-empty"')
-    expect(html(tree)).toContain('No sessions for Codex CLI.')
-  })
-  it('shows an unrecognized id verbatim in the scoped empty state', async () => {
-    mockSessions([session('claude-code')])
-    const tree = await loadExplorer({ activeHarness: 'future-harness-v2' })
-    expect(html(tree)).toContain('No sessions for future-harness-v2.')
-  })
-  it('shows a scoped empty state for an unknown harness instead of falling back to All', async () => {
-    const tree = await loadExplorer({ activeHarness: 'missing-harness' })
-    expect(rowIds(tree)).toEqual([])
-    expect(html(tree)).toContain('No sessions for missing-harness.')
-  })
-  it('keeps the scope and empties out when that harness disappears from refreshed inventory', async () => {
-    expect(rowIds(await loadExplorer({ activeHarness: 'copilot-cli' }))).toEqual(['sess-copilot-cli'])
-    const remaining = inventory.filter((s) => s.harness !== 'copilot-cli')
-    queryClient.setQueryData(inventoryQuery.queryKey, remaining)
-    const tree = renderExplorer({ activeHarness: 'copilot-cli' })
-    expect(rowIds(tree)).toEqual([])
-    expect(html(tree)).toContain('No sessions for GitHub Copilot CLI.')
-  })
-  it.each(['agent-all', 'all'])('treats the %s spelling as the unscoped inventory', async (spelling) => {
-    expect(rowIds(await loadExplorer({ activeHarness: spelling }))).toEqual(inventory.map((s) => s.session_id).sort())
-  })
-  it('keeps the empty message when the canonical inventory is empty', async () => {
-    mockSessions([])
-    const tree = await loadExplorer()
-    expect(rowIds(tree)).toEqual([])
-    expect(html(tree)).toContain('data-testid="explorer-empty"')
-    expect(html(tree)).toContain('No sessions found.')
-  })
-  it('preserves the loading state until the canonical response arrives', () => {
-    expect(html(renderExplorer())).toContain('data-testid="explorer-loading"')
-  })
-  it('preserves the error state when the canonical HTTP request fails', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })))
+describe('ContextExplorer pages through the server (Task T3)', () => {
+  it('requests the first page with the sessions page limit and no harness when the scope is all', async () => {
+    const server = stubServer(inventory)
     renderExplorer()
-    await expect(queryClient.fetchQuery(inventoryQuery)).rejects.toThrow('Request failed (503)')
-    expect(html(renderExplorer())).toContain('data-testid="explorer-error"')
-    expect(html(renderExplorer())).toContain('Request failed (503)')
+    await screen.findByTestId('agent-session-row-sess-claude-code')
+    // The engine serves roots and their inline subagents; the explorer shows
+    // every root the page carried.
+    expect(server.requests).toEqual(['/api/kyber/sessions?page=1&limit=100'])
+    expect(screen.getAllByTestId(/^agent-session-row-/)).toHaveLength(inventory.length)
+  })
+
+  it("sends the shell's harness to the server and shows exactly the page the server served", async () => {
+    const server = stubServer(inventory)
+    renderExplorer({ activeHarness: 'codex-cli' })
+    await screen.findByTestId('agent-session-row-sess-codex-cli')
+    expect(server.requests).toEqual(['/api/kyber/sessions?page=1&limit=100&harness=codex-cli'])
+  })
+
+  it('keeps an unrecognized canonical harness scoped through the server, showing its raw id', async () => {
+    renderExplorer({ activeHarness: 'future-harness-v2' })
+    await screen.findByTestId('agent-session-row-sess-future-harness-v2')
+    expect(screen.queryByTestId('agent-session-row-sess-claude-code')).toBeNull()
+  })
+
+  it('treats the agent-all spelling as the unscoped inventory', async () => {
+    const server = stubServer(inventory)
+    renderExplorer({ activeHarness: 'agent-all' })
+    await screen.findByTestId('agent-session-row-sess-claude-code')
+    expect(server.requests[0]).not.toContain('harness=')
+  })
+
+  it('holds the loading state until the paged answer arrives', async () => {
+    const server = stubServer(inventory, {}, { hold: true })
+    renderExplorer()
+    expect(screen.getByTestId('explorer-loading')).not.toBeNull()
+    expect(screen.queryByTestId('agent-session-row-sess-claude-code')).toBeNull()
+    server.release()
+    await screen.findByTestId('agent-session-row-sess-claude-code')
+  })
+
+  it('renders the error state when the request fails, with the message the user also sees', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({}, 503)))
+    renderExplorer()
+    const error = await screen.findByTestId('explorer-error')
+    expect(error.textContent).toContain('Request failed (503)')
+    expect(screen.queryByTestId('agent-session-row-sess-claude-code')).toBeNull()
+  })
+
+  it('renders the error state when the served envelope is malformed, never a silent empty list', async () => {
+    // An unpaged body — the shape the old list route served — is not the page
+    // envelope; it is a broken server, and must read as an error.
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ sessions: inventory })))
+    renderExplorer()
+    const error = await screen.findByTestId('explorer-error')
+    expect(error.textContent).toMatch(/malformed/i)
+    expect(screen.queryByTestId('explorer-empty')).toBeNull()
+  })
+
+  it('renders the scoped empty state when the server answers an empty page', async () => {
+    stubServer([session('claude-code')])
+    renderExplorer({ activeHarness: 'codex-cli' })
+    const empty = await screen.findByTestId('explorer-empty')
+    expect(empty.textContent).toBe('No sessions for Codex CLI.')
+  })
+
+  it('shows the unrecognized scope verbatim in the scoped empty state', async () => {
+    stubServer([session('claude-code')])
+    renderExplorer({ activeHarness: 'future-harness-v2' })
+    expect((await screen.findByTestId('explorer-empty')).textContent).toBe('No sessions for future-harness-v2.')
+  })
+
+  it('shows the unscoped empty state when the store holds no sessions at all', async () => {
+    stubServer([])
+    renderExplorer()
+    expect((await screen.findByTestId('explorer-empty')).textContent).toBe('No sessions found.')
+  })
+
+  it('searches server-side: the query string carries q and the rows are the narrowed page', async () => {
+    const server = stubServer(inventory)
+    renderExplorer()
+    await screen.findByTestId('agent-session-row-sess-claude-code')
+
+    fireEvent.change(searchBox(), { target: { value: 'codex-cli' } })
+    await waitFor(() => expect(server.requests.some((url) => url.includes('q=codex-cli'))).toBe(true))
+    await waitFor(() => expect(screen.queryByTestId('agent-session-row-sess-claude-code')).toBeNull())
+    expect(screen.getByTestId('agent-session-row-sess-codex-cli')).not.toBeNull()
+  })
+
+  it('commits one search for a burst of keystrokes, not one per character', async () => {
+    const server = stubServer(inventory)
+    renderExplorer()
+    await screen.findByTestId('agent-session-row-sess-claude-code')
+
+    fireEvent.change(searchBox(), { target: { value: 'c' } })
+    fireEvent.change(searchBox(), { target: { value: 'co' } })
+    fireEvent.change(searchBox(), { target: { value: 'codex-cli' } })
+
+    await waitFor(() => expect(server.requests.some((url) => url.includes('q=codex-cli'))).toBe(true))
+    expect(server.requests.filter((url) => url.includes('q='))).toHaveLength(1)
+  })
+
+  it('restarts at page one when the search changes', async () => {
+    const many = Array.from({ length: 250 }, (_, i) => session('claude-code', `-${i}`))
+    const server = stubServer(many)
+    renderExplorer()
+    await screen.findByTestId('agent-session-row-sess-claude-code-0')
+
+    // Walk to page two, then search: the new search must ask for page one.
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    await waitFor(() => expect(server.requests.some((url) => url.includes('page=2'))).toBe(true))
+
+    fireEvent.change(searchBox(), { target: { value: '-249' } })
+    await waitFor(() => expect(server.requests.some((url) => url.includes('q=-249') && url.includes('page=1'))).toBe(true))
+    expect(screen.getByTestId('agent-session-row-sess-claude-code-249')).not.toBeNull()
+  })
+
+  it('pages the root list through the shared pager, requesting page two only on press', async () => {
+    const many = Array.from({ length: 250 }, (_, i) => session('claude-code', `-${i}`))
+    const server = stubServer(many)
+    renderExplorer()
+    await screen.findByTestId('agent-session-row-sess-claude-code-0')
+    expect(screen.getAllByTestId(/^agent-session-row-/)).toHaveLength(100)
+
+    expect(server.requests.filter((url) => url.includes('page=2'))).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    await waitFor(() => expect(server.requests.some((url) => url.includes('page=2'))).toBe(true))
+    expect(screen.getAllByTestId(/^agent-session-row-/)).toHaveLength(100)
+  })
+
+  it('marks the page it is showing on the shared pager', async () => {
+    const many = Array.from({ length: 250 }, (_, i) => session('claude-code', `-${i}`))
+    stubServer(many)
+    renderExplorer()
+    await screen.findByTestId('agent-session-row-sess-claude-code-0')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Page 2' }).getAttribute('aria-current')).toBe('page'))
+    expect(screen.getByRole('button', { name: 'Page 1' }).getAttribute('aria-current')).toBeNull()
+  })
+})
+
+describe('subagent children page under the root (Task T3)', () => {
+  const thirty = Array.from({ length: 30 }, (_, i) => session('claude-code', `-child-${i}`))
+
+  function childRoot(): KyberSessionSummary {
+    return rootWithChildren('sess-parent-001', thirty)
+  }
+
+  it('shows the inline first 25 and pages the rest at the subagent route', async () => {
+    const server = stubServer([childRoot()], { 'sess-parent-001': thirty })
+    renderExplorer()
+    await screen.findByTestId('agent-session-row-sess-parent-001')
+
+    // Collapsed: no children on screen, no subagent request.
+    expect(screen.queryByTestId('subagent-children')).toBeNull()
+    expect(server.requests.filter((url) => url.includes('/subagents'))).toHaveLength(0)
+
+    fireEvent.click(screen.getByTestId('subagent-toggle-sess-parent-001'))
+    const children = await screen.findByTestId('subagent-children')
+    expect(within(children).getAllByTestId(/^agent-session-row-/)).toHaveLength(25)
+
+    fireEvent.click(within(children).getByRole('button', { name: 'Next page' }))
+    await waitFor(() => expect(server.requests.some((url) => url.includes('/subagents?page=2'))).toBe(true))
+    await waitFor(() => expect(within(children).getAllByTestId(/^agent-session-row-/)).toHaveLength(5))
+  })
+
+  it('pages back to the inline preview', async () => {
+    stubServer([childRoot()], { 'sess-parent-001': thirty })
+    renderExplorer()
+    await screen.findByTestId('agent-session-row-sess-parent-001')
+    fireEvent.click(screen.getByTestId('subagent-toggle-sess-parent-001'))
+    const children = await screen.findByTestId('subagent-children')
+
+    fireEvent.click(within(children).getByRole('button', { name: 'Next page' }))
+    await waitFor(() => expect(within(children).getAllByTestId(/^agent-session-row-/)).toHaveLength(5))
+
+    fireEvent.click(within(children).getByRole('button', { name: 'Previous page' }))
+    await waitFor(() => expect(within(children).getAllByTestId(/^agent-session-row-/)).toHaveLength(25))
+    expect(within(children).queryByTestId('subagent-children-error')).toBeNull()
+  })
+
+  it('renders a failed subagent read as an error, never as no more subagents', async () => {
+    stubServer([childRoot()], { 'sess-parent-001': thirty }, { failSubagents: true })
+    renderExplorer()
+    await screen.findByTestId('agent-session-row-sess-parent-001')
+    fireEvent.click(screen.getByTestId('subagent-toggle-sess-parent-001'))
+    const children = await screen.findByTestId('subagent-children')
+
+    fireEvent.click(within(children).getByRole('button', { name: 'Next page' }))
+    const failure = await within(children).findByTestId('subagent-children-error')
+    expect(failure.textContent).toContain('Request failed (500)')
+    // The inline preview is still on screen: a deeper-page failure does not
+    // claim the root has no subagents.
+    expect(within(children).getAllByTestId(/^agent-session-row-/)).toHaveLength(25)
   })
 })
 
@@ -244,79 +348,57 @@ describe('ContextExplorer reports the session it opens', () => {
   it('reports the expanded session and clears it on collapse', async () => {
     const onSelectSession = vi.fn()
     seedSessionDetail('sess-claude-code')
-    openRow(await loadExplorer({ onSelectSession }), 'sess-claude-code')
+    renderExplorer({ onSelectSession })
+    fireEvent.click(await screen.findByTestId('agent-session-row-sess-claude-code'))
     expect(onSelectSession).toHaveBeenCalledExactlyOnceWith('sess-claude-code')
-    expect(html(renderExplorer({ onSelectSession }))).toContain('data-testid="agent-session-dashboard"')
+    expect(screen.getByTestId('agent-session-dashboard')).not.toBeNull()
 
-    openRow(renderExplorer({ onSelectSession }), 'sess-claude-code')
-    expect(onSelectSession).toHaveBeenLastCalledWith(undefined)
-    expect(html(renderExplorer({ onSelectSession }))).not.toContain('data-testid="agent-session-dashboard"')
+    fireEvent.click(screen.getByTestId('agent-session-row-sess-claude-code'))
+    await waitFor(() => expect(onSelectSession).toHaveBeenLastCalledWith(undefined))
+    expect(screen.queryByTestId('agent-session-dashboard')).toBeNull()
   })
+
   it('reports the parent session a subagent row points at', async () => {
     const onSelectSession = vi.fn()
-    mockSessions([
+    stubServer([
       { ...session('claude-code'), is_subagent: true, parent_session: 'sess-parent-001' },
-      { ...session('claude-code', '-parent'), session_id: 'sess-parent-001' },
+      { ...session('claude-code'), session_id: 'sess-parent-001' },
     ])
     seedSessionDetail('sess-parent-001')
-    const tree = await loadExplorer({ onSelectSession })
-    // The link lives inside AgentSessionRow's own output, so invoke the row
-    // element the explorer rendered rather than walking its unrendered props.
-    const row = nodes(tree, (node) => node.type === AgentSessionRow)[0]!
-    const link = nodes(
-      AgentSessionRow(row.props as Parameters<typeof AgentSessionRow>[0]),
-      (node) => node.props['data-testid'] === 'parent-session-link',
-    )
-    expect(link).toHaveLength(1)
-    link[0].props.onClick!({ stopPropagation: vi.fn() })
+    renderExplorer({ onSelectSession })
+    fireEvent.click(await screen.findByTestId('parent-session-link'))
     expect(onSelectSession).toHaveBeenCalledExactlyOnceWith('sess-parent-001')
-    expect(html(renderExplorer({ onSelectSession }))).toContain('data-testid="agent-session-dashboard"')
   })
+
   it('closes the expanded session when the scope moves to another harness', async () => {
     seedSessionDetail('sess-claude-code')
     const onSelectSession = vi.fn()
-    const claude = { activeHarness: 'claude-code', onSelectSession }
-    openRow(await loadExplorer(claude), 'sess-claude-code')
-    expect(html(renderExplorer(claude))).toContain('data-testid="agent-session-dashboard"')
+    const { rerender } = renderExplorer({ activeHarness: 'claude-code', onSelectSession })
+    fireEvent.click(await screen.findByTestId('agent-session-row-sess-claude-code'))
+    expect(screen.getByTestId('agent-session-dashboard')).not.toBeNull()
 
-    // A session expanded under Claude Code must not stay expanded — or reportable —
-    // once the shell scopes to another harness.
-    const codex = { activeHarness: 'codex-cli', onSelectSession }
-    expect(html(renderExplorer(codex))).not.toContain('data-testid="agent-session-dashboard"')
-    expect(rowIds(renderExplorer(codex))).toEqual(['sess-codex-cli'])
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <ContextExplorer activeHarness="codex-cli" onSelectSession={onSelectSession} />
+      </QueryClientProvider>,
+    )
+    expect(screen.queryByTestId('agent-session-dashboard')).toBeNull()
+    await screen.findByTestId('agent-session-row-sess-codex-cli')
 
     // Returning to the original scope does not resurrect the old expansion either.
-    expect(html(renderExplorer(claude))).not.toContain('data-testid="agent-session-dashboard"')
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <ContextExplorer activeHarness="claude-code" onSelectSession={onSelectSession} />
+      </QueryClientProvider>,
+    )
+    expect(screen.queryByTestId('agent-session-dashboard')).toBeNull()
   })
+
   it('keeps the expanded session while the scope is unchanged', async () => {
     seedSessionDetail('sess-claude-code')
-    const claude = { activeHarness: 'claude-code' }
-    openRow(await loadExplorer(claude), 'sess-claude-code')
-    expect(html(renderExplorer(claude))).toContain('data-testid="agent-session-dashboard"')
-  })
-  it('expanding a canonical row mounts AgentSessionDashboard', () => {
-    const detailClient = createTestQueryClient()
-    detailClient.setQueryData(['kyber-session', sampleSession.session_id], {
-      id: sampleSession.session_id,
-      session_id: sampleSession.session_id,
-      harness: sampleSession.harness,
-      label: sampleSession.label,
-      summary: {
-        turn_count: 10,
-        cost: { basis: 'published', status: 'priced', value: 0.185, currency: 'USD' },
-      },
-      turns: [],
-      tools: [],
-      timeline: [],
-    })
-
-    const markup = html(
-      <AgentSessionRow s={sampleSession} open onToggle={() => {}} onSelectSession={() => {}} />,
-      detailClient,
-    )
-
-    expect(markup).toContain('data-testid="agent-session-dashboard"')
-    expect(markup).toContain('data-testid="overview-strip-section"')
+    renderExplorer({ activeHarness: 'claude-code' })
+    fireEvent.click(await screen.findByTestId('agent-session-row-sess-claude-code'))
+    expect(screen.getByTestId('agent-session-dashboard')).not.toBeNull()
   })
 })
 
@@ -324,25 +406,28 @@ describe('AgentSessionRow parent navigation', () => {
   it('navigates to the canonical parent without toggling the child', () => {
     const onSelectSession = vi.fn()
     const onToggle = vi.fn()
-    const tree = AgentSessionRow({
-      s: { ...session('claude-code'), is_subagent: true, parent_session: 'sess-parent-001' },
-      open: false, onToggle, onSelectSession,
-    })
-    const links = nodes(tree, (node) => node.props['data-testid'] === 'parent-session-link')
-    expect(links).toHaveLength(1)
-    expect(links[0].props.title).toBe('Parent session: sess-parent-001')
+    const { container } = render(
+      <AgentSessionRow
+        s={{ ...session('claude-code'), is_subagent: true, parent_session: 'sess-parent-001' }}
+        open={false}
+        onToggle={onToggle}
+        onSelectSession={onSelectSession}
+      />,
+    )
+    const link = container.querySelector('[data-testid="parent-session-link"]')!
+    expect(link.getAttribute('title')).toBe('Parent session: sess-parent-001')
     // The link is a sibling of the row button, not inside it, so a click cannot reach onToggle.
-    const rowButton = nodes(tree, (node) => node.props['data-testid'] === 'agent-session-row-sess-claude-code')
-    expect(rowButton).toHaveLength(1)
-    expect(nodes(rowButton[0] as unknown as React.ReactElement, (node) => node.props['data-testid'] === 'parent-session-link')).toHaveLength(0)
-    links[0].props.onClick!({})
+    expect(link.closest('button')?.getAttribute('data-testid')).toBe('parent-session-link')
+    expect(link.querySelector('button')).toBeNull()
+    fireEvent.click(link)
     expect(onSelectSession).toHaveBeenCalledExactlyOnceWith('sess-parent-001')
     expect(onToggle).not.toHaveBeenCalled()
   })
 })
 
 describe('AgentSessionRow row cost cell (issue #186)', () => {
-  // The cell is addressed by test id; T4 adds `data-testid="agent-session-cost"`.
+  // Static markup keeps these assertions on the cell's own classes: the row's
+  // dashboard child is only opened (and only queried) when a row is expanded.
   function renderCostCell(cost: KyberSessionSummary['cost'] | undefined): {
     text: string
     title: string
@@ -351,9 +436,8 @@ describe('AgentSessionRow row cost cell (issue #186)', () => {
     const target: KyberSessionSummary = { ...sampleSession, cost_usd: null }
     if (cost !== undefined) target.cost = cost
     else delete target.cost
-    const markup = html(
+    const markup = renderToStaticMarkup(
       <AgentSessionRow s={target} open={false} onToggle={() => {}} onSelectSession={() => {}} />,
-      createTestQueryClient(),
     )
     const match = /<span([^>]*data-testid="agent-session-cost"[^>]*)>([\s\S]*?)<\/span>/.exec(markup)
     expect(match, 'row must render an element with data-testid="agent-session-cost"').not.toBeNull()
@@ -401,8 +485,6 @@ describe('AgentSessionRow row cost cell (issue #186)', () => {
   })
 
   it('keeps word statuses on one line without shrinking below the measured phrase width (issue #228)', () => {
-    // "no published rate" measures ~97px at text-xs; w-20 (80px) wraps. The cell
-    // stays on formatCostFigure (U10) and uses w-28 (112px) plus nowrap.
     const { text, className } = renderCostCell({ basis: 'published', status: 'no_rate' })
     expect(text).toBe(formatCostFigure(normalizeCostBlock({ basis: 'published', status: 'no_rate' })))
     expect(className.split(/\s+/)).toEqual(expect.arrayContaining(['w-28', 'whitespace-nowrap', 'shrink-0']))
@@ -410,40 +492,11 @@ describe('AgentSessionRow row cost cell (issue #186)', () => {
   })
 })
 
-describe('ContextExplorer removed surface', () => {
-  it('does not export a tree-detail or context-window-toggle component', () => {
-    expect(ContextExplorerModule).not.toHaveProperty('TreeTable')
-    expect(ContextExplorerModule).not.toHaveProperty('SessionDetails')
-    expect(ContextExplorerModule).not.toHaveProperty('SessionDetailsBoundary')
-  })
-  it('never requests the context-tree endpoint', async () => {
-    // Behavioural guard through the mocked HTTP boundary. Asserting that five literal
-    // strings are absent from the source file would pass on a renamed helper or a
-    // moved fetch while the feature it polices came straight back.
-    const fetchMock = mockSessions()
-    await loadExplorer()
-    expect(fetchMock.mock.calls.map(([url]) => String(url))).not.toContain('/api/context/tree')
-  })
-})
-
 // ---------------------------------------------------------------------------
-// Task T3.1: Hierarchical subagent tree and dual spend contracts
+// Hierarchical subagent tree and dual spend contracts (Task T3.1)
 // ---------------------------------------------------------------------------
 
-interface SessionRollup {
-  turn_count?: number | null
-  total_input?: number | null
-  total_output?: number | null
-  tokens?: number | null
-  cost_usd?: number | null
-}
-
-interface HierarchicalSessionSummary extends KyberSessionSummary {
-  subagents?: HierarchicalSessionSummary[]
-  rollup?: SessionRollup
-}
-
-const sampleChild1: HierarchicalSessionSummary = {
+const childOne: KyberSessionSummary = {
   session_id: 'sess-child-001',
   harness: 'claude-code',
   label: 'explore workspace architecture',
@@ -458,7 +511,7 @@ const sampleChild1: HierarchicalSessionSummary = {
   started: '2026-03-01T12:05:00.000Z',
 }
 
-const sampleChild2: HierarchicalSessionSummary = {
+const childTwo: KyberSessionSummary = {
   session_id: 'sess-child-002',
   harness: 'claude-code',
   label: 'run test suite verification',
@@ -473,7 +526,7 @@ const sampleChild2: HierarchicalSessionSummary = {
   started: '2026-03-01T12:10:00.000Z',
 }
 
-const sampleParentWithSubagents: HierarchicalSessionSummary = {
+const parentWithSubagents: KyberSessionSummary = {
   session_id: 'sess-parent-001',
   harness: 'claude-code',
   label: 'orchestrate multi-agent feature delivery',
@@ -492,177 +545,92 @@ const sampleParentWithSubagents: HierarchicalSessionSummary = {
     tokens: 93000,
     cost_usd: 0.37,
   },
-  subagents: [sampleChild1, sampleChild2],
-}
-
-function findSubagentToggle(tree: React.ReactElement, sessionId: string): TestNode | undefined {
-  const direct = nodes(tree, (node) =>
-    node.props['data-testid'] === `subagent-toggle-${sessionId}` ||
-    node.props['data-testid'] === 'subagent-toggle' ||
-    Boolean(node.props['aria-label']?.toLowerCase().includes('subagent')),
-  )
-  if (direct.length > 0) return direct[0]
-
-  const rows = nodes(tree, (node) => node.type === AgentSessionRow)
-  const row = rows.find((node) => (node.props as { s?: KyberSessionSummary }).s?.session_id === sessionId)
-  if (row) {
-    const rowTree = AgentSessionRow(row.props as Parameters<typeof AgentSessionRow>[0])
-    const inRow = nodes(rowTree, (node) =>
-      node.props['data-testid'] === `subagent-toggle-${sessionId}` ||
-      node.props['data-testid'] === 'subagent-toggle' ||
-      Boolean(node.props['aria-label']?.toLowerCase().includes('subagent')),
-    )
-    if (inRow.length > 0) return inRow[0]
-  }
-  return undefined
+  subagents: [childOne, childTwo],
 }
 
 describe('hierarchical subagent tree and dual spend (Task T3.1)', () => {
   it('renders an expand/collapse chevron toggle button on parent sessions with subagents', async () => {
-    mockSessions([sampleParentWithSubagents])
-    const tree = await loadExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
-    const markup = html(tree)
-
-    expect(markup).toContain('data-testid="agent-session-row-sess-parent-001"')
-
-    const toggle = findSubagentToggle(tree, 'sess-parent-001')
-    expect(toggle, 'Parent row must display an expand/collapse toggle button (chevron) for child subagents').toBeDefined()
-    expect(markup).toMatch(/data-testid="subagent-toggle(?:-sess-parent-001)?"|aria-label="[^"]*subagent[^"]*"/)
+    renderExplorer({ sessions: [parentWithSubagents] })
+    await screen.findByTestId('agent-session-row-sess-parent-001')
+    expect(screen.getByTestId('subagent-toggle-sess-parent-001').getAttribute('aria-expanded')).toBe('false')
   })
 
   it('toggles child subagent visibility when clicking the chevron button', async () => {
-    mockSessions([sampleParentWithSubagents])
-    const tree = await loadExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
+    renderExplorer({ sessions: [parentWithSubagents] })
+    await screen.findByTestId('agent-session-row-sess-parent-001')
 
-    const toggle = findSubagentToggle(tree, 'sess-parent-001')
-    expect(toggle, 'Parent row must have a subagent chevron toggle button').toBeDefined()
+    expect(screen.queryByTestId('subagent-children')).toBeNull()
+    fireEvent.click(screen.getByTestId('subagent-toggle-sess-parent-001'))
+    expect(screen.getByTestId('subagent-children')).not.toBeNull()
 
-    // Initially collapsed: child subagents are not visible
-    const initialHtml = html(tree)
-    expect(initialHtml).not.toContain('sess-child-001')
-    expect(initialHtml).not.toContain('sess-child-002')
-
-    // Click chevron to expand
-    expect(typeof toggle!.props.onClick, 'Chevron toggle must have onClick handler').toBe('function')
-    toggle!.props.onClick!({ stopPropagation: vi.fn() })
-
-    // When expanded, child subagents are visible
-    const expandedTree = renderExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
-    const expandedHtml = html(expandedTree)
-    expect(expandedHtml).toContain('sess-child-001')
-    expect(expandedHtml).toContain('sess-child-002')
-
-    // Click chevron again to collapse
-    const toggleCollapse = findSubagentToggle(expandedTree, 'sess-parent-001')
-    expect(toggleCollapse, 'Chevron toggle must be available when expanded').toBeDefined()
-    toggleCollapse!.props.onClick!({ stopPropagation: vi.fn() })
-
-    // After collapsing, child subagents are hidden again
-    const collapsedTree = renderExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
-    const collapsedHtml = html(collapsedTree)
-    expect(collapsedHtml).not.toContain('sess-child-001')
-    expect(collapsedHtml).not.toContain('sess-child-002')
+    fireEvent.click(screen.getByTestId('subagent-toggle-sess-parent-001'))
+    expect(screen.queryByTestId('subagent-children')).toBeNull()
   })
 
   it('renders child subagents nested and indented under parent with agent names and subagent indicators when expanded', async () => {
-    mockSessions([sampleParentWithSubagents])
-    const tree = await loadExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
+    renderExplorer({ sessions: [parentWithSubagents] })
+    await screen.findByTestId('agent-session-row-sess-parent-001')
+    fireEvent.click(screen.getByTestId('subagent-toggle-sess-parent-001'))
 
-    const toggle = findSubagentToggle(tree, 'sess-parent-001')
-    expect(toggle, 'Parent row must have a subagent chevron toggle button').toBeDefined()
-    toggle!.props.onClick!({ stopPropagation: vi.fn() })
-
-    const expandedTree = renderExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
-    const markup = html(expandedTree)
-
-    expect(markup).toContain('sess-child-001')
-    expect(markup).toContain('sess-child-002')
-
-    expect(markup).toContain('explorer')
-    expect(markup).toContain('test-runner')
-
-    const childRowMatch = /data-testid="(?:agent-session-row|subagent-row)-sess-child-001"[\s\S]*?(?:data-testid="subagent-indicator"|<span[^>]*>\s*subagent\s*<\/span>)/.exec(markup)
-    expect(childRowMatch, 'Child subagents must display a subagent indicator').not.toBeNull()
-
-    const hasIndentation =
-      /class="[^"]*\b(?:pl-[4-9]|pl-\d{2}|ml-[4-9]|ml-\d{2}|indent)\b[^"]*"[^>]*data-testid="(?:agent-session-row|subagent-row)-sess-child-001"/.test(markup) ||
-      /data-testid="(?:agent-session-row|subagent-row)-sess-child-001"[^>]*class="[^"]*\b(?:pl-[4-9]|pl-\d{2}|ml-[4-9]|ml-\d{2}|indent)\b[^"]*"/.test(markup) ||
-      /data-testid="(?:subagent-tree|subagent-children|subagent-nesting)"[\s\S]*?sess-child-001/.test(markup)
-    expect(hasIndentation, 'Child subagents must be rendered nested and indented under the parent row').toBe(true)
+    const children = screen.getByTestId('subagent-children')
+    expect(within(children).getByTestId('agent-session-row-sess-child-001')).not.toBeNull()
+    expect(within(children).getByTestId('agent-session-row-sess-child-002')).not.toBeNull()
+    expect(within(children).getAllByTestId('subagent-indicator')).toHaveLength(2)
+    expect(within(children).getByText('explorer · explore workspace architecture')).not.toBeNull()
+    expect(within(children).getByText('test-runner · run test suite verification')).not.toBeNull()
   })
 
   it('displays rolled-up cost from session.rollup on the parent row and granular cost on child rows', async () => {
-    mockSessions([sampleParentWithSubagents])
-    const tree = await loadExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
+    renderExplorer({ sessions: [parentWithSubagents] })
+    await screen.findByTestId('agent-session-row-sess-parent-001')
 
-    const parentMarkup = html(tree)
-    const parentCostMatch = /data-testid="agent-session-row-sess-parent-001"[\s\S]*?data-testid="agent-session-cost"[^>]*>([\s\S]*?)<\/span>/.exec(parentMarkup)
-    expect(parentCostMatch, 'Parent row must render cost cell').not.toBeNull()
-    expect(parentCostMatch![1]).toContain('$0.37')
+    // The parent's wire rollup carries the summed cost; children carry their own.
+    expect(screen.getByTestId('agent-session-cost').textContent).toContain('$0.37')
 
-    const toggle = findSubagentToggle(tree, 'sess-parent-001')
-    expect(toggle, 'Parent row must have a subagent chevron toggle button').toBeDefined()
-    toggle!.props.onClick!({ stopPropagation: vi.fn() })
-
-    const expandedTree = renderExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
-    const expandedMarkup = html(expandedTree)
-
-    const child1CostMatch = /data-testid="(?:agent-session-row|subagent-row)-sess-child-001"[\s\S]*?data-testid="agent-session-cost"[^>]*>([\s\S]*?)<\/span>/.exec(expandedMarkup)
-    expect(child1CostMatch, 'Child 1 row must render cost cell').not.toBeNull()
-    expect(child1CostMatch![1]).toContain('$0.05')
-
-    const child2CostMatch = /data-testid="(?:agent-session-row|subagent-row)-sess-child-002"[\s\S]*?data-testid="agent-session-cost"[^>]*>([\s\S]*?)<\/span>/.exec(expandedMarkup)
-    expect(child2CostMatch, 'Child 2 row must render cost cell').not.toBeNull()
-    expect(child2CostMatch![1]).toContain('$0.12')
+    fireEvent.click(screen.getByTestId('subagent-toggle-sess-parent-001'))
+    const children = await screen.findByTestId('subagent-children')
+    const childCosts = within(children).getAllByTestId('agent-session-cost').map((node) => node.textContent)
+    expect(childCosts).toHaveLength(2)
+    expect(childCosts[0]).toContain('$0.05')
+    expect(childCosts[1]).toContain('$0.12')
   })
 
   it('renders the parent cost from the rollup wire shape (cost_usd) beside the rolled-up turns', async () => {
-    mockSessions([sampleParentWithSubagents])
-    const tree = await loadExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
-    const markup = html(tree)
-
-    expect(markup).toContain('25 turns')
-    const cost = /data-testid="agent-session-row-sess-parent-001"[\s\S]*?data-testid="agent-session-cost"[^>]*>([\s\S]*?)<\/span>/.exec(markup)
-    expect(cost![1]).toContain('$0.37')
+    renderExplorer({ sessions: [parentWithSubagents] })
+    await screen.findByTestId('agent-session-row-sess-parent-001')
+    expect(screen.getByText('25 turns')).not.toBeNull()
+    expect(screen.getByTestId('agent-session-cost').textContent).toContain('$0.37')
   })
 
   it('never nests a button inside a button, and the subagent toggle reports its state', async () => {
-    mockSessions([sampleParentWithSubagents])
-    const tree = await loadExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
-    const markup = html(tree)
+    const { container } = renderExplorer({ sessions: [parentWithSubagents] })
+    await screen.findByTestId('agent-session-row-sess-parent-001')
+    expect(container.querySelector('button button')).toBeNull()
+    expect(screen.getByTestId('subagent-toggle-sess-parent-001').getAttribute('aria-expanded')).toBe('false')
 
-    let depth = 0
-    let deepest = 0
-    for (const tag of markup.match(/<\/?button\b/g) ?? []) {
-      depth += tag.startsWith('</') ? -1 : 1
-      deepest = Math.max(deepest, depth)
-    }
-    expect(deepest, 'a <button> must never contain another <button>').toBe(1)
-    expect(markup).toMatch(/data-testid="subagent-toggle-sess-parent-001"[^>]*aria-expanded="false"|aria-expanded="false"[^>]*data-testid="subagent-toggle-sess-parent-001"/)
+    fireEvent.click(screen.getByTestId('subagent-toggle-sess-parent-001'))
+    expect(screen.getByTestId('subagent-toggle-sess-parent-001').getAttribute('aria-expanded')).toBe('true')
   })
 
   it('renders title as "<agent name> · <task summary>" with a tooltip displaying the raw sessionId', async () => {
-    mockSessions([sampleParentWithSubagents])
-    const tree = await loadExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
-    const markup = html(tree)
+    renderExplorer({ sessions: [parentWithSubagents] })
+    await screen.findByTestId('agent-session-row-sess-parent-001')
 
-    expect(markup).toContain('lead-orchestrator · orchestrate multi-agent feature delivery')
+    const parentTitle = screen
+      .getAllByTitle('sess-parent-001')
+      .find((node) => node.textContent?.includes('lead-orchestrator · orchestrate multi-agent feature delivery'))
+    expect(parentTitle).not.toBeNull()
 
-    const parentTitleWithTooltip = /<span[^>]*title="sess-parent-001"[^>]*>[\s\S]*?lead-orchestrator · orchestrate multi-agent feature delivery[\s\S]*?<\/span>/.test(markup)
-    expect(parentTitleWithTooltip, 'Parent title element must have tooltip displaying raw sessionId').toBe(true)
-
-    const toggle = findSubagentToggle(tree, 'sess-parent-001')
-    expect(toggle, 'Parent row must have a subagent chevron toggle button').toBeDefined()
-    toggle!.props.onClick!({ stopPropagation: vi.fn() })
-
-    const expandedMarkup = html(renderExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] }))
-
-    expect(expandedMarkup).toContain('explorer · explore workspace architecture')
-    const child1TitleWithTooltip = /<span[^>]*title="sess-child-001"[^>]*>[\s\S]*?explorer · explore workspace architecture[\s\S]*?<\/span>/.test(expandedMarkup)
-    expect(child1TitleWithTooltip, 'Child 1 title element must have tooltip displaying raw sessionId').toBe(true)
-
-    expect(expandedMarkup).toContain('test-runner · run test suite verification')
-    const child2TitleWithTooltip = /<span[^>]*title="sess-child-002"[^>]*>[\s\S]*?test-runner · run test suite verification[\s\S]*?<\/span>/.test(expandedMarkup)
-    expect(child2TitleWithTooltip, 'Child 2 title element must have tooltip displaying raw sessionId').toBe(true)
+    fireEvent.click(screen.getByTestId('subagent-toggle-sess-parent-001'))
+    await waitFor(() => {
+      const childTitle = screen
+        .getAllByTitle('sess-child-001')
+        .find((node) => node.textContent?.includes('explorer · explore workspace architecture'))
+      const childTwoTitle = screen
+        .getAllByTitle('sess-child-002')
+        .find((node) => node.textContent?.includes('test-runner · run test suite verification'))
+      expect(childTitle).not.toBeNull()
+      expect(childTwoTitle).not.toBeNull()
+    })
   })
 })

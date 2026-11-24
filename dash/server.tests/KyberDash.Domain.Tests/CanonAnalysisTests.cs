@@ -321,6 +321,69 @@ public class CanonAnalysisTests
         Assert.Equal(0.02, auxiliarySpend.Value ?? 0, precision: 10);
     }
 
+    /// <summary>
+    /// A level wider than a page keeps the total sibling order the timeline section pages by:
+    /// start offset, then span id, with no duplicate and none dropped, and the synthetic
+    /// containers — <c>(auxiliary)</c> and the <c>(orphan:...)</c> groups — are addressable by
+    /// their exact ids so a parent request can name them.
+    /// </summary>
+    [Fact]
+    public void TimelineSiblingsKeepATotalOrderAcrossAWideLevelWithSyntheticContainers()
+    {
+        CanonicalRecord seed = MakeLlmRecord(
+            "seed-0",
+            "sess-wide",
+            "claude-code",
+            "2026-11-14T23:00:00.000Z",
+            100,
+            20);
+
+        List<CanonicalRecord> records = [];
+        for (int index = 0; index < 30; index++)
+        {
+            // Same start offset on every primary root, so the order falls to the span id tiebreak.
+            records.Add(seed with { SpanId = $"root-{index:D3}" });
+        }
+
+        for (int index = 0; index < 30; index++)
+        {
+            records.Add(seed with
+            {
+                SpanId = $"aux-{index:D3}",
+                ParentSpanId = null,
+                Name = $"chat.title {index}",
+            });
+        }
+
+        for (int index = 0; index < 2; index++)
+        {
+            records.Add(seed with
+            {
+                SpanId = $"lost-{index}",
+                ParentSpanId = "missing-parent",
+                Name = "orphan.tool",
+            });
+        }
+
+        TimelineNode root = CanonContextAnalysis.BuildTimeline(records);
+
+        // The top level holds every container and root, ordered by start offset then span id.
+        List<string> topLevel = [.. root.Children.Select(static node => node.SpanId)];
+        Assert.Equal(32, topLevel.Count);
+        Assert.Equal(topLevel.Count, topLevel.Distinct(StringComparer.Ordinal).Count());
+        List<string> ordered = [.. topLevel.Order(StringComparer.Ordinal)];
+        Assert.Equal(ordered, topLevel);
+
+        TimelineNode auxiliary = Assert.Single(root.Children, static node => node.SpanId == "(auxiliary)");
+        Assert.Equal(30, auxiliary.Children.Count);
+        Assert.Equal(
+            [.. Enumerable.Range(0, 30).Select(index => $"aux-{index:D3}")],
+            auxiliary.Children.Select(static node => node.SpanId));
+
+        TimelineNode orphan = Assert.Single(root.Children, static node => node.SpanId == "(orphan:claude-code:orphan.tool)");
+        Assert.Equal(["lost-0", "lost-1"], orphan.Children.Select(static node => node.SpanId));
+    }
+
     [Fact]
     public void OutcomeAndFindingDetectors_RankAndLintPerD5D6D8()
     {

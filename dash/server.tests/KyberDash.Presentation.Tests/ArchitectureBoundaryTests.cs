@@ -196,6 +196,52 @@ public class ArchitectureBoundaryTests
         Assert.Empty(offenders);
     }
 
+    /// <summary>
+    /// The maintenance-named whole-store read stays out of every request path.
+    /// <see cref="KyberDash.Contracts.Repositories.IRelationalStoreReader.AllSessionRecordsForMaintenance"/>
+    /// materializes every stored record and child row in one query, so on a large store it is the
+    /// very stall the purpose-named reads exist to remove.
+    /// </summary>
+    /// <remarks>
+    /// Only the projector's full pass, the <c>kyber build</c> command, and doctor may name it.
+    /// The request paths — the engine's bridge, the rollups engine, and the dashboard, analytics,
+    /// and report services — must answer from the purpose-named reads instead.
+    /// </remarks>
+    [Fact]
+    public void RequestPathsCannotReachMaintenanceReads()
+    {
+        string? root = TryFindPresentationDirectory();
+        if (root is null)
+            return;
+
+        const string maintenanceRead = "AllSessionRecordsForMaintenance";
+
+        // The contract declaration, its adapter, and the maintenance consumers allowed to name it.
+        string[] permitted =
+        [
+            Path.Combine("KyberDash.Contracts", "Repositories", "IRelationalStoreReader.cs"),
+            Path.Combine("KyberDash.Data", "Repositories", "SqliteRelationalStore.Reader.cs"),
+            Path.Combine("KyberDash.Application", "CanonSessionProjectorEngine.cs"),
+            Path.Combine("KyberDash.Cli", "Program.cs"),
+            Path.Combine("KyberDash.Application", "Services", "DoctorService.cs"),
+        ];
+
+        List<string> offenders = [];
+        foreach (string file in SourceFiles(root))
+        {
+            if (!File.ReadAllText(file).Contains(maintenanceRead, StringComparison.Ordinal))
+                continue;
+
+            string relative = Path.GetRelativePath(root, file);
+            if (!permitted.Contains(relative, StringComparer.Ordinal))
+                offenders.Add(relative);
+        }
+
+        Assert.True(
+            offenders.Count == 0,
+            $"Only the projection's full pass, the CLI build path, and doctor may name {maintenanceRead}; these sources name it: {string.Join(", ", offenders)}.");
+    }
+
     private static void AssertNoReferences(Assembly assembly, params string[] forbiddenNames)
     {
         IReadOnlyList<string> referenced = ReferencedAssemblyNames(assembly);

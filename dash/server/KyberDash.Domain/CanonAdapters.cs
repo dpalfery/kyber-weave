@@ -934,8 +934,17 @@ public static class CanonAdapters
                 counters.Output,
                 counters.Reasoning != 0 ? counters.Reasoning : null);
 
+            string? sessionId = string.IsNullOrWhiteSpace(record.SessionId) ? null : record.SessionId.Trim();
+            if (sessionId is null)
+            {
+                string? piSession = ReadNonEmptyString(raw.Attributes, "pi.session.id");
+                if (!string.IsNullOrWhiteSpace(piSession))
+                    sessionId = piSession.Trim();
+            }
+
             return record with
             {
+                SessionId = sessionId,
                 Parts = mergedParts,
                 Content = CanonValidation.ContentFromParts(mergedParts),
                 Tokens = tokens,
