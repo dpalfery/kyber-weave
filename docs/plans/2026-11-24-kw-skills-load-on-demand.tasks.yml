@@ -1,6 +1,6 @@
 schema-version: 2
 plan: docs/plans/2026-11-24-kw-skills-load-on-demand.md
-execution-digest: 3436a1a2c1834310f5b761fdc43c6511c63d54e5574d71c94ce7451c1f5d9069
+execution-digest: 0b61dfb8e230ffb08fddc1c14fec9021fb46c02b4831bd2992884fae7b9abca3
 tasks:
   - id: T1
     capabilities: Documentation in Markdown under the governed-docs rules.
@@ -750,9 +750,6 @@ tasks:
       - dash/server/KyberDash.Application/Services/DashboardQueryService.cs
       - dash/server/KyberDash.Api/Endpoints/DashEndpointMappings.cs
       - dash/server.tests/KyberDash.Application.Tests/Fakes/InMemoryRelationalStore.cs
-      - dash/server.tests/KyberDash.Application.Tests/Sessions/SessionKwSkillLoadsTests.cs
-      - dash/server.tests/KyberDash.Data.Tests/Repositories/SqliteRelationalStoreReadTests.cs
-      - dash/server.tests/KyberDash.Presentation.Tests/MinimalApiEndpointTests.cs
     session: dash-server
     prompt: >
       Task T11: KyberDash engine — KW skill loads read and the kw-skills section route
@@ -773,17 +770,21 @@ tasks:
       - **Depends on:** none
 
       - **Files:**
-        - `dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs`: `SessionKwSkillLoads(string sessionKey)` → `StoredKwSkillLoad(SpanId, ToolName, McpServerName, McpToolName, InputText, StartedAtUtc)`.
-        - `dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs`: one query scoped to the session over `tool_call`, `tool_call_mcp`, `tool_call_input_text`, `record`, `record_session_link`, filtering the D17 names in SQL.
-        - New `dash/server/KyberDash.Application/Sessions/KwSkillLoads.cs` (recognizer and name parse, pure), used by `dash/server/KyberDash.Application/KyberBridgeEngine.cs` `GetSessionKwSkills` (copy `GetSessionSkills` paging and 404).
+        - `dash/server/KyberDash.Contracts/Repositories/IRelationalStoreReader.cs`: `SessionKwSkillLoads(sessionKey)` → `StoredKwSkillLoad(SpanId, ToolName, McpServerName, McpToolName, ReplyHead, StartedAtUtc)`; `ReplyHead` (replacing `InputText`) is the reply's first 1024 characters or null.
+        - `dash/server/KyberDash.Data/Repositories/SqliteRelationalStore.Reader.cs`: one session-scoped query over `tool_call`, `tool_call_mcp`, `tool_call_result_text` (`substr(text, 1, 1024)`), `record`, `record_session_link`, filtering the load names in SQL; never `tool_call_input_text`.
+        - New `dash/server/KyberDash.Application/Sessions/KwSkillLoads.cs` (pure recognizer and reply-header parse; returns the name only), used by `dash/server/KyberDash.Application/KyberBridgeEngine.cs` `GetSessionKwSkills` (copy `GetSessionSkills` paging and 404).
         - `dash/server/KyberDash.Contracts/Services/IDashServices.cs`, `dash/server/KyberDash.Application/Services/DashboardQueryService.cs`, `dash/server/KyberDash.Api/Endpoints/DashEndpointMappings.cs` (`/session/{id}/kw-skills`).
-        - `dash/server.tests/KyberDash.Application.Tests/Fakes/InMemoryRelationalStore.cs` and any `FaultingSessionReader`/`DelegatingReader` copies: implement the new member.
-        - Tests per the Test contract: new `dash/server.tests/KyberDash.Application.Tests/Sessions/SessionKwSkillLoadsTests.cs`; extend `dash/server.tests/KyberDash.Data.Tests/Repositories/SqliteRelationalStoreReadTests.cs` and `dash/server.tests/KyberDash.Presentation.Tests/MinimalApiEndpointTests.cs`.
+        - `dash/server.tests/KyberDash.Application.Tests/Fakes/InMemoryRelationalStore.cs` and any `FaultingSessionReader`/`DelegatingReader` copies: the new member; the JSON refusal stays.
+        - Tests per the Test contract (`ClaudeTranscriptMapperTests` is test only; the mapper does not change).
       - **Commands:**
         - `kyber-weave review gates . --agent <worker> --task T11 --red`
+        - `dotnet test dash/server/KyberDash.sln -c Release --filter "FullyQualifiedName~KyberDash.Application.Tests.Sessions.SessionKwSkillLoadsTests|FullyQualifiedName~KyberDash.Data.Tests.Repositories.SqliteRelationalStoreReadTests|FullyQualifiedName~KyberDash.Data.Tests.Harnesses.ClaudeTranscriptMapperTests|FullyQualifiedName~KyberDash.Presentation.Tests.MinimalApiEndpointTests"` (fails before implementation, passes after; no `--artifacts-path`)
+        - `dotnet format dash/server/KyberDash.sln whitespace --verify-no-changes -v minimal`
         - `kyber-weave review gates . --agent <worker> --task T11`
       - **Acceptance:**
-        - T11 rows pass; no canon schema change and no `SchemaVersion` bump.
+        - T11 rows pass under the dash runner command; the worker reports its failing and passing output (the gate report alone is not T11 evidence).
+        - No schema change or `SchemaVersion` bump; `JsonDocumentText`, `GuardedTextExpr`, `ToolContentMeasurer` and the fake's refusal unchanged.
+        - Failure mode: reply text leaks through the API. Mitigation: (1) the reader returns at most 1024 characters; (2) only a name passing the skill-name pattern leaves the application.
 
       Reference content for this task, quoted exactly from its source document and complete as given:
 
@@ -794,7 +795,7 @@ tasks:
 
       |---|---|---|---|---|---|
 
-      | T11 | new `dash/server.tests/KyberDash.Application.Tests/Sessions/SessionKwSkillLoadsTests.cs` (namespace `KyberDash.Application.Tests.Sessions`, over `InMemoryRelationalStore`); extend `dash/server.tests/KyberDash.Data.Tests/Repositories/SqliteRelationalStoreReadTests.cs`; extend `dash/server.tests/KyberDash.Presentation.Tests/MinimalApiEndpointTests.cs` | `dotnet test dash/server/KyberDash.sln -c Release --filter "FullyQualifiedName~KyberDash.Application.Tests.Sessions.SessionKwSkillLoadsTests\|FullyQualifiedName~KyberDash.Data.Tests.Repositories.SqliteRelationalStoreReadTests\|FullyQualifiedName~MinimalApiEndpointTests"` | `AnMcpSplitLoadSkillCallIsALoadWithSkillAgentSessionAndTime`; one case per D17 tool-name spelling; `AnotherServersLoadSkillIsNotALoad`; `AMissingOrUnparsableInputGivesANullSkill`; `ASessionWithNoLoadsAnswersAnEmptyPage`; `PagesAreInCallOrderWithTheTotal`; `AnUnknownSessionIs404`; `AKwSkillLoadIsNotAHarnessSkillInvocation` (the skills section is unchanged); reader: `SessionKwSkillLoadsReadsOnlyThatSessionsToolCalls`; endpoint: route answers the D18 shape. | `SessionKwSkillLoads` and the route do not exist. | All named tests pass. |
+      | T11 | new `dash/server.tests/KyberDash.Application.Tests/Sessions/SessionKwSkillLoadsTests.cs` (namespace `KyberDash.Application.Tests.Sessions`, over `InMemoryRelationalStore`); extend `dash/server.tests/KyberDash.Data.Tests/Repositories/SqliteRelationalStoreReadTests.cs`, `dash/server.tests/KyberDash.Data.Tests/Harnesses/ClaudeTranscriptMapperTests.cs`, `dash/server.tests/KyberDash.Presentation.Tests/MinimalApiEndpointTests.cs`. Seed a plain-text reply and no input text (the store refuses JSON text). | `dotnet test dash/server/KyberDash.sln -c Release --filter "FullyQualifiedName~KyberDash.Application.Tests.Sessions.SessionKwSkillLoadsTests\|FullyQualifiedName~KyberDash.Data.Tests.Repositories.SqliteRelationalStoreReadTests\|FullyQualifiedName~KyberDash.Data.Tests.Harnesses.ClaudeTranscriptMapperTests\|FullyQualifiedName~KyberDash.Presentation.Tests.MinimalApiEndpointTests"` | `AnMcpSplitLoadSkillCallIsALoadWithSkillAgentSessionAndTime`; one case per tool-name spelling; `AnotherServersLoadSkillIsNotALoad`; `AMissingOrUnrecognizedReplyGivesANullSkill` (none, unknown-name, malformed, bad name); `TheSkillLineIsReadOnlyFromTheReplyHeader`; `ASessionWithNoLoadsAnswersAnEmptyPage`; `PagesAreInCallOrderWithTheTotal`; `AnUnknownSessionIs404`; `AKwSkillLoadIsNotAHarnessSkillInvocation`; reader: `SessionKwSkillLoadsReadsOnlyThatSessionsToolCalls`, `SessionKwSkillLoadsReturnsAtMostTheReplysFirst1024Characters`; mapper: `AnMcpLoadSkillCallKeepsItsReplyAsResultTextAndWithholdsItsJsonInput`; endpoint: the D18 shape. | The runner command fails before implementation (the task gate does not cover dash). | The runner command passes, non-zero count; dash format check clean. |
 
 
       #### Decisions this task cites
@@ -803,7 +804,7 @@ tasks:
 
       |---|---|---|---|---|
 
-      | D17 | How does KyberDash record a load? | From the tool calls it already stores; no schema change. A load is a `tool_call` whose `tool_call_mcp.server_name` normalizes (lower case, `_`→`-`) to `kw-docs` and whose `server_tool_name` is `load_skill`, or, with no MCP split, whose `tool_name` is `mcp__kw-docs__load_skill`, `mcp__kw_docs__load_skill`, `kw-docs_load_skill`, `kw-docs__load_skill` or `kw-docs/load_skill`. Skill = the `name` string in `tool_call_input_text` JSON, else null; agent = the session's `agent_name`; time = the record's `started_at_utc`. | Todo: "Recording only". `CollectedToolCall` carries the MCP server and tool names and the input text. | ANSWERED — autonomous: low-confidence, no authoritative source |
+      | D17 | How does KyberDash record a load? | From stored tool calls; no schema change, JSON guard unchanged. A load is a `tool_call` whose `tool_call_mcp.server_name` normalizes (lower case, `_`→`-`) to `kw-docs` with `server_tool_name` `load_skill`, or, unsplit, whose `tool_name` is `mcp__kw-docs__load_skill`, `mcp__kw_docs__load_skill`, `kw-docs_load_skill`, `kw-docs__load_skill` or `kw-docs/load_skill`. Skill = the first `skill: <name>` line before the first blank line of the reply (`tool_call_result_text.text`, first 1024 characters), kept only if it matches `^[a-z0-9]+(-[a-z0-9]+)*$` and is at most 64 characters, else null ("not recorded"). The input is never read. Agent = session `agent_name`; time = record `started_at_utc`. | Amended 2026-11-24: JSON input is never stored (investigation findings), the reply is plain text and is. Rejected: input fingerprints, `record_skill_invocation` (mixes in harness skills), always-null skill. | ANSWERED — autonomous: recommendation accepted (AUTONOMOUS_APPROVAL: plan-amendment, 2026-11-24) |
 
       | D18 | KyberDash API and placement? | `GET /api/kyber/session/{id}/kw-skills?page=&limit=` (default 25), 404 for an unknown session, and `{ "rows": [ { "skill": string\|null, "agent": string\|null, "session_id": string, "span_id": string, "loaded_at": string\|null } ], "total", "limit", "offset", "page" }` in call order. The web shows it as its own section, `KW skills`, right after the Skills section, with skill (or "not recorded"), agent, session and time columns and the existing loading/error/empty states. The section has no number, so the numbers of the other sections stay as they are. | Fixed here so T11 and T12 run in parallel, as ADR 0092's section routes do. | ANSWERED — autonomous: low-confidence, no authoritative source |
 
