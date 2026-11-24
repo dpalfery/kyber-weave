@@ -2865,7 +2865,10 @@ describe('SessionInspectorDrawer: lossless request builders', () => {
     const origFetch = globalThis.fetch
     globalThis.fetch = ((input: unknown) => {
       captured.push(String(input))
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+      // A body each route's parser accepts, so a parser regression fails the test
+      // rather than being swallowed: the turn route's served shape (identity plus
+      // parts) also satisfies the session content read.
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ sessionId: 'sess-x', turnIndex: 2, parts: [] }) })
     }) as typeof fetch
     return () => {
       globalThis.fetch = origFetch
@@ -2876,9 +2879,7 @@ describe('SessionInspectorDrawer: lossless request builders', () => {
     const urls: string[] = []
     const restore = mockFetch(urls)
     try {
-      // Only the request path is under test; the stub's empty body is not a turn
-      // the parser accepts, so its refusal is expected and set aside.
-      await fetchTurnContentFull('sess-x', 2).catch(() => undefined)
+      await fetchTurnContentFull('sess-x', 2)
       expect(urls).toHaveLength(1)
       expect(urls[0]).toBe('/api/kyber/session/sess-x/turn/2/content?full=true')
       expect(urls[0]).not.toContain('budget')

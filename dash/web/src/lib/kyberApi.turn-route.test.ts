@@ -146,6 +146,18 @@ describe('fetchKyberSessionTurns per-turn route', () => {
     expect(content.assembledText).toBe('')
   })
 
+  it.each([
+    ['negative', -1],
+    ['fractional', 1.5],
+  ])('refuses a %s turn index on both turn routes', async (_why, turnIndex) => {
+    stubFetch(200, { sessionId: 'sess-1', turnIndex, parts: [] })
+    await expect(fetchTurnContent('sess-1', 1)).rejects.toThrow(/malformed/i)
+
+    stubFetch(200, { sessionId: 'sess-1', turnIndex, projection_status: 'PROJECTION_FAILED' })
+    await expect(fetchTurnContent('sess-1', 1)).rejects.toThrow(/malformed/i)
+    await expect(fetchKyberSessionTurn('sess-1', 1)).rejects.toThrow(/malformed/i)
+  })
+
   it('reads a marker other than PROJECTION_FAILED as no fault on either turn route', async () => {
     // One fault contract: only the exact sections' marker names a faulted read.
     stubFetch(200, { sessionId: 'sess-1', turnIndex: 1, projection_status: 'PENDING' })

@@ -410,12 +410,14 @@ function parseKyberPage<T>(
 }
 
 /**
- * Reads one sessions-list row: every row must name its session, since the list
- * keys, links and selects rows by that id.
+ * Reads one sessions-list row: every row must name its session (non-empty), since
+ * the list keys, links and selects rows by that id, and its harness, which the
+ * list groups and labels rows by.
  */
 function readSessionSummaryRow(path: string): (row: unknown) => KyberSessionSummary {
   return (row) => {
-    if (!isRaw(row) || typeof row.session_id !== 'string') throw malformedPage(path, 'a row has no session_id')
+    if (!isRaw(row) || typeof row.session_id !== 'string' || row.session_id === '') throw malformedPage(path, 'a row has no session_id')
+    if (typeof row.harness !== 'string') throw malformedPage(path, 'a row has no harness')
     return row as unknown as KyberSessionSummary
   }
 }
@@ -797,7 +799,7 @@ function parseTurnContentResult(raw: unknown, path: string): KyberTurnContentRes
   if (raw.projection_status === TURN_PROJECTION_FAILED) {
     return {
       sessionId: requireStringField(raw, 'sessionId', path),
-      turnIndex: requireNumberField(raw, 'turnIndex', path),
+      turnIndex: requireIntegerField(raw, 'turnIndex', path, 0),
       projection_status: raw.projection_status,
       blocks: [],
       parts: [],
@@ -805,7 +807,7 @@ function parseTurnContentResult(raw: unknown, path: string): KyberTurnContentRes
     }
   }
   const sessionId = requireStringField(raw, 'sessionId', path)
-  const turnIndex = requireNumberField(raw, 'turnIndex', path)
+  const turnIndex = requireIntegerField(raw, 'turnIndex', path, 0)
   if (!Array.isArray(raw.parts)) throw malformedSection(path, 'parts is not an array')
   const sourceParts: TurnContentSourcePart[] = raw.parts.map((entry: unknown) => {
     if (!isRaw(entry)) throw malformedSection(path, 'parts entry is not an object')
@@ -3165,7 +3167,7 @@ function parseSessionTurnSection(raw: unknown, path: string): KyberSessionTurnSe
   if (raw.projection_status === TURN_PROJECTION_FAILED && !isRaw(raw.turn)) {
     return {
       sessionId: requireStringField(raw, 'sessionId', path),
-      turnIndex: requireNumberField(raw, 'turnIndex', path),
+      turnIndex: requireIntegerField(raw, 'turnIndex', path, 0),
       context: null,
       projection_status: raw.projection_status,
     }
@@ -3180,7 +3182,7 @@ function parseSessionTurnSection(raw: unknown, path: string): KyberSessionTurnSe
   }
   const section: KyberSessionTurnSection = {
     sessionId: requireStringField(raw, 'sessionId', path),
-    turnIndex: requireNumberField(raw, 'turnIndex', path),
+    turnIndex: requireIntegerField(raw, 'turnIndex', path, 0),
     turn: turn as unknown as KyberSessionTurnRow,
     context: raw.context === null ? null : (raw.context as unknown as KyberContextTurn),
   }
