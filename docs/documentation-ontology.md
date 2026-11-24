@@ -139,7 +139,7 @@ what it is and whose it is.
 |---|---|---|
 | `<name>.standards.md` | `coding-standard` | The standard: six headings, in this order — Naming and layout; Coding standards; Testing; Commands; Security and data handling; Done checklist. |
 | `<name>.rules.md` | `rule` | Prose rules a model reads. They outrank the standard and are not evaluated by the Arbiter. |
-| `<name>.skills.yml` | not governed | The KW skills this technology or role gets: a YAML list of skill names, nothing else (`[]` for none). The skills themselves are in the pool at `<docs-root>/standards/skills/<name>/SKILL.md`, checked by `KW-DOC-SKILL-001` to `-006`, not by the corpus. |
+| `<name>.skills.yml` | not governed | The KW skills this technology or role gets: a YAML list of skill names, nothing else (`[]` for none). The skills themselves are in the pool at `<docs-root>/standards/skills/<name>/SKILL.md`, checked by `KW-DOC-SKILL-001` to `-007`, not by the corpus. |
 | `<name>.arbiter-rules.yml` | not governed | Machine rules the Arbiter evaluates. YAML, no frontmatter, and a file that declares no rule is valid. |
 
 `shared-rules.md` beside the folders holds the rules that apply to every technology. A standard may

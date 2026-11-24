@@ -105,7 +105,7 @@ Set `doc-type: rule` and `technology: <folder>` (or
 two lines and keeps every other line and the body unchanged. Fix it before dispatch: a
 worker that never receives the rules is not told they exist.
 
-### `KW-DOC-SKILL-001` to `-006` — KW skills
+### `KW-DOC-SKILL-001` to `-007` — KW skills
 
 A **KW skill** is on-demand guidance, not a harness skill: a folder
 `<docs-root>/standards/skills/<name>/SKILL.md` (frontmatter `name` and `description` only)
@@ -121,6 +121,7 @@ strings and nothing else; `[]` is a valid empty list.
 | `KW-DOC-SKILL-004` | Error | A pool skill's `name` differs from its folder | Make them equal |
 | `KW-DOC-SKILL-005` | Warning | A legacy `<scope>.skills.md` remains | Move real guidance into a KW skill, list it, delete the file |
 | `KW-DOC-SKILL-006` | Error | A technology or role is named `skills` (the pool folder's name) | Rename the scope |
+| `KW-DOC-SKILL-007` | Error | A pool skill folder holds no `SKILL.md`, or holds one behind a symbolic link (never followed) | Add a real `SKILL.md`, or replace the link with the file |
 
 `kyber-weave docs standards migrate` writes `[]` for a missing `.skills.yml` and does not
 convert a `.skills.md`. Never put a KW skill in a harness skills folder.

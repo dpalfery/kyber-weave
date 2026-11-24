@@ -216,9 +216,9 @@ copies between a harness and the pool unchanged, which no corpus document does. 
 `DocumentLoader` skips every file beneath a docs root's `standards/skills/`, and the standards-folder walk skips the
 `skills` folder (`skills` is therefore a reserved scope name). Without that, every pool file would fail
 `KW-DOC-SPEC-001` and the pool folder `KW-DOC-SPEC-012`. The pool is checked by its own rule family,
-`KW-DOC-SKILL-001` to `-006`, which a repository's `.skills.yml` files and pool are held to by `docs validate`:
+`KW-DOC-SKILL-001` to `-007`, which a repository's `.skills.yml` files and pool are held to by `docs validate`:
 a list that is not names, a listed name with no folder, a pool skill without `name` or `description`, a `name` that
-differs from its folder, a legacy `<scope>.skills.md`, and a scope named `skills`
+differs from its folder, a legacy `<scope>.skills.md`, a scope named `skills`, and a pool folder with no `SKILL.md` or one behind a link
 ([the rows](../ci-pipelines/rule-reference.md#kw-skills--docs-validate)).
 
 How the lists resolve to a prompt, and how `load_skill` reads a skill, are in
