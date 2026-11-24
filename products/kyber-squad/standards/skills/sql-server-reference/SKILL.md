@@ -18,6 +18,13 @@ description: "Reference for SQL Server and Azure SQL T-SQL work: establish the t
 - For an existing database, use the `mssql` tools to read the schema, indexes and
   constraints before proposing an edit. Never assume structure you can verify.
 
+## Hand-off
+
+- Publish the approved table-definition block (column names, data types, nullability, key and
+  index declarations) as the contract that data-access and application code consume.
+- A schema need arrives described in the task; record the design in the plan, then get it
+  approved before publishing the block.
+
 ## Reference index
 
 - Security best practices: https://learn.microsoft.com/sql/relational-databases/security/sql-server-security-best-practices

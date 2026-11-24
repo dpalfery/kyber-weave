@@ -6,6 +6,12 @@ component: KyberSquad
 status: superseded
 owner: dpalfery
 last-reviewed: 2026-11-24
+documentation-impact: extends-component
+impact-components:
+  - KyberSquad
+  - DocGraph
+  - KyberArbiter
+  - KyberDash
 ---
 
 # Kyber-Weave skills that agents load on demand
@@ -134,3 +140,29 @@ KyberDash shows which skills agents actually load, so unused skills can be cut a
 - Run `squad update` into a scratch home and assert no harness skill folder holds a KW skill.
 - Feed KyberDash a session containing a `load_skill` call and assert it appears in the KW skills section and not
   among harness skills.
+
+## Decisions
+
+| ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+|---|---|---|---|---|
+| KW-1 | Plan or direct change? | Promoted to the implementation plan named under the title; the story's In scope, Out of scope, Assumptions and acceptance criteria were its requirements source. | The plan records its own decisions D1 to D27 and AP1. | ANSWERED: owner settled the story 2026-11-22; conductor promoted it 2026-11-24 |
+
+## Closeout mapping
+
+Links are written from this archive entry's location (`docs/archive/todo/`).
+
+| ID | Destination |
+|---|---|
+| KW-1, KW-H1 | [ADR 0093](../../adr/0093-kw-skills-load-on-demand-through-kw-docs.md) and [the archived plan](../plans/2026-11-24-kw-skills-load-on-demand.md), whose Closeout mapping names every canonical document the story's content now lives in. |
+| KyberSquad | [Kyber-Squad architecture](../../kyber-squad/architecture.md#13-kw-skills-the-on-demand-pool) |
+| DocGraph | [DocGraph architecture](../../docgraph/architecture.md#standards-folders-and-the-kw-skill-pool) |
+| KyberArbiter | [Kyber Arbiter architecture](../../kyber-arbiter/architecture.md#kw-skills-in-the-dispatch-prompt) |
+| KyberDash | [KyberDash architecture](../../dash/architecture.md#kw-skill-loads) |
+
+## Design harvest
+
+The story's design is harvested by its successor plan, whose Design harvest and Closeout mapping name every destination.
+
+| ID | Content | Destination |
+|---|---|---|
+| KW-H1 | The KW skill pool, assignment lists, dispatch part, `load_skill`, validation rules and KyberDash section | [ADR 0093](../../adr/0093-kw-skills-load-on-demand-through-kw-docs.md), which links each canonical document |

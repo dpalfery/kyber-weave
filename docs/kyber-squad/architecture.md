@@ -5,9 +5,10 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Domain/Squad
 owner: dpalfery
-last-reviewed: 2026-11-22
+last-reviewed: 2026-11-24
 status: current
 decided-by:
+  - adr/0093-kw-skills-load-on-demand-through-kw-docs
   - adr/0076-test-first-is-one-worker-per-task
   - adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude
   - adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook
@@ -2648,8 +2649,72 @@ the harness-by-harness delivery path are in
 - The design kept the `worker-roster` switch until the removal. It is now `tiered` only, and the
   value `technology` is the configuration error `KW-CONFIG-001`.
 
+## 13. KW skills: the on-demand pool
+
+A **KW skill** is guidance that a Squad agent loads when its description fits the work, instead of every
+agent paying for it in its prompt. It is not a harness skill: harness skills are the folders a harness loads
+itself (`squad install` deploys those), and a KW skill is read only through the kw-docs `load_skill` tool
+([the tool](../docgraph/mcp-runbook.md#load_skillname-projectpath--null)). The two kinds share a file shape and
+nothing else, so a skill copies between them unchanged. The decision and its rejected alternatives are in
+[ADR 0093](../adr/0093-kw-skills-load-on-demand-through-kw-docs.md); the glossary defines the term against
+[ADR 0049](../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md)'s "Kyber-Weave skills".
+
+### The pool and its resolution
+
+- **Repository pool.** `<docs-root>/standards/skills/<name>/SKILL.md`, for every configured docs root; the first
+  root in `ontology.docs-roots` order wins a name. A folder may also hold reference files (for example under
+  `references/`). `DocsLayout.SkillsPool` names the folder.
+- **Shipped pool.** `products/kyber-squad/standards/skills/<name>/`, embedded in the `KyberWeave.Application`
+  assembly as `KwSkills/<name>/<relative path>` with `skills.manifest.yml` listing each skill and its files
+  (the embedded-resource seam reads by name only, so the manifest is the enumeration; `KwSkillPoolContentTests`
+  pins manifest = tree). Nine skills ship: `dotnet-build-diagnostics`, `aws-cli-queries`,
+  `azure-resource-inspection`, `go-gates`, `maui-environment-doctor`, `pylance-tooling`, `rust-cross-build`,
+  `sql-server-reference` and `tauri-v2-reference`.
+- **Repository over shipped.** A repository skill wins the whole name over the shipped skill of the same name,
+  in the list's description and in `load_skill`. `docs init` copies the shipped skills named by the
+  `.skills.yml` files it writes (with the parent's) into the repository pool, and never overwrites a skill folder
+  that already exists.
+- **The corpus skips the pool.** The `SKILL.md` files carry harness frontmatter only, so `DocumentLoader` skips
+  every file beneath a docs root's `standards/skills/` and the standards-folder shape walk skips the `skills`
+  folder. Only the [KW-DOC-SKILL rules](../ci-pipelines/rule-reference.md#kw-skills--docs-validate) check the pool,
+  and a technology or role may not be named `skills`.
+
+### Assignment: `<scope>.skills.yml`
+
+Each technology and role folder under `standards/` holds `<scope>.skills.yml`: a YAML sequence of skill-name
+strings and nothing else; `[]` is a valid empty list and a missing file lists nothing. The list a dispatch carries
+is, in order, the parent technology's list (`builds-on`, one level, as rules inherit), then the technology's own,
+then the role's, with duplicates dropped at their first occurrence (`IKwSkillCatalog.SkillsFor`). Each entry
+carries the name, the description from the `SKILL.md` frontmatter, and its source.
+
+A role folder is `standards/<role>/` where the role is in `ontology.roles` or in the shipped roles. An agent name
+maps to the folder of the same name; `code-reviewer`, `plan-reviewer`, `review-lens` and `review-triage` map to
+`reviewer`; any other agent (`docs-dev`, `product-owner`, `research-agent`, the developer tiers) has no role
+skills. The main conductor session is never dispatched, so the `conductor` role list reaches an agent only when
+that role is dispatched as a sub-agent.
+
+Every shipped `<scope>.skills.md` was migrated: real guidance (build diagnostics, cloud CLI queries, cross-build
+notes, doctor commands, reference indexes) became the nine skills above, and prose that pointed at a harness skill
+or repeated the standard was deleted with its folder left on an empty list. A legacy `<scope>.skills.md` in a host
+repository is reported by `KW-DOC-SKILL-005` and left in place; `docs standards migrate` writes `[]` for a missing
+`.skills.yml` and does not convert it.
+
+### Never deployed to a harness
+
+`squad update` and `squad install` never write a KW skill into a harness skills folder. `SquadSourceLoader` and
+`SquadPacker` read only `products/kyber-squad/skills` and `.apm/skills`, never `standards/`, so the guard needs no
+special case. Three tests keep it so: `KwSkillPoolContentTests.NoKwSkillIsASquadSkillAndThePackCarriesNone` (KW
+skill names are disjoint from every Squad and APM skill name, and no pack entry sits under `standards/skills`),
+and the CI integration test `SquadKyberWeaveSkillsTests.GlobalInstallDeploysNoKwSkill` (a global install into a
+scratch home writes none). Disjoint names matter because an agent that met a KW skill name in its harness's own
+list would load the wrong copy; the list's opening instruction tells it never to.
+
+The dispatch insertion that lists the skills is in
+[the Arbiter architecture](../kyber-arbiter/architecture.md#kw-skills-in-the-dispatch-prompt).
+
 ## Related
 
+- [ADR 0093](../adr/0093-kw-skills-load-on-demand-through-kw-docs.md) — KW skills are a separate pool loaded on demand through kw-docs, never deployed as harness skills
 - [ADR 0067](../adr/0067-copilot-system-prompt-override-is-machine-wide.md) — the opt-in, machine-wide Copilot system-prompt override
 - [Copilot prompt runbook](copilot-prompt-runbook.md) — doctor checks, the `mode=replace` line, silent fallback, and known limits
 - [ADR 0017](../adr/0017-copilot-deterministic-tool-order.md) — Copilot tool membership and global emission order

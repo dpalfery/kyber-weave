@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-23
+last-reviewed: 2026-11-24
 decided-by:
   - adr/0084-kyberdash-csharp-engine
   - adr/0020-kyberdash-one-time-fork
@@ -1280,6 +1280,7 @@ back.
 | `GET /api/kyber/session/{id}/tools` | `SessionToolFigures(sessionKey)` — ranked rows (never-invoked included) plus the `aggregate` priced over every row before paging (`measurable`/`reason`, `maxCost`, `residentCostTotal`, `invocationCount`, `unusedCount`, `unusedRange`, `byServer`, `definitionsSpanId`) | No |
 | `GET /api/kyber/session/{id}/servers` | `SessionToolFigures(sessionKey)` — the same read's server rollups, paged at 25 | No |
 | `GET /api/kyber/session/{id}/skills` | `SessionSkillFigures(sessionKey)` — skill rows paged at 25 with the session total; whole-session counts come from the summary's `skills_listed`/`skills_invoked` | No |
+| `GET /api/kyber/session/{id}/kw-skills` | `SessionKwSkillLoads(sessionKey)` — the session's candidate `load_skill` tool calls, read from `tool_call`, its MCP split, the first 1,024 characters of its reply and its record's start time, in call order; paging is applied over the recognized loads. The call's input is never joined ([KW skill loads](#kw-skill-loads)) | No — only a reply's first 1,024 characters |
 | `GET /api/kyber/session/{id}/requests` | `SessionRequestFigures(sessionKey, page, limit)` plus `RequestPromptPreviews(sessionKey, requestSpanIds)` — the page's request rows, with prompt previews for the page's spans only | **Yes — the page's prompt previews only, fetched because the rows on screen show them** |
 | `GET /api/kyber/session/{id}/reconciliation` | `SessionReconciliationFigures(sessionKey, page, limit)` — reconciliation rows paged at 25 | No |
 | `GET /api/kyber/session/{id}/problems` | `SessionProblems(sessionKey, page, limit)` — problem rows paged at 25 | No |
@@ -1669,6 +1670,34 @@ and the listing text for the first turn listed, fetched through the turn route a
 turn-content route — never from a session-wide payload. The unit tests render these states in a
 simulated DOM and the bundle builds. The states have not yet been checked against a live
 dashboard session.
+
+### KW skill loads
+
+A **KW skill** is on-demand Kyber-Weave guidance an agent reads by calling the kw-docs `load_skill` tool
+([the tool](../docgraph/mcp-runbook.md#load_skillname-projectpath--null)). It is not a harness skill, so it never
+enters the Skills view above, which is built from harness `Skill` tool calls alone
+(`SkillExtraction.ExtractInvoked`). KyberDash records a load from the tool calls it already stores, with no schema
+change and the JSON-withholding rule untouched ([ADR 0093](../adr/0093-kw-skills-load-on-demand-through-kw-docs.md)).
+
+- **What is a load.** A `tool_call` whose `tool_call_mcp.server_name`, normalized (lower case, `_` to `-`), is
+  `kw-docs` and whose `server_tool_name` is `load_skill`; or, where the harness does not split the name, whose
+  `tool_name` is one of `mcp__kw-docs__load_skill`, `mcp__kw_docs__load_skill`, `kw-docs_load_skill`,
+  `kw-docs__load_skill` or `kw-docs/load_skill`. Another server's `load_skill` is not a load. A harness that
+  records the call under a spelling not listed here is under-counted; nothing else is affected.
+- **Which skill.** The input is never read: a JSON tool input is stored as size and fingerprint only
+  (`STORE_JSON_TEXT_REFUSED` guards the text column), but the reply is plain text and is kept. The skill is the first
+  `skill: <name>` line before the first blank line of the reply's first 1,024 characters
+  (`tool_call_result_text.text`), accepted only if it matches `^[a-z0-9]+(-[a-z0-9]+)*$` and is at most 64
+  characters; otherwise it is null and the web shows "not recorded". An unknown name, a malformed skill or a harness
+  that stores no result text therefore still shows the load, with the skill not recorded. This couples to the reply
+  header `load_skill` writes: keep `skill:` on the reply's second line.
+- **Agent and time.** The agent is the session's `agent_name` and the time is the record's `started_at_utc`.
+- **The route and the section.** `GET /api/kyber/session/{id}/kw-skills?page=&limit=` (default 25) as in the table
+  above, one read per section like [ADR 0092](../adr/0092-dashboard-views-load-by-section-and-page.md)'s routes. The
+  web's `SessionKwSkillsSection` renders it as its own section after Skills, with skill, agent, session and time
+  columns and the usual loading, error and empty states ("No KW skills were loaded in this session."); it carries no
+  section number, so the numbering of the other sections is unchanged. A global, cross-session KW skills view is not
+  built.
 
 ### Message role on content parts
 
@@ -2366,6 +2395,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridgeEngine`:
 | `/api/kyber/session/:id/tools` | `GET` | `{ entries, data, total, page, limit, aggregate }` | Ranked tool rows (never-invoked included and flagged), 25 per page, with the page-independent `aggregate` (`measurable` / `reason`, `maxCost`, `residualCostTotal`, `invocationCount`, `unusedCount`, `unusedRange`, `byServer`, `definitionsSpanId`) priced over every row before paging. |
 | `/api/kyber/session/:id/servers` | `GET` | `{ entries, data, total, page, limit }` | Server rollup rows, 25 per page. |
 | `/api/kyber/session/:id/skills` | `GET` | `{ rows, total, page, limit }` or the not-measurable verdict | Skill rows, 25 per page; the whole-block `{availability: 'not_measurable', reason}` verdict when neither side is measured. Whole-list aggregates are not served yet ([skills view contract](#skills-view-contract)). |
+| `/api/kyber/session/:id/kw-skills` | `GET` | `{ rows, total, limit, offset, page }` | KW skill loads, 25 per page (`?page=&limit=`), in call order; 404 for an unknown session. A row is `{ skill: string\|null, agent: string\|null, session_id, span_id, loaded_at: string\|null }`. The web shows it as its own `KW skills` section right after Skills, apart from harness skills ([KW skill loads](#kw-skill-loads)). |
 | `/api/kyber/session/:id/requests` | `GET` | `{ entries, data, total, page, limit }` | Request rows (`request`, `timestamp`, `turns`, `model`, `prompt` preview), 25 per page. Prompt previews are read for the page's spans only. |
 | `/api/kyber/session/:id/reconciliation` | `GET` | `{ entries, data, total, page, limit }` | Reconciliation rows (today's snake-case fields, null-match rows omitted as before), 25 per page. |
 | `/api/kyber/session/:id/problems` | `GET` | `{ entries, data, total, page, limit }` | Problem rows, 25 per page. |
