@@ -317,8 +317,14 @@ public sealed class RunStartRunner : IRunStartRunner
         if (!located.Succeeded)
             return located;
 
+        // git answers with one path on one line. Anything else (nothing, several lines, a character no path may hold)
+        // is not a path to write to, so it fails the step rather than reaching the file system.
+        string answer = located.StandardOutput.Trim();
+        if (answer.Length == 0 || answer.Contains('\n', StringComparison.Ordinal) || answer.IndexOfAny(Path.GetInvalidPathChars()) >= 0)
+            return new GitOutcome(1, string.Empty, $"git did not name the exclude file: '{answer}'");
+
         string root = Path.TrimEndingDirectorySeparator(_paths.GetFullPath(_repositoryRoot, _environment.CurrentDirectory));
-        string excludePath = Path.Combine(root, located.StandardOutput.Trim());
+        string excludePath = Path.Combine(root, answer);
 
         try
         {
