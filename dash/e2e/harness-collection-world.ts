@@ -1,7 +1,7 @@
 // Shared harness-collection world backed by `kyberdash e2e-seed` (never ~/.kyberdash/canon.db).
 
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync, rmdirSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -119,10 +119,28 @@ function assertValidatedTempRoot(rootDir: string, baseTmpDir: string, errorPrefi
   if (isIsolatedTempRoot(rootDir, baseTmpDir)) {
     return
   }
+  const resolvedBase = resolve(baseTmpDir)
+  const resolvedRoot = resolve(rootDir)
+  const basePrefix = ensureTrailingSep(resolvedBase)
+  if (
+    rootDir.trim() === '' ||
+    rootDir.includes('\0') ||
+    baseTmpDir.trim() === '' ||
+    baseTmpDir.includes('\0') ||
+    resolvedRoot === resolvedBase ||
+    !resolvedRoot.startsWith(basePrefix)
+  ) {
+    throw new Error(`${errorPrefix}: ${rootDir}`)
+  }
   try {
-    rmdirSync(rootDir)
+    const stat = lstatSync(resolvedRoot)
+    if (!stat.isSymbolicLink() && stat.isDirectory()) {
+      rmSync(resolvedRoot, { recursive: true, force: true })
+    }
   } catch (cleanupError) {
-    throw new Error(`${errorPrefix}: ${rootDir}`, { cause: cleanupError })
+    if (!(cleanupError instanceof Error && 'code' in cleanupError && cleanupError.code === 'ENOENT')) {
+      throw new Error(`${errorPrefix}: ${rootDir}`, { cause: cleanupError })
+    }
   }
   throw new Error(`${errorPrefix}: ${rootDir}`)
 }

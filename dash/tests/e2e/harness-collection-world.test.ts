@@ -1,8 +1,26 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const mkdtempHook = vi.hoisted(() => ({
+  recordedDirs: [] as string[],
+  onCreated: undefined as ((createdDir: string) => void) | undefined,
+}))
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  return {
+    ...actual,
+    mkdtempSync: ((...args: Parameters<typeof actual.mkdtempSync>) => {
+      const created = actual.mkdtempSync(...args)
+      mkdtempHook.recordedDirs.push(created)
+      mkdtempHook.onCreated?.(created)
+      return created
+    }) as typeof actual.mkdtempSync,
+  }
+})
 
 import {
   cleanupIsolatedTempRoot,
@@ -115,8 +133,39 @@ describe('harness-collection-world isolated temp root containment (Issue 1)', ()
     const invalidTmp = join(sandboxRoot, '.kyberdash')
     mkdirSync(invalidTmp, { recursive: true })
 
+    mkdtempHook.recordedDirs.length = 0
     expect(() => createTempRoot(invalidTmp)).toThrow(/escaped tmpdir/)
-    expect(readdirSync(invalidTmp)).toEqual([])
+    expect(mkdtempHook.recordedDirs).toHaveLength(1)
+    const tempDir = mkdtempHook.recordedDirs[0]
+    expect(tempDir).toBeDefined()
+    if (tempDir !== undefined) {
+      expect(tempDir.startsWith(join(invalidTmp, 'kyber-harness-collection-'))).toBe(true)
+      expect(existsSync(tempDir)).toBe(false)
+    }
+  })
+
+  it('recursively removes a non-empty temp root when assertValidatedTempRoot rejects containment', () => {
+    const invalidTmp = join(sandboxRoot, '.kyberdash')
+    mkdirSync(invalidTmp, { recursive: true })
+
+    mkdtempHook.recordedDirs.length = 0
+    mkdtempHook.onCreated = (createdDir) => {
+      mkdirSync(join(createdDir, 'nested'), { recursive: true })
+      writeFileSync(join(createdDir, 'nested', 'race.txt'), 'concurrent write', 'utf8')
+    }
+    try {
+      expect(() => createTempRoot(invalidTmp)).toThrow(/escaped tmpdir/)
+    } finally {
+      mkdtempHook.onCreated = undefined
+    }
+
+    expect(mkdtempHook.recordedDirs).toHaveLength(1)
+    const tempDir = mkdtempHook.recordedDirs[0]
+    expect(tempDir).toBeDefined()
+    if (tempDir !== undefined) {
+      expect(tempDir.startsWith(join(invalidTmp, 'kyber-harness-collection-'))).toBe(true)
+      expect(existsSync(tempDir)).toBe(false)
+    }
   })
 })
 
@@ -295,8 +344,15 @@ describe('startIsolatedServer temp root cleanup on failure (Finding 4)', () => {
     process.env['TEMP'] = invalidTmp
     process.env['TMP'] = invalidTmp
     try {
+      mkdtempHook.recordedDirs.length = 0
       await expect(startIsolatedServer({ startupTimeoutMs: 500 })).rejects.toThrow(/isolated server temp root invalid/)
-      expect(readdirSync(invalidTmp)).toEqual([])
+      expect(mkdtempHook.recordedDirs).toHaveLength(1)
+      const tempDir = mkdtempHook.recordedDirs[0]
+      expect(tempDir).toBeDefined()
+      if (tempDir !== undefined) {
+        expect(tempDir.startsWith(join(invalidTmp, 'kyber-otel-e2e-'))).toBe(true)
+        expect(existsSync(tempDir)).toBe(false)
+      }
     } finally {
       if (prevTmpdir === undefined) delete process.env['TMPDIR']
       else process.env['TMPDIR'] = prevTmpdir
@@ -310,6 +366,9 @@ describe('startIsolatedServer temp root cleanup on failure (Finding 4)', () => {
   it('removes the mkdtemp directory when child spawn fails during initialization', async () => {
     const validTmp = join(sandboxRoot, 'valid-tmp')
     mkdirSync(validTmp, { recursive: true })
+    // Simulate a Node runtime cache directory (e.g. node-compile-cache in CI) sharing baseTmpDir.
+    const runtimeCacheDir = join(validTmp, 'node-compile-cache')
+    mkdirSync(runtimeCacheDir, { recursive: true })
     const prevTmpdir = process.env['TMPDIR']
     const prevTemp = process.env['TEMP']
     const prevTmp = process.env['TMP']
@@ -319,8 +378,16 @@ describe('startIsolatedServer temp root cleanup on failure (Finding 4)', () => {
     process.env['TMP'] = validTmp
     process.env['KYBERDASH_BIN'] = join(sandboxRoot, 'missing-kyberdash-binary')
     try {
+      mkdtempHook.recordedDirs.length = 0
       await expect(startIsolatedServer({ startupTimeoutMs: 5_000 })).rejects.toThrow(/spawn failed|exited/)
-      expect(readdirSync(validTmp)).toEqual([])
+      expect(mkdtempHook.recordedDirs).toHaveLength(1)
+      const tempDir = mkdtempHook.recordedDirs[0]
+      expect(tempDir).toBeDefined()
+      if (tempDir !== undefined) {
+        expect(tempDir.startsWith(join(validTmp, 'kyber-otel-e2e-'))).toBe(true)
+        expect(existsSync(tempDir)).toBe(false)
+      }
+      expect(existsSync(runtimeCacheDir)).toBe(true)
     } finally {
       if (prevTmpdir === undefined) delete process.env['TMPDIR']
       else process.env['TMPDIR'] = prevTmpdir

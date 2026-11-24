@@ -440,6 +440,24 @@ export class UpstreamResponseTooLargeError extends Error {
   }
 }
 
+export class StaticAssetTooLargeError extends Error {
+  readonly code = 'ERR_STATIC_ASSET_TOO_LARGE'
+
+  constructor(message: string) {
+    super(message)
+    this.name = 'StaticAssetTooLargeError'
+  }
+}
+
+export class PathTraversalError extends Error {
+  readonly code = 'ERR_PATH_TRAVERSAL'
+
+  constructor(message: string) {
+    super(message)
+    this.name = 'PathTraversalError'
+  }
+}
+
 async function readRequestBody(req: IncomingMessage): Promise<string> {
   return new Promise<string>((resolveBody, rejectBody) => {
     const chunks: Buffer[] = []
@@ -552,12 +570,22 @@ export type StaticAssetResolution =
   | { readonly ok: true; readonly filePath: string; readonly contentType: string }
   | { readonly ok: false; readonly statusCode: 400 | 403 | 404; readonly message: string }
 
-function verifyNoSymlinkSegments(
+export function verifyNoSymlinkSegments(
   realDistDir: string,
   segments: readonly string[],
 ): { readonly ok: true } | { readonly ok: false; readonly statusCode: 403 | 404; readonly message: string } {
   let current = realDistDir
   for (const segment of segments) {
+    if (
+      segment === '.' ||
+      segment === '..' ||
+      segment.length === 0 ||
+      segment.includes('\0') ||
+      segment.includes('/') ||
+      (process.platform === 'win32' && segment.includes('\\'))
+    ) {
+      throw new PathTraversalError('Invalid path segment during static asset traversal check')
+    }
     current = join(current, segment)
     try {
       if (lstatSync(current).isSymbolicLink()) {
@@ -648,11 +676,26 @@ export function resolveStaticAsset(distDir: string, pathname: string): StaticAss
 
 export type StaticAssetReadResult =
   | { readonly ok: true; readonly contents: Buffer; readonly contentType: string }
-  | { readonly ok: false; readonly statusCode: 403 | 404; readonly message: string }
+  | { readonly ok: false; readonly statusCode: 403 | 404 | 413; readonly message: string }
 
-function mapStaticAssetOpenError(error: unknown): { readonly ok: false; readonly statusCode: 403 | 404; readonly message: string } {
-  const code = error instanceof Error && 'code' in error ? error.code : undefined
-  if (code === 'ELOOP' || code === 'EEXIST' || code === 'EACCES' || code === 'EPERM') {
+export function mapStaticAssetOpenError(
+  error: unknown,
+): { readonly ok: false; readonly statusCode: 403 | 404 | 413; readonly message: string } {
+  const code =
+    error !== null && typeof error === 'object' && 'code' in error
+      ? (error as { readonly code?: unknown }).code
+      : undefined
+  if (error instanceof StaticAssetTooLargeError || code === 'ERR_STATIC_ASSET_TOO_LARGE') {
+    return { ok: false, statusCode: 413, message: 'Payload Too Large' }
+  }
+  if (
+    error instanceof PathTraversalError ||
+    code === 'ERR_PATH_TRAVERSAL' ||
+    code === 'ELOOP' ||
+    code === 'EEXIST' ||
+    code === 'EACCES' ||
+    code === 'EPERM'
+  ) {
     return { ok: false, statusCode: 403, message: 'Forbidden' }
   }
   return { ok: false, statusCode: 404, message: 'Not found' }
@@ -670,7 +713,7 @@ function readOpenedFileDescriptor(fd: number, maxBytes: number): Buffer {
     }
     totalBytes += bytesRead
     if (totalBytes > maxBytes) {
-      throw new Error(`Static asset exceeded ${maxBytes} byte limit`)
+      throw new StaticAssetTooLargeError(`Static asset exceeded ${maxBytes} byte limit`)
     }
     chunks.push(bytesRead === chunkSize ? chunk : chunk.subarray(0, bytesRead))
   }
@@ -680,7 +723,9 @@ function readOpenedFileDescriptor(fd: number, maxBytes: number): Buffer {
 export function readResolvedStaticAsset(
   distDir: string,
   resolved: Extract<StaticAssetResolution, { readonly ok: true }>,
+  options?: { readonly maxBytes?: number },
 ): StaticAssetReadResult {
+  const maxBytes = resolveMaxResponseBytes(options?.maxBytes, 'maxBytes')
   let realDistDir: string
   try {
     realDistDir = realpathSync(distDir)
@@ -710,8 +755,9 @@ export function readResolvedStaticAsset(
     // Re-verify path containment and symlink-free traversal after opening the descriptor
     // so neither a final-component swap nor a parent-directory symlink swap can leak files.
     const relPath = relative(realDistDir, targetPath)
-    const segments = relPath.split(/[\\/]+/).filter((seg) => seg.length > 0)
-    if (segments.length === 0 || segments.some((seg) => seg === '..' || seg === '.')) {
+    const separatorPattern = process.platform === 'win32' ? /[\\/]+/ : /\/+/
+    const segments = relPath.split(separatorPattern).filter((seg) => seg.length > 0)
+    if (segments.length === 0) {
       return { ok: false, statusCode: 403, message: 'Forbidden' }
     }
 
@@ -730,11 +776,11 @@ export function readResolvedStaticAsset(
       return { ok: false, statusCode: 403, message: 'Forbidden' }
     }
 
-    if (fdStat.size > MAX_PROXY_RESPONSE_BYTES) {
-      return { ok: false, statusCode: 403, message: 'Forbidden' }
+    if (fdStat.size > maxBytes) {
+      throw new StaticAssetTooLargeError(`Static asset (${fdStat.size} bytes) exceeded ${maxBytes} byte limit`)
     }
 
-    const contents = readOpenedFileDescriptor(fd, MAX_PROXY_RESPONSE_BYTES)
+    const contents = readOpenedFileDescriptor(fd, maxBytes)
     return { ok: true, contents, contentType: resolved.contentType }
   } catch (error) {
     return mapStaticAssetOpenError(error)
@@ -753,7 +799,12 @@ function serveStaticAsset(res: ServerResponse, distDir: string, pathname: string
     return
   }
 
-  const asset = readResolvedStaticAsset(distDir, resolved)
+  let asset: StaticAssetReadResult
+  try {
+    asset = readResolvedStaticAsset(distDir, resolved)
+  } catch (error) {
+    asset = mapStaticAssetOpenError(error)
+  }
   if (!asset.ok) {
     res.writeHead(asset.statusCode, { 'content-type': 'text/plain; charset=utf-8' })
     res.end(asset.message)

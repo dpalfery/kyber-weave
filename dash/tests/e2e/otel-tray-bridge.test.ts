@@ -1,21 +1,52 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const fsHooks = vi.hoisted(() => ({
+  fstatSizeOverride: undefined as number | undefined,
+}))
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  return {
+    ...actual,
+    fstatSync: ((...args: Parameters<typeof actual.fstatSync>) => {
+      const stat = actual.fstatSync(...args)
+      if (fsHooks.fstatSizeOverride !== undefined && typeof stat.size === 'number') {
+        const overriddenSize = fsHooks.fstatSizeOverride
+        return new Proxy(stat, {
+          get(target, prop, receiver) {
+            if (prop === 'size') {
+              return overriddenSize
+            }
+            const value = Reflect.get(target, prop, receiver)
+            return typeof value === 'function' ? value.bind(target) : value
+          },
+        })
+      }
+      return stat
+    }) as typeof actual.fstatSync,
+  }
+})
 
 import {
   MAX_PROXY_RESPONSE_BYTES,
+  PathTraversalError,
+  StaticAssetTooLargeError,
   UpstreamResponseTooLargeError,
   buildTrayViewState,
   fetchTrayBridgeState,
   isValidApiVersion,
   isValidRefreshCadenceMinutes,
+  mapStaticAssetOpenError,
   parseTrayBridgeStateSnapshot,
   readBoundedResponseBuffer,
   readResolvedStaticAsset,
   resolveStaticAsset,
   startTrayBridge,
+  verifyNoSymlinkSegments,
   type TrayBridgeHandle,
   type TraySettings,
 } from '../../e2e/otel-tray-bridge.js'
@@ -74,6 +105,7 @@ describe('otel-tray-bridge hardening (Issues 4, 5, 6, 7, 8)', () => {
   })
 
   afterEach(async () => {
+    fsHooks.fstatSizeOverride = undefined
     while (activeBridges.length > 0) {
       const bridge = activeBridges.pop()
       if (bridge) {
@@ -585,6 +617,125 @@ describe('otel-tray-bridge hardening (Issues 4, 5, 6, 7, 8)', () => {
 
       const dirRes = await fetch(`${bridge.url}/assets`)
       expect(dirRes.status).toBe(404)
+    })
+  })
+
+  describe('PR #662 fixes: 413 size-cap handling, POSIX backslash filenames, and verifyNoSymlinkSegments traversal checks', () => {
+    it('returns 413 Payload Too Large when fstatSync size exceeds maxBytes or readSync exceeds maxBytes', () => {
+      writeFileSync(join(distDir, 'exact.txt'), '0123456789abcdef', 'utf8')
+      writeFileSync(join(distDir, 'over-fstat.txt'), '0123456789abcdefX', 'utf8')
+
+      const exactResolved = resolveStaticAsset(distDir, '/exact.txt')
+      expect(exactResolved.ok).toBe(true)
+      if (!exactResolved.ok) return
+      const exactResult = readResolvedStaticAsset(distDir, exactResolved, { maxBytes: 16 })
+      expect(exactResult.ok).toBe(true)
+
+      const overFstatResolved = resolveStaticAsset(distDir, '/over-fstat.txt')
+      expect(overFstatResolved.ok).toBe(true)
+      if (!overFstatResolved.ok) return
+      const fstatOverResult = readResolvedStaticAsset(distDir, overFstatResolved, { maxBytes: 16 })
+      expect(fstatOverResult).toEqual({
+        ok: false,
+        statusCode: 413,
+        message: 'Payload Too Large',
+      })
+
+      // Simulate a concurrent growth race where fstatSync sees <= maxBytes but readSync reads > maxBytes.
+      fsHooks.fstatSizeOverride = 4
+      try {
+        const readOverResult = readResolvedStaticAsset(distDir, overFstatResolved, { maxBytes: 16 })
+        expect(readOverResult).toEqual({
+          ok: false,
+          statusCode: 413,
+          message: 'Payload Too Large',
+        })
+      } finally {
+        fsHooks.fstatSizeOverride = undefined
+      }
+    })
+
+    it('maps StaticAssetTooLargeError and ERR_STATIC_ASSET_TOO_LARGE explicitly to 413 in mapStaticAssetOpenError', () => {
+      const capError = new StaticAssetTooLargeError('too large')
+      expect(capError.code).toBe('ERR_STATIC_ASSET_TOO_LARGE')
+      expect(mapStaticAssetOpenError(capError)).toEqual({
+        ok: false,
+        statusCode: 413,
+        message: 'Payload Too Large',
+      })
+
+      const codedError = Object.assign(new Error('cap exceeded'), { code: 'ERR_STATIC_ASSET_TOO_LARGE' })
+      expect(mapStaticAssetOpenError(codedError)).toEqual({
+        ok: false,
+        statusCode: 413,
+        message: 'Payload Too Large',
+      })
+    })
+
+    it('returns HTTP 413 Payload Too Large when serving an oversized static asset over startTrayBridge', async () => {
+      const oversizedPath = join(distDir, 'oversized.bin')
+      writeFileSync(oversizedPath, '', 'utf8')
+      truncateSync(oversizedPath, MAX_PROXY_RESPONSE_BYTES + 1)
+
+      const stub = await startStubServer((_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end('{}')
+      })
+      activeServers.push(stub)
+
+      const bridge = await startTrayBridge({ serverUrl: stub.url, distDir })
+      activeBridges.push(bridge)
+
+      const oversizedRes = await fetch(`${bridge.url}/oversized.bin`)
+      expect(oversizedRes.status).toBe(413)
+      expect(await oversizedRes.text()).toBe('Payload Too Large')
+    })
+
+    it('treats backslash as a filename character on POSIX in readResolvedStaticAsset', () => {
+      if (process.platform === 'win32') {
+        return
+      }
+      const posixBackslashPath = join(distDir, 'foo\\bar.js')
+      writeFileSync(posixBackslashPath, 'console.log("backslash-ok")', 'utf8')
+
+      const result = readResolvedStaticAsset(distDir, {
+        ok: true,
+        filePath: posixBackslashPath,
+        contentType: 'application/javascript; charset=utf-8',
+      })
+      expect(result.ok).toBe(true)
+      if (result.ok) {
+        expect(result.contents.toString('utf8')).toBe('console.log("backslash-ok")')
+      }
+    })
+
+    it('rejects . and .. traversal segments directly inside verifyNoSymlinkSegments', () => {
+      expect(verifyNoSymlinkSegments(distDir, ['assets', 'app.js'])).toEqual({ ok: true })
+
+      for (const badSegments of [
+        ['.'],
+        ['..'],
+        ['assets', '..'],
+        ['assets', '..', 'index.html'],
+        ['assets', '.'],
+        [''],
+        ['a/b'],
+      ]) {
+        let caught: unknown
+        try {
+          verifyNoSymlinkSegments(distDir, badSegments)
+        } catch (error) {
+          caught = error
+        }
+        expect(caught, JSON.stringify(badSegments)).toBeInstanceOf(PathTraversalError)
+        expect((caught as PathTraversalError).code, JSON.stringify(badSegments)).toBe('ERR_PATH_TRAVERSAL')
+      }
+
+      expect(mapStaticAssetOpenError(new PathTraversalError('traversal'))).toEqual({
+        ok: false,
+        statusCode: 403,
+        message: 'Forbidden',
+      })
     })
   })
 })
