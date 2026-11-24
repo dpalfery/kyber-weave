@@ -4,11 +4,11 @@ using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.KwSkills;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Review.Catalogue;
 using YamlDotNet.Core;
-using YamlDotNet.RepresentationModel;
 
 namespace KyberWeave.Core.Docs.Scaffolding;
 
@@ -320,20 +320,9 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
             return [];
         }
 
-        try
+        if (KwSkillFiles.TryParseList(text, out List<string> names))
         {
-            YamlStream stream = new();
-            stream.Load(new StringReader(text));
-            if (stream.Documents.Count == 1
-                && stream.Documents[0].RootNode is YamlSequenceNode sequence
-                && sequence.Children.All(child => child is YamlScalarNode { Value: { Length: > 0 } }))
-            {
-                return [.. sequence.Children.Cast<YamlScalarNode>().Select(node => node.Value!.Trim())];
-            }
-        }
-        catch (YamlException exception)
-        {
-            throw new InvalidDataException($"The shipped '{scope}' skills list is not valid YAML: {exception.Message}", exception);
+            return names;
         }
 
         throw new InvalidDataException($"The shipped '{scope}' skills list is not a YAML sequence of skill names.");

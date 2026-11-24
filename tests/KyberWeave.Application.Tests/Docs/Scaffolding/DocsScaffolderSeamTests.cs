@@ -57,6 +57,18 @@ public sealed class DocsScaffolderSeamTests
         Assert.False(_disk.DirectoryExists("/kw/outside"));
     }
 
+    [Fact]
+    public void AShippedSkillsListThatIsNotASequenceOfNamesStopsTheScaffold()
+    {
+        _resources.Add("Standards.csharp.skills.yml", "name: not-a-list\n");
+
+        InvalidDataException error = Assert.Throws<InvalidDataException>(() =>
+            Scaffolder().Scaffold("repo", "docs", reviewGates: false, standards: ["csharp"]));
+
+        Assert.Contains("csharp", error.Message, StringComparison.Ordinal);
+        Assert.Contains("skills list", error.Message, StringComparison.Ordinal);
+    }
+
     private sealed class NoFiles : IRepositoryFileLister
     {
         public IReadOnlyList<string> List(string repositoryRoot) => [];
