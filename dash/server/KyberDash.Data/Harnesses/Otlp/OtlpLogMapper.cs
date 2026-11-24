@@ -49,7 +49,7 @@ public static class OtlpLogMapper
 
     private static readonly string[] ModelKeys = ["gen_ai.response.model", "gen_ai.request.model", "model"];
     private static readonly string[] DurationKeys = ["duration_ms", "durationMs"];
-    private static readonly string[] CostUsdKeys = ["cost_usd", "costUsd"];
+    private static readonly string[] CostUsdKeys = ["gen_ai.usage.cost", "cost_usd", "costUsd"];
     private static readonly string[] ErrorMessageKeys = ["error.message", "error"];
     private static readonly string[] EventNameKeys = ["event.name", "event_name"];
 
@@ -417,7 +417,7 @@ public static class OtlpLogMapper
             Parts: BuildCollectedParts(normalized, log.Body, item.EventName),
             Tool: null,
             Agent: null,
-            SkillsInvoked: [],
+            SkillsInvoked: SkillExtraction.ExtractInvoked(log.Attributes),
             AgentInstanceId: null,
             ToolDefinitions: [],
             Signals: new CollectedRecordSignals(errorMessage, null, null, null),
@@ -720,10 +720,19 @@ public static class OtlpLogMapper
         return null;
     }
 
-    private static CollectedCost? ExtractReportedCost(
+    /// <summary>
+    /// Extracts a finite non-negative reported cost from <paramref name="normalizedCost"/> or
+    /// fallback USD cost attributes in <paramref name="attributes"/>.
+    /// </summary>
+    /// <param name="normalizedCost">Normalized adapter cost block.</param>
+    /// <param name="attributes">Optional raw OTLP attributes inspected when <paramref name="normalizedCost"/> has no cost.</param>
+    /// <returns>The reported <see cref="CollectedCost"/>, or <see langword="null"/> when absent or invalid.</returns>
+    public static CollectedCost? ExtractReportedCost(
         CostBlock normalizedCost,
-        IReadOnlyDictionary<string, JsonElement> attributes)
+        IReadOnlyDictionary<string, JsonElement>? attributes)
     {
+        ArgumentNullException.ThrowIfNull(normalizedCost);
+
         if (normalizedCost.Value is double costValue
             && double.IsFinite(costValue)
             && costValue >= 0
@@ -731,6 +740,11 @@ public static class OtlpLogMapper
             && !JsonDocumentText.IsDocument(normalizedCost.Currency))
         {
             return new CollectedCost(costValue, normalizedCost.Currency);
+        }
+
+        if (attributes is null)
+        {
+            return null;
         }
 
         foreach (string key in CostUsdKeys)

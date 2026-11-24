@@ -5,7 +5,7 @@ import { Card } from '../components/ui/card.js'
 import { Skeleton } from '../components/ui/skeleton.js'
 import {
   fetchRun,
-  fetchKyberSessions,
+  fetchKyberSession,
   type KyberRunDetail,
   type KyberExecutionSummary,
   type ScorecardData,
@@ -185,14 +185,20 @@ export function RunDetail({
 
   // A run may expose its execution tree before it has materialized a `turns`
   // array. The session projection is already persisted and lets the spine
-  // navigate those measured turns without manufacturing a run rollup.
-  const { data: executionSession } = useQuery({
-    queryKey: ['kyber-execution-session', activeExecution?.sessionId],
-    queryFn: async () => {
-      const sessions = await fetchKyberSessions(run?.harness)
-      return sessions.find((session) => (session.sessionId ?? session.session_id) === activeExecution?.sessionId)
-    },
-    enabled: !!activeExecution?.sessionId,
+  // navigate those measured turns without manufacturing a run rollup. The
+  // session resolves through the bounded summary route — one bounded read for
+  // the identity fields and the turn count — never by downloading the
+  // sessions list and searching it.
+  const executionSessionId = activeExecution?.sessionId
+  const {
+    data: executionSession,
+    isLoading: executionSessionLoading,
+    isError: executionSessionError,
+    error: executionSessionErrorValue,
+  } = useQuery({
+    queryKey: ['kyber-execution-session', executionSessionId],
+    queryFn: () => fetchKyberSession(executionSessionId!),
+    enabled: executionSessionId !== undefined,
   })
 
   // Filter turns by selected execution if available
@@ -204,7 +210,9 @@ export function RunDetail({
       )
     }
 
-    const turnCount = executionSession?.turnCount ?? executionSession?.turn_count
+    // The bounded summary carries the session's own turn count; a summary
+    // without one is unmeasured, not zero.
+    const turnCount = executionSession?.summary?.turn_count
     if (
       !activeExecutionId ||
       typeof turnCount !== 'number' ||
@@ -442,8 +450,21 @@ export function RunDetail({
               </div>
 
               {displayedTurns.length === 0 ? (
-                <div className="py-8 text-center text-xs text-muted-foreground">
-                  No turns recorded for selected execution.
+                <div
+                  className="py-8 text-center text-xs text-muted-foreground"
+                  data-testid={
+                    !run?.turns && executionSessionLoading
+                      ? 'turns-session-loading'
+                      : !run?.turns && executionSessionError
+                        ? 'turns-session-error'
+                        : 'turns-empty'
+                  }
+                >
+                  {!run?.turns && executionSessionLoading
+                    ? 'Reading the execution session…'
+                    : !run?.turns && executionSessionError
+                      ? `The session's turn count could not be read: ${String((executionSessionErrorValue as Error)?.message)}`
+                      : 'No turns recorded for selected execution.'}
                 </div>
               ) : (
                 <div className="overflow-x-auto max-h-72">

@@ -7,6 +7,24 @@ import {
   type SchemaCostAnalysis,
   type RankedTool,
 } from './SchemaCostRanking.js'
+import type { PagedWindow } from './session/types.js'
+
+/**
+ * The ranking's props as the tools section feeds them: the page's rows plus the
+ * aggregate the engine priced over every row before paging, and the window the
+ * page came in under. Declared as an intersection so the fixtures stay
+ * structural against the component's own props.
+ */
+type SectionRankingProps = React.ComponentProps<typeof SchemaCostRanking> & {
+  aggregate?: {
+    maxCost: number | null
+    unusedCount: number
+    offeredCount: number | null
+    unusedRange: { tokenResidencies: number; floor: number; ceiling: number; currency?: string } | null
+    byServer: Record<string, number> | Map<string, number>
+  }
+  pager?: PagedWindow
+}
 
 const reactInternals = (
   React as unknown as {
@@ -235,5 +253,99 @@ describe('SchemaCostRanking: per-tool schema token count', () => {
     expect(html).toContain('data-testid="tool-schema-tokens-Bash"')
     expect(html).toContain('250 tok')
     expect(html).toContain('20 turns')
+  })
+})
+
+describe('SchemaCostRanking: on the section page and its aggregate', () => {
+  // The tools route answers one page of rows with an aggregate the engine
+  // priced over every row before paging. Page two is held back in every test
+  // here: the whole-ranking figures must be right with only page one loaded.
+  const pageRows = [
+    { name: 'small', server: null, invocations: 2, total_schema_cost: 300, invoked: true, in_definitions: true, is_mcp: false },
+    { name: 'big', server: null, invocations: 1, total_schema_cost: 500, invoked: true, in_definitions: true, is_mcp: false },
+  ]
+
+  const wholeRanking: SectionRankingProps['aggregate'] = {
+    maxCost: 5000,
+    unusedCount: 5,
+    offeredCount: 40,
+    unusedRange: { tokenResidencies: 7500, floor: 0.03, ceiling: 0.12, currency: 'USD' },
+    byServer: { git: 4500, fs: 6000 },
+  }
+
+  it('scales every bar from the aggregate maxCost, not from the page rows', () => {
+    // The page's largest resident cost is 500; the whole ranking's is 5000.
+    // A bar filled to 100% would claim `big` is the most expensive tool the
+    // session offered — a claim page two can only contradict.
+    const props: SectionRankingProps = { tools: pageRows, aggregate: wholeRanking }
+    const html = renderHtml(<SchemaCostRanking {...props} />)
+    const bigRow = html.slice(
+      html.indexOf('data-testid="tool-row-big"'),
+      html.indexOf('data-testid="schema-server-rollup"'),
+    )
+    expect(bigRow).toContain('data-testid="schema-tool-bar-big"')
+    expect(bigRow).toContain('width:10%')
+    expect(bigRow).not.toContain('width:100%')
+  })
+
+  it('keeps the page-derived scale when no aggregate has been served', () => {
+    const html = renderHtml(<SchemaCostRanking tools={pageRows} />)
+    expect(html).toContain('width:100%')
+  })
+
+  it('heads the ranking with the whole-ranking counts from the aggregate and summary, not the page rows', () => {
+    const props: SectionRankingProps = { tools: pageRows, aggregate: wholeRanking }
+    const html = renderHtml(<SchemaCostRanking {...props} />)
+    expect(html).toContain('5 of 40 offered tools were never invoked')
+    expect(html).not.toContain('0 of 2')
+  })
+
+  it('builds the server rollup from the aggregate byServer even when the page rows name none of it', () => {
+    const props: SectionRankingProps = { tools: pageRows, aggregate: wholeRanking }
+    const html = renderHtml(<SchemaCostRanking {...props} />)
+    expect(html).toContain('data-testid="schema-server-git"')
+    expect(html).toContain('data-testid="schema-server-fs"')
+    expect(html).toContain('4.5K')
+    expect(html).toContain('6.0K')
+  })
+
+  it('takes the unused-schema waste range from the aggregate', () => {
+    const props: SectionRankingProps = { tools: pageRows, aggregate: wholeRanking }
+    const html = renderHtml(<SchemaCostRanking {...props} />)
+    expect(html).toContain('data-testid="schema-unused-range"')
+    expect(html).toMatch(/\$0\.03\s+–\s+\$0\.12/)
+  })
+
+  it('hides the waste range and states the cost not measurable when the aggregate priced none', () => {
+    const props: SectionRankingProps = { tools: pageRows, aggregate: { ...wholeRanking, unusedRange: null } }
+    const html = renderHtml(<SchemaCostRanking {...props} />)
+    expect(html).not.toContain('data-testid="schema-unused-range"')
+    expect(html).toContain('not measurable')
+  })
+
+  it('pages the ranking at 25 rows and reports the page the viewer turned to', () => {
+    const onPageChange = vi.fn()
+    const props: SectionRankingProps = {
+      tools: pageRows,
+      aggregate: wholeRanking,
+      pager: { page: 1, total: 30, limit: 25, onPageChange },
+    }
+    const tree = SchemaCostRanking(props)
+    const pager = findElementByTestId(tree, 'list-pager')
+    expect(pager).not.toBeNull()
+    const next = findElementByTestId(tree, 'pager-next')
+    expect(next).not.toBeNull()
+    ;(next?.props.onClick as () => void)()
+    expect(onPageChange).toHaveBeenCalledWith(2)
+  })
+
+  it('renders no pager while the whole list fits one page', () => {
+    const props: SectionRankingProps = {
+      tools: pageRows,
+      aggregate: wholeRanking,
+      pager: { page: 1, total: 2, limit: 25, onPageChange: () => {} },
+    }
+    const html = renderHtml(<SchemaCostRanking {...props} />)
+    expect(html).not.toContain('data-testid="list-pager"')
   })
 })

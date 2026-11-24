@@ -1,5 +1,7 @@
 import { cn, fmtTokens } from '../lib/utils.js'
 import { MCP_SERVER_COLORS } from './SessionSpendCharts.js'
+import { Pager } from './ui/Pager.js'
+import type { PagedWindow } from './session/types.js'
 
 /**
  * Wire + analysis shape for schema-cost ranking (R8).
@@ -39,7 +41,8 @@ export type SchemaCostAnalysis =
   | {
       measurable: false
       invocationCount: number
-      reason?: 'declared_not_measurable'
+      /** The historic union marker, or the engine's own stored reason for the verdict. */
+      reason?: 'declared_not_measurable' | string
     }
 
 /**
@@ -63,6 +66,16 @@ export type SchemaCostToolRow = {
 export type SchemaCostRankingProps = {
   schema?: SchemaCostAnalysis | null
   tools?: SchemaCostToolRow[]
+  /**
+   * The tools section's whole-ranking figures, priced by the engine over every
+   * row before paging. When present it is the source for the bar scale, the
+   * per-server rollup, the waste range and the headline counts, so they are
+   * already whole-session values with only page one loaded. A caller without
+   * one (a caller holding every row) derives the same figures from its rows.
+   */
+  aggregate?: SchemaCostRankingAggregate | null
+  /** The paging window the ranking's rows arrived under; absent when the caller holds the whole list. */
+  pager?: PagedWindow
   /** Kept for the session inspector: a click still opens the existing tool drawer. */
   onSelectTool?: (tool: {
     name: string
@@ -74,6 +87,20 @@ export type SchemaCostRankingProps = {
     in_definitions?: boolean
   }) => void
   className?: string
+}
+
+/** The tools section's aggregate, priced over every row before paging. */
+export type SchemaCostRankingAggregate = {
+  /** The bar scale: the largest resident cost in the whole ranking. */
+  maxCost: number | null
+  /** Offered-but-never-invoked tools, counted over every row. */
+  unusedCount: number
+  /** Offered tools overall, as the session summary measured it; null when it did not measure it. */
+  offeredCount: number | null
+  /** The unused-schema cost band, priced over every row. */
+  unusedRange: UnusedSchemaRange | null
+  /** Per-server resident-cost rollup, priced over every row. */
+  byServer: Record<string, number> | Map<string, number>
 }
 
 type DisplayTool = {
@@ -180,7 +207,7 @@ function unusedResidentCost(schema: SchemaCostAnalysis | null | undefined, never
   return measured.reduce((sum, tool) => sum + tool.cost!, 0)
 }
 
-export function SchemaCostRanking({ schema, tools, onSelectTool, className }: SchemaCostRankingProps) {
+export function SchemaCostRanking({ schema, tools, aggregate, pager, onSelectTool, className }: SchemaCostRankingProps) {
   if (schema?.measurable === false) {
     return (
       <div
@@ -208,7 +235,13 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
 
   const ranked = displayToolsOf(schema, tools)
   const neverInvoked = neverInvokedOf(schema, ranked)
-  const unusedCost = unusedResidentCost(schema, neverInvoked)
+  // Whole-ranking figures come from the section's aggregate when it is here —
+  // priced over every row before paging, so they are already whole-session
+  // values with only page one loaded. Without one, they derive from the rows
+  // the caller holds.
+  const unusedCost = aggregate
+    ? (aggregate.unusedRange?.tokenResidencies ?? undefined)
+    : unusedResidentCost(schema, neverInvoked)
 
   if (ranked.length === 0) {
     return (
@@ -245,10 +278,21 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
   }
 
   const measuredCosts = ranked.map((tool) => tool.cost).filter((cost): cost is number => cost !== undefined)
-  const maxCost = measuredCosts.length > 0 ? Math.max(...measuredCosts) : undefined
+  const maxCost = aggregate
+    ? (aggregate.maxCost ?? undefined)
+    : measuredCosts.length > 0
+      ? Math.max(...measuredCosts)
+      : undefined
 
   const serverRollup: Array<{ label: string; cost?: number; builtin: boolean; mcp: boolean }> = []
-  if (schema?.measurable) {
+  if (aggregate) {
+    for (const [label, cost] of byServerEntries(aggregate.byServer).sort(
+      ([a, costA], [b, costB]) => costB - costA || (a < b ? -1 : a > b ? 1 : 0),
+    )) {
+      const mcp = tools?.some((tool) => serverOf(tool) === label && tool.is_mcp === true) ?? true
+      serverRollup.push({ label, cost, builtin: false, mcp })
+    }
+  } else if (schema?.measurable) {
     for (const [label, cost] of byServerEntries(schema.byServer).sort(
       ([a, costA], [b, costB]) => costB - costA || (a < b ? -1 : a > b ? 1 : 0),
     )) {
@@ -294,9 +338,13 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
     })
   }
 
-  const unusedRange = schema?.measurable ? schema.unusedRange : undefined
-  const offered = ranked.length
-  const unusedCount = neverInvoked.length
+  const unusedRange = aggregate
+    ? (aggregate.unusedRange ?? undefined)
+    : schema?.measurable
+      ? schema.unusedRange
+      : undefined
+  const offered = aggregate ? (aggregate.offeredCount ?? ranked.length) : ranked.length
+  const unusedCount = aggregate ? aggregate.unusedCount : neverInvoked.length
   const serverCosts = serverRollup
     .map((row) => row.cost)
     .filter((cost): cost is number => cost !== undefined)
@@ -505,6 +553,17 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
             Floor assumes every residency a cache read; ceiling assumes every one was fresh input.
           </p>
         </div>
+      )}
+
+      {pager != null && (
+        <Pager
+          page={pager.page}
+          limit={pager.limit}
+          total={pager.total}
+          onPageChange={pager.onPageChange}
+          loading={pager.loading}
+          ariaLabel="Tool ranking pages"
+        />
       )}
     </div>
   )

@@ -29,6 +29,9 @@ public static class DashEndpointMappings
     private const string PagingInvalidMessage =
         "limit and page must be positive whole numbers and offset a non-negative whole number";
 
+    private const string OffsetNotPageStartMessage =
+        "offset must fall on the start of a page (a multiple of limit); these routes page by page and limit";
+
     private static readonly string[] PostAnalyticsOperations =
     [
         "query",
@@ -49,13 +52,22 @@ public static class DashEndpointMappings
         RouteGroupBuilder kyber = endpoints.MapGroup("/api/kyber");
         kyber.MapGet("/sessions", SessionsAsync);
         kyber.MapGet("/session", SessionsAsync);
-        kyber.MapGet("/session/{id}", SessionDetailAsync);
         kyber.MapGet("/session/{id}/summary", SessionSummaryAsync);
+        kyber.MapGet("/session/{id}/charts", SessionChartsAsync);
+        kyber.MapGet("/session/{id}/requests", SessionRequestsAsync);
+        kyber.MapGet("/session/{id}/reconciliation", SessionReconciliationAsync);
+        kyber.MapGet("/session/{id}/problems", SessionProblemsAsync);
+        kyber.MapGet("/session/{id}/tools", SessionToolsAsync);
+        kyber.MapGet("/session/{id}/servers", SessionServersAsync);
+        kyber.MapGet("/session/{id}/skills", SessionSkillsAsync);
+        kyber.MapGet("/session/{id}/timeline", SessionTimelineAsync);
         kyber.MapGet("/session/{id}/content", SessionContentAsync);
+        kyber.MapGet("/session/{id}/subagents", SessionSubagentsAsync);
         kyber.MapGet("/session/{id}/turn/{index}", TurnFiguresAsync);
         kyber.MapGet("/session/{id}/turn/{index}/content", TurnContentAsync);
         kyber.MapGet("/span/{id}/attributes", SpanAttributesAsync);
-        kyber.MapGet("/session/{sessionKey}/stored-fields", StoredFieldsAsync);
+        kyber.MapGet("/session/{sessionKey}/stored-fields", StoredFieldsInventoryAsync);
+        kyber.MapGet("/session/{sessionKey}/stored-fields/{table}", StoredFieldRowsAsync);
 
         kyber.MapGet("/compare", CompareAsync);
         kyber.MapGet("/compare/runs", CompareRunsAsync);
@@ -183,29 +195,204 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
 
-        int? limit = DashHttp.OptionalPositiveInt(request.Query, "limit", out bool invalidLimit);
-        if (invalidLimit)
-            return DashHttp.Error(StatusCodes.Status400BadRequest, "limit must be a positive whole number");
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSessionPageLimit);
+        if (refusal is not null)
+            return refusal;
 
-        string? harness = request.Query.TryGetValue("harness", out Microsoft.Extensions.Primitives.StringValues h) ? h.ToString() : null;
+        string? harness = DashHttp.NormalizeFilter(DashHttp.OptionalQueryString(request.Query, "harness"));
+        string? search = DashHttp.OptionalQueryString(request.Query, "q");
         return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, new { sessions = query.GetSessions(limit, harness) }),
+            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetSessionPage(page, limit, harness, search)),
             cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task<IResult> SessionDetailAsync(string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static async Task<IResult> SessionSubagentsAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
+
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSubagentPageLimit, id);
+        if (refusal is not null)
+            return refusal;
+
         return await Task.Run<IResult>(
-            () => DashHttp.FromNullableJson(query.GetSessionDetail(id), "Session not found"),
+            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetSubagentPage(id, page, limit)),
             cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Reads the page window the sessions routes share — <c>limit</c> and <c>page</c>, with
+    /// <c>offset</c> accepted only where it starts a page — or the response that refuses it: 404
+    /// for a blank session id, 400 for a malformed window. The default page size is also the
+    /// largest the route serves (100 sessions, 25 section rows), so a larger <c>limit</c> is clamped.
+    /// </summary>
+    /// <param name="request">Incoming request carrying the query string.</param>
+    /// <param name="defaultLimit">Rows per page when the request names no limit, and the most it may name.</param>
+    /// <param name="sessionId">The session the route reads, or <see langword="null"/> for the sessions list.</param>
+    /// <returns>The clamped limit, the one-based page, and the refusal to answer, or <see langword="null"/> when the window is valid.</returns>
+    private static (int Limit, int Page, IResult? Refusal) ReadPageWindow(HttpRequest request, int defaultLimit, string? sessionId = null)
+    {
+        if (sessionId is not null && string.IsNullOrWhiteSpace(sessionId))
+            return (defaultLimit, 1, DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"));
+
+        (int limit, int _, int page) = DashHttp.Pagination(request.Query, defaultLimit, out bool invalid, maxLimit: defaultLimit);
+        if (invalid)
+            return (limit, page, DashHttp.Error(StatusCodes.Status400BadRequest, PagingInvalidMessage));
+
+        if (!OffsetStartsThePage(request.Query, limit, page))
+            return (limit, page, DashHttp.Error(StatusCodes.Status400BadRequest, OffsetNotPageStartMessage));
+
+        return (limit, page, null);
+    }
+
+    /// <summary>
+    /// Whether a request's <c>offset</c>, when it carries one, is the first row of the page
+    /// <paramref name="page"/> names. The sessions routes page by <c>page</c> and <c>limit</c>:
+    /// any other offset would be snapped to a page start and answer a window the caller did not
+    /// ask for, so it is refused instead.
+    /// </summary>
+    /// <param name="query">The request's query string.</param>
+    /// <param name="limit">Rows per page, after clamping.</param>
+    /// <param name="page">The one-based page the request resolves to.</param>
+    /// <returns><see langword="true"/> when the request carries no offset or its offset starts that page.</returns>
+    private static bool OffsetStartsThePage(IQueryCollection query, int limit, int page) =>
+        DashHttp.OptionalNonNegativeInt(query, "offset") is not int rawOffset
+        || rawOffset == (long)(page - 1) * limit;
 
     private static async Task<IResult> SessionSummaryAsync(string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
         return await Task.Run<IResult>(
             () => DashHttp.FromNullableJson(query.GetSessionSummary(id), "Session not found"),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> SessionChartsAsync(string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        return await Task.Run<IResult>(
+            () => query.GetSessionCharts(id) is { } charts
+                ? DashHttp.NoStoreJson(StatusCodes.Status200OK, charts)
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> SessionRequestsAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(query);
+
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit, id);
+        if (refusal is not null)
+            return refusal;
+
+        return await Task.Run<IResult>(
+            () => query.GetSessionRequests(id, page, limit) is { } payload
+                ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> SessionReconciliationAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(query);
+
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit, id);
+        if (refusal is not null)
+            return refusal;
+
+        return await Task.Run<IResult>(
+            () => query.GetSessionReconciliation(id, page, limit) is { } payload
+                ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> SessionProblemsAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(query);
+
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit, id);
+        if (refusal is not null)
+            return refusal;
+
+        return await Task.Run<IResult>(
+            () => query.GetSessionProblems(id, page, limit) is { } payload
+                ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> SessionToolsAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(query);
+
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit, id);
+        if (refusal is not null)
+            return refusal;
+
+        return await Task.Run<IResult>(
+            () => query.GetSessionTools(id, page, limit) is { } payload
+                ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> SessionServersAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(query);
+
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit, id);
+        if (refusal is not null)
+            return refusal;
+
+        return await Task.Run<IResult>(
+            () => query.GetSessionServers(id, page, limit) is { } payload
+                ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> SessionSkillsAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(query);
+
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit, id);
+        if (refusal is not null)
+            return refusal;
+
+        return await Task.Run<IResult>(
+            () => query.GetSessionSkills(id, page, limit) is { } payload
+                ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Serves <c>GET /api/kyber/session/{id}/timeline</c>: one page of one level of the session's
+    /// timeline tree. The <c>parent</c> query value arrives URL-encoded when it names a synthetic
+    /// container (<c>%28auxiliary%29</c>), so it is read through the query collection, which hands
+    /// the decoded id to the service.
+    /// </summary>
+    private static async Task<IResult> SessionTimelineAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(query);
+
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit, id);
+        if (refusal is not null)
+            return refusal;
+
+        string? parent = DashHttp.OptionalQueryString(request.Query, "parent");
+        return await Task.Run<IResult>(
+            () => query.GetSessionTimeline(id, parent, page, limit) is { } payload
+                ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -269,11 +456,27 @@ public static class DashEndpointMappings
             cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task<IResult> StoredFieldsAsync(string sessionKey, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static async Task<IResult> StoredFieldsInventoryAsync(string sessionKey, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
         return await Task.Run<IResult>(
-            () => DashHttp.FromNullableJson(query.GetStoredFields(sessionKey), "Session not found"),
+            () => DashHttp.FromNullableJson(query.GetStoredFieldsInventory(sessionKey), "Session not found"),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> StoredFieldRowsAsync(HttpRequest request, string sessionKey, string table, IDashboardQueryService query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(query);
+
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit, sessionKey);
+        if (refusal is not null)
+            return refusal;
+
+        return await Task.Run<IResult>(
+            () => query.GetStoredFieldRows(sessionKey, table, page, limit) is { } payload
+                ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session or table not found"),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -383,15 +586,22 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
 
-        string? harness = DashHttp.OptionalQueryString(request.Query, "harness");
-        string? sessionId = DashHttp.OptionalQueryString(request.Query, "session");
-        string? runId = DashHttp.OptionalQueryString(request.Query, "run");
-        int limit = DashHttp.OptionalPositiveInt(request.Query, "limit", out bool invalidLimit) ?? 50;
+        string? harness = DashHttp.NormalizeFilter(DashHttp.OptionalQueryString(request.Query, "harness"));
+        string? sessionId = DashHttp.OptionalQueryString(request.Query, "session")?.Trim();
+        string? runId = DashHttp.OptionalQueryString(request.Query, "run")?.Trim();
+        int? parsedLimit = DashHttp.OptionalPositiveInt(request.Query, "limit", out bool invalidLimit);
         if (invalidLimit)
             return DashHttp.Error(StatusCodes.Status400BadRequest, "limit must be a positive whole number");
 
+        int limit = Math.Clamp(parsedLimit ?? 50, 1, 200);
+        int? parsedDays = DashHttp.OptionalPositiveInt(request.Query, "days", out bool invalidDays);
+        if (invalidDays)
+            return DashHttp.Error(StatusCodes.Status400BadRequest, "days must be a positive whole number");
+
+        int days = parsedDays ?? 7;
+
         return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetReport(harness, sessionId, runId, limit)),
+            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetReport(harness, sessionId, runId, limit, days)),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -867,8 +1077,12 @@ public static class DashEndpointMappings
         if (document is null)
             return NotBuiltResult();
 
+        // The app shell is a document wherever it is served: at "/", as index.html, and on every
+        // client-side route (/session/s/turn/0), where the asset service answers with index.html.
+        // It must never be cached, or an old shell keeps naming asset hashes a later build dropped.
         bool isDocument = string.Equals(path, "/", StringComparison.Ordinal)
-            || string.Equals(Path.GetExtension(path), ".html", StringComparison.OrdinalIgnoreCase);
+            || string.Equals(Path.GetExtension(path), ".html", StringComparison.OrdinalIgnoreCase)
+            || (!IsFileName(path) && document.ContentType.StartsWith("text/html", StringComparison.OrdinalIgnoreCase));
         context.Response.Headers.CacheControl = isDocument
             ? "no-store"
             : "public, max-age=31536000, immutable";

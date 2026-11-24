@@ -1,11 +1,19 @@
 import * as React from 'react'
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 
-import { fetchKyberSessions, type KyberSessionSummary } from '../lib/kyberApi.js'
+import {
+  fetchKyberSessionPage,
+  fetchKyberSubagentPage,
+  KYBER_SESSIONS_PAGE_LIMIT,
+  KYBER_SUBAGENTS_PAGE_LIMIT,
+  type KyberPage,
+  type KyberSessionSummary,
+} from '../lib/kyberApi.js'
 import { formatSessionId, formatSessionTitle } from '../lib/labels.js'
 import { cn, usd } from '../lib/utils.js'
 import { Card } from './ui/card.js'
+import { Pager } from './ui/Pager.js'
 import { Skeleton } from './ui/skeleton.js'
 import { AgentSessionDashboard } from './AgentSessionDashboard.js'
 import { formatCostFigure, normalizeCostBlock } from './SessionCostPanel.js'
@@ -21,6 +29,9 @@ export const ALL_PROVIDER = 'agent-all' as const
 
 /** The scope that means every harness, as the shell's selector spells it. */
 export const ALL_HARNESS = 'all' as const
+
+/** How long the search box waits for the user to stop typing before it narrows the query. */
+export const SESSIONS_SEARCH_DEBOUNCE_MS = 400
 
 // Labels never determine membership or merge canonical harness identities: they
 // only name a harness in prose, so anything unrecognised keeps its own id.
@@ -302,28 +313,76 @@ export function ContextExplorer({ activeHarness, onSelectSession, sessions: init
     }))
   }
 
-  // One unfiltered read backs every scope, so a harness this machine has never
-  // collected simply narrows to nothing instead of minting a request filter.
+  // The search box is display state; the committed query trails it, so a
+  // burst of keystrokes narrows the list once, not once per character.
+  const [searchInput, setSearchInput] = useState('')
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+
+  useEffect(() => {
+    if (searchInput === search) return
+    const timer = setTimeout(() => {
+      setSearch(searchInput)
+      setPage(1)
+    }, SESSIONS_SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [searchInput, search])
+
+  // The list requests the page the server decides: the shell's harness scope
+  // and the search text travel on the query string, so a page costs what it
+  // shows and not what the store holds. A harness this machine has never
+  // collected simply answers an empty page instead of minting a filter.
+  const harness = scope === ALL_HARNESS ? undefined : scope
+  // Optional initial rows used by testing or custom embeddings: they stand in
+  // for the whole page, so the query sleeps and the pager has no total.
+  const embedded = initialSessions !== undefined
   const {
-    data: kyberData,
+    data: kyberPage,
     isLoading: isKyberLoading,
+    isFetching: isKyberFetching,
     isError: isKyberError,
     error: kyberError,
   } = useQuery({
-    queryKey: ['kyber-sessions'],
-    queryFn: () => fetchKyberSessions(),
+    queryKey: ['kyber-sessions', scope, search, page],
+    queryFn: () =>
+      fetchKyberSessionPage({
+        page,
+        limit: KYBER_SESSIONS_PAGE_LIMIT,
+        harness,
+        q: search === '' ? undefined : search,
+      }),
+    enabled: !embedded,
     staleTime: 30_000,
+    // The previous page stays on screen while the next one loads: the pager
+    // disables instead, so a page turn never blanks a list the user was
+    // reading.
+    placeholderData: keepPreviousData,
   })
 
-  const sourceData = initialSessions ?? kyberData
-  const sessions =
-    scope === ALL_HARNESS ? sourceData : sourceData?.filter((s) => s.harness === scope)
+  const sourcePage: KyberPage<KyberSessionSummary> | undefined =
+    initialSessions !== undefined
+      ? { entries: initialSessions, data: initialSessions, total: initialSessions.length, page: 1, limit: KYBER_SESSIONS_PAGE_LIMIT }
+      : kyberPage
+  const sessions = sourcePage?.entries
 
-  const isLoading = initialSessions ? false : isKyberLoading
-  const isError = initialSessions ? false : isKyberError
+  const isLoading = embedded ? false : isKyberLoading
+  const isError = embedded ? false : isKyberError
 
   return (
     <Card className="overflow-hidden">
+      {!embedded && (
+        <div className="border-b border-border px-4 py-2.5">
+          <input
+            type="search"
+            data-testid="explorer-search"
+            aria-label="Search sessions"
+            placeholder="Search sessions…"
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            className="w-full rounded-md border border-border bg-outer-background px-3 py-1.5 text-xs text-foreground placeholder:text-tertiary-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
+      )}
       {isLoading && (
         <div className="flex flex-col gap-2 p-4" data-testid="explorer-loading">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -338,7 +397,7 @@ export function ContextExplorer({ activeHarness, onSelectSession, sessions: init
         </p>
       )}
 
-      {!isLoading && !isError && sourceData && (
+      {!isLoading && !isError && sourcePage && (
         <>
           {sessions?.length === 0 && (
             <p className="px-4 py-6 text-sm text-tertiary-foreground" data-testid="explorer-empty">
@@ -363,27 +422,104 @@ export function ContextExplorer({ activeHarness, onSelectSession, sessions: init
                   onToggleSubagents={() => toggleSubagents(sid)}
                 />
                 {hasSubagents && isSubagentsExpanded && (
-                  <div data-testid="subagent-children" className="pl-6 border-l border-border/50">
-                    {s.subagents!.map((child) => {
-                      const childSid = child.session_id || child.sessionId || ''
-                      return (
-                        <AgentSessionRow
-                          key={childSid}
-                          s={child}
-                          open={openId === childSid}
-                          onToggle={() => selectSession(openId === childSid ? null : childSid)}
-                          onSelectSession={(id) => selectSession(id)}
-                          isChild
-                        />
-                      )
-                    })}
-                  </div>
+                  <SubagentChildren
+                    key={`${scope}:${sid}`}
+                    root={s}
+                    openId={openId}
+                    onToggleSession={(childSid) => selectSession(openId === childSid ? null : childSid)}
+                    onSelectSession={(id) => selectSession(id)}
+                  />
                 )}
               </React.Fragment>
             )
           })}
+          {sourcePage.total > sourcePage.limit && (
+            <Pager
+              page={page}
+              limit={sourcePage.limit}
+              total={sourcePage.total}
+              onPageChange={setPage}
+              loading={isKyberFetching}
+              ariaLabel="Sessions pages"
+            />
+          )}
         </>
       )}
     </Card>
+  )
+}
+
+/**
+ * The children of one expanded root: the first subagents the sessions page
+ * carried inline, and the rest paged at the root's own route through the
+ * shared pager. One page shows at a time — the inline preview is page one,
+ * which costs nothing to show — and a deeper page that fails to load reads
+ * as an error, never as "no more subagents".
+ */
+function SubagentChildren({
+  root,
+  openId,
+  onToggleSession,
+  onSelectSession,
+}: {
+  root: KyberSessionSummary
+  openId: string | null
+  onToggleSession: (id: string) => void
+  onSelectSession: (id: string) => void
+}) {
+  const rootId = root.session_id || root.sessionId || ''
+  const inline = root.subagents ?? []
+  const total = root.subagent_total
+  const paged = typeof total === 'number' && total > inline.length
+  const [page, setPage] = useState(1)
+
+  // Pages beyond the preview are the only ones this route answers for; page
+  // one is the preview itself, already on screen.
+  const {
+    data: deeperPage,
+    isError: pageError,
+    error: pageErrorValue,
+    isFetching: pageFetching,
+  } = useQuery({
+    queryKey: ['kyber-subagents', rootId, page],
+    queryFn: () => fetchKyberSubagentPage(rootId, page),
+    enabled: paged && page > 1,
+    placeholderData: (previous) => previous,
+    staleTime: 30_000,
+  })
+
+  const children = page === 1 || !paged ? inline : deeperPage?.entries ?? inline
+
+  return (
+    <div data-testid="subagent-children" className="pl-6 border-l border-border/50">
+      {pageError && (
+        <p className="px-4 py-1.5 text-xs text-tertiary-foreground" data-testid="subagent-children-error">
+          Failed to load subagents page {page}: {String((pageErrorValue as Error)?.message)}
+        </p>
+      )}
+      {children.map((child) => {
+        const childSid = child.session_id || child.sessionId || ''
+        return (
+          <AgentSessionRow
+            key={childSid}
+            s={child}
+            open={openId === childSid}
+            onToggle={() => onToggleSession(childSid)}
+            onSelectSession={(id) => onSelectSession(id)}
+            isChild
+          />
+        )
+      })}
+      {paged && (
+        <Pager
+          page={page}
+          limit={KYBER_SUBAGENTS_PAGE_LIMIT}
+          total={total ?? 0}
+          onPageChange={setPage}
+          loading={pageFetching}
+          ariaLabel={`Subagent pages of ${formatSessionId(rootId)}`}
+        />
+      )}
+    </div>
   )
 }

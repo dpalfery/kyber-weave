@@ -139,7 +139,10 @@ public static class CanonRecordHydration
         };
     }
 
-    private static string PartKeyOf(ContentBucket bucket) => bucket switch
+    /// <summary>Maps a collected content-part bucket to the canonical part key the pipeline uses.</summary>
+    /// <param name="bucket">Bucket recorded on the content part.</param>
+    /// <returns>The canonical part key, which is also the stored bucket name.</returns>
+    public static string PartKeyOf(ContentBucket bucket) => bucket switch
     {
         ContentBucket.SystemPrompt => "system_prompt",
         ContentBucket.ToolDefinitions => "tool_definitions",

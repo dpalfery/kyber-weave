@@ -72,7 +72,7 @@ public class CodexLocalShellTests
         InMemoryRelationalStore store = new();
         store.WriteBatch(batch);
 
-        CollectedRecord? storedChild = store.GetRecord(child.RecordId);
+        CollectedRecord? storedChild = store.FindRecord(child.RecordId);
         Assert.NotNull(storedChild);
         Assert.NotNull(storedChild.Tool);
         Assert.True(storedChild.Tool.Succeeded);
@@ -142,7 +142,7 @@ public class CodexLocalShellTests
         InMemoryRelationalStore store = new();
         store.WriteBatch(batch);
 
-        CollectedRecord? storedUnpaired = store.GetRecord(unpaired.RecordId);
+        CollectedRecord? storedUnpaired = store.FindRecord(unpaired.RecordId);
         Assert.NotNull(storedUnpaired?.Tool);
         Assert.False(storedUnpaired.Tool.Succeeded);
     }
@@ -174,7 +174,7 @@ public class CodexLocalShellTests
         InMemoryRelationalStore store = new();
         store.WriteBatch(batch);
 
-        CollectedRecord? storedChild = store.GetRecord(child.RecordId);
+        CollectedRecord? storedChild = store.FindRecord(child.RecordId);
         Assert.NotNull(storedChild?.Tool);
         Assert.Null(storedChild.Tool.Succeeded);
         Assert.Equal(RecordStatus.Unset, storedChild.Status);

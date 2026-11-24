@@ -27,6 +27,23 @@ public partial class CanonSessionProjectorEngine
     /// <summary>Maximum timestamp skew (ms) for exact-counter or Cursor overlap twin collapsing.</summary>
     public const long TwinTurnMaxSkewMs = 60_000;
 
+    /// <summary>Default per-session record count a read-path projection pass may rebuild in one pass.</summary>
+    /// <remarks>
+    /// A dirty session with more records than the budget is deferred: the read path must answer
+    /// within a bounded read, so oversized sessions stay dirty for the maintenance pass
+    /// (<c>kyber build</c> and the job scheduler) instead of stalling the request.
+    /// </remarks>
+    public const int DefaultReadPathSessionRecordBudget = 2_000;
+
+    /// <summary>Default total record count one read-path projection pass may rebuild.</summary>
+    /// <remarks>
+    /// The per-session budget bounds one oversized session; this budget bounds the whole pass,
+    /// so a cold read pass over thousands of small sessions rebuilds a bounded prefix of them
+    /// inside the request and leaves the rest dirty for the next pass or the maintenance
+    /// rebuild instead of rebuilding the whole store at once.
+    /// </remarks>
+    public const int DefaultReadPathPassRecordBudget = 20_000;
+
     private const int PromptPreviewLength = 200;
     private const string FileSourcePrefix = "codeburn/";
     private const string DroidHarness = "droid";
@@ -61,6 +78,9 @@ public partial class CanonSessionProjectorEngine
     private readonly IProjectionStore? projections;
     private readonly IOperationalStore? operationalStore;
     private readonly IPricingRepository pricing;
+    private readonly int readPathSessionRecordBudget;
+    private readonly int readPathPassRecordBudget;
+    private int projectionPassInFlight;
 
     /// <summary>
     /// Initializes a relational <see cref="CanonSessionProjectorEngine"/> projecting typed session
@@ -70,21 +90,29 @@ public partial class CanonSessionProjectorEngine
     /// <param name="projections">Typed projection store receiving session, context, schema, timeline, and finding rows.</param>
     /// <param name="operationalStore">Operational store backing the token counter and projection watermarks.</param>
     /// <param name="pricing">Model rate-table repository used when resolving context windows.</param>
+    /// <param name="readPathSessionRecordBudget">Per-session record count a read-path pass may rebuild before deferring the session.</param>
+    /// <param name="readPathPassRecordBudget">Total record count one read-path pass may rebuild before deferring every later session.</param>
     public CanonSessionProjectorEngine(
         IRelationalStoreReader reader,
         IProjectionStore projections,
         IOperationalStore operationalStore,
-        IPricingRepository pricing)
+        IPricingRepository pricing,
+        int readPathSessionRecordBudget = DefaultReadPathSessionRecordBudget,
+        int readPathPassRecordBudget = DefaultReadPathPassRecordBudget)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(projections);
         ArgumentNullException.ThrowIfNull(operationalStore);
         ArgumentNullException.ThrowIfNull(pricing);
+        ArgumentOutOfRangeException.ThrowIfLessThan(readPathSessionRecordBudget, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(readPathPassRecordBudget, 1);
 
         this.reader = reader;
         this.projections = projections;
         this.operationalStore = operationalStore;
         this.pricing = pricing;
+        this.readPathSessionRecordBudget = readPathSessionRecordBudget;
+        this.readPathPassRecordBudget = readPathPassRecordBudget;
     }
 
     [GeneratedRegex(@"^invoke_agent(?:[ :]|$)", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
@@ -732,11 +760,73 @@ public partial class CanonSessionProjectorEngine
     /// Runs an incremental session projection pass over the store, rebuilding
     /// only session keys dirtied since the previous pass (or all keys on a full/first pass).
     /// </summary>
+    /// <remarks>
+    /// This is the maintenance entry: the CLI's <c>kyber build</c>, the refresh engine, the
+    /// clean service, and the job scheduler call it, and it never defers a dirty session.
+    /// </remarks>
     /// <returns>Summary of built, skipped, and pruned sessions plus emitted finding count.</returns>
     public ProjectionPassReport ProjectIncremental()
     {
-        return ProjectIncrementalRelational();
+        if (!TryBeginProjectionPass())
+        {
+            return RefusedProjectionPassReport();
+        }
+
+        try
+        {
+            return ProjectIncrementalRelational(forReads: false);
+        }
+        finally
+        {
+            EndProjectionPass();
+        }
     }
+
+    /// <summary>
+    /// Runs the read-path variant of the incremental projection pass: the same attribution-driven
+    /// identities and skip decisions, but a dirty session whose record count exceeds the
+    /// per-session budget is deferred rather than rebuilt, stays dirty in the write-back, and is
+    /// listed in <see cref="ProjectionPassReport.DeferredKeys"/> for a maintenance pass to
+    /// rebuild later.
+    /// </summary>
+    /// <remarks>
+    /// The entry exists so a request path never pays for a whole-store record read or an
+    /// oversized rebuild: it reads full records only for the sessions it rebuilds. When another
+    /// pass is already in flight the call returns a zero report instead of waiting.
+    /// </remarks>
+    /// <returns>Summary of built, skipped, and pruned sessions, emitted findings, and deferred keys.</returns>
+    public ProjectionPassReport ProjectIncrementalForReads()
+    {
+        if (!TryBeginProjectionPass())
+        {
+            return RefusedProjectionPassReport();
+        }
+
+        try
+        {
+            return ProjectIncrementalRelational(forReads: true);
+        }
+        finally
+        {
+            EndProjectionPass();
+        }
+    }
+
+    /// <summary>Claims the single projection pass slot; <see langword="false"/> when a pass is already in flight.</summary>
+    private bool TryBeginProjectionPass() => Interlocked.CompareExchange(ref projectionPassInFlight, 1, 0) == 0;
+
+    /// <summary>Releases the single projection pass slot; called from <c>finally</c> so a faulted pass cannot leave it claimed.</summary>
+    private void EndProjectionPass() => Interlocked.Exchange(ref projectionPassInFlight, 0);
+
+    /// <summary>The report a pass entry returns when another pass is already in flight.</summary>
+    private static ProjectionPassReport RefusedProjectionPassReport() => new(
+        Built: 0,
+        Skipped: 0,
+        Pruned: 0,
+        Findings: 0,
+        RebuiltKeys: [],
+        SkippedKeys: [],
+        DeferredKeys: null);
 
     private bool HasCurrentProjectionEnvironment()
     {
@@ -2398,7 +2488,7 @@ public partial class CanonSessionProjectorEngine
     /// same flow the projection service already uses.
     /// </para>
     /// </remarks>
-    private ProjectionPassReport ProjectIncrementalRelational()
+    private ProjectionPassReport ProjectIncrementalRelational(bool forReads)
     {
         _ = pricing.LoadPricingTables();
 
@@ -2419,58 +2509,135 @@ public partial class CanonSessionProjectorEngine
             ? new HashSet<string>(dirtyState!.Keys!, StringComparer.Ordinal)
             : null;
 
-        Dictionary<string, CollectedSession> sessionsByKey = new(StringComparer.Ordinal);
-        foreach (CollectedSession session in reader!.Sessions())
+        // Attribution rows replace the whole-store record read: identities, skip decisions, and
+        // the per-session and per-pass record budgets are planned from (session key, harness,
+        // count) rows, and full records are read only for the keys this pass actually rebuilds.
+        IReadOnlyList<StoredSessionAttribution> attributions = reader!.SessionAttributions();
+        Dictionary<string, List<string>> harnessesByKey = new(StringComparer.Ordinal);
+        Dictionary<string, int> recordCountByKey = new(StringComparer.Ordinal);
+        foreach (StoredSessionAttribution attribution in attributions)
         {
-            sessionsByKey.TryAdd(session.SessionKey, session);
-        }
-
-        Dictionary<string, List<CollectedRecord>> collectedByKey = new(StringComparer.Ordinal);
-        foreach (CollectedRecord record in reader.Records())
-        {
-            if (string.IsNullOrEmpty(record.SessionKey))
+            if (string.IsNullOrEmpty(attribution.SessionKey))
             {
                 continue;
             }
 
-            if (!collectedByKey.TryGetValue(record.SessionKey!, out List<CollectedRecord>? list))
+            if (!harnessesByKey.TryGetValue(attribution.SessionKey, out List<string>? harnesses))
             {
-                list = [];
-                collectedByKey[record.SessionKey!] = list;
+                harnesses = [];
+                harnessesByKey[attribution.SessionKey] = harnesses;
+                recordCountByKey[attribution.SessionKey] = 0;
             }
 
-            list.Add(record);
+            harnesses.Add(attribution.HarnessId);
+            recordCountByKey[attribution.SessionKey] += attribution.RecordCount;
         }
 
-        List<string> sessionKeys = [.. collectedByKey.Keys.OrderBy(static key => key, StringComparer.Ordinal)];
+        List<string> sessionKeys = [.. harnessesByKey.Keys.OrderBy(static key => key, StringComparer.Ordinal)];
         SessionIdentities identities = new(
-            sessionKeys.SelectMany(key => collectedByKey[key].Select(record => (key, record.HarnessId))));
+            attributions
+                .Where(static attribution => !string.IsNullOrEmpty(attribution.SessionKey))
+                .Select(static attribution => (attribution.SessionKey, attribution.HarnessId)));
+
+        Dictionary<string, CollectedSession> sessionsByKey = new(StringComparer.Ordinal);
+        foreach (CollectedSession session in reader.Sessions())
+        {
+            sessionsByKey.TryAdd(session.SessionKey, session);
+        }
 
         HashSet<string> storedProjectionIds = new(
             projections!.ListSessionProjections().Select(static projection => projection.SessionId),
             StringComparer.Ordinal);
 
-        CachedTokenCounter counter = new(operationalStore, CanonTokenCache.ApproximateTokenizerName);
-
-        int builtCount = 0;
-        int skippedCount = 0;
-        int findingsCount = 0;
-        List<string> rebuiltKeys = [];
+        List<string> rebuildKeys = [];
+        List<string> deferredKeys = [];
         List<string> skippedKeys = [];
-        HashSet<string> builtSessionIds = new(StringComparer.Ordinal);
-
+        int passRecordCount = 0;
+        bool passBudgetExhausted = false;
         foreach (string key in sessionKeys)
         {
             if (canIncremental
                 && dirtySet is not null
                 && !dirtySet.Contains(key)
-                && PriorIdsOf(key, collectedByKey[key], identities).All(storedProjectionIds.Contains))
+                && PriorIdsOf(key, harnessesByKey[key], identities).All(storedProjectionIds.Contains))
             {
                 skippedKeys.Add(key);
-                skippedCount++;
                 continue;
             }
 
+            if (forReads && recordCountByKey[key] > readPathSessionRecordBudget)
+            {
+                deferredKeys.Add(key);
+                continue;
+            }
+
+            // The pass budget bounds the whole read pass, so a cold store of thousands of small
+            // sessions cannot rebuild every one of them inside a request: once the running total
+            // would cross it, the crossing key and every later key defer to later passes. The
+            // first candidate is always admitted so a pass always rebuilds at least one session
+            // and repeated passes converge.
+            if (forReads && (passBudgetExhausted
+                || (rebuildKeys.Count > 0 && passRecordCount + recordCountByKey[key] > readPathPassRecordBudget)))
+            {
+                passBudgetExhausted = true;
+                deferredKeys.Add(key);
+                continue;
+            }
+
+            rebuildKeys.Add(key);
+            passRecordCount += recordCountByKey[key];
+        }
+
+        Dictionary<string, List<CollectedRecord>> collectedByKey = new(StringComparer.Ordinal);
+        if (canIncremental || forReads)
+        {
+            foreach (string key in rebuildKeys)
+            {
+                collectedByKey[key] = [.. reader.SessionRecordsForRebuild(key)];
+            }
+        }
+        else
+        {
+            // Only the maintenance full/wildcard path reads the whole store in one query; the
+            // read path stays attribution-driven and per key so a request never pays for it.
+            foreach (CollectedRecord record in reader.AllSessionRecordsForMaintenance())
+            {
+                if (string.IsNullOrEmpty(record.SessionKey))
+                {
+                    continue;
+                }
+
+                if (!collectedByKey.TryGetValue(record.SessionKey!, out List<CollectedRecord>? list))
+                {
+                    list = [];
+                    collectedByKey[record.SessionKey!] = list;
+                }
+
+                list.Add(record);
+            }
+        }
+
+        // A stored projection survives the pass when its session is still attributed records —
+        // built, skipped-clean, or deferred — so only sessions whose records disappeared are
+        // pruned, and a deferred session keeps its last stored projection for reads to answer.
+        HashSet<string> liveSessionIds = new(StringComparer.Ordinal);
+        foreach (string key in sessionKeys)
+        {
+            foreach (string id in PriorIdsOf(key, harnessesByKey[key], identities))
+            {
+                liveSessionIds.Add(id);
+            }
+        }
+
+        CachedTokenCounter counter = new(operationalStore, CanonTokenCache.ApproximateTokenizerName);
+
+        int builtCount = 0;
+        int skippedCount = skippedKeys.Count;
+        int findingsCount = 0;
+        List<string> rebuiltKeys = [];
+
+        foreach (string key in rebuildKeys)
+        {
             List<CanonicalRecord> hydrated = [.. collectedByKey[key].Select(CanonRecordHydration.Hydrate)];
             hydrated.Sort(CompareRecordTimestamps);
             Dictionary<string, List<CanonicalRecord>> grouped = GroupByCanonicalHarness(hydrated);
@@ -2510,7 +2677,6 @@ public partial class CanonSessionProjectorEngine
                     counter.Count,
                     sessionsByKey[sessionId].Title);
                 projections.ReplaceSessionProjection(projection);
-                builtSessionIds.Add(sessionId);
                 builtCount++;
 
                 findingsCount += RebuildSessionFindingsRelational(sessionId, merged, identities);
@@ -2524,7 +2690,7 @@ public partial class CanonSessionProjectorEngine
         int prunedCount = 0;
         foreach (StoredSessionProjection stored in projections.ListSessionProjections())
         {
-            if (builtSessionIds.Contains(stored.SessionId))
+            if (liveSessionIds.Contains(stored.SessionId))
             {
                 continue;
             }
@@ -2538,7 +2704,29 @@ public partial class CanonSessionProjectorEngine
 
         long finalMarker = operationalStore.GetWriteMarker();
         operationalStore.SetProjectionState(new ProjectionStateView(SqliteRelationalStore.SchemaVersion, finalMarker));
-        operationalStore.ClearProjectionDirtyState();
+        if (deferredKeys.Count > 0)
+        {
+            // Deferred keys stay dirty at the watermark this pass just wrote, so the next pass
+            // (read or maintenance) retries them and a span ingested during the pass is not
+            // lost. When a span arrived mid-pass, the keys dirty at pass start stay dirty too:
+            // a rebuilt session's per-key read cannot have seen a span ingested after it, so
+            // the next pass rebuilds those sessions instead of skipping them clean.
+            HashSet<string> writeBackKeys = new(deferredKeys, StringComparer.Ordinal);
+            if (finalMarker > currentMarker && dirtySet is not null)
+            {
+                writeBackKeys.UnionWith(dirtySet);
+            }
+
+            operationalStore.SetProjectionDirtyState(new DirtyProjectionState(
+                FromSeq: finalMarker,
+                ToSeq: finalMarker,
+                Keys: [.. writeBackKeys.Order(StringComparer.Ordinal)],
+                IsWildcard: false));
+        }
+        else
+        {
+            operationalStore.ClearProjectionDirtyState();
+        }
 
         return new ProjectionPassReport(
             Built: builtCount,
@@ -2546,7 +2734,8 @@ public partial class CanonSessionProjectorEngine
             Pruned: prunedCount,
             Findings: findingsCount,
             RebuiltKeys: rebuiltKeys,
-            SkippedKeys: skippedKeys);
+            SkippedKeys: skippedKeys,
+            DeferredKeys: forReads ? deferredKeys : null);
     }
 
     /// <summary>
@@ -2698,11 +2887,10 @@ public partial class CanonSessionProjectorEngine
 
     private static IEnumerable<string> PriorIdsOf(
         string key,
-        IReadOnlyList<CollectedRecord> records,
+        IReadOnlyList<string> harnessIds,
         SessionIdentities identities)
     {
-        HashSet<string> harnesses = new(records.Select(static record => record.HarnessId), StringComparer.Ordinal);
-        foreach (string harness in harnesses)
+        foreach (string harness in harnessIds)
         {
             string? id = identities.IdFor(key, harness);
             if (id is not null)

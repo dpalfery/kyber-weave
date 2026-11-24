@@ -4,7 +4,7 @@ title: Retire the Uncalled Context and Schema Routes; Supersede ADR 0007 D3 in P
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-20
+last-reviewed: 2026-11-23
 supersedes:
   - adr/0007-kyberdash-agent-session-analysis-integration
 ---
@@ -52,10 +52,12 @@ preserve compatibility for nobody, while the landed bounded pattern
    precedence-guard branch, which replaced the routes' own method guards. A
    non-GET on a deleted path therefore answers 404 rather than 405.
 3. **Everything else in the route table is untouched.** `/api/kyber/timeline`
-   survives; the `GET /api/kyber/session/:id` passthrough and its
-   `GET /api/kyber/session/:id/summary` sibling stand; the content routes, the
+   survives; the `GET /api/kyber/session/:id/summary` sibling stands; the content routes, the
    list route, and all remaining endpoints stand. No surviving route's matching
-   changed — the deletion removed two branches and nothing else.
+   changed — the deletion removed two branches and nothing else. The
+   `GET /api/kyber/session/:id` passthrough named here was later retired by
+   [ADR 0092](0092-dashboard-views-load-by-section-and-page.md): it is deleted and answers the
+   generic 404, and its summary sibling still stands.
 
 ## Alternatives Considered
 
