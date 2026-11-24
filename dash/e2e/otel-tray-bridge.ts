@@ -1,7 +1,18 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+  statSync,
+} from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { dirname, extname, isAbsolute, join, resolve, sep } from 'node:path'
+import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Page } from '@playwright/test'
 
@@ -467,14 +478,34 @@ async function readRequestBody(req: IncomingMessage): Promise<string> {
   })
 }
 
+function assertValidMaxResponseBytes(raw: unknown, fieldName: string): number {
+  if (
+    typeof raw !== 'number' ||
+    !Number.isFinite(raw) ||
+    !Number.isInteger(raw) ||
+    raw < 1 ||
+    raw > MAX_PROXY_RESPONSE_BYTES
+  ) {
+    throw new Error(
+      `${fieldName} must be a positive integer at most ${MAX_PROXY_RESPONSE_BYTES}, got ${String(raw)}`,
+    )
+  }
+  return raw
+}
+
+function resolveMaxResponseBytes(raw: unknown, fieldName: string): number {
+  return raw === undefined ? MAX_PROXY_RESPONSE_BYTES : assertValidMaxResponseBytes(raw, fieldName)
+}
+
 export async function readBoundedResponseBuffer(response: Response, maxBytes: number): Promise<Buffer> {
+  const validatedMaxBytes = assertValidMaxResponseBytes(maxBytes, 'maxBytes')
   const contentLengthHeader = response.headers.get('content-length')
   if (contentLengthHeader !== null && contentLengthHeader.trim() !== '') {
     const declaredLength = Number(contentLengthHeader)
-    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    if (Number.isFinite(declaredLength) && declaredLength > validatedMaxBytes) {
       await response.body?.cancel().catch(() => undefined)
       throw new UpstreamResponseTooLargeError(
-        `Upstream response Content-Length (${declaredLength} bytes) exceeded ${maxBytes} byte limit`,
+        `Upstream response Content-Length (${declaredLength} bytes) exceeded ${validatedMaxBytes} byte limit`,
       )
     }
   }
@@ -494,9 +525,9 @@ export async function readBoundedResponseBuffer(response: Response, maxBytes: nu
       }
       if (value !== undefined) {
         totalBytes += value.byteLength
-        if (totalBytes > maxBytes) {
+        if (totalBytes > validatedMaxBytes) {
           await reader.cancel().catch(() => undefined)
-          throw new UpstreamResponseTooLargeError(`Upstream response exceeded ${maxBytes} byte limit`)
+          throw new UpstreamResponseTooLargeError(`Upstream response exceeded ${validatedMaxBytes} byte limit`)
         }
         chunks.push(value)
       }
@@ -520,6 +551,27 @@ function sendJson(res: ServerResponse, statusCode: number, payload: unknown): vo
 export type StaticAssetResolution =
   | { readonly ok: true; readonly filePath: string; readonly contentType: string }
   | { readonly ok: false; readonly statusCode: 400 | 403 | 404; readonly message: string }
+
+function verifyNoSymlinkSegments(
+  realDistDir: string,
+  segments: readonly string[],
+): { readonly ok: true } | { readonly ok: false; readonly statusCode: 403 | 404; readonly message: string } {
+  let current = realDistDir
+  for (const segment of segments) {
+    current = join(current, segment)
+    try {
+      if (lstatSync(current).isSymbolicLink()) {
+        return { ok: false, statusCode: 403, message: 'Forbidden' }
+      }
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
+        return { ok: false, statusCode: 404, message: 'Not found' }
+      }
+      return { ok: false, statusCode: 403, message: 'Forbidden' }
+    }
+  }
+  return { ok: true }
+}
 
 export function resolveStaticAsset(distDir: string, pathname: string): StaticAssetResolution {
   if (pathname.includes('\0')) {
@@ -565,19 +617,9 @@ export function resolveStaticAsset(distDir: string, pathname: string): StaticAss
   }
 
   const segments = relativeRaw.split('/').filter((seg) => seg.length > 0)
-  let current = realDistDir
-  for (const segment of segments) {
-    current = join(current, segment)
-    try {
-      if (lstatSync(current).isSymbolicLink()) {
-        return { ok: false, statusCode: 403, message: 'Forbidden' }
-      }
-    } catch (error) {
-      if (error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
-        return { ok: false, statusCode: 404, message: 'Not found' }
-      }
-      return { ok: false, statusCode: 403, message: 'Forbidden' }
-    }
+  const segmentCheck = verifyNoSymlinkSegments(realDistDir, segments)
+  if (!segmentCheck.ok) {
+    return segmentCheck
   }
 
   let realCandidate: string
@@ -604,6 +646,105 @@ export function resolveStaticAsset(distDir: string, pathname: string): StaticAss
   return { ok: true, filePath: realCandidate, contentType }
 }
 
+export type StaticAssetReadResult =
+  | { readonly ok: true; readonly contents: Buffer; readonly contentType: string }
+  | { readonly ok: false; readonly statusCode: 403 | 404; readonly message: string }
+
+function mapStaticAssetOpenError(error: unknown): { readonly ok: false; readonly statusCode: 403 | 404; readonly message: string } {
+  const code = error instanceof Error && 'code' in error ? error.code : undefined
+  if (code === 'ELOOP' || code === 'EEXIST' || code === 'EACCES' || code === 'EPERM') {
+    return { ok: false, statusCode: 403, message: 'Forbidden' }
+  }
+  return { ok: false, statusCode: 404, message: 'Not found' }
+}
+
+function readOpenedFileDescriptor(fd: number, maxBytes: number): Buffer {
+  const chunks: Buffer[] = []
+  let totalBytes = 0
+  const chunkSize = 65_536
+  while (true) {
+    const chunk = Buffer.allocUnsafe(chunkSize)
+    const bytesRead = readSync(fd, chunk, 0, chunkSize, null)
+    if (bytesRead === 0) {
+      break
+    }
+    totalBytes += bytesRead
+    if (totalBytes > maxBytes) {
+      throw new Error(`Static asset exceeded ${maxBytes} byte limit`)
+    }
+    chunks.push(bytesRead === chunkSize ? chunk : chunk.subarray(0, bytesRead))
+  }
+  return Buffer.concat(chunks, totalBytes)
+}
+
+export function readResolvedStaticAsset(
+  distDir: string,
+  resolved: Extract<StaticAssetResolution, { readonly ok: true }>,
+): StaticAssetReadResult {
+  let realDistDir: string
+  try {
+    realDistDir = realpathSync(distDir)
+  } catch {
+    return { ok: false, statusCode: 404, message: 'Not found' }
+  }
+
+  const realDistPrefix = realDistDir.endsWith(sep) ? realDistDir : `${realDistDir}${sep}`
+  const targetPath = resolve(resolved.filePath)
+  if (targetPath === realDistDir || !targetPath.startsWith(realDistPrefix)) {
+    return { ok: false, statusCode: 403, message: 'Forbidden' }
+  }
+
+  const openFlags =
+    process.platform !== 'win32'
+      ? constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)
+      : constants.O_RDONLY
+
+  let fd: number | undefined
+  try {
+    fd = openSync(targetPath, openFlags)
+    const fdStat = fstatSync(fd)
+    if (!fdStat.isFile()) {
+      return { ok: false, statusCode: 404, message: 'Not found' }
+    }
+
+    // Re-verify path containment and symlink-free traversal after opening the descriptor
+    // so neither a final-component swap nor a parent-directory symlink swap can leak files.
+    const relPath = relative(realDistDir, targetPath)
+    const segments = relPath.split(/[\\/]+/).filter((seg) => seg.length > 0)
+    if (segments.length === 0 || segments.some((seg) => seg === '..' || seg === '.')) {
+      return { ok: false, statusCode: 403, message: 'Forbidden' }
+    }
+
+    const segmentCheck = verifyNoSymlinkSegments(realDistDir, segments)
+    if (!segmentCheck.ok) {
+      return segmentCheck
+    }
+
+    const pathStat = lstatSync(targetPath)
+    if (pathStat.isSymbolicLink() || pathStat.dev !== fdStat.dev || pathStat.ino !== fdStat.ino) {
+      return { ok: false, statusCode: 403, message: 'Forbidden' }
+    }
+
+    const postRealPath = realpathSync(targetPath)
+    if (postRealPath === realDistDir || !postRealPath.startsWith(realDistPrefix)) {
+      return { ok: false, statusCode: 403, message: 'Forbidden' }
+    }
+
+    if (fdStat.size > MAX_PROXY_RESPONSE_BYTES) {
+      return { ok: false, statusCode: 403, message: 'Forbidden' }
+    }
+
+    const contents = readOpenedFileDescriptor(fd, MAX_PROXY_RESPONSE_BYTES)
+    return { ok: true, contents, contentType: resolved.contentType }
+  } catch (error) {
+    return mapStaticAssetOpenError(error)
+  } finally {
+    if (fd !== undefined) {
+      closeSync(fd)
+    }
+  }
+}
+
 function serveStaticAsset(res: ServerResponse, distDir: string, pathname: string): void {
   const resolved = resolveStaticAsset(distDir, pathname)
   if (!resolved.ok) {
@@ -612,21 +753,18 @@ function serveStaticAsset(res: ServerResponse, distDir: string, pathname: string
     return
   }
 
-  // Single syscall: read directly and map a missing path (or a directory,
-  // which readFileSync rejects) to 404.
-  let contents: Buffer
-  try {
-    contents = readFileSync(resolved.filePath)
-  } catch {
-    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
-    res.end('Not found')
+  const asset = readResolvedStaticAsset(distDir, resolved)
+  if (!asset.ok) {
+    res.writeHead(asset.statusCode, { 'content-type': 'text/plain; charset=utf-8' })
+    res.end(asset.message)
     return
   }
+
   res.writeHead(200, {
-    'content-type': resolved.contentType,
+    'content-type': asset.contentType,
     'cache-control': 'no-store',
   })
-  res.end(contents)
+  res.end(asset.contents)
 }
 
 async function fetchLoopbackJson(
@@ -639,7 +777,7 @@ async function fetchLoopbackJson(
   readonly errorMessage: string | null
 }> {
   const method = init?.method ?? 'GET'
-  const maxResponseBytes = init?.maxResponseBytes ?? MAX_PROXY_RESPONSE_BYTES
+  const maxResponseBytes = resolveMaxResponseBytes(init?.maxResponseBytes, 'maxResponseBytes')
   // Loopback server-to-server request intentionally omits any browser Origin header
   // so DashHttp.IsAllowedMutation permits local mutations.
   const headers: Record<string, string> = {}
@@ -719,10 +857,7 @@ export async function startTrayBridge(options: {
 }): Promise<TrayBridgeHandle> {
   const serverOrigin = assertLoopbackServerOrigin(options.serverUrl)
   const distDir = options.distDir ?? ensureTrayUiBuilt({ forceRebuild: options.forceBuild })
-  const maxProxyBytes = options.maxProxyResponseBytes ?? MAX_PROXY_RESPONSE_BYTES
-  if (!Number.isFinite(maxProxyBytes) || !Number.isInteger(maxProxyBytes) || maxProxyBytes < 1) {
-    throw new Error(`maxProxyResponseBytes must be a positive integer, got ${String(options.maxProxyResponseBytes)}`)
-  }
+  const maxProxyBytes = resolveMaxResponseBytes(options.maxProxyResponseBytes, 'maxProxyResponseBytes')
   const viewPathPatterns = loadViewPathPatterns()
 
   let traySettings: TraySettings = { ...DEFAULT_TRAY_SETTINGS }
@@ -1289,7 +1424,7 @@ export async function fetchTrayBridgeState(
 ): Promise<TrayBridgeStateSnapshot> {
   const origin = assertLoopbackServerOrigin(bridgeUrl)
   const suffix = options?.refresh ? '?refresh=1' : ''
-  const maxBytes = options?.maxBytes ?? MAX_PROXY_RESPONSE_BYTES
+  const maxBytes = resolveMaxResponseBytes(options?.maxBytes, 'maxBytes')
   const res = await fetch(`${origin}/tray/state${suffix}`, {
     signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
   })

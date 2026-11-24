@@ -1,7 +1,7 @@
 // Shared harness-collection world backed by `kyberdash e2e-seed` (never ~/.kyberdash/canon.db).
 
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync, rmdirSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -115,12 +115,22 @@ export function isIsolatedTempRoot(rootDir: string, baseTmpDir: string = tmpdir(
   return true
 }
 
+function assertValidatedTempRoot(rootDir: string, baseTmpDir: string, errorPrefix: string): void {
+  if (isIsolatedTempRoot(rootDir, baseTmpDir)) {
+    return
+  }
+  try {
+    rmdirSync(rootDir)
+  } catch (cleanupError) {
+    throw new Error(`${errorPrefix}: ${rootDir}`, { cause: cleanupError })
+  }
+  throw new Error(`${errorPrefix}: ${rootDir}`)
+}
+
 export function createTempRoot(baseTmpDir: string = tmpdir()): string {
   const resolvedBase = resolve(baseTmpDir)
   const root = mkdtempSync(join(resolvedBase, 'kyber-harness-collection-'))
-  if (!isIsolatedTempRoot(root, resolvedBase)) {
-    throw new Error(`harness-collection temp root escaped tmpdir: ${root}`)
-  }
+  assertValidatedTempRoot(root, resolvedBase, 'harness-collection temp root escaped tmpdir')
   return root
 }
 
@@ -315,68 +325,70 @@ export async function startIsolatedServer(options?: {
   readonly startupTimeoutMs?: number
 }): Promise<IsolatedServerHandle> {
   const startupTimeoutMs = options?.startupTimeoutMs ?? 90_000
-  const rootDir = mkdtempSync(join(tmpdir(), 'kyber-otel-e2e-'))
-  if (!isIsolatedTempRoot(rootDir)) {
-    throw new Error(`isolated server temp root invalid: ${rootDir}`)
-  }
+  const baseTmpDir = resolve(tmpdir())
+  const rootDir = mkdtempSync(join(baseTmpDir, 'kyber-otel-e2e-'))
+  assertValidatedTempRoot(rootDir, baseTmpDir, 'isolated server temp root invalid')
 
-  const dbPath = join(rootDir, 'canon.db')
-  if (resolve(dbPath) === resolve(USER_CANON)) {
-    cleanupIsolatedTempRoot(rootDir)
-    throw new Error('refusing to serve the user canon.db')
-  }
-
-  const stateDir = join(rootDir, 'state')
-  const homeDir = join(rootDir, 'home')
-  mkdirSync(stateDir, { recursive: true })
-  mkdirSync(homeDir, { recursive: true })
-
-  const { command, prefixArgs, repoRoot, dashRoot } = resolveKyberdashCommand()
-  const dashDist = join(dashRoot, 'dist', 'dash')
-  if (!existsSync(join(dashDist, 'index.html'))) {
-    const built = spawnSync('npm', ['run', 'build:web'], {
-      cwd: dashRoot,
-      encoding: 'utf8',
-      timeout: 300_000,
-      killSignal: 'SIGKILL',
-    })
-    if (built.status !== 0) {
-      cleanupIsolatedTempRoot(rootDir)
-      throw new Error(`build:web failed: ${built.stdout ?? ''}\n${built.stderr ?? ''}`)
-    }
-  }
-
-  const child = spawn(
-    command,
-    [...prefixArgs, 'web', '--no-open', '--port', '0', '--db', dbPath, '--state-dir', stateDir],
-    {
-      cwd: repoRoot,
-      env: {
-        ...process.env,
-        HOME: homeDir,
-        USERPROFILE: homeDir,
-        KYBER_CANON_DB: dbPath,
-        KYBERDASH_STATE_DIR: stateDir,
-        KYBERDASH_DASH_DIR: process.env['KYBERDASH_DASH_DIR'] ?? dashDist,
-      },
-      detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  )
-
-  const pid = child.pid
-  const killOnExit = (): void => {
-    if (pid === undefined || !isProcessGroupAlive(pid)) return
-    try {
-      signalProcessGroup(pid, 'SIGKILL')
-    } catch {
-      // Process is exiting; nothing left can act on the error.
-    }
-  }
-  process.once('exit', killOnExit)
-
+  let dbPath: string
+  let stateDir: string
+  let child: ReturnType<typeof spawn> | undefined
+  let pid: number | undefined
+  let killOnExit: (() => void) | undefined
   let url: string
   try {
+    dbPath = join(rootDir, 'canon.db')
+    if (resolve(dbPath) === resolve(USER_CANON)) {
+      throw new Error('refusing to serve the user canon.db')
+    }
+
+    stateDir = join(rootDir, 'state')
+    const homeDir = join(rootDir, 'home')
+    mkdirSync(stateDir, { recursive: true })
+    mkdirSync(homeDir, { recursive: true })
+
+    const { command, prefixArgs, repoRoot, dashRoot } = resolveKyberdashCommand()
+    const dashDist = join(dashRoot, 'dist', 'dash')
+    if (!existsSync(join(dashDist, 'index.html'))) {
+      const built = spawnSync('npm', ['run', 'build:web'], {
+        cwd: dashRoot,
+        encoding: 'utf8',
+        timeout: 300_000,
+        killSignal: 'SIGKILL',
+      })
+      if (built.status !== 0) {
+        throw new Error(`build:web failed: ${built.stdout ?? ''}\n${built.stderr ?? ''}`)
+      }
+    }
+
+    const spawned = spawn(
+      command,
+      [...prefixArgs, 'web', '--no-open', '--port', '0', '--db', dbPath, '--state-dir', stateDir],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          HOME: homeDir,
+          USERPROFILE: homeDir,
+          KYBER_CANON_DB: dbPath,
+          KYBERDASH_STATE_DIR: stateDir,
+          KYBERDASH_DASH_DIR: process.env['KYBERDASH_DASH_DIR'] ?? dashDist,
+        },
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    )
+    child = spawned
+    pid = spawned.pid
+    killOnExit = (): void => {
+      if (pid === undefined || !isProcessGroupAlive(pid)) return
+      try {
+        signalProcessGroup(pid, 'SIGKILL')
+      } catch {
+        // Process is exiting; nothing left can act on the error.
+      }
+    }
+    process.once('exit', killOnExit)
+
     url = await new Promise<string>((resolveUrl, rejectUrl) => {
       let stdoutBuffer = ''
       let stderrBuffer = ''
@@ -399,11 +411,11 @@ export async function startIsolatedServer(options?: {
         rejectUrl(error)
       }
 
-      child.stderr.on('data', (chunk: Buffer) => {
+      spawned.stderr.on('data', (chunk: Buffer) => {
         stderrBuffer += chunk.toString('utf8')
       })
 
-      child.stdout.on('data', (chunk: Buffer) => {
+      spawned.stdout.on('data', (chunk: Buffer) => {
         if (settled) return
         stdoutBuffer += chunk.toString('utf8')
         let newlineAt = stdoutBuffer.indexOf('\n')
@@ -429,22 +441,26 @@ export async function startIsolatedServer(options?: {
         }
       })
 
-      child.once('error', (error) => {
+      spawned.once('error', (error) => {
         finishError(new Error(`kyberdash web spawn failed: ${String(error)}`))
       })
 
-      child.once('exit', (code) => {
+      spawned.once('exit', (code) => {
         finishError(new Error(`kyberdash web exited ${code} before ready: ${stdoutBuffer}\n${stderrBuffer}`))
       })
     })
   } catch (error) {
-    process.off('exit', killOnExit)
-    if (pid !== undefined) {
-      await stopProcessGroup(pid)
-    } else if (child.exitCode === null && child.signalCode === null) {
-      child.kill('SIGKILL')
+    if (killOnExit !== undefined) {
+      process.off('exit', killOnExit)
     }
-    cleanupIsolatedTempRoot(rootDir)
+    if (child !== undefined) {
+      if (pid !== undefined) {
+        await stopProcessGroup(pid)
+      } else if (child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL')
+      }
+    }
+    cleanupIsolatedTempRoot(rootDir, baseTmpDir)
     throw error
   }
 
@@ -457,13 +473,15 @@ export async function startIsolatedServer(options?: {
     stop: async () => {
       if (stopped) return
       stopped = true
-      process.off('exit', killOnExit)
+      if (killOnExit !== undefined) {
+        process.off('exit', killOnExit)
+      }
       if (pid !== undefined) {
         await stopProcessGroup(pid)
-      } else if (child.exitCode === null && child.signalCode === null) {
+      } else if (child !== undefined && child.exitCode === null && child.signalCode === null) {
         child.kill('SIGKILL')
       }
-      cleanupIsolatedTempRoot(rootDir)
+      cleanupIsolatedTempRoot(rootDir, baseTmpDir)
     },
   }
 }
@@ -523,14 +541,18 @@ export async function waitForOtlpIngest(
       }
 
       const healthJson: unknown = await healthRes.json()
-      const pendingCount =
-        isPlainRecord(healthJson) &&
-        typeof healthJson['pendingCount'] === 'number' &&
-        Number.isFinite(healthJson['pendingCount'])
-          ? healthJson['pendingCount']
-          : 0
-      if (pendingCount > 0) {
-        lastError = `collector still draining (${pendingCount} pending)`
+      const rawPendingCount = isPlainRecord(healthJson) ? healthJson['pendingCount'] : undefined
+      if (
+        typeof rawPendingCount !== 'number' ||
+        !Number.isFinite(rawPendingCount) ||
+        rawPendingCount < 0
+      ) {
+        lastError = '/healthz missing or invalid pendingCount'
+        await new Promise<void>((resolveWait) => setTimeout(resolveWait, pollIntervalMs))
+        continue
+      }
+      if (rawPendingCount > 0) {
+        lastError = `collector still draining (${rawPendingCount} pending)`
         await new Promise<void>((resolveWait) => setTimeout(resolveWait, pollIntervalMs))
         continue
       }

@@ -13,6 +13,7 @@ import {
   isValidRefreshCadenceMinutes,
   parseTrayBridgeStateSnapshot,
   readBoundedResponseBuffer,
+  readResolvedStaticAsset,
   resolveStaticAsset,
   startTrayBridge,
   type TrayBridgeHandle,
@@ -401,6 +402,189 @@ describe('otel-tray-bridge hardening (Issues 4, 5, 6, 7, 8)', () => {
       await expect(fetchTrayBridgeState(stub.url)).rejects.toThrow(/invalid JSON/i)
       mode = 'bad-shape'
       await expect(fetchTrayBridgeState(stub.url)).rejects.toThrow(/Invalid \/tray\/state payload/)
+    })
+  })
+
+  describe('Finding 2: fetchTrayBridgeState and maxBytes cap enforcement', () => {
+    it('rejects Infinity, NaN, non-numbers, non-positive, non-integer, and oversized maxBytes in fetchTrayBridgeState', async () => {
+      const validSnapshot = {
+        viewState: {
+          phase: 'ready',
+          report: null,
+          reportFetchedAt: null,
+          error: null,
+          jobs: null,
+          sharedSettings: null,
+          coverage: null,
+          kyberdashVersion: null,
+          settings: BASE_SETTINGS,
+        },
+        invocations: [],
+        openedViews: [],
+        hidePopoverCount: 0,
+        quitCount: 0,
+      }
+      const stub = await startStubServer((_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify(validSnapshot))
+      })
+      activeServers.push(stub)
+
+      for (const badMaxBytes of [
+        Number.POSITIVE_INFINITY,
+        Number.NEGATIVE_INFINITY,
+        Number.NaN,
+        -1,
+        0,
+        1.5,
+        MAX_PROXY_RESPONSE_BYTES + 1,
+        '1024' as unknown as number,
+      ]) {
+        await expect(fetchTrayBridgeState(stub.url, { maxBytes: badMaxBytes }), String(badMaxBytes)).rejects.toThrow(
+          /maxBytes must be a positive integer/,
+        )
+      }
+
+      const okSnapshot = await fetchTrayBridgeState(stub.url)
+      expect(okSnapshot.viewState.phase).toBe('ready')
+    })
+
+    it('rejects invalid or oversized maxBytes in startTrayBridge and readBoundedResponseBuffer', async () => {
+      const stub = await startStubServer((_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end('{}')
+      })
+      activeServers.push(stub)
+
+      for (const badMaxBytes of [
+        Number.POSITIVE_INFINITY,
+        Number.NaN,
+        -1,
+        0,
+        1.5,
+        MAX_PROXY_RESPONSE_BYTES + 1,
+      ]) {
+        await expect(
+          startTrayBridge({ serverUrl: stub.url, distDir, maxProxyResponseBytes: badMaxBytes }),
+          String(badMaxBytes),
+        ).rejects.toThrow(/maxProxyResponseBytes must be a positive integer/)
+
+        await expect(
+          readBoundedResponseBuffer(new Response('ok'), badMaxBytes),
+          String(badMaxBytes),
+        ).rejects.toThrow(/maxBytes must be a positive integer/)
+      }
+    })
+
+    it('enforces the 10 MiB default cap in fetchTrayBridgeState when maxBytes is omitted', async () => {
+      const stub = await startStubServer((_req, res) => {
+        res.writeHead(200, {
+          'content-type': 'application/json',
+          'content-length': String(MAX_PROXY_RESPONSE_BYTES + 1),
+        })
+        res.end('{}')
+      })
+      activeServers.push(stub)
+
+      await expect(fetchTrayBridgeState(stub.url)).rejects.toBeInstanceOf(UpstreamResponseTooLargeError)
+    })
+  })
+
+  describe('Finding 3: static asset read TOCTOU protection', () => {
+    it('reads a verified regular file inside distDir via readResolvedStaticAsset', () => {
+      const resolved = resolveStaticAsset(distDir, '/assets/app.js')
+      expect(resolved.ok).toBe(true)
+      if (!resolved.ok) return
+
+      const asset = readResolvedStaticAsset(distDir, resolved)
+      expect(asset.ok).toBe(true)
+      if (asset.ok) {
+        expect(asset.contents.toString('utf8')).toBe('console.log("ok")')
+      }
+    })
+
+    it('rejects target file swapped to an external or internal symlink after resolveStaticAsset', () => {
+      const resolved = resolveStaticAsset(distDir, '/assets/app.js')
+      expect(resolved.ok).toBe(true)
+      if (!resolved.ok) return
+
+      rmSync(join(distDir, 'assets', 'app.js'))
+      symlinkSync(join(outsideDir, 'secret.txt'), join(distDir, 'assets', 'app.js'))
+
+      const externalSwap = readResolvedStaticAsset(distDir, resolved)
+      expect(externalSwap.ok).toBe(false)
+      if (!externalSwap.ok) {
+        expect(externalSwap.statusCode).toBe(403)
+      }
+
+      rmSync(join(distDir, 'assets', 'app.js'))
+      symlinkSync(join(distDir, 'index.html'), join(distDir, 'assets', 'app.js'))
+
+      const internalSwap = readResolvedStaticAsset(distDir, resolved)
+      expect(internalSwap.ok).toBe(false)
+      if (!internalSwap.ok) {
+        expect(internalSwap.statusCode).toBe(403)
+      }
+    })
+
+    it('rejects intermediate directory swapped to an external symlink after resolveStaticAsset', () => {
+      writeFileSync(join(outsideDir, 'app.js'), 'SECRET_VIA_DIR_SWAP', 'utf8')
+      const resolved = resolveStaticAsset(distDir, '/assets/app.js')
+      expect(resolved.ok).toBe(true)
+      if (!resolved.ok) return
+
+      rmSync(join(distDir, 'assets'), { recursive: true, force: true })
+      symlinkSync(outsideDir, join(distDir, 'assets'))
+
+      const dirSwap = readResolvedStaticAsset(distDir, resolved)
+      expect(dirSwap.ok).toBe(false)
+      if (!dirSwap.ok) {
+        expect(dirSwap.statusCode).toBe(403)
+      }
+    })
+
+    it('returns 404 when resolved asset is replaced with a directory or removed before read', () => {
+      const resolvedForDir = resolveStaticAsset(distDir, '/assets/app.js')
+      expect(resolvedForDir.ok).toBe(true)
+      if (resolvedForDir.ok) {
+        rmSync(join(distDir, 'assets', 'app.js'))
+        mkdirSync(join(distDir, 'assets', 'app.js'))
+        const dirResult = readResolvedStaticAsset(distDir, resolvedForDir)
+        expect(dirResult.ok).toBe(false)
+        if (!dirResult.ok) {
+          expect(dirResult.statusCode).toBe(404)
+        }
+      }
+
+      const resolvedMissing = resolveStaticAsset(distDir, '/index.html')
+      expect(resolvedMissing.ok).toBe(true)
+      if (resolvedMissing.ok) {
+        rmSync(join(distDir, 'index.html'))
+        const missingResult = readResolvedStaticAsset(distDir, resolvedMissing)
+        expect(missingResult.ok).toBe(false)
+        if (!missingResult.ok) {
+          expect(missingResult.statusCode).toBe(404)
+        }
+      }
+    })
+
+    it('returns 403 for symlinked dir and 404 for directory paths over HTTP via startTrayBridge', async () => {
+      symlinkSync(outsideDir, join(distDir, 'dir-link'))
+      const stub = await startStubServer((_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end('{}')
+      })
+      activeServers.push(stub)
+
+      const bridge = await startTrayBridge({ serverUrl: stub.url, distDir })
+      activeBridges.push(bridge)
+
+      const symlinkDirRes = await fetch(`${bridge.url}/dir-link/secret.txt`)
+      expect(symlinkDirRes.status).toBe(403)
+      expect(await symlinkDirRes.text()).not.toContain('SECRET_OUTSIDE_DIST')
+
+      const dirRes = await fetch(`${bridge.url}/assets`)
+      expect(dirRes.status).toBe(404)
     })
   })
 })
