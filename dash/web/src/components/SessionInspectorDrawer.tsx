@@ -3223,17 +3223,23 @@ function TurnBucketPanel({ request }: { request: TurnBucketContentRequest }) {
 
   // The session-level system prompt lives on the session content route, not
   // on any single turn span (the first turn span carries none, so a
-  // span-scoped request 404s). Every other bucket keeps its turn span.
-  const contentRequest: SessionContentRequest = request.bucket === 'system_prompt'
-    ? { sessionId: request.sessionId, part: request.bucket }
-    : { sessionId: request.sessionId, span: turn.spanId, part: request.bucket }
+  // span-scoped request 404s). Every other bucket keeps its turn span. A row
+  // that predates span ids has no turn-scoped route to open, and dropping the
+  // empty span would fetch SESSION content under a turn-labelled panel, so it
+  // gets no request at all and shows only its own captured content.
+  const contentRequest: SessionContentRequest | null =
+    request.bucket === 'system_prompt'
+      ? { sessionId: request.sessionId, part: request.bucket }
+      : turn.spanId
+        ? { sessionId: request.sessionId, span: turn.spanId, part: request.bucket }
+        : null
 
   return (
     <div className="space-y-4">
       <ContextBucketInspector
         item={{ bucket: request.bucket, key: request.bucket, label, tokens, value: tokens, total, content }}
       />
-      <FullContentPanel request={contentRequest} fallback={content} />
+      {contentRequest !== null ? <FullContentPanel request={contentRequest} fallback={content} /> : null}
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Skeleton } from '../components/ui/skeleton.js'
 import {
@@ -109,21 +109,41 @@ export function SessionPicker({
   // rather than a stale search the user cleared by choosing an option.
   const [edited, setEdited] = useState<string | null>(null)
   const [activeIndex, setActiveIndex] = useState(-1)
-  const pendingSearch = useMemo(() => ({ timer: undefined as ReturnType<typeof setTimeout> | undefined }), [])
+  // A page turn replaces the rows the index pointed at, so the index must not
+  // survive it. Adjusted during render (the state-when-props-change pattern),
+  // before the pointer is read.
+  const [prevPage, setPrevPage] = useState(page)
+  if (prevPage !== page) {
+    setPrevPage(page)
+    setActiveIndex(-1)
+  }
+  const pendingSearch = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // The debounce must not outlive the picker that armed it: unmounting the
+  // picker leaves no timer behind to call back into a gone component.
+  useEffect(
+    () => () => {
+      if (pendingSearch.current !== undefined) clearTimeout(pendingSearch.current)
+    },
+    [],
+  )
 
   const displayValue = edited ?? (selectedLabel != null && selectedLabel.length > 0 ? selectedLabel : effectiveSessionId ?? '')
   const optionIds = ['all', ...options.map((session) => sessionIdOf(session))]
+  // Only an index that still names an option may produce a pointer: options can
+  // shrink under a previously valid index, and `session-option-undefined` is
+  // not an element id.
+  const activeOptionId = activeIndex >= 0 ? optionIds[activeIndex] : undefined
 
   const cancelPendingSearch = () => {
-    if (pendingSearch.timer !== undefined) {
-      clearTimeout(pendingSearch.timer)
-      pendingSearch.timer = undefined
+    if (pendingSearch.current !== undefined) {
+      clearTimeout(pendingSearch.current)
+      pendingSearch.current = undefined
     }
   }
 
   const commitSearch = (text: string) => {
     cancelPendingSearch()
-    pendingSearch.timer = setTimeout(() => onSearch(text), SESSION_PICKER_SEARCH_DEBOUNCE_MS)
+    pendingSearch.current = setTimeout(() => onSearch(text), SESSION_PICKER_SEARCH_DEBOUNCE_MS)
   }
 
   const choose = (id: string | undefined) => {
@@ -148,7 +168,7 @@ export function SessionPicker({
         aria-expanded={open}
         aria-controls="context-doctor-session-listbox"
         aria-autocomplete="list"
-        aria-activedescendant={open && activeIndex >= 0 ? `session-option-${optionIds[activeIndex]}` : undefined}
+        aria-activedescendant={open && activeOptionId !== undefined ? `session-option-${activeOptionId}` : undefined}
         data-testid="context-doctor-session-combobox"
         className="text-density-xs text-foreground"
         placeholder="All sessions — search to narrow"
@@ -772,6 +792,16 @@ export function ContextDoctor({
   // by the harness scope above this page, then by the search text here — so
   // the picker never downloads the inventory whole.
   const [pickerQuery, setPickerQuery] = useState<{ q: string; page: number }>({ q: '', page: 1 })
+  // A harness change restarts the picker at its first page: page N of the
+  // harness just left is not where a viewer narrowing to another harness is,
+  // and it may be past the end of the new list. Adjusted during render (the
+  // React state-when-props-change pattern, as `useSectionPage` does for a
+  // session change), so the out-of-range page request never leaves.
+  const [prevHarnessFilter, setPrevHarnessFilter] = useState(harnessFilter)
+  if (prevHarnessFilter !== harnessFilter) {
+    setPrevHarnessFilter(harnessFilter)
+    setPickerQuery((previous) => ({ ...previous, page: 1 }))
+  }
   const {
     data: sessionPage,
     isLoading: loadingSessions,
