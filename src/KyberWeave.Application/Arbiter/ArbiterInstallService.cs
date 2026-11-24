@@ -1,4 +1,7 @@
 using System.ComponentModel;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -37,7 +40,8 @@ public sealed class ArbiterInstallService(
     IArbiterInstallLifecycle lifecycle,
     ISquadGlobalRootResolver globalRoots,
     IArbiterBinaryProbe probe,
-    IDocsScaffoldingService scaffolder) : IArbiterInstallService
+    IDocsScaffoldingService scaffolder,
+    IArbiterKeyService keys) : IArbiterInstallService
 {
     /// <inheritdoc />
     public ArbiterInstallPrepared Prepare(ArbiterInstallRequest request)
@@ -56,13 +60,33 @@ public sealed class ArbiterInstallService(
 
         ArbiterProviderKind existingKind;
         ArbiterProviderKind effectiveKind;
+        KyberWeaveConfig repositoryConfig;
+        ArbiterProviderConfig effectiveProvider;
+        bool endpointOverridden;
+        string? loadedConfigPath;
         try
         {
-            (existingKind, effectiveKind) = ReadExistingProviderKind(root, request.ConfigOption, isProjectScope);
+            (repositoryConfig, existingKind, effectiveProvider, endpointOverridden, loadedConfigPath) =
+                ReadExistingProvider(root, request.ConfigOption, isProjectScope);
+            effectiveKind = effectiveProvider.Kind;
         }
         catch (YamlDotNet.Core.YamlException ex)
         {
             events.Add(new ArbiterInstallError(ex.Message));
+            return StopPrepared(1, events);
+        }
+
+        if (!ArbiterUserSettings.TryResolveEndpointOrigin(
+                repositoryConfig.Arbiter.Provider,
+                effectiveProvider,
+                endpointOverridden,
+                environment.HomeDirectory,
+                loadedConfigPath,
+                out string endpoint,
+                out string origin,
+                out string? endpointError))
+        {
+            events.Add(new ArbiterInstallError(endpointError));
             return StopPrepared(1, events);
         }
 
@@ -87,8 +111,6 @@ public sealed class ArbiterInstallService(
             events.Add(new ArbiterInstallArgvKeyWarning());
         }
 
-        string endpoint = ResolveEndpoint(root, request.ConfigOption, isProjectScope);
-        string origin = ArbiterKeyResolver.GetOrigin(endpoint) ?? ArbiterKeyResolver.TypeSafeOrigin;
         bool needsKey = providerKind == ArbiterProviderKind.Systemone
                         && !IsLoopbackEndpoint(endpoint);
 
@@ -98,7 +120,7 @@ public sealed class ArbiterInstallService(
 
         if (needsKey && keyToStore is null)
         {
-            if (!string.IsNullOrEmpty(ResolveStoredKey(endpoint)))
+            if (!string.IsNullOrEmpty(ResolveStoredKey(endpoint, repositoryConfig, effectiveProvider)))
             {
                 keyToStore = null;
             }
@@ -402,20 +424,25 @@ public sealed class ArbiterInstallService(
         kind == ArbiterProviderKind.Systemone ? "systemone" : "none";
 
     /// <summary>
-    /// The provider kind the host config holds before this run (none when nothing is configured),
-    /// and the kind in effect once the per-user override is applied over it.
+    /// The repository configuration as loaded, the provider kind it configures (none when nothing
+    /// is configured), and the provider in effect once the per-user override is applied over it.
     /// </summary>
+    /// <remarks>
+    /// One read serves all three: the endpoint and its origin come from the effective provider,
+    /// while the un-merged repository configuration is what the key service needs to bind the
+    /// environment key to the override origin.
+    /// </remarks>
     /// <exception cref="YamlDotNet.Core.YamlException">Thrown when the per-user override is malformed.</exception>
-    private (ArbiterProviderKind Configured, ArbiterProviderKind Effective) ReadExistingProviderKind(
+    private (KyberWeaveConfig Repository, ArbiterProviderKind Configured, ArbiterProviderConfig Effective, bool EndpointOverridden, string? ConfigPath) ReadExistingProvider(
         string root, string? configOption, bool projectScope)
     {
         KyberWeaveConfigLoadResult loaded = configs.Load(root, configOption, projectScope);
-        ArbiterProviderConfig repository = loaded.Success && loaded.Config is not null
-            ? loaded.Config.Arbiter.Provider
-            : KyberWeaveConfigDefaults.Product.Arbiter.Provider;
-        ArbiterProviderKind effective =
-            userSettings.ApplyTo(repository, environment.HomeDirectory).Kind;
-        return (repository.Kind, effective);
+        KyberWeaveConfig repository = loaded.Success && loaded.Config is not null
+            ? loaded.Config
+            : KyberWeaveConfigDefaults.Product;
+        ArbiterUserProviderResolution resolution =
+            userSettings.Resolve(repository.Arbiter.Provider, environment.HomeDirectory);
+        return (repository, repository.Arbiter.Provider.Kind, resolution.Provider, resolution.EndpointOverridden, loaded.ConfigPath);
     }
 
     private static bool ParseProvider(string? raw, out ArbiterProviderKind kind)
@@ -466,17 +493,6 @@ public sealed class ArbiterInstallService(
         }
     }
 
-    private string ResolveEndpoint(string root, string? configOption, bool projectScope)
-    {
-        KyberWeaveConfigLoadResult loaded = configs.Load(root, configOption, projectScope);
-        if (loaded.Success
-            && loaded.Config is not null
-            && !string.IsNullOrWhiteSpace(loaded.Config.Arbiter.Provider.Endpoint))
-            return loaded.Config.Arbiter.Provider.Endpoint.Trim();
-
-        return ArbiterProviderConfig.DefaultNone.Endpoint;
-    }
-
     private static bool IsLoopbackEndpoint(string endpoint)
     {
         try
@@ -489,16 +505,9 @@ public sealed class ArbiterInstallService(
         }
     }
 
-    private string? ResolveStoredKey(string endpoint)
+    private string? ResolveStoredKey(string endpoint, KyberWeaveConfig repository, ArbiterProviderConfig effectiveProvider)
     {
-        try
-        {
-            return ArbiterKeyResolver.Resolve(endpoint, credentials, environment.GetVariable);
-        }
-        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
-        {
-            return null;
-        }
+        return keys.TryResolveKey(repository, effectiveProvider, endpoint);
     }
 
     private string? ReadStoredKey(string origin)
@@ -609,18 +618,49 @@ public sealed class ArbiterInstallService(
 
         if (plan.NeedsKey)
         {
-            string? key = null;
+            // Read and validate the override once here, then pass the merged provider to key
+            // resolution so a file modified mid-verify cannot pass validation on one endpoint
+            // and bind the environment key to another.
+            ArbiterUserProviderResolution effective;
             try
             {
-                key = ArbiterKeyResolver.Resolve(
-                    plan.Endpoint,
-                    credentials,
-                    environment.GetVariable);
+                effective = userSettings.Resolve(loaded.Config.Arbiter.Provider, environment.HomeDirectory);
             }
-            catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
+            catch (YamlDotNet.Core.YamlException ex)
             {
-                key = null;
+                events.Add(new ArbiterInstallError(ex.Message));
+                return false;
             }
+
+            if (!ArbiterUserSettings.TryResolveEndpointOrigin(
+                    loaded.Config.Arbiter.Provider,
+                    effective.Provider,
+                    effective.EndpointOverridden,
+                    environment.HomeDirectory,
+                    loaded.ConfigPath,
+                    out string effectiveEndpoint,
+                    out string effectiveOrigin,
+                    out string? endpointError))
+            {
+                events.Add(new ArbiterInstallError(endpointError));
+                return false;
+            }
+
+            if (!string.Equals(effectiveEndpoint, plan.Endpoint, StringComparison.Ordinal) ||
+                !string.Equals(effectiveOrigin, plan.Origin, StringComparison.Ordinal))
+            {
+                (string displayEffectiveEndpoint, string displayPlannedEndpoint) =
+                    FormatMismatchPair(effectiveEndpoint, plan.Endpoint);
+                (string displayEffectiveOrigin, string displayPlannedOrigin) =
+                    FormatMismatchPair(effectiveOrigin, plan.Origin);
+                events.Add(new ArbiterInstallError(
+                    $"Verification failed: the effective provider endpoint '{displayEffectiveEndpoint}' " +
+                    $"(origin '{displayEffectiveOrigin}') does not match the planned endpoint '{displayPlannedEndpoint}' " +
+                    $"(origin '{displayPlannedOrigin}')."));
+                return false;
+            }
+
+            string? key = keys.TryResolveKey(loaded.Config, effective.Provider, effectiveEndpoint);
 
             if (string.IsNullOrEmpty(key))
             {
@@ -655,4 +695,42 @@ public sealed class ArbiterInstallService(
                 $"The 'kyber-weave-arbiter' binary probe failed: {ex.Message}"));
         }
     }
+
+    private static (string Effective, string Planned) FormatMismatchPair(string effective, string planned)
+    {
+        string displayEffective = ArbiterUserSettings.FormatCandidateForError(effective);
+        string displayPlanned = ArbiterUserSettings.FormatCandidateForError(planned);
+
+        if (string.Equals(effective, planned, StringComparison.Ordinal) ||
+            !string.Equals(displayEffective, displayPlanned, StringComparison.Ordinal))
+        {
+            return (displayEffective, displayPlanned);
+        }
+
+        int diffIndex = FirstDifferenceIndex(effective, planned);
+        return (
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"{displayEffective} [differs at index {diffIndex}, len {effective.Length}, sha256:{ShortSha256(effective)}]"),
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"{displayPlanned} [differs at index {diffIndex}, len {planned.Length}, sha256:{ShortSha256(planned)}]"));
+    }
+
+    private static int FirstDifferenceIndex(string left, string right)
+    {
+        int sharedLength = Math.Min(left.Length, right.Length);
+        for (int i = 0; i < sharedLength; i++)
+        {
+            if (left[i] != right[i])
+            {
+                return i;
+            }
+        }
+
+        return sharedLength;
+    }
+
+    private static string ShortSha256(string value) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)))[..8];
 }

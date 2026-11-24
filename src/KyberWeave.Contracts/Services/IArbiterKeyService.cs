@@ -1,3 +1,4 @@
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Contracts.Services;
@@ -14,11 +15,31 @@ public interface IArbiterKeyService
     /// <returns>The key, or null when none resolves.</returns>
     string? ResolveKey(KyberWeaveConfig config, string endpoint);
 
+    /// <summary>
+    /// Resolves the key for <paramref name="endpoint"/> using a pre-resolved <paramref name="effectiveProvider"/>
+    /// instead of re-reading the per-user override. A loopback endpoint needs no key and returns null.
+    /// </summary>
+    /// <param name="config">The repository configuration before the per-user override is applied.</param>
+    /// <param name="effectiveProvider">The merged provider already read from the per-user override.</param>
+    /// <param name="endpoint">The provider endpoint.</param>
+    /// <returns>The key, or null when none resolves.</returns>
+    string? ResolveKey(KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint);
+
     /// <summary>Resolves the key, treating a credential store that cannot be read as an absent key.</summary>
     /// <param name="config">The configuration whose provider the user override applies to.</param>
     /// <param name="endpoint">The provider endpoint.</param>
     /// <returns>The key, or null when none resolves or the store failed.</returns>
     string? TryResolveKey(KyberWeaveConfig config, string endpoint);
+
+    /// <summary>
+    /// Resolves the key using a pre-resolved <paramref name="effectiveProvider"/>, treating a credential store that
+    /// cannot be read as an absent key.
+    /// </summary>
+    /// <param name="config">The repository configuration before the per-user override is applied.</param>
+    /// <param name="effectiveProvider">The merged provider already read from the per-user override.</param>
+    /// <param name="endpoint">The provider endpoint.</param>
+    /// <returns>The key, or null when none resolves or the store failed.</returns>
+    string? TryResolveKey(KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint);
 
     /// <summary>Creates the resolver a provider asks for the key of the endpoint it calls.</summary>
     /// <param name="config">The configuration whose provider the user override applies to.</param>

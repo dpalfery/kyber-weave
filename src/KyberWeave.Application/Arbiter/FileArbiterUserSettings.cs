@@ -1,6 +1,7 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Rules;
+using KyberWeave.Core.Configuration;
 using YamlDotNet.Core;
 
 namespace KyberWeave.Data.Arbiter;
@@ -10,14 +11,20 @@ namespace KyberWeave.Data.Arbiter;
 public sealed class FileArbiterUserSettings(IFileSystem fileSystem) : IArbiterUserSettings
 {
     /// <inheritdoc />
-    public ArbiterProviderConfig ApplyTo(ArbiterProviderConfig repository, string homeDirectory)
+    public ArbiterProviderConfig ApplyTo(ArbiterProviderConfig repository, string homeDirectory) =>
+        Resolve(repository, homeDirectory).Provider;
+
+    /// <inheritdoc />
+    public ArbiterUserProviderResolution Resolve(ArbiterProviderConfig repository, string homeDirectory)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
         string path = ArbiterUserSettings.GetPath(homeDirectory);
         if (!fileSystem.FileExists(path))
         {
-            return ArbiterConfigLoader.ApplyUserProviderOverride(repository, null);
+            return new ArbiterUserProviderResolution(
+                ArbiterConfigLoader.ApplyUserProviderOverride(repository, null),
+                EndpointOverridden: false);
         }
 
         string yaml;
@@ -32,6 +39,9 @@ public sealed class FileArbiterUserSettings(IFileSystem fileSystem) : IArbiterUs
                 exception);
         }
 
-        return ArbiterConfigLoader.ApplyUserProviderOverride(repository, ArbiterUserSettings.ParseProvider(yaml, path));
+        ArbiterProviderYaml? parsed = ArbiterUserSettings.ParseProvider(yaml, path);
+        return new ArbiterUserProviderResolution(
+            ArbiterConfigLoader.ApplyUserProviderOverride(repository, parsed),
+            EndpointOverridden: parsed?.Endpoint is not null);
     }
 }

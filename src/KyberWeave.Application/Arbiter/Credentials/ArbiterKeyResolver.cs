@@ -80,6 +80,11 @@ public static class ArbiterKeyResolver
             return null;
         }
 
+        if (string.IsNullOrWhiteSpace(uri.Host))
+        {
+            return null;
+        }
+
         string host = uri.Host.Contains(':', StringComparison.Ordinal) ? $"[{uri.Host}]" : uri.Host;
         return uri.IsDefaultPort
             ? $"{uri.Scheme}://{host}"
