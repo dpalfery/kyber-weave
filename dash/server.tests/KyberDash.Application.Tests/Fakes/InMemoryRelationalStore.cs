@@ -37,6 +37,130 @@ public class InMemoryRelationalStore :
 
     private readonly Lock syncRoot = new();
     private StoreState state = StoreState.CreateEmpty();
+    private readonly List<string> readLog = [];
+    private readonly List<string> sessionProjectionReadLog = [];
+    private readonly List<IReadOnlyList<string>> keyedSessionFigureReads = [];
+    private long materializedContentBytes;
+
+    /// <summary>
+    /// Names of the <see cref="IRelationalStoreReader"/> methods invoked since the read log was
+    /// last cleared, in call order, so tests can assert which reads a code path issued.
+    /// </summary>
+    public IReadOnlyList<string> ReadLog
+    {
+        get
+        {
+            lock (syncRoot)
+            {
+                return [.. readLog];
+            }
+        }
+    }
+
+    /// <summary>
+    /// Names of the session-projection read methods invoked since the read log was last cleared,
+    /// in call order: <see cref="ListSessionProjections"/>, <see cref="GetSessionProjection"/>,
+    /// and the paged header reads. The read log keeps a path that pages honest about never
+    /// falling back to the unfiltered projection list.
+    /// </summary>
+    public IReadOnlyList<string> SessionProjectionReadLog
+    {
+        get
+        {
+            lock (syncRoot)
+            {
+                return [.. sessionProjectionReadLog];
+            }
+        }
+    }
+
+    /// <summary>
+    /// The session keys of every keyed
+    /// <see cref="SessionListFigures(IReadOnlyCollection{string}, IModelPricingLookup?)"/> read
+    /// since the read log was last cleared, in call order, so a test can assert that a page
+    /// priced exactly its own keys.
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<string>> KeyedSessionFigureReads
+    {
+        get
+        {
+            lock (syncRoot)
+            {
+                return [.. keyedSessionFigureReads];
+            }
+        }
+    }
+
+    /// <summary>
+    /// Total UTF-8 content bytes materialized by record, content-part, and tool-call reads since
+    /// the read log was last cleared, so tests can assert how much content a code path pulled
+    /// out of the store.
+    /// </summary>
+    public long MaterializedContentBytes
+    {
+        get
+        {
+            lock (syncRoot)
+            {
+                return materializedContentBytes;
+            }
+        }
+    }
+
+    /// <summary>Clears the instrumented read logs and the materialized content byte counter.</summary>
+    public void ClearReadLog()
+    {
+        lock (syncRoot)
+        {
+            readLog.Clear();
+            sessionProjectionReadLog.Clear();
+            keyedSessionFigureReads.Clear();
+            materializedContentBytes = 0;
+        }
+    }
+
+    /// <summary>Records that one <see cref="IRelationalStoreReader"/> method ran. Caller holds <see cref="syncRoot"/>.</summary>
+    /// <param name="methodName">Name of the reader method invoked.</param>
+    private void NoteRead(string methodName) => readLog.Add(methodName);
+
+    /// <summary>Records that one session-projection read ran. Caller holds <see cref="syncRoot"/>.</summary>
+    /// <param name="methodName">Name of the projection-store method invoked.</param>
+    private void NoteSessionProjectionRead(string methodName) => sessionProjectionReadLog.Add(methodName);
+
+    /// <summary>
+    /// Finds the stored record with <paramref name="spanId"/> together with its content: the
+    /// round-trip tests observe ingestion through this after the per-span content-bearing read
+    /// was retired from the contract.
+    /// </summary>
+    /// <param name="spanId">Record span identifier.</param>
+    /// <returns>The materialized record, or <see langword="null"/> when no row carries that span.</returns>
+    public CollectedRecord? FindRecord(string spanId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(spanId);
+        return AllSessionRecordsForMaintenance()
+            .FirstOrDefault(record => string.Equals(record.RecordId, spanId, StringComparison.Ordinal));
+    }
+
+    /// <summary>Lists the stored content parts of <paramref name="spanId"/>, text included.</summary>
+    /// <param name="spanId">Record span identifier.</param>
+    public IReadOnlyList<CollectedContentPart> FindRecordParts(string spanId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(spanId);
+        return
+        [
+            .. AllSessionRecordsForMaintenance()
+                .Where(record => string.Equals(record.RecordId, spanId, StringComparison.Ordinal))
+                .SelectMany(record => record.Parts),
+        ];
+    }
+
+    /// <summary>Lists the stored content parts of every record linked to <paramref name="sessionKey"/>, text included.</summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    public IReadOnlyList<CollectedContentPart> FindSessionParts(string sessionKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        return [.. SessionRecordsForRebuild(sessionKey).SelectMany(record => record.Parts)];
+    }
 
     /// <summary>Returns the number of persisted rows in <paramref name="tableName"/>.</summary>
     /// <param name="tableName">Catalog table name.</param>
@@ -197,6 +321,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(Harnesses));
             TableMetadata meta = GetTableMetadata("harness");
             int col = meta.ColumnIndices["harness_id"];
             return [.. state.GetRows("harness").Select(row => (string)row[col]!).OrderBy(static id => id, StringComparer.Ordinal)];
@@ -208,6 +333,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(Sources));
             TableMetadata meta = GetTableMetadata("source");
             List<StoredSource> results = [];
             foreach (object?[] row in state.GetRows("source"))
@@ -233,6 +359,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(CountRecords));
             if (harnessId is null)
             {
                 return state.GetRows("record").Count;
@@ -253,48 +380,112 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
-    public CollectedRecord? GetRecord(string spanId)
+    public IReadOnlyList<StoredSourceCount> SourceRecordCounts()
+    {
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SourceRecordCounts));
+            TableMetadata meta = GetTableMetadata("record");
+            Dictionary<string, int> counts = new(StringComparer.Ordinal);
+            foreach (object?[] row in state.GetRows("record"))
+            {
+                if (row[meta.ColumnIndices["source_id"]] is not string sourceId)
+                {
+                    continue;
+                }
+
+                counts[sourceId] = counts.TryGetValue(sourceId, out int current) ? current + 1 : 1;
+            }
+
+            return
+            [
+                .. counts
+                    .OrderBy(static pair => pair.Key, StringComparer.Ordinal)
+                    .Select(static pair => new StoredSourceCount(pair.Key, pair.Value)),
+            ];
+        }
+    }
+
+    /// <inheritdoc />
+    public CollectedRecord? RecordContentFree(string spanId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(spanId);
 
         lock (syncRoot)
         {
+            NoteRead(nameof(RecordContentFree));
             object?[]? row = FindRowByKey(state, "record", [("span_id", spanId)]);
-            return row is null ? null : MaterializeRecord(state, row);
+            return row is null ? null : MaterializeRecordContentFree(state, row);
         }
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<CollectedRecord> Records(
-        string? sessionKey = null,
-        string? harnessId = null,
-        string? sourceId = null)
+    public string? SpanPromptText(string spanId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(spanId);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SpanPromptText));
+            TableMetadata meta = GetTableMetadata("content_part");
+            foreach (object?[] row in state.GetRows("content_part")
+                .Where(r => string.Equals(GetString(meta, r, "span_id"), spanId, StringComparison.Ordinal))
+                .OrderBy(r => GetInt64(meta, r, "position")))
+            {
+                CollectedContentPart part = MaterializeContentPart(state, row);
+                if (part.Bucket is not (ContentBucket.UserPrompt or ContentBucket.UserMessage or ContentBucket.ConversationHistory))
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(part.PlainText))
+                {
+                    continue;
+                }
+
+                materializedContentBytes += Encoding.UTF8.GetByteCount(part.PlainText);
+                return part.PlainText;
+            }
+
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<StoredSessionAttribution> SessionAttributions()
     {
         lock (syncRoot)
         {
-            HashSet<string>? sessionSpans = sessionKey is null ? null : ResolveSessionSpanIds(state, sessionKey);
-            TableMetadata meta = GetTableMetadata("record");
-            List<CollectedRecord> results = [];
-
-            foreach (object?[] row in state.GetRows("record"))
+            NoteRead(nameof(SessionAttributions));
+            TableMetadata linkMeta = GetTableMetadata("record_session_link");
+            Dictionary<string, Dictionary<string, int>> countsByKey = new(StringComparer.Ordinal);
+            foreach (object?[] linkRow in state.GetRows("record_session_link"))
             {
-                string spanId = GetString(meta, row, "span_id");
-                if (sessionSpans is not null && !sessionSpans.Contains(spanId))
+                string spanId = GetString(linkMeta, linkRow, "span_id");
+                object?[]? recordRow = FindRowByKey(state, "record", [("span_id", spanId)]);
+                if (recordRow is null)
                 {
                     continue;
                 }
 
-                if (harnessId is not null && !string.Equals(GetString(meta, row, "harness_id"), harnessId, StringComparison.Ordinal))
+                string sessionKey = GetString(linkMeta, linkRow, "session_key");
+                string harnessId = GetString(GetTableMetadata("record"), recordRow, "harness_id");
+                if (!countsByKey.TryGetValue(sessionKey, out Dictionary<string, int>? byHarness))
                 {
-                    continue;
+                    byHarness = new Dictionary<string, int>(StringComparer.Ordinal);
+                    countsByKey[sessionKey] = byHarness;
                 }
 
-                if (sourceId is not null && !string.Equals(GetString(meta, row, "source_id"), sourceId, StringComparison.Ordinal))
-                {
-                    continue;
-                }
+                byHarness[harnessId] = byHarness.TryGetValue(harnessId, out int count) ? count + 1 : 1;
+            }
 
-                results.Add(MaterializeRecord(state, row));
+            List<StoredSessionAttribution> results = [];
+            foreach (KeyValuePair<string, Dictionary<string, int>> byKey in countsByKey.OrderBy(static kv => kv.Key, StringComparer.Ordinal))
+            {
+                foreach (KeyValuePair<string, int> byHarness in byKey.Value.OrderBy(static kv => kv.Key, StringComparer.Ordinal))
+                {
+                    results.Add(new StoredSessionAttribution(byKey.Key, byHarness.Key, byHarness.Value));
+                }
             }
 
             return results;
@@ -302,10 +493,98 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
+    public IReadOnlyList<CollectedRecord> SessionRecordsForRebuild(string sessionKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionRecordsForRebuild));
+            return CollectReaderRecords(sessionKey, null, null);
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<CollectedRecord> AllSessionRecordsForMaintenance()
+    {
+        lock (syncRoot)
+        {
+            NoteRead(nameof(AllSessionRecordsForMaintenance));
+            return CollectReaderRecords(null, null, null);
+        }
+    }
+
+    /// <summary>Filters and materializes records for a reader call, counting materialized content bytes. Caller holds <see cref="syncRoot"/>.</summary>
+    /// <param name="sessionKey">Optional session key filter.</param>
+    /// <param name="harnessId">Optional harness identifier filter.</param>
+    /// <param name="sourceId">Optional source identifier filter.</param>
+    private List<CollectedRecord> CollectReaderRecords(string? sessionKey, string? harnessId, string? sourceId)
+    {
+        HashSet<string>? sessionSpans = sessionKey is null ? null : ResolveSessionSpanIds(state, sessionKey);
+        TableMetadata meta = GetTableMetadata("record");
+        List<CollectedRecord> results = [];
+
+        foreach (object?[] row in state.GetRows("record"))
+        {
+            string spanId = GetString(meta, row, "span_id");
+            if (sessionSpans is not null && !sessionSpans.Contains(spanId))
+            {
+                continue;
+            }
+
+            if (harnessId is not null && !string.Equals(GetString(meta, row, "harness_id"), harnessId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (sourceId is not null && !string.Equals(GetString(meta, row, "source_id"), sourceId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            CollectedRecord record = MaterializeRecord(state, row);
+            materializedContentBytes += ContentBytesOf(record);
+            results.Add(record);
+        }
+
+        return results;
+    }
+
+    /// <summary>Counts the UTF-8 content bytes a materialized record carries. Caller holds <see cref="syncRoot"/>.</summary>
+    /// <param name="record">Materialized record.</param>
+    private static long ContentBytesOf(CollectedRecord record)
+    {
+        long bytes = 0;
+        foreach (CollectedContentPart part in record.Parts)
+        {
+            bytes += ContentBytesOf(part);
+        }
+
+        if (record.Tool is not null)
+        {
+            bytes += ContentBytesOf(record.Tool.Input);
+            bytes += ContentBytesOf(record.Tool.Result);
+        }
+
+        return bytes;
+    }
+
+    /// <summary>Counts the UTF-8 bytes of a content part's plain text payload.</summary>
+    /// <param name="part">Materialized content part, when present.</param>
+    private static long ContentBytesOf(CollectedContentPart? part) =>
+        part?.PlainText is null ? 0 : Encoding.UTF8.GetByteCount(part.PlainText);
+
+    /// <summary>Counts the UTF-8 bytes of a tool-call payload's plain text.</summary>
+    /// <param name="content">Tool input or result payload, when present.</param>
+    private static long ContentBytesOf(CollectedToolContent? content) =>
+        content?.PlainText is null ? 0 : Encoding.UTF8.GetByteCount(content.PlainText);
+
+    /// <inheritdoc />
     public IReadOnlyList<StoredTokenCount> TokenCounts(string? spanId = null, string? sessionKey = null)
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(TokenCounts));
             HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, spanId, sessionKey);
             TableMetadata meta = GetTableMetadata("record_token_count");
             List<StoredTokenCount> results = [];
@@ -333,6 +612,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(ReportedTotals));
             HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, spanId, sessionKey);
             TableMetadata meta = GetTableMetadata("record_reported_total");
             List<StoredReportedTotal> results = [];
@@ -360,6 +640,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(ReportedCosts));
             HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, spanId, sessionKey);
             TableMetadata meta = GetTableMetadata("record_reported_cost");
             List<StoredReportedCost> results = [];
@@ -387,23 +668,30 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
-            HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, spanId, sessionKey);
-            TableMetadata meta = GetTableMetadata("record_skill_invocation");
-            List<StoredSkillInvocation> results = [];
+            NoteRead(nameof(SkillsInvoked));
+            return CollectSkillInvocations(state, spanId, sessionKey);
+        }
+    }
 
-            foreach (object?[] row in state.GetRows("record_skill_invocation"))
+    /// <summary>Reads skill invocation rows without logging a reader call. Caller holds <see cref="syncRoot"/>.</summary>
+    private static List<StoredSkillInvocation> CollectSkillInvocations(StoreState currentState, string? spanId, string? sessionKey)
+    {
+        HashSet<string>? allowedSpans = ResolveFilteredSpanIds(currentState, spanId, sessionKey);
+        TableMetadata meta = GetTableMetadata("record_skill_invocation");
+        List<StoredSkillInvocation> results = [];
+
+        foreach (object?[] row in currentState.GetRows("record_skill_invocation"))
+        {
+            string rowSpan = GetString(meta, row, "span_id");
+            if (allowedSpans is not null && !allowedSpans.Contains(rowSpan))
             {
-                string rowSpan = GetString(meta, row, "span_id");
-                if (allowedSpans is not null && !allowedSpans.Contains(rowSpan))
-                {
-                    continue;
-                }
-
-                results.Add(new StoredSkillInvocation(rowSpan, GetString(meta, row, "skill_name")));
+                continue;
             }
 
-            return results;
+            results.Add(new StoredSkillInvocation(rowSpan, GetString(meta, row, "skill_name")));
         }
+
+        return results;
     }
 
     /// <inheritdoc />
@@ -411,6 +699,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(ToolCalls));
             HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, spanId, sessionKey);
             TableMetadata meta = GetTableMetadata("tool_call");
             List<StoredToolCall> results = [];
@@ -426,6 +715,8 @@ public class InMemoryRelationalStore :
                 CollectedToolCall? call = MaterializeToolCall(state, rowSpan);
                 if (call is not null)
                 {
+                    materializedContentBytes += ContentBytesOf(call.Input);
+                    materializedContentBytes += ContentBytesOf(call.Result);
                     results.Add(new StoredToolCall(rowSpan, call));
                 }
             }
@@ -435,11 +726,31 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<StoredContentPart> ContentParts(string? spanId = null, string? sessionKey = null)
+    public IReadOnlyList<StoredContentPart> TurnContentParts(
+        string sessionKey,
+        int? turnIndex = null,
+        string? spanId = null,
+        string? part = null,
+        int budget = 0,
+        bool full = false)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
         lock (syncRoot)
         {
-            HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, spanId, sessionKey);
+            NoteRead(nameof(TurnContentParts));
+
+            string? scopedSpan = spanId;
+            if (string.IsNullOrEmpty(scopedSpan) && turnIndex.HasValue)
+            {
+                scopedSpan = ResolveTurnContentSpan(state, sessionKey, turnIndex.Value);
+                if (scopedSpan is null)
+                {
+                    return [];
+                }
+            }
+
+            HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, scopedSpan, sessionKey);
             TableMetadata meta = GetTableMetadata("content_part");
             List<StoredContentPart> results = [];
 
@@ -453,11 +764,117 @@ public class InMemoryRelationalStore :
                     continue;
                 }
 
+                if (!string.IsNullOrEmpty(part) && !string.Equals(GetString(meta, row, "bucket"), part, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
                 results.Add(new StoredContentPart(rowSpan, MaterializeContentPart(state, row)));
             }
 
-            return results;
+            if (full || budget <= 0)
+            {
+                foreach (StoredContentPart scoped in results)
+                {
+                    materializedContentBytes += ContentBytesOf(scoped.Part);
+                }
+
+                return results;
+            }
+
+            List<StoredContentPart> capped = new(results.Count);
+            long bytes = 0;
+            foreach (StoredContentPart scoped in results)
+            {
+                capped.Add(scoped);
+                long partBytes = ContentBytesOf(scoped.Part);
+                bytes += partBytes;
+                materializedContentBytes += partBytes;
+                if (bytes >= budget)
+                {
+                    break;
+                }
+            }
+
+            return capped;
         }
+    }
+
+    /// <inheritdoc />
+    public int TurnContentPartCount(
+        string sessionKey,
+        int? turnIndex = null,
+        string? spanId = null,
+        string? part = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(TurnContentPartCount));
+
+            string? scopedSpan = spanId;
+            if (string.IsNullOrEmpty(scopedSpan) && turnIndex.HasValue)
+            {
+                scopedSpan = ResolveTurnContentSpan(state, sessionKey, turnIndex.Value);
+                if (scopedSpan is null)
+                {
+                    return 0;
+                }
+            }
+
+            // Same scope as TurnContentParts, counting rows only: no part is materialized and no
+            // content byte is counted, so the count read stays content-free.
+            HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, scopedSpan, sessionKey);
+            TableMetadata meta = GetTableMetadata("content_part");
+            int count = 0;
+            foreach (object?[] row in state.GetRows("content_part"))
+            {
+                string rowSpan = GetString(meta, row, "span_id");
+                if (allowedSpans is not null && !allowedSpans.Contains(rowSpan))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(part) && !string.Equals(GetString(meta, row, "bucket"), part, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                count++;
+            }
+
+            return count;
+        }
+    }
+
+    /// <summary>
+    /// Resolves a turn index to the span the turn figures answer for that index, so the content
+    /// read is scoped to the same turn the summary already priced.
+    /// </summary>
+    /// <param name="currentState">Store snapshot to read.</param>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <param name="turnIndex">Zero-based turn index.</param>
+    /// <returns>The turn's span identifier, or <see langword="null"/> when the index is outside the session.</returns>
+    private static string? ResolveTurnContentSpan(StoreState currentState, string sessionKey, int turnIndex)
+    {
+        if (turnIndex < 0)
+        {
+            return null;
+        }
+
+        object?[]? sessionRow = FindRowByKey(currentState, "session", [("session_id", sessionKey)]);
+        List<CollectedRecord> records = CollectSessionRecordsContentFree(currentState, sessionKey);
+        if (sessionRow is null && records.Count == 0)
+        {
+            return null;
+        }
+
+        string harnessId = sessionRow is not null
+            ? GetString(GetTableMetadata("session"), sessionRow, "harness_id")
+            : records[0].HarnessId;
+        IReadOnlyList<ReadTimeTurnSummary> turns = BuildSessionTurnFigures(currentState, sessionKey, records, harnessId, pricing: null);
+        return turnIndex < turns.Count ? turns[turnIndex].SpanId : null;
     }
 
     /// <inheritdoc />
@@ -465,6 +882,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(ToolDefinitions));
             HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, spanId, sessionKey);
             TableMetadata meta = GetTableMetadata("tool_definition");
             List<StoredToolDefinition> results = [];
@@ -491,6 +909,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(AgentInvocations));
             HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, spanId, sessionKey);
             TableMetadata meta = GetTableMetadata("agent_invocation");
             List<StoredAgentInvocation> results = [];
@@ -519,6 +938,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(RecordSignals));
             HashSet<string>? allowedSpans = ResolveFilteredSpanIds(state, spanId, sessionKey);
             HashSet<string> candidateSpans = new(StringComparer.Ordinal);
 
@@ -549,6 +969,7 @@ public class InMemoryRelationalStore :
 
         lock (syncRoot)
         {
+            NoteRead(nameof(GetSession));
             object?[]? row = FindRowByKey(state, "session", [("session_id", sessionKey)]);
             return row is null ? null : MaterializeSession(state, row);
         }
@@ -559,6 +980,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(Sessions));
             TableMetadata meta = GetTableMetadata("session");
             List<CollectedSession> results = [];
             foreach (object?[] row in state.GetRows("session"))
@@ -580,6 +1002,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteRead(nameof(SessionModelUsages));
             TableMetadata meta = GetTableMetadata("session_model_usage");
             List<StoredSessionModelUsage> results = [];
             foreach (object?[] row in state.GetRows("session_model_usage")
@@ -608,62 +1031,602 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
-    public StoredFieldsView StoredFields(string sessionKey)
+    public StoredFieldsInventoryView StoredFieldsInventory(string sessionKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
 
         lock (syncRoot)
         {
-            return BuildStoredFieldsView(state, sessionKey);
+            NoteRead(nameof(StoredFieldsInventory));
+            return BuildStoredFieldsInventory(state, sessionKey);
         }
     }
 
     /// <inheritdoc />
-    public SessionAggregateView? GetSessionAggregate(string sessionKey, IModelPricingLookup? pricing = null)
+    public StoredTableRows? StoredFieldsRows(string sessionKey, string table, int page, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(table);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        lock (syncRoot)
+        {
+            // The route's table name is an allowlist key, never SQL: only a name the catalog
+            // lists reaches the row builder below, so an unknown table issues no read at all.
+            if (!RelationalSchemaCatalog.TryGetTable(table, out TableDefinition? definition) || definition is null)
+            {
+                return null;
+            }
+
+            NoteRead(nameof(StoredFieldsRows));
+            SessionScope scope = ResolveSessionScope(state, sessionKey);
+            List<object?[]> scopedRows = FilterRowsForSessionScope(state, definition, scope);
+            int offset = (int)Math.Clamp((long)(page - 1) * limit, 0L, int.MaxValue);
+            List<StoredFieldRow> rows = [];
+            for (int index = offset; index < Math.Min(offset + limit, scopedRows.Count); index++)
+            {
+                rows.Add(ToStoredFieldRow(definition, scopedRows[index]));
+            }
+
+            return new StoredTableRows(
+                definition.Name,
+                [.. definition.Columns.Select(static c => c.Name)],
+                scopedRows.Count,
+                page,
+                limit,
+                offset,
+                rows);
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<SessionListFigure> SessionListFigures(string? harnessId = null, IModelPricingLookup? pricing = null)
+    {
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionListFigures));
+            return BuildSessionListFigures((_, rowHarness) => harnessId is null || string.Equals(rowHarness, harnessId, StringComparison.Ordinal), pricing);
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<SessionListFigure> SessionListFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null)
+    {
+        ArgumentNullException.ThrowIfNull(sessionKeys);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionListFigures));
+            keyedSessionFigureReads.Add([.. sessionKeys]);
+            HashSet<string> keys = new(sessionKeys, StringComparer.Ordinal);
+            return BuildSessionListFigures((rowKey, _) => keys.Contains(rowKey), pricing);
+        }
+    }
+
+    /// <summary>
+    /// Builds the sessions-list figures of the session rows <paramref name="include"/> selects, in
+    /// session-row order, from each row's content-free records. Caller holds
+    /// <see cref="syncRoot"/>.
+    /// </summary>
+    /// <param name="include">Predicate over a session row's key and harness id.</param>
+    /// <param name="pricing">Optional pricing lookup overriding default bundled rate tables.</param>
+    /// <returns>One figure per selected session row.</returns>
+    private List<SessionListFigure> BuildSessionListFigures(Func<string, string, bool> include, IModelPricingLookup? pricing)
+    {
+        TableMetadata sessionMeta = GetTableMetadata("session");
+        List<SessionListFigure> results = [];
+        foreach (object?[] row in state.GetRows("session"))
+        {
+            string sessionKey = GetString(sessionMeta, row, "session_id");
+            if (!include(sessionKey, GetString(sessionMeta, row, "harness_id")))
+            {
+                continue;
+            }
+
+            CollectedSession session = MaterializeSession(state, row);
+            List<CollectedRecord> records = CollectSessionRecordsContentFree(state, sessionKey);
+            results.Add(BuildSessionListFigure(state, session, records, pricing));
+        }
+
+        return results;
+    }
+
+    /// <inheritdoc />
+    public SessionSummaryFigure? SessionSummaryFigures(string sessionKey, IModelPricingLookup? pricing = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
 
         lock (syncRoot)
         {
-            return BuildSessionAggregateView(state, sessionKey, pricing);
+            NoteRead(nameof(SessionSummaryFigures));
+            SessionSummaryFigure? summary = BuildSessionFigures(state, sessionKey, CollectSessionRecordsContentFree(state, sessionKey), pricing)?.Summary;
+            return summary is null
+                ? null
+                : summary with { SkillInvocations = CollectSkillInvocations(state, spanId: null, sessionKey) };
         }
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<SessionAggregateView> ListSessionAggregates(string? harnessId = null, IModelPricingLookup? pricing = null)
+    public IReadOnlyList<SessionReportFigure> SessionReportFigures(IReadOnlyCollection<string> sessionKeys, IModelPricingLookup? pricing = null)
     {
+        ArgumentNullException.ThrowIfNull(sessionKeys);
+
         lock (syncRoot)
         {
+            NoteRead(nameof(SessionReportFigures));
+            HashSet<string> keys = new(sessionKeys, StringComparer.Ordinal);
             TableMetadata sessionMeta = GetTableMetadata("session");
-            List<SessionAggregateView> results = [];
+            List<SessionReportFigure> figures = [];
             foreach (object?[] row in state.GetRows("session"))
             {
-                if (harnessId is not null && !string.Equals(GetString(sessionMeta, row, "harness_id"), harnessId, StringComparison.Ordinal))
+                string sessionKey = GetString(sessionMeta, row, "session_id");
+                if (!keys.Contains(sessionKey))
                 {
                     continue;
                 }
 
-                string key = GetString(sessionMeta, row, "session_id");
-                SessionAggregateView? aggregate = BuildSessionAggregateView(state, key, pricing);
-                if (aggregate is not null)
+                SessionSummaryFigure? summary = BuildSessionFigures(state, sessionKey, CollectSessionRecordsContentFree(state, sessionKey), pricing)?.Summary;
+                if (summary is not null)
                 {
-                    results.Add(aggregate);
+                    figures.Add(new SessionReportFigure(summary));
                 }
             }
 
-            return results;
+            return figures;
         }
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ReadTimeTurnSummary> SessionTurnSummaries(string sessionKey, IModelPricingLookup? pricing = null)
+    public IReadOnlyList<CollectedRecord> SessionRecordsContentFree(string sessionKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
 
         lock (syncRoot)
         {
-            return BuildSessionTurnSummaries(state, sessionKey, pricing);
+            NoteRead(nameof(SessionRecordsContentFree));
+            return CollectSessionRecordsContentFree(state, sessionKey);
         }
+    }
+
+    /// <inheritdoc />
+    public virtual IReadOnlyList<CollectedRecord> SessionTimelineRecords(string sessionKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionTimelineRecords));
+            return CollectSessionTimelineRecords(state, sessionKey);
+        }
+    }
+
+    /// <inheritdoc />
+    public virtual ReadTimeTurnSummary? TurnFigures(string sessionKey, int turnIndex, IModelPricingLookup? pricing = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        if (turnIndex < 0)
+        {
+            return null;
+        }
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(TurnFigures));
+            object?[]? sessionRow = FindRowByKey(state, "session", [("session_id", sessionKey)]);
+            List<CollectedRecord> records = CollectSessionRecordsContentFree(state, sessionKey);
+            if (sessionRow is null && records.Count == 0)
+            {
+                return null;
+            }
+
+            string harnessId = sessionRow is not null
+                ? GetString(GetTableMetadata("session"), sessionRow, "harness_id")
+                : records[0].HarnessId;
+            IReadOnlyList<ReadTimeTurnSummary> turns = BuildSessionTurnFigures(state, sessionKey, records, harnessId, pricing);
+            return turnIndex < turns.Count ? turns[turnIndex] : null;
+        }
+    }
+
+    /// <inheritdoc />
+    public SessionTurnFigureSet? SessionTurnFigures(string sessionKey, IModelPricingLookup? pricing = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionTurnFigures));
+            object?[]? sessionRow = FindRowByKey(state, "session", [("session_id", sessionKey)]);
+            List<CollectedRecord> records = CollectSessionRecordsContentFree(state, sessionKey);
+            if (sessionRow is null && records.Count == 0)
+            {
+                return null;
+            }
+
+            string harnessId = sessionRow is not null
+                ? GetString(GetTableMetadata("session"), sessionRow, "harness_id")
+                : records[0].HarnessId;
+            IReadOnlyList<ReadTimeTurnSummary> turns = BuildSessionTurnFigures(state, sessionKey, records, harnessId, pricing);
+            ReadTimeContextBucketSummary? firstContextBucket = null;
+            ReadTimeContextBucketSummary? lastContextBucket = null;
+            if (GetSessionProjectionFromState(state, sessionKey)?.Context?.Turns is { Count: > 0 } contextTurns)
+            {
+                List<StoredSessionContextTurn> orderedContext = [.. contextTurns.OrderBy(static t => t.Position)];
+                List<(int Position, CollectedRecord Record)> turnEntries =
+                    ResolveSessionTurnEntries(state, sessionKey, records);
+                firstContextBucket = BuildContextBucketSummary(orderedContext[0], turnEntries);
+                lastContextBucket = BuildContextBucketSummary(orderedContext[^1], turnEntries);
+            }
+
+            return new SessionTurnFigureSet(turns, firstContextBucket, lastContextBucket);
+        }
+    }
+
+    /// <inheritdoc />
+    public virtual SessionRequestFigurePageResult SessionRequestFigures(string sessionKey, int page, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionRequestFigures));
+            List<ReadTimeSessionRequestSummary> rows =
+            [
+                .. BuildSessionFigures(state, sessionKey, CollectSessionRecordsContentFree(state, sessionKey), null)?.Requests ?? [],
+            ];
+            return new SessionRequestFigurePageResult(PageOf(rows, page, limit), rows.Count);
+        }
+    }
+
+    /// <inheritdoc />
+    public virtual SessionReconciliationFigurePageResult SessionReconciliationFigures(string sessionKey, int page, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionReconciliationFigures));
+            // The section renders the measurable rows only, as the detail payload's
+            // reconciliation rows do: a row whose either match is absent is not rendered.
+            List<ReadTimeTurnReconciliation> rows =
+            [
+                .. (BuildSessionFigures(state, sessionKey, CollectSessionRecordsContentFree(state, sessionKey), null)?.Reconciliation ?? [])
+                    .Where(static row => row.InputMatch.HasValue && row.OutputMatch.HasValue),
+            ];
+            return new SessionReconciliationFigurePageResult(PageOf(rows, page, limit), rows.Count);
+        }
+    }
+
+    /// <inheritdoc />
+    public virtual SessionProblemPageResult SessionProblems(string sessionKey, int page, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionProblems));
+            List<Problem> rows = CollectSessionProblems(state, sessionKey, ResolveSessionSpanIds(state, sessionKey));
+            return new SessionProblemPageResult(PageOf(rows, page, limit), rows.Count);
+        }
+    }
+
+    /// <inheritdoc />
+    public virtual SessionToolFigureSet SessionToolFigures(string sessionKey, IModelPricingLookup? pricing = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionToolFigures));
+            StoreState currentState = state;
+
+            // The session harness and the session's first turn model in record-start order are
+            // the two identity columns the unused-range pricing resolves — the same rows the
+            // adapter's statement reads.
+            object?[]? sessionRow = FindRowByKey(currentState, "session", [("session_id", sessionKey)]);
+            string? harnessId = sessionRow is null
+                ? null
+                : GetString(GetTableMetadata("session"), sessionRow, "harness_id");
+            List<CollectedRecord> records = CollectSessionRecordsContentFree(currentState, sessionKey);
+            string? primaryModel = records
+                .Where(static record => record.Op == RecordOp.LlmInvoke)
+                .OrderBy(static record => record.StartedAt)
+                .ThenBy(static record => record.RecordId, StringComparer.Ordinal)
+                .Select(static record => record.Model)
+                .FirstOrDefault(static model => !string.IsNullOrEmpty(model));
+
+            // Tool-call metadata only, with the adapter's error rule: a call failed when its
+            // stored outcome says so or it carries an error message; the record's own status is
+            // the wide figures' input, not this read's.
+            int toolCallTotal = 0;
+            List<string> toolsInvoked = [];
+            HashSet<string> seenInvokedTools = new(StringComparer.Ordinal);
+            Dictionary<string, int> invCounts = new(StringComparer.Ordinal);
+            Dictionary<string, int> errCounts = new(StringComparer.Ordinal);
+            foreach (CollectedRecord record in records)
+            {
+                if (record.Tool is null)
+                {
+                    continue;
+                }
+
+                toolCallTotal++;
+                string toolName = record.Tool.ToolName;
+                if (seenInvokedTools.Add(toolName))
+                {
+                    toolsInvoked.Add(toolName);
+                }
+
+                invCounts[toolName] = invCounts.GetValueOrDefault(toolName) + 1;
+                if (record.Tool.Succeeded == false || record.Tool.Error is not null)
+                {
+                    errCounts[toolName] = errCounts.GetValueOrDefault(toolName) + 1;
+                }
+            }
+
+            List<string> toolsOffered = [];
+            HashSet<string> seenOfferedTools = new(StringComparer.Ordinal);
+            Dictionary<string, (long SchemaTokens, string? Server, HashSet<string> SpanIds)> defStats = new(StringComparer.Ordinal);
+            string? definitionsSpanId = null;
+            foreach (CollectedRecord record in records)
+            {
+                if (record.ToolDefinitions.Count > 0)
+                {
+                    definitionsSpanId ??= record.RecordId;
+                }
+
+                foreach (CollectedToolDefinition def in record.ToolDefinitions)
+                {
+                    if (seenOfferedTools.Add(def.ToolName))
+                    {
+                        toolsOffered.Add(def.ToolName);
+                    }
+
+                    if (!defStats.TryGetValue(def.ToolName, out (long SchemaTokens, string? Server, HashSet<string> SpanIds) existing))
+                    {
+                        defStats[def.ToolName] = (
+                            def.SchemaTokens,
+                            def.Server,
+                            new HashSet<string>(StringComparer.Ordinal) { record.RecordId });
+                    }
+                    else
+                    {
+                        _ = existing.SpanIds.Add(record.RecordId);
+                        defStats[def.ToolName] = (existing.SchemaTokens, existing.Server ?? def.Server, existing.SpanIds);
+                    }
+                }
+            }
+
+            // The residency helpers price the stored schema only, so the read carries the schema
+            // in a minimal projection shape instead of the session's whole projection. The
+            // measurability verdict reads the stored projection's own schema fields, the same
+            // verdict the summary payload states.
+            StoredSessionProjection? storedProjection = GetSessionProjectionFromState(currentState, sessionKey);
+            StoredSessionSchema? schema = storedProjection?.Schema;
+            StoredSessionProjection? projection = schema is null
+                ? null
+                : new StoredSessionProjection(
+                    SessionId: sessionKey,
+                    Label: string.Empty,
+                    IsSubagent: false,
+                    SpanCount: 0,
+                    StartedAtUtc: string.Empty,
+                    EndedAtUtc: string.Empty,
+                    ParentSessionId: null,
+                    AgentName: null,
+                    IncludedInParent: false,
+                    RequestSpanIds: [],
+                    Turns: [],
+                    Schema: schema);
+
+            List<ReadTimeSessionToolSummary> tools = BuildSessionToolSummaries(
+                projection,
+                schema?.TurnCount ?? 0,
+                defStats,
+                toolsInvoked,
+                invCounts,
+                errCounts);
+            List<ReadTimeSessionServerSummary> servers = BuildSessionServerSummaries(projection, tools);
+            UnusedSchemaRange? unusedRange = ResolveUnusedRange(
+                projection,
+                harnessId ?? string.Empty,
+                primaryModel is null ? [] : [primaryModel],
+                pricing);
+
+            List<StoredSchemaServerTokens> byServer = [];
+            if (schema is not null)
+            {
+                foreach (StoredSchemaServerTokens server in schema.Servers)
+                {
+                    byServer.Add(new StoredSchemaServerTokens(server.ServerName, server.Tokens));
+                }
+            }
+            else
+            {
+                // The unmeasured ranking's rollup, priced from the tool rows themselves the way
+                // the display layer derives it today: rows carrying a server and a measured cost,
+                // largest cost first.
+                Dictionary<string, long> totals = new(StringComparer.Ordinal);
+                foreach (ReadTimeSessionToolSummary tool in tools)
+                {
+                    if (tool.Server is null || tool.TotalSchemaCost <= 0)
+                    {
+                        continue;
+                    }
+
+                    totals[tool.Server] = totals.GetValueOrDefault(tool.Server) + tool.TotalSchemaCost;
+                }
+
+                byServer.AddRange(totals
+                    .OrderByDescending(static kv => kv.Value)
+                    .ThenBy(static kv => kv.Key, StringComparer.Ordinal)
+                    .Select(static kv => new StoredSchemaServerTokens(kv.Key, kv.Value)));
+            }
+
+            long? maxCost = null;
+            long residentCostTotal = 0;
+            int unusedCount = 0;
+            foreach (ReadTimeSessionToolSummary tool in tools)
+            {
+                if (!maxCost.HasValue || tool.TotalSchemaCost > maxCost.Value)
+                {
+                    maxCost = tool.TotalSchemaCost;
+                }
+
+                residentCostTotal += tool.TotalSchemaCost;
+                if (!tool.Invoked)
+                {
+                    unusedCount++;
+                }
+            }
+
+            return new SessionToolFigureSet(
+                Tools: tools,
+                Servers: servers,
+                ToolsOffered: toolsOffered,
+                UnusedRange: unusedRange,
+                ByServer: byServer,
+                MaxCost: maxCost,
+                ResidentCostTotal: residentCostTotal,
+                InvocationCount: toolCallTotal,
+                UnusedCount: unusedCount,
+                DefinitionsSpanId: definitionsSpanId,
+                SchemaMeasurable: schema is not null,
+                SchemaUnmeasurableReason: storedProjection?.SchemaUnmeasurableReason);
+        }
+    }
+
+    /// <inheritdoc />
+    public virtual IReadOnlyList<StoredSkillInvocation> SessionSkillFigures(string sessionKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(SessionSkillFigures));
+            HashSet<string> sessionSpans = ResolveSessionSpanIds(state, sessionKey);
+            TableMetadata meta = GetTableMetadata("record_skill_invocation");
+            List<StoredSkillInvocation> rows = [];
+            foreach (object?[] row in state.GetRows("record_skill_invocation"))
+            {
+                string spanId = GetString(meta, row, "span_id");
+                if (sessionSpans.Contains(spanId))
+                {
+                    rows.Add(new StoredSkillInvocation(spanId, GetString(meta, row, "skill_name")));
+                }
+            }
+
+            return rows;
+        }
+    }
+
+    /// <inheritdoc />
+    public virtual IReadOnlyList<StoredRequestPromptPreview> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds)
+    {
+        ArgumentNullException.ThrowIfNull(requestSpanIds);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+
+        lock (syncRoot)
+        {
+            NoteRead(nameof(RequestPromptPreviews));
+            if (requestSpanIds.Count == 0)
+            {
+                return [];
+            }
+
+            List<CollectedRecord> records = CollectSessionRecordsContentFree(state, sessionKey);
+            List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntries(state, sessionKey, records);
+            List<StoredRequestPromptPreview> previews = [];
+            foreach (string requestSpanId in requestSpanIds.Distinct(StringComparer.Ordinal))
+            {
+                previews.Add(new StoredRequestPromptPreview(
+                    requestSpanId,
+                    MaterializeRequestPromptPreview(state, sessionKey, requestSpanId, records, turnEntries)));
+            }
+
+            return previews;
+        }
+    }
+
+    /// <summary>
+    /// Reads one request span's prompt preview: its own prompt-bucket parts first, then the parts
+    /// of the turns it owns, in turn order — the same rule the detail figures' request rows use —
+    /// counting the part text the candidate records' parts materialize.
+    /// </summary>
+    /// <param name="currentState">Store state to read parts from.</param>
+    /// <param name="sessionKey">Owning session key.</param>
+    /// <param name="requestSpanId">Request span whose preview is read.</param>
+    /// <param name="records">The session's content-free records, for turn ownership.</param>
+    /// <param name="turnEntries">The session's turn entries, in turn order.</param>
+    /// <returns>The truncated preview, or <see langword="null"/> when the span carries none.</returns>
+    private string? MaterializeRequestPromptPreview(
+        StoreState currentState,
+        string sessionKey,
+        string requestSpanId,
+        IReadOnlyList<CollectedRecord> records,
+        IReadOnlyList<(int Position, CollectedRecord Record)> turnEntries)
+    {
+        HashSet<string> subtree = CollectDescendantSpanIds(requestSpanId, records);
+        List<CollectedRecord> candidates = [];
+        CollectedRecord? requestRecord = MaterializeRecordWithParts(currentState, requestSpanId);
+        if (requestRecord is not null)
+        {
+            candidates.Add(requestRecord);
+        }
+
+        foreach ((int _, CollectedRecord turnEntry) in turnEntries)
+        {
+            if (subtree.Contains(turnEntry.RecordId) && turnEntry.RecordId != requestSpanId)
+            {
+                CollectedRecord? ownedTurn = MaterializeRecordWithParts(currentState, turnEntry.RecordId);
+                if (ownedTurn is not null)
+                {
+                    candidates.Add(ownedTurn);
+                }
+            }
+        }
+
+        foreach (CollectedRecord candidate in candidates)
+        {
+            foreach (CollectedContentPart part in candidate.Parts)
+            {
+                materializedContentBytes += ContentBytesOf(part);
+            }
+        }
+
+        return ExtractPromptPreview(requestRecord, [.. candidates.Skip(requestRecord is null ? 0 : 1)]);
+    }
+
+    /// <summary>Materializes one record's scalar columns, tokens, and content parts, when its row exists.</summary>
+    /// <param name="currentState">Store state to read from.</param>
+    /// <param name="spanId">Record span id.</param>
+    /// <returns>The record, or <see langword="null"/> when no row carries the span.</returns>
+    private static CollectedRecord? MaterializeRecordWithParts(StoreState currentState, string spanId)
+    {
+        object?[]? row = FindRowByKey(currentState, "record", [("span_id", spanId)]);
+        return row is null ? null : MaterializeRecord(currentState, row);
+    }
+
+    /// <summary>Cuts one page of <paramref name="rows"/>, tolerating a page past the end.</summary>
+    /// <param name="rows">The rows the read computed, in their own order.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page.</param>
+    /// <returns>The page's rows; empty when the page starts past the end.</returns>
+    private static List<T> PageOf<T>(IReadOnlyList<T> rows, int page, int limit)
+    {
+        if (rows.Count == 0)
+        {
+            return [];
+        }
+
+        long offset = Math.Min((long)(page - 1) * limit, rows.Count);
+        return [.. rows.Skip((int)offset).Take(limit)];
     }
 
     /// <inheritdoc />
@@ -673,8 +1636,8 @@ public class InMemoryRelationalStore :
 
         lock (syncRoot)
         {
-            object?[]? row = FindRowByKey(state, "session_projection", [("session_id", sessionId)]);
-            return row is null ? null : MaterializeSessionProjection(state, row);
+            NoteSessionProjectionRead(nameof(GetSessionProjection));
+            return GetSessionProjectionFromState(state, sessionId);
         }
     }
 
@@ -683,6 +1646,7 @@ public class InMemoryRelationalStore :
     {
         lock (syncRoot)
         {
+            NoteSessionProjectionRead(nameof(ListSessionProjections));
             TableMetadata projMeta = GetTableMetadata("session_projection");
             TableMetadata sessionMeta = GetTableMetadata("session");
             List<StoredSessionProjection> results = [];
@@ -705,6 +1669,258 @@ public class InMemoryRelationalStore :
 
             return results;
         }
+    }
+
+    /// <inheritdoc />
+    public SessionHeaderPageResult SessionHeaderPage(string? harnessId, string? search, int page, int limit)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        lock (syncRoot)
+        {
+            NoteSessionProjectionRead(nameof(SessionHeaderPage));
+            List<StoredSessionHeader> scope = SessionProjectionHeadersInScope(state, harnessId);
+            Dictionary<string, string?> parentById = ParentLinksOf(scope);
+            List<StoredSessionHeader> roots =
+            [
+                .. scope.Where(header => IsSessionRoot(header, parentById) && SessionHeaderMatches(header, search)),
+            ];
+            return PageSessionHeaders(roots, page, limit);
+        }
+    }
+
+    /// <inheritdoc />
+    public SessionHeaderPageResult SessionChildHeaderPage(string parentSessionId, int page, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(parentSessionId);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+
+        lock (syncRoot)
+        {
+            NoteSessionProjectionRead(nameof(SessionChildHeaderPage));
+            return PageSessionHeaders(AttachableChildren(SessionProjectionHeadersInScope(state, null), parentSessionId), page, limit);
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<SessionChildPreviewEntry> SessionChildPreview(IReadOnlyCollection<string> parentSessionIds, int perParent)
+    {
+        ArgumentNullException.ThrowIfNull(parentSessionIds);
+        ArgumentOutOfRangeException.ThrowIfLessThan(perParent, 1);
+
+        lock (syncRoot)
+        {
+            NoteSessionProjectionRead(nameof(SessionChildPreview));
+            List<StoredSessionHeader> scope = SessionProjectionHeadersInScope(state, null);
+            Dictionary<string, string?> parentById = ParentLinksOf(scope);
+            HashSet<string> requested = new(parentSessionIds, StringComparer.Ordinal);
+            Dictionary<string, List<StoredSessionHeader>> childrenByParent = new(StringComparer.Ordinal);
+            foreach (StoredSessionHeader header in scope)
+            {
+                if (header.ParentSessionId is not null
+                    && requested.Contains(header.ParentSessionId)
+                    && !IsSessionRoot(header, parentById))
+                {
+                    if (!childrenByParent.TryGetValue(header.ParentSessionId, out List<StoredSessionHeader>? children))
+                    {
+                        children = [];
+                        childrenByParent[header.ParentSessionId] = children;
+                    }
+
+                    children.Add(header);
+                }
+            }
+
+            // The scope is ordered newest start first and then by session id, so walking it
+            // answers the previews in that order.
+            List<SessionChildPreviewEntry> entries = [];
+            foreach (StoredSessionHeader parent in scope)
+            {
+                if (!childrenByParent.TryGetValue(parent.SessionId, out List<StoredSessionHeader>? attachable))
+                {
+                    continue;
+                }
+
+                entries.Add(new SessionChildPreviewEntry(
+                    parent.SessionId,
+                    attachable.Count,
+                    [.. attachable
+                        .OrderBy(static child => child.StartedAtUtc, StringComparer.Ordinal)
+                        .ThenBy(static child => child.SessionId, StringComparer.Ordinal)
+                        .Select(static child => child.SessionId)
+                        .Take(perParent)]));
+            }
+
+            return entries;
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<StoredSessionHeader> SessionHeadersByKeys(IReadOnlyCollection<string> sessionIds)
+    {
+        ArgumentNullException.ThrowIfNull(sessionIds);
+
+        lock (syncRoot)
+        {
+            NoteSessionProjectionRead(nameof(SessionHeadersByKeys));
+            HashSet<string> keys = new(sessionIds, StringComparer.Ordinal);
+            return [.. SessionProjectionHeadersInScope(state, null).Where(header => keys.Contains(header.SessionId))];
+        }
+    }
+
+    /// <summary>
+    /// Reads the projection headers of every session in <paramref name="harnessId"/>'s scope —
+    /// every projected session, or those whose session row carries that harness — newest start
+    /// first and then by session id, reading no child collection. Caller holds
+    /// <see cref="syncRoot"/>.
+    /// </summary>
+    /// <param name="currentState">Store state to read.</param>
+    /// <param name="harnessId">Optional harness filter over the session rows.</param>
+    /// <returns>The scoped projection headers, in page order.</returns>
+    private static List<StoredSessionHeader> SessionProjectionHeadersInScope(StoreState currentState, string? harnessId)
+    {
+        TableMetadata projMeta = GetTableMetadata("session_projection");
+        TableMetadata sessionMeta = GetTableMetadata("session");
+        List<StoredSessionHeader> headers = [];
+        foreach (object?[] row in currentState.GetRows("session_projection"))
+        {
+            if (harnessId is not null)
+            {
+                object?[]? sessionRow = FindRowByKey(currentState, "session", [("session_id", GetString(projMeta, row, "session_id"))]);
+                if (sessionRow is null || !string.Equals(GetString(sessionMeta, sessionRow, "harness_id"), harnessId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+            }
+
+            headers.Add(MaterializeSessionHeader(currentState, row));
+        }
+
+        return [.. headers
+            .OrderByDescending(static header => header.StartedAtUtc, StringComparer.Ordinal)
+            .ThenBy(static header => header.SessionId, StringComparer.Ordinal)];
+    }
+
+    /// <summary>
+    /// Reads one projection's header — its columns and single-row satellites, and no child
+    /// collection.
+    /// </summary>
+    /// <param name="currentState">Store state to read.</param>
+    /// <param name="row">The <c>session_projection</c> row.</param>
+    /// <returns>The projection header.</returns>
+    private static StoredSessionHeader MaterializeSessionHeader(StoreState currentState, object?[] row)
+    {
+        TableMetadata meta = GetTableMetadata("session_projection");
+        string sessionId = GetString(meta, row, "session_id");
+        return new StoredSessionHeader(
+            sessionId,
+            GetString(meta, row, "label"),
+            GetInt64(meta, row, "is_subagent") == 1L,
+            (int)GetInt64(meta, row, "span_count"),
+            GetString(meta, row, "started_at_utc"),
+            GetString(meta, row, "ended_at_utc"),
+            ReadOptionalSingleString(currentState, "session_projection_parent", "session_id", sessionId, "parent_session_id"),
+            ReadOptionalSingleString(currentState, "session_projection_agent", "session_id", sessionId, "agent_name"),
+            FindRowByKey(currentState, "session_projection_included_in_parent", [("session_id", sessionId)]) is not null,
+            ReadOptionalSingleString(currentState, "session_context_unmeasurable", "session_id", sessionId, "reason"),
+            ReadOptionalSingleString(currentState, "session_schema_unmeasurable", "session_id", sessionId, "reason"));
+    }
+
+    /// <summary>Maps every session in a scope to its parent link. A parent that is not in the scope stays named, and the root rule treats it as absent.</summary>
+    /// <param name="scope">The scoped projection headers.</param>
+    /// <returns>Each scoped session id and its parent session id, or <see langword="null"/>.</returns>
+    private static Dictionary<string, string?> ParentLinksOf(IReadOnlyList<StoredSessionHeader> scope) =>
+        scope.ToDictionary(static header => header.SessionId, static header => header.ParentSessionId, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The root rule: a session is a root unless its parent is a projected session in the scope
+    /// and attaching it would form no cycle. Attaching would complete a cycle when the parent's
+    /// own chain leads back to this session.
+    /// </summary>
+    /// <param name="header">The session to classify.</param>
+    /// <param name="parentById">Each session in the scope and its parent link.</param>
+    /// <returns><see langword="true"/> when the session is a root.</returns>
+    private static bool IsSessionRoot(StoredSessionHeader header, IReadOnlyDictionary<string, string?> parentById)
+    {
+        if (string.IsNullOrEmpty(header.ParentSessionId) || !parentById.ContainsKey(header.ParentSessionId))
+        {
+            return true;
+        }
+
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        for (string? cursor = header.ParentSessionId; cursor is not null && seen.Add(cursor); cursor = parentById.TryGetValue(cursor, out string? parent) ? parent : null)
+        {
+            if (string.Equals(cursor, header.SessionId, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The sessions in a scope that attach to <paramref name="parentSessionId"/> — every projected
+    /// session's children that are not roots — oldest start first and then by session id.
+    /// </summary>
+    /// <param name="scope">The scoped projection headers.</param>
+    /// <param name="parentSessionId">The parent session.</param>
+    /// <returns>The parent's attachable children.</returns>
+    private static List<StoredSessionHeader> AttachableChildren(List<StoredSessionHeader> scope, string parentSessionId)
+    {
+        Dictionary<string, string?> parentById = ParentLinksOf(scope);
+        return
+        [
+            .. scope
+                .Where(header => string.Equals(header.ParentSessionId, parentSessionId, StringComparison.Ordinal) && !IsSessionRoot(header, parentById))
+                .OrderBy(static header => header.StartedAtUtc, StringComparer.Ordinal)
+                .ThenBy(static header => header.SessionId, StringComparer.Ordinal),
+        ];
+    }
+
+    /// <summary>
+    /// Whether a session's label or session id contains the search text: ASCII letters match
+    /// either case and every other character matches itself, which is what the adapter's
+    /// <c>LIKE</c> answers.
+    /// </summary>
+    /// <param name="header">The session to match.</param>
+    /// <param name="search">Search text, or <see langword="null"/> for no filter.</param>
+    /// <returns><see langword="true"/> when the session matches.</returns>
+    private static bool SessionHeaderMatches(StoredSessionHeader header, string? search) =>
+        search is null || ContainsAsciiIgnoreCase(header.Label, search) || ContainsAsciiIgnoreCase(header.SessionId, search);
+
+    private static bool ContainsAsciiIgnoreCase(string text, string search)
+    {
+        for (int start = 0; start + search.Length <= text.Length; start++)
+        {
+            int matched = 0;
+            while (matched < search.Length && FoldAscii(text[start + matched]) == FoldAscii(search[matched]))
+            {
+                matched++;
+            }
+
+            if (matched == search.Length)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static char FoldAscii(char value) => value is >= 'A' and <= 'Z' ? (char)(value + ('a' - 'A')) : value;
+
+    /// <summary>Cuts a page from an ordered header list and reports the list's size.</summary>
+    /// <param name="ordered">Headers in page order.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on a page.</param>
+    /// <returns>The page's headers and the size of <paramref name="ordered"/>.</returns>
+    private static SessionHeaderPageResult PageSessionHeaders(List<StoredSessionHeader> ordered, int page, int limit)
+    {
+        long skip = ((long)page - 1) * limit;
+        return new SessionHeaderPageResult([.. ordered.Skip(skip >= ordered.Count ? ordered.Count : (int)skip).Take(limit)], ordered.Count);
     }
 
     /// <inheritdoc />
@@ -4807,56 +6023,315 @@ public class InMemoryRelationalStore :
             ReadOptionalSingleString(currentState, "metric_point_source", "point_id", pointId, "source"));
     }
 
-    private static StoredFieldsView BuildStoredFieldsView(StoreState currentState, string sessionKey)
+    private static StoredFieldsInventoryView BuildStoredFieldsInventory(StoreState currentState, string sessionKey)
     {
         SessionScope scope = ResolveSessionScope(currentState, sessionKey);
         Dictionary<string, List<object?[]>> scopedRowsByTable = new(RelationalSchemaCatalog.Tables.Count, StringComparer.Ordinal);
-        List<StoredTableFields> tableEntries = new(RelationalSchemaCatalog.Tables.Count);
-
         foreach (TableDefinition table in RelationalSchemaCatalog.Tables)
         {
-            List<object?[]> scopedRows = FilterRowsForSessionScope(currentState, table, scope);
-            scopedRowsByTable[table.Name] = scopedRows;
-
-            List<string> columnNames = [.. table.Columns.Select(static c => c.Name)];
-            List<StoredFieldRow> renderedRows = [.. scopedRows.Select(r => ToStoredFieldRow(table, r))];
-            List<string> missingParentKeys = ComputeMissingParentKeys(table, scopedRows, scopedRowsByTable);
-
-            tableEntries.Add(new StoredTableFields(table.Name, columnNames, renderedRows, missingParentKeys));
+            scopedRowsByTable[table.Name] = FilterRowsForSessionScope(currentState, table, scope);
         }
 
-        return new StoredFieldsView(sessionKey, tableEntries);
+        List<StoredTableInventory> tableEntries = new(RelationalSchemaCatalog.Tables.Count);
+        foreach (TableDefinition table in RelationalSchemaCatalog.Tables)
+        {
+            List<object?[]> scopedRows = scopedRowsByTable[table.Name];
+            List<string> missingParentKeys = ComputeMissingParentKeys(table, scopedRows, scopedRowsByTable);
+            tableEntries.Add(new StoredTableInventory(
+                table.Name,
+                [.. table.Columns.Select(static c => c.Name)],
+                scopedRows.Count,
+                missingParentKeys));
+        }
+
+        return new StoredFieldsInventoryView(sessionKey, tableEntries);
     }
 
-    private static IReadOnlyList<ReadTimeTurnSummary> BuildSessionTurnSummaries(
+    /// <summary>
+    /// Derives one session's sessions-list figures from its session row, content-free records,
+    /// stored projection, and ingest problems. The turn loop walks the same scalar columns the
+    /// retired session-aggregate read walked; the fields the sessions list renders are kept and
+    /// the content-bearing aggregate fields are deliberately absent.
+    /// </summary>
+    private static SessionListFigure BuildSessionListFigure(
         StoreState currentState,
-        string sessionKey,
+        CollectedSession session,
+        IReadOnlyList<CollectedRecord> records,
         IModelPricingLookup? pricing)
     {
-        object?[]? sessionRow = FindRowByKey(currentState, "session", [("session_id", sessionKey)]);
-        List<CollectedRecord> records = CollectSessionRecords(currentState, sessionKey);
-        if (sessionRow is null && records.Count == 0)
+        string sessionKey = session.SessionKey;
+        string harnessId = session.HarnessId;
+
+        HashSet<string> sessionSpanIds = new(StringComparer.Ordinal);
+        foreach (CollectedRecord record in records)
+        {
+            _ = sessionSpanIds.Add(record.RecordId);
+        }
+
+        StoredSessionProjection? projection = GetSessionProjectionFromState(currentState, sessionKey);
+        List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntries(currentState, sessionKey, records);
+
+        List<CostBlock> turnPublishedBlocks = new(turnEntries.Count);
+        List<CostBlock> valuedTurnPublishedBlocks = [];
+        List<CostBlock> valuedTurnHarnessBlocks = [];
+        List<string> models = [];
+        HashSet<string> seenModels = new(StringComparer.Ordinal);
+        long totalInput = 0;
+        bool hasInput = false;
+        long totalOutput = 0;
+        bool hasOutput = false;
+
+        foreach ((int position, CollectedRecord turnRecord) in turnEntries)
+        {
+            ReadTimeTurnSummary turnSummary = BuildTurnSummary(
+                turnRecord,
+                position,
+                harnessId,
+                pricing,
+                out CostBlock publishedBlock,
+                out CostBlock? harnessBlock);
+
+            turnPublishedBlocks.Add(publishedBlock);
+            if (publishedBlock.Value is double publishedValue && double.IsFinite(publishedValue))
+            {
+                valuedTurnPublishedBlocks.Add(publishedBlock);
+            }
+
+            if (harnessBlock is not null && harnessBlock.Value is double harnessValue && double.IsFinite(harnessValue))
+            {
+                valuedTurnHarnessBlocks.Add(harnessBlock);
+            }
+
+            if (!string.IsNullOrEmpty(turnRecord.Model) && seenModels.Add(turnRecord.Model))
+            {
+                models.Add(turnRecord.Model);
+            }
+
+            if (turnSummary.InputTokens.HasValue)
+            {
+                totalInput += turnSummary.InputTokens.Value;
+                hasInput = true;
+            }
+
+            if (turnSummary.OutputTokens.HasValue)
+            {
+                totalOutput += turnSummary.OutputTokens.Value;
+                hasOutput = true;
+            }
+        }
+
+        List<CollectedRecord> rootRecords =
+        [
+            .. records
+                .Where(r => r.ParentRecordId is null ||
+                            string.Equals(r.ParentRecordId, r.RecordId, StringComparison.Ordinal) ||
+                            !sessionSpanIds.Contains(r.ParentRecordId))
+                .OrderBy(static r => r.StartedAt)
+                .ThenBy(static r => r.RecordId, StringComparer.Ordinal),
+        ];
+
+        List<Problem> extraProblems = [];
+
+        List<CostBlock> reportedRecordBlocks = [];
+        foreach (CollectedRecord record in records)
+        {
+            if (record.ReportedCost is null)
+            {
+                continue;
+            }
+
+            IReadOnlyDictionary<string, double>? byModel = !string.IsNullOrEmpty(record.Model)
+                ? new Dictionary<string, double>(StringComparer.Ordinal) { [record.Model] = record.ReportedCost.Amount }
+                : null;
+            reportedRecordBlocks.Add(new CostBlock(
+                CostBasis.Harness,
+                CostStatus.Priced,
+                record.ReportedCost.Amount,
+                record.ReportedCost.Currency,
+                byModel));
+        }
+
+        ReadTimeCostSummary? sessionReportedCost = reportedRecordBlocks.Count > 0
+            ? AggregateCostBlocks(reportedRecordBlocks, CostBasis.Harness, extraProblems)
+            : null;
+
+        ReadTimeCostSummary sessionPublishedCost = turnPublishedBlocks.Count > 0
+            ? AggregateCostBlocks(turnPublishedBlocks, CostBasis.Published, extraProblems)
+            : new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, []);
+
+        ReadTimeCostBasisMismatch? basisMismatch = null;
+        if (valuedTurnHarnessBlocks.Count > 0 && valuedTurnPublishedBlocks.Count > 0)
+        {
+            List<CostBlock> combined = [.. valuedTurnHarnessBlocks, .. valuedTurnPublishedBlocks];
+            CostTotalResult mismatchTotal = CanonPricing.SumCosts(combined);
+            CostBasisMismatch? domainMismatch = CanonPricing.CostBasisMismatchOf(combined, mismatchTotal);
+            if (domainMismatch is not null)
+            {
+                List<ReadTimeBasisTotal> totalsByBasis =
+                [
+                    .. domainMismatch.TotalsByBasis
+                        .OrderBy(static kv => kv.Key, StringComparer.Ordinal)
+                        .Select(static kv => new ReadTimeBasisTotal(kv.Key, kv.Value)),
+                ];
+                basisMismatch = new ReadTimeCostBasisMismatch(
+                    domainMismatch.Code,
+                    domainMismatch.Message,
+                    domainMismatch.Bases,
+                    totalsByBasis);
+            }
+
+            if (mismatchTotal.Problem is not null)
+            {
+                extraProblems.Add(mismatchTotal.Problem);
+            }
+        }
+
+        int requestCount = projection is not null && projection.RequestSpanIds.Count > 0
+            ? projection.RequestSpanIds.Count
+            : rootRecords.Count;
+
+        List<Problem> problems = CollectSessionProblems(currentState, sessionKey, sessionSpanIds);
+        problems.AddRange(extraProblems);
+
+        return new SessionListFigure(
+            SessionKey: sessionKey,
+            HarnessId: harnessId,
+            Repo: session.Workspace?.Repository,
+            Branch: session.Workspace?.Branch,
+            TurnCount: turnEntries.Count,
+            RequestCount: requestCount,
+            TotalInput: hasInput ? totalInput : null,
+            TotalOutput: hasOutput ? totalOutput : null,
+            ReportedCost: sessionReportedCost,
+            PublishedCost: sessionPublishedCost,
+            CostBasisMismatch: basisMismatch,
+            Models: models,
+            ProblemsCount: problems.Count);
+    }
+
+    /// <summary>
+    /// Collects a session's records from state without materializing any content-bearing child
+    /// row, so <see cref="SessionListFigures"/> never counts content bytes on the fake.
+    /// </summary>
+    private static List<CollectedRecord> CollectSessionRecordsContentFree(StoreState currentState, string sessionKey)
+    {
+        HashSet<string> sessionSpans = ResolveSessionSpanIds(currentState, sessionKey);
+        if (sessionSpans.Count == 0)
         {
             return [];
         }
 
-        string harnessId = sessionRow is not null
-            ? GetString(GetTableMetadata("session"), sessionRow, "harness_id")
-            : records[0].HarnessId;
-
-        List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntries(currentState, sessionKey, records);
-        List<ReadTimeTurnSummary> summaries = new(turnEntries.Count);
-        foreach ((int position, CollectedRecord turnRecord) in turnEntries)
+        TableMetadata recordMeta = GetTableMetadata("record");
+        List<CollectedRecord> records = [];
+        foreach (object?[] row in currentState.GetRows("record"))
         {
-            summaries.Add(BuildTurnSummary(turnRecord, position, harnessId, pricing, out _, out _));
+            if (sessionSpans.Contains(GetString(recordMeta, row, "span_id")))
+            {
+                records.Add(MaterializeRecordContentFree(currentState, row));
+            }
         }
 
-        return summaries;
+        return records;
     }
 
-    private static SessionAggregateView? BuildSessionAggregateView(
+    /// <summary>
+    /// Collects a session's records from state carrying only the columns the timeline tree's
+    /// nodes read, so <see cref="SessionTimelineRecords"/> never materializes a token count,
+    /// tool row, or content-bearing child row.
+    /// </summary>
+    private static List<CollectedRecord> CollectSessionTimelineRecords(StoreState currentState, string sessionKey)
+    {
+        HashSet<string> sessionSpans = ResolveSessionSpanIds(currentState, sessionKey);
+        if (sessionSpans.Count == 0)
+        {
+            return [];
+        }
+
+        TableMetadata recordMeta = GetTableMetadata("record");
+        List<CollectedRecord> records = [];
+        foreach (object?[] row in currentState.GetRows("record"))
+        {
+            if (sessionSpans.Contains(GetString(recordMeta, row, "span_id")))
+            {
+                records.Add(MaterializeRecordTimeline(currentState, row));
+            }
+        }
+
+        return records;
+    }
+
+    /// <summary>
+    /// Materializes the record-header columns the timeline tree's nodes read — the span, parent,
+    /// harness, timestamp, duration, kind, name, status, cost, model and declared window — with
+    /// every other child row absent, matching the SQLite timeline read row for row.
+    /// </summary>
+    private static CollectedRecord MaterializeRecordTimeline(StoreState currentState, object?[] recordRow)
+    {
+        TableMetadata meta = GetTableMetadata("record");
+        string spanId = GetString(meta, recordRow, "span_id");
+        string harnessId = GetString(meta, recordRow, "harness_id");
+        RecordOp op = ParseRecordOp(GetString(meta, recordRow, "op"));
+        RecordKind kind = ParseRecordKind(GetString(meta, recordRow, "kind"));
+        string name = GetString(meta, recordRow, "name");
+        DateTimeOffset startedAt = ParseTimestamp(GetString(meta, recordRow, "started_at_utc"));
+        RecordStatus status = ParseRecordStatus(GetString(meta, recordRow, "status"));
+
+        string? sessionKey = ReadOptionalSingleString(currentState, "record_session_link", "span_id", spanId, "session_key");
+        string? parentSpanId = ReadOptionalSingleString(currentState, "record_parent", "span_id", spanId, "parent_span_id");
+        string? model = ReadOptionalSingleString(currentState, "record_model", "span_id", spanId, "model_id");
+        long? reportedDurationMs = ReadOptionalSingleInt64(currentState, "record_reported_duration", "span_id", spanId, "duration_ms");
+        long? declaredWindow = ReadOptionalSingleInt64(currentState, "record_declared_context_window", "span_id", spanId, "declared_context_window");
+
+        object?[]? costRow = FindRowByKey(currentState, "record_reported_cost", [("span_id", spanId)]);
+        CollectedCost? reportedCost = costRow is null
+            ? null
+            : new CollectedCost(
+                GetDouble(GetTableMetadata("record_reported_cost"), costRow, "amount"),
+                GetString(GetTableMetadata("record_reported_cost"), costRow, "currency"));
+
+        return new CollectedRecord(
+            spanId,
+            harnessId,
+            op,
+            kind,
+            name,
+            startedAt,
+            status,
+            sessionKey,
+            parentSpanId,
+            TraceId: null,
+            model,
+            EndedAt: null,
+            reportedDurationMs,
+            Tokens: [],
+            reportedCost,
+            Parts: [],
+            Tool: null,
+            Agent: null,
+            SkillsInvoked: [],
+            AgentInstanceId: null,
+            ToolDefinitions: [],
+            new CollectedRecordSignals(ErrorMessage: null, EditFailures: null, CorrectionRule: null, declaredWindow),
+            ReportedInputTokens: null,
+            ReportedOutputTokens: null);
+    }
+
+    /// <summary>
+    /// Materializes a record's scalar columns and token counts — the columns the sessions-list
+    /// figures derive from — without any content-bearing child row: parts, tool calls, tool
+    /// definitions, agent invocations, and skills stay absent, and signals stay absent because
+    /// no list figure reads them.
+    /// </summary>
+    /// <summary>
+    /// Derives one session's bounded summary figures, tool residency rows, and request metadata
+    /// from content-free record scalars, its stored projection, and ingest diagnostics: the
+    /// figures the retired session-aggregate read computed, minus every content-bearing
+    /// column.
+    /// </summary>
+    private static SessionFigureSet? BuildSessionFigures(
         StoreState currentState,
         string sessionKey,
+        List<CollectedRecord> records,
         IModelPricingLookup? pricing)
     {
         object?[]? sessionRow = FindRowByKey(currentState, "session", [("session_id", sessionKey)]);
@@ -4865,8 +6340,9 @@ public class InMemoryRelationalStore :
             return null;
         }
 
-        string harnessId = GetString(GetTableMetadata("session"), sessionRow, "harness_id");
-        List<CollectedRecord> records = CollectSessionRecords(currentState, sessionKey);
+        CollectedSession session = MaterializeSession(currentState, sessionRow);
+        string harnessId = session.HarnessId;
+
         HashSet<string> sessionSpanIds = new(StringComparer.Ordinal);
         Dictionary<string, CollectedRecord> recordsBySpanId = new(records.Count, StringComparer.Ordinal);
         foreach (CollectedRecord record in records)
@@ -4878,7 +6354,6 @@ public class InMemoryRelationalStore :
         StoredSessionProjection? projection = GetSessionProjectionFromState(currentState, sessionKey);
         List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntries(currentState, sessionKey, records);
 
-        List<ReadTimeTurnSummary> turnSummaries = new(turnEntries.Count);
         List<CostBlock> turnPublishedBlocks = new(turnEntries.Count);
         List<CostBlock> valuedTurnPublishedBlocks = [];
         List<CostBlock> valuedTurnHarnessBlocks = [];
@@ -4894,6 +6369,7 @@ public class InMemoryRelationalStore :
         bool hasCacheCreation = false;
         int cacheCreationTurns = 0;
         List<ReadTimeTurnReconciliation> reconciliation = new(turnEntries.Count);
+        int unmeasuredInputTurns = 0;
 
         foreach ((int position, CollectedRecord turnRecord) in turnEntries)
         {
@@ -4905,14 +6381,18 @@ public class InMemoryRelationalStore :
                 out CostBlock publishedBlock,
                 out CostBlock? harnessBlock);
 
-            turnSummaries.Add(turnSummary);
+            if (!turnSummary.InputTokens.HasValue)
+            {
+                unmeasuredInputTurns++;
+            }
+
             turnPublishedBlocks.Add(publishedBlock);
-            if (publishedBlock.Value is double pv && double.IsFinite(pv))
+            if (publishedBlock.Value is double publishedValue && double.IsFinite(publishedValue))
             {
                 valuedTurnPublishedBlocks.Add(publishedBlock);
             }
 
-            if (harnessBlock is not null && harnessBlock.Value is double hv && double.IsFinite(hv))
+            if (harnessBlock is not null && harnessBlock.Value is double harnessValue && double.IsFinite(harnessValue))
             {
                 valuedTurnHarnessBlocks.Add(harnessBlock);
             }
@@ -5062,13 +6542,11 @@ public class InMemoryRelationalStore :
             ? cacheCreationTurns
             : null;
 
-        // Tool calls and tool definitions aggregation.
         int toolCallTotal = 0;
         List<string> toolsInvoked = [];
         HashSet<string> seenInvokedTools = new(StringComparer.Ordinal);
         Dictionary<string, int> invCounts = new(StringComparer.Ordinal);
         Dictionary<string, int> errCounts = new(StringComparer.Ordinal);
-
         foreach (CollectedRecord record in records)
         {
             if (record.Tool is null)
@@ -5098,7 +6576,6 @@ public class InMemoryRelationalStore :
         HashSet<string> seenOfferedTools = new(StringComparer.Ordinal);
         Dictionary<string, (long SchemaTokens, string? Server, HashSet<string> SpanIds)> defStats = new(StringComparer.Ordinal);
         int toolDefinitionRowCount = 0;
-
         foreach (CollectedRecord record in records)
         {
             foreach (CollectedToolDefinition def in record.ToolDefinitions)
@@ -5111,21 +6588,19 @@ public class InMemoryRelationalStore :
 
                 if (!defStats.TryGetValue(def.ToolName, out (long SchemaTokens, string? Server, HashSet<string> SpanIds) existing))
                 {
-                    HashSet<string> spanSet = new(StringComparer.Ordinal) { record.RecordId };
-                    defStats[def.ToolName] = (def.SchemaTokens, def.Server, spanSet);
+                    defStats[def.ToolName] = (
+                        def.SchemaTokens,
+                        def.Server,
+                        new HashSet<string>(StringComparer.Ordinal) { record.RecordId });
                 }
                 else
                 {
                     _ = existing.SpanIds.Add(record.RecordId);
-                    defStats[def.ToolName] = (
-                        existing.SchemaTokens,
-                        existing.Server ?? def.Server,
-                        existing.SpanIds);
+                    defStats[def.ToolName] = (existing.SchemaTokens, existing.Server ?? def.Server, existing.SpanIds);
                 }
             }
         }
 
-        bool hasToolDefinitions = toolDefinitionRowCount > 0;
         List<ReadTimeSessionToolSummary> tools = BuildSessionToolSummaries(
             projection,
             turnEntries.Count,
@@ -5133,24 +6608,36 @@ public class InMemoryRelationalStore :
             toolsInvoked,
             invCounts,
             errCounts);
-        List<ReadTimeSessionServerSummary> servers = BuildSessionServerSummaries(projection, tools);
+        int reconciliationTotal = 0;
+        int reconciliationMismatched = 0;
+        foreach (ReadTimeTurnReconciliation row in reconciliation)
+        {
+            if (!row.InputMatch.HasValue || !row.OutputMatch.HasValue)
+            {
+                continue;
+            }
+
+            reconciliationTotal++;
+            if (!row.InputMatch.Value || !row.OutputMatch.Value)
+            {
+                reconciliationMismatched++;
+            }
+        }
 
         IReadOnlyList<string> requestSpanIds = projection is not null && projection.RequestSpanIds.Count > 0
             ? projection.RequestSpanIds
             : [.. rootRecords.Select(static r => r.RecordId)];
         int requestCount = requestSpanIds.Count;
-        List<ReadTimeSessionRequestSummary> requests = BuildRequestSummaries(requestSpanIds, records, recordsBySpanId, turnEntries);
-
-        ReadTimeSessionCoverage coverage = new(
-            SchemaMeasurable: projection?.Schema is not null,
-            ContextMeasurable: projection?.Context is not null);
+        List<ReadTimeSessionRequestSummary> requests = BuildRequestSummaries(
+            requestSpanIds,
+            records,
+            recordsBySpanId,
+            turnEntries);
 
         List<Problem> problems = CollectSessionProblems(currentState, sessionKey, sessionSpanIds);
         problems.AddRange(extraProblems);
 
-        List<SubagentSession> subagents = BuildSubagentSummaries(projection, records, recordsBySpanId);
-        ReadTimeAuxiliarySummary auxiliary = BuildAuxiliarySummary(projection, records, recordsBySpanId, harnessId, pricing, problems);
-
+        List<ReadTimeSessionServerSummary> servers = BuildSessionServerSummaries(projection, tools);
         ReadTimeContextBucketSummary? firstContextBucket = null;
         ReadTimeContextBucketSummary? lastContextBucket = null;
         if (projection?.Context?.Turns is { Count: > 0 } contextTurns)
@@ -5162,64 +6649,172 @@ public class InMemoryRelationalStore :
 
         UnusedSchemaRange? unusedRange = ResolveUnusedRange(projection, harnessId, models, pricing);
 
-        return new SessionAggregateView(
-            SessionKey: sessionKey,
-            HarnessId: harnessId,
-            TurnCount: turnEntries.Count,
-            RequestCount: requestCount,
-            TotalInput: nullableTotalInput,
-            TotalOutput: nullableTotalOutput,
-            TotalCacheRead: nullableTotalCacheRead,
-            TotalCacheCreation: nullableTotalCacheCreation,
-            DurationMs: hasDuration ? totalDuration : null,
-            Models: models,
-            ReportedCost: sessionReportedCost,
-            PublishedCost: sessionPublishedCost,
-            CostBasisMismatch: basisMismatch,
-            CacheHitRatio: cacheHitRatio,
-            CacheCreationCoverage: cacheCreationCoverage,
-            ToolCalls: toolCalls,
-            ToolsInvoked: toolsInvoked,
-            HasToolDefinitions: hasToolDefinitions,
-            ToolsOffered: toolsOffered,
-            Tools: tools,
-            Servers: servers,
-            Requests: requests,
-            Coverage: coverage,
-            Problems: problems,
-            Reconciliation: reconciliation,
-            Subagents: subagents,
-            Auxiliary: auxiliary,
-            FirstContextBucket: firstContextBucket,
-            LastContextBucket: lastContextBucket,
-            UnusedRange: unusedRange);
+        return new SessionFigureSet(
+            new SessionSummaryFigure(
+                SessionKey: sessionKey,
+                HarnessId: harnessId,
+                TurnCount: turnEntries.Count,
+                RequestCount: requestCount,
+                TotalInput: nullableTotalInput,
+                TotalOutput: nullableTotalOutput,
+                TotalCacheRead: nullableTotalCacheRead,
+                TotalCacheCreation: nullableTotalCacheCreation,
+                DurationMs: hasDuration ? totalDuration : null,
+                Models: models,
+                CacheHitRatio: cacheHitRatio,
+                CacheCreationCoverage: cacheCreationCoverage,
+                ToolCalls: toolCalls,
+                ToolsInvoked: toolsInvoked,
+                HasToolDefinitions: toolDefinitionRowCount > 0,
+                ToolsOffered: toolsOffered,
+                ReportedCost: sessionReportedCost,
+                PublishedCost: sessionPublishedCost,
+                CostBasisMismatch: basisMismatch,
+                Coverage: new ReadTimeSessionCoverage(
+                    SchemaMeasurable: projection?.Schema is not null,
+                    ContextMeasurable: projection?.Context is not null),
+                Problems: problems,
+                SkillInvocations: [],
+                ToolRowsCount: tools.Count,
+                UnmeasuredInputTurns: unmeasuredInputTurns,
+                ReconciliationTotal: reconciliationTotal,
+                ReconciliationMismatched: reconciliationMismatched),
+            tools,
+            requests,
+            servers,
+            reconciliation,
+            firstContextBucket,
+            lastContextBucket,
+            unusedRange);
+    }
+
+    /// <summary>One session's content-free figures with the detail page's tool and request rows.</summary>
+    private sealed record SessionFigureSet(
+        SessionSummaryFigure Summary,
+        IReadOnlyList<ReadTimeSessionToolSummary> Tools,
+        IReadOnlyList<ReadTimeSessionRequestSummary> Requests,
+        IReadOnlyList<ReadTimeSessionServerSummary> Servers,
+        IReadOnlyList<ReadTimeTurnReconciliation> Reconciliation,
+        ReadTimeContextBucketSummary? FirstContextBucket,
+        ReadTimeContextBucketSummary? LastContextBucket,
+        UnusedSchemaRange? UnusedRange);
+
+    private static IReadOnlyList<ReadTimeTurnSummary> BuildSessionTurnFigures(
+        StoreState currentState,
+        string sessionKey,
+        List<CollectedRecord> records,
+        string harnessId,
+        IModelPricingLookup? pricing)
+    {
+        List<(int Position, CollectedRecord Record)> turnEntries = ResolveSessionTurnEntries(currentState, sessionKey, records);
+        List<ReadTimeTurnSummary> summaries = new(turnEntries.Count);
+        foreach ((int position, CollectedRecord turnRecord) in turnEntries)
+        {
+            summaries.Add(BuildTurnSummary(turnRecord, position, harnessId, pricing, out _, out _));
+        }
+
+        return summaries;
+    }
+
+    private static CollectedRecord MaterializeRecordContentFree(StoreState currentState, object?[] recordRow)
+    {
+        TableMetadata meta = GetTableMetadata("record");
+        string spanId = GetString(meta, recordRow, "span_id");
+        string harnessId = GetString(meta, recordRow, "harness_id");
+        RecordOp op = ParseRecordOp(GetString(meta, recordRow, "op"));
+        RecordKind kind = ParseRecordKind(GetString(meta, recordRow, "kind"));
+        string name = GetString(meta, recordRow, "name");
+        DateTimeOffset startedAt = ParseTimestamp(GetString(meta, recordRow, "started_at_utc"));
+        RecordStatus status = ParseRecordStatus(GetString(meta, recordRow, "status"));
+
+        string? sessionKey = ReadOptionalSingleString(currentState, "record_session_link", "span_id", spanId, "session_key");
+        string? parentSpanId = ReadOptionalSingleString(currentState, "record_parent", "span_id", spanId, "parent_span_id");
+        string? traceId = ReadOptionalSingleString(currentState, "record_trace", "span_id", spanId, "trace_id");
+        string? model = ReadOptionalSingleString(currentState, "record_model", "span_id", spanId, "model_id");
+        string? endedRaw = ReadOptionalSingleString(currentState, "record_end", "span_id", spanId, "ended_at_utc");
+        DateTimeOffset? endedAt = endedRaw is null ? null : ParseTimestamp(endedRaw);
+        long? reportedDurationMs = ReadOptionalSingleInt64(currentState, "record_reported_duration", "span_id", spanId, "duration_ms");
+        string? agentInstanceId = ReadOptionalSingleString(currentState, "record_agent_instance", "span_id", spanId, "agent_instance_id");
+
+        TableMetadata tokenMeta = GetTableMetadata("record_token_count");
+        List<CollectedTokenCount> tokens =
+        [
+            .. currentState.GetRows("record_token_count")
+                .Where(r => string.Equals(GetString(tokenMeta, r, "span_id"), spanId, StringComparison.Ordinal))
+                .Select(r => new CollectedTokenCount(
+                    ParseTokenClass(GetString(tokenMeta, r, "token_class")),
+                    GetInt64(tokenMeta, r, "token_count"))),
+        ];
+
+        object?[]? costRow = FindRowByKey(currentState, "record_reported_cost", [("span_id", spanId)]);
+        CollectedCost? reportedCost = costRow is null
+            ? null
+            : new CollectedCost(
+                GetDouble(GetTableMetadata("record_reported_cost"), costRow, "amount"),
+                GetString(GetTableMetadata("record_reported_cost"), costRow, "currency"));
+
+        long? reportedInput = ReadOptionalReportedTotal(currentState, spanId, "input");
+        long? reportedOutput = ReadOptionalReportedTotal(currentState, spanId, "output");
+
+        TableMetadata defMeta = GetTableMetadata("tool_definition");
+        List<CollectedToolDefinition> toolDefs =
+        [
+            .. currentState.GetRows("tool_definition")
+                .Where(r => string.Equals(GetString(defMeta, r, "span_id"), spanId, StringComparison.Ordinal))
+                .OrderBy(r => (int)GetInt64(defMeta, r, "position"))
+                .Select(r => MaterializeToolDefinition(currentState, r)),
+        ];
+
+        return new CollectedRecord(
+            spanId,
+            harnessId,
+            op,
+            kind,
+            name,
+            startedAt,
+            status,
+            sessionKey,
+            parentSpanId,
+            traceId,
+            model,
+            endedAt,
+            reportedDurationMs,
+            tokens,
+            reportedCost,
+            Parts: [],
+            Tool: MaterializeToolCallContentFree(currentState, spanId),
+            Agent: null,
+            SkillsInvoked: [],
+            agentInstanceId,
+            toolDefs,
+            MaterializeRecordSignals(currentState, spanId),
+            reportedInput,
+            reportedOutput);
+    }
+
+    /// <summary>
+    /// Materializes a tool call's metadata with no input or result text, the shape the
+    /// content-free record read carries.
+    /// </summary>
+    private static CollectedToolCall? MaterializeToolCallContentFree(StoreState currentState, string spanId)
+    {
+        CollectedToolCall? call = MaterializeToolCall(currentState, spanId);
+        if (call is null)
+        {
+            return null;
+        }
+
+        return call with
+        {
+            Input = call.Input is null ? null : call.Input with { PlainText = null },
+            Result = call.Result is null ? null : call.Result with { PlainText = null },
+        };
     }
 
     private static StoredSessionProjection? GetSessionProjectionFromState(StoreState currentState, string sessionId)
     {
         object?[]? row = FindRowByKey(currentState, "session_projection", [("session_id", sessionId)]);
         return row is null ? null : MaterializeSessionProjection(currentState, row);
-    }
-
-    private static List<CollectedRecord> CollectSessionRecords(StoreState currentState, string sessionKey)
-    {
-        HashSet<string> sessionSpans = ResolveSessionSpanIds(currentState, sessionKey);
-        if (sessionSpans.Count == 0)
-        {
-            return [];
-        }
-
-        TableMetadata recordMeta = GetTableMetadata("record");
-        List<CollectedRecord> records = [];
-        foreach (object?[] row in currentState.GetRows("record"))
-        {
-            if (sessionSpans.Contains(GetString(recordMeta, row, "span_id")))
-            {
-                records.Add(MaterializeRecord(currentState, row));
-            }
-        }
-
-        return records;
     }
 
     private static List<(int Position, CollectedRecord Record)> ResolveSessionTurnEntries(

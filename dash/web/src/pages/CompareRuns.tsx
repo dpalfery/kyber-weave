@@ -74,7 +74,6 @@ export type CompareRunsProps = {
   onSelectRunB?: (id: string) => void
 }
 
-const PHASES: TaskPhase[] = ['exploration', 'implementation', 'verification', 'resolution']
 const SIGNAL_STATUSES: ReadonlySet<string> = new Set([
   'compared',
   'not_comparable',
@@ -255,6 +254,7 @@ function toTurn(raw: Record<string, unknown> | null): RunTurnSummary | null {
           reportedInput: asNumber(tokens.reportedInput),
           reportedOutput: asNumber(tokens.reportedOutput),
           all: asNumber(tokens.all),
+          allReason: asString(tokens.allReason),
         }
       : undefined,
     cost: (() => {
@@ -299,109 +299,6 @@ function toAlignedPair(pair: KyberPhaseAlignedTurnPair): PhaseAlignedTurnPair {
     signals: pair.signals.map(toSignal),
     reading: pair.reading,
   }
-}
-
-function tryTurnTokenTotal(turn: RunTurnSummary): number | undefined {
-  if (typeof turn.tokens?.all === 'number') return turn.tokens.all
-  const reportedInput = turn.tokens?.reportedInput
-  const output = turn.tokens?.output
-  if (typeof reportedInput === 'number' && typeof output === 'number') {
-    return reportedInput + output
-  }
-  const fresh = turn.tokens?.freshInput
-  const cache = turn.tokens?.cacheRead
-  const cacheCreation = turn.tokens?.cacheCreation
-  if (
-    typeof fresh === 'number' &&
-    typeof cache === 'number' &&
-    typeof output === 'number'
-  ) {
-    return fresh + cache + (cacheCreation ?? 0) + output
-  }
-  return undefined
-}
-
-function sumTurnTokens(turns: RunTurnSummary[]): number | undefined {
-  if (turns.length === 0) return undefined
-  let sum = 0
-  for (const turn of turns) {
-    const total = tryTurnTokenTotal(turn)
-    if (total === undefined) return undefined
-    sum += total
-  }
-  return sum
-}
-
-function alignTurnsByPhase(turnsA: RunTurnSummary[], turnsB: RunTurnSummary[]): PhaseAlignedTurnPair[] {
-  const pairs: PhaseAlignedTurnPair[] = []
-
-  for (const phase of PHASES) {
-    const phaseTurnsA = turnsA.filter((t) => t.phase === phase)
-    const phaseTurnsB = turnsB.filter((t) => t.phase === phase)
-    const maxCount = Math.max(phaseTurnsA.length, phaseTurnsB.length)
-
-    for (let i = 0; i < maxCount; i++) {
-      const turnA = phaseTurnsA[i] ?? null
-      const turnB = phaseTurnsB[i] ?? null
-
-      const tokensA = turnA ? tryTurnTokenTotal(turnA) : undefined
-      const tokensB = turnB ? tryTurnTokenTotal(turnB) : undefined
-      const delta =
-        tokensA !== undefined && tokensB !== undefined ? tokensB - tokensA : undefined
-
-      const reading =
-        turnA && turnB
-          ? tokensA !== undefined && tokensB !== undefined
-            ? `Phase ${phase}: Run A spent ${tokensA.toLocaleString()} tokens; Run B spent ${tokensB.toLocaleString()} tokens (delta: ${delta && delta > 0 ? '+' : ''}${delta?.toLocaleString()}).`
-            : `Phase ${phase}: Token telemetry unavailable for one or both runs in this phase slot.`
-          : turnA
-            ? tokensA !== undefined
-              ? `Phase ${phase}: Run A executed ${tokensA.toLocaleString()} tokens; Run B completed phase in fewer turns.`
-              : `Phase ${phase}: Run A token telemetry unavailable; Run B completed phase in fewer turns.`
-            : tokensB !== undefined
-              ? `Phase ${phase}: Run B executed ${tokensB.toLocaleString()} tokens; Run A completed phase in fewer turns.`
-              : `Phase ${phase}: Run B token telemetry unavailable; Run A completed phase in fewer turns.`
-
-      const tokenSignal: SignalComparison =
-        turnA && turnB
-          ? tokensA !== undefined && tokensB !== undefined
-            ? {
-                name: 'total_tokens',
-                label: 'Tokens',
-                unit: 'tokens',
-                runAValue: tokensA,
-                runBValue: tokensB,
-                delta,
-                status: 'compared',
-              }
-            : {
-                name: 'total_tokens',
-                label: 'Tokens',
-                unit: 'tokens',
-                status: 'not_comparable',
-                reason: 'Token telemetry unavailable in one or both paired turns',
-              }
-          : {
-              name: 'total_tokens',
-              label: 'Tokens',
-              unit: 'tokens',
-              runAValue: turnA && tokensA !== undefined ? tokensA : undefined,
-              runBValue: turnB && tokensB !== undefined ? tokensB : undefined,
-              status: turnA ? 'missing_in_b' : 'missing_in_a',
-            }
-
-      pairs.push({
-        phase,
-        phaseIndex: i,
-        runATurn: turnA,
-        runBTurn: turnB,
-        signals: [tokenSignal],
-        reading,
-      })
-    }
-  }
-
-  return pairs
 }
 
 export function CompareRuns({
@@ -501,9 +398,10 @@ export function CompareRuns({
   const runA = runs.find((r) => r.runId === selectedAId)
   const runB = runs.find((r) => r.runId === selectedBId)
 
-  const pairs =
-    comparison?.pairs.map(toAlignedPair) ??
-    (runA && runB ? alignTurnsByPhase(runA.turns, runB.turns) : [])
+  // Token totals, phase alignment, and pair readings come from the engine payload only (the
+  // KyberDash display-layer rule): a value the engine withheld renders as not measurable, never
+  // as a number the browser derived.
+  const pairs = comparison?.pairs.map(toAlignedPair) ?? []
 
   const runAMetrics = runMetricsUnavailable(comparison?.runA)
   const runBMetrics = runMetricsUnavailable(comparison?.runB)
@@ -515,23 +413,9 @@ export function CompareRuns({
     comparison?.runB,
     runB ? (runB.turnCount ?? runB.turns.length) : undefined,
   )
-  // Never recompute via sumTurnTokens when the engine reported unavailability —
-  // that helper has no measurability gate and would re-derive withheld totals.
-  const totalTokensA =
-    asNumber(comparison?.runA.totalTokens) ??
-    (runAMetrics.unavailable ? undefined : sumTurnTokens(runA?.turns ?? []))
-  const totalTokensB =
-    asNumber(comparison?.runB.totalTokens) ??
-    (runBMetrics.unavailable ? undefined : sumTurnTokens(runB?.turns ?? []))
   const tokenDeltaState = tokenDeltaUnavailable(comparison?.totals)
-  const measuredTokenDelta =
+  const tokenDelta =
     comparison?.totals.availability === 'measured' ? comparison.totals.tokenDelta : undefined
-  const tokenDelta = tokenDeltaState.unavailable
-    ? undefined
-    : (asNumber(measuredTokenDelta) ??
-      (totalTokensA !== undefined && totalTokensB !== undefined
-        ? totalTokensB - totalTokensA
-        : undefined))
 
   const activeProposedPair = proposedPairs.find(
     (p) =>

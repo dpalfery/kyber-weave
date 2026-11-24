@@ -2699,13 +2699,21 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
   it('routes a whole-turn drawer request to the full panel without clipped content', () => {
     const qc = createTestQueryClient()
     seedTurn(qc, buildTurnFixture())
+    // The drawer resolves the row it opens by key (D9): the measured totals
+    // come from the per-turn route, never from an opener-carried row.
+    qc.setQueryData(['kyber-session-turn', TURN_SESSION_ID, TURN_INDEX], {
+      sessionId: TURN_SESSION_ID,
+      turnIndex: TURN_INDEX,
+      turn: { index: TURN_INDEX, fresh: 250, cache_read: 200, cache_creation: 50 },
+      context: null,
+    })
     const html = renderHtml(
       <QueryClientProvider client={qc}>
         <SessionInspectorDrawer
           open={true}
           onClose={() => {}}
           title="Turn 2 · Full context"
-          rawContent={{ turnIndex: TURN_INDEX, turn: { fresh: 250, cache_read: 200, cache_creation: 50 } } as unknown as Parameters<typeof SessionInspectorDrawer>[0]['rawContent']}
+          rawContent={{ turnIndex: TURN_INDEX } as unknown as Parameters<typeof SessionInspectorDrawer>[0]['rawContent']}
           contentRequest={{ sessionId: TURN_SESSION_ID, turnIndex: TURN_INDEX, full: true }}
         />
       </QueryClientProvider>
@@ -2714,9 +2722,47 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
     expect(html).toContain('data-testid="turn-content-full"')
     expect(text).toContain(OWN_SYSTEM_PROMPT)
     expect(text).toContain(SHARED_PROMPT)
+    // The measured totals come from the fetched row.
+    expect(html).toContain('data-testid="turn-total-cache-read"')
+    expect(text).toContain('200')
     // The clipped payload-row inspector stays out of the lossless view.
     expect(html).not.toContain('data-testid="turn-inspector"')
     expect(html).not.toContain('data-testid="drawer-content-loading"')
+  })
+
+  it('shows a faulted projection as an error state, never as measured figures or zeros', () => {
+    const qc = createTestQueryClient()
+    seedTurn(qc, buildTurnFixture())
+    // The per-turn route answers, but that session's projection read faulted:
+    // the answer is not data, so no figure may render as measured or as a zero.
+    qc.setQueryData(['kyber-session-turn', TURN_SESSION_ID, TURN_INDEX], {
+      sessionId: TURN_SESSION_ID,
+      turnIndex: TURN_INDEX,
+      turn: { index: TURN_INDEX, fresh: 0, cache_read: 0, cache_creation: 0, system_prompt: 0 },
+      context: { index: 1, buckets: { system_prompt: 0, tool_definitions: 0 } },
+      projection_status: 'PROJECTION_FAILED',
+    })
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <SessionInspectorDrawer
+          open={true}
+          onClose={() => {}}
+          title="Turn 2 · Full context"
+          contentRequest={{ sessionId: TURN_SESSION_ID, turnIndex: TURN_INDEX, full: true }}
+        />
+      </QueryClientProvider>
+    )
+    const text = unescapeHtml(html)
+    expect(html).toContain('data-testid="turn-section-error"')
+    expect(html).toContain('role="alert"')
+    expect(text).toContain('PROJECTION_FAILED')
+    // No totals strip, no "not recorded" placeholder, no measured row: a
+    // faulted turn is an error state, not a turn whose figures are zero.
+    expect(html).not.toContain('data-testid="turn-token-totals"')
+    expect(html).not.toContain('data-testid="turn-token-totals-absent"')
+    expect(html).not.toContain('data-testid="turn-total-fresh"')
+    expect(html).not.toContain('data-testid="turn-content-full"')
+    expect(text).not.toContain('Measured turn totals')
   })
 
   it('builds Copy Turn text covering every returned part plus labeled shared context', () => {
@@ -2819,7 +2865,10 @@ describe('SessionInspectorDrawer: lossless request builders', () => {
     const origFetch = globalThis.fetch
     globalThis.fetch = ((input: unknown) => {
       captured.push(String(input))
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+      // A body each route's parser accepts, so a parser regression fails the test
+      // rather than being swallowed: the turn route's served shape (identity plus
+      // parts) also satisfies the session content read.
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ sessionId: 'sess-x', turnIndex: 2, parts: [] }) })
     }) as typeof fetch
     return () => {
       globalThis.fetch = origFetch

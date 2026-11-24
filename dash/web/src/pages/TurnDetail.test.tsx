@@ -305,11 +305,7 @@ describe('TurnDetail raw packet disclosure (B7)', () => {
     // The bounded per-turn route answers one row, not the session's list of
     // them: the page reads the turn it displays and nothing else. This row
     // carries no counters, so the inspector header renders its absent state.
-    rawPacketApi.fetchKyberSessionTurns.mockResolvedValue({
-      session_id: 'sess-raw-packet',
-      turn_index: 0,
-      index: 0,
-    })
+    rawPacketApi.fetchKyberSessionTurns.mockResolvedValue({ index: 0 })
     rawPacketApi.fetchSpanAttributes.mockResolvedValue(rawPacketApi.spanAttributes)
     rawPacketApi.fetchQuarantineEntry.mockResolvedValue(rawPacketApi.quarantineEntry)
   })
@@ -346,6 +342,42 @@ describe('TurnDetail raw packet disclosure (B7)', () => {
       expect(screen.getByTestId('raw-packet-disclosure')).toBeTruthy()
     })
     expect(screen.getByTestId('raw-packet-disclosure').textContent).toContain('Raw packet')
+  })
+
+  it('reads no run when the turn was opened without one, and loads the session it names', async () => {
+    // A session turn link (/session/:id/turn/:n) names the session, not a run:
+    // the page must not ask for /api/kyber/run/undefined.
+    rawPacketApi.fetchTurnContent.mockResolvedValue(turnContent())
+    renderDom(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })}>
+        <TurnDetail executionId="sess-raw-packet" turnIndex={0} />
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => expect(rawPacketApi.fetchTurnContent).toHaveBeenCalledWith('sess-raw-packet', 0))
+    expect(rawPacketApi.fetchRun).not.toHaveBeenCalled()
+  })
+
+  it('shows the sections’ projection failure when the turn read names a faulted projection', async () => {
+    // The engine's fault shape: identity plus the marker, no figures, no content.
+    rawPacketApi.fetchTurnContent.mockResolvedValue({
+      sessionId: 'sess-raw-packet',
+      turnIndex: 0,
+      projection_status: 'PROJECTION_FAILED',
+      blocks: [],
+      parts: [],
+      assembledText: '',
+    })
+    rawPacketApi.fetchKyberSessionTurns.mockResolvedValue(undefined)
+    renderTurn()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('turn-projection-failed').textContent).toContain('PROJECTION_FAILED')
+    })
+    // A faulted projection is not an empty turn: neither the "no bands" answer
+    // nor the inspector renders below the failure.
+    expect(screen.queryByTestId('context-content')).toBeNull()
+    expect(screen.queryByText('No context bands were recorded for this turn.')).toBeNull()
   })
 
   it('opens by fetching exactly spanAttributesPath plus interactionPath through kyberApi, and shows the JSON unclipped', async () => {
@@ -486,8 +518,6 @@ describe('TurnDetail measured counters (bounded per-turn read)', () => {
 
   it('asks for the turn it displays, and renders that turn\'s counters', async () => {
     rawPacketApi.fetchKyberSessionTurns.mockResolvedValue({
-      session_id: 'sess-raw-packet',
-      turn_index: 0,
       index: 0,
       input: 900,
       output: 130,

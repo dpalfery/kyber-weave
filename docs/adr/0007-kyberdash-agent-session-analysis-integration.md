@@ -4,7 +4,7 @@ title: KyberDash Agent Session Analysis Integration, Dual-Database Architecture,
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-03
+last-reviewed: 2026-11-23
 ---
 
 # ADR 0007: KyberDash Agent Session Analysis Integration, Dual-Database Architecture, and Navigation Topology
@@ -16,7 +16,13 @@ Accepted
 The "Backward-compatible endpoints" clause of decision D3 is superseded by
 [ADR 0041](0041-kyberdash-retire-legacy-context-schema-routes.md):
 `GET /api/kyber/context` and `GET /api/kyber/schema` are deleted (no live
-caller); `/api/kyber/timeline` and every other D3 endpoint stand.
+caller); `/api/kyber/timeline` and every other D3 endpoint stand. The
+`GET /api/kyber/session/:id` clause of decision D3 is superseded by
+[ADR 0092](0092-dashboard-views-load-by-section-and-page.md): the monolithic
+session payload is retired and answers 404; the session view reads one route per
+section, the report prices its window with one keyed batched read, and the run
+page reads turn figures. D3's `/api/kyber/timeline` clause and everything else
+in ADR 0007 stand.
 
 ## Context
 

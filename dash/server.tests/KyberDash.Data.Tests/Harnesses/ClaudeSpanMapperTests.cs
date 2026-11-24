@@ -621,9 +621,9 @@ public class ClaudeSpanMapperTests
 
         Assert.Equal(3, store.CountRecords("claude-code"));
         Assert.NotNull(store.GetSession("sess-persist-1"));
-        Assert.NotNull(store.GetRecord("span-persist-model"));
-        Assert.NotNull(store.GetRecord("span-persist-tool")?.Tool);
-        Assert.NotNull(store.GetRecord("span-persist-agent")?.Agent);
+        Assert.NotNull(store.FindRecord("span-persist-model"));
+        Assert.NotNull(store.FindRecord("span-persist-tool")?.Tool);
+        Assert.NotNull(store.FindRecord("span-persist-agent")?.Agent);
     }
 
     private static JsonElement Element(object value) => JsonSerializer.SerializeToElement(value);

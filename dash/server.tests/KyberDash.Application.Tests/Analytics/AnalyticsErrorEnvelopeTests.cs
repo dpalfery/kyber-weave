@@ -27,7 +27,7 @@ public sealed class AnalyticsErrorEnvelopeTests
         }
         else
         {
-            reader.Setup(store => store.ListSessionAggregates(It.IsAny<string?>(), It.IsAny<IModelPricingLookup?>()))
+            reader.Setup(store => store.Sessions(It.IsAny<string?>()))
                 .Throws(storeException);
         }
 
@@ -45,7 +45,7 @@ public sealed class AnalyticsErrorEnvelopeTests
     public void InvalidArgumentFaultReturnsBadRequestContractV1Envelope(Exception argumentException)
     {
         (Mock<IRelationalStoreReader> reader, Mock<IProjectionStore> projections, Mock<IOperationalStore> operational) = CreateBaseStoreMocks();
-        reader.Setup(store => store.ListSessionAggregates(It.IsAny<string?>(), It.IsAny<IModelPricingLookup?>()))
+        reader.Setup(store => store.Sessions(It.IsAny<string?>()))
             .Throws(argumentException);
         KyberBridgeEngine engine = CreateEngine(reader.Object, projections.Object, operational.Object);
 
@@ -73,7 +73,7 @@ public sealed class AnalyticsErrorEnvelopeTests
     public void UnexpectedFaultReturnsNonEmptyInternalErrorContractV1Envelope()
     {
         (Mock<IRelationalStoreReader> reader, Mock<IProjectionStore> projections, Mock<IOperationalStore> operational) = CreateBaseStoreMocks();
-        reader.Setup(store => store.ListSessionAggregates(It.IsAny<string?>(), It.IsAny<IModelPricingLookup?>()))
+        reader.Setup(store => store.Sessions(It.IsAny<string?>()))
             .Throws(new InvalidOperationException("Corrupted rollup state"));
         KyberBridgeEngine engine = CreateEngine(reader.Object, projections.Object, operational.Object);
 
@@ -106,12 +106,9 @@ public sealed class AnalyticsErrorEnvelopeTests
     {
         Mock<IRelationalStoreReader> reader = new();
         reader.Setup(store => store.Sessions(It.IsAny<string?>())).Returns(Array.Empty<CollectedSession>());
-        reader.Setup(store => store.Records(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()))
-            .Returns(Array.Empty<CollectedRecord>());
         reader.Setup(store => store.CountRecords(It.IsAny<string?>())).Returns(0);
         reader.Setup(store => store.Harnesses()).Returns(Array.Empty<string>());
-        reader.Setup(store => store.ListSessionAggregates(It.IsAny<string?>(), It.IsAny<IModelPricingLookup?>()))
-            .Returns(Array.Empty<SessionAggregateView>());
+        reader.Setup(store => store.SessionAttributions()).Returns(Array.Empty<StoredSessionAttribution>());
 
         Mock<IProjectionStore> projections = new();
         projections.Setup(store => store.ListSessionProjections(It.IsAny<string?>()))

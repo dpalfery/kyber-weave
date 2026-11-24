@@ -40,6 +40,23 @@ function typeQuery(testId: string, value: string) {
   fireEvent.change(screen.getByTestId(testId), { target: { value } })
 }
 
+function renderBucketTurn(section: Record<string, unknown>) {
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: Infinity } },
+  })
+  qc.setQueryData(['kyber-session-turn', SESSION_ID, 0], section)
+  return render(
+    <QueryClientProvider client={qc}>
+      <SessionInspectorDrawer
+        open={true}
+        onClose={() => {}}
+        title="Turn 1 · tool_definitions"
+        contentRequest={{ sessionId: SESSION_ID, turnIndex: 0, bucket: 'tool_definitions' }}
+      />
+    </QueryClientProvider>,
+  )
+}
+
 describe('SessionInspectorDrawer: bucket drill-down shared toolbar', () => {
   it('renders the Formatted/Raw toolbar with search and Copy on a bucket part', () => {
     renderBucket([{ spanId: 'span-a', part: PART, text: RAW }])
@@ -98,5 +115,25 @@ describe('SessionInspectorDrawer: bucket drill-down shared toolbar', () => {
     expect(screen.getByTestId('drawer-content-duplicate-note').textContent).toBe('Identical in 3 captured spans')
     expect(screen.getByTestId('drawer-content-0-view-formatted')).toBeTruthy()
     expect(screen.getByTestId('drawer-content-1-view-formatted')).toBeTruthy()
+  })
+})
+
+describe('SessionInspectorDrawer: bucket drill-down on a faulted projection', () => {
+  it('shows the error state, never the bucket figures or a zero', () => {
+    renderBucketTurn({
+      sessionId: SESSION_ID,
+      turnIndex: 0,
+      turn: { index: 0, spanId: 'span-t0' },
+      context: { index: 1, buckets: { tool_definitions: 0, residual: 0 }, reported_input: 0 },
+      projection_status: 'PROJECTION_FAILED',
+    })
+
+    const error = screen.getByTestId('turn-section-error')
+    expect(error.getAttribute('role')).toBe('alert')
+    expect(error.textContent).toContain('PROJECTION_FAILED')
+    // No bucket inspector, no total, no zero: the route answered "not data".
+    expect(screen.queryByTestId('context-bucket-inspector')).toBeNull()
+    expect(screen.queryByTestId('turn-token-totals')).toBeNull()
+    expect(screen.queryByTestId('turn-token-totals-absent')).toBeNull()
   })
 })
