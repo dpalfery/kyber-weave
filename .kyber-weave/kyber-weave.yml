@@ -320,7 +320,7 @@ review:
     - id: ts-typecheck
       include: ["dash/**"]
       run: [npm, run, --prefix, dash, typecheck]
-      requires-paths: ["dash/node_modules", "dash/web/node_modules"]
+      requires-paths: &dash-web-requires ["dash/node_modules", "dash/web/node_modules"]
       blocking: true
       applies-when:
         paths: ["dash/**"]
@@ -343,7 +343,7 @@ review:
     - id: ts-test
       include: ["dash/**"]
       run: [npm, run, --prefix, dash, test, --, --coverage]
-      requires-paths: ["dash/node_modules", "dash/web/node_modules"]
+      requires-paths: *dash-web-requires
       # Full-suite gates run only for the review council or CI; a dev agent's run is refused.
       full-suite: true
       blocking: true
@@ -357,7 +357,7 @@ review:
     - id: ts-lint
       include: ["dash/**"]
       run: [npm, run, --prefix, dash, lint]
-      requires-paths: ["dash/node_modules", "dash/web/node_modules"]
+      requires-paths: *dash-web-requires
       blocking: true
       applies-when:
         paths: ["dash/**"]
