@@ -9,8 +9,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 /// <remarks>
 /// Every subagent gets the baseline block once, so the rule that a refused folder is a stop lives there and
-/// nowhere else: a worker that is refused a folder must report the path and the refusal, never build its own
-/// worktree, clone or copy to work around it. The rule map records the row (D7) and the prose rule catalog
+/// nowhere else: a worker that is refused a folder must report the path, and never make its own worktree.
+/// The rule map records the row (D7) and the prose rule catalog
 /// checks that row's home and control in <c>ProseRuleCatalogTests</c>.
 /// </remarks>
 public sealed class WorkerRuleRefusedFolderTests
