@@ -217,8 +217,10 @@ public sealed class ReviewGatesService(
                         $"{requirement.GateId}: required path '{requirement.Path}' is missing, so the gate cannot start. {requirement.Fix}, then run the review again.",
                         requirement.GateId));
 
-                // Nothing but the empty report is written: no evidence and no finished-cycle record, so a rerun with
-                // the same --out is the same cycle, in the same mode.
+                // Only the empty report is written here: no evidence and no finished-cycle record. The cycle folder and
+                // its identity.json were already written when the cycle was detected above; that record names this
+                // change's branch, base and head, so a rerun with the same --out reads it as the same cycle, in the
+                // same mode.
                 return RefuseWithEmptyReport(request, report);
             }
         }
