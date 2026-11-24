@@ -179,6 +179,60 @@ public sealed class CanonRunComparisonTests
         Assert.Contains("telemetry", gap.GetString(), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Cost comparability reads the bases of priced turns only: an unpriced first turn (no rate,
+    /// basis unknown) does not turn the pair into "unknown vs published" when every priced turn
+    /// on both sides shares one basis.
+    /// </summary>
+    [Fact]
+    public void CostComparabilityReadsThePricedTurnsBasesNotTheFirstTurnsBasis()
+    {
+        RunComparisonRun sideA = new(RunA, "claude-code", null,
+        [
+            ComparisonTurn(0, cost: new ReadTimeCostSummary(CostBasis.Unknown, CostStatus.NoRate, null, null, [])),
+            ComparisonTurn(1, cost: new ReadTimeCostSummary(CostBasis.Published, CostStatus.Priced, 0.5, "USD", [])),
+        ]);
+        RunComparisonRun sideB = new(RunB, "claude-code", null,
+        [
+            ComparisonTurn(0, cost: new ReadTimeCostSummary(CostBasis.Published, CostStatus.Priced, 0.3, "USD", [])),
+        ]);
+
+        JsonElement comparison = CanonRunComparison.Compare(sideA, sideB);
+
+        JsonElement totals = comparison.GetProperty("totals");
+        Assert.True(totals.GetProperty("costComparable").GetBoolean());
+        Assert.False(totals.TryGetProperty("costRefusalReason", out _));
+        Assert.Equal(0.5, totals.GetProperty("costA").GetDouble());
+        Assert.Equal(0.3, totals.GetProperty("costB").GetDouble());
+        Assert.Equal(-0.2, totals.GetProperty("costDelta").GetDouble(), precision: 9);
+    }
+
+    /// <summary>
+    /// The rule still refuses when the priced turns' bases genuinely differ: reading priced turns
+    /// only must not blur a harness-basis run against a published-basis one.
+    /// </summary>
+    [Fact]
+    public void CostComparabilityStillRefusesWhenThePricedTurnsBasesDiffer()
+    {
+        RunComparisonRun sideA = new(RunA, "claude-code", null,
+        [
+            ComparisonTurn(0, cost: new ReadTimeCostSummary(CostBasis.Published, CostStatus.Priced, 0.5, "USD", [])),
+        ]);
+        RunComparisonRun sideB = new(RunB, "claude-code", null,
+        [
+            ComparisonTurn(0, cost: new ReadTimeCostSummary(CostBasis.Harness, CostStatus.Priced, 0.3, "USD", [])),
+        ]);
+
+        JsonElement comparison = CanonRunComparison.Compare(sideA, sideB);
+
+        JsonElement totals = comparison.GetProperty("totals");
+        Assert.False(totals.GetProperty("costComparable").GetBoolean());
+        Assert.Contains(
+            "published vs harness",
+            totals.GetProperty("costRefusalReason").GetString(),
+            StringComparison.Ordinal);
+    }
+
     [Fact]
     public void UnequalPhaseCountsAlignByPhaseWithMissingTurnSignals()
     {
@@ -306,6 +360,22 @@ public sealed class CanonRunComparisonTests
             Records: records,
             Problems: []));
     }
+
+    /// <summary>One resolved comparison turn with seeded measured totals and a cost block.</summary>
+    private static RunComparisonTurn ComparisonTurn(int turnIndex, ReadTimeCostSummary? cost) =>
+        new(
+            TurnIndex: turnIndex,
+            SpanId: $"span-cmp-{turnIndex}",
+            FreshInput: 100,
+            CacheRead: 0,
+            CacheCreation: 0,
+            Output: 10,
+            ReportedInput: 100,
+            ReportedOutput: 10,
+            All: 110,
+            AllReason: null,
+            Cost: cost,
+            Tools: []);
 
     private static CollectedRecord Turn(
         string spanId,

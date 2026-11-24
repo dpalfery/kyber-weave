@@ -1154,7 +1154,7 @@ public class InMemoryRelationalStore :
     }
 
     /// <inheritdoc />
-    public ReadTimeTurnSummary? TurnFigures(string sessionKey, int turnIndex, IModelPricingLookup? pricing = null)
+    public virtual ReadTimeTurnSummary? TurnFigures(string sessionKey, int turnIndex, IModelPricingLookup? pricing = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
         if (turnIndex < 0)

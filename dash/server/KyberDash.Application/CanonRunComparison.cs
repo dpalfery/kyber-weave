@@ -860,10 +860,15 @@ public static class CanonRunComparison
     /// <param name="turnsA">Run A's phased turns.</param>
     /// <param name="turnsB">Run B's phased turns.</param>
     /// <returns>Whether the costs are comparable, and why not when they are not.</returns>
+    /// <remarks>
+    /// Only priced turns declare a basis money was compared on, so an unpriced first turn (no
+    /// rate, basis unknown) must not veto the pair when every priced turn on both sides shares
+    /// one basis. The first priced turn names each side's basis.
+    /// </remarks>
     private static (bool CostComparable, string? CostRefusalReason) CostComparability(List<PhaseTurn> turnsA, List<PhaseTurn> turnsB)
     {
-        CostBasis? basisA = turnsA.Count > 0 ? turnsA[0].Turn.Cost?.Basis : null;
-        CostBasis? basisB = turnsB.Count > 0 ? turnsB[0].Turn.Cost?.Basis : null;
+        CostBasis? basisA = FirstPricedBasis(turnsA);
+        CostBasis? basisB = FirstPricedBasis(turnsB);
         if (basisA is null || basisB is null)
         {
             return (true, null);
@@ -880,6 +885,12 @@ public static class CanonRunComparison
 
         return (true, null);
     }
+
+    /// <summary>The basis of the first turn whose cost was priced, or <see langword="null"/> when none was.</summary>
+    private static CostBasis? FirstPricedBasis(List<PhaseTurn> turns) =>
+        turns.Select(static turn => turn.Turn.Cost)
+            .FirstOrDefault(static cost => cost is not null && cost.Status == CostStatus.Priced)
+            ?.Basis;
 
     /// <summary>Names a cost basis the way the canonical wire converter does, for refusal messages.</summary>
     /// <param name="basis">The basis being named.</param>

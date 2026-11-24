@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { fetchKyberSessionTurns } from './kyberApi.js'
+import { fetchKyberSessionTurn, fetchKyberSessionTurns, fetchTurnContent } from './kyberApi.js'
 
 type FetchCall = { url: string; init: RequestInit | undefined }
 
@@ -115,5 +115,34 @@ describe('fetchKyberSessionTurns per-turn route', () => {
     const bareRead: (sessionId: string) => Promise<unknown> = fetchKyberSessionTurns
 
     expect(bareRead).toBeTypeOf('function')
+  })
+
+  it('surfaces a faulted projection as the sections’ failure state, not a malformed error', async () => {
+    // A faulted turn-figures read answers 200 with the sections' marker and no
+    // turn row. The read resolves with the marker — the page renders the failure
+    // state the sections render — and carries no figures, never a neighbour's.
+    stubFetch(200, { sessionId: 'sess-1', turnIndex: 1, projection_status: 'PROJECTION_FAILED' })
+
+    const section = await fetchKyberSessionTurn('sess-1', 1)
+
+    expect(section.projection_status).toBe('PROJECTION_FAILED')
+    expect(section.turn).toBeUndefined()
+
+    const row = await fetchOneTurn('sess-1', 1)
+    expect(figuresOf(row)).toBeUndefined()
+  })
+
+  it('carries the fault marker through the content route with inert transport fields', async () => {
+    // Same engine convention on the content route: identity plus the marker, no
+    // content fields. The parser keeps the marker and fills the required arrays
+    // with nothing, so a consumer renders the failure instead of an empty turn.
+    stubFetch(200, { sessionId: 'sess-1', turnIndex: 1, projection_status: 'PROJECTION_FAILED' })
+
+    const content = await fetchTurnContent('sess-1', 1)
+
+    expect(content.projection_status).toBe('PROJECTION_FAILED')
+    expect(content.blocks).toEqual([])
+    expect(content.parts).toEqual([])
+    expect(content.assembledText).toBe('')
   })
 })

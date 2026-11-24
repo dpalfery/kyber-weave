@@ -521,7 +521,7 @@ public static class CanonIngestPipeline
 
         CollectedToolCall? tool = BuildToolCall(record);
         IReadOnlyList<string> skillsInvoked = SkillExtraction.ExtractInvoked(record.Raw, tool?.ToolName);
-        IReadOnlyList<CollectedToolDefinition> toolDefinitions = BuildToolDefinitions(record);
+        IReadOnlyList<CollectedToolDefinition> toolDefinitions = BuildToolDefinitions(record, out HashSet<int> definitionPartIndexes);
 
         return new CollectedRecord(
             RecordId: record.SpanId,
@@ -539,7 +539,7 @@ public static class CanonIngestPipeline
             ReportedDurationMs: reportedDurationMs,
             Tokens: tokens,
             ReportedCost: cost,
-            Parts: BuildCollectedParts(record, skipToolDefinitions: toolDefinitions.Count > 0),
+            Parts: BuildCollectedParts(record, skipToolDefinitions: toolDefinitions.Count > 0, definitionPartIndexes),
             Tool: tool,
             Agent: null,
             SkillsInvoked: skillsInvoked,
@@ -628,34 +628,47 @@ public static class CanonIngestPipeline
             ExitCode: null);
     }
 
-    private static IReadOnlyList<CollectedToolDefinition> BuildToolDefinitions(CanonicalRecord record)
+    private static IReadOnlyList<CollectedToolDefinition> BuildToolDefinitions(
+        CanonicalRecord record,
+        out HashSet<int> contributingPartIndexes)
     {
         List<CollectedToolDefinition> definitions = [];
         HashSet<string> seenNames = new(StringComparer.Ordinal);
+        HashSet<int> contributing = [];
         int position = 0;
 
         if (record.Parts is { Count: > 0 })
         {
-            foreach (ContentPart part in record.Parts)
+            for (int partIndex = 0; partIndex < record.Parts.Count; partIndex++)
             {
+                ContentPart part = record.Parts[partIndex];
                 if (!string.Equals(part.Part, "tool_definitions", StringComparison.Ordinal)
                     || string.IsNullOrWhiteSpace(part.Text))
                 {
                     continue;
                 }
 
-                AddToolDefinitionsFromText(part.Text, part.Server, part.Tokens, definitions, seenNames, ref position);
+                if (AddToolDefinitionsFromText(part.Text, part.Server, part.Tokens, definitions, seenNames, ref position))
+                {
+                    contributing.Add(partIndex);
+                }
             }
         }
         else if (record.Content.TryGetValue("tool_definitions", out string? text) && !string.IsNullOrWhiteSpace(text))
         {
-            AddToolDefinitionsFromText(text, null, null, definitions, seenNames, ref position);
+            _ = AddToolDefinitionsFromText(text, null, null, definitions, seenNames, ref position);
         }
 
+        contributingPartIndexes = contributing;
         return definitions;
     }
 
-    private static void AddToolDefinitionsFromText(
+    /// <summary>
+    /// Parses the tool definitions in one part's text into <paramref name="definitions"/>, and
+    /// answers whether any were added: a part the parser refused (truncated JSON, no name) has no
+    /// definitions to store and stays as content instead.
+    /// </summary>
+    private static bool AddToolDefinitionsFromText(
         string text,
         string? defaultServer,
         long? partTokens,
@@ -663,6 +676,7 @@ public static class CanonIngestPipeline
         HashSet<string> seenNames,
         ref int position)
     {
+        int addedBefore = definitions.Count;
         string trimmed = text.Trim();
         if (trimmed.StartsWith('{') || trimmed.StartsWith('['))
         {
@@ -712,11 +726,11 @@ public static class CanonIngestPipeline
                     }
                 }
 
-                return;
+                return definitions.Count > addedBefore;
             }
             catch (JsonException)
             {
-                return;
+                return definitions.Count > addedBefore;
             }
         }
 
@@ -727,6 +741,8 @@ public static class CanonIngestPipeline
                 : Math.Max(1L, ToolContentMeasurer.Measure(trimmed).MeasuredTokens);
             definitions.Add(new CollectedToolDefinition(position++, trimmed, SafeOptionalText(defaultServer), tokens));
         }
+
+        return definitions.Count > addedBefore;
     }
 
     private static string? ExtractToolNameFromObject(JsonElement item)
@@ -772,7 +788,10 @@ public static class CanonIngestPipeline
 
     private static readonly string[] ToolServerPropertyKeys = ["server", "mcpServer"];
 
-    private static List<CollectedContentPart> BuildCollectedParts(CanonicalRecord record, bool skipToolDefinitions)
+    private static List<CollectedContentPart> BuildCollectedParts(
+        CanonicalRecord record,
+        bool skipToolDefinitions,
+        HashSet<int> definitionPartIndexes)
     {
         List<CollectedContentPart> parts = [];
         HashSet<int> usedPositions = [];
@@ -780,14 +799,18 @@ public static class CanonIngestPipeline
 
         if (record.Parts is { Count: > 0 })
         {
-            foreach (ContentPart part in record.Parts)
+            for (int partIndex = 0; partIndex < record.Parts.Count; partIndex++)
             {
+                ContentPart part = record.Parts[partIndex];
                 if (!ContentBuckets.TryMap(part.Part, out ContentBucket bucket))
                 {
                     continue;
                 }
 
-                if (skipToolDefinitions && bucket == ContentBucket.ToolDefinitions)
+                // Skip only the tool_definitions parts whose text became stored definitions; a
+                // sibling part the parser refused stays as content so its text and reported
+                // tokens survive.
+                if (skipToolDefinitions && bucket == ContentBucket.ToolDefinitions && definitionPartIndexes.Contains(partIndex))
                 {
                     continue;
                 }
