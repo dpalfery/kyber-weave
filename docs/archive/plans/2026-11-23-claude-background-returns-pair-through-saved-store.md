@@ -2,7 +2,7 @@
 id: plans/2026-11-23-claude-background-returns-pair-through-saved-store
 title: Claude background returns pair with their dispatch through the saved store
 doc-type: plan
-status: current
+status: archived
 component: KyberArbiter
 owner: dpalfery
 last-reviewed: 2026-11-23
@@ -15,7 +15,7 @@ impact-components:
 
 # Claude background returns pair with their dispatch through the saved store
 
-**Status: Ready, 2026-11-24.**
+**Status: Archived, 2026-11-24.**
 
 ## Request
 
@@ -152,7 +152,7 @@ docs-dev harvests the two Design harvest rows into `docs/kyber-arbiter/architect
 
 | ID | Destination |
 |---|---|
-| D1, D2, D3, D4, D6, D7, D9 | [Kyber Arbiter architecture](../kyber-arbiter/architecture.md) (Claude hand-back hook section) |
-| D5 | [Kyber Arbiter architecture](../kyber-arbiter/architecture.md) (Recovered returns section) |
+| D1, D2, D3, D4, D6, D7, D9 | [Kyber Arbiter architecture](../../kyber-arbiter/architecture.md) (Claude hand-back hook section) |
+| D5 | [Kyber Arbiter architecture](../../kyber-arbiter/architecture.md) (Recovered returns section) |
 | D8, AP1 | Documentation waiver — plan-shape and approval records with no behavior a reader must consult |
-| KyberArbiter | [Kyber Arbiter architecture](../kyber-arbiter/architecture.md) |
+| KyberArbiter | [Kyber Arbiter architecture](../../kyber-arbiter/architecture.md) |
