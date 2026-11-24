@@ -350,7 +350,7 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
         }
         catch (SkillParseException exception)
         {
-            bad = KwSkillLoadResult.Malformed(name, [exception.Message]);
+            bad = KwSkillLoadResult.Malformed(name, folder, [exception.Message]);
             return false;
         }
 
@@ -365,7 +365,7 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
             missing.Add("description");
         }
 
-        bad = missing.Count == 0 ? null : KwSkillLoadResult.Malformed(name, missing);
+        bad = missing.Count == 0 ? null : KwSkillLoadResult.Malformed(name, folder, missing);
         return missing.Count == 0;
     }
 

@@ -45,7 +45,7 @@ public enum KwSkillLoadOutcome
 /// <param name="Outcome">How the load ended; decides which other members carry a value.</param>
 /// <param name="Name">The trimmed name asked for.</param>
 /// <param name="Body">Found: the <c>SKILL.md</c> text below its frontmatter.</param>
-/// <param name="Folder">Found: the absolute folder, or <c>(not materialized: reason)</c> when a shipped skill could not be written.</param>
+/// <param name="Folder">Found: the absolute folder, or <c>(not materialized: reason)</c> when a shipped skill could not be written. Malformed: the folder the skill was read from.</param>
 /// <param name="Source">Found: the pool the skill resolved from.</param>
 /// <param name="References">Found: the absolute path of every other file in the folder, in ordinal order. Never their contents.</param>
 /// <param name="ExistingNames">Unknown: every name that does exist.</param>
@@ -70,8 +70,8 @@ public sealed record KwSkillLoadResult(
         new(KwSkillLoadOutcome.Unknown, name, string.Empty, string.Empty, null, [], existingNames, []);
 
     /// <summary>Creates a malformed-skill result.</summary>
-    public static KwSkillLoadResult Malformed(string name, IReadOnlyList<string> missing) =>
-        new(KwSkillLoadOutcome.Malformed, name, string.Empty, string.Empty, null, [], [], missing);
+    public static KwSkillLoadResult Malformed(string name, string folder, IReadOnlyList<string> missing) =>
+        new(KwSkillLoadOutcome.Malformed, name, string.Empty, folder, null, [], [], missing);
 }
 
 /// <summary>

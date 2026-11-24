@@ -46,6 +46,10 @@ public interface IDocsQueryService
     /// <param name="charBudget">Total characters of prose, clamped by the service.</param>
     string AgentCodingStandards(string technology, string? topic, int charBudget);
 
+    /// <summary>Loads one KW skill: its body, the folder it sits in, and the paths of its reference files.</summary>
+    /// <param name="name">The skill's name, as a task prompt's KW skills list or a coding standard's gives it.</param>
+    string LoadSkill(string name);
+
     /// <summary>The provenance line every response leads with, without loading the corpus when it is not yet loaded.</summary>
     string Provenance();
 }

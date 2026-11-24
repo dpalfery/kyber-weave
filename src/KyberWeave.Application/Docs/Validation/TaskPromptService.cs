@@ -5,6 +5,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.KwSkills;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.FileSystem;
@@ -46,11 +47,6 @@ public sealed class TaskPromptService(
 
     private const string KwSkillsUnit = "kw-skills";
     private const string StandardUnitPrefix = "standard:";
-
-    /// <summary>The first line of the <c>kw-skills</c> part: how a worker loads one of these skills.</summary>
-    private const string LoadSkillInstruction =
-        "These are Kyber-Weave skills, not harness skills. When a skill's description fits your work, load it by " +
-        "calling the kw-docs load_skill tool with its name; never load one through your harness's own skill tool.";
 
     /// <summary>What the <c>kw-skills</c> part says when the budget cut the list.</summary>
     private const string KwSkillsLeftOut =
@@ -663,14 +659,7 @@ public sealed class TaskPromptService(
         cut.Contains(KwSkillsUnit) ? KwSkillsLeftOut : KwSkillsText(entries);
 
     /// <summary>The instruction line, then one <c>- name: description</c> line per skill.</summary>
-    private static string KwSkillsText(IReadOnlyList<KwSkillEntry> entries)
-    {
-        StringBuilder text = new(LoadSkillInstruction);
-        foreach (KwSkillEntry entry in entries)
-            text.Append("\n- ").Append(entry.Name).Append(": ").Append(entry.Description);
-
-        return text.ToString();
-    }
+    private static string KwSkillsText(IReadOnlyList<KwSkillEntry> entries) => KwSkillListText.Render(entries);
 
     private static string StandardPart(PromptContent content, IReadOnlySet<string> cut)
     {

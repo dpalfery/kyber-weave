@@ -214,9 +214,7 @@ public sealed partial class DocumentIndex
         return new StandardsBundle(
             SharedRulesDocument(),
             hasParent ? ScopedDocuments(DocType.Rule, parent!).FirstOrDefault() : null,
-            hasParent ? ScopedDocuments(DocType.Skill, parent!).FirstOrDefault() : null,
             ScopedDocuments(DocType.Rule, key).FirstOrDefault(),
-            ScopedDocuments(DocType.Skill, key).FirstOrDefault(),
             standard);
     }
 
@@ -894,19 +892,15 @@ public sealed partial class DocumentIndex
 
 /// <summary>
 /// One technology's whole standards bundle: the shared rules that apply everywhere, the
-/// parent's rules and skills when the standard names one, then this technology's rules,
-/// skills and standard.
+/// parent's rules when the standard names one, then this technology's rules and standard.
+/// The KW skills a technology gets are not part of it: they come from the skill catalog.
 /// </summary>
 /// <param name="SharedRules">The rules file that names no technology, when the corpus has one.</param>
 /// <param name="ParentRules">The parent technology's rules, when the standard names a parent.</param>
-/// <param name="ParentSkills">The parent technology's skills, when the standard names a parent.</param>
 /// <param name="Rules">This technology's prose rules.</param>
-/// <param name="Skills">This technology's skills document.</param>
 /// <param name="Standard">This technology's coding standard.</param>
 public sealed record StandardsBundle(
     DocumentModel? SharedRules,
     DocumentModel? ParentRules,
-    DocumentModel? ParentSkills,
     DocumentModel? Rules,
-    DocumentModel? Skills,
     DocumentModel? Standard);

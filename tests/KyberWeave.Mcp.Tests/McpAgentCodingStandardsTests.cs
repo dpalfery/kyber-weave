@@ -794,6 +794,25 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// Calls the tool by reflection, in the order its contract declares its parameters:
     /// technology, then the optional topic, then the optional budget.
     /// </summary>
+    /// <summary>
+    /// The coding-standard answer lists the KW skills a technology gets, in the same words the task prompt uses, in
+    /// place of the old skills prose (D25). The list names each skill and says how to load it.
+    /// </summary>
+    [Fact]
+    public void TheBundleListsKwSkillsInsteadOfSkillsProse()
+    {
+        (DocsTools tools, _) = Corpus(
+            (CsharpStandardPath, CsharpStandard()),
+            ("6-Docs/standards/csharp/csharp.skills.yml", "- plan-craft\n"),
+            ("6-Docs/standards/skills/plan-craft/SKILL.md", "---\nname: plan-craft\ndescription: Plan craft for the change.\n---\n\nPLAN BODY\n"));
+
+        string response = Ask(tools, "csharp");
+
+        Assert.Contains("- plan-craft: Plan craft for the change.", response, StringComparison.Ordinal);
+        Assert.Contains("load_skill", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("csharp skills", response, StringComparison.Ordinal);
+    }
+
     private static string Ask(
         DocsTools tools,
         string technology,

@@ -31,6 +31,9 @@ public static class DocsServerInstructions
         gates as kyber-weave docs validate and docs drift, without a shell), and docs_get_source_repository_and_revision
         (which repository and revision the documentation comes from).
 
+        To read a KW skill named in a task prompt's KW skills list or a coding standard's, call load_skill
+        with its name; it answers with the skill's instructions and the paths of its reference files.
+
         Two tools change files, and only plan files: docs_finalize_approved_plan_and_write_task_file
         sets an approved Draft plan to Ready and writes its task file, and
         docs_archive_plan_after_closeout_is_complete archives a plan once its closeout evidence is
