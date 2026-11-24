@@ -659,7 +659,9 @@ public sealed partial class DocsQueryService : IDocsQueryService
 
     /// <summary>
     /// The reply for a loaded skill: the <c>skill:</c> header a worker reads, the pool and folder it came from, the paths
-    /// of its reference files (never their contents), then the body of its <c>SKILL.md</c> below the frontmatter.
+    /// of its reference files (never their contents), then the body of its <c>SKILL.md</c> below the frontmatter. The
+    /// body is capped like every other section, and a skill whose file ends at its frontmatter says so rather than
+    /// answering with blank space.
     /// </summary>
     private static string FormatSkill(KwSkillLoadResult skill)
     {
@@ -670,7 +672,11 @@ public sealed partial class DocsQueryService : IDocsQueryService
         sb.Append("references:\n");
         if (skill.References.Count == 0) sb.Append("(none)\n");
         foreach (string reference in skill.References) sb.Append("- ").Append(reference).Append('\n');
-        sb.Append('\n').Append(skill.Body.Trim());
+        sb.Append('\n');
+        string body = skill.Body.Trim();
+        sb.AppendLine(body.Length == 0
+            ? "(this SKILL.md carries no text below its frontmatter)"
+            : Truncate(body, SectionCharCap));
         return sb.ToString();
     }
 

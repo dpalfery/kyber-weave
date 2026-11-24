@@ -115,6 +115,36 @@ public sealed class McpLoadSkillTests : IDisposable
         Assert.DoesNotContain("skill-25", reply, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A body longer than the section cap is cut at the cap with the truncation named, so one huge
+    /// SKILL.md cannot blow the reply.
+    /// </summary>
+    [Fact]
+    public void ABodyOverTheSectionCapIsTruncated()
+    {
+        WriteSkill(_server, "big-body", "A long body.", new string('x', 7000) + "TAIL-MARKER");
+
+        string reply = Load(Tools(_server), "big-body");
+
+        Assert.Contains("… truncated at 6000 characters.", reply, StringComparison.Ordinal);
+        Assert.DoesNotContain("TAIL-MARKER", reply, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A skill whose SKILL.md ends at its frontmatter is still found, with the empty body named
+    /// rather than answered as blank space after the references.
+    /// </summary>
+    [Fact]
+    public void AnEmptyBodyIsNamedRatherThanAnsweredAsBlankSpace()
+    {
+        _server.Write($"{SkillsPool}/empty-body/SKILL.md", "---\nname: empty-body\ndescription: No body.\n---\n");
+
+        string reply = Load(Tools(_server), "empty-body");
+
+        Assert.Contains("skill: empty-body\n", reply, StringComparison.Ordinal);
+        Assert.Contains("(this SKILL.md carries no text below its frontmatter)", reply, StringComparison.Ordinal);
+    }
+
     /// <summary>A skill whose frontmatter lacks a required field names the field, and is still an answer rather than a failure.</summary>
     [Fact]
     public void AMalformedSkillNamesWhatIsMissingAndIsNotAFailure()
