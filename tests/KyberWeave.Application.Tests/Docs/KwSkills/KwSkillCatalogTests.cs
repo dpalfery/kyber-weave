@@ -337,6 +337,53 @@ public sealed class KwSkillCatalogTests
         Assert.Equal([Path.Combine(folder, "real.md")], result.References);
     }
 
+    private void Unreadable(string suffix) =>
+        _files.FailWhen(
+            operation => operation.Name == "ReadAllText"
+                && operation.Path is not null
+                && operation.Path.EndsWith(suffix, StringComparison.Ordinal),
+            new IOException("denied"));
+
+    [Fact]
+    public void AnUnreadableRepositorySkillMdLoadsAsMalformedWithAReasonInsteadOfThrowing()
+    {
+        Skill("go-gates", "Go.");
+        Unreadable("SKILL.md");
+
+        KwSkillLoadResult result = _catalog.Load("go-gates");
+
+        Assert.Equal(KwSkillLoadOutcome.Malformed, result.Outcome);
+        Assert.Empty(result.MissingFields);
+        Assert.Contains("could not be read", result.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnUnreadableRepositorySkillMdIsAProblemWhenListedInsteadOfThrowing()
+    {
+        Put("docs/standards/csharp/csharp.skills.yml", "- go-gates\n");
+        Skill("go-gates", "Go.");
+        Unreadable("SKILL.md");
+
+        KwSkillList list = _catalog.SkillsFor("csharp", null);
+
+        Assert.Empty(list.Entries);
+        KwSkillProblem problem = Assert.Single(list.Problems);
+        Assert.Contains("go-gates", problem.Message, StringComparison.Ordinal);
+        Assert.Contains("could not be read", problem.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnUnparseableFrontmatterLoadsAsMalformedWithTheParserReasonAndNoFieldNames()
+    {
+        Put("docs/standards/skills/broken/SKILL.md", "---\nname: [unclosed\n---\n\nBody\n");
+
+        KwSkillLoadResult result = _catalog.Load("broken");
+
+        Assert.Equal(KwSkillLoadOutcome.Malformed, result.Outcome);
+        Assert.Empty(result.MissingFields);
+        Assert.False(string.IsNullOrWhiteSpace(result.Reason));
+    }
+
     private void Put(string relative, string content)
     {
         string path = Path.Combine(_root, relative.Replace('/', Path.DirectorySeparatorChar));

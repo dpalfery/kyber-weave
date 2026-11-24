@@ -122,7 +122,12 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
         string? folder = RepositoryFolder(wanted);
         if (folder is not null)
         {
-            string text = _files.ReadAllText(Path.Combine(folder, SkillFile));
+            string? text = SafeRead(Path.Combine(folder, SkillFile));
+            if (text is null)
+            {
+                return KwSkillLoadResult.Malformed(wanted, folder, [], "its SKILL.md could not be read");
+            }
+
             return Parse(wanted, text, folder, out Skill? skill, out KwSkillLoadResult? bad)
                 ? KwSkillLoadResult.Found(wanted, skill.InstructionsBody, folder, KwSkillSource.Repository, References(folder))
                 : bad;
@@ -293,20 +298,9 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
 
     private static List<string> ParseList(string text, string relative, List<KwSkillProblem> problems)
     {
-        try
+        if (KwSkillFiles.TryParseList(text, out List<string> names))
         {
-            YamlStream stream = new();
-            stream.Load(new StringReader(text));
-            if (stream.Documents.Count == 1
-                && stream.Documents[0].RootNode is YamlSequenceNode sequence
-                && sequence.Children.All(child => child is YamlScalarNode { Value: { Length: > 0 } }))
-            {
-                return [.. sequence.Children.Cast<YamlScalarNode>().Select(node => node.Value!.Trim())];
-            }
-        }
-        catch (YamlException)
-        {
-            // Reported below with the rest of the malformed shapes.
+            return names;
         }
 
         problems.Add(new KwSkillProblem(
@@ -326,10 +320,17 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
 
         string? folder = RepositoryFolder(name);
         KwSkillSource source = folder is null ? KwSkillSource.Shipped : KwSkillSource.Repository;
-        string text = folder is null ? _shipped.ReadSkillFile(name) : _files.ReadAllText(Path.Combine(folder, SkillFile));
+        string? text = folder is null ? _shipped.ReadSkillFile(name) : SafeRead(Path.Combine(folder, SkillFile));
+        if (text is null)
+        {
+            problems.Add(new KwSkillProblem(listFile, $"'{name}' cannot be read: its SKILL.md could not be read."));
+            return;
+        }
+
         if (!Parse(name, text, folder ?? name, out Skill? skill, out KwSkillLoadResult? bad))
         {
-            problems.Add(new KwSkillProblem(listFile, $"'{name}' cannot be read: {string.Join(", ", bad.MissingFields)}."));
+            string why = bad.Reason ?? "its SKILL.md has no " + string.Join("/", bad.MissingFields);
+            problems.Add(new KwSkillProblem(listFile, $"'{name}' cannot be read: {why}."));
             return;
         }
 
@@ -343,30 +344,14 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
         [NotNullWhen(true)] out Skill? skill,
         [NotNullWhen(false)] out KwSkillLoadResult? bad)
     {
-        skill = null;
-        try
+        if (KwSkillFiles.TryInspect(text, Path.Combine(folder, SkillFile), folder, out skill, out string? parseError, out List<string> missing))
         {
-            skill = SkillParser.Parse(text, Path.Combine(folder, SkillFile), folder, [], []);
-        }
-        catch (SkillParseException exception)
-        {
-            bad = KwSkillLoadResult.Malformed(name, folder, [exception.Message]);
-            return false;
+            bad = null;
+            return true;
         }
 
-        List<string> missing = [];
-        if (string.IsNullOrWhiteSpace(skill.Frontmatter.Name))
-        {
-            missing.Add("name");
-        }
-
-        if (string.IsNullOrWhiteSpace(skill.Frontmatter.Description))
-        {
-            missing.Add("description");
-        }
-
-        bad = missing.Count == 0 ? null : KwSkillLoadResult.Malformed(name, folder, missing);
-        return missing.Count == 0;
+        bad = KwSkillLoadResult.Malformed(name, folder, missing, parseError);
+        return false;
     }
 
     private List<string> References(string folder)

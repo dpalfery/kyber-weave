@@ -3,11 +3,8 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.KwSkills;
 using KyberWeave.Core.Skills.Model;
-using KyberWeave.Core.Skills.Parsing;
 using KyberWeave.Core.Text;
 using KyberWeave.Domain.FileSystem;
-using YamlDotNet.Core;
-using YamlDotNet.RepresentationModel;
 
 namespace KyberWeave.Core.Docs.Validation;
 
@@ -52,7 +49,7 @@ internal sealed class KwSkillRulesValidator(string repoRoot, IFileSystem files, 
             return;
         }
 
-        if (!TryParseList(text, out List<string> names))
+        if (!KwSkillFiles.TryParseList(text, out List<string> names))
         {
             report.Add(new Diagnostic(
                 DocSpecValidator.SkillListMalformed, Severity.Error,
@@ -129,27 +126,33 @@ internal sealed class KwSkillRulesValidator(string repoRoot, IFileSystem files, 
         string folder,
         DiagnosticReport report)
     {
-        string text = files.ReadAllText(absoluteSkill);
-        Skill skill;
+        string text;
         try
         {
-            skill = SkillParser.Parse(text, absoluteSkill, folder, [], []);
+            text = files.ReadAllText(absoluteSkill);
         }
-        catch (SkillParseException exception)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             report.Add(new Diagnostic(
                 DocSpecValidator.SkillPoolFrontmatter, Severity.Error,
-                $"the skill '{folderName}' has no readable frontmatter: {exception.Message}",
+                $"the skill '{folderName}' could not be read: {exception.Message}",
                 folderName, relativeSkill,
-                "Open the file with a frontmatter block that declares 'name' and 'description'."));
+                "Make the file readable, then re-run docs validate."));
             return;
         }
 
-        List<string> missing = [];
-        if (string.IsNullOrWhiteSpace(skill.Frontmatter.Name)) missing.Add("name");
-        if (string.IsNullOrWhiteSpace(skill.Frontmatter.Description)) missing.Add("description");
-        if (missing.Count > 0)
+        if (!KwSkillFiles.TryInspect(text, absoluteSkill, folder, out Skill? skill, out string? parseError, out List<string> missing))
         {
+            if (parseError is not null)
+            {
+                report.Add(new Diagnostic(
+                    DocSpecValidator.SkillPoolFrontmatter, Severity.Error,
+                    $"the skill '{folderName}' has no readable frontmatter: {parseError}",
+                    folderName, relativeSkill,
+                    "Open the file with a frontmatter block that declares 'name' and 'description'."));
+                return;
+            }
+
             report.Add(new Diagnostic(
                 DocSpecValidator.SkillPoolFrontmatter, Severity.Error,
                 $"the skill '{folderName}' declares no {string.Join(" and no ", missing)}.",
@@ -167,30 +170,6 @@ internal sealed class KwSkillRulesValidator(string repoRoot, IFileSystem files, 
                 folderName, relativeSkill,
                 $"Set 'name: {folderName}'; a skill is looked up by its folder name."));
         }
-    }
-
-    /// <summary>Reads a list as the catalog does: one YAML sequence of non-empty scalars and nothing else.</summary>
-    private static bool TryParseList(string text, out List<string> names)
-    {
-        names = [];
-        try
-        {
-            YamlStream stream = new();
-            stream.Load(new StringReader(text));
-            if (stream.Documents.Count == 1
-                && stream.Documents[0].RootNode is YamlSequenceNode sequence
-                && sequence.Children.All(child => child is YamlScalarNode { Value: { Length: > 0 } }))
-            {
-                names = [.. sequence.Children.Cast<YamlScalarNode>().Select(node => node.Value!.Trim())];
-                return true;
-            }
-        }
-        catch (YamlException)
-        {
-            // Not a YAML document at all: the caller reports the shape, so nothing is lost here.
-        }
-
-        return false;
     }
 
     private string Combine(string relativePath) =>

@@ -238,4 +238,90 @@ public sealed class KwSkillValidationTests
             DocSpecValidator.ReservedSkillsScope,
             Severity.Error);
     }
+
+    [Theory]
+    [InlineData("Bad Name")]
+    [InlineData("../x")]
+    public void AnInvalidListedNameIsKwDocSkill002AndNeverReachesTheFileSystem(string name)
+    {
+        using DocFixture fixture = Scope($"- \"{name}\"\n");
+
+        Diagnostic finding = Only(
+            Validate(fixture, Dotnet, Catalog(fixture, new FakeEmbeddedResources())),
+            DocSpecValidator.SkillListUnknownName,
+            Severity.Error);
+
+        Assert.Contains(name, finding.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnEmptyScalarEntryIsKwDocSkill001()
+    {
+        using DocFixture fixture = Scope("- \"\"\n");
+
+        Only(Validate(fixture, Dotnet), DocSpecValidator.SkillListMalformed, Severity.Error);
+    }
+
+    [Fact]
+    public void AnUnreadableListFileIsKwDocSkill001NotACrash()
+    {
+        using DocFixture fixture = Scope("[]\n");
+        fixture.Memory!.FailWhen(
+            operation => operation.Name == "ReadAllText"
+                && operation.Path is not null
+                && operation.Path.EndsWith("dotnet.skills.yml", StringComparison.Ordinal),
+            new IOException("denied"));
+
+        Diagnostic finding = Only(Validate(fixture, Dotnet), DocSpecValidator.SkillListMalformed, Severity.Error);
+
+        Assert.Contains("could not be read", finding.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnUnreadablePoolSkillMdIsKwDocSkill003NotACrash()
+    {
+        using DocFixture fixture = Scope("[]\n")
+            .Write("6-Docs/standards/skills/go-gates/SKILL.md", "---\nname: go-gates\ndescription: Run.\n---\n\nBODY\n");
+        fixture.Memory!.FailWhen(
+            operation => operation.Name == "ReadAllText"
+                && operation.Path is not null
+                && operation.Path.EndsWith("SKILL.md", StringComparison.Ordinal),
+            new IOException("denied"));
+
+        Diagnostic finding = Only(Validate(fixture, Dotnet), DocSpecValidator.SkillPoolFrontmatter, Severity.Error);
+
+        Assert.Contains("could not be read", finding.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AMalformedPoolSkillMdFrontmatterIsKwDocSkill003WithTheParserReason()
+    {
+        using DocFixture fixture = Scope("[]\n")
+            .Write("6-Docs/standards/skills/go-gates/SKILL.md", "---\nname: [unclosed\n---\n\nBODY\n");
+
+        Diagnostic finding = Only(Validate(fixture, Dotnet), DocSpecValidator.SkillPoolFrontmatter, Severity.Error);
+
+        Assert.Contains("no readable frontmatter", finding.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ALinkedSkillFolderInThePoolIsNotCheckedAndALinkedPoolIsNotRead()
+    {
+        using DocFixture fixture = Scope("[]\n")
+            .Write("elsewhere/go-gates/SKILL.md", "no frontmatter at all\n");
+        string root = fixture.Root;
+        fixture.Memory!.CreateDirectory(Path.Combine(root, "6-Docs", "standards", "skills"));
+        fixture.Memory.CreateDirectoryLink(
+            Path.Combine(root, "6-Docs", "standards", "skills", "go-gates"), Path.Combine(root, "elsewhere", "go-gates"));
+
+        Assert.Empty(Validate(fixture, Dotnet).Items);
+
+        // A pool that is itself a link is skipped whole.
+        using DocFixture linkedPool = Scope("[]\n")
+            .Write("elsewhere/pool/go-gates/SKILL.md", "no frontmatter at all\n");
+        linkedPool.Memory!.CreateDirectoryLink(
+            Path.Combine(linkedPool.Root, "6-Docs", "standards", "skills"), Path.Combine(linkedPool.Root, "elsewhere", "pool"));
+
+        Assert.Empty(Validate(linkedPool, Dotnet).Items);
+    }
 }

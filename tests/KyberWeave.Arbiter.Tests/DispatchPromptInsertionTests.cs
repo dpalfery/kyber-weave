@@ -892,11 +892,10 @@ public sealed class DispatchPromptInsertionTests
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
-        Assert.All(prompts.Requests, request =>
-        {
-            Assert.Null(request.TaskId);
-            Assert.Null(request.Technology);
-        });
+        TaskPromptRequest request = Assert.Single(prompts.Requests);
+        Assert.Null(request.TaskId);
+        Assert.Null(request.Technology);
+        Assert.Equal("csharp-dev", request.RoleAgent);
     }
 
     [Fact]

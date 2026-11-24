@@ -49,7 +49,8 @@ public enum KwSkillLoadOutcome
 /// <param name="Source">Found: the pool the skill resolved from.</param>
 /// <param name="References">Found: the absolute path of every other file in the folder, in ordinal order. Never their contents.</param>
 /// <param name="ExistingNames">Unknown: every name that does exist.</param>
-/// <param name="MissingFields">Malformed: the frontmatter fields that are missing, or the reason the frontmatter cannot be read.</param>
+/// <param name="MissingFields">Malformed: the frontmatter fields that are missing. Empty when <paramref name="Reason"/> is set.</param>
+/// <param name="Reason">Malformed: why the file could not be read or its frontmatter parsed, or null when fields are missing.</param>
 public sealed record KwSkillLoadResult(
     KwSkillLoadOutcome Outcome,
     string Name,
@@ -58,7 +59,8 @@ public sealed record KwSkillLoadResult(
     KwSkillSource? Source,
     IReadOnlyList<string> References,
     IReadOnlyList<string> ExistingNames,
-    IReadOnlyList<string> MissingFields)
+    IReadOnlyList<string> MissingFields,
+    string? Reason = null)
 {
     /// <summary>Creates a found result.</summary>
     public static KwSkillLoadResult Found(
@@ -70,8 +72,8 @@ public sealed record KwSkillLoadResult(
         new(KwSkillLoadOutcome.Unknown, name, string.Empty, string.Empty, null, [], existingNames, []);
 
     /// <summary>Creates a malformed-skill result.</summary>
-    public static KwSkillLoadResult Malformed(string name, string folder, IReadOnlyList<string> missing) =>
-        new(KwSkillLoadOutcome.Malformed, name, string.Empty, folder, null, [], [], missing);
+    public static KwSkillLoadResult Malformed(string name, string folder, IReadOnlyList<string> missing, string? reason = null) =>
+        new(KwSkillLoadOutcome.Malformed, name, string.Empty, folder, null, [], [], missing, reason);
 }
 
 /// <summary>

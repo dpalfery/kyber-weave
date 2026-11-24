@@ -603,8 +603,10 @@ public sealed partial class DocsQueryService : IDocsQueryService
             KwSkillLoadOutcome.Unknown =>
                 $"No KW skill is named '{result.Name}'. Skills that exist: {string.Join(", ", result.ExistingNames)}.",
             _ =>
-                $"The KW skill '{result.Name}' in {result.Folder} cannot be loaded: its SKILL.md has no "
-                + string.Join("/", result.MissingFields) + ".",
+                result.Reason is not null
+                    ? $"The KW skill '{result.Name}' in {result.Folder} cannot be loaded: {result.Reason}."
+                    : $"The KW skill '{result.Name}' in {result.Folder} cannot be loaded: its SKILL.md has no "
+                        + string.Join("/", result.MissingFields) + ".",
         };
         return provenance + "\n" + body;
     }

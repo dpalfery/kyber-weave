@@ -108,6 +108,19 @@ public sealed class McpLoadSkillTests : IDisposable
         Assert.Contains("cannot be loaded: its SKILL.md has no description", reply, StringComparison.Ordinal);
     }
 
+    /// <summary>A SKILL.md whose frontmatter cannot be parsed reads as a parse failure, never as "has no &lt;error&gt;".</summary>
+    [Fact]
+    public void AnUnparseableFrontmatterIsReportedAsAReasonNotAMissingField()
+    {
+        _server.Write($"{SkillsPool}/broken/SKILL.md", "---\nname: [unclosed\n---\n\nBody\n");
+
+        string reply = Load(Tools(_server), "broken");
+
+        Assert.Contains("The KW skill 'broken' in ", reply, StringComparison.Ordinal);
+        Assert.Contains("cannot be loaded: ", reply, StringComparison.Ordinal);
+        Assert.DoesNotContain("SKILL.md has no ", reply, StringComparison.Ordinal);
+    }
+
     /// <summary>A blank name is answered with the usage line, which names the argument it wants.</summary>
     [Theory]
     [InlineData("")]
