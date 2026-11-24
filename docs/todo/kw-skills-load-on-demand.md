@@ -57,12 +57,12 @@ In scope:
     name maps to a role folder by exact match on this fixed table: `conductor` → `conductor`, `architect` →
     `architect`, `code-reviewer` → `reviewer`, `plan-reviewer` → `reviewer`. An agent not in the table (for example
     `docs-dev` today) has no role folder and gets no role skills; a new role folder adds its row to the table.
-    `docs validate` reports a shipped role folder with no table row and a table row whose folder does not exist, so
-    the table cannot drift from the folders unnoticed.
+    `docs validate` reports a role folder, shipped or added in the repository's standards tree, with no table row,
+    and a table row whose folder exists in neither, so the table cannot drift from the folders unnoticed.
   - The section is wrapped in one `<kyber-weave-skills>` tag and lists one entry per skill with its `name` and
     `description`, each XML-escaped, so a description cannot close or forge the tag.
-  - A listed name that is not a skill name, or a listed skill that has no folder or a malformed `SKILL.md`, is left
-    out of the entries, and the section ends with
+  - A listed name that is not a skill name, or a listed skill that has no folder, a malformed `SKILL.md`, or a
+    winning copy outside the pool, is left out of the entries, and the section ends with
     one line naming each left-out skill, so a partial list never reads as complete. `docs validate` reports the same
     skills.
   - When the task-prompt budget cuts the section, the section says it is partial and names the skills it left out,
@@ -82,17 +82,21 @@ In scope:
     at most 100 paths; past 100 the reply says how many more there are. Enumeration never enters a linked directory,
     and a file is listed only when its resolved path lies inside the skill folder.
   - The `SKILL.md` body is capped at 64 KiB; past the cap the reply says it is truncated and gives the body's full
-    size.
+    size. A reply whose body or reference list was cut says so in its status line (`SKILL_LOADED_PARTIAL`).
   - Resolves the repository copy before the shipped copy.
-  - Answers an unknown name with the skill names that exist (sorted, at most 100, with a count of the rest), and a malformed skill (no `name` or
+  - Answers an unknown name with the skill names that exist (sorted, at most 100, with a count of the rest): the
+    usable skills of the repository and shipped pools merged by name, one entry per name, leaving out invalid names
+    and skills with a malformed or outside-pool winning copy, and a malformed skill (no `name` or
     `description`) with what is missing; neither is a tool failure.
   - Every reply has a status line a caller can match, directly after the provenance line every kw-docs response opens
-    with: `STATUS: SKILL_LOADED` on success, otherwise `STATUS: SKILL_NOT_FOUND`, `STATUS: SKILL_MALFORMED`,
+    with: `STATUS: SKILL_LOADED` on a whole success, `STATUS: SKILL_LOADED_PARTIAL` when the body or the
+    reference list was cut, otherwise `STATUS: SKILL_NOT_FOUND`, `STATUS: SKILL_MALFORMED`,
     `STATUS: SKILL_NAME_INVALID` or `STATUS: SKILL_OUTSIDE_POOL`.
   - Starts with the provenance line every kw-docs response carries.
 - **Validation.** `docs validate` reports:
   - a `.skills.yml` that is not a list of names, or that lists a name that is not a skill name;
-  - a listed skill with no folder in the pool;
+  - a listed skill with a valid name and no folder in the pool (an invalid name is reported once, as invalid, and is
+    not also reported as missing);
   - a `SKILL.md` with no `name` or no `description`, or whose `name` is not its folder's name;
   - a skill folder whose name is not a skill name;
   - a `<scope>.skills.md` left in a standards folder after migration;
@@ -150,7 +154,10 @@ KyberDash shows which skills agents actually load, so unused skills can be cut a
 - A repository copy that is malformed is reported as malformed by `load_skill` and the section; the shipped copy of
   the same name is not used.
 - `load_skill` on a skill folder holding a linked directory that points outside it lists no path from that directory.
-- A `SKILL.md` larger than 64 KiB comes back cut at the cap with the truncation and full size stated.
+- A `SKILL.md` larger than 64 KiB comes back cut at the cap with the truncation and full size stated, under
+  `STATUS: SKILL_LOADED_PARTIAL`.
+- A listed name that is invalid is reported once by `docs validate`, as an invalid name.
+- A role folder the repository adds with no row in the role table is reported by `docs validate`.
 - Every `load_skill` reply has the provenance line first and a `STATUS:` line second, `STATUS: SKILL_LOADED` on
   success.
 - `docs validate` reports each case in its list once: a `.skills.yml` listing an invalid name, a skill folder with an
