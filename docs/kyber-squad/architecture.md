@@ -2701,13 +2701,17 @@ repository is reported by `KW-DOC-SKILL-005` and left in place; `docs standards 
 
 ### Never deployed to a harness
 
-`squad update` and `squad install` never write a KW skill into a harness skills folder. `SquadSourceLoader` and
-`SquadPacker` read only `products/kyber-squad/skills` and `.apm/skills`, never `standards/`, so the guard needs no
-special case. Three tests keep it so: `KwSkillPoolContentTests.NoKwSkillIsASquadSkillAndThePackCarriesNone` (KW
-skill names are disjoint from every Squad and APM skill name, and no pack entry sits under `standards/skills`),
-and the CI integration test `SquadKyberWeaveSkillsTests.GlobalInstallDeploysNoKwSkill` (a global install into a
-scratch home writes none). Disjoint names matter because an agent that met a KW skill name in its harness's own
-list would load the wrong copy; the list's opening instruction tells it never to.
+`squad update` and `squad install` never write a KW skill into a harness skills folder. `SquadSourceLoader` never
+reads `standards/`; it loads `agents/` and the top-level `skills/`. `SquadPacker` walks the whole canonical source
+tree for the APM archive, so it skips every entry under `standards/skills/` explicitly; its plugins archive reads
+only `plugin.json`, `mcp.json`, and the `skills/` and `.apm/skills/` trees. Three tests keep it so:
+`KwSkillPoolContentTests.NoKwSkillIsASquadSkillAndThePackCarriesNone` (KW skill names are disjoint from every
+Squad and APM skill name, and no `standards` folder appears under the Squad source's `skills/`), and the CI
+integration tests `SquadKyberWeaveSkillsTests.NoPackArchiveCarriesAStandardsSkillsEntryOrAKwSkillName` (neither
+archive carries an entry under `standards/skills/` or a folder named for a KW skill) and
+`SquadKyberWeaveSkillsTests.GlobalInstallDeploysNoKwSkill` (a global install into a scratch home writes none).
+Disjoint names matter because an agent that met a KW skill name in its harness's own list would load the wrong
+copy; the list's opening instruction tells it never to.
 
 The dispatch insertion that lists the skills is in
 [the Arbiter architecture](../kyber-arbiter/architecture.md#kw-skills-in-the-dispatch-prompt).
