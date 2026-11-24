@@ -2463,6 +2463,7 @@ export type KyberSessionSection =
   | 'tools'
   | 'servers'
   | 'skills'
+  | 'kw-skills'
   | 'timeline'
   | 'requests'
   | 'reconciliation'
@@ -2938,6 +2939,44 @@ function parseSessionSkillsPage(raw: unknown, path: string): KyberSessionSkillsP
   return { measurable: true, rows, ...window }
 }
 
+/**
+ * One KW skill load: a skill the agent loaded on demand, with the agent, the
+ * session and span it came from, and when it loaded. A load whose skill name
+ * was not recorded carries `skill: null`; nothing is defaulted.
+ */
+export interface KyberKwSkillRow {
+  skill: string | null
+  agent: string | null
+  session_id: string
+  span_id: string
+  loaded_at: string | null
+}
+
+/** One page of a session's KW skill loads, from `GET /api/kyber/session/:id/kw-skills`. */
+export interface KyberSessionKwSkillsPage extends KyberSectionWindow {
+  rows: KyberKwSkillRow[]
+}
+
+function readKwSkillRow(raw: Raw, path: string): KyberKwSkillRow {
+  return {
+    skill: readNullableString(raw.skill, path, 'skill'),
+    agent: readNullableString(raw.agent, path, 'agent'),
+    session_id: requireStringField(raw, 'session_id', path),
+    span_id: requireStringField(raw, 'span_id', path),
+    loaded_at: readNullableString(raw.loaded_at, path, 'loaded_at'),
+  }
+}
+
+function parseSessionKwSkillsPage(raw: unknown, path: string): KyberSessionKwSkillsPage {
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  if (!Array.isArray(raw.rows)) throw malformedSection(path, 'rows is not an array')
+  const rows = raw.rows.map((row) => {
+    if (!isRaw(row)) throw malformedSection(path, 'a KW skill row is not an object')
+    return readKwSkillRow(row, path)
+  })
+  return { rows, ...readSectionWindow(raw, path) }
+}
+
 // ── Timeline ────────────────────────────────────────────────────────────────
 
 /** One timeline node: today's node fields minus `children`, plus its child count. */
@@ -3236,6 +3275,15 @@ export async function fetchKyberSessionSkills(
 ): Promise<KyberSessionSkillsPage> {
   const path = sectionPath(sessionId, 'skills', page)
   return parseSessionSkillsPage(await fetchJson<unknown>(path), path)
+}
+
+/** Reads one page of the session's KW skill loads. */
+export async function fetchKyberSessionKwSkills(
+  sessionId: string,
+  page = 1,
+): Promise<KyberSessionKwSkillsPage> {
+  const path = sectionPath(sessionId, 'kw-skills', page)
+  return parseSessionKwSkillsPage(await fetchJson<unknown>(path), path)
 }
 
 /** Reads one level of the session's timeline tree, page by page. */

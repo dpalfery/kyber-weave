@@ -13,6 +13,7 @@ import {
   fetchKyberSessionReconciliation,
   fetchKyberSessionRequests,
   fetchKyberSessionServers,
+  fetchKyberSessionKwSkills,
   fetchKyberSessionSkills,
   fetchKyberSessionStoredFields,
   fetchStoredTableRowsPage,
@@ -358,6 +359,46 @@ describe('session section fetchers', () => {
   it('rejects a skills body whose rows is not an array', async () => {
     stubFetch(200, { measurable: true, rows: 'none', total: 0, page: 1, limit: 25, offset: 0 })
     await expect(fetchKyberSessionSkills('sess-1', 1)).rejects.toThrow(/malformed/i)
+  })
+
+  it('GETs the kw-skills route with the page and returns the paged KW skill rows', async () => {
+    const body = {
+      rows: [
+        {
+          skill: 'kw-docs',
+          agent: 'claude',
+          session_id: 'sess-1',
+          span_id: 'span-1',
+          loaded_at: '2026-11-19T10:05:00.000Z',
+        },
+        { skill: null, agent: null, session_id: 'sess-1', span_id: 'span-2', loaded_at: null },
+      ],
+      total: 2,
+      limit: 25,
+      offset: 0,
+      page: 1,
+    }
+    const calls = stubFetch(200, body)
+
+    const page = await fetchKyberSessionKwSkills('sess-1', 1)
+
+    expect(calls[0]!.url).toBe('/api/kyber/session/sess-1/kw-skills?page=1&limit=25')
+    expect(page).toEqual(body)
+  })
+
+  it('rejects a kw-skills body whose rows is not an array', async () => {
+    stubFetch(200, { rows: 'none', total: 0, page: 1, limit: 25, offset: 0 })
+    await expect(fetchKyberSessionKwSkills('sess-1', 1)).rejects.toThrow(/malformed/i)
+  })
+
+  it('rejects a kw-skills row that is not an object', async () => {
+    stubFetch(200, { rows: ['kw-docs'], total: 1, page: 1, limit: 25, offset: 0 })
+    await expect(fetchKyberSessionKwSkills('sess-1', 1)).rejects.toThrow(/malformed/i)
+  })
+
+  it('rejects a kw-skills body without the paging window', async () => {
+    stubFetch(200, { rows: [], total: 0 })
+    await expect(fetchKyberSessionKwSkills('sess-1', 1)).rejects.toThrow(/malformed/i)
   })
 
   it('GETs one timeline level with the parent and page', async () => {
