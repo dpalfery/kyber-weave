@@ -2,7 +2,7 @@
 id: plans/2026-11-24-kw-skills-load-on-demand
 title: Kyber-Weave skills that agents load on demand
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-11-24
@@ -18,7 +18,7 @@ impact-components:
 
 # Kyber-Weave skills that agents load on demand
 
-**Status: Ready.**
+**Status: Archived, 2026-11-24.**
 
 ## Request
 
@@ -30,7 +30,7 @@ impact-components:
 >
 > The plan must cover: the KW skill pool at standards/skills/<name>/SKILL.md and repository-over-shipped resolution; <scope>.skills.yml assignment with parent-technology inheritance; the dispatch-hook skills section for workers and role agents (one XML tag, opening instruction, omitted when empty, within the existing prompt budget); the kw-docs `load_skill` MCP tool; `docs validate` rules; `squad update` never deploying KW skills to harness folders; KyberDash recording and a separate KW skills section; and migration of every shipped <scope>.skills.md to .skills.yml (real guidance becomes a KW skill) including docs init and templates. Assign each task to the specialist whose file trigger matches (csharp-dev, typescript-dev, react-dev, test-dev, docs-dev, etc.), with RED test tasks by test-dev separate from GREEN implementation. Include the todo promotion bookkeeping (successor recorded in the todo, todo Superseded, index updated) as a docs-dev task.
 
-The requirements source is [the todo](../todo/kw-skills-load-on-demand.md) (owner-settled 2026-11-22). Its In scope, Out of scope, Assumptions, Acceptance criteria and Suggested tests are binding; T1 moves it to the archive, and the archived copy keeps the text.
+The requirements source is [the todo](../../todo/kw-skills-load-on-demand.md) (owner-settled 2026-11-22). Its In scope, Out of scope, Assumptions, Acceptance criteria and Suggested tests are binding; T1 moves it to the archive, and the archived copy keeps the text.
 
 ## Problem and goal
 
@@ -513,24 +513,24 @@ Links are written from this plan's folder before archive; the archive step rebas
 
 | ID | Destination |
 |---|---|
-| H1, KyberSquad | [KW skills: the on-demand pool](../kyber-squad/architecture.md#13-kw-skills-the-on-demand-pool) (pool paths, `.skills.yml`, inheritance, role mapping, shipped against repository, migration), with the operator view in [KW skills are never deployed](../kyber-squad/onboarding.md#kw-skills-are-never-deployed) and the list shape in [Coding standards](../standards/README.md) and the [ontology](../documentation-ontology.md) |
-| H2 | [Never deployed to a harness](../kyber-squad/architecture.md#never-deployed-to-a-harness) and [KW skills are never deployed](../kyber-squad/onboarding.md#kw-skills-are-never-deployed) (D16 and its three guards) |
-| H3, KyberArbiter | [KW skills in the dispatch prompt](../kyber-arbiter/architecture.md#kw-skills-in-the-dispatch-prompt) (`<kw-skills>`, role-only insertion, the target, the budget) |
-| H4 | [`load_skill`](../docgraph/mcp-runbook.md#load_skillname-projectpath--null) (arguments, reply, failures, materialization) and the changed coding-standard bundle in the same runbook |
-| H5, DocGraph | [Standards folders and the KW skill pool](../docgraph/architecture.md#standards-folders-and-the-kw-skill-pool), [KW skills rules](../ci-pipelines/rule-reference.md#kw-skills--docs-validate), the [CLI surface](../cli-command-surface.md) rows for `docs init` and `docs standards migrate`, and the authoring skill's [rules](../../.apm/skills/kyber-docs-authoring/references/rules.md) and [retrofit](../../.apm/skills/kyber-docs-authoring/references/retrofit.md) |
-| H6, KyberDash | [KW skill loads](../dash/architecture.md#kw-skill-loads), the read-model register row and the REST API table row in the same document |
-| H7, ContextHygiene | [Glossary: KW skill](../glossary.md#kw-skill), with [Skill governance](../context-hygiene/skills.md) distinguishing it from ADR 0049's term |
-| H8 | [ADR 0093](../adr/0093-kw-skills-load-on-demand-through-kw-docs.md), indexed in the [ADR index](../adr/README.md) and cross-referenced from [ADR 0049](../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md) |
-| D2, D3, D4, D5, D6, D7, D8, D19, D22, D23, D24 | [KW skills: the on-demand pool](../kyber-squad/architecture.md#13-kw-skills-the-on-demand-pool); D3 and D6 also in [Standards folders and the KW skill pool](../docgraph/architecture.md#standards-folders-and-the-kw-skill-pool); D5 also in [`load_skill`](../docgraph/mcp-runbook.md#load_skillname-projectpath--null); D22 in the [glossary](../glossary.md#kw-skill) |
-| D9, D10, D11 | [KW skills in the dispatch prompt](../kyber-arbiter/architecture.md#kw-skills-in-the-dispatch-prompt) |
-| D12, D13, D14, D25 | [`load_skill`](../docgraph/mcp-runbook.md#load_skillname-projectpath--null) and the coding-standard bundle description in the same runbook |
-| D15 | [KW skills rules](../ci-pipelines/rule-reference.md#kw-skills--docs-validate) and the authoring skill's [rules](../../.apm/skills/kyber-docs-authoring/references/rules.md) |
-| D16 | [Never deployed to a harness](../kyber-squad/architecture.md#never-deployed-to-a-harness) |
-| D17, D18 | [KW skill loads](../dash/architecture.md#kw-skill-loads) |
-| D26, D27 | Documentation waiver: run provenance. D26 records why dispatch went to the developer tiers (the roster is `tiered`, already documented in [the worker roster](../kyber-squad/architecture.md#12-the-worker-roster-and-developer-tiers)); D27 records how T11 was verified, and the gate gap it exposed is filed in [KW skills follow-ups](../todo/kw-skills-follow-ups.md). No invariant survives for a future reader |
+| H1, KyberSquad | [KW skills: the on-demand pool](../../kyber-squad/architecture.md#13-kw-skills-the-on-demand-pool) (pool paths, `.skills.yml`, inheritance, role mapping, shipped against repository, migration), with the operator view in [KW skills are never deployed](../../kyber-squad/onboarding.md#kw-skills-are-never-deployed) and the list shape in [Coding standards](../../standards/README.md) and the [ontology](../../documentation-ontology.md) |
+| H2 | [Never deployed to a harness](../../kyber-squad/architecture.md#never-deployed-to-a-harness) and [KW skills are never deployed](../../kyber-squad/onboarding.md#kw-skills-are-never-deployed) (D16 and its three guards) |
+| H3, KyberArbiter | [KW skills in the dispatch prompt](../../kyber-arbiter/architecture.md#kw-skills-in-the-dispatch-prompt) (`<kw-skills>`, role-only insertion, the target, the budget) |
+| H4 | [`load_skill`](../../docgraph/mcp-runbook.md#load_skillname-projectpath--null) (arguments, reply, failures, materialization) and the changed coding-standard bundle in the same runbook |
+| H5, DocGraph | [Standards folders and the KW skill pool](../../docgraph/architecture.md#standards-folders-and-the-kw-skill-pool), [KW skills rules](../../ci-pipelines/rule-reference.md#kw-skills--docs-validate), the [CLI surface](../../cli-command-surface.md) rows for `docs init` and `docs standards migrate`, and the authoring skill's [rules](../../../.apm/skills/kyber-docs-authoring/references/rules.md) and [retrofit](../../../.apm/skills/kyber-docs-authoring/references/retrofit.md) |
+| H6, KyberDash | [KW skill loads](../../dash/architecture.md#kw-skill-loads), the read-model register row and the REST API table row in the same document |
+| H7, ContextHygiene | [Glossary: KW skill](../../glossary.md#kw-skill), with [Skill governance](../../context-hygiene/skills.md) distinguishing it from ADR 0049's term |
+| H8 | [ADR 0093](../../adr/0093-kw-skills-load-on-demand-through-kw-docs.md), indexed in the [ADR index](../../adr/README.md) and cross-referenced from [ADR 0049](../../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md) |
+| D2, D3, D4, D5, D6, D7, D8, D19, D22, D23, D24 | [KW skills: the on-demand pool](../../kyber-squad/architecture.md#13-kw-skills-the-on-demand-pool); D3 and D6 also in [Standards folders and the KW skill pool](../../docgraph/architecture.md#standards-folders-and-the-kw-skill-pool); D5 also in [`load_skill`](../../docgraph/mcp-runbook.md#load_skillname-projectpath--null); D22 in the [glossary](../../glossary.md#kw-skill) |
+| D9, D10, D11 | [KW skills in the dispatch prompt](../../kyber-arbiter/architecture.md#kw-skills-in-the-dispatch-prompt) |
+| D12, D13, D14, D25 | [`load_skill`](../../docgraph/mcp-runbook.md#load_skillname-projectpath--null) and the coding-standard bundle description in the same runbook |
+| D15 | [KW skills rules](../../ci-pipelines/rule-reference.md#kw-skills--docs-validate) and the authoring skill's [rules](../../../.apm/skills/kyber-docs-authoring/references/rules.md) |
+| D16 | [Never deployed to a harness](../../kyber-squad/architecture.md#never-deployed-to-a-harness) |
+| D17, D18 | [KW skill loads](../../dash/architecture.md#kw-skill-loads) |
+| D26, D27 | Documentation waiver: run provenance. D26 records why dispatch went to the developer tiers (the roster is `tiered`, already documented in [the worker roster](../../kyber-squad/architecture.md#12-the-worker-roster-and-developer-tiers)); D27 records how T11 was verified, and the gate gap it exposed is filed in [KW skills follow-ups](../../todo/kw-skills-follow-ups.md). No invariant survives for a future reader |
 | D1, D20, D21, AP1 | Documentation waiver: run provenance. D1 chose a plan over a spec; D20 and D21 record conflicts between the request and ADR 0080 and the test-first contract, resolved in favour of the existing rules; AP1 is the approval to execute. Each is stated in full in [`## Decisions`](#decisions) and changes no workflow |
 
-ADR: [ADR 0093](../adr/0093-kw-skills-load-on-demand-through-kw-docs.md) is the new record; no other ADR is needed.
+ADR: [ADR 0093](../../adr/0093-kw-skills-load-on-demand-through-kw-docs.md) is the new record; no other ADR is needed.
 
 ## Completion summary
 
@@ -552,4 +552,4 @@ published; it is restored in the `sql-server-reference` skill's Hand-off section
 NOT VERIFIED: `SquadKyberWeaveSkillsTests.GlobalInstallDeploysNoKwSkill` and a live KyberDash capture of a real
 `load_skill` call under each harness spelling — both need CI or a live harness session, not run here.
 
-Follow-ups are in [KW skills follow-ups](../todo/kw-skills-follow-ups.md).
+Follow-ups are in [KW skills follow-ups](../../todo/kw-skills-follow-ups.md).

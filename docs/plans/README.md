@@ -64,9 +64,7 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-| Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
-|---|---|---|---|---|---|
-| [2026-11-24-kw-skills-load-on-demand.md](2026-11-24-kw-skills-load-on-demand.md) | Ready | 2026-11-24 | — | Pending closeout (ADR 0093 planned) | KW skills in `standards/skills/<name>/SKILL.md`, assigned by `<scope>.skills.yml`, listed in one `<kw-skills>` part of every Squad dispatch, loaded through kw-docs `load_skill`, validated by `docs validate`, never deployed to a harness, and shown in their own KyberDash section. |
+No plans are open.
 
 ## Archived Plans
 
