@@ -161,4 +161,26 @@ public sealed class KyberStandardsTemplateReaderTests
         Assert.Equal("technology", exception.ParamName);
         Assert.Contains("Unknown technology 'csharp'", exception.Message, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void TryReadShippedSkillNamesTheFileTheBuildDoesNotShip()
+    {
+        _resources.Add(
+            "KwSkills/skills.manifest.yml",
+            """
+            skills:
+              - name: shipped-one
+                files:
+                  - SKILL.md
+                  - references/ref.md
+            """);
+        _resources.Add("KwSkills/shipped-one/SKILL.md", "---\nname: shipped-one\ndescription: One.\n---\n\nBody\n");
+
+        InvalidDataException error = Assert.Throws<InvalidDataException>(
+            () => Reader.TryReadShippedSkill("shipped-one", out _));
+
+        Assert.Contains("shipped-one", error.Message, StringComparison.Ordinal);
+        Assert.Contains("references/ref.md", error.Message, StringComparison.Ordinal);
+        Assert.Contains("does not ship", error.Message, StringComparison.Ordinal);
+    }
 }

@@ -40,6 +40,7 @@ internal sealed class ShippedKwSkillPool(IEmbeddedResources resources)
     /// <summary>Opens one file the manifest lists for a skill.</summary>
     /// <param name="name">A name the manifest lists.</param>
     /// <param name="relative">A path the manifest lists for that skill.</param>
+    /// <exception cref="InvalidDataException">The manifest lists a file the build does not ship.</exception>
     public Stream Open(string name, string relative)
     {
         string logical = $"{ResourcePrefix}{name}/{relative}";
@@ -51,7 +52,14 @@ internal sealed class ShippedKwSkillPool(IEmbeddedResources resources)
         {
             // MSBuild's RecursiveDir ends in the platform separator, so on Windows the logical name
             // carries backslashes where the manifest has slashes.
-            return resources.OpenRead($"{ResourcePrefix}{name}\\{relative.Replace('/', '\\')}");
+            try
+            {
+                return resources.OpenRead($"{ResourcePrefix}{name}\\{relative.Replace('/', '\\')}");
+            }
+            catch (MissingEmbeddedResourceException)
+            {
+                throw Bad($"skill '{name}' lists '{relative}', which the build does not ship.");
+            }
         }
     }
 
