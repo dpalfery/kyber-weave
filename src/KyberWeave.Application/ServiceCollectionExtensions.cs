@@ -82,7 +82,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<ISeverityOverrideSource>(),
             sp.GetRequiredService<TimeProvider>(),
             sp.GetRequiredService<IPathResolver>(),
-            sp.GetRequiredService<IProcessEnvironment>()));
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IKwSkillCatalogFactory>()));
         services.TryAddSingleton<IPacketHostFacts>(sp => new PacketHostFacts(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ITaskPromptServiceFactory>(sp => new TaskPromptServiceFactory(
             sp.GetRequiredService<IPlanTaskService>(),

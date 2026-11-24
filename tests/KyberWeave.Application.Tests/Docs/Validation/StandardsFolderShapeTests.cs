@@ -64,26 +64,11 @@ public class StandardsFolderShapeTests
         # {scope} rules
         """;
 
-    private static string Skills(string scope) =>
-        $"""
-        ---
-        id: standards/{scope}/skills
-        title: {scope} skills
-        doc-type: skill
-        status: current
-        technology: {scope}
-        owner: Maintainers
-        last-reviewed: 2026-07-21
-        ---
-
-        # {scope} skills
-        """;
-
     private static DocFixture CompleteFolder(string scope) =>
         DocFixture.CreateInMemory().WithCatalog()
             .Write($"6-Docs/standards/{scope}/{scope}.standards.md", Standard(scope))
             .Write($"6-Docs/standards/{scope}/{scope}.rules.md", Rules(scope))
-            .Write($"6-Docs/standards/{scope}/{scope}.skills.md", Skills(scope))
+            .Write($"6-Docs/standards/{scope}/{scope}.skills.yml", "[]\n")
             .Write($"6-Docs/standards/{scope}/{scope}.arbiter-rules.yml", "rules: []\n");
 
     [Fact]
@@ -131,7 +116,7 @@ public class StandardsFolderShapeTests
         using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet", OwnHeadings))
             .Write("6-Docs/standards/dotnet/dotnet.rules.md", Rules("dotnet"))
-            .Write("6-Docs/standards/dotnet/dotnet.skills.md", Skills("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.skills.yml", "[]\n")
             .Write("6-Docs/standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
 
         DiagnosticReport report = fixture.Validate(DotnetDeclared);
@@ -148,7 +133,7 @@ public class StandardsFolderShapeTests
     {
         using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet"))
-            .Write("6-Docs/standards/dotnet/dotnet.skills.md", Skills("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.skills.yml", "[]\n")
             .Write("6-Docs/standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
 
         DiagnosticReport report = fixture.Validate(DotnetDeclared);
@@ -185,7 +170,7 @@ public class StandardsFolderShapeTests
         using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet", MissingTesting))
             .Write("6-Docs/standards/dotnet/dotnet.rules.md", Rules("dotnet"))
-            .Write("6-Docs/standards/dotnet/dotnet.skills.md", Skills("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.skills.yml", "[]\n")
             .Write("6-Docs/standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
 
         DiagnosticReport report = fixture.Validate(DotnetDeclared);
@@ -214,7 +199,7 @@ public class StandardsFolderShapeTests
         using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet", Reversed))
             .Write("6-Docs/standards/dotnet/dotnet.rules.md", Rules("dotnet"))
-            .Write("6-Docs/standards/dotnet/dotnet.skills.md", Skills("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.skills.yml", "[]\n")
             .Write("6-Docs/standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
 
         DiagnosticReport report = fixture.Validate(DotnetDeclared);
@@ -238,7 +223,7 @@ public class StandardsFolderShapeTests
         using DocFixture fixture = DocFixture.CreateInMemory()
             .Write("standards/dotnet/dotnet.standards.md", Standard("dotnet", OwnHeadings))
             .Write("standards/dotnet/dotnet.rules.md", Rules("dotnet"))
-            .Write("standards/dotnet/dotnet.skills.md", Skills("dotnet"))
+            .Write("standards/dotnet/dotnet.skills.yml", "[]\n")
             .Write("standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
         OntologyConfig ontology = new() { DocsRoots = ["."], Technologies = ["dotnet"] };
 
@@ -258,7 +243,7 @@ public class StandardsFolderShapeTests
     {
         using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet"))
-            .Write("6-Docs/standards/dotnet/dotnet.skills.md", Skills("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.skills.yml", "[]\n")
             .Write("6-Docs/standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n")
             .Write("outside/dotnet.rules.md", Rules("dotnet"));
         fixture.Memory!.CreateFileLink(
@@ -283,7 +268,7 @@ public class StandardsFolderShapeTests
         using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("outside/dotnet/dotnet.standards.md", Standard("dotnet"))
             .Write("outside/dotnet/dotnet.rules.md", Rules("dotnet"))
-            .Write("outside/dotnet/dotnet.skills.md", Skills("dotnet"))
+            .Write("outside/dotnet/dotnet.skills.yml", "[]\n")
             .Write("outside/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
         fixture.Memory!.CreateDirectory(Path.Combine(fixture.Root, "6-Docs", "standards"));
         fixture.Memory!.CreateDirectoryLink(
@@ -331,19 +316,12 @@ public class StandardsFolderShapeTests
     private static string RulesWithoutTechnology(string scope) => Rules(scope).Replace(
         $"technology: {scope}\n", string.Empty, StringComparison.Ordinal);
 
-    /// <summary>A skills file that says it is a reference rather than a skill.</summary>
-    private static string SkillsTypedReference(string scope) => Skills(scope).Replace(
-        "doc-type: skill", "doc-type: reference", StringComparison.Ordinal);
-
     /// <summary>A rules file that names a technology other than its folder's.</summary>
     private static string RulesNamingAnotherTechnology(string scope, string claimed) => Rules(scope).Replace(
         $"technology: {scope}\n", $"technology: {claimed}\n", StringComparison.Ordinal);
 
-    private static string RoleSkills(string scope) => Skills(scope).Replace(
-        "technology: " + scope, "role: " + scope, StringComparison.Ordinal);
-
     /// <summary>
-    /// A rules or skills file that exists but whose frontmatter does not declare the folder's
+    /// A rules file that exists but whose frontmatter does not declare the folder's
     /// doc-type and scope is invisible to the standards lookup the task prompt reads, so every
     /// worker is told the folder has no such file while validation says nothing. The folder
     /// check must report it, naming the file, what it has and the two frontmatter lines to set.
@@ -354,7 +332,7 @@ public class StandardsFolderShapeTests
         using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet"))
             .Write("6-Docs/standards/dotnet/dotnet.rules.md", RulesWithoutTechnology("dotnet"))
-            .Write("6-Docs/standards/dotnet/dotnet.skills.md", Skills("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.skills.yml", "[]\n")
             .Write("6-Docs/standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
 
         DiagnosticReport report = fixture.Validate(DotnetDeclared);
@@ -381,7 +359,7 @@ public class StandardsFolderShapeTests
         using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet"))
             .Write("6-Docs/standards/dotnet/dotnet.rules.md", RulesNamingAnotherTechnology("dotnet", "react"))
-            .Write("6-Docs/standards/dotnet/dotnet.skills.md", Skills("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.skills.yml", "[]\n")
             .Write("6-Docs/standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
 
         DiagnosticReport report = fixture.Validate(DotnetDeclared);
@@ -395,22 +373,68 @@ public class StandardsFolderShapeTests
         Assert.Contains("technology: dotnet", error.Hint, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// KW-DOC-SPEC-015 checks the rules file only. A skills list is YAML with no frontmatter, so a
+    /// list without any must not be reported as a skills-file frontmatter problem.
+    /// </summary>
     [Fact]
-    public void ASkillsFileTypedReferenceIsAnErrorNamingTheRequiredDocType()
+    public void ASkillsYmlIsNotCheckedForFrontmatter()
     {
         using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet"))
             .Write("6-Docs/standards/dotnet/dotnet.rules.md", Rules("dotnet"))
-            .Write("6-Docs/standards/dotnet/dotnet.skills.md", SkillsTypedReference("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.skills.yml", "[]\n")
             .Write("6-Docs/standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
 
         DiagnosticReport report = fixture.Validate(DotnetDeclared);
 
-        Diagnostic error = Assert.Single(
+        Assert.DoesNotContain(
             report.Items, item => item.Code == DocSpecValidator.StandardsFileFrontmatter);
-        Assert.Contains("dotnet.skills.md", error.Message, StringComparison.Ordinal);
-        Assert.Contains("doc-type 'reference'", error.Message, StringComparison.Ordinal);
-        Assert.Contains("doc-type: skill", error.Hint, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AFolderWithSkillsYmlHasAllFourFiles()
+    {
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
+            .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.rules.md", Rules("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.skills.yml", "[]\n")
+            .Write("6-Docs/standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
+
+        DiagnosticReport report = fixture.Validate(DotnetDeclared);
+
+        Assert.DoesNotContain(report.Items, item => item.Code == DocSpecValidator.MissingFolderFile);
+        Assert.False(report.HasErrors);
+    }
+
+    [Fact]
+    public void AFolderMissingSkillsYmlIsKwDocSpec012()
+    {
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
+            .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.rules.md", Rules("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
+
+        DiagnosticReport report = fixture.Validate(DotnetDeclared);
+
+        Diagnostic error = Assert.Single(report.Items, item => item.Code == DocSpecValidator.MissingFolderFile);
+        Assert.Equal(Severity.Error, error.Severity);
+        Assert.Contains("dotnet.skills.yml", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The repository's KW skill pool is <c>standards/skills</c>, one folder per skill. It is not a
+    /// scope, so it must never be checked for the four files a technology folder holds.
+    /// </summary>
+    [Fact]
+    public void ThePoolFolderIsNotAStandardsFolder()
+    {
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
+            .Write("6-Docs/standards/skills/go-gates/SKILL.md", "---\nname: go-gates\ndescription: Run the gates.\n---\n\nBODY\n");
+
+        DiagnosticReport report = fixture.Validate(DotnetDeclared);
+
+        Assert.DoesNotContain(report.Items, item => item.Code == DocSpecValidator.MissingFolderFile);
     }
 
     [Fact]
@@ -419,7 +443,7 @@ public class StandardsFolderShapeTests
         using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/reviewer/reviewer.standards.md", RoleStandard("reviewer"))
             .Write("6-Docs/standards/reviewer/reviewer.rules.md", RoleRules("reviewer"))
-            .Write("6-Docs/standards/reviewer/reviewer.skills.md", RoleSkills("reviewer"))
+            .Write("6-Docs/standards/reviewer/reviewer.skills.yml", "[]\n")
             .Write("6-Docs/standards/reviewer/reviewer.arbiter-rules.yml", "rules: []\n");
 
         DiagnosticReport report = fixture.Validate(DotnetDeclared);
@@ -461,6 +485,6 @@ public class StandardsFolderShapeTests
 
         Assert.Contains(report.Items, i =>
             i.Code == DocSpecValidator.MissingFolderFile
-            && i.Message.Contains("reviewer.skills.md", StringComparison.Ordinal));
+            && i.Message.Contains("reviewer.skills.yml", StringComparison.Ordinal));
     }
 }
