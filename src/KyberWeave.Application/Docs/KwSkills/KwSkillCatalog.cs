@@ -294,7 +294,8 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
 
     /// <summary>
     /// Reads a shipped skill's SKILL.md, answering null when the manifest lists a file the product
-    /// never embedded, so a packaging gap surfaces as Malformed rather than as a thrown error.
+    /// never embedded under either name spelling, so a packaging gap surfaces as Malformed rather
+    /// than as a thrown error.
     /// </summary>
     private string? SafeShippedRead(string name)
     {
@@ -302,7 +303,7 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
         {
             return _shipped.ReadSkillFile(name);
         }
-        catch (MissingEmbeddedResourceException)
+        catch (Exception exception) when (exception is MissingEmbeddedResourceException or InvalidDataException)
         {
             return null;
         }
