@@ -240,4 +240,36 @@ public sealed class ArbiterKeyResolutionTests
             Assert.DoesNotContain(SentinelKey, diagnostic.ToString(), StringComparison.Ordinal);
         }
     }
+
+    [Fact]
+    public void KeyService_WithPreResolvedEffectiveProvider_UsesBindingWithoutReReadingOverride()
+    {
+        int applyCount = 0;
+        FakeArbiterUserSettings userSettings = new()
+        {
+            Override = (repository, _) =>
+            {
+                applyCount++;
+                return repository;
+            },
+        };
+        FakeCredentialStore store = new();
+        FakeProcessEnvironment environment = new(
+            homeDirectory: ArbiterTestRoots.Under("home"),
+            readVariable: EnvReader(SentinelKey));
+        ArbiterKeyService service = new(store, environment, userSettings);
+        KyberWeaveConfig config = KyberWeaveConfigDefaults.Product;
+        ArbiterProviderConfig effectiveProvider = config.Arbiter.Provider with
+        {
+            Kind = ArbiterProviderKind.Systemone,
+            Endpoint = "https://openrouter.ai/api/v1",
+        };
+
+        string? resolved = service.ResolveKey(config, effectiveProvider, effectiveProvider.Endpoint);
+        string? tryResolved = service.TryResolveKey(config, effectiveProvider, effectiveProvider.Endpoint);
+
+        Assert.Equal(SentinelKey, resolved);
+        Assert.Equal(SentinelKey, tryResolved);
+        Assert.Equal(0, applyCount);
+    }
 }

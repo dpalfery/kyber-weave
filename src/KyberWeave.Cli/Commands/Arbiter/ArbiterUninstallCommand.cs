@@ -230,11 +230,18 @@ public sealed class ArbiterUninstallCommand(
             return false;
         }
 
-        string endpoint = string.IsNullOrWhiteSpace(mergedProvider.Endpoint)
-            ? ArbiterSetupCommand.TypeSafeEndpoint
-            : mergedProvider.Endpoint.Trim();
-
-        string origin = ArbiterKeyResolver.GetOrigin(endpoint) ?? ArbiterKeyResolver.TypeSafeOrigin;
+        if (!ArbiterUserSettings.TryResolveEndpointOrigin(
+                repositoryProvider,
+                mergedProvider,
+                environment.HomeDirectory,
+                loaded.ConfigPath,
+                out _,
+                out string origin,
+                out string? endpointError))
+        {
+            console.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(endpointError)}[/]");
+            return false;
+        }
 
         if (uninstaller.AnotherTargetIsDeployed(root, target))
         {

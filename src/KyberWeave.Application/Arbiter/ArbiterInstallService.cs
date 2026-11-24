@@ -59,14 +59,29 @@ public sealed class ArbiterInstallService(
         ArbiterProviderKind effectiveKind;
         KyberWeaveConfig repositoryConfig;
         ArbiterProviderConfig effectiveProvider;
+        string? loadedConfigPath;
         try
         {
-            (repositoryConfig, existingKind, effectiveProvider) = ReadExistingProvider(root, request.ConfigOption, isProjectScope);
+            (repositoryConfig, existingKind, effectiveProvider, loadedConfigPath) =
+                ReadExistingProvider(root, request.ConfigOption, isProjectScope);
             effectiveKind = effectiveProvider.Kind;
         }
         catch (YamlDotNet.Core.YamlException ex)
         {
             events.Add(new ArbiterInstallError(ex.Message));
+            return StopPrepared(1, events);
+        }
+
+        if (!ArbiterUserSettings.TryResolveEndpointOrigin(
+                repositoryConfig.Arbiter.Provider,
+                effectiveProvider,
+                environment.HomeDirectory,
+                loadedConfigPath,
+                out string endpoint,
+                out string origin,
+                out string? endpointError))
+        {
+            events.Add(new ArbiterInstallError(endpointError));
             return StopPrepared(1, events);
         }
 
@@ -91,10 +106,6 @@ public sealed class ArbiterInstallService(
             events.Add(new ArbiterInstallArgvKeyWarning());
         }
 
-        string endpoint = string.IsNullOrWhiteSpace(effectiveProvider.Endpoint)
-            ? ArbiterProviderConfig.DefaultNone.Endpoint
-            : effectiveProvider.Endpoint.Trim();
-        string origin = ArbiterKeyResolver.GetOrigin(endpoint) ?? ArbiterKeyResolver.TypeSafeOrigin;
         bool needsKey = providerKind == ArbiterProviderKind.Systemone
                         && !IsLoopbackEndpoint(endpoint);
 
@@ -104,7 +115,7 @@ public sealed class ArbiterInstallService(
 
         if (needsKey && keyToStore is null)
         {
-            if (!string.IsNullOrEmpty(ResolveStoredKey(endpoint, repositoryConfig)))
+            if (!string.IsNullOrEmpty(ResolveStoredKey(endpoint, repositoryConfig, effectiveProvider)))
             {
                 keyToStore = null;
             }
@@ -417,7 +428,7 @@ public sealed class ArbiterInstallService(
     /// environment key to the override origin.
     /// </remarks>
     /// <exception cref="YamlDotNet.Core.YamlException">Thrown when the per-user override is malformed.</exception>
-    private (KyberWeaveConfig Repository, ArbiterProviderKind Configured, ArbiterProviderConfig Effective) ReadExistingProvider(
+    private (KyberWeaveConfig Repository, ArbiterProviderKind Configured, ArbiterProviderConfig Effective, string? ConfigPath) ReadExistingProvider(
         string root, string? configOption, bool projectScope)
     {
         KyberWeaveConfigLoadResult loaded = configs.Load(root, configOption, projectScope);
@@ -426,7 +437,7 @@ public sealed class ArbiterInstallService(
             : KyberWeaveConfigDefaults.Product;
         ArbiterProviderConfig effective =
             userSettings.ApplyTo(repository.Arbiter.Provider, environment.HomeDirectory);
-        return (repository, repository.Arbiter.Provider.Kind, effective);
+        return (repository, repository.Arbiter.Provider.Kind, effective, loaded.ConfigPath);
     }
 
     private static bool ParseProvider(string? raw, out ArbiterProviderKind kind)
@@ -489,9 +500,9 @@ public sealed class ArbiterInstallService(
         }
     }
 
-    private string? ResolveStoredKey(string endpoint, KyberWeaveConfig repository)
+    private string? ResolveStoredKey(string endpoint, KyberWeaveConfig repository, ArbiterProviderConfig effectiveProvider)
     {
-        return keys.TryResolveKey(repository, endpoint);
+        return keys.TryResolveKey(repository, effectiveProvider, endpoint);
     }
 
     private string? ReadStoredKey(string origin)
@@ -602,12 +613,13 @@ public sealed class ArbiterInstallService(
 
         if (plan.NeedsKey)
         {
-            // TryResolveKey treats a malformed override as no binding by design, so the
-            // override is validated explicitly first: a file that broke between Prepare
-            // and Verify must surface as itself, not as a missing key.
+            // Read and validate the override once here, then pass the merged provider to key
+            // resolution so a file modified mid-verify cannot pass validation on one endpoint
+            // and bind the environment key to another.
+            ArbiterProviderConfig effective;
             try
             {
-                _ = userSettings.ApplyTo(loaded.Config.Arbiter.Provider, environment.HomeDirectory);
+                effective = userSettings.ApplyTo(loaded.Config.Arbiter.Provider, environment.HomeDirectory);
             }
             catch (YamlDotNet.Core.YamlException ex)
             {
@@ -615,7 +627,20 @@ public sealed class ArbiterInstallService(
                 return false;
             }
 
-            string? key = keys.TryResolveKey(loaded.Config, plan.Endpoint);
+            if (!ArbiterUserSettings.TryResolveEndpointOrigin(
+                    loaded.Config.Arbiter.Provider,
+                    effective,
+                    environment.HomeDirectory,
+                    loaded.ConfigPath,
+                    out _,
+                    out _,
+                    out string? endpointError))
+            {
+                events.Add(new ArbiterInstallError(endpointError));
+                return false;
+            }
+
+            string? key = keys.TryResolveKey(loaded.Config, effective, plan.Endpoint);
 
             if (string.IsNullOrEmpty(key))
             {

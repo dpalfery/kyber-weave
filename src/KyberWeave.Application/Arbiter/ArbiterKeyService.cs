@@ -25,6 +25,19 @@ public sealed class ArbiterKeyService(
     }
 
     /// <inheritdoc />
+    public string? ResolveKey(KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(effectiveProvider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
+        return ArbiterKeyResolver.Resolve(
+            endpoint,
+            store,
+            environment.GetVariable,
+            UserOverrideEndpoint(config.Arbiter.Provider, effectiveProvider));
+    }
+
+    /// <inheritdoc />
     public string? TryResolveKey(KyberWeaveConfig config, string endpoint)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -32,6 +45,22 @@ public sealed class ArbiterKeyService(
         try
         {
             return ResolveKey(config, endpoint);
+        }
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
+    public string? TryResolveKey(KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(effectiveProvider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
+        try
+        {
+            return ResolveKey(config, effectiveProvider, endpoint);
         }
         catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
@@ -53,9 +82,7 @@ public sealed class ArbiterKeyService(
         {
             ArbiterProviderConfig repository = config.Arbiter.Provider;
             ArbiterProviderConfig merged = userSettings.ApplyTo(repository, environment.HomeDirectory);
-            return string.Equals(merged.Endpoint, repository.Endpoint, StringComparison.Ordinal)
-                ? null
-                : merged.Endpoint;
+            return UserOverrideEndpoint(repository, merged);
         }
         catch (YamlException)
         {
@@ -66,4 +93,9 @@ public sealed class ArbiterKeyService(
             return null;
         }
     }
+
+    private static string? UserOverrideEndpoint(ArbiterProviderConfig repository, ArbiterProviderConfig merged) =>
+        string.Equals(merged.Endpoint, repository.Endpoint, StringComparison.Ordinal)
+            ? null
+            : merged.Endpoint;
 }

@@ -3,6 +3,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
+using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Scaffolding;
@@ -255,6 +256,207 @@ public sealed class ArbiterInstallServiceSeamsTests
         Assert.DoesNotContain("no key resolves", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// An unparseable endpoint in the per-user override stops <c>Prepare</c> fail-closed with a
+    /// configuration error naming the override file instead of falling back to the TypeSafe origin.
+    /// </summary>
+    [Theory]
+    [InlineData("not-a-url")]
+    [InlineData("ftp://openrouter.ai/api/v1")]
+    [InlineData("")]
+    public void Prepare_InvalidOverrideEndpoint_FailsClosedWithConfigError(string invalidEndpoint)
+    {
+        FakeArbiterUserSettings userSettings = new()
+        {
+            Override = (repository, _) => repository with { Kind = ArbiterProviderKind.Systemone, Endpoint = invalidEndpoint },
+        };
+        ArbiterInstallService service = Service(userSettings);
+
+        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: null, projectScope: true, providerOption: "systemone"));
+
+        Assert.Equal(1, prepared.ExitCode);
+        Assert.Null(prepared.Plan);
+        ArbiterInstallError error = Assert.Single(prepared.Events.OfType<ArbiterInstallError>());
+        Assert.Contains(RuleValidator.MalformedSection, error.Message, StringComparison.Ordinal);
+        Assert.Contains(ArbiterUserSettings.GetPath(Home), error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(ArbiterKeyResolver.MissingKeyCode, error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(ArbiterKeyResolver.TypeSafeOrigin, error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <c>Verify</c> reads the per-user override once and reuses that effective provider for key
+    /// resolution, so a later read cannot switch the endpoint between validation and key binding.
+    /// </summary>
+    [Fact]
+    public void Apply_VerifyReadsOverrideOnce_SucceedsWhenSubsequentReadWouldDiffer()
+    {
+        Func<string, string?> readVariable = name =>
+            string.Equals(name, ArbiterKeyResolver.EnvVarName, StringComparison.Ordinal) ? "env-key-for-verify" : null;
+        IArbiterConfigResolver configs = new RepositoryEndpointConfigs(ArbiterProviderConfig.DefaultNone.Endpoint);
+        ArbiterInstallService prepareService = Service(
+            OverrideToSystemone(),
+            configs: configs,
+            readVariable: readVariable,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallPrepared prepared = prepareService.Prepare(
+            Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
+
+        Assert.Equal(0, prepared.ExitCode);
+        Assert.NotNull(prepared.Plan);
+
+        int reads = 0;
+        FakeArbiterUserSettings flipping = new()
+        {
+            Override = (repository, _) =>
+            {
+                reads++;
+                string endpoint = reads == 1 ? OverrideEndpoint : "https://other.example.com/v1";
+                return repository with { Kind = ArbiterProviderKind.Systemone, Endpoint = endpoint };
+            },
+        };
+        ArbiterInstallService applyService = Service(
+            flipping,
+            configs: configs,
+            readVariable: readVariable,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+
+        Assert.Equal(0, applied.ExitCode);
+        Assert.Empty(applied.Events.OfType<ArbiterInstallError>());
+        Assert.Equal(1, reads);
+    }
+
+    /// <summary>
+    /// Conversely, when the single override read in <c>Verify</c> yields a different endpoint than
+    /// the plan recorded, a later change back to the planned endpoint cannot bypass verification.
+    /// </summary>
+    [Fact]
+    public void Apply_VerifyReadsOverrideOnce_FailsWhenSingleReadDiffersFromPlanEndpoint()
+    {
+        Func<string, string?> readVariable = name =>
+            string.Equals(name, ArbiterKeyResolver.EnvVarName, StringComparison.Ordinal) ? "env-key-for-verify" : null;
+        IArbiterConfigResolver configs = new RepositoryEndpointConfigs(ArbiterProviderConfig.DefaultNone.Endpoint);
+        ArbiterInstallService prepareService = Service(
+            OverrideToSystemone(),
+            configs: configs,
+            readVariable: readVariable,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallPrepared prepared = prepareService.Prepare(
+            Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
+
+        Assert.Equal(0, prepared.ExitCode);
+        Assert.NotNull(prepared.Plan);
+
+        int reads = 0;
+        FakeArbiterUserSettings flipping = new()
+        {
+            Override = (repository, _) =>
+            {
+                reads++;
+                string endpoint = reads == 1 ? "https://other.example.com/v1" : OverrideEndpoint;
+                return repository with { Kind = ArbiterProviderKind.Systemone, Endpoint = endpoint };
+            },
+        };
+        ArbiterInstallService applyService = Service(
+            flipping,
+            configs: configs,
+            readVariable: readVariable,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+
+        Assert.Equal(1, applied.ExitCode);
+        ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
+        Assert.Contains("no key resolves", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, reads);
+    }
+
+    /// <summary>
+    /// An override whose endpoint becomes unparseable between <c>Prepare</c> and <c>Verify</c>
+    /// fails closed with the configuration error naming the override file.
+    /// </summary>
+    [Fact]
+    public void Apply_InvalidOverrideEndpointAfterPrepare_ReportsConfigErrorNamingOverrideFile()
+    {
+        Func<string, string?> readVariable = name =>
+            string.Equals(name, ArbiterKeyResolver.EnvVarName, StringComparison.Ordinal) ? "env-key-for-verify" : null;
+        IArbiterConfigResolver configs = new RepositoryEndpointConfigs(ArbiterProviderConfig.DefaultNone.Endpoint);
+        ArbiterInstallService prepareService = Service(
+            OverrideToSystemone(),
+            configs: configs,
+            readVariable: readVariable,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallPrepared prepared = prepareService.Prepare(
+            Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
+
+        Assert.Equal(0, prepared.ExitCode);
+        Assert.NotNull(prepared.Plan);
+
+        FakeArbiterUserSettings invalidEndpoint = new()
+        {
+            Override = (repository, _) => repository with { Kind = ArbiterProviderKind.Systemone, Endpoint = "not-a-url" },
+        };
+        ArbiterInstallService applyService = Service(
+            invalidEndpoint,
+            configs: configs,
+            readVariable: readVariable,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+
+        Assert.Equal(1, applied.ExitCode);
+        ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
+        Assert.Contains(RuleValidator.MalformedSection, error.Message, StringComparison.Ordinal);
+        Assert.Contains(ArbiterUserSettings.GetPath(Home), error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("no key resolves", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// <c>Prepare</c> reads the per-user override once even when resolving the key for a
+    /// systemone provider.
+    /// </summary>
+    [Fact]
+    public void Prepare_ReadsOverrideOnce()
+    {
+        int reads = 0;
+        FakeArbiterUserSettings counting = new()
+        {
+            Override = (repository, _) =>
+            {
+                reads++;
+                return repository with { Kind = ArbiterProviderKind.Systemone, Endpoint = OverrideEndpoint };
+            },
+        };
+        ArbiterInstallService service = Service(
+            counting,
+            readVariable: name => string.Equals(name, ArbiterKeyResolver.EnvVarName, StringComparison.Ordinal) ? "env-key" : null);
+
+        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: null, projectScope: true, providerOption: "systemone"));
+
+        Assert.Equal(0, prepared.ExitCode);
+        Assert.NotNull(prepared.Plan);
+        Assert.Equal(1, reads);
+    }
+
+    /// <summary>
+    /// An unparseable endpoint in the host configuration itself also stops <c>Prepare</c>
+    /// fail-closed naming the host configuration path rather than falling back to the TypeSafe origin.
+    /// </summary>
+    [Fact]
+    public void Prepare_InvalidHostConfigEndpoint_FailsClosedNamingHostConfig()
+    {
+        const string hostConfigPath = "/kw/work/repo/.kyber-weave/kyber-weave.yml";
+        ArbiterInstallService service = Service(
+            configs: new RepositoryEndpointConfigs("not-a-url", hostConfigPath));
+
+        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: "repo", projectScope: true, providerOption: "systemone"));
+
+        Assert.Equal(1, prepared.ExitCode);
+        Assert.Null(prepared.Plan);
+        ArbiterInstallError error = Assert.Single(prepared.Events.OfType<ArbiterInstallError>());
+        Assert.Contains(RuleValidator.MalformedSection, error.Message, StringComparison.Ordinal);
+        Assert.Contains(hostConfigPath, error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(ArbiterKeyResolver.TypeSafeOrigin, error.Message, StringComparison.Ordinal);
+    }
+
     private static FakeArbiterUserSettings OverrideToSystemone() =>
         new()
         {
@@ -317,7 +519,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     }
 
     /// <summary>The host configuration naming a repository endpoint, instead of the shipped default.</summary>
-    private sealed class RepositoryEndpointConfigs(string endpoint) : IArbiterConfigResolver
+    private sealed class RepositoryEndpointConfigs(string endpoint, string? configPath = null) : IArbiterConfigResolver
     {
         public bool TryResolve(
             string path,
@@ -334,7 +536,7 @@ public sealed class ArbiterInstallServiceSeamsTests
         public KyberWeaveConfig? TryLoadRepository(string root) => Config();
 
         public KyberWeaveConfigLoadResult Load(string root, string? configFile, bool projectScope) =>
-            new(true, Config());
+            new(true, Config(), configPath: configPath);
 
         public KyberWeaveConfig LoadFromYaml(string yaml) => Config();
 

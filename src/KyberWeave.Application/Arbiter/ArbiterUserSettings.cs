@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -22,6 +24,58 @@ public static class ArbiterUserSettings
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
         return Path.Combine(homeDirectory, ".config", "kyber-weave", "arbiter.yml");
+    }
+
+    /// <summary>
+    /// Trims the effective provider's endpoint and derives its <c>scheme://host[:port]</c> origin,
+    /// or builds a <c>KW-ARB-CONFIG-001</c> error naming the user override file or host configuration
+    /// when the endpoint is blank or not an absolute <c>http(s)</c> URL.
+    /// </summary>
+    /// <param name="repositoryProvider">The repository provider before the per-user override was applied.</param>
+    /// <param name="effectiveProvider">The merged provider whose endpoint is resolved.</param>
+    /// <param name="homeDirectory">The home directory where the per-user override lives.</param>
+    /// <param name="configPath">The loaded host configuration path, or null when none was recorded.</param>
+    /// <param name="endpoint">The trimmed endpoint URL when valid.</param>
+    /// <param name="origin">The derived endpoint origin when valid.</param>
+    /// <param name="error">The configuration error message when invalid.</param>
+    /// <returns><see langword="true"/> when the endpoint and origin resolved; otherwise <see langword="false"/>.</returns>
+    public static bool TryResolveEndpointOrigin(
+        ArbiterProviderConfig repositoryProvider,
+        ArbiterProviderConfig effectiveProvider,
+        string homeDirectory,
+        string? configPath,
+        out string endpoint,
+        out string origin,
+        [NotNullWhen(false)] out string? error)
+    {
+        ArgumentNullException.ThrowIfNull(repositoryProvider);
+        ArgumentNullException.ThrowIfNull(effectiveProvider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
+
+        string candidate = string.IsNullOrWhiteSpace(effectiveProvider.Endpoint)
+            ? string.Empty
+            : effectiveProvider.Endpoint.Trim();
+        string? resolvedOrigin = candidate.Length == 0
+            ? null
+            : ArbiterKeyResolver.GetOrigin(candidate);
+        if (resolvedOrigin is not null)
+        {
+            endpoint = candidate;
+            origin = resolvedOrigin;
+            error = null;
+            return true;
+        }
+
+        endpoint = string.Empty;
+        origin = string.Empty;
+        bool fromOverride = !string.Equals(effectiveProvider.Endpoint, repositoryProvider.Endpoint, StringComparison.Ordinal);
+        string source = fromOverride
+            ? $"The user override '{GetPath(homeDirectory)}'"
+            : !string.IsNullOrWhiteSpace(configPath)
+                ? $"The host configuration '{configPath}'"
+                : "The host configuration";
+        error = $"[{RuleValidator.MalformedSection}] {source} has an invalid arbiter.provider.endpoint '{candidate}'; expected an absolute http(s) URL.";
+        return false;
     }
 
     /// <summary>

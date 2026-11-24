@@ -5,7 +5,9 @@ using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
+using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
@@ -557,6 +559,36 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
 
         Assert.Equal(0, execution.ExitCode);
         Assert.DoesNotContain(ArbiterKeyResolver.MissingKeyCode, execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An unparseable endpoint in the per-user override fails closed with a configuration error
+    /// naming the override file instead of falling back to the TypeSafe origin and raising
+    /// <c>KW-ARB-KEY-001</c>.
+    /// </summary>
+    [Fact]
+    public void Install_SystemoneWithInvalidOverrideEndpoint_FailsClosedNamingOverrideFile()
+    {
+        string host = NewDir("install-invalid-override-endpoint");
+        WriteOverride("provider:\n  kind: systemone\n  endpoint: not-a-url\n  model: jev-1.14.0\n");
+
+        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterInstallSettings
+            {
+                Path = host,
+                Target = "factory",
+                Provider = "systemone",
+                DryRun = true,
+                Project = true,
+            }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains(RuleValidator.MalformedSection, execution.Output, StringComparison.Ordinal);
+        Assert.Contains(ArbiterUserSettings.GetPath(_home), execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(ArbiterKeyResolver.MissingKeyCode, execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(TypeSafeOrigin, execution.Output, StringComparison.Ordinal);
     }
 
     /// <summary>
