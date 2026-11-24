@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.KwSkills;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Mcp;
 using KyberWeave.Tests;
@@ -112,7 +113,7 @@ public sealed class McpAgentCodingStandardsRepositoryTests
     }
 
     [Fact]
-    public void TheRepositoryBundleCarriesItsRulesAndSkillsForEveryInstalledTechnology()
+    public void TheRepositoryBundleCarriesItsRulesAndItsKwSkillListForEveryInstalledTechnology()
     {
         string[] installed = ["csharp", "test", "typescript", "react", "rust", "tauri", "github-actions"];
 
@@ -121,7 +122,19 @@ public sealed class McpAgentCodingStandardsRepositoryTests
             string response = Ask(RepositorySurface.Value, technology);
 
             Assert.Contains($"## {technology} rules", response, StringComparison.Ordinal);
-            Assert.Contains($"## {technology} skills", response, StringComparison.Ordinal);
+
+            // The bundle no longer carries skills prose (D25): a technology with KW skills gets one "KW skills"
+            // list, worded by KwSkillListText, and none gets a per-technology skills section.
+            Assert.DoesNotContain($"## {technology} skills", response, StringComparison.Ordinal);
+            if (response.Contains("## KW skills", StringComparison.Ordinal))
+            {
+                Assert.Contains(KwSkillListText.LoadInstruction, response, StringComparison.Ordinal);
+            }
+        }
+
+        foreach (string withSkills in new[] { "rust", "tauri" })
+        {
+            Assert.Contains("## KW skills", Ask(RepositorySurface.Value, withSkills), StringComparison.Ordinal);
         }
 
         Assert.Contains("## Shared rules", Ask(RepositorySurface.Value, "csharp"), StringComparison.Ordinal);

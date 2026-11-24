@@ -106,6 +106,12 @@ public sealed class SquadPacker(IWritableFileSystem files, ISquadCompanionSkills
                 continue;
             }
 
+            // KW skills are never deployed into a harness pack (D16): they ship embedded in the CLI and load through kw-docs.
+            if (relPath.StartsWith("standards/skills/", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             // Exclude target-specific trees
             if (relPath.StartsWith(".codex/", StringComparison.OrdinalIgnoreCase) ||
                 relPath.StartsWith(".claude/", StringComparison.OrdinalIgnoreCase) ||

@@ -6,7 +6,7 @@ namespace KyberDash.Application.Sessions;
 /// <param name="SpanId">Span identifier of the load's tool call.</param>
 /// <param name="Skill">The name on the reply's <c>skill:</c> header line, or <see langword="null"/> when the reply names no valid skill.</param>
 /// <param name="StartedAtUtc">The owning record's start time.</param>
-public sealed record KwSkillLoad(string SpanId, string? Skill, DateTimeOffset StartedAtUtc);
+public record KwSkillLoad(string SpanId, string? Skill, DateTimeOffset StartedAtUtc);
 
 /// <summary>
 /// Recognizes KW skill loads among a session's tool calls and reads the skill each one names (D17).

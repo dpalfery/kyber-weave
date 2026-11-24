@@ -24,6 +24,7 @@ const CHARTS_ROUTE = `/api/kyber/session/${SESSION_ID}/charts`
 const TOOLS_ROUTE = `/api/kyber/session/${SESSION_ID}/tools?page=1&limit=25`
 const SERVERS_ROUTE = `/api/kyber/session/${SESSION_ID}/servers?page=1&limit=25`
 const SKILLS_ROUTE = `/api/kyber/session/${SESSION_ID}/skills?page=1&limit=25`
+const KW_SKILLS_ROUTE = `/api/kyber/session/${SESSION_ID}/kw-skills?page=1&limit=25`
 const TIMELINE_ROUTE = `/api/kyber/session/${SESSION_ID}/timeline?page=1&limit=25`
 const REQUESTS_ROUTE = `/api/kyber/session/${SESSION_ID}/requests?page=1&limit=25`
 const RECONCILIATION_ROUTE = `/api/kyber/session/${SESSION_ID}/reconciliation?page=1&limit=25`
@@ -36,6 +37,7 @@ const PAGE_ORDER = [
   TOOLS_ROUTE,
   SERVERS_ROUTE,
   SKILLS_ROUTE,
+  KW_SKILLS_ROUTE,
   TIMELINE_ROUTE,
   REQUESTS_ROUTE,
   RECONCILIATION_ROUTE,
@@ -232,6 +234,8 @@ const SKILL_ROW = { name: 'docs', listed: true, invocations: 2, turns_listed: [0
 
 const SKILLS_BODY = { measurable: true, rows: [SKILL_ROW], total: 1, limit: 25, offset: 0, page: 1 }
 
+const KW_SKILLS_BODY = { rows: [], total: 0, limit: 25, offset: 0, page: 1 }
+
 const TIMELINE_BODY = {
   sessionId: SESSION_ID,
   parent: null,
@@ -324,6 +328,7 @@ function respondAll(
   router.respond(TOOLS_ROUTE, (overrides[TOOLS_ROUTE] as typeof TOOLS_BODY) ?? TOOLS_BODY)
   router.respond(SERVERS_ROUTE, (overrides[SERVERS_ROUTE] as typeof SERVERS_BODY) ?? SERVERS_BODY)
   router.respond(SKILLS_ROUTE, (overrides[SKILLS_ROUTE] as typeof SKILLS_BODY) ?? SKILLS_BODY)
+  router.respond(KW_SKILLS_ROUTE, (overrides[KW_SKILLS_ROUTE] as typeof KW_SKILLS_BODY) ?? KW_SKILLS_BODY)
   router.respond(TIMELINE_ROUTE, (overrides[TIMELINE_ROUTE] as typeof TIMELINE_BODY) ?? TIMELINE_BODY)
   router.respond(REQUESTS_ROUTE, (overrides[REQUESTS_ROUTE] as typeof REQUESTS_BODY) ?? REQUESTS_BODY)
   router.respond(RECONCILIATION_ROUTE, (overrides[RECONCILIATION_ROUTE] as typeof RECONCILIATION_BODY) ?? RECONCILIATION_BODY)
@@ -336,17 +341,17 @@ function respondAll(
 // ---------------------------------------------------------------------------
 
 describe('AgentSessionDashboard: opening a session', () => {
-  it('issues the ten section requests in page order before any response resolves', async () => {
+  it('issues the eleven section requests in page order before any response resolves', async () => {
     const router = stubSectionRoutes()
     mountDashboard()
-    await waitFor(() => expect(router.calls).toHaveLength(10))
+    await waitFor(() => expect(router.calls).toHaveLength(11))
     expect(router.calls).toEqual(PAGE_ORDER)
   })
 
   it('issues no content-route or stored-fields-rows request on open', async () => {
     const router = stubSectionRoutes()
     mountDashboard()
-    await waitFor(() => expect(router.calls).toHaveLength(10))
+    await waitFor(() => expect(router.calls).toHaveLength(11))
     const lateRoutes = router.calls.filter(
       (url) => /\/content(\?|$)/.test(url) || /\/turn\/\d+\/content/.test(url) || /\/stored-fields\/[^/?]+/.test(url),
     )
@@ -355,7 +360,7 @@ describe('AgentSessionDashboard: opening a session', () => {
     // Nothing new fires once every route answers, either: the drawer stays shut.
     respondAll(router)
     await screen.findByTestId('session-harness-badge')
-    expect(router.calls).toHaveLength(10)
+    expect(router.calls).toHaveLength(11)
   })
 
   it('renders the header, banners and overview from /summary alone', async () => {
