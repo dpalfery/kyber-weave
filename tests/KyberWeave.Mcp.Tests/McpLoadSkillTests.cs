@@ -96,6 +96,25 @@ public sealed class McpLoadSkillTests : IDisposable
         Assert.Contains("plan-craft", reply, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A pool too large to name whole is named capped, with the remainder counted and the far end
+    /// of the pool absent, so the reply stays bounded however many skills a checkout has.
+    /// </summary>
+    [Fact]
+    public void AnUnknownNameCapsTheSkillsThatExistAndCountsTheRest()
+    {
+        for (int index = 1; index <= 25; index++)
+        {
+            WriteSkill(_server, $"skill-{index:00}", "Filler skill.", "BODY");
+        }
+
+        string reply = Load(Tools(_server), "no-such-skill");
+
+        Assert.Contains("Skills that exist: ", reply, StringComparison.Ordinal);
+        Assert.Contains("(+", reply, StringComparison.Ordinal);
+        Assert.DoesNotContain("skill-25", reply, StringComparison.Ordinal);
+    }
+
     /// <summary>A skill whose frontmatter lacks a required field names the field, and is still an answer rather than a failure.</summary>
     [Fact]
     public void AMalformedSkillNamesWhatIsMissingAndIsNotAFailure()

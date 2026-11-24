@@ -58,6 +58,9 @@ public sealed partial class DocsQueryService : IDocsQueryService
     /// <summary>Code joins listed per document.</summary>
     private const int JoinCap = 20;
 
+    /// <summary>Skills named in the unknown-skill reply before the remainder is counted.</summary>
+    private const int SkillNameCap = 20;
+
     /// <summary>Skills-list problems named in one answer before the remainder is counted.</summary>
     private const int SkillProblemCap = 10;
 
@@ -626,8 +629,7 @@ public sealed partial class DocsQueryService : IDocsQueryService
         string body = result.Outcome switch
         {
             KwSkillLoadOutcome.Found => FormatSkill(result),
-            KwSkillLoadOutcome.Unknown =>
-                $"No KW skill is named '{result.Name}'. Skills that exist: {string.Join(", ", result.ExistingNames)}.",
+            KwSkillLoadOutcome.Unknown => UnknownSkillReply(result),
             _ =>
                 result.Reason is not null
                     ? $"The KW skill '{result.Name}' in {result.Folder} cannot be loaded: {result.Reason}."
@@ -635,6 +637,24 @@ public sealed partial class DocsQueryService : IDocsQueryService
                         + string.Join("/", result.MissingFields) + ".",
         };
         return provenance + "\n" + body;
+    }
+
+    /// <summary>
+    /// The reply for a name no skill has: the names that do exist, capped with the remainder
+    /// counted so a large pool cannot blow the reply, and a pool with no names at all said so
+    /// rather than rendered as an empty list.
+    /// </summary>
+    private static string UnknownSkillReply(KwSkillLoadResult result)
+    {
+        if (result.ExistingNames.Count == 0)
+        {
+            return $"No KW skill is named '{result.Name}', and this checkout has no KW skills.";
+        }
+
+        string names = string.Join(", ", result.ExistingNames.Take(SkillNameCap));
+        return result.ExistingNames.Count > SkillNameCap
+            ? $"No KW skill is named '{result.Name}'. Skills that exist: {names} (+{result.ExistingNames.Count - SkillNameCap} more)."
+            : $"No KW skill is named '{result.Name}'. Skills that exist: {names}.";
     }
 
     /// <summary>
