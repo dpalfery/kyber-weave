@@ -255,8 +255,8 @@ public sealed class RunStartRunner : IRunStartRunner
     }
 
     /// <summary>
-    ///     The worktree path a branch of that name is created at: a sibling of the repository, so it never
-    ///     lands inside the checkout the operator is standing in.
+    ///     The worktree path a branch of that name is created at: inside <c>.agent_worktrees</c> under the
+    ///     repository root, which <see cref="EnsureWorktreeFolderExcluded" /> keeps out of git's status.
     /// </summary>
     /// <param name="branch">The branch the worktree holds.</param>
     /// <param name="startedAt">When the run started; the folder name carries it in UTC.</param>
