@@ -98,12 +98,27 @@ internal sealed class ShippedKwSkillPool(IEmbeddedResources resources)
                     || !KwSkillNames.IsValid(name)
                     || !map.Children.TryGetValue(new YamlScalarNode("files"), out YamlNode? filesNode)
                     || filesNode is not YamlSequenceNode fileList
-                    || !fileList.Children.All(f => f is YamlScalarNode { Value: { Length: > 0 } }))
+                    || !fileList.Children.All(f => f is YamlScalarNode))
                 {
                     throw Bad("an entry is not { name, files } with a valid skill name");
                 }
 
-                List<string> relatives = [.. fileList.Children.Cast<YamlScalarNode>().Select(f => f.Value!)];
+                List<string> relatives = [];
+                foreach (YamlScalarNode file in fileList.Children.Cast<YamlScalarNode>())
+                {
+                    if (file.Value is not { Length: > 0 } relative || !IsPlainRelativePath(relative))
+                    {
+                        throw Bad($"skill '{name}' lists '{file.Value}', which is not a plain relative path.");
+                    }
+
+                    relatives.Add(relative);
+                }
+
+                if (relatives.Distinct(StringComparer.Ordinal).Count() != relatives.Count)
+                {
+                    throw Bad($"skill '{name}' lists a file twice.");
+                }
+
                 if (!relatives.Contains(SkillFile, StringComparer.Ordinal) || !skills.TryAdd(name, relatives))
                 {
                     throw Bad($"skill '{name}' is listed twice or has no {SkillFile}");
@@ -117,6 +132,18 @@ internal sealed class ShippedKwSkillPool(IEmbeddedResources resources)
 
         return skills;
     }
+
+    /// <summary>
+    /// True when <paramref name="relative"/> can only name a file inside its skill's folder: no rooted,
+    /// parent, empty or padded segment and no backslash. Every consumer joins the entry under a folder or
+    /// asks the build for it as a resource name, so anything else could neither stay inside the folder nor
+    /// match a shipped resource.
+    /// </summary>
+    private static bool IsPlainRelativePath(string relative) =>
+        relative.Trim().Length == relative.Length
+        && !relative.Contains('\\', StringComparison.Ordinal)
+        && !Path.IsPathRooted(relative)
+        && relative.Split('/').All(segment => segment is not ("" or "." or ".."));
 
     private static InvalidDataException Bad(string reason) =>
         new($"{ManifestResource} is not a valid skill manifest: {reason}.");

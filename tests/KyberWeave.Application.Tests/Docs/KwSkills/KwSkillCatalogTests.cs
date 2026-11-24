@@ -287,6 +287,49 @@ public sealed class KwSkillCatalogTests
         Assert.Equal("SHIPPED BODY", second.Body.Trim());
     }
 
+    [Theory]
+    [InlineData("../SKILL.md")]
+    [InlineData("/SKILL.md")]
+    [InlineData("sub/../../SKILL.md")]
+    [InlineData("a\\b.md")]
+    [InlineData("\" SKILL.md\"")]
+    [InlineData("references//ref.md")]
+    public void AManifestEntryThatIsNotAPlainRelativePathIsRefused(string entry)
+    {
+        _resources.Add(
+            "KwSkills/skills.manifest.yml",
+            $"""
+            skills:
+              - name: shipped-one
+                files:
+                  - {entry}
+            """);
+
+        InvalidDataException error = Assert.Throws<InvalidDataException>(() => _catalog.Names());
+
+        Assert.Contains("skills.manifest.yml", error.Message, StringComparison.Ordinal);
+        Assert.Contains("not a plain relative path", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AManifestEntryListedTwiceIsRefused()
+    {
+        _resources.Add(
+            "KwSkills/skills.manifest.yml",
+            """
+            skills:
+              - name: shipped-one
+                files:
+                  - SKILL.md
+                  - SKILL.md
+            """);
+
+        InvalidDataException error = Assert.Throws<InvalidDataException>(() => _catalog.Names());
+
+        Assert.Contains("skills.manifest.yml", error.Message, StringComparison.Ordinal);
+        Assert.Contains("twice", error.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AMaterializationFailureStillReturnsTheBody()
     {
