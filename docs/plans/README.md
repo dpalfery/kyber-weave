@@ -64,7 +64,9 @@ its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plans are open.
+| Plan | Status | Component |
+|---|---|---|
+| [Claude background returns pair with their dispatch through the saved store](2026-11-23-claude-background-returns-pair-through-saved-store.md) | Ready | KyberArbiter |
 
 ## Archived Plans
 
