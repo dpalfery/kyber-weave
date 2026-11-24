@@ -11,11 +11,11 @@ The block is what ships. This prose is for whoever maintains it.
 directly; use the harness tool search only when it lists them as deferred. If a call errors, run
 `codegraph explore "<names or question>"` in the shell, then read files directly, naming each file
 and why. Call a tool unavailable only with the quoted error of a call you made; otherwise report it
-as not tried. Name specific symbols or files in each `codegraph_explore` query rather than broad topics.
+as not tried. Name specific symbols or files in each `codegraph_explore` query.
 If the result says "Output too large … Saved to: <path>", `view` that file once and use it as your
 answer: do not re-run the query and do not fall back to grep.
 
-**A refused folder is a stop.** When the harness refuses a folder your task needs, stop and report the refused path and the refusal text. Never create a worktree, clone or copy of your own to work around it.
+**A refused folder is a stop.** Report the path; never make your own worktree.
 
 When you work in a linked worktree, pass projectPath=<absolute path of your worktree> to every kw-docs tool and to codegraph_explore; the answer's provenance root= must equal your worktree. Start every shell command with `cd <absolute path of your worktree> && `: some harnesses report the canonical checkout as your directory, and the Arbiter refuses a step that would run there.
 
