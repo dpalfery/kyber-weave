@@ -71,7 +71,7 @@ export function extractMessagesFromHistory(text: string): {
                   : JSON.stringify(pt),
           )
           .join('\n')
-      } else if (content !== undefined) {
+      } else if (content !== undefined && content !== null) {
         msgText = JSON.stringify(content, null, 2)
       }
 
@@ -180,6 +180,12 @@ export function labelTurnContentParts(source: readonly TurnContentSourcePart[]):
       })
     } else if (p.part === 'conversation_history') {
       const { userMessages, assistantMessages } = extractMessagesFromHistory(p.text)
+      // The served count is split by message share so the two parts sum to it
+      // exactly: rounding each share alone would turn 1 token into 2.
+      const userTokens = tokens
+        ? Math.round(tokens * (userMessages.length / (userMessages.length + assistantMessages.length)))
+        : undefined
+      const assistantTokens = tokens && userTokens !== undefined ? tokens - userTokens : undefined
       if (userMessages.length > 0 || assistantMessages.length > 0) {
         if (userMessages.length > 0) {
           parts.push({
@@ -188,9 +194,7 @@ export function labelTurnContentParts(source: readonly TurnContentSourcePart[]):
             part: 'user_messages',
             label: 'User Messages',
             text: userMessages.join('\n\n'),
-            tokens: tokens
-              ? Math.round(tokens * (userMessages.length / (userMessages.length + assistantMessages.length)))
-              : undefined,
+            tokens: userTokens,
             truncated,
             order: orderCounter,
           })
@@ -202,9 +206,7 @@ export function labelTurnContentParts(source: readonly TurnContentSourcePart[]):
             part: 'assistant_turns',
             label: 'Assistant Turns',
             text: assistantMessages.join('\n\n'),
-            tokens: tokens
-              ? Math.round(tokens * (assistantMessages.length / (userMessages.length + assistantMessages.length)))
-              : undefined,
+            tokens: assistantTokens,
             truncated,
             order: orderCounter,
           })
@@ -229,7 +231,9 @@ export function labelTurnContentParts(source: readonly TurnContentSourcePart[]):
           part: 'conversation_history',
           label: 'Conversation History',
           text: p.text,
-          tokens,
+          // The same served text as the user part above: its tokens are counted
+          // there once, so this copy carries none.
+          tokens: undefined,
           truncated,
           order: orderCounter,
         })

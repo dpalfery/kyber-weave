@@ -417,7 +417,7 @@ function parseKyberPage<T>(
 function readSessionSummaryRow(path: string): (row: unknown) => KyberSessionSummary {
   return (row) => {
     if (!isRaw(row) || typeof row.session_id !== 'string' || row.session_id === '') throw malformedPage(path, 'a row has no session_id')
-    if (typeof row.harness !== 'string') throw malformedPage(path, 'a row has no harness')
+    if (typeof row.harness !== 'string' || row.harness === '') throw malformedPage(path, 'a row has no harness')
     return row as unknown as KyberSessionSummary
   }
 }
@@ -815,7 +815,7 @@ function parseTurnContentResult(raw: unknown, path: string): KyberTurnContentRes
       part: requireStringField(entry, 'part', path),
       text: requireStringField(entry, 'text', path),
       spanId: typeof entry.spanId === 'string' ? entry.spanId : undefined,
-      tokens: typeof entry.tokens === 'number' && Number.isFinite(entry.tokens) ? entry.tokens : undefined,
+      tokens: typeof entry.tokens === 'number' && Number.isInteger(entry.tokens) && entry.tokens >= 0 ? entry.tokens : undefined,
       server: typeof entry.server === 'string' ? entry.server : undefined,
       resident: entry.resident === false ? false : undefined,
       truncated: entry.truncated === true ? true : undefined,

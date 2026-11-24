@@ -93,6 +93,7 @@ describe('fetchKyberSessionPage', () => {
     ['a row has no session id', { data: [{ harness: 'codex' }], total: 1, page: 1, limit: 100 }],
     ['a row has an empty session id', { data: [{ session_id: '', harness: 'codex' }], total: 1, page: 1, limit: 100 }],
     ['a row has no harness', { data: [{ session_id: 'sess-1' }], total: 1, page: 1, limit: 100 }],
+    ['a row has an empty harness', { data: [{ session_id: 'sess-1', harness: '' }], total: 1, page: 1, limit: 100 }],
     ['data is not an array', { data: { 0: session('sess-1') }, total: 1, page: 1, limit: 100 }],
     ['a row is not an object', { data: ['sess-1'], total: 1, page: 1, limit: 100 }],
     ['the body is not an object', null],

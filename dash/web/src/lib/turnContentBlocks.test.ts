@@ -115,8 +115,29 @@ describe('labelTurnContentParts', () => {
 
     expect(parts.map((p) => [p.id, p.part, p.label, p.text, p.tokens])).toEqual([
       ['part-user-0', 'user_messages', 'User Messages', 'plain dialog', 9],
-      ['part-conv-1', 'conversation_history', 'Conversation History', 'plain dialog', 9],
+      ['part-conv-1', 'conversation_history', 'Conversation History', 'plain dialog', undefined],
     ])
+    // The served tokens are counted once across the parts, not once per copy.
+    expect(parts.reduce((sum, p) => sum + (p.tokens ?? 0), 0)).toBe(9)
+  })
+
+  it('splits served tokens so the parts sum to exactly the served count', () => {
+    const history = JSON.stringify([
+      { role: 'user', content: 'q' },
+      { role: 'assistant', content: 'a' },
+    ])
+    for (const tokens of [1, 3, 7]) {
+      const parts = labelTurnContentParts([{ part: 'conversation_history', text: history, tokens }])
+      expect(parts.reduce((sum, p) => sum + (p.tokens ?? 0), 0)).toBe(tokens)
+    }
+  })
+
+  it('reads a null message content as no message, never the text "null"', () => {
+    const history = JSON.stringify([
+      { role: 'user', content: null },
+      { role: 'assistant', content: 'answer' },
+    ])
+    expect(extractMessagesFromHistory(history)).toEqual({ userMessages: [], assistantMessages: ['answer'] })
   })
 
   it('labels an unknown part kind by its key with underscores as spaces', () => {

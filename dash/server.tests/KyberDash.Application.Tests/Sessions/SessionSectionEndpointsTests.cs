@@ -390,9 +390,11 @@ public sealed class SessionSectionEndpointsTests
 
         // A budget that cuts the parts keeps the prefix and reports the cut: the flag counts
         // scoped parts, not the serialized turn's byte length.
+        store.ClearReadLog();
         JsonElement bounded = bridge.GetTurnContent(sessionKey, 0, budget: 50)!.Value;
         Assert.True(bounded.GetProperty("truncated").GetBoolean());
         Assert.Equal(2, bounded.GetProperty("parts").GetArrayLength());
+        Assert.Contains(nameof(InMemoryRelationalStore.TurnContentPartCount), store.ReadLog);
 
         // The lossless full read never reports truncation and pays no count read.
         store.ClearReadLog();
