@@ -313,6 +313,74 @@ public sealed class SessionSectionEndpointsTests
     }
 
     /// <summary>
+    /// The turn content route carries the restored contract: the turn's span and model at the top
+    /// level, the raw-packet pointer to that span's attributes, and a <c>truncated</c> flag that
+    /// counts scoped parts — true only when the budgeted parts read left a part behind, never on
+    /// the lossless full read, and never for a turn that recorded no parts.
+    /// </summary>
+    [Fact]
+    public void TheTurnContentRouteCarriesSpanModelRawPacketAndCountsTruncationByParts()
+    {
+        InMemoryRelationalStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-turn-content";
+        WriteSession(
+            store,
+            sessionKey,
+            [
+                Turn(
+                    "turn-content-0",
+                    sessionKey,
+                    0,
+                    inputTokens: 1_000,
+                    parts:
+                    [
+                        TextPart(0, "user_prompt", new string('a', 40)),
+                        TextPart(1, "conversation_history", "history line"),
+                        TextPart(2, "tool_result_content", new string('t', 60)),
+                    ]),
+                Turn("turn-content-1", sessionKey, 1, inputTokens: 1_100, model: null),
+            ]);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        // The default budget reads every scoped part, so the count read reports nothing left
+        // behind and the payload names the turn's span, model, and raw-packet pointer.
+        store.ClearReadLog();
+        JsonElement content = bridge.GetTurnContent(sessionKey, 0)!.Value;
+        Assert.Equal("turn-content-0", content.GetProperty("spanId").GetString());
+        Assert.Equal("claude-sonnet-4-6", content.GetProperty("model").GetString());
+        Assert.Equal(
+            "/api/kyber/span/turn-content-0/attributes",
+            content.GetProperty("rawPacket").GetProperty("spanAttributesPath").GetString());
+        Assert.False(content.GetProperty("rawPacket").TryGetProperty("interactionPath", out _));
+        Assert.False(content.GetProperty("truncated").GetBoolean());
+        Assert.Equal(3, content.GetProperty("parts").GetArrayLength());
+        Assert.Contains(nameof(InMemoryRelationalStore.TurnContentPartCount), store.ReadLog);
+
+        // A budget that cuts the parts keeps the prefix and reports the cut: the flag counts
+        // scoped parts, not the serialized turn's byte length.
+        JsonElement bounded = bridge.GetTurnContent(sessionKey, 0, budget: 50)!.Value;
+        Assert.True(bounded.GetProperty("truncated").GetBoolean());
+        Assert.Equal(2, bounded.GetProperty("parts").GetArrayLength());
+
+        // The lossless full read never reports truncation and pays no count read.
+        store.ClearReadLog();
+        JsonElement full = bridge.GetTurnContent(sessionKey, 0, budget: 50, full: true)!.Value;
+        Assert.False(full.GetProperty("truncated").GetBoolean());
+        Assert.Equal(3, full.GetProperty("parts").GetArrayLength());
+        Assert.DoesNotContain(nameof(InMemoryRelationalStore.TurnContentPartCount), store.ReadLog);
+
+        // A model-less turn omits the model field, and a turn that recorded no parts is never
+        // truncated.
+        JsonElement bare = bridge.GetTurnContent(sessionKey, 1)!.Value;
+        Assert.False(bare.TryGetProperty("model", out _));
+        Assert.False(bare.GetProperty("truncated").GetBoolean());
+        Assert.Equal(0, bare.GetProperty("parts").GetArrayLength());
+    }
+
+    /// <summary>
     /// The requests section pages today's request rows at 25 with the true total, and carries the
     /// prompt previews the page's requests own — read in one scoped pass over exactly the page's
     /// request spans, never the session's whole conversation.

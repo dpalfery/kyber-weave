@@ -648,13 +648,33 @@ public sealed class AnalyticsReadPathTests
         Assert.Equal("claude-sonnet-4-6", attributes.GetProperty("attributes").GetProperty("gen_ai.response.model").GetString());
     }
 
-    /// <summary>Turn figures and bounded turn content answer from typed turn summaries.</summary>
+    /// <summary>
+    /// Turn figures and bounded turn content answer from typed turn summaries. The bounded
+    /// content payload's <c>truncated</c> flag counts scoped parts — the budgeted read leaving at
+    /// least one part behind — while <c>content</c>/<c>turn</c> keep the legacy byte-budget slice
+    /// of the serialized turn row.
+    /// </summary>
     [Fact]
     public void GetTurnFiguresAndTurnContentAnswerBoundedTurnPayloads()
     {
         InMemoryRelationalStore store = new();
         FakePricingRepository pricing = new();
-        WriteSession(store, "sess-turns", [Turn("turn-t1", "sess-turns", 0, inputTokens: 400, outputTokens: 60)]);
+        WriteSession(
+            store,
+            "sess-turns",
+            [
+                Turn(
+                    "turn-t1",
+                    "sess-turns",
+                    0,
+                    inputTokens: 400,
+                    outputTokens: 60,
+                    parts:
+                    [
+                        TextPart(0, "user_prompt", new string('a', 80)),
+                        TextPart(1, "tool_result_content", "hi"),
+                    ]),
+            ]);
         _ = CreateProjection(store, pricing).ProjectAll();
         KyberBridgeEngine bridge = CreateBridge(store, pricing: pricing);
 
@@ -665,16 +685,25 @@ public sealed class AnalyticsReadPathTests
         Assert.Null(bridge.GetTurnFigures("sess-turns", 5));
         Assert.Null(bridge.GetTurnFigures("missing", 0));
 
+        // The first part's 80 bytes cross the 64-byte budget, so the cut keeps that part alone
+        // and leaves the second behind: `truncated` is the parts-count verdict, and the legacy
+        // content slice of the serialized turn row still answers under its own byte budget.
         JsonElement bounded = bridge.GetTurnContent("sess-turns", 0, budget: 64, full: false)!.Value;
         Assert.True(bounded.GetProperty("truncated").GetBoolean());
         Assert.Equal(64, bounded.GetProperty("budget").GetInt32());
         Assert.True(bounded.GetProperty("totalBytes").GetInt64() > 64);
         Assert.False(string.IsNullOrEmpty(bounded.GetProperty("content").GetString()));
         Assert.Equal(JsonValueKind.Null, bounded.GetProperty("turn").ValueKind);
+        Assert.Equal(
+            ["user_prompt"],
+            bounded.GetProperty("parts").EnumerateArray()
+                .Select(static part => part.GetProperty("part").GetString()).ToList());
 
+        // The lossless full read answers every part and never reports truncation.
         JsonElement full = bridge.GetTurnContent("sess-turns", 0, full: true)!.Value;
         Assert.False(full.GetProperty("truncated").GetBoolean());
         Assert.Equal("turn-t1", full.GetProperty("turn").GetProperty("spanId").GetString());
+        Assert.Equal(2, full.GetProperty("parts").GetArrayLength());
     }
 
     /// <summary>Session content answers one flat entry per captured part and none for a partless span.</summary>
@@ -2095,6 +2124,13 @@ public sealed class AnalyticsReadPathTests
             int budget = 0,
             bool full = false) =>
             inner.TurnContentParts(sessionKey, turnIndex, spanId, part, budget, full);
+
+        public int TurnContentPartCount(
+            string sessionKey,
+            int? turnIndex = null,
+            string? spanId = null,
+            string? part = null) =>
+            inner.TurnContentPartCount(sessionKey, turnIndex, spanId, part);
 
         public IReadOnlyList<StoredToolDefinition> ToolDefinitions(string? spanId = null, string? sessionKey = null) => inner.ToolDefinitions(spanId, sessionKey);
 
