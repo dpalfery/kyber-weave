@@ -19,12 +19,20 @@ public interface ILostReturnRecovery
     /// <remarks>
     /// A dispatch the rules refused wrote a pre event but never ran a worker, so it is not a candidate. When several
     /// dispatches of the agent are still open the stop event cannot say which one ended: none is closed and one line
-    /// is logged, because closing the wrong one reports work as finished that never ran.
+    /// is logged, because closing the wrong one reports work as finished that never ran. A stop event that names the
+    /// agent's id closes exactly the dispatch the engine followed for that id, when its pre event is still open, and
+    /// nothing else; an id with no followed dispatch falls back to the name rule.
     /// </remarks>
     /// <param name="harness">The harness token that delivered the stop event.</param>
     /// <param name="sessionId">The harness session the agent ran in, when the payload names one.</param>
     /// <param name="agentNames">Every name the stop event gives the agent; empty when it gives none.</param>
     /// <param name="context">What the event is evaluated against.</param>
+    /// <param name="agentId">The harness's id for the agent, when the stop event carries one.</param>
     /// <returns>How many dispatches were closed: 0 or 1.</returns>
-    int RecoverLostReturn(string harness, string? sessionId, IReadOnlyList<string> agentNames, HookContext context);
+    int RecoverLostReturn(
+        string harness,
+        string? sessionId,
+        IReadOnlyList<string> agentNames,
+        HookContext context,
+        string? agentId = null);
 }

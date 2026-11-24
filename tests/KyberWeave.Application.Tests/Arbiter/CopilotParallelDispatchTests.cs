@@ -174,6 +174,8 @@ public sealed class CopilotParallelDispatchTests
 
         public List<BackgroundDispatch> Tracked { get; } = [];
 
+        public BackgroundDispatchRecord? FindBackgroundDispatch(string sessionId, string agentId, HookContext context) => null;
+
         public HookOutcome DecidePreDispatch(string caller, string? target, string prompt, KyberWeaveConfig config) =>
             new(HookOutcomeKind.Allow);
 

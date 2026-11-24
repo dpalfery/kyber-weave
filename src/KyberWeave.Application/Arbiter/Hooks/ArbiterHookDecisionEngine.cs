@@ -287,6 +287,16 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     }
 
     /// <inheritdoc/>
+    public BackgroundDispatchRecord? FindBackgroundDispatch(string sessionId, string agentId, HookContext context)
+    {
+        ArgumentNullException.ThrowIfNull(sessionId);
+        ArgumentNullException.ThrowIfNull(agentId);
+        ArgumentNullException.ThrowIfNull(context);
+        string arbiterDirectory = ResolveArbiterDirectory(context.RepoRoot, context.Scope, context.HomeDirectory);
+        return _background.Find(arbiterDirectory, sessionId, agentId);
+    }
+
+    /// <inheritdoc/>
     public HookOutcome DecideBackgroundReturn(
         string harness,
         string sessionId,
@@ -320,7 +330,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         BackgroundDispatch dispatch = record.Dispatch;
         HookOutcome outcome = Decide(
             harness, dispatch.Caller, dispatch.Target, dispatch.Prompt, response, isPost: true, config, context,
-            toolCallId: null, sessionId: null, preId: record.PreId);
+            toolCallId: null, sessionId: dispatch.SessionId, preId: record.PreId);
         _background.Save(
             arbiterDirectory,
             record with { LastResponseDigest = digest, PendingNote = string.IsNullOrWhiteSpace(outcome.Reason) ? null : outcome.Reason });
@@ -350,7 +360,12 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     }
 
     /// <inheritdoc/>
-    public int RecoverLostReturn(string harness, string? sessionId, IReadOnlyList<string> agentNames, HookContext context)
+    public int RecoverLostReturn(
+        string harness,
+        string? sessionId,
+        IReadOnlyList<string> agentNames,
+        HookContext context,
+        string? agentId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(harness);
         ArgumentNullException.ThrowIfNull(agentNames);
@@ -377,6 +392,28 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         HashSet<string> paired = [.. events
             .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
             .Select(e => e.PreId!)];
+
+        // A followed background agent names its own dispatch: the saved record holds the pre event it answers, so no
+        // name match, no multiple-match refusal and no late-stop check applies. Anything else uses the name rule.
+        if (!string.IsNullOrWhiteSpace(agentId)
+            && _background.Find(arbiterDirectory, sessionId, agentId) is { } followed)
+        {
+            ArbiterLedgerEvent? own = events.FirstOrDefault(e =>
+                e.Phase == ArbiterLedgerPhases.Pre
+                && e.At < now
+                && string.Equals(e.Id, followed.PreId, StringComparison.Ordinal)
+                && !paired.Contains(e.Id)
+                && string.Equals(e.Harness, harness, StringComparison.Ordinal)
+                && string.Equals(e.Session, sessionId, StringComparison.Ordinal));
+            if (own is null
+                || LedgerFacts.NotDispatchedLedgerIds(_state.OpenDecisionLog(arbiterDirectory)).Contains(own.Id))
+            {
+                return 0;
+            }
+
+            return AppendRecovery(ledger, own, stopEvent, agent, now, context);
+        }
+
         List<ArbiterLedgerEvent> open = [.. events.Where(e =>
             e.Phase == ArbiterLedgerPhases.Pre
             && e.At < now
@@ -447,6 +484,17 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             return 0;
         }
 
+        return AppendRecovery(ledger, pre, stopEvent, agent, now, context);
+    }
+
+    private int AppendRecovery(
+        IArbiterLedger ledger,
+        ArbiterLedgerEvent pre,
+        string stopEvent,
+        string agent,
+        DateTimeOffset now,
+        HookContext context)
+    {
         // The recovery runs on the stop hook, which the harness kills at its timeout: the row it exists to write
         // must not be what pushes the hook past it. The hook path is synchronous end to end (the adapters are, so
         // the engine is), and making it async would change the recovery interface, every adapter and the host for

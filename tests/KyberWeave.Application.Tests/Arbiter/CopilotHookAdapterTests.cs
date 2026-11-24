@@ -394,8 +394,10 @@ public sealed class CopilotHookAdapterTests
     }
 
     /// <summary>An engine that follows background dispatches: it answers a turn's end with a note and keeps one pending.</summary>
-    private sealed class BackgroundEngine : IHookDecisionEngine, IBackgroundDispatchEngine
+    private sealed class BackgroundEngine : IHookDecisionEngine, IBackgroundDispatchEngine, ILostReturnRecovery
     {
+        public string? RecoveredAgentId { get; private set; }
+
         public List<BackgroundDispatch> Tracked { get; } = [];
 
         public int PostCalls { get; private set; }
@@ -414,6 +416,19 @@ public sealed class CopilotHookAdapterTests
         }
 
         public void TrackBackgroundDispatch(BackgroundDispatch dispatch, HookContext context) => Tracked.Add(dispatch);
+
+        public BackgroundDispatchRecord? FindBackgroundDispatch(string sessionId, string agentId, HookContext context) => null;
+
+        public int RecoverLostReturn(
+            string harness,
+            string? sessionId,
+            IReadOnlyList<string> agentNames,
+            HookContext context,
+            string? agentId = null)
+        {
+            RecoveredAgentId = agentId;
+            return 0;
+        }
 
         public HookOutcome DecideBackgroundReturn(
             string harness, string sessionId, string agentId, string response, KyberWeaveConfig config, HookContext context) =>
@@ -514,6 +529,16 @@ public sealed class CopilotHookAdapterTests
         Assert.Equal(
             "FIRST TURN DONE\n\nARBITER_ESCALATION: gate report disagrees",
             doc.RootElement.GetProperty("modifiedResponse").GetString());
+    }
+
+    [Fact]
+    public void Cli_SubagentStop_PassesThePayloadAgentIdToRecovery()
+    {
+        BackgroundEngine engine = new();
+
+        RunCli(engine, SubagentStopPayload);
+
+        Assert.Equal("28ec0b43-93e2-47b0-b3ad-2530846d5dd3", engine.RecoveredAgentId);
     }
 
     [Fact]
