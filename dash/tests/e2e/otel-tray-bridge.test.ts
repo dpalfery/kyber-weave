@@ -8,6 +8,7 @@ const fsHooks = vi.hoisted(() => ({
   fstatSizeOverride: undefined as number | undefined,
   openSyncError: undefined as Error | undefined,
   realpathSyncError: undefined as Error | undefined,
+  statSyncError: undefined as Error | undefined,
 }))
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -23,6 +24,12 @@ vi.mock('node:fs', async (importOriginal) => {
       }) as typeof actual.realpathSync,
       { native: actual.realpathSync.native },
     ),
+    statSync: ((...args: Parameters<typeof actual.statSync>) => {
+      if (fsHooks.statSyncError !== undefined) {
+        throw fsHooks.statSyncError
+      }
+      return actual.statSync(...args)
+    }) as typeof actual.statSync,
     openSync: ((...args: Parameters<typeof actual.openSync>) => {
       if (fsHooks.openSyncError !== undefined) {
         throw fsHooks.openSyncError
@@ -53,6 +60,7 @@ import {
   PathTraversalError,
   StaticAssetTooLargeError,
   UpstreamResponseTooLargeError,
+  assertValidDistDir,
   buildTrayViewState,
   fetchTrayBridgeState,
   isValidApiVersion,
@@ -126,6 +134,7 @@ describe('otel-tray-bridge hardening (Issues 4, 5, 6, 7, 8)', () => {
     fsHooks.fstatSizeOverride = undefined
     fsHooks.openSyncError = undefined
     fsHooks.realpathSyncError = undefined
+    fsHooks.statSyncError = undefined
     while (activeBridges.length > 0) {
       const bridge = activeBridges.pop()
       if (bridge) {
@@ -959,6 +968,132 @@ describe('otel-tray-bridge hardening (Issues 4, 5, 6, 7, 8)', () => {
         expect(errorSpy).toHaveBeenCalledTimes(2)
         expect(errorSpy).toHaveBeenNthCalledWith(1, 'tray static asset internal error:', 'TypeError')
         expect(errorSpy).toHaveBeenNthCalledWith(2, 'tray static asset internal error:', 'TypeError')
+      } finally {
+        errorSpy.mockRestore()
+      }
+    })
+
+    it('rejects non-existent, non-directory, ENOTDIR, and unreadable distDir with TypeError and HTTP 500 instead of 404 or 403', async () => {
+      const resolved = resolveStaticAsset(distDir, '/assets/app.js')
+      expect(resolved.ok).toBe(true)
+      if (!resolved.ok) return
+
+      const missingDistDir = join(sandboxRoot, 'missing-dist\r\n[INFO] forged')
+      const regularFileDistDir = join(outsideDir, 'secret.txt')
+      const enotdirDistDir = join(regularFileDistDir, 'nested')
+      const danglingSymlinkDistDir = join(sandboxRoot, 'dangling-dist-link')
+      symlinkSync(join(sandboxRoot, 'does-not-exist'), danglingSymlinkDistDir)
+      const fileSymlinkDistDir = join(sandboxRoot, 'file-dist-link')
+      symlinkSync(regularFileDistDir, fileSymlinkDistDir)
+      const loopSymlinkDistDir = join(sandboxRoot, 'loop-dist-link')
+      symlinkSync(loopSymlinkDistDir, loopSymlinkDistDir)
+
+      const invalidDistDirs = [
+        missingDistDir,
+        regularFileDistDir,
+        enotdirDistDir,
+        danglingSymlinkDistDir,
+        fileSymlinkDistDir,
+        loopSymlinkDistDir,
+      ]
+
+      for (const badDistDir of invalidDistDirs) {
+        expect(() => assertValidDistDir(badDistDir), badDistDir).toThrow(TypeError)
+        expect(() => resolveStaticAsset(badDistDir, '/assets/app.js'), badDistDir).toThrow(TypeError)
+        expect(() => readResolvedStaticAsset(badDistDir, resolved), badDistDir).toThrow(TypeError)
+      }
+
+      const validSymlinkDistDir = join(sandboxRoot, 'valid-dist-link')
+      symlinkSync(distDir, validSymlinkDistDir)
+      expect(assertValidDistDir(validSymlinkDistDir)).toBe(distDir)
+
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        for (const badDistDir of invalidDistDirs) {
+          const stub = await startStubServer((_req, res) => {
+            serveStaticAsset(res, badDistDir, '/assets/app.js')
+          })
+          activeServers.push(stub)
+
+          const res = await fetch(`${stub.url}/assets/app.js`)
+          expect(res.status, badDistDir).toBe(500)
+          expect(await res.text(), badDistDir).toBe('Internal Server Error')
+        }
+
+        // Verify readResolvedStaticAsset inside serveStaticAsset also rejects missing distDir with 500, not 404.
+        const vanishedDistDir = join(sandboxRoot, 'vanished-dist')
+        mkdirSync(join(vanishedDistDir, 'assets'), { recursive: true })
+        writeFileSync(join(vanishedDistDir, 'assets', 'app.js'), 'console.log("vanished")', 'utf8')
+        const vanishedResolved = resolveStaticAsset(vanishedDistDir, '/assets/app.js')
+        expect(vanishedResolved.ok).toBe(true)
+        if (!vanishedResolved.ok) return
+        rmSync(vanishedDistDir, { recursive: true, force: true })
+
+        const vanishedStub = await startStubServer((_req, res) => {
+          serveStaticAsset(res, vanishedDistDir, '/assets/app.js', () => vanishedResolved)
+        })
+        activeServers.push(vanishedStub)
+
+        const vanishedRes = await fetch(`${vanishedStub.url}/assets/app.js`)
+        expect(vanishedRes.status).toBe(500)
+        expect(await vanishedRes.text()).toBe('Internal Server Error')
+
+        // Verify statSync ENOENT / EACCES failures on distDir also map to TypeError and HTTP 500 with sanitized logs.
+        for (const statCode of ['ENOENT', 'EACCES'] as const) {
+          fsHooks.statSyncError = Object.assign(new Error(`statSync ${statCode} ${distDir}\r\nforged`), {
+            code: statCode,
+          })
+          try {
+            expect(() => assertValidDistDir(distDir), statCode).toThrow(TypeError)
+            const statErrStub = await startStubServer((_req, res) => {
+              serveStaticAsset(res, distDir, '/assets/app.js')
+            })
+            activeServers.push(statErrStub)
+
+            const statErrRes = await fetch(`${statErrStub.url}/assets/app.js`)
+            expect(statErrRes.status, statCode).toBe(500)
+            expect(await statErrRes.text(), statCode).toBe('Internal Server Error')
+          } finally {
+            fsHooks.statSyncError = undefined
+          }
+        }
+
+        // Verify unexpected Error with code like EINVAL during distDir validation still maps to TypeError (EINVAL) + 500.
+        fsHooks.realpathSyncError = Object.assign(new Error(`realpath EINVAL ${distDir}\r\nforged`), {
+          code: 'EINVAL',
+        })
+        try {
+          expect(() => assertValidDistDir(distDir)).toThrow(TypeError)
+          const einvalStub = await startStubServer((_req, res) => {
+            serveStaticAsset(res, distDir, '/assets/app.js')
+          })
+          activeServers.push(einvalStub)
+
+          const einvalRes = await fetch(`${einvalStub.url}/assets/app.js`)
+          expect(einvalRes.status).toBe(500)
+          expect(await einvalRes.text()).toBe('Internal Server Error')
+        } finally {
+          fsHooks.realpathSyncError = undefined
+        }
+
+        const expectedDiagnostics = [
+          ...invalidDistDirs.map(() => 'TypeError'),
+          'TypeError',
+          'TypeError',
+          'TypeError',
+          'TypeError (EINVAL)',
+        ]
+        expect(errorSpy).toHaveBeenCalledTimes(expectedDiagnostics.length)
+        expectedDiagnostics.forEach((diagnostic, idx) => {
+          expect(errorSpy).toHaveBeenNthCalledWith(idx + 1, 'tray static asset internal error:', diagnostic)
+        })
+
+        for (const callArgs of errorSpy.mock.calls) {
+          const joined = callArgs.map((arg) => String(arg)).join(' ')
+          expect(joined).not.toMatch(/[\r\n]/)
+          expect(joined).not.toContain('forged')
+          expect(joined).not.toContain(sandboxRoot)
+        }
       } finally {
         errorSpy.mockRestore()
       }

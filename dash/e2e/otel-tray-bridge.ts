@@ -598,14 +598,39 @@ export function verifyNoSymlinkSegments(
   return { ok: true }
 }
 
-function assertValidDistDir(distDir: string): void {
+export function assertValidDistDir(distDir: string): string {
   if (typeof distDir !== 'string' || distDir.trim() === '') {
     throw new TypeError('distDir must be a non-empty string')
   }
+
+  let realDistDir: string
+  let isDirectory: boolean
+  try {
+    realDistDir = realpathSync(distDir)
+    isDirectory = statSync(realDistDir).isDirectory()
+  } catch (error) {
+    const mapped = mapStaticAssetOpenError(error)
+    if (mapped.statusCode === 500) {
+      if (error instanceof TypeError) {
+        throw error
+      }
+      const rawCode = extractErrorCode(error)
+      const safeCode = typeof rawCode === 'string' && /^[A-Z0-9_]+$/.test(rawCode) ? rawCode : undefined
+      const wrapped = new TypeError('distDir must be an existing directory', { cause: error })
+      throw safeCode !== undefined ? Object.assign(wrapped, { code: safeCode }) : wrapped
+    }
+    throw new TypeError('distDir must be an existing directory', { cause: error })
+  }
+
+  if (!isDirectory) {
+    throw new TypeError('distDir must be an existing directory')
+  }
+
+  return realDistDir
 }
 
 export function resolveStaticAsset(distDir: string, pathname: string): StaticAssetResolution {
-  assertValidDistDir(distDir)
+  const realDistDir = assertValidDistDir(distDir)
   if (pathname.includes('\0')) {
     return { ok: false, statusCode: 400, message: 'Bad request path' }
   }
@@ -637,13 +662,6 @@ export function resolveStaticAsset(distDir: string, pathname: string): StaticAss
     relativeRaw.split('/').some((seg) => seg === '..' || seg === '.')
   ) {
     return { ok: false, statusCode: 403, message: 'Forbidden' }
-  }
-
-  let realDistDir: string
-  try {
-    realDistDir = realpathSync(distDir)
-  } catch (error) {
-    return rethrowUnexpectedStaticAssetError(error)
   }
 
   const realDistPrefix = realDistDir.endsWith(sep) ? realDistDir : `${realDistDir}${sep}`
@@ -773,14 +791,8 @@ export function readResolvedStaticAsset(
   resolved: Extract<StaticAssetResolution, { readonly ok: true }>,
   options?: { readonly maxBytes?: number },
 ): StaticAssetReadResult {
-  assertValidDistDir(distDir)
+  const realDistDir = assertValidDistDir(distDir)
   const maxBytes = resolveMaxResponseBytes(options?.maxBytes, 'maxBytes')
-  let realDistDir: string
-  try {
-    realDistDir = realpathSync(distDir)
-  } catch (error) {
-    return mapExpectedStaticAssetReadError(error)
-  }
 
   const realDistPrefix = realDistDir.endsWith(sep) ? realDistDir : `${realDistDir}${sep}`
   const targetPath = resolve(resolved.filePath)
