@@ -88,7 +88,7 @@ public sealed class WorkerRuleRefusedFolderTests
         int question = Array.FindIndex(lines, line => line.Trim() == "**Add the agent worktree folder to `.gitignore`?**");
 
         Assert.True(question >= 0, "mcp-and-index.md has no question asking to add the agent worktree folder to .gitignore.");
-        Assert.Contains("adds the line `.agent_worktrees/`", lines[question + 1], StringComparison.Ordinal);
+        Assert.Contains("adds the line `.agent_worktrees/`", question + 1 < lines.Length ? lines[question + 1] : string.Empty, StringComparison.Ordinal);
     }
 
     /// <summary>
