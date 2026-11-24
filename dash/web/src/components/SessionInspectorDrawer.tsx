@@ -3196,6 +3196,12 @@ function TurnBucketPanel({ request }: { request: TurnBucketContentRequest }) {
   }
 
   const { turn, context } = sectionQuery.data
+  // A section without a turn row is a fault shape the marker guard above does not
+  // name; it carries no figures, so the failure view stands in rather than a
+  // fabricated zero.
+  if (turn === undefined) {
+    return <TurnSectionFailure data={sectionQuery.data} error={sectionQuery.error} />
+  }
   // Figures read this turn's own context first; the row's own buckets and
   // measured counters are the fallbacks, exactly as the retired opener read
   // them. An unmeasurable figure renders as the formatter's dash.

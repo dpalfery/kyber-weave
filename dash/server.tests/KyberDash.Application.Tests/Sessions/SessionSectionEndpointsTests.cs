@@ -208,6 +208,46 @@ public sealed class SessionSectionEndpointsTests
     }
 
     /// <summary>
+    /// The turn routes carry the section routes' fault convention: a turn figures read that faults
+    /// answers <c>{ sessionId, turnIndex, projection_status: "PROJECTION_FAILED" }</c> — an answer,
+    /// never the 404 a missing turn earns — while an index outside the session still answers null.
+    /// </summary>
+    [Fact]
+    public void TheTurnRoutesAnswerProjectionFailedWhenTheFiguresReadFaults()
+    {
+        TurnFiguresFaultingStore store = new();
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-turn-broken";
+        const string healthyKey = "sess-turn-ok";
+        WriteSession(store, sessionKey, [Turn($"{sessionKey}-0", sessionKey, 0, inputTokens: 1_000, outputTokens: 100)]);
+        WriteSession(store, healthyKey, [Turn($"{healthyKey}-0", healthyKey, 0, inputTokens: 1_000, outputTokens: 100)]);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        // An index outside a readable session is an honest 404, never the fault payload.
+        Assert.Null(bridge.GetTurnFigures(healthyKey, 9));
+        Assert.Null(bridge.GetTurnContent(healthyKey, 9));
+        Assert.Null(bridge.GetTurnFigures("sess-missing", 0));
+
+        JsonElement? figures = bridge.GetTurnFigures(sessionKey, 0);
+        Assert.NotNull(figures);
+        Assert.Equal(sessionKey, figures.Value.GetProperty("sessionId").GetString());
+        Assert.Equal(0, figures.Value.GetProperty("turnIndex").GetInt32());
+        Assert.Equal("PROJECTION_FAILED", figures.Value.GetProperty("projection_status").GetString());
+        Assert.False(figures.Value.TryGetProperty("turn", out _));
+
+        JsonElement? content = bridge.GetTurnContent(sessionKey, 0);
+        Assert.NotNull(content);
+        Assert.Equal(sessionKey, content.Value.GetProperty("sessionId").GetString());
+        Assert.Equal(0, content.Value.GetProperty("turnIndex").GetInt32());
+        Assert.Equal("PROJECTION_FAILED", content.Value.GetProperty("projection_status").GetString());
+        Assert.False(content.Value.TryGetProperty("turn", out _));
+        Assert.False(content.Value.TryGetProperty("parts", out _));
+        Assert.False(content.Value.TryGetProperty("content", out _));
+    }
+
+    /// <summary>
     /// The requests section pages today's request rows at 25 with the true total, and carries the
     /// prompt previews the page's requests own — read in one scoped pass over exactly the page's
     /// request spans, never the session's whole conversation.
@@ -1422,6 +1462,24 @@ public sealed class SessionSectionEndpointsTests
             }
 
             return base.SessionTimelineRecords(sessionKey);
+        }
+    }
+
+    /// <summary>
+    /// In-memory store whose turn figures read fails for one session, so a test can pin that the
+    /// turn routes answer the section routes' <c>PROJECTION_FAILED</c> convention for that session
+    /// instead of reading the fault as a missing turn.
+    /// </summary>
+    private sealed class TurnFiguresFaultingStore : InMemoryRelationalStore
+    {
+        public override ReadTimeTurnSummary? TurnFigures(string sessionKey, int turnIndex, IModelPricingLookup? pricing = null)
+        {
+            if (string.Equals(sessionKey, "sess-turn-broken", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("projection exploded");
+            }
+
+            return base.TurnFigures(sessionKey, turnIndex, pricing);
         }
     }
 

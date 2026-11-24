@@ -281,7 +281,7 @@ export interface TurnTokenFigures {
 export async function fetchKyberSessionTurns(
   sessionId: string,
   turnIndex: number,
-): Promise<KyberSessionTurnRow> {
+): Promise<KyberSessionTurnRow | undefined> {
   const section = await fetchKyberSessionTurn(sessionId, turnIndex)
   return section.turn
 }
@@ -734,9 +734,36 @@ export interface KyberTurnContentResult {
   } | null
   /** The skills this turn listed and invoked; absent on a turn that predates the skills projection. */
   skills?: KyberTurnSkillsEntry
+  /**
+   * The sections' failure marker: present with no content fields when this turn's
+   * projection read faulted. `blocks`/`parts`/`assembledText` are then inert empty
+   * transport fields — the page renders the failure state, never an empty turn.
+   */
+  projection_status?: string
 }
 
-export function fetchTurnContent(
+/**
+ * Parses the content route's body. A faulted projection read answers the sections'
+ * failure shape (identity plus the marker, no content fields); the parser keeps the
+ * marker and fills the required transport fields with nothing, so consumers gate on
+ * the marker rather than reading the fault as an empty turn.
+ */
+function parseTurnContentResult(raw: unknown, path: string): KyberTurnContentResult {
+  if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  if (raw.projection_status === 'PROJECTION_FAILED') {
+    return {
+      sessionId: requireStringField(raw, 'sessionId', path),
+      turnIndex: requireNumberField(raw, 'turnIndex', path),
+      projection_status: raw.projection_status,
+      blocks: [],
+      parts: [],
+      assembledText: '',
+    }
+  }
+  return raw as unknown as KyberTurnContentResult
+}
+
+export async function fetchTurnContent(
   sessionId: string,
   turnIndex: number,
   opts?: { budget?: number; full?: boolean },
@@ -752,7 +779,7 @@ export function fetchTurnContent(
   }
   const qs = params.toString()
   const path = `/api/kyber/session/${encodeURIComponent(sessionId)}/turn/${turnIndex}/content${qs ? `?${qs}` : ''}`
-  return fetchJson<KyberTurnContentResult>(path)
+  return parseTurnContentResult(await fetchJson<unknown>(path), path)
 }
 
 /**
@@ -3050,13 +3077,25 @@ function parseStoredFieldRowsPage(raw: unknown, path: string): StoredFieldRowsPa
 export interface KyberSessionTurnSection {
   sessionId: string
   turnIndex: number
-  turn: KyberSessionTurnRow
+  /** Absent when the payload names a faulted projection instead of a turn row. */
+  turn?: KyberSessionTurnRow
   context: KyberContextTurn | null
   projection_status?: string
 }
 
 function parseSessionTurnSection(raw: unknown, path: string): KyberSessionTurnSection {
   if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
+  // A faulted projection read answers the sections' failure shape: identity plus the
+  // projection_status marker, no turn row. The section carries the marker; the page
+  // renders the failure state, never a neighbour's figures.
+  if (typeof raw.projection_status === 'string' && !isRaw(raw.turn)) {
+    return {
+      sessionId: requireStringField(raw, 'sessionId', path),
+      turnIndex: requireNumberField(raw, 'turnIndex', path),
+      context: null,
+      projection_status: raw.projection_status,
+    }
+  }
   const turn = raw.turn
   if (!isRaw(turn)) throw malformedSection(path, 'turn is not an object')
   requireNumberField(turn, 'index', path)

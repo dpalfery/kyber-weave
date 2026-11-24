@@ -982,10 +982,14 @@ public class KyberBridgeEngine
             return null;
         }
 
-        ReadTimeTurnSummary? turn = TryTurnFigures(sessionId, turnIndex);
+        var (turn, projectionStatus) = TryTurnFigures(sessionId, turnIndex);
         if (turn is null)
         {
-            return null;
+            // A faulted read answers the section routes' PROJECTION_FAILED convention — an answer,
+            // not the 404 that would misread a broken projection as a missing turn.
+            return projectionStatus is not null
+                ? ProjectionFailedTurnPayload(sessionId, turnIndex)
+                : null;
         }
 
         StoredSessionContextTurn? storedContextTurn = projections
@@ -1012,10 +1016,14 @@ public class KyberBridgeEngine
     public JsonElement? GetTurnContent(string sessionId, int turnIndex, int budget = ContentResponseBudget, bool full = false)
     {
         EnsureProjected();
-        ReadTimeTurnSummary? figures = TryTurnFigures(sessionId, turnIndex);
+        (ReadTimeTurnSummary? figures, string? projectionStatus) = TryTurnFigures(sessionId, turnIndex);
         if (figures is null)
         {
-            return null;
+            // Same convention as the figures route: a faulted read answers PROJECTION_FAILED; only
+            // an index outside the session answers null.
+            return projectionStatus is not null
+                ? ProjectionFailedTurnPayload(sessionId, turnIndex)
+                : null;
         }
 
         int effectiveBudget = budget > 0 ? budget : ContentResponseBudget;
@@ -1077,7 +1085,8 @@ public class KyberBridgeEngine
         string? scopedSpan = spanId;
         if (string.IsNullOrEmpty(scopedSpan) && turnIndex.HasValue)
         {
-            scopedSpan = TryTurnFigures(sessionId, turnIndex.Value)?.SpanId;
+            (ReadTimeTurnSummary? turn, _) = TryTurnFigures(sessionId, turnIndex.Value);
+            scopedSpan = turn?.SpanId;
         }
 
         List<CanonicalRecord> selected = string.IsNullOrEmpty(scopedSpan)
@@ -2485,18 +2494,30 @@ public class KyberBridgeEngine
         }
     }
 
-    private ReadTimeTurnSummary? TryTurnFigures(string sessionKey, int turnIndex)
+    private (ReadTimeTurnSummary? Figures, string? ProjectionStatus) TryTurnFigures(string sessionKey, int turnIndex)
     {
         try
         {
-            return reader.TurnFigures(sessionKey, turnIndex, pricing.LoadPricingTables());
+            return (reader.TurnFigures(sessionKey, turnIndex, pricing.LoadPricingTables()), null);
         }
         catch (Exception ex)
         {
             RecordProjectionFailure(sessionKey, ex.Message);
-            return null;
+            return (null, ProjectionFailedStatus);
         }
     }
+
+    /// <summary>
+    /// The payload the turn routes answer when this turn's figures read faulted: identity plus the
+    /// section routes' <see cref="ProjectionFailedStatus"/> marker, with no figures to render.
+    /// </summary>
+    private static JsonElement ProjectionFailedTurnPayload(string sessionId, int turnIndex) =>
+        JsonSerializer.SerializeToElement(new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["sessionId"] = sessionId,
+            ["turnIndex"] = turnIndex,
+            ["projection_status"] = ProjectionFailedStatus,
+        }, CamelCaseJsonOptions);
 
     /// <summary>Reads a session's per-turn figures with its context edges, isolating any fault to that session.</summary>
     /// <param name="sessionKey">Canonical session key.</param>

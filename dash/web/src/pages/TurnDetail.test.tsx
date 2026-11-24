@@ -344,6 +344,28 @@ describe('TurnDetail raw packet disclosure (B7)', () => {
     expect(screen.getByTestId('raw-packet-disclosure').textContent).toContain('Raw packet')
   })
 
+  it('shows the sections’ projection failure when the turn read names a faulted projection', async () => {
+    // The engine's fault shape: identity plus the marker, no figures, no content.
+    rawPacketApi.fetchTurnContent.mockResolvedValue({
+      sessionId: 'sess-raw-packet',
+      turnIndex: 0,
+      projection_status: 'PROJECTION_FAILED',
+      blocks: [],
+      parts: [],
+      assembledText: '',
+    })
+    rawPacketApi.fetchKyberSessionTurns.mockResolvedValue(undefined)
+    renderTurn()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('turn-projection-failed').textContent).toContain('PROJECTION_FAILED')
+    })
+    // A faulted projection is not an empty turn: neither the "no bands" answer
+    // nor the inspector renders below the failure.
+    expect(screen.queryByTestId('context-content')).toBeNull()
+    expect(screen.queryByText('No context bands were recorded for this turn.')).toBeNull()
+  })
+
   it('opens by fetching exactly spanAttributesPath plus interactionPath through kyberApi, and shows the JSON unclipped', async () => {
     rawPacketApi.fetchTurnContent.mockResolvedValue(
       turnContent({
