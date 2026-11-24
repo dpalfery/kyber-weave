@@ -592,16 +592,16 @@ export function verifyNoSymlinkSegments(
         return { ok: false, statusCode: 403, message: 'Forbidden' }
       }
     } catch (error) {
-      if (error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
-        return { ok: false, statusCode: 404, message: 'Not found' }
-      }
-      return { ok: false, statusCode: 403, message: 'Forbidden' }
+      return rethrowUnexpectedStaticAssetError(error)
     }
   }
   return { ok: true }
 }
 
 export function resolveStaticAsset(distDir: string, pathname: string): StaticAssetResolution {
+  if (typeof distDir !== 'string') {
+    throw new TypeError('distDir must be a string')
+  }
   if (pathname.includes('\0')) {
     return { ok: false, statusCode: 400, message: 'Bad request path' }
   }
@@ -638,8 +638,8 @@ export function resolveStaticAsset(distDir: string, pathname: string): StaticAss
   let realDistDir: string
   try {
     realDistDir = realpathSync(distDir)
-  } catch {
-    return { ok: false, statusCode: 404, message: 'Not found' }
+  } catch (error) {
+    return rethrowUnexpectedStaticAssetError(error)
   }
 
   const realDistPrefix = realDistDir.endsWith(sep) ? realDistDir : `${realDistDir}${sep}`
@@ -657,8 +657,8 @@ export function resolveStaticAsset(distDir: string, pathname: string): StaticAss
   let realCandidate: string
   try {
     realCandidate = realpathSync(candidate)
-  } catch {
-    return { ok: false, statusCode: 404, message: 'Not found' }
+  } catch (error) {
+    return rethrowUnexpectedStaticAssetError(error)
   }
 
   if (realCandidate === realDistDir || !realCandidate.startsWith(realDistPrefix)) {
@@ -669,8 +669,8 @@ export function resolveStaticAsset(distDir: string, pathname: string): StaticAss
     if (!statSync(realCandidate).isFile()) {
       return { ok: false, statusCode: 404, message: 'Not found' }
     }
-  } catch {
-    return { ok: false, statusCode: 404, message: 'Not found' }
+  } catch (error) {
+    return rethrowUnexpectedStaticAssetError(error)
   }
 
   const ext = extname(realCandidate).toLowerCase()
@@ -680,7 +680,7 @@ export function resolveStaticAsset(distDir: string, pathname: string): StaticAss
 
 export type StaticAssetReadResult =
   | { readonly ok: true; readonly contents: Buffer; readonly contentType: string }
-  | { readonly ok: false; readonly statusCode: 403 | 404 | 413; readonly message: string }
+  | { readonly ok: false; readonly statusCode: 403 | 404 | 413 | 500; readonly message: string }
 
 const STATIC_ASSET_FORBIDDEN_ERROR_CODES: ReadonlySet<string> = new Set([
   'ERR_PATH_TRAVERSAL',
@@ -695,9 +695,14 @@ const STATIC_ASSET_FORBIDDEN_ERROR_CODES: ReadonlySet<string> = new Set([
   'EISDIR',
 ])
 
+const STATIC_ASSET_NOT_FOUND_ERROR_CODES: ReadonlySet<string> = new Set([
+  'ENOENT',
+  'ENOTDIR',
+])
+
 export function mapStaticAssetOpenError(
   error: unknown,
-): { readonly ok: false; readonly statusCode: 403 | 404 | 413; readonly message: string } {
+): { readonly ok: false; readonly statusCode: 403 | 404 | 413 | 500; readonly message: string } {
   const code =
     error !== null && typeof error === 'object' && 'code' in error
       ? (error as { readonly code?: unknown }).code
@@ -711,7 +716,20 @@ export function mapStaticAssetOpenError(
   ) {
     return { ok: false, statusCode: 403, message: 'Forbidden' }
   }
-  return { ok: false, statusCode: 404, message: 'Not found' }
+  if (typeof code === 'string' && STATIC_ASSET_NOT_FOUND_ERROR_CODES.has(code)) {
+    return { ok: false, statusCode: 404, message: 'Not found' }
+  }
+  return { ok: false, statusCode: 500, message: 'Internal Server Error' }
+}
+
+function rethrowUnexpectedStaticAssetError(
+  error: unknown,
+): { readonly ok: false; readonly statusCode: 403 | 404; readonly message: string } {
+  const mapped = mapStaticAssetOpenError(error)
+  if (mapped.statusCode === 403 || mapped.statusCode === 404) {
+    return { ok: false, statusCode: mapped.statusCode, message: mapped.message }
+  }
+  throw error
 }
 
 function readOpenedFileDescriptor(fd: number, maxBytes: number): Buffer {
@@ -738,12 +756,15 @@ export function readResolvedStaticAsset(
   resolved: Extract<StaticAssetResolution, { readonly ok: true }>,
   options?: { readonly maxBytes?: number },
 ): StaticAssetReadResult {
+  if (typeof distDir !== 'string') {
+    throw new TypeError('distDir must be a string')
+  }
   const maxBytes = resolveMaxResponseBytes(options?.maxBytes, 'maxBytes')
   let realDistDir: string
   try {
     realDistDir = realpathSync(distDir)
-  } catch {
-    return { ok: false, statusCode: 404, message: 'Not found' }
+  } catch (error) {
+    return mapStaticAssetOpenError(error)
   }
 
   const realDistPrefix = realDistDir.endsWith(sep) ? realDistDir : `${realDistDir}${sep}`
@@ -811,14 +832,25 @@ export function serveStaticAsset(
   resolveAsset: typeof resolveStaticAsset = resolveStaticAsset,
 ): void {
   let asset: StaticAssetReadResult | Extract<StaticAssetResolution, { readonly ok: false }>
+  let unexpectedError: unknown
   try {
     const resolved = resolveAsset(distDir, pathname)
     asset = resolved.ok ? readResolvedStaticAsset(distDir, resolved) : resolved
   } catch (error) {
+    unexpectedError = error
     asset = mapStaticAssetOpenError(error)
   }
 
   if (!asset.ok) {
+    if (asset.statusCode === 500) {
+      const detail =
+        unexpectedError === undefined
+          ? asset.message
+          : unexpectedError instanceof Error
+            ? unexpectedError.message
+            : String(unexpectedError)
+      console.error('tray static asset failed:', detail)
+    }
     res.writeHead(asset.statusCode, { 'content-type': 'text/plain; charset=utf-8' })
     res.end(asset.message)
     return

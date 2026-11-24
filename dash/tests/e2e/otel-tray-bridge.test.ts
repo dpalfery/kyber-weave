@@ -864,5 +864,94 @@ describe('otel-tray-bridge hardening (Issues 4, 5, 6, 7, 8)', () => {
         message: 'Forbidden',
       })
     })
+
+    it('maps unknown error codes, generic Errors, TypeErrors, and non-Errors to 500 Internal Server Error in mapStaticAssetOpenError', () => {
+      for (const unexpectedError of [
+        Object.assign(new Error('unknown code'), { code: 'EUNKNOWN' }),
+        Object.assign(new Error('invalid arg'), { code: 'EINVAL' }),
+        Object.assign(new Error('numeric code'), { code: 123 }),
+        new Error('generic failure'),
+        new TypeError('distDir must be defined'),
+        'string error',
+        null,
+        undefined,
+      ]) {
+        expect(mapStaticAssetOpenError(unexpectedError), String(unexpectedError)).toEqual({
+          ok: false,
+          statusCode: 500,
+          message: 'Internal Server Error',
+        })
+      }
+    })
+
+    it('responds with HTTP 500 when resolveAsset or real resolveStaticAsset encounters an unexpected runtime error', async () => {
+      const injectedStub = await startStubServer((_req, res) => {
+        serveStaticAsset(res, distDir, '/assets/app.js', () => {
+          throw new TypeError('distDir must be defined')
+        })
+      })
+      activeServers.push(injectedStub)
+
+      const injectedRes = await fetch(`${injectedStub.url}/assets/app.js`)
+      expect(injectedRes.status).toBe(500)
+      expect(await injectedRes.text()).toBe('Internal Server Error')
+
+      const undefinedDirStub = await startStubServer((_req, res) => {
+        serveStaticAsset(res, undefined as unknown as string, '/assets/app.js')
+      })
+      activeServers.push(undefinedDirStub)
+
+      const undefinedDirRes = await fetch(`${undefinedDirStub.url}/assets/app.js`)
+      expect(undefinedDirRes.status).toBe(500)
+      expect(await undefinedDirRes.text()).toBe('Internal Server Error')
+
+      const resolved = resolveStaticAsset(distDir, '/assets/app.js')
+      expect(resolved.ok).toBe(true)
+      if (!resolved.ok) return
+
+      fsHooks.openSyncError = new TypeError('unexpected openSync TypeError')
+      try {
+        expect(readResolvedStaticAsset(distDir, resolved)).toEqual({
+          ok: false,
+          statusCode: 500,
+          message: 'Internal Server Error',
+        })
+      } finally {
+        fsHooks.openSyncError = undefined
+      }
+    })
+
+    it('still returns 404 Not found for missing files and ENOENT / ENOTDIR across readResolvedStaticAsset and serveStaticAsset', async () => {
+      const resolved = resolveStaticAsset(distDir, '/assets/app.js')
+      expect(resolved.ok).toBe(true)
+      if (!resolved.ok) return
+
+      for (const missingCode of ['ENOENT', 'ENOTDIR']) {
+        fsHooks.openSyncError = Object.assign(new Error(`openSync ${missingCode}`), { code: missingCode })
+        try {
+          expect(readResolvedStaticAsset(distDir, resolved), missingCode).toEqual({
+            ok: false,
+            statusCode: 404,
+            message: 'Not found',
+          })
+        } finally {
+          fsHooks.openSyncError = undefined
+        }
+      }
+
+      const stub = await startStubServer((req, res) => {
+        const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1')
+        serveStaticAsset(res, distDir, requestUrl.pathname)
+      })
+      activeServers.push(stub)
+
+      const enoentRes = await fetch(`${stub.url}/does-not-exist.js`)
+      expect(enoentRes.status).toBe(404)
+      expect(await enoentRes.text()).toBe('Not found')
+
+      const enotdirRes = await fetch(`${stub.url}/index.html/subfile`)
+      expect(enotdirRes.status).toBe(404)
+      expect(await enotdirRes.text()).toBe('Not found')
+    })
   })
 })
