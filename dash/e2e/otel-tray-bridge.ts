@@ -1,7 +1,18 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+  statSync,
+} from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { dirname, extname, isAbsolute, join, resolve, sep } from 'node:path'
+import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Page } from '@playwright/test'
 
@@ -429,6 +440,24 @@ export class UpstreamResponseTooLargeError extends Error {
   }
 }
 
+export class StaticAssetTooLargeError extends Error {
+  readonly code = 'ERR_STATIC_ASSET_TOO_LARGE'
+
+  constructor(message: string) {
+    super(message)
+    this.name = 'StaticAssetTooLargeError'
+  }
+}
+
+export class PathTraversalError extends Error {
+  readonly code = 'ERR_PATH_TRAVERSAL'
+
+  constructor(message: string) {
+    super(message)
+    this.name = 'PathTraversalError'
+  }
+}
+
 async function readRequestBody(req: IncomingMessage): Promise<string> {
   return new Promise<string>((resolveBody, rejectBody) => {
     const chunks: Buffer[] = []
@@ -467,14 +496,34 @@ async function readRequestBody(req: IncomingMessage): Promise<string> {
   })
 }
 
+function assertValidMaxResponseBytes(raw: unknown, fieldName: string): number {
+  if (
+    typeof raw !== 'number' ||
+    !Number.isFinite(raw) ||
+    !Number.isInteger(raw) ||
+    raw < 1 ||
+    raw > MAX_PROXY_RESPONSE_BYTES
+  ) {
+    throw new Error(
+      `${fieldName} must be a positive integer at most ${MAX_PROXY_RESPONSE_BYTES}, got ${String(raw)}`,
+    )
+  }
+  return raw
+}
+
+function resolveMaxResponseBytes(raw: unknown, fieldName: string): number {
+  return raw === undefined ? MAX_PROXY_RESPONSE_BYTES : assertValidMaxResponseBytes(raw, fieldName)
+}
+
 export async function readBoundedResponseBuffer(response: Response, maxBytes: number): Promise<Buffer> {
+  const validatedMaxBytes = assertValidMaxResponseBytes(maxBytes, 'maxBytes')
   const contentLengthHeader = response.headers.get('content-length')
   if (contentLengthHeader !== null && contentLengthHeader.trim() !== '') {
     const declaredLength = Number(contentLengthHeader)
-    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    if (Number.isFinite(declaredLength) && declaredLength > validatedMaxBytes) {
       await response.body?.cancel().catch(() => undefined)
       throw new UpstreamResponseTooLargeError(
-        `Upstream response Content-Length (${declaredLength} bytes) exceeded ${maxBytes} byte limit`,
+        `Upstream response Content-Length (${declaredLength} bytes) exceeded ${validatedMaxBytes} byte limit`,
       )
     }
   }
@@ -494,9 +543,9 @@ export async function readBoundedResponseBuffer(response: Response, maxBytes: nu
       }
       if (value !== undefined) {
         totalBytes += value.byteLength
-        if (totalBytes > maxBytes) {
+        if (totalBytes > validatedMaxBytes) {
           await reader.cancel().catch(() => undefined)
-          throw new UpstreamResponseTooLargeError(`Upstream response exceeded ${maxBytes} byte limit`)
+          throw new UpstreamResponseTooLargeError(`Upstream response exceeded ${validatedMaxBytes} byte limit`)
         }
         chunks.push(value)
       }
@@ -521,7 +570,67 @@ export type StaticAssetResolution =
   | { readonly ok: true; readonly filePath: string; readonly contentType: string }
   | { readonly ok: false; readonly statusCode: 400 | 403 | 404; readonly message: string }
 
+export function verifyNoSymlinkSegments(
+  realDistDir: string,
+  segments: readonly string[],
+): { readonly ok: true } | { readonly ok: false; readonly statusCode: 403 | 404; readonly message: string } {
+  let current = realDistDir
+  for (const segment of segments) {
+    if (
+      segment === '.' ||
+      segment === '..' ||
+      segment.length === 0 ||
+      segment.includes('\0') ||
+      segment.includes('/') ||
+      (process.platform === 'win32' && segment.includes('\\'))
+    ) {
+      throw new PathTraversalError('Invalid path segment during static asset traversal check')
+    }
+    current = join(current, segment)
+    try {
+      if (lstatSync(current).isSymbolicLink()) {
+        return { ok: false, statusCode: 403, message: 'Forbidden' }
+      }
+    } catch (error) {
+      return rethrowUnexpectedStaticAssetError(error)
+    }
+  }
+  return { ok: true }
+}
+
+export function assertValidDistDir(distDir: string): string {
+  if (typeof distDir !== 'string' || distDir.trim() === '') {
+    throw new TypeError('distDir must be a non-empty string')
+  }
+
+  let realDistDir: string
+  let isDirectory: boolean
+  try {
+    realDistDir = realpathSync(distDir)
+    isDirectory = statSync(realDistDir).isDirectory()
+  } catch (error) {
+    const mapped = mapStaticAssetOpenError(error)
+    if (mapped.statusCode === 500) {
+      if (error instanceof TypeError) {
+        throw error
+      }
+      const rawCode = extractErrorCode(error)
+      const safeCode = typeof rawCode === 'string' && /^[A-Z0-9_]+$/.test(rawCode) ? rawCode : undefined
+      const wrapped = new TypeError('distDir must be an existing directory', { cause: error })
+      throw safeCode !== undefined ? Object.assign(wrapped, { code: safeCode }) : wrapped
+    }
+    throw new TypeError('distDir must be an existing directory', { cause: error })
+  }
+
+  if (!isDirectory) {
+    throw new TypeError('distDir must be an existing directory')
+  }
+
+  return realDistDir
+}
+
 export function resolveStaticAsset(distDir: string, pathname: string): StaticAssetResolution {
+  const realDistDir = assertValidDistDir(distDir)
   if (pathname.includes('\0')) {
     return { ok: false, statusCode: 400, message: 'Bad request path' }
   }
@@ -537,7 +646,11 @@ export function resolveStaticAsset(distDir: string, pathname: string): StaticAss
     return { ok: false, statusCode: 400, message: 'Bad request path' }
   }
 
-  if (decodedPath.includes('\\') || decodedPath.startsWith('//') || !decodedPath.startsWith('/')) {
+  if (
+    (process.platform === 'win32' && decodedPath.includes('\\')) ||
+    decodedPath.startsWith('//') ||
+    !decodedPath.startsWith('/')
+  ) {
     return { ok: false, statusCode: 403, message: 'Forbidden' }
   }
 
@@ -551,13 +664,6 @@ export function resolveStaticAsset(distDir: string, pathname: string): StaticAss
     return { ok: false, statusCode: 403, message: 'Forbidden' }
   }
 
-  let realDistDir: string
-  try {
-    realDistDir = realpathSync(distDir)
-  } catch {
-    return { ok: false, statusCode: 404, message: 'Not found' }
-  }
-
   const realDistPrefix = realDistDir.endsWith(sep) ? realDistDir : `${realDistDir}${sep}`
   const candidate = resolve(realDistDir, relativeRaw)
   if (candidate === realDistDir || !candidate.startsWith(realDistPrefix)) {
@@ -565,26 +671,16 @@ export function resolveStaticAsset(distDir: string, pathname: string): StaticAss
   }
 
   const segments = relativeRaw.split('/').filter((seg) => seg.length > 0)
-  let current = realDistDir
-  for (const segment of segments) {
-    current = join(current, segment)
-    try {
-      if (lstatSync(current).isSymbolicLink()) {
-        return { ok: false, statusCode: 403, message: 'Forbidden' }
-      }
-    } catch (error) {
-      if (error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
-        return { ok: false, statusCode: 404, message: 'Not found' }
-      }
-      return { ok: false, statusCode: 403, message: 'Forbidden' }
-    }
+  const segmentCheck = verifyNoSymlinkSegments(realDistDir, segments)
+  if (!segmentCheck.ok) {
+    return segmentCheck
   }
 
   let realCandidate: string
   try {
     realCandidate = realpathSync(candidate)
-  } catch {
-    return { ok: false, statusCode: 404, message: 'Not found' }
+  } catch (error) {
+    return rethrowUnexpectedStaticAssetError(error)
   }
 
   if (realCandidate === realDistDir || !realCandidate.startsWith(realDistPrefix)) {
@@ -595,8 +691,8 @@ export function resolveStaticAsset(distDir: string, pathname: string): StaticAss
     if (!statSync(realCandidate).isFile()) {
       return { ok: false, statusCode: 404, message: 'Not found' }
     }
-  } catch {
-    return { ok: false, statusCode: 404, message: 'Not found' }
+  } catch (error) {
+    return rethrowUnexpectedStaticAssetError(error)
   }
 
   const ext = extname(realCandidate).toLowerCase()
@@ -604,29 +700,201 @@ export function resolveStaticAsset(distDir: string, pathname: string): StaticAss
   return { ok: true, filePath: realCandidate, contentType }
 }
 
-function serveStaticAsset(res: ServerResponse, distDir: string, pathname: string): void {
-  const resolved = resolveStaticAsset(distDir, pathname)
-  if (!resolved.ok) {
-    res.writeHead(resolved.statusCode, { 'content-type': 'text/plain; charset=utf-8' })
-    res.end(resolved.message)
+export type StaticAssetReadResult =
+  | { readonly ok: true; readonly contents: Buffer; readonly contentType: string }
+  | { readonly ok: false; readonly statusCode: 403 | 404 | 413; readonly message: string }
+
+const STATIC_ASSET_FORBIDDEN_ERROR_CODES: ReadonlySet<string> = new Set([
+  'ERR_PATH_TRAVERSAL',
+  'ELOOP',
+  'EEXIST',
+  'EACCES',
+  'EPERM',
+  'EBUSY',
+  'EMFILE',
+  'ENFILE',
+  'EIO',
+  'EISDIR',
+])
+
+const STATIC_ASSET_NOT_FOUND_ERROR_CODES: ReadonlySet<string> = new Set([
+  'ENOENT',
+  'ENOTDIR',
+])
+
+function extractErrorCode(error: unknown): unknown {
+  return error !== null && typeof error === 'object' && 'code' in error
+    ? (error as { readonly code?: unknown }).code
+    : undefined
+}
+
+export function mapStaticAssetOpenError(
+  error: unknown,
+): { readonly ok: false; readonly statusCode: 403 | 404 | 413 | 500; readonly message: string } {
+  const code = extractErrorCode(error)
+  if (error instanceof StaticAssetTooLargeError || code === 'ERR_STATIC_ASSET_TOO_LARGE') {
+    return { ok: false, statusCode: 413, message: 'Payload Too Large' }
+  }
+  if (
+    error instanceof PathTraversalError ||
+    (typeof code === 'string' && STATIC_ASSET_FORBIDDEN_ERROR_CODES.has(code))
+  ) {
+    return { ok: false, statusCode: 403, message: 'Forbidden' }
+  }
+  if (typeof code === 'string' && STATIC_ASSET_NOT_FOUND_ERROR_CODES.has(code)) {
+    return { ok: false, statusCode: 404, message: 'Not found' }
+  }
+  return { ok: false, statusCode: 500, message: 'Internal Server Error' }
+}
+
+function rethrowUnexpectedStaticAssetError(
+  error: unknown,
+): { readonly ok: false; readonly statusCode: 403 | 404; readonly message: string } {
+  const mapped = mapStaticAssetOpenError(error)
+  if (mapped.statusCode === 403 || mapped.statusCode === 404) {
+    return { ok: false, statusCode: mapped.statusCode, message: mapped.message }
+  }
+  throw error
+}
+
+function mapExpectedStaticAssetReadError(
+  error: unknown,
+): { readonly ok: false; readonly statusCode: 403 | 404 | 413; readonly message: string } {
+  const mapped = mapStaticAssetOpenError(error)
+  if (mapped.statusCode === 500) {
+    throw error
+  }
+  return { ok: false, statusCode: mapped.statusCode, message: mapped.message }
+}
+
+function readOpenedFileDescriptor(fd: number, maxBytes: number): Buffer {
+  const chunks: Buffer[] = []
+  let totalBytes = 0
+  const chunkSize = 65_536
+  while (true) {
+    const chunk = Buffer.allocUnsafe(chunkSize)
+    const bytesRead = readSync(fd, chunk, 0, chunkSize, null)
+    if (bytesRead === 0) {
+      break
+    }
+    totalBytes += bytesRead
+    if (totalBytes > maxBytes) {
+      throw new StaticAssetTooLargeError(`Static asset exceeded ${maxBytes} byte limit`)
+    }
+    chunks.push(bytesRead === chunkSize ? chunk : chunk.subarray(0, bytesRead))
+  }
+  return Buffer.concat(chunks, totalBytes)
+}
+
+export function readResolvedStaticAsset(
+  distDir: string,
+  resolved: Extract<StaticAssetResolution, { readonly ok: true }>,
+  options?: { readonly maxBytes?: number },
+): StaticAssetReadResult {
+  const realDistDir = assertValidDistDir(distDir)
+  const maxBytes = resolveMaxResponseBytes(options?.maxBytes, 'maxBytes')
+
+  const realDistPrefix = realDistDir.endsWith(sep) ? realDistDir : `${realDistDir}${sep}`
+  const targetPath = resolve(resolved.filePath)
+  if (targetPath === realDistDir || !targetPath.startsWith(realDistPrefix)) {
+    return { ok: false, statusCode: 403, message: 'Forbidden' }
+  }
+
+  const openFlags =
+    process.platform !== 'win32'
+      ? constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)
+      : constants.O_RDONLY
+
+  let fd: number | undefined
+  try {
+    fd = openSync(targetPath, openFlags)
+    const fdStat = fstatSync(fd)
+    if (!fdStat.isFile()) {
+      return { ok: false, statusCode: 404, message: 'Not found' }
+    }
+
+    // Re-verify path containment and symlink-free traversal after opening the descriptor
+    // so neither a final-component swap nor a parent-directory symlink swap can leak files.
+    const relPath = relative(realDistDir, targetPath)
+    const separatorPattern = process.platform === 'win32' ? /[\\/]+/ : /\/+/
+    const segments = relPath.split(separatorPattern).filter((seg) => seg.length > 0)
+    if (segments.length === 0) {
+      return { ok: false, statusCode: 403, message: 'Forbidden' }
+    }
+
+    const segmentCheck = verifyNoSymlinkSegments(realDistDir, segments)
+    if (!segmentCheck.ok) {
+      return segmentCheck
+    }
+
+    const pathStat = lstatSync(targetPath)
+    if (pathStat.isSymbolicLink() || pathStat.dev !== fdStat.dev || pathStat.ino !== fdStat.ino) {
+      return { ok: false, statusCode: 403, message: 'Forbidden' }
+    }
+
+    const postRealPath = realpathSync(targetPath)
+    if (postRealPath === realDistDir || !postRealPath.startsWith(realDistPrefix)) {
+      return { ok: false, statusCode: 403, message: 'Forbidden' }
+    }
+
+    if (fdStat.size > maxBytes) {
+      throw new StaticAssetTooLargeError(`Static asset (${fdStat.size} bytes) exceeded ${maxBytes} byte limit`)
+    }
+
+    const contents = readOpenedFileDescriptor(fd, maxBytes)
+    return { ok: true, contents, contentType: resolved.contentType }
+  } catch (error) {
+    return mapExpectedStaticAssetReadError(error)
+  } finally {
+    if (fd !== undefined) {
+      closeSync(fd)
+    }
+  }
+}
+
+function formatSafeStaticAssetErrorDiagnostic(error: unknown): string {
+  const rawName = error instanceof Error ? error.name : undefined
+  const errorName =
+    typeof rawName === 'string' && /^[A-Za-z0-9_]+$/.test(rawName) ? rawName : 'UnknownError'
+  const rawCode = extractErrorCode(error)
+  const errorCode =
+    typeof rawCode === 'string' && /^[A-Z0-9_]+$/.test(rawCode) ? rawCode : undefined
+  return errorCode ? `${errorName} (${errorCode})` : errorName
+}
+
+export function serveStaticAsset(
+  res: ServerResponse,
+  distDir: string,
+  pathname: string,
+  resolveAsset: typeof resolveStaticAsset = resolveStaticAsset,
+): void {
+  let asset:
+    | StaticAssetReadResult
+    | ReturnType<typeof mapStaticAssetOpenError>
+    | Extract<StaticAssetResolution, { readonly ok: false }>
+  let unexpectedError: unknown
+  try {
+    const resolved = resolveAsset(distDir, pathname)
+    asset = resolved.ok ? readResolvedStaticAsset(distDir, resolved) : resolved
+  } catch (error) {
+    unexpectedError = error
+    asset = mapStaticAssetOpenError(error)
+  }
+
+  if (!asset.ok) {
+    if (asset.statusCode === 500) {
+      console.error('tray static asset internal error:', formatSafeStaticAssetErrorDiagnostic(unexpectedError))
+    }
+    res.writeHead(asset.statusCode, { 'content-type': 'text/plain; charset=utf-8' })
+    res.end(asset.message)
     return
   }
 
-  // Single syscall: read directly and map a missing path (or a directory,
-  // which readFileSync rejects) to 404.
-  let contents: Buffer
-  try {
-    contents = readFileSync(resolved.filePath)
-  } catch {
-    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
-    res.end('Not found')
-    return
-  }
   res.writeHead(200, {
-    'content-type': resolved.contentType,
+    'content-type': asset.contentType,
     'cache-control': 'no-store',
   })
-  res.end(contents)
+  res.end(asset.contents)
 }
 
 async function fetchLoopbackJson(
@@ -639,7 +907,7 @@ async function fetchLoopbackJson(
   readonly errorMessage: string | null
 }> {
   const method = init?.method ?? 'GET'
-  const maxResponseBytes = init?.maxResponseBytes ?? MAX_PROXY_RESPONSE_BYTES
+  const maxResponseBytes = resolveMaxResponseBytes(init?.maxResponseBytes, 'maxResponseBytes')
   // Loopback server-to-server request intentionally omits any browser Origin header
   // so DashHttp.IsAllowedMutation permits local mutations.
   const headers: Record<string, string> = {}
@@ -719,10 +987,7 @@ export async function startTrayBridge(options: {
 }): Promise<TrayBridgeHandle> {
   const serverOrigin = assertLoopbackServerOrigin(options.serverUrl)
   const distDir = options.distDir ?? ensureTrayUiBuilt({ forceRebuild: options.forceBuild })
-  const maxProxyBytes = options.maxProxyResponseBytes ?? MAX_PROXY_RESPONSE_BYTES
-  if (!Number.isFinite(maxProxyBytes) || !Number.isInteger(maxProxyBytes) || maxProxyBytes < 1) {
-    throw new Error(`maxProxyResponseBytes must be a positive integer, got ${String(options.maxProxyResponseBytes)}`)
-  }
+  const maxProxyBytes = resolveMaxResponseBytes(options.maxProxyResponseBytes, 'maxProxyResponseBytes')
   const viewPathPatterns = loadViewPathPatterns()
 
   let traySettings: TraySettings = { ...DEFAULT_TRAY_SETTINGS }
@@ -1289,7 +1554,7 @@ export async function fetchTrayBridgeState(
 ): Promise<TrayBridgeStateSnapshot> {
   const origin = assertLoopbackServerOrigin(bridgeUrl)
   const suffix = options?.refresh ? '?refresh=1' : ''
-  const maxBytes = options?.maxBytes ?? MAX_PROXY_RESPONSE_BYTES
+  const maxBytes = resolveMaxResponseBytes(options?.maxBytes, 'maxBytes')
   const res = await fetch(`${origin}/tray/state${suffix}`, {
     signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
   })
