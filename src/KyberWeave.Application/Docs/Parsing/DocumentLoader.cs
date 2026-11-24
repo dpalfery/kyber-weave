@@ -123,7 +123,22 @@ public sealed partial class DocumentLoader : IDocumentSource
         string[] segments = relativePath.Split('/');
         if (segments.Any(s => _config.ExcludedPathSegments.Contains(s, StringComparer.OrdinalIgnoreCase))) return true;
 
+        // The KW skill pool is not corpus: its SKILL.md files carry the Agent Skills frontmatter, not
+        // a governed document's, and the skill catalog reads them itself.
+        if (IsInSkillsPool(relativePath)) return true;
+
         return _config.ExcludedFiles.Contains(BeneathRoot(relativePath), StringComparer.OrdinalIgnoreCase);
+    }
+
+    private bool IsInSkillsPool(string relativePath)
+    {
+        foreach (string root in _docsRoots)
+        {
+            string prefix = DocsLayout.SkillsPool(root == "." ? string.Empty : root).TrimStart('/') + "/";
+            if (relativePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return false;
     }
 
     /// <summary>

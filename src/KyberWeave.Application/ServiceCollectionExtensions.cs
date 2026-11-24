@@ -6,6 +6,7 @@ using KyberWeave.Contracts.Docs;
 using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Docs.KwSkills;
 using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Mcp;
@@ -91,6 +92,11 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IDocumentSourceFactory>(),
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton<IKwSkillCatalogFactory>(sp => new KwSkillCatalogFactory(
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IEmbeddedResources>()));
         services.TryAddSingleton<IPlanCloseoutService>(sp => new PlanCloseoutService(
             sp.GetRequiredService<IRepositoryFileStore>(),
             sp.GetRequiredService<IBoundedProcessExecutor>(),

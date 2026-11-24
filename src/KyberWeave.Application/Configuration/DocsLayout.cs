@@ -56,8 +56,17 @@ public static class DocsLayout
     /// <summary>The prose rules file's name inside a technology, role or platform folder.</summary>
     public const string RulesSuffix = ".rules.md";
 
-    /// <summary>The skills file's name inside a technology, role or platform folder.</summary>
+    /// <summary>
+    /// The legacy skills file's name inside a technology, role or platform folder: prose that carries
+    /// skill guidance. The KW skill catalog does not read it; it reads <see cref="SkillsListSuffix"/>.
+    /// </summary>
     public const string SkillsSuffix = ".skills.md";
+
+    /// <summary>
+    /// The name of the file that lists a scope's KW skills: a YAML sequence of skill names and nothing
+    /// else. <see cref="SkillsSuffix"/> is the legacy prose file of the same scope.
+    /// </summary>
+    public const string SkillsListSuffix = ".skills.yml";
 
     /// <summary>The Arbiter's machine rules file inside a technology, role or platform folder.</summary>
     public const string ArbiterRulesSuffix = ".arbiter-rules.yml";
@@ -83,9 +92,19 @@ public static class DocsLayout
     public static string RulesFile(string docsRoot, string name) =>
         $"{docsRoot}/{Standards}/{name}/{name}{RulesSuffix}";
 
-    /// <summary>The skills file of a scope folder, named after the folder.</summary>
+    /// <summary>The legacy prose skills file of a scope folder, named after the folder.</summary>
     public static string SkillsFile(string docsRoot, string name) =>
         $"{docsRoot}/{Standards}/{name}/{name}{SkillsSuffix}";
+
+    /// <summary>The file listing a scope folder's KW skills, named after the folder.</summary>
+    public static string SkillsListFile(string docsRoot, string name) =>
+        $"{docsRoot}/{Standards}/{name}/{name}{SkillsListSuffix}";
+
+    /// <summary>
+    /// The folder holding the repository's own KW skills, one subfolder per skill with a
+    /// <c>SKILL.md</c> inside. The documentation corpus skips it: a skill is not a governed document.
+    /// </summary>
+    public static string SkillsPool(string docsRoot) => $"{docsRoot}/{Standards}/skills";
 
     /// <summary>The Arbiter machine rules file of a scope folder, named after the folder.</summary>
     public static string ArbiterRulesFile(string docsRoot, string name) =>

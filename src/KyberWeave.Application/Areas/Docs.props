@@ -121,6 +121,15 @@
     <EmbeddedResource Include="..\..\products\kyber-squad\shared\difficulty-rubric.md" LogicalName="Squad.difficulty-rubric.md" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!--
+      The shipped KW skill pool: skills.manifest.yml and one folder per skill. The catalog enumerates
+      the pool through the manifest and asks for each file as KwSkills/<name>/<relative path>.
+      RecursiveDir ends in the platform separator, so the catalog's reader normalizes it.
+    -->
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\skills\**\*" LogicalName="KwSkills/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
   <Target Name="VerifyPullRequestDescription" BeforeTargets="PrepareForBuild">
     <GetFileHash Files="@(CanonicalPullRequestDescription)" Algorithm="SHA256">
       <Output TaskParameter="Hash" PropertyName="_CanonicalPullRequestDescriptionHash" />
