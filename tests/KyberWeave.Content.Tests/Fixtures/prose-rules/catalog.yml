@@ -450,7 +450,7 @@ rules:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
   - id: D7
-    statement: When the harness refuses a folder a worker's task needs, the worker stops and reports the refused path and the refusal, and never creates a worktree, clone or copy of its own to work around it.
+    statement: When the harness refuses a folder a worker's task needs, the worker stops and reports the path, and never makes its own worktree.
     stated-in:
       - products/kyber-squad/shared/worker-baseline.md
     controls:
