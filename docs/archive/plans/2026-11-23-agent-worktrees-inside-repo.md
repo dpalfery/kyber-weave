@@ -2,7 +2,7 @@
 id: plans/2026-11-23-agent-worktrees-inside-repo
 title: Run worktrees inside the repository, and a council gate step that fails fast
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-11-23
@@ -17,7 +17,7 @@ impact-components:
 
 # Run worktrees inside the repository, and a council gate step that fails fast
 
-**Status: Ready, 2026-11-23.**
+**Status: Archived, 2026-11-24.**
 
 ## Request
 
@@ -286,15 +286,15 @@ docs-dev harvests the Design harvest rows into `docs/cli-command-surface.md` (ru
 
 | ID | Destination | Documentation impact |
 |---|---|---|
-| D1, D12 | [Where the branch lands](../cli-command-surface.md) and [ADR 0060](../adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name.md), amended; no ADR — ADR waiver: refines the run-start location in ADR 0060 | extends-component |
-| D2, D3 | [Where the branch lands](../cli-command-surface.md) (exclude line written first, run stops with the remedy) | extends-component |
-| D4 | [Check ids](../docgraph/mcp-runbook.md) (`codegraph.nested-worktrees`) | extends-component |
-| D5, D6 | [Gate runner](../code-review/architecture.md), [`requires-paths`](../configuration.md) and the `review gates` rows in [CLI command surface](../cli-command-surface.md) | extends-component |
+| D1, D12 | [Where the branch lands](../../cli-command-surface.md) and [ADR 0060](../../adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name.md), amended; no ADR — ADR waiver: refines the run-start location in ADR 0060 | extends-component |
+| D2, D3 | [Where the branch lands](../../cli-command-surface.md) (exclude line written first, run stops with the remedy) | extends-component |
+| D4 | [Check ids](../../docgraph/mcp-runbook.md) (`codegraph.nested-worktrees`) | extends-component |
+| D5, D6 | [Gate runner](../../code-review/architecture.md), [`requires-paths`](../../configuration.md) and the `review gates` rows in [CLI command surface](../../cli-command-surface.md) | extends-component |
 | D7, D10 | Documentation waiver: which gates list `dash/web/node_modules` and this repository's `.gitignore` line are host configuration, pinned by `ReviewGateRequiredPathsConfigTests`; the gate runner section names the three gates | extends-component |
-| D8 | [CLI command surface](../cli-command-surface.md) (`review gates` `--council` needs `--out`, `KW-REVIEW-028`) | extends-component |
+| D8 | [CLI command surface](../../cli-command-surface.md) (`review gates` `--council` needs `--out`, `KW-REVIEW-028`) | extends-component |
 | D9 | Documentation waiver: not built; listed as a PR note in Out-of-scope boundaries | extends-component |
-| D11 | [Worker rule map](../kyber-squad/worker-rule-map.md) (refused-folder rule, one home in the worker baseline) | extends-component |
+| D11 | [Worker rule map](../../kyber-squad/worker-rule-map.md) (refused-folder rule, one home in the worker baseline) | extends-component |
 | AP1 | Documentation waiver: approval record only | extends-component |
-| KyberSquad | [Worker rule map](../kyber-squad/worker-rule-map.md), [Where the branch lands](../cli-command-surface.md) | extends-component |
-| ReviewCouncil | [Gate runner](../code-review/architecture.md) | extends-component |
-| DocGraph | [Check ids](../docgraph/mcp-runbook.md) | extends-component |
+| KyberSquad | [Worker rule map](../../kyber-squad/worker-rule-map.md), [Where the branch lands](../../cli-command-surface.md) | extends-component |
+| ReviewCouncil | [Gate runner](../../code-review/architecture.md) | extends-component |
+| DocGraph | [Check ids](../../docgraph/mcp-runbook.md) | extends-component |
