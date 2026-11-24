@@ -133,7 +133,12 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
                 : bad;
         }
 
-        string shipped = _shipped.ReadSkillFile(wanted);
+        string? shipped = SafeShippedRead(wanted);
+        if (shipped is null)
+        {
+            return KwSkillLoadResult.Malformed(wanted, wanted, [], "its SKILL.md could not be read");
+        }
+
         if (!Parse(wanted, shipped, wanted, out Skill? shippedSkill, out KwSkillLoadResult? shippedBad))
         {
             return shippedBad;
@@ -272,6 +277,22 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
         }
     }
 
+    /// <summary>
+    /// Reads a shipped skill's SKILL.md, answering null when the manifest lists a file the product
+    /// never embedded, so a packaging gap surfaces as Malformed rather than as a thrown error.
+    /// </summary>
+    private string? SafeShippedRead(string name)
+    {
+        try
+        {
+            return _shipped.ReadSkillFile(name);
+        }
+        catch (MissingEmbeddedResourceException)
+        {
+            return null;
+        }
+    }
+
     private List<string> ReadList(string scope, List<KwSkillProblem> problems)
     {
         foreach (string root in _docsRoots)
@@ -320,7 +341,7 @@ public sealed class KwSkillCatalog : IKwSkillCatalog
 
         string? folder = RepositoryFolder(name);
         KwSkillSource source = folder is null ? KwSkillSource.Shipped : KwSkillSource.Repository;
-        string? text = folder is null ? _shipped.ReadSkillFile(name) : SafeRead(Path.Combine(folder, SkillFile));
+        string? text = folder is null ? SafeShippedRead(name) : SafeRead(Path.Combine(folder, SkillFile));
         if (text is null)
         {
             problems.Add(new KwSkillProblem(listFile, $"'{name}' cannot be read: its SKILL.md could not be read."));

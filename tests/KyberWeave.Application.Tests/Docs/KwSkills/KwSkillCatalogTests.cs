@@ -373,6 +373,33 @@ public sealed class KwSkillCatalogTests
     }
 
     [Fact]
+    public void AShippedSkillMdMissingFromTheProductLoadsAsMalformedInsteadOfThrowing()
+    {
+        // The manifest lists shipped-one, but its SKILL.md was never embedded: reading it throws.
+        _resources.Add("KwSkills/skills.manifest.yml", Manifest);
+
+        KwSkillLoadResult result = _catalog.Load("shipped-one");
+
+        Assert.Equal(KwSkillLoadOutcome.Malformed, result.Outcome);
+        Assert.Empty(result.MissingFields);
+        Assert.Contains("could not be read", result.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AShippedSkillMdMissingFromTheProductIsAProblemWhenListedInsteadOfThrowing()
+    {
+        _resources.Add("KwSkills/skills.manifest.yml", Manifest);
+        Put("docs/standards/csharp/csharp.skills.yml", "- shipped-one\n");
+
+        KwSkillList list = _catalog.SkillsFor("csharp", null);
+
+        Assert.Empty(list.Entries);
+        KwSkillProblem problem = Assert.Single(list.Problems);
+        Assert.Contains("shipped-one", problem.Message, StringComparison.Ordinal);
+        Assert.Contains("could not be read", problem.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AnUnparseableFrontmatterLoadsAsMalformedWithTheParserReasonAndNoFieldNames()
     {
         Put("docs/standards/skills/broken/SKILL.md", "---\nname: [unclosed\n---\n\nBody\n");
