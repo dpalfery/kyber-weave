@@ -147,3 +147,12 @@ The end-of-run council reviews the whole change under the `code-review` skill; t
 ## docs-dev closeout
 
 docs-dev harvests the two Design harvest rows into `docs/kyber-arbiter/architecture.md` (the Claude hand-back hook section and the lost-return recovery section), updates any statement there that describes the in-memory launch link, fills the Closeout mapping, and archives the plan.
+
+## Closeout mapping
+
+| ID | Destination |
+|---|---|
+| D1, D2, D3, D4, D6, D7, D9 | [Kyber Arbiter architecture](../kyber-arbiter/architecture.md) (Claude hand-back hook section) |
+| D5 | [Kyber Arbiter architecture](../kyber-arbiter/architecture.md) (Recovered returns section) |
+| D8, AP1 | Documentation waiver — plan-shape and approval records with no behavior a reader must consult |
+| KyberArbiter | [Kyber Arbiter architecture](../kyber-arbiter/architecture.md) |
