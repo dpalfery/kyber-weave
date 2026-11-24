@@ -136,4 +136,4 @@ every list pages, and conversation text is fetched only when it is shown.
 - [KyberDash architecture](../dash/architecture.md#read-path-invariants-and-the-read-model-register) — the read-model register, the maintenance-read boundary, deferral and single-flight
 - [KyberDash architecture](../dash/architecture.md#web-dashboard-data-loading-by-section-and-page) — the web data-loading contract
 - [KyberDash runbook](../dash/runbook.md#11-slow-dashboard-responses-on-a-large-store) — what a viewer sees now: header first, sections filling in page order, pages fetched on demand
-- [Plan: 2026-11-23 lazy sectioned session views](../plans/2026-11-23-kyberdash-lazy-sectioned-session-views.md) — the twenty decisions and the request trace this record harvests
+- [Plan: 2026-11-23 lazy sectioned session views](../archive/plans/2026-11-23-kyberdash-lazy-sectioned-session-views.md) — the twenty decisions and the request trace this record harvests

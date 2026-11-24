@@ -59,8 +59,10 @@ must match its consumer.
 
 1. **A store read is shaped to its consumer (D1, D11).** Every dashboard endpoint answers from one
    purpose-named read model whose result is the page's shape: `SessionListFigures`,
-   `SessionDetailFigures`, `SessionSummaryFigures`, `TurnFigures`, `SessionRecordsContentFree`,
-   `RecordContentFree`, `TurnContentParts`. A read whose result the caller then filters, subsets or
+   `SessionSummaryFigures`, `TurnFigures`, `SessionRecordsContentFree`, `RecordContentFree`,
+   `TurnContentParts`. (`SessionDetailFigures`, the monolithic session read this record first
+   listed, is retired: [ADR 0092](0092-dashboard-views-load-by-section-and-page.md) split it into
+   one read per section.) A read whose result the caller then filters, subsets or
    half-discards is a defect: the query carries the shape, not the caller. A new page gets a new
    named read; it does not widen an existing one.
 
