@@ -137,7 +137,6 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
     public string? RenderPromptInsertion(JsonElement payload, string? renderedCaller, HookContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        _ = renderedCaller;
 
         if (IsAgentLifecycle(payload))
         {
@@ -155,8 +154,11 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 
             JsonElement toolInput = RequireToolInput(payload);
             string prompt = GetString(toolInput, "prompt") ?? string.Empty;
+            // The Local target story is HandleLocalPre's: an absent agentName makes the caller the
+            // target, so the insertion-only answer expands the dispatch the evaluated path expands.
+            string caller = string.IsNullOrWhiteSpace(renderedCaller) ? "unidentified" : renderedCaller;
             DispatchInsertion insertion = DispatchPromptInsertion.Expand(
-                prompt, context, GetString(toolInput, "agentName"));
+                prompt, context, LocalTargetOf(toolInput, caller));
             return insertion.Kind switch
             {
                 DispatchInsertionKind.Inserted => RenderLocalPreAllowPrompt(toolInput, insertion.Text),
@@ -376,10 +378,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         {
             string? toolUseId = GetString(payload, "tool_use_id");
             JsonElement toolInput = RequireToolInput(payload);
-            string? agentName = GetString(toolInput, "agentName");
-            string? target = !string.IsNullOrWhiteSpace(agentName)
-                ? agentName
-                : (string.Equals(caller, "unidentified", StringComparison.Ordinal) ? null : caller);
+            string? target = LocalTargetOf(toolInput, caller);
             string prompt = GetString(toolInput, "prompt")
                 ?? throw new InvalidOperationException(
                     "Malformed Copilot hook event: runSubagent input carries no prompt.");
@@ -391,7 +390,8 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             string? cwd = GetString(payload, "cwd");
             TrustedDecisionKey? key = string.IsNullOrWhiteSpace(toolUseId)
                 ? null
-                : new TrustedDecisionKey(toolUseId, agentName, promptDigest, tool ?? string.Empty, cwd);
+                : new TrustedDecisionKey(
+                    toolUseId, GetString(toolInput, "agentName"), promptDigest, tool ?? string.Empty, cwd);
             if (key is not null && TrustedDecisions.TryGetValue(key.Value, out string? stored))
             {
                 context.Log.WriteLine(
@@ -483,10 +483,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         if (payload.TryGetProperty("tool_input", out JsonElement toolInput)
             && toolInput.ValueKind == JsonValueKind.Object)
         {
-            string? agentName = GetString(toolInput, "agentName");
-            target = !string.IsNullOrWhiteSpace(agentName)
-                ? agentName
-                : (string.Equals(caller, "unidentified", StringComparison.Ordinal) ? null : caller);
+            target = LocalTargetOf(toolInput, caller);
             prompt = GetString(toolInput, "prompt") ?? string.Empty;
         }
 
@@ -782,6 +779,19 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 
     private static bool IsLocalDispatchTool(string? tool) =>
         string.Equals(tool, "runSubagent", StringComparison.Ordinal);
+
+    /// <summary>
+    /// The target a Local dispatch is judged and expanded with: the input's
+    /// <c>agentName</c>, or the caller when the input names none — an absent Local
+    /// <c>agentName</c> means the calling agent.
+    /// </summary>
+    private static string? LocalTargetOf(JsonElement toolInput, string caller)
+    {
+        string? agentName = GetString(toolInput, "agentName");
+        return !string.IsNullOrWhiteSpace(agentName)
+            ? agentName
+            : string.Equals(caller, "unidentified", StringComparison.Ordinal) ? null : caller;
+    }
 
     /// <summary>Whether the payload carries a Copilot CLI 1.x <c>toolCalls</c> batch.</summary>
     private static bool HasCliCall(JsonElement payload) => FirstCliCall(payload) is not null;

@@ -190,6 +190,40 @@ public sealed class CopilotHookAdapterTests
         Assert.Equal("dev-medium", engine.SeenPreTarget);
     }
 
+    /// <summary>
+    /// The insertion-only answer (an Arbiter that is off, or a hook that defers) expands a Local dispatch the
+    /// way the evaluated path does: an absent <c>agentName</c> makes the rendered caller the target, so the
+    /// prompt service is asked for that role rather than for none.
+    /// </summary>
+    [Fact]
+    public void Local_InsertionOnly_AbsentAgentName_UsesTheCallerTarget()
+    {
+        DispatchPromptQuery? query = null;
+        HookContext context = new(
+            "/repo",
+            () => "decision-test-1",
+            TextWriter.Null,
+            BuildDispatchPrompt: q =>
+            {
+                query = q;
+                return new DispatchPromptExpansion(true, "<task>the packet</task>", null);
+            });
+        CopilotHookAdapter adapter = new(new ScriptedEngine(), CopilotHookAdapter.VsCodeToken);
+        string stdin = VsCodeFixture("pre-runsubagent-no-agentname.json");
+
+        string? insertion = adapter.RenderPromptInsertion(
+            JsonDocument.Parse(stdin).RootElement.Clone(), "dev-medium", context);
+
+        Assert.NotNull(insertion);
+        Assert.Equal("dev-medium", query?.Target);
+        using JsonDocument document = JsonDocument.Parse(insertion);
+        JsonElement output = document.RootElement.GetProperty("hookSpecificOutput");
+        Assert.Equal("allow", output.GetProperty("permissionDecision").GetString());
+        Assert.Equal(
+            "<task>the packet</task>\n\nContinue the implementation.",
+            output.GetProperty("updatedInput").GetProperty("prompt").GetString());
+    }
+
     [Fact]
     public void Local_NonDispatchTool_ReadGuardDeniesOnContent_NotName()
     {
