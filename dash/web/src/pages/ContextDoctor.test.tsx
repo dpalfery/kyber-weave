@@ -1299,6 +1299,8 @@ describe('ContextDoctor scope: harness and session', () => {
     holdSummary?: Promise<void>
     /** A store the sessions route serves instead of SCOPE_SESSIONS. */
     store?: Array<{ session_id: string; harness: string; label: string | null }>
+    /** When present, every sessions request's query string is appended here. */
+    sessionRequests?: string[]
   } = {}): string[] {
     const requested: string[] = []
     let sessionFailures = opts.sessionsFailures ?? 0
@@ -1311,6 +1313,7 @@ describe('ContextDoctor scope: harness and session', () => {
         const fail = (status: number) =>
           ({ ok: false, status, json: async () => ({ error: 'failed' }) }) as unknown as Response
         if (url.pathname === '/api/kyber/sessions') {
+          opts.sessionRequests?.push(url.search)
           // A failure budget, so a retry is driven deterministically against
           // one stub: the endpoint fails, then recovers.
           if (sessionFailures > 0) {
@@ -1774,5 +1777,48 @@ describe('ContextDoctor scope: harness and session', () => {
     fireEvent.keyDown(box, { key: 'ArrowDown' })
     fireEvent.keyDown(box, { key: 'Enter' })
     expect(screen.getByTestId('context-doctor-session-combobox').getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('restarts the picker at page one when the harness changes', async () => {
+    // 150 pi sessions and one cursor session: page two of pi is not page two of
+    // cursor, so a picker that kept the page would ask for an empty window.
+    const store = [
+      ...Array.from({ length: 150 }, (_, i) => ({
+        session_id: `sess-pi-${i}`,
+        harness: 'pi',
+        label: `pi ${i}` as string | null,
+      })),
+      { session_id: 'sess-cursor-only', harness: 'cursor', label: 'cursor only' as string | null },
+    ]
+    const sessionRequests: string[] = []
+    stubScoped({ store, sessionRequests })
+    const utils = renderScoped({ activeHarness: 'pi' })
+
+    const listbox = () => screen.getByTestId('context-doctor-session-listbox')
+    await openPicker()
+    await waitFor(() => expect(within(listbox()).queryByTestId('session-option-sess-pi-99')).not.toBeNull())
+    fireEvent.click(within(listbox()).getByRole('button', { name: 'Next page' }))
+    await waitFor(() => expect(within(listbox()).queryByTestId('session-option-sess-pi-100')).not.toBeNull())
+    expect(
+      sessionRequests.some((qs) => {
+        const params = new URLSearchParams(qs)
+        return params.get('harness') === 'pi' && params.get('page') === '2'
+      }),
+    ).toBe(true)
+
+    // The owner switches harness while the picker sits on page two.
+    utils.rerender({ activeHarness: 'cursor' })
+
+    await waitFor(() =>
+      expect(within(listbox()).queryByTestId('session-option-sess-cursor-only')).not.toBeNull(),
+    )
+    // The first page of the new harness was asked for; an out-of-range page
+    // never was.
+    expect(
+      sessionRequests.some((qs) => {
+        const params = new URLSearchParams(qs)
+        return params.get('harness') === 'cursor' && params.get('page') === '2'
+      }),
+    ).toBe(false)
   })
 })

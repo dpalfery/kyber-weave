@@ -772,6 +772,16 @@ export function ContextDoctor({
   // by the harness scope above this page, then by the search text here — so
   // the picker never downloads the inventory whole.
   const [pickerQuery, setPickerQuery] = useState<{ q: string; page: number }>({ q: '', page: 1 })
+  // A harness change restarts the picker at its first page: page N of the
+  // harness just left is not where a viewer narrowing to another harness is,
+  // and it may be past the end of the new list. Adjusted during render (the
+  // React state-when-props-change pattern, as `useSectionPage` does for a
+  // session change), so the out-of-range page request never leaves.
+  const [prevHarnessFilter, setPrevHarnessFilter] = useState(harnessFilter)
+  if (prevHarnessFilter !== harnessFilter) {
+    setPrevHarnessFilter(harnessFilter)
+    setPickerQuery((previous) => ({ ...previous, page: 1 }))
+  }
   const {
     data: sessionPage,
     isLoading: loadingSessions,
