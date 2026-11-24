@@ -75,12 +75,13 @@ public sealed class GateRunnerCouncilOutTests : IDisposable
     }
 
     [Fact]
-    public void AnAgentRunWithCouncilAndWithoutOutIsNotRefusedForOut()
+    public void CouncilWithAgentIsRefused()
     {
         CapturedConsoleExecution<int> run = _services.Run(
             _services.ReviewGatesApp(), ["review", "gates", _repo, "--agent", "dev-easy", "--council", "--format", "json"]);
 
-        Assert.NotEqual(ClientInputExitCode, run.Result);
-        Assert.DoesNotContain("--out", run.Output, StringComparison.Ordinal);
+        Assert.Equal(ClientInputExitCode, run.Result);
+        Assert.Contains(InvalidInput, run.Output, StringComparison.Ordinal);
+        Assert.Contains("--agent", run.Output, StringComparison.Ordinal);
     }
 }

@@ -83,9 +83,20 @@ public sealed class ReviewGatesCommand(
             return ClientInputExitCode;
         }
 
+        // --council admits the council's full-suite gates under review.gates, and --agent runs one agent's
+        // review.task-gates, which never read --council. A run cannot be both, so it is refused rather than silently
+        // dropping --council.
+        if (settings.Council && settings.Agent is not null)
+        {
+            WriteClientInputError(
+                $"{ReviewGateReporting.InvalidInput}: --council runs the council's gates under review.gates, so it cannot be " +
+                "combined with --agent, which runs one agent's task gates.");
+            return ClientInputExitCode;
+        }
+
         // --council writes the full council report, and a council run that names no --out file would finish with its
-        // report nowhere. Refused before any gate runs. Task gates never take --council, so --agent runs are not asked.
-        if (settings.Council && settings.Out is null && settings.Agent is null)
+        // report nowhere. Refused before any gate runs.
+        if (settings.Council && settings.Out is null)
         {
             WriteClientInputError(
                 $"{ReviewGateReporting.InvalidInput}: --council needs --out, the file the full report is written to. " +
