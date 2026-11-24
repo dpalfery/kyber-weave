@@ -116,6 +116,7 @@ public sealed class RunStartRunnerWorktreeExcludeTests
 
         Assert.False(outcome.Succeeded);
         Assert.Contains("denied", outcome.FirstErrorLine, StringComparison.Ordinal);
+        Assert.Equal("*.log\n", _files.ReadAllText(ExcludePath));
     }
 
     [Fact]
