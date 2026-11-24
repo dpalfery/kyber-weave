@@ -212,10 +212,39 @@ public sealed class SessionSectionEndpointsTests
     /// stack-exhaustion or a cancelled request propagates instead of being reported as
     /// <c>PROJECTION_FAILED</c>, so an unhealthy process is never misread as one bad session.
     /// </summary>
+    /// <summary>
+    /// A read fault of the session's own stored data — the store, the disk, or a stored shape the
+    /// read cannot parse — is that session's broken projection and answers <c>PROJECTION_FAILED</c>.
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(TimeoutException))]
+    [InlineData(typeof(InvalidOperationException))]
+    [InlineData(typeof(FormatException))]
+    [InlineData(typeof(System.Text.Json.JsonException))]
+    [InlineData(typeof(InvalidDataException))]
+    public void TheTurnRoutesIsolateStoreAndStoredShapeFaults(Type faultType)
+    {
+        TurnFiguresFaultingStore store = new(() => (Exception)Activator.CreateInstance(faultType)!);
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-turn-broken";
+        WriteSession(store, sessionKey, [Turn($"{sessionKey}-0", sessionKey, 0, inputTokens: 1_000, outputTokens: 100)]);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        JsonElement? figures = bridge.GetTurnFigures(sessionKey, 0);
+
+        Assert.NotNull(figures);
+        Assert.Equal("PROJECTION_FAILED", figures.Value.GetProperty("projection_status").GetString());
+    }
+
     [Theory]
     [InlineData(typeof(OutOfMemoryException))]
     [InlineData(typeof(InsufficientExecutionStackException))]
     [InlineData(typeof(OperationCanceledException))]
+    [InlineData(typeof(NullReferenceException))]
+    [InlineData(typeof(ArgumentNullException))]
     public void TheTurnRoutesLetFatalAndCancellationFaultsPropagate(Type faultType)
     {
         TurnFiguresFaultingStore store = new(() => (Exception)Activator.CreateInstance(faultType)!);
