@@ -171,4 +171,32 @@ describe('SessionInspectorDrawer: the drawer fetches what it opens (D9)', () => 
     expect(error.textContent).toContain('Request failed (500)')
     expect(router.calls.filter((url) => url.includes('/content'))).toEqual([])
   })
+
+  it('requests no content when a non-prompt bucket’s turn row carries no span', async () => {
+    const router = stubHeldFetch()
+    renderDrawer({ contentRequest: { sessionId: SESSION_ID, turnIndex: 4, bucket: 'tool_definitions' } })
+
+    await waitFor(() => expect(router.calls).toContain(turnRoute(4)))
+    // A turn row may predate span ids. Without one there is no turn-scoped
+    // content route to open, and dropping the empty span would fetch SESSION
+    // content under a turn-labelled panel, so the drawer asks for nothing and
+    // shows the bucket's own captured content instead.
+    router.respond(
+      turnRoute(4),
+      turnSection(
+        4,
+        { spanId: undefined, content: { tool_definitions: 'captured tool defs' } },
+        { index: 1, buckets: { tool_definitions: 42 }, reported_input: 900 },
+      ),
+    )
+
+    const inspector = await screen.findByTestId('context-bucket-inspector')
+    expect(inspector.textContent).toContain('42')
+    expect(inspector.textContent).toContain('captured tool defs')
+    // Give a wrong implementation a turn to issue its request, then prove none.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(router.calls.filter((url) => url.includes('/content'))).toEqual([])
+    expect(screen.queryByTestId('drawer-content-loading')).toBeNull()
+    expect(screen.queryByTestId('drawer-content-fallback-note')).toBeNull()
+  })
 })
