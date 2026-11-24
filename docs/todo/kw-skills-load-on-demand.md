@@ -100,7 +100,9 @@ In scope:
   - a `SKILL.md` with no `name` or no `description`, or whose `name` is not its folder's name;
   - a skill folder whose name is not a skill name;
   - a `<scope>.skills.md` left in a standards folder after migration;
-  - a shipped role folder with no row in the role table, or a table row whose role folder does not exist.
+  - a skill whose winning copy resolves outside the pool;
+  - a role folder, shipped or added in the repository's standards tree, with no row in the role table, or a table
+    row whose role folder exists in neither.
 - **Never deployed to a harness.** `squad update` does not copy KW skills into any harness skill folder.
 - **KyberDash.** Each `load_skill` call is recorded with the skill, the agent, the session and the time. KyberDash
   shows KW skill loads in their own section, separate from harness skill use. Recording only: nothing is blocked or
@@ -158,8 +160,11 @@ KyberDash shows which skills agents actually load, so unused skills can be cut a
   `STATUS: SKILL_LOADED_PARTIAL`.
 - A listed name that is invalid is reported once by `docs validate`, as an invalid name.
 - A role folder the repository adds with no row in the role table is reported by `docs validate`.
-- Every `load_skill` reply has the provenance line first and a `STATUS:` line second, `STATUS: SKILL_LOADED` on
-  success.
+- Every `load_skill` reply has the provenance line first and a `STATUS:` line second: `STATUS: SKILL_LOADED` on a
+  whole success, `STATUS: SKILL_LOADED_PARTIAL` when the body or the reference list was cut.
+- A skill folder holding more than 100 reference files returns the first 100 paths in ordinal order, the count of the
+  rest, and `STATUS: SKILL_LOADED_PARTIAL`.
+- `docs validate` reports a skill whose winning copy resolves outside the pool.
 - `docs validate` reports each case in its list once: a `.skills.yml` listing an invalid name, a skill folder with an
   invalid name, a leftover `.skills.md`, and a role folder and role table that disagree.
 - `docs validate` reports a listed skill that has no folder, a `SKILL.md` missing `name` or `description`, a `name`
