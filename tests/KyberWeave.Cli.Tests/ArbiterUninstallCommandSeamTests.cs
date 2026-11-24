@@ -213,6 +213,46 @@ public sealed class ArbiterUninstallCommandSeamTests
         Assert.Equal("typesafe-key", _credentials.Read(ArbiterKeyResolver.TypeSafeOrigin));
     }
 
+    /// <summary>
+    /// When both the host configuration and the per-user override file specify the same invalid
+    /// endpoint, <c>--remove-key</c> fails closed naming the per-user override file.
+    /// </summary>
+    [Fact]
+    public void Execute_RemoveKey_BothHostConfigAndOverrideSetSameInvalidEndpoint_FailsClosedNamingOverrideFile()
+    {
+        const string hostConfigPath = "/kw/home/.kyber-weave/kyber-weave.yml";
+        _uninstaller.Deployed = true;
+        _credentials.Seed(ArbiterKeyResolver.TypeSafeOrigin, "typesafe-key");
+        string overridePath = ArbiterUserSettings.GetPath(Home);
+        _files.CreateDirectory(Path.GetDirectoryName(overridePath)!);
+        _files.WriteAllText(overridePath, "provider:\n  kind: systemone\n  endpoint: not-a-url\n");
+        DefaultConfigs configs = new()
+        {
+            Loaded = new KyberWeaveConfigLoadResult(
+                true,
+                new KyberWeaveConfig
+                {
+                    Arbiter = new ArbiterConfig
+                    {
+                        Enabled = true,
+                        Provider = new ArbiterProviderConfig(ArbiterProviderKind.Systemone, "not-a-url", "jev-1.14.0", 3000),
+                    },
+                },
+                configPath: hostConfigPath),
+        };
+
+        int exit = Run(
+            new ArbiterUninstallSettings { Target = "claude", RemoveKey = true },
+            new FileArbiterUserSettings(_files),
+            configs);
+
+        Assert.Equal(1, exit);
+        Assert.Empty(_credentials.Deletes);
+        Assert.Contains(RuleValidator.MalformedSection, _console.Output, StringComparison.Ordinal);
+        Assert.Contains(overridePath, _console.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(hostConfigPath, _console.Output, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Execute_APathNamingTheHomeDirectory_IsTheGlobalScope()
     {

@@ -272,4 +272,54 @@ public sealed class ArbiterKeyResolutionTests
         Assert.Equal(SentinelKey, tryResolved);
         Assert.Equal(0, applyCount);
     }
+
+    [Fact]
+    public void KeyService_OverrideEndpointWithSurroundingWhitespace_HonorsEnvKey()
+    {
+        string home = ArbiterTestRoots.Under("home");
+        _state.Files.CreateDirectory(Path.Combine(home, ".config", "kyber-weave"));
+        _state.Files.WriteAllText(
+            ArbiterUserSettings.GetPath(home),
+            "provider:\n  kind: systemone\n  endpoint: \"https://openrouter.ai/api/v1 \"\n");
+        FileArbiterUserSettings userSettings = new(_state.Files);
+        FakeCredentialStore store = new();
+        FakeProcessEnvironment environment = new(
+            homeDirectory: home,
+            readVariable: EnvReader(SentinelKey));
+        ArbiterKeyService service = new(store, environment, userSettings);
+        KyberWeaveConfig config = KyberWeaveConfigDefaults.Product;
+        ArbiterProviderConfig effective = userSettings.ApplyTo(config.Arbiter.Provider, home);
+
+        Assert.Equal(SentinelKey, service.ResolveKey(config, "https://openrouter.ai/api/v1"));
+        Assert.Equal(SentinelKey, service.ResolveKey(config, effective, "https://openrouter.ai/api/v1"));
+        Assert.Equal(SentinelKey, service.TryResolveKey(config, effective, "https://openrouter.ai/api/v1"));
+        Assert.Equal(SentinelKey, service.CreateKeyResolver(config)(new Uri("https://openrouter.ai/api/v1")));
+    }
+
+    [Theory]
+    [InlineData("https://repo.example.com/v1", " https://repo.example.com/v1 ")]
+    [InlineData(" https://repo.example.com/v1 ", "https://repo.example.com/v1")]
+    public void KeyService_OverrideDiffersOnlyByWhitespaceFromRepository_DoesNotHonorEnvKey(
+        string repositoryEndpoint,
+        string effectiveEndpoint)
+    {
+        FakeCredentialStore store = new();
+        FakeProcessEnvironment environment = new(
+            homeDirectory: ArbiterTestRoots.Under("home"),
+            readVariable: EnvReader(SentinelKey));
+        ArbiterKeyService service = new(store, environment, new FakeArbiterUserSettings());
+        KyberWeaveConfig config = new()
+        {
+            Arbiter = new ArbiterConfig
+            {
+                Enabled = true,
+                Provider = new ArbiterProviderConfig(ArbiterProviderKind.Systemone, repositoryEndpoint, "jev-1.14.0", 3000),
+            },
+        };
+        ArbiterProviderConfig effective = config.Arbiter.Provider with { Endpoint = effectiveEndpoint };
+
+        string? resolved = service.TryResolveKey(config, effective, "https://repo.example.com/v1");
+
+        Assert.Null(resolved);
+    }
 }

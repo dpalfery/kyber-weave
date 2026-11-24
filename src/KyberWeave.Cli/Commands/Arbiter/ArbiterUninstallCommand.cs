@@ -219,10 +219,10 @@ public sealed class ArbiterUninstallCommand(
         }
 
         ArbiterProviderConfig repositoryProvider = loaded.Config?.Arbiter.Provider ?? ArbiterProviderConfig.DefaultNone;
-        ArbiterProviderConfig mergedProvider;
+        ArbiterUserProviderResolution effective;
         try
         {
-            mergedProvider = userSettings.ApplyTo(repositoryProvider, environment.HomeDirectory);
+            effective = userSettings.Resolve(repositoryProvider, environment.HomeDirectory);
         }
         catch (YamlDotNet.Core.YamlException ex)
         {
@@ -232,7 +232,8 @@ public sealed class ArbiterUninstallCommand(
 
         if (!ArbiterUserSettings.TryResolveEndpointOrigin(
                 repositoryProvider,
-                mergedProvider,
+                effective.Provider,
+                effective.EndpointOverridden,
                 environment.HomeDirectory,
                 loaded.ConfigPath,
                 out _,

@@ -59,10 +59,11 @@ public sealed class ArbiterInstallService(
         ArbiterProviderKind effectiveKind;
         KyberWeaveConfig repositoryConfig;
         ArbiterProviderConfig effectiveProvider;
+        bool endpointOverridden;
         string? loadedConfigPath;
         try
         {
-            (repositoryConfig, existingKind, effectiveProvider, loadedConfigPath) =
+            (repositoryConfig, existingKind, effectiveProvider, endpointOverridden, loadedConfigPath) =
                 ReadExistingProvider(root, request.ConfigOption, isProjectScope);
             effectiveKind = effectiveProvider.Kind;
         }
@@ -75,6 +76,7 @@ public sealed class ArbiterInstallService(
         if (!ArbiterUserSettings.TryResolveEndpointOrigin(
                 repositoryConfig.Arbiter.Provider,
                 effectiveProvider,
+                endpointOverridden,
                 environment.HomeDirectory,
                 loadedConfigPath,
                 out string endpoint,
@@ -428,16 +430,16 @@ public sealed class ArbiterInstallService(
     /// environment key to the override origin.
     /// </remarks>
     /// <exception cref="YamlDotNet.Core.YamlException">Thrown when the per-user override is malformed.</exception>
-    private (KyberWeaveConfig Repository, ArbiterProviderKind Configured, ArbiterProviderConfig Effective, string? ConfigPath) ReadExistingProvider(
+    private (KyberWeaveConfig Repository, ArbiterProviderKind Configured, ArbiterProviderConfig Effective, bool EndpointOverridden, string? ConfigPath) ReadExistingProvider(
         string root, string? configOption, bool projectScope)
     {
         KyberWeaveConfigLoadResult loaded = configs.Load(root, configOption, projectScope);
         KyberWeaveConfig repository = loaded.Success && loaded.Config is not null
             ? loaded.Config
             : KyberWeaveConfigDefaults.Product;
-        ArbiterProviderConfig effective =
-            userSettings.ApplyTo(repository.Arbiter.Provider, environment.HomeDirectory);
-        return (repository, repository.Arbiter.Provider.Kind, effective, loaded.ConfigPath);
+        ArbiterUserProviderResolution resolution =
+            userSettings.Resolve(repository.Arbiter.Provider, environment.HomeDirectory);
+        return (repository, repository.Arbiter.Provider.Kind, resolution.Provider, resolution.EndpointOverridden, loaded.ConfigPath);
     }
 
     private static bool ParseProvider(string? raw, out ArbiterProviderKind kind)
@@ -616,10 +618,10 @@ public sealed class ArbiterInstallService(
             // Read and validate the override once here, then pass the merged provider to key
             // resolution so a file modified mid-verify cannot pass validation on one endpoint
             // and bind the environment key to another.
-            ArbiterProviderConfig effective;
+            ArbiterUserProviderResolution effective;
             try
             {
-                effective = userSettings.ApplyTo(loaded.Config.Arbiter.Provider, environment.HomeDirectory);
+                effective = userSettings.Resolve(loaded.Config.Arbiter.Provider, environment.HomeDirectory);
             }
             catch (YamlDotNet.Core.YamlException ex)
             {
@@ -629,18 +631,29 @@ public sealed class ArbiterInstallService(
 
             if (!ArbiterUserSettings.TryResolveEndpointOrigin(
                     loaded.Config.Arbiter.Provider,
-                    effective,
+                    effective.Provider,
+                    effective.EndpointOverridden,
                     environment.HomeDirectory,
                     loaded.ConfigPath,
-                    out _,
-                    out _,
+                    out string effectiveEndpoint,
+                    out string effectiveOrigin,
                     out string? endpointError))
             {
                 events.Add(new ArbiterInstallError(endpointError));
                 return false;
             }
 
-            string? key = keys.TryResolveKey(loaded.Config, effective, plan.Endpoint);
+            if (!string.Equals(effectiveEndpoint, plan.Endpoint, StringComparison.Ordinal) ||
+                !string.Equals(effectiveOrigin, plan.Origin, StringComparison.Ordinal))
+            {
+                events.Add(new ArbiterInstallError(
+                    $"Verification failed: the effective provider endpoint '{effectiveEndpoint}' " +
+                    $"(origin '{effectiveOrigin}') does not match the planned endpoint '{plan.Endpoint}' " +
+                    $"(origin '{plan.Origin}')."));
+                return false;
+            }
+
+            string? key = keys.TryResolveKey(loaded.Config, effective.Provider, effectiveEndpoint);
 
             if (string.IsNullOrEmpty(key))
             {

@@ -21,7 +21,7 @@ public sealed class ArbiterKeyService(
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
-        return ArbiterKeyResolver.Resolve(endpoint, store, environment.GetVariable, UserOverrideEndpoint(config));
+        return ArbiterKeyResolver.Resolve(endpoint.Trim(), store, environment.GetVariable, UserOverrideEndpoint(config));
     }
 
     /// <inheritdoc />
@@ -31,7 +31,7 @@ public sealed class ArbiterKeyService(
         ArgumentNullException.ThrowIfNull(effectiveProvider);
         ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
         return ArbiterKeyResolver.Resolve(
-            endpoint,
+            endpoint.Trim(),
             store,
             environment.GetVariable,
             UserOverrideEndpoint(config.Arbiter.Provider, effectiveProvider));
@@ -94,8 +94,12 @@ public sealed class ArbiterKeyService(
         }
     }
 
-    private static string? UserOverrideEndpoint(ArbiterProviderConfig repository, ArbiterProviderConfig merged) =>
-        string.Equals(merged.Endpoint, repository.Endpoint, StringComparison.Ordinal)
+    private static string? UserOverrideEndpoint(ArbiterProviderConfig repository, ArbiterProviderConfig merged)
+    {
+        string repositoryEndpoint = ArbiterUserSettings.NormalizeEndpoint(repository.Endpoint);
+        string mergedEndpoint = ArbiterUserSettings.NormalizeEndpoint(merged.Endpoint);
+        return mergedEndpoint.Length == 0 || string.Equals(mergedEndpoint, repositoryEndpoint, StringComparison.Ordinal)
             ? null
-            : merged.Endpoint;
+            : mergedEndpoint;
+    }
 }
