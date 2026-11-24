@@ -110,6 +110,22 @@ describe('useSectionPage', () => {
     expect(result.current.page).toBe(2)
   })
 
+  it('reports a failed page turn instead of holding the previous page silently', async () => {
+    const fetchPage = vi.fn(async (sessionId: string, page: number) => {
+      if (page === 2) throw new Error('page 2 failed')
+      return pageOf(sessionId, page)
+    })
+    const { result } = mountHook(fetchPage, { sessionId: SESSION })
+
+    await waitFor(() => expect(result.current.data).toBeDefined())
+    act(() => result.current.setPage(2))
+    // The failed page is an error the section shows, never page 1's rows
+    // standing in for page 2 with no word of the failure.
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(result.current.failure).toBe('page 2 failed')
+    expect(result.current.data).toBeUndefined()
+  })
+
   it('refetch re-runs the query for the page the viewer is on', async () => {
     const fetchPage = vi.fn(async (sessionId: string, page: number) => pageOf(sessionId, page))
     const { result } = mountHook(fetchPage, { sessionId: SESSION })
