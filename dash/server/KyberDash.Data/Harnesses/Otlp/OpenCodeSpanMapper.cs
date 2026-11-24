@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using KyberDash.Data.Collector;
 using KyberDash.Domain;
 
@@ -23,9 +22,6 @@ namespace KyberDash.Data.Harnesses.Otlp;
 /// </remarks>
 public partial class OpenCodeSpanMapper : OtlpSpanMapperBase
 {
-    [GeneratedRegex(@"^invoke_agent(?:[ :]|$)", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
-    private static partial Regex InvokeAgentNameRegex();
-
     /// <summary>Canonical harness identifier emitted for OpenCode OTLP spans.</summary>
     public const string OpenCodeHarnessId = "opencode";
 
@@ -108,29 +104,7 @@ public partial class OpenCodeSpanMapper : OtlpSpanMapperBase
             }
         }
 
-        return ResolveGenericOp(native);
-    }
-
-    private static RecordOp ResolveGenericOp(OtlpSpanNative native)
-    {
-        if (OtlpSpanNative.HasAnyKey(native.Attributes, ["gen_ai.tool.name"]))
-        {
-            return RecordOp.ToolInvoke;
-        }
-
-        if (string.Equals(native.OperationName, "invoke_agent", StringComparison.Ordinal)
-            || InvokeAgentNameRegex().IsMatch(native.Name))
-        {
-            return RecordOp.AgentInvoke;
-        }
-
-        if (OtlpSpanNative.HasAnyKey(native.Attributes, OtlpSpanNative.InputTokenKeys)
-            || OtlpSpanNative.HasAnyKey(native.Attributes, OtlpSpanNative.OutputTokenKeys))
-        {
-            return RecordOp.LlmInvoke;
-        }
-
-        return RecordOp.Unspecified;
+        return OtlpSpanMapperCore.ResolveGenericOp(native);
     }
 
     private static bool IsSupportedContract(OtlpSpanNative native) =>

@@ -132,6 +132,35 @@ public static class ToolContentMeasurer
         return Measure(raw, maxPlainTextBytes);
     }
 
+    /// <summary>
+    /// Measures a raw tool-result or message text at <see cref="CanonSynth.MaxToolResultBytes"/>
+    /// and projects it into the canonical <see cref="CollectedContentPart"/>: document-classified
+    /// text is withheld in full, and truncated plain text reports its original UTF-8 byte length.
+    /// Every harness mapper builds its content parts through this helper so the canonical part
+    /// contract stays identical across harnesses.
+    /// </summary>
+    /// <param name="position">Content-part position within the record.</param>
+    /// <param name="bucket">Content bucket the part belongs to.</param>
+    /// <param name="rawText">Raw text to classify and measure.</param>
+    /// <param name="role">Speaker role carried on the part.</param>
+    /// <returns>The projected <see cref="CollectedContentPart"/>.</returns>
+    public static CollectedContentPart BuildContentPart(int position, ContentBucket bucket, string rawText, string? role)
+    {
+        ToolContentMeasurement measurement = Measure(rawText, CanonSynth.MaxToolResultBytes);
+        return new CollectedContentPart(
+            Position: position,
+            Bucket: bucket,
+            PlainText: measurement.IsDocument ? null : measurement.PlainText,
+            Withheld: measurement.IsDocument ? measurement.ToWithheldText() : null,
+            ReportedTokens: null,
+            Server: null,
+            Role: role,
+            Resident: null,
+            OriginalUtf8BytesWhenTruncated: measurement.IsDocument
+                ? null
+                : measurement.OriginalUtf8BytesWhenTruncated);
+    }
+
     private static bool TryParseDocumentOrNested(string text, [NotNullWhen(true)] out JsonDocument? document)
     {
         string current = text;

@@ -347,7 +347,7 @@ public class WarpMapper : IHarnessMapper
                     correctionRule = check.Rule;
                 }
 
-                parts.Add(BuildContentPart(0, ContentBucket.UserMessage, userMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, userMessage, "user"));
             }
 
             List<CollectedTokenCount> tokens = inputTokens > 0
@@ -843,29 +843,6 @@ public class WarpMapper : IHarnessMapper
             null,
             [],
             new CollectedRecordSignals(null, null, null, null));
-    }
-
-    private static CollectedContentPart BuildContentPart(
-        int position,
-        ContentBucket bucket,
-        string rawText,
-        string role)
-    {
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(rawText, CanonSynth.MaxToolResultBytes);
-        string? plainText = measurement.IsDocument ? null : measurement.PlainText;
-        CollectedWithheldText? withheld = measurement.IsDocument ? measurement.ToWithheldText() : null;
-        long? originalBytes = measurement.IsDocument ? null : measurement.OriginalUtf8BytesWhenTruncated;
-
-        return new CollectedContentPart(
-            position,
-            bucket,
-            plainText,
-            withheld,
-            null,
-            null,
-            role,
-            null,
-            originalBytes);
     }
 
     private static string EnsureUniqueRecordId(HashSet<string> seenRecordIds, string candidate, int disambiguator) =>
