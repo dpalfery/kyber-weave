@@ -1862,4 +1862,26 @@ describe('ContextDoctor scope: harness and session', () => {
     // The index belonged to the previous page's rows.
     expect(box.getAttribute('aria-activedescendant')).toBeNull()
   })
+
+  it('clears the pending search timer when the picker unmounts', async () => {
+    stubScoped()
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout')
+    try {
+      const { unmount } = renderScoped({ activeHarness: 'pi' })
+      const box = await openPicker()
+      setTimeoutSpy.mockClear()
+
+      fireEvent.change(box, { target: { value: 'sess' } })
+      expect(setTimeoutSpy).toHaveBeenCalledTimes(1)
+      const pending = setTimeoutSpy.mock.results[0]!.value as ReturnType<typeof setTimeout>
+
+      unmount()
+      // The debounce must not outlive the picker that armed it.
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(pending)
+    } finally {
+      setTimeoutSpy.mockRestore()
+      clearTimeoutSpy.mockRestore()
+    }
+  })
 })

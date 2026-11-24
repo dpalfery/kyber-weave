@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Skeleton } from '../components/ui/skeleton.js'
 import {
@@ -117,7 +117,15 @@ export function SessionPicker({
     setPrevPage(page)
     setActiveIndex(-1)
   }
-  const pendingSearch = useMemo(() => ({ timer: undefined as ReturnType<typeof setTimeout> | undefined }), [])
+  const pendingSearch = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // The debounce must not outlive the picker that armed it: unmounting the
+  // picker leaves no timer behind to call back into a gone component.
+  useEffect(
+    () => () => {
+      if (pendingSearch.current !== undefined) clearTimeout(pendingSearch.current)
+    },
+    [],
+  )
 
   const displayValue = edited ?? (selectedLabel != null && selectedLabel.length > 0 ? selectedLabel : effectiveSessionId ?? '')
   const optionIds = ['all', ...options.map((session) => sessionIdOf(session))]
@@ -127,15 +135,15 @@ export function SessionPicker({
   const activeOptionId = activeIndex >= 0 ? optionIds[activeIndex] : undefined
 
   const cancelPendingSearch = () => {
-    if (pendingSearch.timer !== undefined) {
-      clearTimeout(pendingSearch.timer)
-      pendingSearch.timer = undefined
+    if (pendingSearch.current !== undefined) {
+      clearTimeout(pendingSearch.current)
+      pendingSearch.current = undefined
     }
   }
 
   const commitSearch = (text: string) => {
     cancelPendingSearch()
-    pendingSearch.timer = setTimeout(() => onSearch(text), SESSION_PICKER_SEARCH_DEBOUNCE_MS)
+    pendingSearch.current = setTimeout(() => onSearch(text), SESSION_PICKER_SEARCH_DEBOUNCE_MS)
   }
 
   const choose = (id: string | undefined) => {
