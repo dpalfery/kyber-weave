@@ -45,6 +45,7 @@ does not load the pool, so these rules are the only check on it. The ids are per
 | `KW-DOC-SKILL-004` | Error | A pool skill's `name` differs from its folder name |
 | `KW-DOC-SKILL-005` | Warning | A legacy `<scope>.skills.md` remains beside the list. Move any real guidance into a KW skill, list it, then delete the file. `docs standards migrate` leaves it for this warning |
 | `KW-DOC-SKILL-006` | Error | A technology or role is named `skills`, which is the pool folder's name |
+| `KW-DOC-SKILL-007` | Error | A pool skill folder holds no `SKILL.md`, or holds one behind a symbolic link, which is not followed |
 
 ### Configuration registry — `docs validate`
 

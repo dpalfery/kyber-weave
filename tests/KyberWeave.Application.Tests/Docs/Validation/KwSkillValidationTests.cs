@@ -11,8 +11,9 @@ namespace KyberWeave.Application.Tests.Docs.Validation;
 
 /// <summary>
 /// The KW-DOC-SKILL rules: what a scope's <c>&lt;scope&gt;.skills.yml</c> list may hold, what a repository
-/// pool <c>SKILL.md</c> must declare, that a legacy <c>.skills.md</c> is only a warning, and that no
-/// technology or role may be named <c>skills</c>. Each case yields exactly one finding with a fix hint.
+/// pool <c>SKILL.md</c> must declare, that a pool folder without a real <c>SKILL.md</c> is an error, that a
+/// legacy <c>.skills.md</c> is only a warning, and that no technology or role may be named <c>skills</c>.
+/// Each case yields exactly one finding with a fix hint.
 /// </summary>
 public sealed class KwSkillValidationTests
 {
@@ -302,6 +303,35 @@ public sealed class KwSkillValidationTests
         Diagnostic finding = Only(Validate(fixture, Dotnet), DocSpecValidator.SkillPoolFrontmatter, Severity.Error);
 
         Assert.Contains("no readable frontmatter", finding.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void APoolFolderWithNoSkillMdIsKwDocSkill007()
+    {
+        using DocFixture fixture = Scope("[]\n");
+        fixture.Memory!.CreateDirectory(Path.Combine(fixture.Root, "6-Docs", "standards", "skills", "go-gates"));
+
+        Diagnostic finding = Only(Validate(fixture, Dotnet), DocSpecValidator.SkillPoolMalformedFolder, Severity.Error);
+
+        Assert.Contains("go-gates", finding.Message, StringComparison.Ordinal);
+        Assert.Contains("SKILL.md", finding.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ASymlinkedSkillMdIsKwDocSkill007AndIsNeverFollowed()
+    {
+        // The link's target holds no frontmatter, so a followed link would report KW-DOC-SKILL-003;
+        // a single KW-DOC-SKILL-007 finding is the proof the link was reported without being read.
+        using DocFixture fixture = Scope("[]\n")
+            .Write("elsewhere/go-gates/SKILL.md", "no frontmatter at all\n");
+        fixture.Memory!.CreateDirectory(Path.Combine(fixture.Root, "6-Docs", "standards", "skills", "go-gates"));
+        fixture.Memory.CreateFileLink(
+            Path.Combine(fixture.Root, "6-Docs", "standards", "skills", "go-gates", "SKILL.md"),
+            Path.Combine(fixture.Root, "elsewhere", "go-gates", "SKILL.md"));
+
+        Diagnostic finding = Only(Validate(fixture, Dotnet), DocSpecValidator.SkillPoolMalformedFolder, Severity.Error);
+
+        Assert.Contains("symbolic link", finding.Message, StringComparison.Ordinal);
     }
 
     [Fact]

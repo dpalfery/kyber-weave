@@ -90,6 +90,9 @@ public sealed class DocSpecValidator
     /// <summary>A technology or role is named <c>skills</c>, which is the pool folder's name.</summary>
     public const string ReservedSkillsScope = "KW-DOC-SKILL-006";
 
+    /// <summary>A pool skill folder holds no <c>SKILL.md</c>, or holds one behind a symbolic link.</summary>
+    public const string SkillPoolMalformedFolder = "KW-DOC-SKILL-007";
+
     /// <summary>
     /// The scalar keys the required-key matrix can demand beyond the base set.
     /// </summary>

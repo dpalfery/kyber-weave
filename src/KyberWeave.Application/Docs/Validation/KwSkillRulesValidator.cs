@@ -76,7 +76,11 @@ internal sealed class KwSkillRulesValidator(string repoRoot, IFileSystem files, 
         }
     }
 
-    /// <summary>Checks each skill folder of a repository pool: its <c>SKILL.md</c> names and describes it, and its name is its folder.</summary>
+    /// <summary>
+    /// Checks each skill folder of a repository pool: its <c>SKILL.md</c> names and describes it, and its name
+    /// is its folder. A folder holding no <c>SKILL.md</c>, or holding one behind a symbolic link, is an error;
+    /// the link is never followed.
+    /// </summary>
     /// <param name="relativePool">The pool folder, repository-relative.</param>
     /// <param name="report">Receives the findings.</param>
     public void CheckPool(string relativePool, DiagnosticReport report)
@@ -91,7 +95,28 @@ internal sealed class KwSkillRulesValidator(string repoRoot, IFileSystem files, 
             string folderName = Path.GetFileName(entry.Path);
             string relativeSkill = $"{relativePool}/{folderName}/{SkillFile}";
             string absoluteSkill = Combine(relativeSkill);
-            if (!files.FileExists(absoluteSkill) || files.GetLinkTarget(absoluteSkill) is not null) continue;
+
+            // The link is asked about before existence, so a dangling link reports as a link
+            // rather than as a missing file, and a linked file is never read.
+            if (files.GetLinkTarget(absoluteSkill) is not null)
+            {
+                report.Add(new Diagnostic(
+                    DocSpecValidator.SkillPoolMalformedFolder, Severity.Error,
+                    $"the skill folder '{folderName}' holds its '{SkillFile}' behind a symbolic link, which is not followed.",
+                    folderName, relativeSkill,
+                    $"Replace the link with a real '{SkillFile}' file."));
+                continue;
+            }
+
+            if (!files.FileExists(absoluteSkill))
+            {
+                report.Add(new Diagnostic(
+                    DocSpecValidator.SkillPoolMalformedFolder, Severity.Error,
+                    $"the skill folder '{folderName}' holds no '{SkillFile}'.",
+                    folderName, relativeSkill,
+                    $"Add a '{SkillFile}' with a 'name:' line equal to the folder name and a 'description:' line that says when to use the skill."));
+                continue;
+            }
 
             CheckSkill(folderName, relativeSkill, absoluteSkill, entry.Path, report);
         }
