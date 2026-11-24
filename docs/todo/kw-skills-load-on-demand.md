@@ -48,6 +48,8 @@ In scope:
 - **Shipped and repository skills.** Kyber ships a starter set of KW skills, and `docs init` copies them into the
   repository's pool. A repository may add its own. When a shipped skill and a repository skill share a name, the
   repository's skill wins, in the injected list (its description) and in `load_skill` (its body and folder) alike.
+  The repository copy wins even when it is unusable (malformed, or outside the pool): the shipped copy is never a
+  silent fallback, and the skill is reported as malformed or outside the pool instead.
 - **Injection at agent start, for every agent.** The same dispatch hook that inserts rules and standards inserts a
   skills section for every Squad agent it starts, worker and role alike:
   - A worker gets the skills of its task's technology (and its parent's).
@@ -55,9 +57,12 @@ In scope:
     name maps to a role folder by exact match on this fixed table: `conductor` → `conductor`, `architect` →
     `architect`, `code-reviewer` → `reviewer`, `plan-reviewer` → `reviewer`. An agent not in the table (for example
     `docs-dev` today) has no role folder and gets no role skills; a new role folder adds its row to the table.
+    `docs validate` reports a shipped role folder with no table row and a table row whose folder does not exist, so
+    the table cannot drift from the folders unnoticed.
   - The section is wrapped in one `<kyber-weave-skills>` tag and lists one entry per skill with its `name` and
     `description`, each XML-escaped, so a description cannot close or forge the tag.
-  - A listed skill that has no folder or a malformed `SKILL.md` is left out of the entries, and the section ends with
+  - A listed name that is not a skill name, or a listed skill that has no folder or a malformed `SKILL.md`, is left
+    out of the entries, and the section ends with
     one line naming each left-out skill, so a partial list never reads as complete. `docs validate` reports the same
     skills.
   - When the task-prompt budget cuts the section, the section says it is partial and names the skills it left out,
@@ -74,20 +79,24 @@ In scope:
   - Returns the skill's `SKILL.md` body, the folder the skill was read from, and the absolute path of each reference
     file in the skill folder. The agent reads reference files with its own read tool; the server adds no read tool for
     them. Reference paths are every regular file under the skill folder except `SKILL.md`, in ordinal path order,
-    leaving out any link that resolves outside the folder, and at most 100 paths; past 100 the reply says how many
-    more there are.
+    at most 100 paths; past 100 the reply says how many more there are. Enumeration never enters a linked directory,
+    and a file is listed only when its resolved path lies inside the skill folder.
+  - The `SKILL.md` body is capped at 64 KiB; past the cap the reply says it is truncated and gives the body's full
+    size.
   - Resolves the repository copy before the shipped copy.
-  - Answers an unknown name with the list of skill names that exist, and a malformed skill (no `name` or
-    `description`) with what is missing; neither is a tool failure. Each of these replies opens with a status line a
-    caller can match: `STATUS: SKILL_NOT_FOUND`, `STATUS: SKILL_MALFORMED`, `STATUS: SKILL_NAME_INVALID` or
-    `STATUS: SKILL_OUTSIDE_POOL`.
+  - Answers an unknown name with the skill names that exist (sorted, at most 100, with a count of the rest), and a malformed skill (no `name` or
+    `description`) with what is missing; neither is a tool failure.
+  - Every reply has a status line a caller can match, directly after the provenance line every kw-docs response opens
+    with: `STATUS: SKILL_LOADED` on success, otherwise `STATUS: SKILL_NOT_FOUND`, `STATUS: SKILL_MALFORMED`,
+    `STATUS: SKILL_NAME_INVALID` or `STATUS: SKILL_OUTSIDE_POOL`.
   - Starts with the provenance line every kw-docs response carries.
 - **Validation.** `docs validate` reports:
-  - a `.skills.yml` that is not a list of names;
+  - a `.skills.yml` that is not a list of names, or that lists a name that is not a skill name;
   - a listed skill with no folder in the pool;
   - a `SKILL.md` with no `name` or no `description`, or whose `name` is not its folder's name;
   - a skill folder whose name is not a skill name;
-  - a `<scope>.skills.md` left in a standards folder after migration.
+  - a `<scope>.skills.md` left in a standards folder after migration;
+  - a shipped role folder with no row in the role table, or a table row whose role folder does not exist.
 - **Never deployed to a harness.** `squad update` does not copy KW skills into any harness skill folder.
 - **KyberDash.** Each `load_skill` call is recorded with the skill, the agent, the session and the time. KyberDash
   shows KW skill loads in their own section, separate from harness skill use. Recording only: nothing is blocked or
@@ -138,6 +147,14 @@ KyberDash shows which skills agents actually load, so unused skills can be cut a
 - `code-reviewer` and `plan-reviewer` get the `reviewer` folder's skills; an agent with no row in the role table gets
   no role section.
 - A listed skill with no folder is named on the section's left-out line, not silently dropped.
+- A repository copy that is malformed is reported as malformed by `load_skill` and the section; the shipped copy of
+  the same name is not used.
+- `load_skill` on a skill folder holding a linked directory that points outside it lists no path from that directory.
+- A `SKILL.md` larger than 64 KiB comes back cut at the cap with the truncation and full size stated.
+- Every `load_skill` reply has the provenance line first and a `STATUS:` line second, `STATUS: SKILL_LOADED` on
+  success.
+- `docs validate` reports each case in its list once: a `.skills.yml` listing an invalid name, a skill folder with an
+  invalid name, a leftover `.skills.md`, and a role folder and role table that disagree.
 - `docs validate` reports a listed skill that has no folder, a `SKILL.md` missing `name` or `description`, a `name`
   that differs from its folder, and a `.skills.yml` that is not a list of names.
 - After `squad update`, no harness skill folder contains a KW skill.
@@ -154,7 +171,10 @@ KyberDash shows which skills agents actually load, so unused skills can be cut a
 - Call `load_skill` against a tree holding a repository copy and a shipped copy of one name, and assert the
   repository body and folder come back, with reference paths and no reference contents.
 - Call `load_skill` with an unknown name and assert the reply lists the existing names and is not a tool failure.
-- Run `docs validate` over fixtures for each validation case and assert one finding each.
+- Run `docs validate` over fixtures for each validation case (including an invalid listed name, an invalid folder
+  name, a leftover `.skills.md`, and a role folder with no table row) and assert one finding each.
+- Call `load_skill` on fixtures for each refusal (invalid name, linked folder outside the pool, malformed repository
+  copy over a valid shipped copy) and assert the status line and that no file outside the pool was read.
 - Run `squad update` into a scratch home and assert no harness skill folder holds a KW skill.
 - Feed KyberDash a session containing a `load_skill` call and assert it appears in the KW skills section and not
   among harness skills.
