@@ -5,7 +5,9 @@ using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
+using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
@@ -531,6 +533,65 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     }
 
     /// <summary>
+    /// The issue's repro at the command seam: the host config names <c>none</c>, the per-user
+    /// override names <c>systemone</c> at the override endpoint, and the key is stored only under
+    /// the override origin, so a dry run completes with exit 0 and no key finding.
+    /// </summary>
+    [Fact]
+    public void Install_SystemoneWithOverrideEndpointAndStoredKey_CompletesTheDryRun()
+    {
+        const string origin = "https://openrouter.ai";
+        string host = NewDir("install-override-endpoint");
+        WriteOverride("provider:\n  kind: systemone\n  endpoint: https://openrouter.ai/api/v1\n  model: jev-1.14.0\n");
+        _store.Seed(origin, "override-key");
+
+        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterInstallSettings
+            {
+                Path = host,
+                Target = "factory",
+                Provider = "systemone",
+                DryRun = true,
+                Project = true,
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.DoesNotContain(ArbiterKeyResolver.MissingKeyCode, execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An unparseable endpoint in the per-user override fails closed with a configuration error
+    /// naming the override file instead of falling back to the TypeSafe origin and raising
+    /// <c>KW-ARB-KEY-001</c>.
+    /// </summary>
+    [Fact]
+    public void Install_SystemoneWithInvalidOverrideEndpoint_FailsClosedNamingOverrideFile()
+    {
+        string host = NewDir("install-invalid-override-endpoint");
+        WriteOverride("provider:\n  kind: systemone\n  endpoint: not-a-url\n  model: jev-1.14.0\n");
+
+        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterInstallSettings
+            {
+                Path = host,
+                Target = "factory",
+                Provider = "systemone",
+                DryRun = true,
+                Project = true,
+            }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains(RuleValidator.MalformedSection, execution.Output, StringComparison.Ordinal);
+        Assert.Contains(ArbiterUserSettings.GetPath(_home), execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(ArbiterKeyResolver.MissingKeyCode, execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(TypeSafeOrigin, execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A dry run with an explicit <c>--config</c> that does not exist still reports the missing
     /// file; only a bare root with no config option is previewed from the YAML a real run would
     /// write.
@@ -563,6 +624,13 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
         _files.WriteAllText(
             ConfigPath(host),
             $"arbiter:\n  enabled: true\n  provider:\n    kind: {kind}\n");
+    }
+
+    private void WriteOverride(string yaml)
+    {
+        string directory = Path.Combine(_home, ".config", "kyber-weave");
+        _files.CreateDirectory(directory);
+        _files.WriteAllText(Path.Combine(directory, "arbiter.yml"), yaml);
     }
 
     private static string ConfigPath(string host) =>

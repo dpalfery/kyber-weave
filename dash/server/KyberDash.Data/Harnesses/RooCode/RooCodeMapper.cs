@@ -269,7 +269,7 @@ public partial class RooCodeMapper : IHarnessMapper
                     correctionRule = check.Rule;
                 }
 
-                parts.Add(BuildContentPart(0, ContentBucket.UserMessage, document.UserMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, document.UserMessage, "user"));
             }
 
             (IReadOnlyList<CollectedTokenCount> tokens, long? reportedInput, long? reportedOutput) = BuildTokens(request);
@@ -457,29 +457,6 @@ public partial class RooCodeMapper : IHarnessMapper
         }
 
         return (tokens, hasInput ? inputSum : null, request.OutputTokens);
-    }
-
-    private static CollectedContentPart BuildContentPart(
-        int position,
-        ContentBucket bucket,
-        string rawText,
-        string role)
-    {
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(rawText, CanonSynth.MaxToolResultBytes);
-        string? plainText = measurement.IsDocument ? null : measurement.PlainText;
-        CollectedWithheldText? withheld = measurement.IsDocument ? measurement.ToWithheldText() : null;
-        long? originalBytes = measurement.IsDocument ? null : measurement.OriginalUtf8BytesWhenTruncated;
-
-        return new CollectedContentPart(
-            Position: position,
-            Bucket: bucket,
-            PlainText: plainText,
-            Withheld: withheld,
-            ReportedTokens: null,
-            Server: null,
-            Role: role,
-            Resident: null,
-            OriginalUtf8BytesWhenTruncated: originalBytes);
     }
 
     private static string ResolveTaskId(string sourceKey)

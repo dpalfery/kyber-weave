@@ -458,7 +458,7 @@ public class KimiCodeMapper : IHarnessMapper
                     correctionRule = check.Rule;
                 }
 
-                parts.Add(BuildContentPart(0, ContentBucket.UserMessage, call.UserMessage, "user"));
+                parts.Add(ToolContentMeasurer.BuildContentPart(0, ContentBucket.UserMessage, call.UserMessage, "user"));
             }
 
             List<CollectedTokenCount> tokens =
@@ -579,29 +579,6 @@ public class KimiCodeMapper : IHarnessMapper
             AgentInstanceId: null,
             ToolDefinitions: [],
             Signals: new CollectedRecordSignals(null, null, null, null));
-    }
-
-    private static CollectedContentPart BuildContentPart(
-        int position,
-        ContentBucket bucket,
-        string rawText,
-        string role)
-    {
-        ToolContentMeasurement measurement = ToolContentMeasurer.Measure(rawText, CanonSynth.MaxToolResultBytes);
-        string? plainText = measurement.IsDocument ? null : measurement.PlainText;
-        CollectedWithheldText? withheld = measurement.IsDocument ? measurement.ToWithheldText() : null;
-        long? originalBytes = measurement.IsDocument ? null : measurement.OriginalUtf8BytesWhenTruncated;
-
-        return new CollectedContentPart(
-            Position: position,
-            Bucket: bucket,
-            PlainText: plainText,
-            Withheld: withheld,
-            ReportedTokens: null,
-            Server: null,
-            Role: role,
-            Resident: null,
-            OriginalUtf8BytesWhenTruncated: originalBytes);
     }
 
     private static string ResolveSessionId(string sourceKey)

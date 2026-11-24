@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using KyberDash.Data.Collector;
 using KyberDash.Domain;
 
@@ -19,43 +18,18 @@ namespace KyberDash.Data.Harnesses.Otlp;
 /// </remarks>
 public partial class CopilotSpanMapper : OtlpSpanMapperBase
 {
-    [GeneratedRegex(@"^invoke_agent(?:[ :]|$)", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
-    private static partial Regex InvokeAgentNameRegex();
-
     /// <summary>Canonical harness identifier emitted for Copilot OTLP spans.</summary>
     public const string CopilotHarnessId = "copilot";
 
     /// <inheritdoc />
     protected override string CanonicalHarnessId => CopilotHarnessId;
 
-    private static readonly OtlpSpanMapperCore.OtlpMapperHooks MapperHooks = new(ResolveOp, TryBuildTokenUsage);
+    private static readonly OtlpSpanMapperCore.OtlpMapperHooks MapperHooks = new(OtlpSpanMapperCore.ResolveGenericOp, TryBuildTokenUsage);
 
     /// <summary>Initializes a new instance of the <see cref="CopilotSpanMapper"/> class.</summary>
     public CopilotSpanMapper()
         : base(MapperHooks)
     {
-    }
-
-    private static RecordOp ResolveOp(OtlpSpanNative native)
-    {
-        if (OtlpSpanNative.HasAnyKey(native.Attributes, ["gen_ai.tool.name"]))
-        {
-            return RecordOp.ToolInvoke;
-        }
-
-        if (string.Equals(native.OperationName, "invoke_agent", StringComparison.Ordinal)
-            || InvokeAgentNameRegex().IsMatch(native.Name))
-        {
-            return RecordOp.AgentInvoke;
-        }
-
-        if (OtlpSpanNative.HasAnyKey(native.Attributes, OtlpSpanNative.InputTokenKeys)
-            || OtlpSpanNative.HasAnyKey(native.Attributes, OtlpSpanNative.OutputTokenKeys))
-        {
-            return RecordOp.LlmInvoke;
-        }
-
-        return RecordOp.Unspecified;
     }
 
     private static bool TryBuildTokenUsage(OtlpSpanNative native, RecordOp op, out TokenUsage? usage)

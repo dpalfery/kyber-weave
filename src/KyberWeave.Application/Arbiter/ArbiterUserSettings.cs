@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -17,11 +19,141 @@ namespace KyberWeave.Core.Arbiter;
 /// </remarks>
 public static class ArbiterUserSettings
 {
+    private const int MaxCandidateDisplayLength = 200;
+
     /// <summary>Locates the override file under an injected home directory.</summary>
     public static string GetPath(string homeDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
         return Path.Combine(homeDirectory, ".config", "kyber-weave", "arbiter.yml");
+    }
+
+    /// <summary>
+    /// Trims the effective provider's endpoint and derives its <c>scheme://host[:port]</c> origin,
+    /// or builds a <c>KW-ARB-CONFIG-001</c> error naming the user override file or host configuration
+    /// when the endpoint is blank or not an absolute <c>http(s)</c> URL.
+    /// </summary>
+    /// <param name="repositoryProvider">The repository provider before the per-user override was applied.</param>
+    /// <param name="effectiveProvider">The merged provider whose endpoint is resolved.</param>
+    /// <param name="homeDirectory">The home directory where the per-user override lives.</param>
+    /// <param name="configPath">The loaded host configuration path, or null when none was recorded.</param>
+    /// <param name="endpoint">The trimmed endpoint URL when valid.</param>
+    /// <param name="origin">The derived endpoint origin when valid.</param>
+    /// <param name="error">The configuration error message when invalid.</param>
+    /// <returns><see langword="true"/> when the endpoint and origin resolved; otherwise <see langword="false"/>.</returns>
+    public static bool TryResolveEndpointOrigin(
+        ArbiterProviderConfig repositoryProvider,
+        ArbiterProviderConfig effectiveProvider,
+        string homeDirectory,
+        string? configPath,
+        out string endpoint,
+        out string origin,
+        [NotNullWhen(false)] out string? error) =>
+        TryResolveEndpointOriginCore(
+            repositoryProvider,
+            effectiveProvider,
+            endpointFromOverride: null,
+            homeDirectory,
+            configPath,
+            out endpoint,
+            out origin,
+            out error);
+
+    /// <summary>
+    /// Trims the effective provider's endpoint and derives its <c>scheme://host[:port]</c> origin,
+    /// or builds a <c>KW-ARB-CONFIG-001</c> error naming the user override file when
+    /// <paramref name="endpointFromOverride"/> is <see langword="true"/> or the host configuration otherwise.
+    /// </summary>
+    /// <param name="repositoryProvider">The repository provider before the per-user override was applied.</param>
+    /// <param name="effectiveProvider">The merged provider whose endpoint is resolved.</param>
+    /// <param name="endpointFromOverride">Whether the per-user override explicitly supplied <c>provider.endpoint</c>.</param>
+    /// <param name="homeDirectory">The home directory where the per-user override lives.</param>
+    /// <param name="configPath">The loaded host configuration path, or null when none was recorded.</param>
+    /// <param name="endpoint">The trimmed endpoint URL when valid.</param>
+    /// <param name="origin">The derived endpoint origin when valid.</param>
+    /// <param name="error">The configuration error message when invalid.</param>
+    /// <returns><see langword="true"/> when the endpoint and origin resolved; otherwise <see langword="false"/>.</returns>
+    public static bool TryResolveEndpointOrigin(
+        ArbiterProviderConfig repositoryProvider,
+        ArbiterProviderConfig effectiveProvider,
+        bool endpointFromOverride,
+        string homeDirectory,
+        string? configPath,
+        out string endpoint,
+        out string origin,
+        [NotNullWhen(false)] out string? error) =>
+        TryResolveEndpointOriginCore(
+            repositoryProvider,
+            effectiveProvider,
+            endpointFromOverride,
+            homeDirectory,
+            configPath,
+            out endpoint,
+            out origin,
+            out error);
+
+    internal static string NormalizeEndpoint(string? endpoint) =>
+        string.IsNullOrWhiteSpace(endpoint) ? string.Empty : endpoint.Trim();
+
+    internal static bool EndpointsEqual(string? left, string? right) =>
+        string.Equals(NormalizeEndpoint(left), NormalizeEndpoint(right), StringComparison.Ordinal);
+
+    private static bool TryResolveEndpointOriginCore(
+        ArbiterProviderConfig repositoryProvider,
+        ArbiterProviderConfig effectiveProvider,
+        bool? endpointFromOverride,
+        string homeDirectory,
+        string? configPath,
+        out string endpoint,
+        out string origin,
+        [NotNullWhen(false)] out string? error)
+    {
+        ArgumentNullException.ThrowIfNull(repositoryProvider);
+        ArgumentNullException.ThrowIfNull(effectiveProvider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
+
+        string candidate = NormalizeEndpoint(effectiveProvider.Endpoint);
+        string? resolvedOrigin = candidate.Length == 0
+            ? null
+            : ArbiterKeyResolver.GetOrigin(candidate);
+        if (resolvedOrigin is not null)
+        {
+            endpoint = candidate;
+            origin = resolvedOrigin;
+            error = null;
+            return true;
+        }
+
+        endpoint = string.Empty;
+        origin = string.Empty;
+        bool fromOverride = endpointFromOverride
+            ?? !EndpointsEqual(effectiveProvider.Endpoint, repositoryProvider.Endpoint);
+        string source = fromOverride
+            ? $"The user override '{GetPath(homeDirectory)}'"
+            : !string.IsNullOrWhiteSpace(configPath)
+                ? $"The host configuration '{configPath}'"
+                : "The host configuration";
+        string displayCandidate = FormatCandidateForError(candidate);
+        error = $"[{RuleValidator.MalformedSection}] {source} has an invalid arbiter.provider.endpoint '{displayCandidate}'; expected an absolute http(s) URL.";
+        return false;
+    }
+
+    /// <summary>Collapses line endings and caps a candidate string at 200 characters for single-line errors.</summary>
+    internal static string FormatCandidateForError(string candidate)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+
+        // A line-ending pair collapses two characters into one, so twice the cap is enough raw text
+        // to fill the display. The rest of a huge candidate is never copied.
+        int take = Math.Min(candidate.Length, MaxCandidateDisplayLength * 2);
+        string oneLine = candidate[..take].ReplaceLineEndings(" ");
+        bool truncated = candidate.Length > take || oneLine.Length > MaxCandidateDisplayLength;
+        if (oneLine.Length > MaxCandidateDisplayLength)
+        {
+            oneLine = oneLine[..MaxCandidateDisplayLength];
+        }
+
+        return truncated ? oneLine + "..." : oneLine;
     }
 
     /// <summary>

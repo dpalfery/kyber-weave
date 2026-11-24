@@ -632,6 +632,44 @@ public class OperationalStoreTests : IDisposable
         Assert.Empty(store.ExecutedSql);
     }
 
+    [Fact]
+    public void NegativeCounters_ThrowTheSameConstraintDiagnostic_ForIntAndLongColumns()
+    {
+        string dbPath = Path.Combine(directory.Path, "negative-counters", "canon.db");
+        RecordingSqliteRelationalStore store = new(dbPath, new SqliteCircuitBreaker());
+        store.ClearRecordedSql();
+
+        DashValidationException longError = Assert.Throws<DashValidationException>(() => store.SetWriteMarker(-5));
+        DashValidationException intError = Assert.Throws<DashValidationException>(
+            () => store.UpsertSourceCheckpoint(new SourceCheckpoint(
+                HarnessId: "claude-code",
+                SourceKey: "src-1",
+                ProviderId: "claude",
+                ParserId: "claude-transcript-reader",
+                ParserContractVersion: "1",
+                Format: "claude-jsonl",
+                SourceRootLabel: "~/.claude",
+                RevisionToken: "rev",
+                CoveredFromUtc: "2026-11-19T00:00:00Z",
+                CoveredThroughUtc: "2026-11-19T08:00:00Z",
+                LastAttemptUtc: "2026-11-19T08:00:00Z",
+                LastSuccessUtc: null,
+                LastStatus: "ok",
+                LastErrorCode: null,
+                UnitCount: -1,
+                RecordCount: -1)));
+
+        Assert.Equal(SqliteRelationalStore.ConstraintViolatedCode, longError.Code);
+        Assert.Equal(SqliteRelationalStore.ConstraintViolatedCode, intError.Code);
+        Assert.Equal(
+            "INTEGER column 'store_write_marker.records_write_seq' cannot be negative.",
+            longError.Message);
+        Assert.Equal(
+            "INTEGER column 'source_checkpoint.unit_count' cannot be negative.",
+            intError.Message);
+        Assert.Empty(store.ExecutedSql);
+    }
+
     private static void AssertConstraintViolated(Action action, RecordingSqliteRelationalStore store)
     {
         DashValidationException ex = Assert.Throws<DashValidationException>(action);

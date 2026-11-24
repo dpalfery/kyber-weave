@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Arbiter;
@@ -25,8 +24,8 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 /// before configuration loads. <c>updatedInput</c> replaces the entire input, so the
 /// strip path copies every <c>tool_input</c> field and only rewrites <c>prompt</c>.
 /// Background launches (<c>status: async_launched</c>) record the
-/// <c>tool_use_id</c>-to-<c>agentId</c> link and write nothing. A hand-back is keyed
-/// by the payload's <c>agent_id</c>, joined to its dispatch through that link, and
+/// dispatch with the engine, which saves it in the Arbiter's state, and write nothing. A hand-back is keyed
+/// by the payload's <c>agent_id</c>, joined to its dispatch through that saved record, and
 /// carries <c>tool_input.message</c> as the output; it is never denied, so a
 /// non-allow outcome returns <c>allow</c> with the envelope or note appended to
 /// <c>message</c> after one blank line.
@@ -59,22 +58,6 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     /// strip-only allow can be exercised. Never set in production.
     /// </summary>
     internal Exception? ModelWriteFault { get; set; }
-
-    /// <summary>
-    /// Background-launch links by harness tool-call id. In-memory by design: the hook
-    /// host is a short-lived process per event, and the link only correlates a launch
-    /// with its later return within one session.
-    /// </summary>
-    internal static readonly ConcurrentDictionary<string, string> LaunchLinks = new();
-
-    /// <summary>
-    /// Hand-back returns by returning <c>agent_id</c>, mapped to the joined dispatch
-    /// <c>tool_use_id</c> where task 4.1's <c>agentId</c> link resolves one, and to
-    /// <see cref="string.Empty"/> where the return arrived with no join (unpaired, for
-    /// <c>KW-ARB-AUDIT-003</c> to report). A foreground <c>PostToolUse(Agent)</c> with
-    /// <c>status: completed</c> for a recorded <c>agentId</c> is not recorded twice.
-    /// </summary>
-    internal static readonly ConcurrentDictionary<string, string> HandbackReturns = new();
 
     /// <summary>Creates an adapter over the hook decision engine.</summary>
     public ClaudeHookAdapter(IHookDecisionEngine engine)
@@ -202,7 +185,8 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             Token,
             GetString(payload, "session_id"),
             string.IsNullOrWhiteSpace(agent) ? [] : [agent],
-            context);
+            context,
+            GetString(payload, "agent_id"));
     }
 
     /// <summary>Resolves the caller: the payload's <c>agent_type</c> outranks <c>--caller</c>.</summary>
@@ -374,9 +358,30 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         {
             string? toolUseId = GetString(payload, "tool_use_id");
             string? agentId = GetString(response, "agentId");
-            if (!string.IsNullOrWhiteSpace(toolUseId) && !string.IsNullOrWhiteSpace(agentId))
+            string? sessionId = GetString(payload, "session_id");
+            if (_engine is IBackgroundDispatchEngine background)
             {
-                LaunchLinks[toolUseId] = agentId;
+                if (string.IsNullOrWhiteSpace(agentId) || string.IsNullOrWhiteSpace(sessionId))
+                {
+                    context.Log.WriteLine(
+                        $"Arbiter: background launch of agent '{agentId ?? "(none)"}' in session '{sessionId ?? "(none)"}' " +
+                        "is not recorded; a launch needs both an agent id and a session id.");
+                }
+                else
+                {
+                    // The engine saves the dispatch in the Arbiter's own state: each hook event is a separate process,
+                    // so nothing here may keep it in memory.
+                    background.TrackBackgroundDispatch(
+                        new BackgroundDispatch(
+                            Token,
+                            sessionId,
+                            agentId,
+                            caller,
+                            SubagentTypeOf(payload),
+                            PromptOf(payload),
+                            toolUseId),
+                        context);
+                }
             }
 
             return string.Empty;
@@ -388,27 +393,41 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
                 $"Malformed Claude hook event: unknown PostToolUse status '{status ?? "<missing>"}'.");
         }
 
-        string? target = null;
-        string prompt = string.Empty;
-        if (payload.TryGetProperty("tool_input", out JsonElement toolInput)
-            && toolInput.ValueKind == JsonValueKind.Object)
-        {
-            target = GetString(toolInput, "subagent_type");
-            // The return classifies to its dispatch's trigger family, so the
-            // original prompt rides along best effort; without it the engine
-            // classifies from caller and target alone.
-            prompt = GetString(toolInput, "prompt") ?? string.Empty;
-        }
-
-        // No double recording: a hand-back already delivered this return.
         string? completedAgentId = GetString(response, "agentId");
+        string? completedSession = GetString(payload, "session_id");
+        HookOutcome outcome;
         if (!string.IsNullOrWhiteSpace(completedAgentId)
-            && HandbackReturns.ContainsKey(completedAgentId))
+            && !string.IsNullOrWhiteSpace(completedSession)
+            && _engine is IBackgroundDispatchEngine followed
+            && followed.FindBackgroundDispatch(completedSession, completedAgentId, context) is { } saved)
         {
-            return string.Empty;
-        }
+            if (saved.LastResponseDigest is not null)
+            {
+                // A hand-back already stored this return. The completed post is the same turn seen again.
+                return string.Empty;
+            }
 
-        HookOutcome outcome = DecidePost(payload, caller, target, prompt, response.GetRawText(), config, context);
+            // The launch is saved and no return is stored yet. Record this turn against that pre,
+            // so a repeat of the same text is not a second row.
+            outcome = followed.DecideBackgroundReturn(
+                Token, completedSession, completedAgentId, response.GetRawText(), config, context);
+        }
+        else
+        {
+            string? target = null;
+            string prompt = string.Empty;
+            if (payload.TryGetProperty("tool_input", out JsonElement toolInput)
+                && toolInput.ValueKind == JsonValueKind.Object)
+            {
+                target = GetString(toolInput, "subagent_type");
+                // The return classifies to its dispatch's trigger family, so the
+                // original prompt rides along best effort; without it the engine
+                // classifies from caller and target alone.
+                prompt = GetString(toolInput, "prompt") ?? string.Empty;
+            }
+
+            outcome = DecidePost(payload, caller, target, prompt, response.GetRawText(), config, context);
+        }
         return outcome.Kind switch
         {
             HookOutcomeKind.PassThrough => string.Empty,
@@ -433,18 +452,18 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     /// <summary>
     /// Handles a background-dispatch return through <c>PreToolUse</c> on
     /// <c>SubagentHandback</c>: records it under the payload's <c>agent_id</c>,
-    /// joined to its dispatch through task 4.1's <c>agentId</c> link, runs the
+    /// joined to its saved dispatch, runs the
     /// post-dispatch rules over <c>tool_input.message</c>, and delivers a non-allow
     /// outcome as <c>allow</c> with the complete input (the envelope or note
     /// appended to <c>message</c> after one blank line). The hand-back is never
     /// denied: a return with no join is recorded unpaired and allowed.
     /// </summary>
     /// <remarks>
-    /// The hand-back evaluates through the same contextual path as a foreground
-    /// return: the returning agent is both caller and target, and there is no
-    /// dispatch prompt to ride along, so the prompt is empty. A plain
-    /// <see cref="IHookDecisionEngine"/> falls back to the context-free overload,
-    /// which is the call task 4.4's tests script.
+    /// A followed dispatch is evaluated by <see cref="IBackgroundDispatchEngine.DecideBackgroundReturn"/> with the
+    /// dispatch's own caller, target and prompt, as a foreground return is. An agent with no saved record is
+    /// evaluated through the same contextual path with the returning agent as both caller and target and an empty
+    /// prompt, and its row carries no <c>pre-id</c>. A plain <see cref="IHookDecisionEngine"/> falls back to the
+    /// context-free overload. The pending note is not taken here: it already rides in the hand-back message.
     /// </remarks>
     private string HandleHandback(JsonElement payload, string caller, KyberWeaveConfig config, HookContext context)
     {
@@ -463,8 +482,24 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
                 "Malformed Claude hook event: SubagentHandback input carries no message.");
         }
 
-        HookOutcome outcome = DecidePost(payload, caller, caller, string.Empty, message, config, context);
-        HandbackReturns[agentId] = JoinedToolUseId(agentId) ?? string.Empty;
+        string? sessionId = GetString(payload, "session_id");
+        HookOutcome outcome;
+        if (_engine is IBackgroundDispatchEngine background
+            && !string.IsNullOrWhiteSpace(sessionId)
+            && background.FindBackgroundDispatch(sessionId, agentId, context) is not null)
+        {
+            // The saved record carries the dispatch's caller, target and prompt, so the return is judged as a
+            // foreground return of that dispatch would be, and pairs with its pre event.
+            outcome = background.DecideBackgroundReturn(Token, sessionId, agentId, message, config, context);
+        }
+        else
+        {
+            context.Log.WriteLine(
+                $"Arbiter: no followed background dispatch for agent '{agentId}' in session '{sessionId ?? "(none)"}'; " +
+                "its return is recorded unpaired.");
+            outcome = DecidePost(payload, caller, caller, string.Empty, message, config, context);
+        }
+
         return outcome.Kind switch
         {
             HookOutcomeKind.PassThrough => string.Empty,
@@ -492,24 +527,6 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             _ => throw new InvalidOperationException(
                 $"Hook engine returned pre-dispatch outcome '{outcome.Kind}' for a post-dispatch event."),
         };
-    }
-
-    /// <summary>
-    /// Joins a returning <c>agent_id</c> to its dispatch through task 4.1's
-    /// <c>agentId</c> link. Null when the return arrived with no join: it is still
-    /// recorded, unpaired, for <c>KW-ARB-AUDIT-003</c> to report.
-    /// </summary>
-    private static string? JoinedToolUseId(string agentId)
-    {
-        foreach (KeyValuePair<string, string> link in LaunchLinks)
-        {
-            if (string.Equals(link.Value, agentId, StringComparison.Ordinal))
-            {
-                return link.Key;
-            }
-        }
-
-        return null;
     }
 
     private HookOutcome DecidePre(
@@ -582,6 +599,12 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         throw new InvalidOperationException(
             "Malformed Claude hook event: the tool event carries no tool_input object.");
     }
+
+    private static string PromptOf(JsonElement payload) =>
+        payload.TryGetProperty("tool_input", out JsonElement toolInput)
+        && toolInput.ValueKind == JsonValueKind.Object
+            ? GetString(toolInput, "prompt") ?? string.Empty
+            : string.Empty;
 
     private static string? SubagentTypeOf(JsonElement payload) =>
         payload.TryGetProperty("tool_input", out JsonElement toolInput)

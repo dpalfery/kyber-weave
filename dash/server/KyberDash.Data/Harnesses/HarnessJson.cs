@@ -298,6 +298,50 @@ public static class HarnessJson
     }
 
     /// <summary>
+    /// Reads the Codex message text from <c>content</c>: a plain string, or the non-empty
+    /// <c>text</c> blocks of a content array joined with newlines. Both Codex ingestion paths
+    /// (the rollout mapper and the transcript reader) read message text through this helper so
+    /// they cannot disagree on what a message says.
+    /// </summary>
+    /// <param name="payload">Codex rollout payload object.</param>
+    /// <returns>The message text, or <see langword="null"/> when absent or empty.</returns>
+    public static string? ReadCodexMessageText(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("content", out JsonElement content))
+        {
+            return null;
+        }
+
+        if (content.ValueKind == JsonValueKind.String)
+        {
+            string? text = content.GetString();
+            return string.IsNullOrEmpty(text) ? null : text;
+        }
+
+        if (content.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        List<string> texts = [];
+        foreach (JsonElement block in content.EnumerateArray())
+        {
+            if (block.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            string? text = ReadString(block, "text");
+            if (!string.IsNullOrEmpty(text))
+            {
+                texts.Add(text);
+            }
+        }
+
+        return texts.Count > 0 ? string.Join('\n', texts) : null;
+    }
+
+    /// <summary>
     /// Resolves the Codex harness identifier, defaulting blank or <c>codex</c> units to the
     /// canonical Codex harness id and otherwise preserving the normalized id.
     /// </summary>
