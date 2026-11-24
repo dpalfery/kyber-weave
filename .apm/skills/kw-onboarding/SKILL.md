@@ -79,7 +79,7 @@ Exit `3` means CodeGraph is not installed: the user installs it themselves.
 
 Load [references/mcp-and-index.md](references/mcp-and-index.md). Ask, in order and only where
 detection shows a gap: build the code index; then the worktree git hook (its fix also refreshes
-the index, so only after a yes to indexing); declare the `codegraph` server; wire the two servers
+the index, so only after a yes to indexing); the `.gitignore` line for the agent worktree folder `.agent_worktrees/`; declare the `codegraph` server; wire the two servers
 into each harness in first-look's recommended set (re-check any harness step 3 adds); then prove
 each answers.
 
