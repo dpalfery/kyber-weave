@@ -216,6 +216,12 @@ public interface IDashboardQueryService
     /// <param name="limit">Rows on the page; 25 unless given.</param>
     JsonElement? GetSessionSkills(string sessionId, int page = 1, int limit = 25);
 
+    /// <summary>Returns one page of the session's KW skill loads (D17), in call order, apart from the harness skills section.</summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows on the page; 25 unless given.</param>
+    JsonElement? GetSessionKwSkills(string sessionId, int page = 1, int limit = 25);
+
     /// <summary>Returns one page of one level of the session's timeline tree, with each node's child count and the tree's bounds.</summary>
     /// <param name="sessionId">Canonical session identifier.</param>
     /// <param name="parentNodeId">Span id whose children the page lists; the top level when null or empty.</param>

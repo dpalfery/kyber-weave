@@ -1933,6 +1933,59 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return results;
     }
 
+    /// <summary>
+    /// The unsplit tool names a KW skill load is recorded under (D17). The application recognizer
+    /// owns the final decision; this list only narrows the read in SQL, so it names the same
+    /// spellings and no more.
+    /// </summary>
+    private static readonly string[] KwSkillLoadToolNames =
+    [
+        "mcp__kw-docs__load_skill",
+        "mcp__kw_docs__load_skill",
+        "kw-docs_load_skill",
+        "kw-docs__load_skill",
+        "kw-docs/load_skill",
+    ];
+
+    /// <inheritdoc />
+    public IReadOnlyList<StoredKwSkillLoad> SessionKwSkillLoads(string sessionKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        // The statement reads the tool-call header, its MCP split, the first 1024 characters of its
+        // reply and its record's start time for the session's candidate calls only. The call's input
+        // is never joined: the skill is read from the reply header (D17).
+        string unsplitNames = string.Join(", ", KwSkillLoadToolNames.Select(static name => TextExpr(name)));
+        string sql = TabReadScriptHeader +
+                     "SELECT hex(CAST(tc.span_id AS BLOB)), hex(CAST(tc.tool_name AS BLOB)), " +
+                     "typeof(tcm.server_name), COALESCE(hex(CAST(tcm.server_name AS BLOB)), ''), " +
+                     "typeof(tcm.server_tool_name), COALESCE(hex(CAST(tcm.server_tool_name AS BLOB)), ''), " +
+                     "typeof(tcrt.text), COALESCE(hex(CAST(substr(tcrt.text, 1, 1024) AS BLOB)), ''), " +
+                     "hex(CAST(r.started_at_utc AS BLOB)) " +
+                     "FROM tool_call tc " +
+                     "JOIN record r ON r.span_id = tc.span_id " +
+                     "LEFT JOIN tool_call_mcp tcm ON tcm.span_id = tc.span_id " +
+                     "LEFT JOIN tool_call_result_text tcrt ON tcrt.span_id = tc.span_id " +
+                     $"WHERE EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = tc.span_id AND rsl.session_key = {TextExpr(sessionKey)}) " +
+                     $"AND (tc.tool_name IN ({unsplitNames}) OR tcm.server_tool_name = {TextExpr("load_skill")}) " +
+                     "ORDER BY tc.rowid ASC;\n";
+
+        string output = ExecuteSqlite(sql);
+        List<StoredKwSkillLoad> results = [];
+        foreach (string line in TabLines(output))
+        {
+            string[] cols = SplitTabLine(line, 9, "session KW skill load");
+            results.Add(new StoredKwSkillLoad(
+                SpanId: ParseHexRequired(cols[0], "tool_call.span_id"),
+                ToolName: ParseHexRequired(cols[1], "tool_call.tool_name"),
+                McpServerName: ParseNullableHex(cols[2], cols[3], "tool_call_mcp.server_name"),
+                McpToolName: ParseNullableHex(cols[4], cols[5], "tool_call_mcp.server_tool_name"),
+                ReplyHead: ParseNullableHex(cols[6], cols[7], "tool_call_result_text.text"),
+                StartedAtUtc: ParseTimestampRequired(ParseHexRequired(cols[8], "record.started_at_utc"), "record.started_at_utc")));
+        }
+
+        return results;
+    }
+
     /// <inheritdoc />
     public IReadOnlyList<StoredRequestPromptPreview> RequestPromptPreviews(string sessionKey, IReadOnlyCollection<string> requestSpanIds)
     {

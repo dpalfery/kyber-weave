@@ -318,6 +318,31 @@ public class ClaudeTranscriptMapperTests
     }
 
     [Fact]
+    public void AnMcpLoadSkillCallKeepsItsReplyAsResultTextAndWithholdsItsJsonInput()
+    {
+        string reply = "skill: csharp-dev\n\n# csharp-dev\nGuidance.";
+
+        string jsonl = string.Join('\n',
+        [
+            "{\"type\":\"assistant\",\"sessionId\":\"sess-kw-load\",\"timestamp\":\"2026-11-19T11:20:00.000Z\",\"message\":{\"id\":\"msg-kw1\",\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"tool_use\",\"id\":\"tc-kw\",\"name\":\"mcp__kw-docs__load_skill\",\"input\":{\"name\":\"csharp-dev\"}}],\"usage\":{\"input_tokens\":20,\"output_tokens\":5}}}",
+            $"{{\"type\":\"user\",\"sessionId\":\"sess-kw-load\",\"timestamp\":\"2026-11-19T11:20:01.000Z\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"tool_result\",\"tool_use_id\":\"tc-kw\",\"content\":{System.Text.Json.JsonSerializer.Serialize(reply)}}}]}}}}",
+        ]);
+
+        ClaudeTranscriptMapper mapper = new();
+        CollectedBatch batch = mapper.Map(CreateUnit("/tmp/.claude/projects/repo/sess-kw-load.jsonl", jsonl), ImportedAt);
+
+        CollectedRecord loadTool = batch.Records[1];
+        Assert.NotNull(loadTool.Tool);
+        Assert.Equal("kw-docs", loadTool.Tool!.McpServerName);
+        Assert.Equal("load_skill", loadTool.Tool.McpToolName);
+        Assert.NotNull(loadTool.Tool.Input);
+        Assert.Null(loadTool.Tool.Input!.PlainText);
+        Assert.Equal(Sha256Hex("{\"name\":\"csharp-dev\"}"), loadTool.Tool.Input.Sha256Fingerprint);
+        Assert.Equal(reply, loadTool.Tool.Result!.PlainText);
+        Assert.Equal(reply, Assert.Single(loadTool.Parts).PlainText);
+    }
+
+    [Fact]
     public void Map_PreservesNumericAndBooleanValuesInContentAndTextSlots()
     {
         string jsonl = string.Join('\n',

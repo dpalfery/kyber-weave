@@ -47,6 +47,25 @@ public record StoredSkillInvocation(string SpanId, string SkillName);
 /// <param name="Call">Static tool call details.</param>
 public record StoredToolCall(string SpanId, CollectedToolCall Call);
 
+/// <summary>
+/// A tool call that may be a KW skill load (<c>tool_call</c>, its MCP split, the first 1024
+/// characters of its reply and its record's start time). The reader only narrows to candidate
+/// names; the application decides which candidates are loads and what skill each names.
+/// </summary>
+/// <param name="SpanId">Owning record span identifier.</param>
+/// <param name="ToolName">Tool name as the harness recorded it (<c>tool_call.tool_name</c>).</param>
+/// <param name="McpServerName">MCP server name when the call was split (<c>tool_call_mcp.server_name</c>).</param>
+/// <param name="McpToolName">MCP tool name when the call was split (<c>tool_call_mcp.server_tool_name</c>).</param>
+/// <param name="ReplyHead">The reply's first 1024 characters (<c>tool_call_result_text.text</c>), or <see langword="null"/> when no reply was captured. The call's input is never read.</param>
+/// <param name="StartedAtUtc">The owning record's start time (<c>record.started_at_utc</c>).</param>
+public record StoredKwSkillLoad(
+    string SpanId,
+    string ToolName,
+    string? McpServerName,
+    string? McpToolName,
+    string? ReplyHead,
+    DateTimeOffset StartedAtUtc);
+
 /// <summary>Persisted content part attached to a record (<c>content_part</c> and child extension tables).</summary>
 /// <param name="SpanId">Owning record span identifier.</param>
 /// <param name="Part">Static content part details.</param>
@@ -982,6 +1001,22 @@ public interface IRelationalStoreReader
     /// spans and touches the skill table alone.
     /// </remarks>
     IReadOnlyList<StoredSkillInvocation> SessionSkillFigures(string sessionKey);
+
+    /// <summary>
+    /// Reads the session's candidate KW skill load tool calls (D17), in call order.
+    /// </summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <returns>
+    /// Every tool call of the session whose MCP server tool is <c>load_skill</c> or whose tool
+    /// name is one of the unsplit D17 spellings, with the owning record's start time. Empty when
+    /// the session has none.
+    /// </returns>
+    /// <remarks>
+    /// The statement scopes to the session's spans and filters the D17 names in SQL, so a session
+    /// with no loads reads no input text beyond its candidates. The recognizer in the application
+    /// layer decides the final load and skill; this read stays a plain row shape.
+    /// </remarks>
+    IReadOnlyList<StoredKwSkillLoad> SessionKwSkillLoads(string sessionKey);
 
     /// <summary>
     /// Reads the prompt previews of exactly the named request spans, and no other span's parts.

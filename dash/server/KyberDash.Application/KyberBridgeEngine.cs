@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using KyberDash.Application.Sessions;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
 using KyberDash.Core.Exceptions;
@@ -853,6 +854,64 @@ public class KyberBridgeEngine
         payload["limit"] = limit;
         payload["offset"] = PageOffset(page, limit);
         payload["page"] = page;
+        if (projectionStatus is not null)
+        {
+            payload["projection_status"] = projectionStatus;
+        }
+
+        return JsonSerializer.SerializeToElement(payload, CamelCaseJsonOptions);
+    }
+
+    /// <summary>Returns one page of the session's KW skill loads (D17), in call order, apart from the harness skills section.</summary>
+    /// <param name="sessionId">Canonical session identifier.</param>
+    /// <param name="page">One-based page number.</param>
+    /// <param name="limit">Rows per page; <see cref="DefaultSectionPageLimit"/> unless given.</param>
+    /// <returns>
+    /// The page payload with <c>rows</c>, <c>total</c>, <c>limit</c>, <c>offset</c> and <c>page</c>,
+    /// or <see langword="null"/> when the session is unknown.
+    /// </returns>
+    /// <remarks>
+    /// A row is one recognized load: its skill (or null when its input names none), the session's
+    /// agent, the session id, the load's span and its record's start time. The 404 check reads the
+    /// projection header row only, as the section routes do.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="page"/> or <paramref name="limit"/> is less than 1.</exception>
+    public JsonElement? GetSessionKwSkills(string sessionId, int page = 1, int limit = DefaultSectionPageLimit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        EnsureProjected();
+        IReadOnlyList<StoredSessionHeader> headers = projections.SessionHeadersByKeys([sessionId]);
+        if (headers.Count == 0)
+        {
+            return null;
+        }
+
+        string? agent = headers[0].AgentName;
+        (IReadOnlyList<StoredKwSkillLoad> calls, string? projectionStatus) = TrySessionKwSkillLoads(sessionId);
+        List<Dictionary<string, object?>> allRows = [];
+        foreach (KwSkillLoad load in KwSkillLoads.Recognize(calls))
+        {
+            allRows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["skill"] = load.Skill,
+                ["agent"] = agent,
+                ["session_id"] = sessionId,
+                ["span_id"] = load.SpanId,
+                ["loaded_at"] = load.StartedAtUtc.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture),
+            });
+        }
+
+        Dictionary<string, object?> payload = new(StringComparer.Ordinal)
+        {
+            ["rows"] = PageOf(allRows, page, limit),
+            ["total"] = allRows.Count,
+            ["limit"] = limit,
+            ["offset"] = PageOffset(page, limit),
+            ["page"] = page,
+        };
         if (projectionStatus is not null)
         {
             payload["projection_status"] = projectionStatus;
@@ -2687,6 +2746,22 @@ public class KyberBridgeEngine
         try
         {
             return (reader.SessionSkillFigures(sessionKey), null);
+        }
+        catch (Exception ex) when (IsSessionReadFault(ex))
+        {
+            RecordProjectionFailure(sessionKey, ex.Message);
+            return ([], ProjectionFailedStatus);
+        }
+    }
+
+    /// <summary>Reads a session's KW skill load candidates, isolating any fault to that session.</summary>
+    /// <param name="sessionKey">Canonical session key.</param>
+    /// <returns>The candidate rows when readable, empty with the isolation marker when the read failed.</returns>
+    private (IReadOnlyList<StoredKwSkillLoad> Rows, string? ProjectionStatus) TrySessionKwSkillLoads(string sessionKey)
+    {
+        try
+        {
+            return (reader.SessionKwSkillLoads(sessionKey), null);
         }
         catch (Exception ex) when (IsSessionReadFault(ex))
         {

@@ -511,6 +511,8 @@ public sealed class AnalyticsOperationsDetailTests
             return inner.SessionSkillFigures(sessionKey);
         }
 
+        public IReadOnlyList<StoredKwSkillLoad> SessionKwSkillLoads(string sessionKey) => inner.SessionKwSkillLoads(sessionKey);
+
         public IReadOnlyList<CollectedRecord> SessionTimelineRecords(string sessionKey)
         {
             if (string.Equals(sessionKey, failingSessionKey, StringComparison.Ordinal))

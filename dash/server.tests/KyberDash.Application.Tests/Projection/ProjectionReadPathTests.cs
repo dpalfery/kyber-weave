@@ -705,6 +705,9 @@ public class ProjectionReadPathTests
 
         /// <inheritdoc />
         public IReadOnlyList<StoredSkillInvocation> SessionSkillFigures(string sessionKey) => inner.SessionSkillFigures(sessionKey);
+
+        /// <inheritdoc />
+        public IReadOnlyList<StoredKwSkillLoad> SessionKwSkillLoads(string sessionKey) => inner.SessionKwSkillLoads(sessionKey);
     }
 
     /// <summary>

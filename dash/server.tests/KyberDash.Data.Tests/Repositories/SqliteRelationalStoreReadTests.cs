@@ -727,6 +727,129 @@ public class SqliteRelationalStoreReadTests : IDisposable
     }
 
     /// <summary>
+    /// The KW skill loads read returns exactly one session's candidate tool calls, in call order,
+    /// with the MCP split, the reply's head and the record's start time; it touches only the
+    /// tool-call tables, the record header and its session link, and matches
+    /// <see cref="InMemoryRelationalStore"/> on two sessions and an unknown one.
+    /// </summary>
+    [Fact]
+    public void SessionKwSkillLoadsReadsOnlyThatSessionsToolCalls()
+    {
+        string dbPath = Path.Combine(directory.Path, "kw-skill-loads", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+        WriteKwLoadSession(sqlite, memory, "sess-kw-a",
+        [
+            KwLoadRecord("span-kw-a-1", "sess-kw-a", 0, new CollectedToolCall("call-a-1", "load_skill", "kw-docs", "load_skill", null, KwLoadReply("skill: csharp-dev\n\nGuidance."), true, null, null)),
+            KwLoadRecord("span-kw-a-2", "sess-kw-a", 1, new CollectedToolCall("call-a-2", "mcp__kw_docs__load_skill", null, null, null, KwLoadReply("skill: dal-dev\n\nGuidance."), true, null, null)),
+            KwLoadRecord("span-kw-a-3", "sess-kw-a", 2, new CollectedToolCall("call-a-3", "read_file", null, null, null, KwLoadReply("skill: notes.md\n\nGuidance."), true, null, null)),
+            KwLoadRecord("span-kw-a-4", "sess-kw-a", 3, new CollectedToolCall("call-a-4", "load_skill", "other-server", "load_skill", null, KwLoadReply("skill: sql-dev\n\nGuidance."), true, null, null)),
+        ]);
+        WriteKwLoadSession(sqlite, memory, "sess-kw-b",
+        [
+            KwLoadRecord("span-kw-b-1", "sess-kw-b", 0, new CollectedToolCall("call-b-1", "load_skill", "kw-docs", "load_skill", null, KwLoadReply("skill: tauri-dev\n\nGuidance."), true, null, null)),
+        ]);
+
+        foreach (string sessionKey in (string[])["sess-kw-a", "sess-kw-b", "sess-missing"])
+        {
+            sqlite.ClearRecordedSql();
+            IReadOnlyList<StoredKwSkillLoad> rows = sqlite.SessionKwSkillLoads(sessionKey);
+            AssertScriptsTouchOnlyTables(sqlite.ExecutedSql, SessionKwSkillLoadTables);
+            Assert.Equivalent(memory.SessionKwSkillLoads(sessionKey), rows, strict: true);
+        }
+
+        IReadOnlyList<StoredKwSkillLoad> sessionA = sqlite.SessionKwSkillLoads("sess-kw-a");
+        string[] expectedSpans = ["span-kw-a-1", "span-kw-a-2", "span-kw-a-4"];
+        Assert.Equal(expectedSpans, sessionA.Select(static row => row.SpanId).ToArray());
+        Assert.DoesNotContain(sessionA, static row => row.ToolName == "read_file");
+        Assert.Equal("skill: csharp-dev\n\nGuidance.", sessionA[0].ReplyHead);
+        Assert.Equal(new DateTimeOffset(2026, 11, 19, 12, 0, 0, TimeSpan.Zero), sessionA[0].StartedAtUtc);
+        Assert.Single(sqlite.SessionKwSkillLoads("sess-kw-b"));
+    }
+
+    /// <summary>
+    /// A load's reply is read only to its first 1024 characters: the SQLite reader and the
+    /// in-memory fake return the same head, and a shorter reply comes back whole.
+    /// </summary>
+    [Fact]
+    public void SessionKwSkillLoadsReturnsAtMostTheReplysFirst1024Characters()
+    {
+        string dbPath = Path.Combine(directory.Path, "kw-skill-reply-head", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+        string longReply = "skill: csharp-dev\n\n" + new string('x', 2000);
+        WriteKwLoadSession(sqlite, memory, "sess-kw-long",
+        [
+            KwLoadRecord("span-kw-long-1", "sess-kw-long", 0, new CollectedToolCall("call-long-1", "load_skill", "kw-docs", "load_skill", null, KwLoadReply(longReply), true, null, null)),
+            KwLoadRecord("span-kw-long-2", "sess-kw-long", 1, new CollectedToolCall("call-long-2", "load_skill", "kw-docs", "load_skill", null, KwLoadReply("skill: dal-dev"), true, null, null)),
+        ]);
+
+        IReadOnlyList<StoredKwSkillLoad> rows = sqlite.SessionKwSkillLoads("sess-kw-long");
+
+        Assert.Equal(longReply[..1024], rows[0].ReplyHead);
+        Assert.Equal(1024, rows[0].ReplyHead!.Length);
+        Assert.Equal("skill: dal-dev", rows[1].ReplyHead);
+        Assert.Equivalent(memory.SessionKwSkillLoads("sess-kw-long"), rows, strict: true);
+    }
+
+    private static readonly string[] SessionKwSkillLoadTables =
+    [
+        "tool_call",
+        "tool_call_mcp",
+        "tool_call_result_text",
+        "record",
+        "record_session_link",
+    ];
+
+    /// <summary>
+    /// Reply text for the reader test: a plain-text reply, since the store refuses JSON object text
+    /// on write (<c>STORE_JSON_TEXT_REFUSED</c>). The call's input is never seeded.
+    /// </summary>
+    private static CollectedToolContent KwLoadReply(string reply) =>
+        new(reply, System.Text.Encoding.UTF8.GetByteCount(reply), reply.Length, null, null);
+
+    private static CollectedRecord KwLoadRecord(string spanId, string sessionKey, int minuteOffset, CollectedToolCall tool) => new(
+        RecordId: spanId,
+        HarnessId: "claude-code",
+        Op: RecordOp.LlmInvoke,
+        Kind: RecordKind.Client,
+        Name: "tool.call",
+        StartedAt: new DateTimeOffset(2026, 11, 19, 12, minuteOffset, 0, TimeSpan.Zero),
+        Status: RecordStatus.Ok,
+        SessionKey: sessionKey,
+        ParentRecordId: null,
+        TraceId: null,
+        Model: "claude-sonnet-4-6",
+        EndedAt: null,
+        ReportedDurationMs: null,
+        Tokens: [],
+        ReportedCost: null,
+        Parts: [],
+        Tool: tool,
+        Agent: null,
+        SkillsInvoked: [],
+        AgentInstanceId: null,
+        ToolDefinitions: [],
+        Signals: new CollectedRecordSignals(null, null, null, null),
+        ReportedInputTokens: null,
+        ReportedOutputTokens: null);
+
+    private static void WriteKwLoadSession(
+        SqliteRelationalStore sqlite,
+        InMemoryRelationalStore memory,
+        string sessionKey,
+        IReadOnlyList<CollectedRecord> records)
+    {
+        CollectedBatch batch = new(
+            Source: new CollectedSource("claude-code", SourceKind.File, sessionKey),
+            Sessions: [new CollectedSession(sessionKey, "claude-code", sessionKey, null, null, [])],
+            Records: records,
+            Problems: []);
+        sqlite.WriteBatch(batch);
+        memory.WriteBatch(batch);
+    }
+
+    /// <summary>
     /// The timeline records read scopes to the record-header columns the timeline tree's nodes
     /// carry: every statement it issues references just the record header, its session link,
     /// parent link, model, reported duration, reported cost and declared window — and never a

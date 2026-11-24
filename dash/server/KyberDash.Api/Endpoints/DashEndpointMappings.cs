@@ -60,6 +60,7 @@ public static class DashEndpointMappings
         kyber.MapGet("/session/{id}/tools", SessionToolsAsync);
         kyber.MapGet("/session/{id}/servers", SessionServersAsync);
         kyber.MapGet("/session/{id}/skills", SessionSkillsAsync);
+        kyber.MapGet("/session/{id}/kw-skills", SessionKwSkillsAsync);
         kyber.MapGet("/session/{id}/timeline", SessionTimelineAsync);
         kyber.MapGet("/session/{id}/content", SessionContentAsync);
         kyber.MapGet("/session/{id}/subagents", SessionSubagentsAsync);
@@ -368,6 +369,22 @@ public static class DashEndpointMappings
 
         return await Task.Run<IResult>(
             () => query.GetSessionSkills(id, page, limit) is { } payload
+                ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> SessionKwSkillsAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(query);
+
+        (int limit, int page, IResult? refusal) = ReadPageWindow(request, KyberBridgeEngine.DefaultSectionPageLimit, id);
+        if (refusal is not null)
+            return refusal;
+
+        return await Task.Run<IResult>(
+            () => query.GetSessionKwSkills(id, page, limit) is { } payload
                 ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
                 : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
             cancellationToken).ConfigureAwait(false);
