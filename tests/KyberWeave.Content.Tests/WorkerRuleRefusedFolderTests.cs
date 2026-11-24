@@ -100,7 +100,7 @@ public sealed class WorkerRuleRefusedFolderTests
     {
         string skill = Corpus.ReadText(OnboardingSkill);
 
-        Assert.Contains(".gitignore", skill, StringComparison.Ordinal);
+        Assert.Contains("the `.gitignore` line for the agent worktree folder `.agent_worktrees/`", skill, StringComparison.Ordinal);
     }
 
     /// <summary>
