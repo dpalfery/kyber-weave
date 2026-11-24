@@ -145,4 +145,21 @@ describe('fetchKyberSessionTurns per-turn route', () => {
     expect(content.parts).toEqual([])
     expect(content.assembledText).toBe('')
   })
+
+  it('reads a marker other than PROJECTION_FAILED as no fault on either turn route', async () => {
+    // One fault contract: only the exact sections' marker names a faulted read.
+    stubFetch(200, { sessionId: 'sess-1', turnIndex: 1, projection_status: 'PENDING' })
+
+    await expect(fetchKyberSessionTurn('sess-1', 1)).rejects.toThrow(/malformed/i)
+    await expect(fetchTurnContent('sess-1', 1)).rejects.toThrow(/malformed/i)
+  })
+
+  it.each([
+    ['blocks is null', { sessionId: 'sess-1', turnIndex: 1, blocks: null, parts: [], assembledText: '' }],
+    ['parts is missing', { sessionId: 'sess-1', turnIndex: 1, blocks: [], assembledText: '' }],
+    ['assembledText is missing', { sessionId: 'sess-1', turnIndex: 1, blocks: [], parts: [] }],
+  ])('refuses a content body the page cannot render: %s', async (_why, body) => {
+    stubFetch(200, body)
+    await expect(fetchTurnContent('sess-1', 1)).rejects.toThrow(/malformed/i)
+  })
 })

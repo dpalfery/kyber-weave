@@ -397,7 +397,7 @@ function parseKyberPage<T>(
   const total = raw.total
   const page = raw.page
   const limit = raw.limit
-  if (typeof total !== 'number' || !Number.isFinite(total)) throw malformedPage(path, 'total is not a number')
+  if (typeof total !== 'number' || !Number.isInteger(total) || total < 0) throw malformedPage(path, 'total is not a row count')
   if (typeof page !== 'number' || !Number.isInteger(page) || page < 1) throw malformedPage(path, 'page is not a page number')
   if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1) throw malformedPage(path, 'limit is not a page size')
   const entries = raw[itemsKey].map((row) => {
@@ -405,6 +405,17 @@ function parseKyberPage<T>(
     return readRow(row)
   })
   return { entries, data: entries, total, page, limit }
+}
+
+/**
+ * Reads one sessions-list row: every row must name its session, since the list
+ * keys, links and selects rows by that id.
+ */
+function readSessionSummaryRow(path: string): (row: unknown) => KyberSessionSummary {
+  return (row) => {
+    if (!isRaw(row) || typeof row.session_id !== 'string') throw malformedPage(path, 'a row has no session_id')
+    return row as unknown as KyberSessionSummary
+  }
 }
 
 /**
@@ -436,7 +447,7 @@ export async function fetchKyberSessionPage(opts: {
   if (opts.q) params.set('q', opts.q)
   const query = params.toString()
   const body = await fetchJson<unknown>(`${path}?${query}`)
-  return parseKyberPage<KyberSessionSummary>(body, `${path}?${query}`, (row) => row as KyberSessionSummary)
+  return parseKyberPage<KyberSessionSummary>(body, `${path}?${query}`, readSessionSummaryRow(path))
 }
 
 /**
@@ -449,7 +460,7 @@ export async function fetchKyberSubagentPage(parentId: string, page = 1): Promis
   params.set('limit', String(KYBER_SUBAGENTS_PAGE_LIMIT))
   const path = `/api/kyber/session/${encodeURIComponent(parentId)}/subagents?${params.toString()}`
   const body = await fetchJson<unknown>(path)
-  return parseKyberPage<KyberSessionSummary>(body, path, (row) => row as KyberSessionSummary)
+  return parseKyberPage<KyberSessionSummary>(body, path, readSessionSummaryRow(path))
 }
 
 // ── Session view payload (/api/kyber/session/:id) ───────────────────────────
@@ -750,7 +761,7 @@ export interface KyberTurnContentResult {
  */
 function parseTurnContentResult(raw: unknown, path: string): KyberTurnContentResult {
   if (!isRaw(raw)) throw malformedSection(path, 'body is not an object')
-  if (raw.projection_status === 'PROJECTION_FAILED') {
+  if (raw.projection_status === TURN_PROJECTION_FAILED) {
     return {
       sessionId: requireStringField(raw, 'sessionId', path),
       turnIndex: requireNumberField(raw, 'turnIndex', path),
@@ -760,8 +771,16 @@ function parseTurnContentResult(raw: unknown, path: string): KyberTurnContentRes
       assembledText: '',
     }
   }
+  requireStringField(raw, 'sessionId', path)
+  requireNumberField(raw, 'turnIndex', path)
+  if (!Array.isArray(raw.blocks)) throw malformedSection(path, 'blocks is not an array')
+  if (!Array.isArray(raw.parts)) throw malformedSection(path, 'parts is not an array')
+  requireStringField(raw, 'assembledText', path)
   return raw as unknown as KyberTurnContentResult
 }
+
+/** The sections' fault marker, matched exactly by both turn-route parsers. */
+const TURN_PROJECTION_FAILED = 'PROJECTION_FAILED'
 
 export async function fetchTurnContent(
   sessionId: string,
@@ -2514,7 +2533,7 @@ function readNullableNumberMap(
 
 function readSectionWindow(raw: Raw, path: string): KyberSectionWindow {
   const window: KyberSectionWindow = {
-    total: requireNumberField(raw, 'total', path),
+    total: requireIntegerField(raw, 'total', path, 0),
     page: requireIntegerField(raw, 'page', path, 1),
     limit: requireIntegerField(raw, 'limit', path, 1),
     offset: requireIntegerField(raw, 'offset', path, 0),
@@ -3088,7 +3107,7 @@ function parseSessionTurnSection(raw: unknown, path: string): KyberSessionTurnSe
   // A faulted projection read answers the sections' failure shape: identity plus the
   // projection_status marker, no turn row. The section carries the marker; the page
   // renders the failure state, never a neighbour's figures.
-  if (typeof raw.projection_status === 'string' && !isRaw(raw.turn)) {
+  if (raw.projection_status === TURN_PROJECTION_FAILED && !isRaw(raw.turn)) {
     return {
       sessionId: requireStringField(raw, 'sessionId', path),
       turnIndex: requireNumberField(raw, 'turnIndex', path),

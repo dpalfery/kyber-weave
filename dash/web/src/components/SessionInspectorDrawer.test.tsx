@@ -2876,7 +2876,9 @@ describe('SessionInspectorDrawer: lossless request builders', () => {
     const urls: string[] = []
     const restore = mockFetch(urls)
     try {
-      await fetchTurnContentFull('sess-x', 2)
+      // Only the request path is under test; the stub's empty body is not a turn
+      // the parser accepts, so its refusal is expected and set aside.
+      await fetchTurnContentFull('sess-x', 2).catch(() => undefined)
       expect(urls).toHaveLength(1)
       expect(urls[0]).toBe('/api/kyber/session/sess-x/turn/2/content?full=true')
       expect(urls[0]).not.toContain('budget')
