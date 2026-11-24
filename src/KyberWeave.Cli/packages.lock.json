@@ -42,8 +42,8 @@
       },
       "Microsoft.Extensions.DependencyInjection.Abstractions": {
         "type": "Transitive",
-        "resolved": "10.0.14",
-        "contentHash": "QtpQzuSZVyTPCuHW058yCs9Nj0394uUkNyFHS813nOmK9UgUdBdaprJ5PPsBgsQIpxADTsTkbaMMonykem6qdw=="
+        "resolved": "11.0.0",
+        "contentHash": "a2c4Kp55miXT6G+DSb75pczXQJHgNMzPyZEyMxrrKxuQrgvctcDWJWD9fVe/uGbQdu4Z0c3B7AVKp1DXmD64nQ=="
       },
       "Spectre.Console.Ansi": {
         "type": "Transitive",
@@ -63,7 +63,7 @@
           "KyberWeave.Domain": "[0.1.0, )",
           "KyberWeave.Kernel": "[0.1.0, )",
           "Markdig": "[1.6.0, )",
-          "Microsoft.Extensions.DependencyInjection.Abstractions": "[10.0.14, )",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "[11.0.0, )",
           "YamlDotNet": "[18.1.0, )"
         }
       },
@@ -74,32 +74,13 @@
           "KyberWeave.Kernel": "[0.1.0, )"
         }
       },
-      "kyberweave.core": {
-        "type": "Project",
-        "dependencies": {
-          "KyberWeave.Contracts": "[0.1.0, )",
-          "KyberWeave.Domain": "[0.1.0, )",
-          "KyberWeave.Kernel": "[0.1.0, )"
-        }
-      },
-      "kyberweave.core.squad": {
-        "type": "Project",
-        "dependencies": {
-          "KyberWeave.Application": "[0.1.0, )",
-          "KyberWeave.Core": "[0.1.0, )",
-          "KyberWeave.Data": "[0.1.0, )",
-          "KyberWeave.Domain": "[0.1.0, )",
-          "Markdig": "[1.6.0, )",
-          "YamlDotNet": "[18.1.0, )"
-        }
-      },
       "kyberweave.data": {
         "type": "Project",
         "dependencies": {
           "KyberWeave.Contracts": "[0.1.0, )",
           "KyberWeave.Domain": "[0.1.0, )",
           "KyberWeave.Kernel": "[0.1.0, )",
-          "Microsoft.Extensions.DependencyInjection.Abstractions": "[10.0.14, )",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "[11.0.0, )",
           "YamlDotNet": "[18.1.0, )"
         }
       },
