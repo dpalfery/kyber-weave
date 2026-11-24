@@ -21,7 +21,8 @@ public sealed class ArbiterKeyService(
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
-        return ArbiterKeyResolver.Resolve(endpoint.Trim(), store, environment.GetVariable, UserOverrideEndpoint(config));
+        return ArbiterKeyResolver.Resolve(
+            ArbiterUserSettings.NormalizeEndpoint(endpoint), store, environment.GetVariable, UserOverrideEndpoint(config));
     }
 
     /// <inheritdoc />
@@ -31,7 +32,7 @@ public sealed class ArbiterKeyService(
         ArgumentNullException.ThrowIfNull(effectiveProvider);
         ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
         return ArbiterKeyResolver.Resolve(
-            endpoint.Trim(),
+            ArbiterUserSettings.NormalizeEndpoint(endpoint),
             store,
             environment.GetVariable,
             UserOverrideEndpoint(config.Arbiter.Provider, effectiveProvider));

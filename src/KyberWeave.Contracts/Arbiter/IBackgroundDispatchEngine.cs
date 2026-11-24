@@ -17,6 +17,16 @@ public interface IBackgroundDispatchEngine
     void TrackBackgroundDispatch(BackgroundDispatch dispatch, HookContext context);
 
     /// <summary>
+    /// Reads the saved record of a followed background agent, so a later hook process can tell whether the agent
+    /// was followed and which dispatch it answers.
+    /// </summary>
+    /// <param name="sessionId">The harness session the agent runs in.</param>
+    /// <param name="agentId">The harness's id for the agent.</param>
+    /// <param name="context">What the event is evaluated against.</param>
+    /// <returns>The record, or null when the agent is not followed.</returns>
+    BackgroundDispatchRecord? FindBackgroundDispatch(string sessionId, string agentId, HookContext context);
+
+    /// <summary>
     /// Records one finished turn of a remembered background agent as the return of its dispatch and runs the return
     /// rules on it. An agent that was never remembered, or a turn already recorded, passes through.
     /// </summary>

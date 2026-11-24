@@ -12,7 +12,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// Contract for task 4.4: the Claude hand-back hook (Q15 decision, option (a)).
 /// A background dispatch returns through <c>PreToolUse</c> on
 /// <c>SubagentHandback</c>, keyed by the payload's <c>agent_id</c>, joined to its
-/// dispatch through task 4.1's <c>agentId</c> link, and carrying
+/// saved dispatch, and carrying
 /// <c>tool_input.message</c> as the output. A non-allow outcome is delivered as
 /// <c>allow</c> with the complete input in <c>updatedInput</c> and the envelope
 /// or note appended to <c>message</c> after one blank line: the hand-back is
@@ -75,17 +75,10 @@ public sealed class ClaudeHandbackTests
         Fixture("pre-subagent-handback.json").Replace(
             "agent-9", agentId, StringComparison.Ordinal);
 
-    private static void SeedLaunchLink(string agentId)
-    {
-        string toolUseId = "toolu-dispatch-" + Guid.NewGuid().ToString("N");
-        ClaudeHookAdapter.LaunchLinks[toolUseId] = agentId;
-    }
-
     [Fact]
-    public void Handback_JoinedReturn_RecordsMessageAsPostDispatchOutput()
+    public void Handback_PlainEngine_RecordsMessageAsPostDispatchOutput()
     {
         string agentId = UniqueAgentId();
-        SeedLaunchLink(agentId);
         ScriptedEngine engine = new();
 
         (int exit, string stdout) = Run(HandbackFor(agentId), "dev-medium", engine);
@@ -107,7 +100,6 @@ public sealed class ClaudeHandbackTests
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate.returned\nANSWER: adds-work (step 0)";
         const string message = "Implemented the plan parser with tests passing.";
         string agentId = UniqueAgentId();
-        SeedLaunchLink(agentId);
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostBlock, envelope) };
 
         (int exit, string stdout) = Run(HandbackFor(agentId), "dev-medium", engine);
@@ -131,7 +123,6 @@ public sealed class ClaudeHandbackTests
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate.returned\nANSWER: adds-work (step 0)";
         string agentId = UniqueAgentId();
-        SeedLaunchLink(agentId);
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
 
         (int exit, string stdout) = Run(HandbackFor(agentId), "dev-medium", engine);
@@ -150,7 +141,6 @@ public sealed class ClaudeHandbackTests
         const string note = "STATUS: ARBITER_ANNOTATION\nFINDING: correctness/null-plan-task";
         const string message = "Implemented the plan parser with tests passing.";
         string agentId = UniqueAgentId();
-        SeedLaunchLink(agentId);
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostAnnotation, note) };
 
         (int exit, string stdout) = Run(HandbackFor(agentId), "dev-medium", engine);
@@ -161,6 +151,71 @@ public sealed class ClaudeHandbackTests
         Assert.Equal("allow", output.GetProperty("permissionDecision").GetString());
         JsonElement updated = output.GetProperty("updatedInput");
         Assert.Equal(message + "\n\n" + note, updated.GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public void Handback_SavedDispatch_IsJudgedThroughDecideBackgroundReturn()
+    {
+        const string message = "Implemented the plan parser with tests passing.";
+        JoiningEngine engine = new();
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
+            _ => EnabledConfig(),
+            () => "decision-test-1");
+        using StringWriter stdout = new();
+        using StringWriter log = new();
+
+        int exit = command.Run("claude", "dev-medium", HandbackFor("agent-joined"), stdout, log);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(0, engine.PostCalls);
+        Assert.Equal("sess-handback-1", engine.ReturnSession);
+        Assert.Equal("agent-joined", engine.ReturnAgent);
+        Assert.Equal(message, engine.ReturnResponse);
+        Assert.Equal(string.Empty, stdout.ToString());
+    }
+
+    /// <summary>A background engine that joins one agent id and records the return it is asked to judge.</summary>
+    private sealed class JoiningEngine : IHookDecisionEngine, IBackgroundDispatchEngine
+    {
+        public int PostCalls;
+
+        public string? ReturnSession { get; private set; }
+
+        public string? ReturnAgent { get; private set; }
+
+        public string? ReturnResponse { get; private set; }
+
+        public HookOutcome DecidePreDispatch(string caller, string? target, string prompt, KyberWeaveConfig config) =>
+            new(HookOutcomeKind.Allow);
+
+        public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config)
+        {
+            PostCalls++;
+            return new HookOutcome(HookOutcomeKind.Allow);
+        }
+
+        public void TrackBackgroundDispatch(BackgroundDispatch dispatch, HookContext context)
+        {
+        }
+
+        public BackgroundDispatchRecord? FindBackgroundDispatch(string sessionId, string agentId, HookContext context) =>
+            string.Equals(agentId, "agent-joined", StringComparison.Ordinal)
+                ? new BackgroundDispatchRecord(
+                    new BackgroundDispatch("claude", sessionId, agentId, "conductor", "dev-easy", "prompt"),
+                    "pre-1")
+                : null;
+
+        public HookOutcome DecideBackgroundReturn(
+            string harness, string sessionId, string agentId, string response, KyberWeaveConfig config, HookContext context)
+        {
+            ReturnSession = sessionId;
+            ReturnAgent = agentId;
+            ReturnResponse = response;
+            return new HookOutcome(HookOutcomeKind.Allow);
+        }
+
+        public IReadOnlyList<string> TakePendingNotes(string sessionId, string caller, HookContext context) => [];
     }
 
     [Fact]
@@ -177,25 +232,6 @@ public sealed class ClaudeHandbackTests
             "Implemented the plan parser with tests passing.",
             engine.SeenPostOutput);
         Assert.Equal(string.Empty, stdout);
-    }
-
-    [Fact]
-    public void Handback_ThenForegroundPostCompleted_IsNotRecordedTwice()
-    {
-        string agentId = UniqueAgentId();
-        SeedLaunchLink(agentId);
-        ScriptedEngine engine = new();
-
-        (int firstExit, string firstStdout) = Run(HandbackFor(agentId), "dev-medium", engine);
-        string completed = Fixture("post-completed.json").Replace(
-            "\"agentId\": \"agent-7\"", "\"agentId\": \"" + agentId + "\"", StringComparison.Ordinal);
-        (int secondExit, string secondStdout) = Run(completed, "conductor", engine);
-
-        Assert.Equal(0, firstExit);
-        Assert.Equal(0, secondExit);
-        Assert.Equal(1, engine.PostCalls);
-        Assert.Equal(string.Empty, firstStdout);
-        Assert.Equal(string.Empty, secondStdout);
     }
 
     [Fact]

@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberArbiter
 source-root: src/KyberWeave.Domain/Arbiter
 owner: dpalfery
-last-reviewed: 2026-11-23
+last-reviewed: 2026-11-24
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -1227,8 +1227,13 @@ session, and marks it:
   paths. Pairing counts a post as claiming a pre unless that post is a recovered one.
 - A dispatch the rules refused wrote a pre row but never ran a worker, so it is not a candidate. The
   same set keeps it out of `ledger.in-flight.paths`.
-- When several dispatches of the agent are still open the stop event cannot say which one ended: none
-  is closed, and one line names how many matched. Closing the wrong one would report work as finished
+- When the stop event names the agent id (Claude's `SubagentStop` and Copilot's `subagentStop` do;
+  Factory's does not) and the background-dispatch store holds a record for that session and agent id,
+  recovery is exact: it closes that record's own dispatch if it is still open, and closes nothing if
+  it is already paired. Same-type siblings, open or returned, play no part in the decision. With no
+  agent id or no record, the name-based rule below applies unchanged.
+- When several dispatches of the agent are still open and the stop event names no followed agent, it
+  cannot say which one ended: none is closed, and one line names how many matched. Closing the wrong one would report work as finished
   that never ran.
 - Factory's `SubagentStop` names the dispatch only by `task_name`, which is a description rather than
   an agent. The target comes from the transcript's `Task` call, the same place the dispatch path reads
@@ -1551,11 +1556,20 @@ project trust so that `.pi/extensions/` loads. Cursor's hooks carry no trust gat
 today. See the [runbook](runbook.md) and
 [Squad onboarding](../kyber-squad/onboarding.md).
 
+### Claude hand-back
+
 Claude observes background dispatches through a hand-back hook. Every agent a governed
 dispatcher can target gets a frontmatter `PreToolUse` hook on `^SubagentHandback$`: it
 records the return under the payload's `agent_id`, joined to the dispatch through the
 `agentId` the dispatcher's `PostToolUse(Agent)` reports at the background launch, and then
-runs the post-dispatch rules. A non-allow outcome never denies the hand-back — it returns
+runs the post-dispatch rules. The launch is saved to the same background-dispatch store Copilot CLI
+uses (on `status: async_launched`), because every hook event runs in a fresh process and nothing
+can be kept in memory between them. The hand-back looks that record up by session and agent id: a
+record pairs the return with its own dispatch's pre event, evaluated like a foreground return of
+that dispatch; no record records the return unpaired, still allowed, with a log line naming the
+session id and agent id looked up. A foreground `completed` post for an agent with a saved launch
+is recorded against that launch when no return is stored yet. Once the record holds a return, a
+later `completed` post is not a second row. A non-allow outcome never denies the hand-back — it returns
 `allow` with `updatedInput`, the complete input with the envelope or note appended to
 `message`, so the dispatcher receives the outcome inside the hand-back. Foreground calls
 keep the `PostToolUse` path, and a return observed by neither is reported by `audit` as an
