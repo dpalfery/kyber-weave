@@ -13,9 +13,10 @@ namespace KyberDash.Application.Tests.Projection;
 /// Read-path projection pass behaviour: an incremental pass plans from
 /// <see cref="IRelationalStoreReader.SessionAttributions"/> and materializes only the rebuilt
 /// session's records, attribution-driven claiming assigns the session ids record iteration
-/// assigned, the read-path entry defers oversized dirty sessions and writes them back as still
-/// dirty, a second <see cref="KyberBridgeEngine.EnsureProjected"/> returns while a first pass
-/// holds the reader (single flight), and deferred sessions surface in projection health.
+/// assigned, the read-path entry defers oversized dirty sessions and sessions past the pass
+/// record budget and writes them back as still dirty, a second
+/// <see cref="KyberBridgeEngine.EnsureProjected"/> returns while a first pass holds the reader
+/// (single flight), and deferred sessions surface in projection health.
 /// </summary>
 public class ProjectionReadPathTests
 {
@@ -185,6 +186,82 @@ public class ProjectionReadPathTests
         Assert.Contains("sess-big", fullPass.RebuiltKeys);
         Assert.Null(store.GetProjectionDirtyState());
         Assert.NotEqual(Serialize(bigBefore), Serialize(store.GetSessionProjection("sess-big")));
+    }
+
+    /// <summary>
+    /// A cold read pass over many small dirty sessions rebuilds only the sessions whose records
+    /// fit the pass record budget and defers the rest through the same dirty write-back the
+    /// oversized-session deferral uses, and a later read pass picks the deferred sessions up.
+    /// </summary>
+    [Fact]
+    public void AReadPathPassRebuildsUpToItsPassRecordBudgetAndALaterPassPicksUpTheRest()
+    {
+        InMemoryRelationalStore store = new();
+        CanonSessionProjectorEngine engine = new(
+            store,
+            store,
+            store,
+            new FakePricingRepository(),
+            readPathPassRecordBudget: 6);
+
+        WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0), Turn("span-a-2", "sess-a", 1)]);
+        WriteSession(store, "sess-b", "claude-code", [Turn("span-b-1", "sess-b", 0), Turn("span-b-2", "sess-b", 1)]);
+        WriteSession(store, "sess-c", "claude-code", [Turn("span-c-1", "sess-c", 0), Turn("span-c-2", "sess-c", 1)]);
+        WriteSession(store, "sess-d", "claude-code", [Turn("span-d-1", "sess-d", 0), Turn("span-d-2", "sess-d", 1)]);
+        store.SetWriteMarker(1);
+
+        ProjectionPassReport firstPass = engine.ProjectIncrementalForReads();
+
+        // Three two-record sessions reach the six-record pass budget; the fourth would cross it.
+        Assert.Equal(["sess-a", "sess-b", "sess-c"], firstPass.RebuiltKeys);
+        Assert.Equal(["sess-d"], firstPass.DeferredKeys);
+
+        DirtyProjectionState? dirty = store.GetProjectionDirtyState();
+        Assert.NotNull(dirty);
+        Assert.Equal(["sess-d"], dirty!.Keys);
+        Assert.False(dirty.IsWildcard);
+
+        ProjectionPassReport secondPass = engine.ProjectIncrementalForReads();
+        Assert.Equal(["sess-d"], secondPass.RebuiltKeys);
+        Assert.NotNull(secondPass.DeferredKeys);
+        Assert.Empty(secondPass.DeferredKeys);
+        Assert.Null(store.GetProjectionDirtyState());
+    }
+
+    /// <summary>
+    /// A read pass whose pass record budget is smaller than any one session still rebuilds the
+    /// first dirty session, so every pass makes progress and repeated passes converge instead of
+    /// deferring the same sessions forever.
+    /// </summary>
+    [Fact]
+    public void AReadPassAlwaysRebuildsAtLeastOneSessionUnderThePassBudget()
+    {
+        InMemoryRelationalStore store = new();
+        CanonSessionProjectorEngine engine = new(
+            store,
+            store,
+            store,
+            new FakePricingRepository(),
+            readPathPassRecordBudget: 1);
+
+        WriteSession(store, "sess-a", "claude-code", [Turn("span-a-1", "sess-a", 0), Turn("span-a-2", "sess-a", 1)]);
+        WriteSession(store, "sess-b", "claude-code", [Turn("span-b-1", "sess-b", 0), Turn("span-b-2", "sess-b", 1)]);
+        WriteSession(store, "sess-c", "claude-code", [Turn("span-c-1", "sess-c", 0), Turn("span-c-2", "sess-c", 1)]);
+        store.SetWriteMarker(1);
+
+        ProjectionPassReport firstPass = engine.ProjectIncrementalForReads();
+        Assert.Equal(["sess-a"], firstPass.RebuiltKeys);
+        Assert.Equal(["sess-b", "sess-c"], firstPass.DeferredKeys);
+
+        ProjectionPassReport secondPass = engine.ProjectIncrementalForReads();
+        Assert.Equal(["sess-b"], secondPass.RebuiltKeys);
+        Assert.Equal(["sess-c"], secondPass.DeferredKeys);
+
+        ProjectionPassReport thirdPass = engine.ProjectIncrementalForReads();
+        Assert.Equal(["sess-c"], thirdPass.RebuiltKeys);
+        Assert.NotNull(thirdPass.DeferredKeys);
+        Assert.Empty(thirdPass.DeferredKeys);
+        Assert.Null(store.GetProjectionDirtyState());
     }
 
     /// <summary>

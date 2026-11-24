@@ -128,6 +128,58 @@ public class SqliteRelationalStoreReadTests : IDisposable
     }
 
     /// <summary>
+    /// The budgeted turn-content read keeps exactly the rows the in-memory cut kept — the parts
+    /// up to and including the one that crosses the byte budget, and nothing after it — matched
+    /// row for row against <see cref="InMemoryRelationalStore"/> and against the prefix of the
+    /// uncut <c>full</c> read.
+    /// </summary>
+    [Fact]
+    public void TurnContentPartsBudgetCutKeepsTheCrossingRowAndMatchesTheInMemoryCut()
+    {
+        string dbPath = Path.Combine(directory.Path, "turn-content-budget", "canon.db");
+        SeamSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+        WriteBudgetedContentTurn(sqlite, memory);
+
+        IReadOnlyList<StoredContentPart> budgeted = sqlite.TurnContentParts("sess-budget", budget: 8);
+        IReadOnlyList<StoredContentPart> whole = sqlite.TurnContentParts("sess-budget", full: true);
+
+        // "aaaaa" is 5 bytes and "bbbb" adds 4, crossing the 8-byte budget on the second part,
+        // so the cut keeps both and drops "cc" and "dddddd".
+        Assert.Equal(["aaaaa", "bbbb"], budgeted.Select(static part => part.Part.PlainText));
+        Assert.Equal(4, whole.Count);
+        Assert.Equal(whole.Take(2).ToList(), budgeted);
+        Assert.Equal(memory.TurnContentParts("sess-budget", budget: 8), budgeted);
+    }
+
+    /// <summary>
+    /// The budget cut happens inside SQLite, not after the read: the scoped script totals the
+    /// bytes before each row and filters on that total, and the text of parts beyond the budget
+    /// never crosses the <c>ExecuteSqliteCore</c> seam into managed memory.
+    /// </summary>
+    [Fact]
+    public void TurnContentPartsBudgetCutHappensInSqliteSoTextBeyondTheBudgetIsNeverRead()
+    {
+        string dbPath = Path.Combine(directory.Path, "turn-content-cut", "canon.db");
+        CapturingSqliteRelationalStore sqlite = new(dbPath, new SqliteCircuitBreaker());
+        InMemoryRelationalStore memory = new();
+        WriteBudgetedContentTurn(sqlite, memory);
+        sqlite.ClearCapturedScripts();
+
+        IReadOnlyList<StoredContentPart> budgeted = sqlite.TurnContentParts("sess-budget", budget: 8);
+
+        Assert.Equal(["aaaaa", "bbbb"], budgeted.Select(static part => part.Part.PlainText));
+
+        (string Script, string Output) contentRead = Assert.Single(sqlite.CapturedScripts);
+        Assert.Contains("bytes_before < 8", contentRead.Script, StringComparison.Ordinal);
+        Assert.Contains("ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING", contentRead.Script, StringComparison.Ordinal);
+        Assert.Contains(ToHex("aaaaa"), contentRead.Output, StringComparison.Ordinal);
+        Assert.Contains(ToHex("bbbb"), contentRead.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(ToHex("cc"), contentRead.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(ToHex("dddddd"), contentRead.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A reported input total is the checksum of fresh, cache-read, and cache-write tokens.
     /// It is not billed at the fresh rate, and a side the harness did not report is not
     /// billed as zero. A reported output total is one rate and is billed. A class breakdown
@@ -315,6 +367,64 @@ public class SqliteRelationalStoreReadTests : IDisposable
         sqlite.WriteBatch(batch);
         memory.WriteBatch(batch);
     }
+
+    /// <summary>
+    /// Writes one four-part turn whose plain texts total 17 UTF-8 bytes (5, 4, 2, 6), so an
+    /// 8-byte budget keeps the first two parts — the second crossing the budget — and cuts the
+    /// last two.
+    /// </summary>
+    private static void WriteBudgetedContentTurn(SqliteRelationalStore sqlite, InMemoryRelationalStore memory)
+    {
+        CollectedRecord record = new(
+            RecordId: "span-budget-1",
+            HarnessId: "claude-code",
+            Op: RecordOp.LlmInvoke,
+            Kind: RecordKind.Client,
+            Name: "chat.turn",
+            StartedAt: new DateTimeOffset(2026, 11, 19, 12, 0, 0, TimeSpan.Zero),
+            Status: RecordStatus.Ok,
+            SessionKey: "sess-budget",
+            ParentRecordId: null,
+            TraceId: null,
+            Model: null,
+            EndedAt: null,
+            ReportedDurationMs: null,
+            Tokens: [new CollectedTokenCount(TokenClass.Input, 100), new CollectedTokenCount(TokenClass.Output, 10)],
+            ReportedCost: null,
+            Parts:
+            [
+                BudgetPart(0, "aaaaa"),
+                BudgetPart(1, "bbbb"),
+                BudgetPart(2, "cc"),
+                BudgetPart(3, "dddddd"),
+            ],
+            Tool: null,
+            Agent: null,
+            SkillsInvoked: [],
+            AgentInstanceId: null,
+            ToolDefinitions: [],
+            Signals: new CollectedRecordSignals(null, null, null, null),
+            ReportedInputTokens: 100,
+            ReportedOutputTokens: 10);
+        CollectedBatch batch = new(
+            Source: new CollectedSource("claude-code", SourceKind.Otlp, "otlp:claude-code"),
+            Sessions: [new CollectedSession("sess-budget", "claude-code", "sess-budget", null, null, [])],
+            Records: [record],
+            Problems: []);
+        sqlite.WriteBatch(batch);
+        memory.WriteBatch(batch);
+    }
+
+    private static CollectedContentPart BudgetPart(int position, string text) => new(
+        Position: position,
+        Bucket: ContentBucket.UserPrompt,
+        PlainText: text,
+        Withheld: null,
+        ReportedTokens: null,
+        Server: null,
+        Role: null,
+        Resident: null,
+        OriginalUtf8BytesWhenTruncated: null);
 
     private static void AssertPricedAlike(
         SqliteRelationalStore sqlite,
@@ -2084,6 +2194,32 @@ public class SqliteRelationalStoreReadTests : IDisposable
     }
 
     private static string ToHex(string text) => Convert.ToHexString(System.Text.Encoding.UTF8.GetBytes(text));
+
+    /// <summary>
+    /// A <see cref="SqliteRelationalStore"/> subclass recording each script together with the
+    /// raw stdout it produced, so a test can prove text a read never needed was never
+    /// materialized out of the database.
+    /// </summary>
+    private class CapturingSqliteRelationalStore : SqliteRelationalStore
+    {
+        private readonly List<(string Script, string Output)> captured = [];
+
+        public CapturingSqliteRelationalStore(string databasePath, ICircuitBreaker circuitBreaker)
+            : base(databasePath, circuitBreaker)
+        {
+        }
+
+        public IReadOnlyList<(string Script, string Output)> CapturedScripts => captured;
+
+        public void ClearCapturedScripts() => captured.Clear();
+
+        protected override string ExecuteSqliteCore(string sql)
+        {
+            string output = base.ExecuteSqliteCore(sql);
+            captured.Add((sql, output));
+            return output;
+        }
+    }
 
     private class ScriptedSqliteRelationalStore : SqliteRelationalStore
     {
