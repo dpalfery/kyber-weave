@@ -2942,7 +2942,8 @@ function parseSessionSkillsPage(raw: unknown, path: string): KyberSessionSkillsP
 /**
  * One KW skill load: a skill the agent loaded on demand, with the agent, the
  * session and span it came from, and when it loaded. A load whose skill name
- * was not recorded carries `skill: null`; nothing is defaulted.
+ * was not recorded carries `skill: null`; nothing is defaulted. Its session and
+ * span ids are always present, since the row is keyed and linked by the span.
  */
 export interface KyberKwSkillRow {
   skill: string | null
@@ -2958,11 +2959,15 @@ export interface KyberSessionKwSkillsPage extends KyberSectionWindow {
 }
 
 function readKwSkillRow(raw: Raw, path: string): KyberKwSkillRow {
+  const sessionId = requireStringField(raw, 'session_id', path)
+  if (sessionId.trim() === '') throw malformedSection(path, 'session_id is empty')
+  const spanId = requireStringField(raw, 'span_id', path)
+  if (spanId.trim() === '') throw malformedSection(path, 'span_id is empty')
   return {
     skill: readNullableString(raw.skill, path, 'skill'),
     agent: readNullableString(raw.agent, path, 'agent'),
-    session_id: requireStringField(raw, 'session_id', path),
-    span_id: requireStringField(raw, 'span_id', path),
+    session_id: sessionId,
+    span_id: spanId,
     loaded_at: readNullableString(raw.loaded_at, path, 'loaded_at'),
   }
 }

@@ -396,6 +396,14 @@ describe('session section fetchers', () => {
     await expect(fetchKyberSessionKwSkills('sess-1', 1)).rejects.toThrow(/malformed/i)
   })
 
+  it('rejects a kw-skills row whose session or span id is empty', async () => {
+    const row = { skill: 'kw-docs', agent: 'claude', session_id: 'sess-1', span_id: 'span-1', loaded_at: null }
+    stubFetch(200, { rows: [{ ...row, session_id: ' ' }], total: 1, page: 1, limit: 25, offset: 0 })
+    await expect(fetchKyberSessionKwSkills('sess-1', 1)).rejects.toThrow(/malformed/i)
+    stubFetch(200, { rows: [{ ...row, span_id: '' }], total: 1, page: 1, limit: 25, offset: 0 })
+    await expect(fetchKyberSessionKwSkills('sess-1', 1)).rejects.toThrow(/malformed/i)
+  })
+
   it('rejects a kw-skills body without the paging window', async () => {
     stubFetch(200, { rows: [], total: 0 })
     await expect(fetchKyberSessionKwSkills('sess-1', 1)).rejects.toThrow(/malformed/i)
