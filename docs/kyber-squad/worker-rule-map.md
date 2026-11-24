@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-11-22
+last-reviewed: 2026-11-23
 keywords:
   - worker rule map
   - rule home
