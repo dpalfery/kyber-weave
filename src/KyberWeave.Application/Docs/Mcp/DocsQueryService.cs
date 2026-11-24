@@ -67,6 +67,9 @@ public sealed partial class DocsQueryService : IDocsQueryService
     /// <summary>Skills-list problems named in one answer before the remainder is counted.</summary>
     private const int SkillProblemCap = 10;
 
+    /// <summary>Skills listed in one answer's KW skills section before the remainder is counted.</summary>
+    private const int SkillEntryCap = 20;
+
     /// <summary>Hard caps for the conversational analysis surface.</summary>
     private const int AnalysisCandidateCap = 20;
     private const int AnalysisCharCap = 12000;
@@ -581,10 +584,11 @@ public sealed partial class DocsQueryService : IDocsQueryService
     }
 
     /// <summary>
-    /// Appends the KW skills a technology gets, listed the way the task prompt lists them (D25). The list is short, so
-    /// it is appended whole rather than cut. A problem the catalog reported while reading the lists is named under the
-    /// list — also when no skill survived it, so a bad list answers with the reason instead of silently dropping the
-    /// section.
+    /// Appends the KW skills a technology gets, listed the way the task prompt lists them (D25). The
+    /// entries and the problems are each capped with the remainder counted, so an oversized pool
+    /// cannot blow the section. A problem the catalog reported while reading the lists is named
+    /// under the list — also when no skill survived it, so a bad list answers with the reason
+    /// instead of silently dropping the section.
     /// </summary>
     /// <param name="sb">The answer being built.</param>
     /// <param name="standard">The technology's standard; the technology it declares scopes the skills.</param>
@@ -599,7 +603,12 @@ public sealed partial class DocsQueryService : IDocsQueryService
         StringBuilder section = new("## KW skills\n");
         if (skills.Entries.Count > 0)
         {
-            section.Append(KwSkillListText.Render(skills.Entries)).Append('\n');
+            section.Append(KwSkillListText.Render([.. skills.Entries.Take(SkillEntryCap)])).Append('\n');
+            if (skills.Entries.Count > SkillEntryCap)
+            {
+                section.Append(CultureInfo.InvariantCulture,
+                    $"… {skills.Entries.Count - SkillEntryCap} more skills omitted by the hard cap.\n");
+            }
         }
 
         if (skills.Problems.Count > 0)

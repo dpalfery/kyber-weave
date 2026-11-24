@@ -1391,7 +1391,8 @@ in order:
    with `builds-on`.
 6. `## <technology> rules`, then `## KW skills`: the same list the task prompt's `<kw-skills>` part
    carries (the opening instruction line, then `- <name>: <description>` per skill, the parent's
-   first), omitted when none is assigned and the lists have no problems. A problem reading the
+   first), omitted when none is assigned and the lists have no problems. The list is capped at the
+   first 20 skills with the remainder counted as an omission line under it. A problem reading the
    lists — an unreadable or malformed list, or a listed name that is no skill — is named under
    `Problems in the skills lists:` (rule `KW-DOC-SKILL-001`, capped with the remainder counted),
    and the section appears for that reason alone when no skill survived the lists. The section
@@ -1409,7 +1410,8 @@ in order:
 8. The omission markers below when a standard section was cut.
 
 Rules are never cut: an id or a hard rule the caller cannot see is worse than a section it
-can ask for again. The KW skills list is short and is never cut. A coding standard declares no
+can ask for again. The KW skills list is capped at 20 entries with the remainder counted, so
+an oversized pool cannot blow the section. A coding standard declares no
 `code-refs` by ontology design, so the response never carries code joins.
 
 **The rule-id index is emitted ahead of the prose.** It lists the `KW-*` ids the standard

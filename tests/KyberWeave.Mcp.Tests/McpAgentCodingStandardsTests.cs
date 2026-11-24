@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Reflection;
+using System.Text;
 using System.Text.RegularExpressions;
 
 using KyberWeave.Core.Configuration;
@@ -829,6 +830,34 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
         Assert.Contains("## KW skills", response, StringComparison.Ordinal);
         Assert.Contains("Problems in the skills lists:", response, StringComparison.Ordinal);
         Assert.Contains("KW-DOC-SKILL-001", response, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A technology whose lists name more skills than the section caps is answered with the cap's
+    /// worth and the remainder counted, so one oversized pool cannot blow the answer.
+    /// </summary>
+    [Fact]
+    public void AnOversizedKwSkillListIsCappedAndCountsTheRest()
+    {
+        List<(string RelativePath, string Text)> documents = [(CsharpStandardPath, CsharpStandard())];
+        StringBuilder list = new();
+        for (int index = 1; index <= 25; index++)
+        {
+            string name = $"filler-{index:00}";
+            list.Append("- ").Append(name).Append('\n');
+            documents.Add((
+                $"6-Docs/standards/skills/{name}/SKILL.md",
+                $"---\nname: {name}\ndescription: Filler skill {index}.\n---\n\nBODY\n"));
+        }
+
+        documents.Add(("6-Docs/standards/csharp/csharp.skills.yml", list.ToString()));
+        (DocsTools tools, _) = Corpus([.. documents]);
+
+        string response = Ask(tools, "csharp");
+
+        Assert.Contains("- filler-01: Filler skill 1.", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("filler-25", response, StringComparison.Ordinal);
+        Assert.Contains("5 more skills omitted by the hard cap.", response, StringComparison.Ordinal);
     }
 
     private static string Ask(
