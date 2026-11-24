@@ -369,20 +369,23 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             predicates.Add($"cp.bucket = {TextExpr(part)}");
         }
 
-        string sql = TabReadScriptHeader +
-                     BuildContentPartSelect("cp", " WHERE " + string.Join(" AND ", predicates), "ORDER BY cp.span_id ASC, cp.position ASC");
+        string whereClause = " WHERE " + string.Join(" AND ", predicates);
+        bool cutInSql = !full && budget > 0;
+        string sql = TabReadScriptHeader + (cutInSql
+            ? BuildBudgetedContentPartSelect("cp", whereClause, budget)
+            : BuildContentPartSelect("cp", whereClause, "ORDER BY cp.span_id ASC, cp.position ASC"));
 
         string output = ExecuteSqlite(sql);
         List<StoredContentPart> results = [];
         foreach (string line in TabLines(output))
         {
-            string[] cols = SplitTabLine(line, 21, "content_part");
+            string[] cols = SplitTabLine(line, cutInSql ? 22 : 21, "content_part");
             string rowSpan = ParseHexRequired(cols[0], "content_part.span_id");
             CollectedContentPart scopedPart = ParseContentPartColumns(cols, startIndex: 1);
             results.Add(new StoredContentPart(rowSpan, scopedPart));
         }
 
-        return CapToBudget(results, budget, full);
+        return results;
     }
 
     /// <summary>
@@ -403,35 +406,6 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             GetSessionTurns(sessionKey),
             SessionRecordsContentFree(sessionKey));
         return turnIndex < turns.Count ? turns[turnIndex].Record.RecordId : null;
-    }
-
-    /// <summary>
-    /// Stops the scoped read at the response budget so it materializes no more text than the
-    /// content view will render; <paramref name="full"/> and a non-positive budget read it whole.
-    /// </summary>
-    /// <param name="parts">Scoped parts in span then position order.</param>
-    /// <param name="budget">Maximum UTF-8 bytes of part text to keep.</param>
-    /// <param name="full">Whether to keep every part regardless of size.</param>
-    private static List<StoredContentPart> CapToBudget(List<StoredContentPart> parts, int budget, bool full)
-    {
-        if (full || budget <= 0)
-        {
-            return parts;
-        }
-
-        List<StoredContentPart> capped = new(parts.Count);
-        long bytes = 0;
-        foreach (StoredContentPart part in parts)
-        {
-            capped.Add(part);
-            bytes += part.Part.PlainText is null ? 0 : Encoding.UTF8.GetByteCount(part.Part.PlainText);
-            if (bytes >= budget)
-            {
-                break;
-            }
-        }
-
-        return capped;
     }
 
     /// <inheritdoc />
@@ -4178,6 +4152,30 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
     private static string BuildContentPartSelect(string alias, string whereClause, string orderBy) =>
         $"SELECT hex(CAST({alias}.span_id AS BLOB)), {BuildContentPartColumns(alias)} " +
+        BuildContentPartFrom(alias) +
+        $"{whereClause} {orderBy};\n";
+
+    /// <summary>
+    /// Builds the budgeted content-part read: the scoped rows are wrapped in a subquery whose
+    /// window totals the UTF-8 bytes of every part before each row, so SQLite returns only the
+    /// rows whose preceding parts stay under <paramref name="budget"/> plus the one row that
+    /// crosses it — the same prefix an in-memory cut kept — and the text past the budget never
+    /// leaves the database.
+    /// </summary>
+    /// <param name="alias">Content-part table alias.</param>
+    /// <param name="whereClause">Scoped predicate clause, starting with WHERE.</param>
+    /// <param name="budget">Maximum UTF-8 bytes of part text to keep.</param>
+    private static string BuildBudgetedContentPartSelect(string alias, string whereClause, int budget) =>
+        "SELECT * FROM (" +
+        $"SELECT hex(CAST({alias}.span_id AS BLOB)) AS span_id, {BuildContentPartColumns(alias)}, " +
+        "COALESCE(SUM(COALESCE(length(CAST(cpt.part_text AS BLOB)), 0)) OVER (" +
+        $"ORDER BY {alias}.span_id ASC, {alias}.position ASC " +
+        "ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS bytes_before " +
+        BuildContentPartFrom(alias) +
+        $"{whereClause}) WHERE bytes_before < {budget.ToString(CultureInfo.InvariantCulture)} " +
+        "ORDER BY span_id ASC, position ASC;\n";
+
+    private static string BuildContentPartFrom(string alias) =>
         $"FROM content_part {alias} " +
         $"LEFT JOIN content_part_text cpt ON cpt.span_id = {alias}.span_id AND cpt.position = {alias}.position " +
         $"LEFT JOIN content_part_withheld cpw ON cpw.span_id = {alias}.span_id AND cpw.position = {alias}.position " +
@@ -4185,8 +4183,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         $"LEFT JOIN content_part_server cps ON cps.span_id = {alias}.span_id AND cps.position = {alias}.position " +
         $"LEFT JOIN content_part_role cpr ON cpr.span_id = {alias}.span_id AND cpr.position = {alias}.position " +
         $"LEFT JOIN content_part_residency cpres ON cpres.span_id = {alias}.span_id AND cpres.position = {alias}.position " +
-        $"LEFT JOIN content_part_truncation cptr ON cptr.span_id = {alias}.span_id AND cptr.position = {alias}.position" +
-        $"{whereClause} {orderBy};\n";
+        $"LEFT JOIN content_part_truncation cptr ON cptr.span_id = {alias}.span_id AND cptr.position = {alias}.position";
 
     private static string BuildContentPartColumns(string alias) =>
         $"{alias}.position, hex(CAST({alias}.bucket AS BLOB)), " +
