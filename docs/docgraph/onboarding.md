@@ -50,8 +50,9 @@ Passing `--kyber-standards` scaffolds every technology template that ships — f
 under `<docs-root>/standards/`, merges their technologies into `ontology.technologies` in
 `.kyber-weave/kyber-weave.yml`, and registers each `<{tech}-coding-standard>` property in
 Config Reg. Each folder it writes holds four files: `<name>.standards.md`,
-`<name>.rules.md`, `<name>.skills.md` and `<name>.arbiter-rules.yml`, and the shared rules
-file is written once beside them.
+`<name>.rules.md`, `<name>.skills.yml` (a list of KW skill names) and `<name>.arbiter-rules.yml`, and the
+shared rules file is written once beside them. The shipped skills those lists name are copied into
+`<docs-root>/standards/skills/`, and a skill folder that already exists is never overwritten.
 
 `--standards <name,name>` installs only the folders named: a technology or platform name
 joins `ontology.technologies`, a role name joins `ontology.roles`, and a file you already

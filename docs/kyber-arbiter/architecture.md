@@ -1388,7 +1388,7 @@ The dispatch hook also lists KW skills (guidance an agent loads on demand; see
   harness skills. When a skill's description fits your work, load it by calling the kw-docs load_skill tool with its
   name; never load one through your harness's own skill tool.` Then one `- <name>: <description>` line per skill.
   `<kw-skills>` is in `DispatchPromptInsertion.ExpandedTags`, so a dispatch that already carries it is never
-  expanded again; `<skills>` stays in that list so a dispatch expanded by an older release stays idempotent. The
+  expanded again; the retired `<skills>` tag is no longer in that list. The
   part is omitted when no skill is assigned.
 - **The target.** `DispatchPromptQuery.Target` is the dispatched agent (`subagent_type`, or the harness's
   equivalent), and every adapter that rewrites a dispatch passes it to `DispatchPromptInsertion.Expand`. The prompt
