@@ -11,6 +11,22 @@ namespace KyberWeave.Tests.Arbiter;
 public sealed class ArbiterUserSettingsTests
 {
     [Fact]
+    public void FormatCandidateForError_CapsWithoutCopyingPastTheWindow()
+    {
+        string marker = "KEEP";
+        string tail = "DROP-THIS-TAIL";
+        string candidate = marker + new string('\n', 50) + new string('a', 500) + tail;
+
+        string formatted = ArbiterUserSettings.FormatCandidateForError(candidate);
+
+        Assert.StartsWith(marker, formatted, StringComparison.Ordinal);
+        Assert.EndsWith("...", formatted, StringComparison.Ordinal);
+        Assert.True(formatted.Length <= 203);
+        Assert.DoesNotContain(tail, formatted, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n", formatted, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void UserOverrideProviderOnlyReplacesFieldByField()
     {
         InMemoryFileSystem files = new();

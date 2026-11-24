@@ -660,10 +660,13 @@ public sealed class ArbiterInstallServiceSeamsTests
 
         Assert.Equal(1, applied.ExitCode);
         ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
-        Assert.Contains(sharedPrefix[..200] + "...", error.Message, StringComparison.Ordinal);
+        string truncated = sharedPrefix[..200] + "...";
+        int first = error.Message.IndexOf(truncated, StringComparison.Ordinal);
+        int second = first < 0 ? -1 : error.Message.IndexOf(truncated, first + truncated.Length, StringComparison.Ordinal);
+        Assert.True(first >= 0 && second >= 0);
+        Assert.Equal(-1, error.Message.IndexOf(truncated, second + truncated.Length, StringComparison.Ordinal));
         Assert.DoesNotContain("/planned", error.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("/effective", error.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain(new string('x', 175), error.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -789,6 +792,56 @@ public sealed class ArbiterInstallServiceSeamsTests
         Assert.Contains(RuleValidator.MalformedSection, error.Message, StringComparison.Ordinal);
         Assert.Contains(hostConfigPath, error.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(overridePath, error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An explicit endpoint-overridden flag with no merge delegate still names the override file,
+    /// which is the case of a supplied endpoint equal to the repository endpoint.
+    /// </summary>
+    [Fact]
+    public void Prepare_ExplicitEndpointOverriddenWithoutMerge_NamesOverrideFile()
+    {
+        const string hostConfigPath = "/kw/work/repo/.kyber-weave/kyber-weave.yml";
+        string overridePath = ArbiterUserSettings.GetPath(Home);
+        ArbiterInstallService service = Service(
+            new FakeArbiterUserSettings { EndpointOverridden = true },
+            configs: new RepositoryEndpointConfigs("not-a-url", hostConfigPath));
+
+        ArbiterInstallPrepared prepared = service.Prepare(
+            Request(pathOption: "repo", projectScope: true, providerOption: "systemone"));
+
+        Assert.Equal(1, prepared.ExitCode);
+        ArbiterInstallError error = Assert.Single(prepared.Events.OfType<ArbiterInstallError>());
+        Assert.Contains(overridePath, error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(hostConfigPath, error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A planned endpoint that differs from the effective one only by surrounding space still verifies.
+    /// </summary>
+    [Fact]
+    public void Apply_Verify_PlanEndpointTrailingSpace_MatchesTheTrimmedEffectiveEndpoint()
+    {
+        _store.Seed(OverrideOrigin, "override-key");
+        IArbiterConfigResolver configs = new RepositoryEndpointConfigs(ArbiterProviderConfig.DefaultNone.Endpoint);
+        ArbiterInstallService prepareService = Service(
+            OverrideToSystemone(),
+            configs: configs,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallPrepared prepared = prepareService.Prepare(
+            Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
+
+        Assert.Equal(0, prepared.ExitCode);
+        Assert.NotNull(prepared.Plan);
+        ArbiterInstallPlan spaced = prepared.Plan with { Endpoint = prepared.Plan.Endpoint + " " };
+
+        ArbiterInstallService applyService = Service(
+            OverrideToSystemone(),
+            configs: configs,
+            lifecycle: new SucceedingLifecycle());
+        ArbiterInstallApplied applied = applyService.Apply(spaced, CancellationToken.None);
+
+        Assert.Equal(0, applied.ExitCode);
     }
 
     private static FakeArbiterUserSettings OverrideToSystemone() =>
