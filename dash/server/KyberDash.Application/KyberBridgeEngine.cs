@@ -2498,12 +2498,23 @@ public class KyberBridgeEngine
         {
             return (reader.SessionSummaryFigures(sessionKey, lookup), null);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsSessionReadFault(ex))
         {
             RecordProjectionFailure(sessionKey, ex.Message);
             return (null, ProjectionFailedStatus);
         }
     }
+
+    /// <summary>
+    /// Whether an exception from one session's section read is that session's fault, to isolate
+    /// behind <see cref="ProjectionFailedStatus"/>, rather than the host's: out-of-memory, stack
+    /// exhaustion and a cancelled request propagate, so an unhealthy process or an aborted request
+    /// is never reported as one broken projection.
+    /// </summary>
+    /// <param name="ex">The exception the read threw.</param>
+    /// <returns><see langword="true"/> when the fault belongs to the session's projection.</returns>
+    private static bool IsSessionReadFault(Exception ex) =>
+        ex is not (OutOfMemoryException or InsufficientExecutionStackException or OperationCanceledException);
 
     private (ReadTimeTurnSummary? Figures, string? ProjectionStatus) TryTurnFigures(string sessionKey, int turnIndex)
     {
@@ -2511,7 +2522,7 @@ public class KyberBridgeEngine
         {
             return (reader.TurnFigures(sessionKey, turnIndex, pricing.LoadPricingTables()), null);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsSessionReadFault(ex))
         {
             RecordProjectionFailure(sessionKey, ex.Message);
             return (null, ProjectionFailedStatus);
@@ -2556,7 +2567,7 @@ public class KyberBridgeEngine
         {
             return (reader.SessionTurnFigures(sessionKey, lookup), null);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsSessionReadFault(ex))
         {
             RecordProjectionFailure(sessionKey, ex.Message);
             return (null, ProjectionFailedStatus);
@@ -2577,7 +2588,7 @@ public class KyberBridgeEngine
         {
             return (reader.SessionRequestFigures(sessionKey, page, limit), null);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsSessionReadFault(ex))
         {
             RecordProjectionFailure(sessionKey, ex.Message);
             return (null, ProjectionFailedStatus);
@@ -2598,7 +2609,7 @@ public class KyberBridgeEngine
         {
             return (reader.SessionReconciliationFigures(sessionKey, page, limit), null);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsSessionReadFault(ex))
         {
             RecordProjectionFailure(sessionKey, ex.Message);
             return (null, ProjectionFailedStatus);
@@ -2619,7 +2630,7 @@ public class KyberBridgeEngine
         {
             return (reader.SessionProblems(sessionKey, page, limit), null);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsSessionReadFault(ex))
         {
             RecordProjectionFailure(sessionKey, ex.Message);
             return (null, ProjectionFailedStatus);
@@ -2638,7 +2649,7 @@ public class KyberBridgeEngine
         {
             return (reader.SessionToolFigures(sessionKey, lookup), null);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsSessionReadFault(ex))
         {
             RecordProjectionFailure(sessionKey, ex.Message);
             return (null, ProjectionFailedStatus);
@@ -2654,7 +2665,7 @@ public class KyberBridgeEngine
         {
             return (reader.SessionSkillFigures(sessionKey), null);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsSessionReadFault(ex))
         {
             RecordProjectionFailure(sessionKey, ex.Message);
             return ([], ProjectionFailedStatus);
@@ -2676,7 +2687,7 @@ public class KyberBridgeEngine
             records.Sort(CompareRecords);
             return (CanonContextAnalysis.BuildTimeline(records), null);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsSessionReadFault(ex))
         {
             RecordProjectionFailure(sessionKey, ex.Message);
             return (null, ProjectionFailedStatus);

@@ -208,6 +208,29 @@ public sealed class SessionSectionEndpointsTests
     }
 
     /// <summary>
+    /// The section reads isolate a broken projection, not a broken host: an out-of-memory, a
+    /// stack-exhaustion or a cancelled request propagates instead of being reported as
+    /// <c>PROJECTION_FAILED</c>, so an unhealthy process is never misread as one bad session.
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(OutOfMemoryException))]
+    [InlineData(typeof(InsufficientExecutionStackException))]
+    [InlineData(typeof(OperationCanceledException))]
+    public void TheTurnRoutesLetFatalAndCancellationFaultsPropagate(Type faultType)
+    {
+        TurnFiguresFaultingStore store = new(() => (Exception)Activator.CreateInstance(faultType)!);
+        FakePricingRepository pricing = new();
+        const string sessionKey = "sess-turn-broken";
+        WriteSession(store, sessionKey, [Turn($"{sessionKey}-0", sessionKey, 0, inputTokens: 1_000, outputTokens: 100)]);
+        _ = CreateProjection(store, pricing).ProjectAll();
+        KyberBridgeEngine bridge = CreateBridge(store, pricing);
+        bridge.EnsureProjected();
+
+        Exception thrown = Assert.ThrowsAny<Exception>(() => bridge.GetTurnFigures(sessionKey, 0));
+        Assert.IsType(faultType, thrown);
+    }
+
+    /// <summary>
     /// The turn routes carry the section routes' fault convention: a turn figures read that faults
     /// answers <c>{ sessionId, turnIndex, projection_status: "PROJECTION_FAILED" }</c> — an answer,
     /// never the 404 a missing turn earns — while an index outside the session still answers null.
@@ -1512,13 +1535,13 @@ public sealed class SessionSectionEndpointsTests
     /// turn routes answer the section routes' <c>PROJECTION_FAILED</c> convention for that session
     /// instead of reading the fault as a missing turn.
     /// </summary>
-    private sealed class TurnFiguresFaultingStore : InMemoryRelationalStore
+    private sealed class TurnFiguresFaultingStore(Func<Exception>? fault = null) : InMemoryRelationalStore
     {
         public override ReadTimeTurnSummary? TurnFigures(string sessionKey, int turnIndex, IModelPricingLookup? pricing = null)
         {
             if (string.Equals(sessionKey, "sess-turn-broken", StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("projection exploded");
+                throw fault?.Invoke() ?? new InvalidOperationException("projection exploded");
             }
 
             return base.TurnFigures(sessionKey, turnIndex, pricing);
